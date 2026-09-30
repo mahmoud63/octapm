@@ -619,10 +619,19 @@ const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
  * Re-import of the same file: a row whose figure is already the activity's
  * official percentage is 'unchanged' (nothing written); a row whose figure
  * already waits in an open import submission is 'already_pending' (no second
- * submission). Any other row is written again — the writer keeps no
+ * submission; `waitingStatus` says whether it waits for approval or, as a
+ * draft, for evidence). Any other row is written again — the writer keeps no
  * idempotency key of its own.
  *
- * `dryRun` answers the same per-row plan for this person without writing.
+ * `dryRun` answers the per-row plan for this person without writing, and the
+ * plan is read from the writer's own rules, not assumed: the assignment
+ * assertion the writer runs (assertProgressSubmitAllowed), the activity's
+ * evidence requirement, and — for an approver — the ITP hold points the
+ * approval gate checks (form.service.openHoldPoints). A row those rules would
+ * refuse is previewed as 'refuse'; one a gate would hold (kept as a draft for
+ * a submit-only person, left pending for an approver) as 'hold'. The import
+ * itself still trusts the writer for every row; the preview only stops
+ * promising rows the writer will not write.
  */
 async function importProgress({
   projectId,
@@ -683,6 +692,7 @@ async function importProgress({
       methodMismatch: activityMethod !== 'percent',
       submissionId: null,
       progressId: null,
+      waitingStatus: null,
       reason: null,
     };
     if (official && normalizePct(official.pctComplete) === pctComplete) {
@@ -692,16 +702,79 @@ async function importProgress({
         message: `Already the official figure (${pctComplete}%); nothing written`,
       };
     } else if (waiting) {
+      // A draft is not in any approver's queue: it waits for evidence, and
+      // the reason says so rather than calling it "awaiting approval".
       row.status = 'already_pending';
       row.submissionId = waiting.id;
+      row.waitingStatus = waiting.status;
       row.reason = {
         code: 'PROGRESS_ALREADY_PENDING',
-        message: `An import submission at ${pctComplete}% is already awaiting approval; no second submission`,
+        message:
+          waiting.status === 'draft'
+            ? `An import submission at ${pctComplete}% is already kept as a draft awaiting evidence; no second submission`
+            : `An import submission at ${pctComplete}% is already awaiting approval; no second submission`,
       };
     } else {
       row.status = canApprove ? 'approve' : 'submit';
+      row.evidenceRequired = Boolean(activity.progressMethod?.evidenceRequired);
     }
     plan.push(row);
+  }
+
+  // The preview: what the writer's own rules say about each row this person
+  // would write. Assignment first (the writer's assertion, run once for every
+  // row; its refusal names the activities it would refuse), then the evidence
+  // requirement, then — for an approver — the hold points the approval gate
+  // reads. Stored beside the row; the import loop never consults it.
+  const toWrite = plan.filter((row) => row.status === 'approve' || row.status === 'submit');
+  let unassigned = new Set();
+  let assignmentRefusal = null;
+  try {
+    await progressService.assertProgressSubmitAllowed({
+      projectId,
+      activityIds: toWrite.map((row) => row.activityId),
+      userId,
+      userRole,
+    });
+  } catch (error) {
+    if (error?.code !== 'ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED') throw error;
+    unassigned = new Set(error.details?.activityIds || toWrite.map((row) => row.activityId));
+    assignmentRefusal = refusalOf(error);
+  }
+  // Required lazily, as progress.service does, to keep clear of a service cycle.
+  const { openHoldPoints } = require('./form.service');
+  for (const row of toWrite) {
+    if (unassigned.has(row.activityId)) {
+      row.expected = { status: 'refuse', reason: assignmentRefusal };
+      continue;
+    }
+    if (row.evidenceRequired) {
+      row.expected = {
+        status: 'hold',
+        reason: {
+          code: 'PROGRESS_EVIDENCE_REQUIRED',
+          message: canApprove
+            ? 'This activity requires evidence before progress can be approved; the row would be left pending'
+            : 'This activity requires evidence before progress can be submitted; the row would be kept as a draft',
+        },
+      };
+      continue;
+    }
+    if (canApprove) {
+      const holdPoints = await openHoldPoints({ projectId, activityId: row.activityId });
+      if (holdPoints.length) {
+        const first = holdPoints[0];
+        row.expected = {
+          status: 'hold',
+          reason: {
+            code: 'ITP_HOLD_POINT_OPEN',
+            message: `${holdPoints.length} ITP hold point${holdPoints.length === 1 ? '' : 's'} on this activity ${holdPoints.length === 1 ? 'has' : 'have'} not passed (${first.ref}: ${first.label} — ${first.state}); the row would be left pending`,
+          },
+        };
+        continue;
+      }
+    }
+    row.expected = { status: row.status, reason: null };
   }
 
   const notMatched = Math.max(0, progressMap.size - matchedKeys.size);
@@ -725,22 +798,37 @@ async function importProgress({
     };
   };
 
+  // What a row answers with: never the plan's working fields.
+  const answerRow = ({ expected, evidenceRequired, ...row }) => row;
+
   if (dryRun) {
-    const toWrite = plan.filter((row) => row.status === 'approve' || row.status === 'submit');
-    const counts = summarize(plan);
+    const previewed = plan.map((row) =>
+      row.expected ? answerRow({ ...row, status: row.expected.status, reason: row.expected.reason }) : answerRow(row),
+    );
+    const counts = summarize(previewed);
+    const count = (status) => previewed.filter((row) => row.status === status).length;
+    const would = {
+      wouldSubmit: count('submit'),
+      wouldApprove: count('approve'),
+      wouldHold: count('hold'),
+      wouldRefuse: count('refuse'),
+    };
+    const held = previewed.filter((row) => row.status === 'hold');
+    const holdReasons = [...new Set(held.map((row) => row.reason.code))]
+      .map((code) => (code === 'PROGRESS_EVIDENCE_REQUIRED' ? 'evidence required' : code === 'ITP_HOLD_POINT_OPEN' ? 'ITP hold point open' : code))
+      .join(', ');
     return {
       dryRun: true,
       authority,
       ...counts,
-      wouldSubmit: canApprove ? 0 : toWrite.length,
-      wouldApprove: canApprove ? toWrite.length : 0,
-      rows: plan.slice(0, PROGRESS_IMPORT_ROW_LIMIT),
+      ...would,
+      rows: previewed.slice(0, PROGRESS_IMPORT_ROW_LIMIT),
       rowLimit: PROGRESS_IMPORT_ROW_LIMIT,
       // The legacy field: how many official figures this call would change.
       updated: 0,
       message: canApprove
-        ? `Dry run: nothing was written. For you ${plural(toWrite.length, 'row')} would be submitted and approved through the progress approval gates (a row a gate refuses stays pending); ${counts.unchanged} already official, ${counts.alreadyPending} already pending, ${notMatched} not matched.`
-        : `Dry run: nothing was written. For you ${plural(toWrite.length, 'row')} would be submitted for approval — not official until an approver approves them; ${counts.unchanged} already official, ${counts.alreadyPending} already pending, ${notMatched} not matched.`,
+        ? `Dry run: nothing was written. For you ${plural(would.wouldApprove, 'row')} would be submitted and approved through the progress approval gates; ${would.wouldHold} would be left pending${held.length ? ` (${holdReasons})` : ''}, ${would.wouldRefuse} would be refused, ${counts.unchanged} already official, ${counts.alreadyPending} already pending, ${notMatched} not matched.`
+        : `Dry run: nothing was written. For you ${plural(would.wouldSubmit, 'row')} would be submitted for approval — not official until an approver approves them; ${would.wouldHold} would be kept as draft (evidence required), ${would.wouldRefuse} would be refused, ${counts.unchanged} already official, ${counts.alreadyPending} already pending, ${notMatched} not matched.`,
     };
   }
 
@@ -816,7 +904,7 @@ async function importProgress({
     dryRun: false,
     authority,
     ...counts,
-    rows: plan.slice(0, PROGRESS_IMPORT_ROW_LIMIT),
+    rows: plan.slice(0, PROGRESS_IMPORT_ROW_LIMIT).map(answerRow),
     rowLimit: PROGRESS_IMPORT_ROW_LIMIT,
     // The legacy field: how many official figures this call changed.
     updated: counts.approved,

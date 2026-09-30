@@ -2650,12 +2650,13 @@ const components = {
         methodMismatch: { type: "boolean", description: "True when the activity is measured by a method other than percent; the submission still names percent, as the writer records the method a submission names." },
         status: {
           type: "string",
-          enum: ["submit", "approve", "submitted", "draft", "approved", "pending", "unchanged", "already_pending", "refused"],
+          enum: ["submit", "approve", "hold", "refuse", "submitted", "draft", "approved", "pending", "unchanged", "already_pending", "refused"],
           description:
-            "Dry run: submit or approve (what this person's authority would do), unchanged, already_pending. Import: submitted (awaiting approval), draft (kept as a draft because the activity requires evidence), approved (official, through the approval writer), pending (the importer may approve but a gate refused — see reason), unchanged (already the official figure), already_pending (an import submission at this figure is already open), refused (the writer refused the submission — see reason).",
+            "Dry run, read from the writer's own rules for this person: submit or approve (what this person's authority would do), hold (a gate would hold the row — kept as a draft for a submit-only person, left pending for an approver; see reason), refuse (the writer's assignment rule would refuse it; see reason), unchanged, already_pending. Import: submitted (awaiting approval), draft (kept as a draft because the activity requires evidence — not in the approval queue until evidence is attached), approved (official, through the approval writer), pending (the importer may approve but a gate refused — see reason), unchanged (already the official figure), already_pending (an import submission at this figure is already open — waitingStatus says where it waits), refused (the writer refused the submission — see reason).",
         },
         submissionId: nullableUuid,
         progressId: { ...nullableUuid, description: "The ActivityProgress row an approval created." },
+        waitingStatus: { type: "string", nullable: true, enum: ["draft", "submitted", null], description: "For already_pending: the status of the open import submission at this figure — submitted (awaiting approval) or draft (awaiting evidence; not in the approval queue)." },
         reason: {
           nullable: true,
           allOf: [objectSchema({ code: { type: "string" }, message: { type: "string" } }, ["code", "message"])],
@@ -2685,8 +2686,10 @@ const components = {
         unchanged: { type: "integer", minimum: 0 },
         alreadyPending: { type: "integer", minimum: 0 },
         refused: { type: "integer", minimum: 0 },
-        wouldSubmit: { type: "integer", minimum: 0, description: "Dry run only." },
-        wouldApprove: { type: "integer", minimum: 0, description: "Dry run only." },
+        wouldSubmit: { type: "integer", minimum: 0, description: "Dry run only: rows that would be submitted for approval for this person (rows a rule would hold or refuse are not counted)." },
+        wouldApprove: { type: "integer", minimum: 0, description: "Dry run only: rows that would be approved for this person through the gates (rows a gate would hold are not counted)." },
+        wouldHold: { type: "integer", minimum: 0, description: "Dry run only: rows a gate would hold — kept as a draft (submit-only) or left pending (approver), with the reason on the row." },
+        wouldRefuse: { type: "integer", minimum: 0, description: "Dry run only: rows the writer's assignment rule would refuse." },
         rows: arrayOf(ref("ProgressImportRow")),
         rowLimit: { type: "integer" },
         updated: { type: "integer", minimum: 0, description: "Legacy: the number of official figures this call changed (= approved; 0 for a dry run or a submit-only import)." },
@@ -8842,7 +8845,7 @@ add(
     tag: "Imports",
     summary: "Import activity progress from an uploaded file, in the importer's own authority.",
     description:
-      "Percentages matched by p6ActivityId become progress submissions (source import, method percent), one per activity; nothing is written to ActivityProgress directly. Two outcomes, decided by the same permission engine as the approve route: a person with progress submission.submit but not submission.approve on this project gets every matched row as a submitted submission (authority.outcome = submitted) — nothing is official until an approver approves it; a person who holds submission.approve gets each row submitted and then approved through the progress approval writer and its gates (authority.outcome = approved) — a row the evidence gate or an open ITP hold point refuses stays pending with the gate's reason and never fails the file. An existing approved figure is never rewritten; a row already at the official figure is unchanged, one already waiting in an open import submission is already_pending. With dryRun=true the per-row outcome for this person is reported and nothing is stored: no document, no submission.",
+      "Percentages matched by p6ActivityId become progress submissions (source import, method percent), one per activity; nothing is written to ActivityProgress directly. Two outcomes, decided by the same permission engine as the approve route: a person with progress submission.submit but not submission.approve on this project gets every matched row as a submitted submission (authority.outcome = submitted) — nothing is official until an approver approves it; a person who holds submission.approve gets each row submitted and then approved through the progress approval writer and its gates (authority.outcome = approved) — a row the evidence gate or an open ITP hold point refuses stays pending with the gate's reason and never fails the file. An existing approved figure is never rewritten; a row already at the official figure is unchanged, one already waiting in an open import submission is already_pending. With dryRun=true the per-row outcome for this person is reported and nothing is stored: no document, no submission — and the outcome is read from the writer's own rules (assignment, evidence requirement, open ITP hold points), so a row that would be held or refused is previewed as such, not promised.",
     operationId: "importProgress",
     parameters: [
       ...projectParams,

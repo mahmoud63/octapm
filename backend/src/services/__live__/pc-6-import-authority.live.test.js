@@ -14,15 +14,19 @@
  * ITP hold point, one is measured by quantity, one is not assigned to the
  * site engineer.
  *
- * - A site engineer (submit, no approve): the dry run says every row would
- *   be SUBMITTED for this person; the import creates 'submitted' import
+ * - A site engineer (submit, no approve): the dry run says which rows would
+ *   be SUBMITTED for this person, and — read from the writer's own rules,
+ *   not assumed — which one would be kept as a draft (evidence required)
+ *   and which one refused (not assigned); the import creates 'submitted' import
  *   submissions and ZERO ActivityProgress rows; the EV report is
  *   byte-identical before and after; the activity's official percentage is
  *   unchanged; the unassigned activity is refused by the writer's assignment
  *   rule and reported, the evidence-required one is kept as a draft, and the
  *   answer says nothing is official yet.
- * - Re-upload of the same file: every row already_pending, nothing written.
- * - A PM (approve): the dry run says rows would be APPROVED; the import goes
+ * - Re-upload of the same file: every row already_pending, nothing written;
+ *   the draft is said to await evidence, the others to await approval.
+ * - A PM (approve): the dry run says which rows would be APPROVED and which
+ *   two the evidence gate and the open hold point would hold; the import goes
  *   through the approval writer (submission approved, ActivityProgress with
  *   submissionId, approvedBy the PM, audit CREATED + APPROVED events); the
  *   evidence-required row and the open-hold-point row stay pending with the
@@ -176,12 +180,19 @@ liveDescribe("PC-6: a progress import makes progress only in the importer's own 
     const evBefore = await evReport();
     const before = await footprint();
 
-    // The dry run states the outcome for this person and writes nothing.
+    // The dry run states the outcome for this person — read from the writer's
+    // rules, so the evidence-required row and the unassigned row are not
+    // promised as submissions — and writes nothing.
     const preview = await upload(siteEngineer.token, xerWith(SITE_FILE), { dryRun: true });
     ok(preview);
-    expect(preview.body.data).toMatchObject({ dryRun: true, authority: { canApprove: false, outcome: "submitted" }, matched: 5, notMatched: 0, wouldSubmit: 5, wouldApprove: 0, updated: 0 });
-    expect(preview.body.data.message).toMatch(/^Dry run: nothing was written\. For you 5 rows would be submitted for approval — not official until an approver approves them/);
-    expect(Object.values(rowsByCode(preview.body.data)).map((row) => row.status)).toEqual(["submit", "submit", "submit", "submit", "submit"]);
+    expect(preview.body.data).toMatchObject({ dryRun: true, authority: { canApprove: false, outcome: "submitted" }, matched: 5, notMatched: 0, wouldSubmit: 3, wouldApprove: 0, wouldHold: 1, wouldRefuse: 1, updated: 0 });
+    expect(preview.body.data.message).toBe("Dry run: nothing was written. For you 3 rows would be submitted for approval — not official until an approver approves them; 1 would be kept as draft (evidence required), 1 would be refused, 0 already official, 0 already pending, 0 not matched.");
+    const previewed = rowsByCode(preview.body.data);
+    expect(["P100", "P300", "P400"].map((code) => previewed[code].status)).toEqual(["submit", "submit", "submit"]);
+    expect(previewed.P200).toMatchObject({ status: "hold", reason: { code: "PROGRESS_EVIDENCE_REQUIRED", message: "This activity requires evidence before progress can be submitted; the row would be kept as a draft" } });
+    expect(previewed.P500).toMatchObject({ status: "refuse", reason: { code: "ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED" } });
+    // The plan's working fields never reach the answer.
+    for (const row of Object.values(previewed)) expect(Object.keys(row)).not.toEqual(expect.arrayContaining(["expected", "evidenceRequired"]));
     expect(await footprint()).toBe(before);
 
     const answer = await upload(siteEngineer.token, xerWith(SITE_FILE));
@@ -219,8 +230,10 @@ liveDescribe("PC-6: a progress import makes progress only in the importer's own 
     ok(answer);
     expect(answer.body.data).toMatchObject({ matched: 5, submitted: 0, draft: 0, approved: 0, alreadyPending: 4, refused: 1, updated: 0 });
     const rows = rowsByCode(answer.body.data);
-    for (const code of ["P100", "P200", "P300", "P400"]) expect(rows[code]).toMatchObject({ status: "already_pending", reason: { code: "PROGRESS_ALREADY_PENDING" } });
-    expect(rows.P500).toMatchObject({ status: "refused", reason: { code: "ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED" } });
+    // Where each waits: the draft for evidence (it is not in the approval queue), the rest for approval.
+    for (const code of ["P100", "P300", "P400"]) expect(rows[code]).toMatchObject({ status: "already_pending", waitingStatus: "submitted", reason: { code: "PROGRESS_ALREADY_PENDING", message: `An import submission at ${SITE_FILE[code]}% is already awaiting approval; no second submission` } });
+    expect(rows.P200).toMatchObject({ status: "already_pending", waitingStatus: "draft", reason: { code: "PROGRESS_ALREADY_PENDING", message: "An import submission at 20% is already kept as a draft awaiting evidence; no second submission" } });
+    expect(rows.P500).toMatchObject({ status: "refused", waitingStatus: null, reason: { code: "ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED" } });
     // Only the source document differs: no submission, no progress row.
     expect(JSON.parse(await footprint())).toEqual({ ...JSON.parse(before), documents: JSON.parse(before).documents + 1 });
   });
@@ -235,8 +248,12 @@ liveDescribe("PC-6: a progress import makes progress only in the importer's own 
 
     const preview = await upload(live.token, xerWith(PM_FILE), { dryRun: true });
     ok(preview);
-    expect(preview.body.data).toMatchObject({ dryRun: true, authority: { canApprove: true, outcome: "approved" }, matched: 5, wouldSubmit: 0, wouldApprove: 5, updated: 0 });
-    expect(preview.body.data.message).toMatch(/^Dry run: nothing was written\. For you 5 rows would be submitted and approved through the progress approval gates/);
+    expect(preview.body.data).toMatchObject({ dryRun: true, authority: { canApprove: true, outcome: "approved" }, matched: 5, wouldSubmit: 0, wouldApprove: 3, wouldHold: 2, wouldRefuse: 0, updated: 0 });
+    expect(preview.body.data.message).toBe("Dry run: nothing was written. For you 3 rows would be submitted and approved through the progress approval gates; 2 would be left pending (evidence required, ITP hold point open), 0 would be refused, 0 already official, 0 already pending, 0 not matched.");
+    const previewed = rowsByCode(preview.body.data);
+    expect(["P100", "P400", "P500"].map((code) => previewed[code].status)).toEqual(["approve", "approve", "approve"]);
+    expect(previewed.P200).toMatchObject({ status: "hold", reason: { code: "PROGRESS_EVIDENCE_REQUIRED", message: "This activity requires evidence before progress can be approved; the row would be left pending" } });
+    expect(previewed.P300).toMatchObject({ status: "hold", reason: { code: "ITP_HOLD_POINT_OPEN", message: "1 ITP hold point on this activity has not passed (ITP-001: Rebar cover verified — pending); the row would be left pending" } });
     expect(await prisma.progressSubmission.count({ where: { projectId: project.id } })).toBe(4);
 
     const auditBefore = await prisma.auditEvent.count({ where: { projectId: project.id, entityType: "progress_submission" } });
