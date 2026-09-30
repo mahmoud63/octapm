@@ -8,6 +8,7 @@ import {
   signInForm,
   type LiveOrg,
 } from './support-workspaces'
+import { expectNoToastBeside, toast } from './support-toasts'
 
 /**
  * The budget line dialog's Original Budget protection (PC-7a; owner decision
@@ -117,8 +118,6 @@ const lineFor = async (projectId: string, costCodeId: string) => {
 /** "$100,000" or "$100,000.00", as the project's currency formatter writes it. */
 const money = (amount: string) => `\\$${amount}(\\.00)?`
 
-const toast = (page: Page, text: string | RegExp) => page.locator('[data-sonner-toast]').filter({ hasText: text })
-
 const row = (page: Page, code: string) => page.getByTestId('uat-budget-line-row').filter({ hasText: code })
 
 /** Adds a material line for a cost code through the dialog. */
@@ -183,6 +182,9 @@ test('the budget line dialog keeps a re-activated original, shows a locked origi
   await archiveLine(page, 'BL-100')
   expect((await lineFor(projectId, keptCodeId)).status).toBe('archived')
 
+  // The first add's own "Budget line added" toast is gone before the line is
+  // added again, so one seen beside the warning below is this add's.
+  await expect(toast(page, 'Budget line added')).toHaveCount(0)
   await addLine(page, 'BL-100', '150000')
   const keptUnlocked = toast(page, 'Archived line re-activated with its original budget kept at')
   await expect(keptUnlocked).toBeVisible()
@@ -192,7 +194,8 @@ test('the budget line dialog keeps a re-activated original, shows a locked origi
   await expect(keptUnlocked).toContainText(
     'A re-activated line keeps its original budget; edit the line to change it while it is unlocked.',
   )
-  await expect(toast(page, 'Budget line added')).toHaveCount(0)
+  // The warning stands alone: the line was not "added" with what was typed.
+  await expectNoToastBeside(page, 'Budget line added', keptUnlocked)
   const reactivated = await lineFor(projectId, keptCodeId)
   expect([reactivated.id, reactivated.originalBudget, reactivated.status]).toEqual([first.id, 100000, 'active'])
 
@@ -249,6 +252,7 @@ test('the budget line dialog keeps a re-activated original, shows a locked origi
   await expect(keptLocked).toContainText(
     'Its original budget is locked: a budget revision stands on it. Record the difference as a budget revision.',
   )
+  await expectNoToastBeside(page, 'Budget line added', keptLocked)
   expect((await lineFor(projectId, keptCodeId)).originalBudget).toBe(100000)
 
   // ── A direct attempt the server refuses: the dialog opened while the line

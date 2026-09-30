@@ -11,6 +11,7 @@ import {
   LIVE_PASSWORD,
   type LiveOrg,
 } from './support-workspaces'
+import { expectNoToastBeside, toast } from './support-toasts'
 
 /**
  * IPC certification waits for an established contract value, and the refusal
@@ -128,8 +129,6 @@ const footprint = (projectId: string) =>
     }
   })
 
-const toast = (page: Page, text: string | RegExp) => page.locator('[data-sonner-toast]').filter({ hasText: text })
-
 const openIpc = async (page: Page, base: string) => {
   await page.goto(`${base}/commercial/ipc`)
   await expect(page.getByTestId('uat-ipc-period-select')).toBeVisible({ timeout: 45_000 })
@@ -242,7 +241,8 @@ test('a refused IPC certification links to Contract terms, which offers each per
   const refusal = toast(page, REFUSAL).filter({ has: link })
   await expect(refusal).toBeVisible()
   await expect(link).toBeVisible()
-  await expect(toast(page, 'Failed to certify IPC')).toHaveCount(0)
+  // Never the generic failure beside it.
+  await expectNoToastBeside(page, 'Failed to certify IPC', refusal)
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/commercial/ipc(\\?|$)`))
 
   // The link lands on Contract terms (Client Billing) for the same project.
@@ -323,8 +323,8 @@ test('a refused IPC certification links to Contract terms, which offers each per
     again.click(),
   ])
   expect(certified.status(), JSON.stringify(await certified.json().catch(() => null))).toBe(200)
-  await expect(toast(page, 'IPC certified')).toBeVisible()
-  await expect(toast(page, REFUSAL)).toHaveCount(0)
+  // (The page was reloaded by openIpc, so the first attempt's refusal is gone.)
+  await expectNoToastBeside(page, REFUSAL, toast(page, 'IPC certified'))
   // The same reading now shows the certification the refusal did not write.
   const after = await footprint(projectId)
   expect(after.status).toBe('certified')
