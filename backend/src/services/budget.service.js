@@ -230,7 +230,31 @@ const loadLines = async ({ projectId, includeArchived = false }, tx = prisma) =>
     orderBy: [{ costCode: { code: "asc" } }, { sortOrder: "asc" }, { costType: "asc" }],
   });
 
-const listBudgetLines = async ({ orgId, projectId, query = {} }) => {
+// What a screen says of each lock condition beside a read-only Original
+// Budget (GET /budget/lines, GET /budget/lines/:lineId). Plain words, the
+// same on every line; the 409 of a refused write names the particular
+// change order, commitment or period.
+const ORIGINAL_LOCK_WORDS = Object.freeze({
+  approved_budget_baseline: "an approved budget baseline includes it",
+  approved_change: "an approved change order, revision or transfer stands on it",
+  executed_commitment: "an executed commitment is committed against it",
+  ledger_posting: "the cost ledger has posted cost to it",
+  locked_period_snapshot: "a locked reporting period's budget snapshot includes it",
+});
+
+// Each line's Original Budget lock, read once for the whole list with the
+// one guard's own conditions (originalBudgetLocks): { locked, conditions:
+// [{ condition, number, reason }] }. On the read answers only — never on a
+// stored budget snapshot (buildSnapshotPayload lists without it).
+const withOriginalBudgetLocks = async ({ projectId, items }) => {
+  const locks = await originalBudgetLocks({ projectId, lineIds: items.map((line) => line.id) });
+  return items.map((line) => {
+    const conditions = (locks.get(line.id) || []).map(({ condition, number }) => ({ condition, number, reason: ORIGINAL_LOCK_WORDS[condition] || condition }));
+    return { ...line, originalBudgetLock: { locked: conditions.length > 0, conditions } };
+  });
+};
+
+const listBudgetLines = async ({ orgId, projectId, query = {}, originalLocks = false }) => {
   await ensureProject({ orgId, projectId });
   const rows = await loadLines({ projectId, includeArchived: Boolean(query.includeArchived) });
   let items = rows.map(serializeLine);
@@ -240,6 +264,7 @@ const listBudgetLines = async ({ orgId, projectId, query = {} }) => {
     const needle = String(query.search).toLowerCase();
     items = items.filter((line) => [line.costCode?.code, line.costCode?.name, line.description].some((text) => text && String(text).toLowerCase().includes(needle)));
   }
+  if (originalLocks) items = await withOriginalBudgetLocks({ projectId, items });
   return { items, summary: summarize(items) };
 };
 
@@ -249,9 +274,10 @@ const loadLine = async ({ projectId, lineId }, tx = prisma) => {
   return line;
 };
 
-const getBudgetLine = async ({ orgId, projectId, lineId }) => {
+const getBudgetLine = async ({ orgId, projectId, lineId, originalLocks = false }) => {
   await ensureProject({ orgId, projectId });
-  return serializeLine(await loadLine({ projectId, lineId }));
+  const line = serializeLine(await loadLine({ projectId, lineId }));
+  return originalLocks ? (await withOriginalBudgetLocks({ projectId, items: [line] }))[0] : line;
 };
 
 /** Allocation amounts follow the revised budget; call after anything that changes it. */
@@ -369,7 +395,9 @@ const originalBudgetLockedError = ({ line, proposed, reasons }) => {
   return new HttpError(
     409,
     "BUDGET_ORIGINAL_LOCKED",
-    `The original budget of ${label} is locked at ${original} (${because}). A changed amount is a budget revision: add it on the line's revisions (POST /budget/lines/${line.id}/revisions). It flows into the Revised Budget and the Original Budget stays ${original} — for example, original 100,000 + an approved revision of +50,000 reads revised 150,000 with the original still 100,000.`,
+    // Plain words for a person; where to record the revision is a field of
+    // the details (revisionPath), not part of the sentence.
+    `The original budget of ${label} is locked at ${original} (${because}). Record a changed amount as a budget revision on this line: it flows into the Revised Budget and the Original Budget stays ${original} — for example, original 100,000 + an approved revision of +50,000 reads revised 150,000 with the original still 100,000.`,
     { lineId: line.id, code: line.costCode?.code || null, costType: line.costType, originalBudget: toMoneyNumber(line.originalBudget), proposed, conditions: reasons, revisionPath: `/budget/lines/${line.id}/revisions` },
   );
 };

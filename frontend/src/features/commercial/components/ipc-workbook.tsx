@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { formatShortDate } from '@/lib/dates'
+import { getServerErrorMessage } from '@/lib/handle-server-error'
 import {
   AlertTriangle,
   Banknote,
@@ -54,6 +56,13 @@ function statusTone(status?: string) {
   return 'border-muted-foreground/30 bg-muted text-muted-foreground'
 }
 
+const errorCodeFrom = (error: unknown) =>
+  (
+    error as {
+      response?: { data?: { error?: { code?: string } } }
+    }
+  )?.response?.data?.error?.code
+
 function StatusBadge({ label, value }: { label: string; value?: string }) {
   return (
     <Badge variant='outline' className={statusTone(value)}>
@@ -90,6 +99,15 @@ export function IpcWorkbook({
   const issueInvoice = useIssueIpcInvoice(projectId)
   const recordPayment = useRecordIpcPayment(projectId)
   const releaseRetention = useReleaseIpcRetention(projectId)
+  const navigate = useNavigate()
+  // Certification waits for an established contract value (409
+  // CONTRACT_VALUE_NOT_ESTABLISHED): the refusal says so in the server's
+  // words and offers the way to Contract terms (Client Billing).
+  const openContractTerms = () =>
+    navigate({
+      to: '/projects/$projectId/$module/$child',
+      params: { projectId, module: 'commercial', child: 'client-billing' },
+    })
 
   const [selectedPeriod, setSelectedPeriod] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
@@ -264,8 +282,19 @@ export function IpcWorkbook({
                   setCertificationComment('')
                   setOverrideReason('')
                   toast.success('IPC certified')
-                } catch {
-                  toast.error('Failed to certify IPC')
+                } catch (error) {
+                  if (
+                    errorCodeFrom(error) === 'CONTRACT_VALUE_NOT_ESTABLISHED'
+                  ) {
+                    toast.error(getServerErrorMessage(error), {
+                      action: {
+                        label: 'Open Contract terms',
+                        onClick: openContractTerms,
+                      },
+                    })
+                  } else {
+                    toast.error('Failed to certify IPC')
+                  }
                 }
               }}
             >

@@ -54,7 +54,9 @@ router.get(
     query("search").optional().isString().trim().isLength({ max: 120 }),
     validate,
   ],
-  asyncHandler(async (req, res) => sendSuccess(res, await budgetService.listBudgetLines({ ...scope(req), query: req.query }))),
+  // Each line says whether its Original Budget is locked, and why (PC-7a), so
+  // an edit screen shows it read-only instead of inviting a refused write.
+  asyncHandler(async (req, res) => sendSuccess(res, await budgetService.listBudgetLines({ ...scope(req), query: req.query, originalLocks: true }))),
 );
 
 router.post(
@@ -133,7 +135,7 @@ router.get(
   "/lines/:lineId",
   requirePermission("cost", "read"),
   [param("lineId").isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await budgetService.getBudgetLine({ ...scope(req), lineId: req.params.lineId }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await budgetService.getBudgetLine({ ...scope(req), lineId: req.params.lineId, originalLocks: true }))),
 );
 
 // originalBudget is validated here as a number; whether it may still move is

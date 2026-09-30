@@ -88,13 +88,19 @@ export function BudgetLineDialog({
   )
   const busy = create.isPending || update.isPending
   const available = codes?.available ?? []
+  // The server says whether this line's Original Budget may still move
+  // (PC-7a); a locked one is shown, not offered for typing.
+  const originalLock = line?.originalBudgetLock?.locked
+    ? line.originalBudgetLock
+    : null
 
   const save = async () => {
     try {
       const payload = {
         costType,
         description: description.trim() || null,
-        originalBudget: parseMoney(original) ?? 0,
+        // A locked original is not sent at all: it cannot change here.
+        ...(originalLock ? {} : { originalBudget: parseMoney(original) ?? 0 }),
         committed: parseMoney(committed) ?? 0,
         forecast: parseMoney(forecast),
       }
@@ -102,8 +108,21 @@ export function BudgetLineDialog({
         await update.mutateAsync({ lineId: line.id, payload })
         toast.success('Budget line saved')
       } else {
-        await create.mutateAsync({ ...payload, costCodeId })
-        toast.success('Budget line added')
+        const created = await create.mutateAsync({ ...payload, costCodeId })
+        const kept = created.originalBudgetKept
+        if (kept) {
+          // An archived line for this cost code and type came back: it keeps
+          // the original it had, whatever was typed (PC-7a).
+          const why = kept.conditions.length
+            ? `Its original budget is locked: ${kept.conditions.map((row) => row.reason).join('; ')}. Record the difference as a budget revision.`
+            : 'A re-activated line keeps its original budget; edit the line to change it while it is unlocked.'
+          toast.warning(
+            `Archived line re-activated with its original budget kept at ${formatMoney(kept.existing)}, not the ${formatMoney(kept.proposed)} entered.`,
+            { description: why }
+          )
+        } else {
+          toast.success('Budget line added')
+        }
       }
       onOpenChange(false)
     } catch (error) {
@@ -175,8 +194,24 @@ export function BudgetLineDialog({
               step='0.01'
               value={original}
               onChange={(e) => setOriginal(e.target.value)}
+              readOnly={Boolean(originalLock)}
+              disabled={Boolean(originalLock)}
+              aria-describedby={
+                originalLock ? 'budget-original-locked' : undefined
+              }
               data-testid='uat-budget-line-original'
             />
+            {originalLock && (
+              <p
+                id='budget-original-locked'
+                className='text-xs text-muted-foreground'
+                data-testid='uat-budget-line-original-locked'
+              >
+                Locked:{' '}
+                {originalLock.conditions.map((row) => row.reason).join('; ')}.
+                Record a changed amount as a budget revision on this line.
+              </p>
+            )}
           </div>
           <div className='space-y-1'>
             <Label

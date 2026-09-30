@@ -53,10 +53,25 @@ liveDescribe("PC-7a: the Original Budget cannot be rewritten once changes, posti
     expect(refused.status).toBe(409);
     expect(refused.body.error.code).toBe("BUDGET_ORIGINAL_LOCKED");
     expect(refused.body.error.message).toContain(`condition ${condition}`);
-    expect(refused.body.error.message).toContain(`/budget/lines/${lineId}/revisions`);
+    expect(refused.body.error.message).toContain("Record a changed amount as a budget revision on this line");
     expect(refused.body.error.message).toContain("Revised Budget");
+    // A plain message for a person: where to post the revision is a field of
+    // the details, never an API path in the sentence.
+    expect(refused.body.error.message).not.toMatch(/\/budget\/|POST |\/api\//);
+    expect(refused.body.error.details.revisionPath).toBe(`/budget/lines/${lineId}/revisions`);
+    expect(refused.body.error.details.conditions.map((row) => row.number)).toContain(condition);
     // Nothing written: the row is byte-identical, updatedAt included.
     expect(await stored(lineId)).toEqual(before);
+    // The reads said so beforehand: the line and the list carry the same
+    // lock, with the same conditions the refusal names.
+    const refusedConditions = refused.body.error.details.conditions.map((row) => [row.condition, row.number]);
+    const read = await getLine(key, lineId);
+    expect(read.originalBudgetLock.locked).toBe(true);
+    expect(read.originalBudgetLock.conditions.map((row) => [row.condition, row.number])).toEqual(refusedConditions);
+    expect(read.originalBudgetLock.conditions.every((row) => typeof row.reason === "string" && row.reason.length > 0)).toBe(true);
+    const listed = await api.get(at(key, "/budget/lines?includeArchived=true"), auth());
+    ok(listed);
+    expect(listed.body.data.items.find((row) => row.id === lineId).originalBudgetLock).toEqual(read.originalBudgetLock);
     return refused;
   };
 
@@ -147,6 +162,8 @@ liveDescribe("PC-7a: the Original Budget cannot be rewritten once changes, posti
     answer = await patchLine("GUARD", line.id, { originalBudget: 100000 });
     ok(answer);
     expect(answer.body.data.originalBudget).toBe(100000);
+    // ... and the reads say it is not locked.
+    expect((await getLine("GUARD", line.id)).originalBudgetLock).toEqual({ locked: false, conditions: [] });
   });
 
   it("condition 2 — the owner's example: original 100,000 + approved revision +50,000 reads revised 150,000, original 100,000; a PATCH is refused and the sibling stays editable", async () => {
@@ -337,9 +354,14 @@ liveDescribe("PC-7a: the Original Budget cannot be rewritten once changes, posti
     const registerAll = await api.get(at("GUARD", "/budget/lines?includeArchived=true"), auth());
     ok(registerAll);
     expect(stored.linesJson.map(figures)).toEqual(registerAll.body.data.items.map(figures));
+    // The register's read-side lock state is not a figure either: the list
+    // carries it, a stored snapshot never does.
+    expect(registerAll.body.data.items.every((row) => typeof row.originalBudgetLock?.locked === "boolean")).toBe(true);
+    expect(stored.linesJson.some((row) => Object.prototype.hasOwnProperty.call(row, "originalBudgetLock"))).toBe(false);
     // And the locked period's snapshot (taken at the lock) carries none either.
     const lockedBudget = await prisma.budgetSnapshot.findUnique({ where: { reportingPeriodId: lockedPeriodId } });
     expect(lockedBudget.linesJson.some((row) => Object.prototype.hasOwnProperty.call(row, "truth"))).toBe(false);
+    expect(lockedBudget.linesJson.some((row) => Object.prototype.hasOwnProperty.call(row, "originalBudgetLock"))).toBe(false);
 
     // Cost summary: the register's budget is "Budget"; the other two are named apart.
     const summary = await api.get(at("GUARD", "/cost/summary"), auth());

@@ -64,6 +64,13 @@ export interface BudgetLineChange {
   createdAt: string | null
 }
 
+/** One Original Budget lock condition (budget.service originalBudgetLocks). */
+export interface BudgetOriginalLockCondition {
+  condition: string
+  number: number
+  reason: string
+}
+
 export interface BudgetLine {
   id: string
   projectId: string
@@ -81,6 +88,14 @@ export interface BudgetLine {
   actual: number
   forecast: number
   forecastIsManual: boolean
+  /**
+   * Whether the Original Budget may still move, and why not (PC-7a). On the
+   * list and single-line reads; a locked line takes a budget revision.
+   */
+  originalBudgetLock?: {
+    locked: boolean
+    conditions: BudgetOriginalLockCondition[]
+  }
   /** Source / derived / projection per figure, and from what (PC-7a). */
   truth?: {
     originalBudget: string
@@ -293,7 +308,19 @@ export const useCreateBudgetLine = (projectId: string) => {
     mutationFn: (payload: BudgetLineInput & { costCodeId: string }) =>
       apiClient
         .post(`${base(projectId)}/lines`, payload)
-        .then((response) => response.data.data as BudgetLine),
+        .then(
+          (response) =>
+            response.data.data as BudgetLine & {
+              // An archived line re-activated for this cost code and type
+              // keeps the original it has (PC-7a); present when the two differ.
+              originalBudgetKept?: {
+                existing: number
+                proposed: number
+                locked: boolean
+                conditions: BudgetOriginalLockCondition[]
+              }
+            }
+        ),
     onSuccess: () => invalidateBudget(qc, projectId),
   })
 }

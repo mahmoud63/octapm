@@ -14429,6 +14429,14 @@ const budgetLineSchema = objectSchema({
   actual: budgetMoney,
   forecast: { ...budgetMoney, description: "Manual forecast, else max(revised, actual, committed)." },
   forecastIsManual: { type: "boolean" },
+  // PC-7a: whether the Original Budget may still move (read answers only).
+  originalBudgetLock: {
+    ...objectSchema({
+      locked: { type: "boolean" },
+      conditions: arrayOf(objectSchema({ condition: { type: "string", enum: ["approved_budget_baseline", "approved_change", "executed_commitment", "ledger_posting", "locked_period_snapshot"] }, number: { type: "integer", minimum: 1, maximum: 5 }, reason: { type: "string" } })),
+    }),
+    description: "GET /budget/lines and GET /budget/lines/{lineId} only (not on write answers, not stored with budget snapshots): locked is true when a lock condition stands on the line, and conditions lists each (condition, its number in the rule, and a plain reason) — the same conditions a PATCH of originalBudget would be refused with. A screen shows originalBudget read-only on a locked line and points to a budget revision.",
+  },
   // PC-7a three truths (control model §3): labels only, no figure changes.
   truth: {
     ...objectSchema({
@@ -14648,7 +14656,7 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
     method: "patch",
     path: "/projects/{projectId}/budget/lines/{lineId}",
     summary: "Edit a line (original budget, committed, actual, forecast, description, cost type, status). Allocation amounts follow the revised budget.",
-    description: `originalBudget is refused with 409 BUDGET_ORIGINAL_LOCKED (the message names the lock conditions and points to the line's revisions; nothing is written) once the line is locked; sending the stored amount back (|Δ| ≤ 0.005) is an echo and passes. ${BUDGET_ORIGINAL_LOCK_RULE}`,
+    description: `originalBudget is refused with 409 BUDGET_ORIGINAL_LOCKED once the line is locked, and nothing is written: the message names the lock conditions in plain words and says to record the changed amount as a budget revision on the line; error.details carries { lineId, code, costType, originalBudget, proposed, conditions: [{ condition, number, reason }], revisionPath } — revisionPath ("/budget/lines/{lineId}/revisions", under the project) is where that revision is posted. GET /budget/lines states each line's originalBudgetLock beforehand; sending the stored amount back (|Δ| ≤ 0.005) is an echo and passes. ${BUDGET_ORIGINAL_LOCK_RULE}`,
     operationId: "updateBudgetLine",
     parameters: [...projectParams, budgetLineIdParam],
     permissions: modulePermission("cost", "update"),
