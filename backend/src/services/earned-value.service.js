@@ -26,7 +26,7 @@ const {
 // Which rule gave the EAC (budget / CPI, or the budget with CPI 0 or none).
 const { eacBasisOf } = require("../utils/eac-basis");
 // Source / derived / projection labels on the report (labels only).
-const { EV_REPORT_TRUTH } = require("../utils/figure-truth");
+const { EV_REPORT_TRUTH, EV_HISTORY_TRUTH } = require("../utils/figure-truth");
 // The server's sentences beside an EV figure (a cutoff not yet reached).
 const { EV_NOTES, cutoffNotReached } = require("../utils/ev-notes");
 
@@ -1077,6 +1077,93 @@ const listReportingPeriods = async ({ orgId, projectId }) => {
   };
 };
 
+// PC-7a item 3 — the S-curve's measured history. The formula S-curve gives
+// EV only at the report's own cutoff (S_CURVE_NOTE); every earlier EV point
+// that was ever measured lives in a locked period's EvPeriodSnapshot. The
+// history is those snapshots, read exactly as stored at the lock — the
+// instant, the date and zone recorded then (describePeriodCutoff, PC-4's one
+// cutoff), and the figures. Nothing is recomputed, interpolated or filled in
+// between periods: an open period, an ad hoc cutoff or a period locked
+// without a snapshot has no point, and a later record never moves one.
+const EV_HISTORY_NOTE =
+  "Each history point is a locked reporting period's snapshot, read as stored at the lock: PV, EV and AC measured at that period's cutoff instant in the zone recorded then. Nothing is recomputed or filled in between periods; open periods have no point, and later records never move a locked one.";
+
+const moneyOrNull = (value) =>
+  value === null || value === undefined ? null : toMoneyNumber(value);
+const ratioOrNull = (value) =>
+  value === null || value === undefined ? null : Number(value);
+
+/**
+ * The locked periods' EV points for a project, earliest cutoff first, each
+ * { periodId, code, label, cutoffDate, cutoffLocalDate, timeZone,
+ * timeZoneSource, timeZoneNote, totalBudget, pv, ev, ac, eac, spi, cpi,
+ * formulaVersion, lockedAt, snapshotId }. `through` (an instant) keeps only
+ * the points cut on or before it, so a report never shows a period after
+ * its own cutoff. Scoped by orgId through the project; read only.
+ */
+const listLockedEvHistory = async ({ orgId, projectId, through = null }, tx = prisma) => {
+  await ensureProject({ orgId, projectId }, tx);
+  const throughAt = through ? new Date(through) : null;
+  const rows = await tx.evPeriodSnapshot.findMany({
+    where: {
+      projectId,
+      // A snapshot whose period is not locked is not a history point.
+      reportingPeriod: { projectId, status: LOCKED_PERIOD },
+      ...(throughAt && Number.isFinite(throughAt.getTime())
+        ? { cutoffDate: { lte: throughAt } }
+        : {}),
+    },
+    include: { reportingPeriod: true },
+    orderBy: [{ cutoffDate: "asc" }, { lockedAt: "asc" }, { id: "asc" }],
+  });
+
+  return rows.map((snapshot) => {
+    const period = snapshot.reportingPeriod;
+    const cutoff = describePeriodCutoff({ ...period, evSnapshot: snapshot });
+    return {
+      periodId: period.id,
+      code: period.code,
+      label: period.label || period.code,
+      cutoffDate: toIso(snapshot.cutoffDate),
+      cutoffLocalDate: cutoff.localDate || null,
+      timeZone: cutoff.timeZone || null,
+      timeZoneSource: cutoff.timeZoneSource || null,
+      timeZoneNote: cutoff.timeZoneNote ?? null,
+      totalBudget: toMoneyNumber(snapshot.totalBudget),
+      pv: toMoneyNumber(snapshot.pv),
+      ev: toMoneyNumber(snapshot.ev),
+      ac: toMoneyNumber(snapshot.ac),
+      eac: moneyOrNull(snapshot.eac),
+      spi: ratioOrNull(snapshot.spi),
+      cpi: ratioOrNull(snapshot.cpi),
+      formulaVersion: snapshot.formulaVersion,
+      lockedAt: toIso(snapshot.lockedAt),
+      snapshotId: snapshot.id,
+    };
+  });
+};
+
+/**
+ * The EV report as GET /reports/ev answers it: the official report
+ * (buildOfficialEvReport, unchanged) with the locked-period history through
+ * its cutoff beside the formula S-curve. Other readers of the report (the
+ * lock, the health card, the forecast, the workspace home) do not carry it.
+ */
+const buildEvReportWithHistory = async ({ orgId, projectId, periodId = null, cutoffDate = null }) => {
+  const report = await buildOfficialEvReport({ orgId, projectId, periodId, cutoffDate });
+  const history = await listLockedEvHistory({
+    orgId,
+    projectId,
+    through: report?.reporting?.cutoffDate || null,
+  });
+  return {
+    ...report,
+    history,
+    historyNote: EV_HISTORY_NOTE,
+    historyTruth: EV_HISTORY_TRUTH,
+  };
+};
+
 const createReportingPeriod = async ({ orgId, projectId, userId, payload }) => {
   const project = await ensureProject({ orgId, projectId });
   const periodStart = parseDate(payload.periodStart, "periodStart");
@@ -1738,6 +1825,9 @@ module.exports = {
   computeEvMetrics,
   computeBudgetRevisionDelta,
   buildOfficialEvReport,
+  buildEvReportWithHistory,
+  listLockedEvHistory,
+  EV_HISTORY_NOTE,
   pickDefaultReportingPeriod,
   periodCutoffReader,
   listReportingPeriods,

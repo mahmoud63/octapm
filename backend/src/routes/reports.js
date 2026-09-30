@@ -234,7 +234,10 @@ router.get(
     validate,
   ],
   asyncHandler(async (req, res) => {
-    const result = await evService.buildOfficialEvReport({
+    // The report plus the locked periods' measured history (PC-7a item 3).
+    // The history is project-level totals only, so withheldEvReport passes
+    // it to every cost reader; the activity breakdown stays BOQ-gated.
+    const result = await evService.buildEvReportWithHistory({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       periodId: req.query.periodId || null,

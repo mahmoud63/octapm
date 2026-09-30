@@ -82,6 +82,28 @@ const EV_REPORT_TRUTH = Object.freeze({
   }),
 });
 
+// The EV report's history points (earned-value.service listLockedEvHistory):
+// each is a locked period's EvPeriodSnapshot as it was stored at the lock.
+// PV, EV and AC were derived at that period's cutoff and are frozen since;
+// the EAC was the projection made at the lock. Nothing here is recomputed.
+const EV_HISTORY_TRUTH = Object.freeze({
+  pv: TRUTHS.DERIVED,
+  ev: TRUTHS.DERIVED,
+  ac: TRUTHS.DERIVED,
+  totalBudget: TRUTHS.DERIVED,
+  spi: TRUTHS.DERIVED,
+  cpi: TRUTHS.DERIVED,
+  eac: projection("eac_at_lock"),
+  frozenAt: "locked_period_snapshot",
+  derivedFrom: Object.freeze({
+    pv: "Stored at the lock: approved time-phased cost loading through that period's cutoff",
+    ev: "Stored at the lock: approved progress × approved BOQ allocations through that period's cutoff",
+    ac: "Stored at the lock: official actual cost on cost records through that period's cutoff",
+    totalBudget: "Stored at the lock: approved allocations + approved budget revisions at that cutoff",
+    eac: "The EAC projected at the lock (revised budget ÷ CPI, or the revised budget without a CPI); later records never move it",
+  }),
+});
+
 module.exports = {
   TRUTHS,
   projection,
@@ -91,4 +113,5 @@ module.exports = {
   COST_RECORD_FORECAST_DEFAULT_BASIS,
   COST_RECORD_FORECAST_DEFAULT_RULE,
   EV_REPORT_TRUTH,
+  EV_HISTORY_TRUTH,
 };

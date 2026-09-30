@@ -5232,6 +5232,30 @@ const components = {
       progressStatus: { type: "string" },
       isCritical: { type: "boolean" },
     }),
+    // PC-7a item 3: one locked reporting period's EV point, read as stored.
+    EarnedValueHistoryPoint: objectSchema(
+      {
+        periodId: uuid,
+        code: { type: "string" },
+        label: { type: "string" },
+        cutoffDate: { ...dateString, description: "The cutoff instant stored in the period's snapshot at the lock (the end of cutoffLocalDate in timeZone); never re-read against today's zone." },
+        cutoffLocalDate: { type: "string", nullable: true, description: "The reporting date (YYYY-MM-DD) recorded at the lock." },
+        timeZone: { type: "string", nullable: true },
+        timeZoneSource: { type: "string", nullable: true, description: "project, organisation or utc, as recorded at the lock." },
+        timeZoneNote: { type: "string", nullable: true, description: "As recorded at the lock: null when the project's own zone applied, else \"Project timezone is not configured; UTC is being used\" or the organisation-default sentence." },
+        totalBudget: money,
+        pv: money,
+        ev: money,
+        ac: money,
+        eac: { ...signedMoney, nullable: true },
+        spi: { type: "number", nullable: true },
+        cpi: { type: "number", nullable: true },
+        formulaVersion: { type: "string" },
+        lockedAt: dateString,
+        snapshotId: uuid,
+      },
+      ["periodId", "code", "label", "cutoffDate", "pv", "ev", "ac", "lockedAt", "snapshotId"],
+    ),
     EarnedValueReport: objectSchema(
       {
         totalBudget: money,
@@ -5281,6 +5305,16 @@ const components = {
         sCurveNote: {
           type: "string",
           description: "What the sCurve's EV points are; for a snapshot stored before EV was given only at the cutoff, that its earlier months repeat the cutoff's EV and are not a measured history.",
+        },
+        history: {
+          ...arrayOf(ref("EarnedValueHistoryPoint")),
+          description:
+            "GET /reports/ev only (PC-7a). The measured S-curve history: one point per LOCKED reporting period of the project whose stored cutoff instant is on or before this report's cutoffDate, earliest first, each read from its EvPeriodSnapshot exactly as stored at the lock (figures, instant, date and zone). Nothing is recomputed, interpolated or filled between periods: an open period, an ad hoc cutoff or a later record never adds or moves a point. Project-level totals, so every cost reader receives it; empty when no period is locked.",
+        },
+        historyNote: { type: "string", description: "GET /reports/ev only: what the history points are (locked snapshots as stored; nothing filled in)." },
+        historyTruth: {
+          ...ref("GenericObject"),
+          description: "GET /reports/ev only (labels): pv, ev, ac, totalBudget, spi and cpi are \"derived\" at the lock and frozen since (frozenAt \"locked_period_snapshot\"); eac is \"projection:eac_at_lock\"; derivedFrom says from what.",
         },
         activityBreakdown: {
           ...arrayOf(ref("EarnedValueActivityBreakdown")),
