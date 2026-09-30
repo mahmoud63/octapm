@@ -768,6 +768,53 @@ const withheldCertificateTotals = (row, terms, access = FULL_ACCESS) => {
   return withoutCapFigures(row, CERTIFICATE_CAP_KEYS, terms);
 };
 
+// The report builder's payment-certificate source (report-sources
+// ipc_certificate) states the same cap-limited totals as columns. A row of a
+// certificate not yet certified, on a project where the caller is refused
+// them (retentionCapWithheld), has each such column null — the same row, the
+// same place, as withheldReportRow does for a mapping column — and
+// `withheldColumns` names them. `status` is the certificate's own, read from
+// the record whether or not the run shows the status column.
+const REPORT_CERTIFICATE_CAP_COLUMNS = Object.freeze({
+  ipc_certificate: Object.freeze(["totalRet", "netPayable", "taxAmount", "balanceDue"]),
+});
+
+/** The columns of a report source that a retention cap on an unestablished contract value limits. */
+const reportCertificateCapColumns = (sourceKey) => REPORT_CERTIFICATE_CAP_COLUMNS[sourceKey] || [];
+
+const withheldReportCertificateRow = (row, { status, keys, terms, access = FULL_ACCESS }) => {
+  if (!row || typeof row !== "object" || retentionHeld(status) || !retentionCapWithheld(terms, access)) return row;
+  const present = (keys || []).filter((key) => has(row, key));
+  if (!present.length) return row;
+  const result = { ...row };
+  for (const key of present) result[key] = null;
+  result.withheldColumns = [...new Set([...(Array.isArray(row.withheldColumns) ? row.withheldColumns : []), ...present])];
+  return result;
+};
+
+// A workflow run on a payment certificate (workflow-tools ipc_certificate)
+// keeps the certificate's net payable as its context's `amount`, taken when
+// the run started (on submission). While the cap limits it (see
+// retentionCapWithheld) that amount restates the unestablished value, so:
+// the engine leaves it out of the context it stores and routes on — decided
+// for a reader who may not read the BOQ (NO_ACCESS), since every approver
+// and every reader of the run sees the same stored context and the template
+// it chose — and a run stored before that rule loses it on the way out to
+// such a reader. `valueWithheld` names it. The context's status is the
+// certificate's when the run started.
+const WORKFLOW_CERTIFICATE_CAP_KEYS = ["amount"];
+const withheldCertificateContext = (context, terms, access = NO_ACCESS) => {
+  if (!context || typeof context !== "object" || retentionHeld(context.status) || !retentionCapWithheld(terms, access)) return context;
+  return withoutCapFigures(context, WORKFLOW_CERTIFICATE_CAP_KEYS, terms);
+};
+
+/** A serialized workflow instance as this caller may receive it (only an ipc_certificate run can change). */
+const withheldWorkflowInstance = (instance, terms, access = FULL_ACCESS) => {
+  if (!instance || typeof instance !== "object" || instance.tool !== "ipc_certificate") return instance;
+  const context = withheldCertificateContext(instance.context, terms, access);
+  return context === instance.context ? instance : { ...instance, context };
+};
+
 const isContractManageEvent = (event) =>
   Boolean(
     event &&
@@ -1215,6 +1262,14 @@ module.exports = {
   withheldIpcItem,
   // The workspace home's IPC queue (a submitted certificate's net payable).
   withheldCertificateTotals,
+  // PC-7a review: the report builder's certificate columns and a workflow run's context.
+  REPORT_CERTIFICATE_CAP_COLUMNS,
+  RETENTION_CAP_WITHHELD,
+  retentionCapWithheld,
+  reportCertificateCapColumns,
+  withheldReportCertificateRow,
+  withheldCertificateContext,
+  withheldWorkflowInstance,
   JOB_BILL_WITHHELD,
   withheldJob,
   BOQ_FIGURE_KEYS,

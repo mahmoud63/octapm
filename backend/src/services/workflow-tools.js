@@ -96,8 +96,21 @@ const TOOLS = Object.freeze({
       { key: "amount", label: "Net payable", type: "number" },
       { key: "totalCert", label: "Certified", type: "number" },
     ],
-    load: ({ tx, projectId, recordId }) => tx.ipcCertificate.findFirst({ where: { id: recordId, projectId } }),
-    context: (row) => ({ ref: row.period, title: `IPC ${row.period}`, status: row.status, amount: money(row.netPayable), totalCert: money(row.totalCert), period: row.period }),
+    // The contract's terms come with the certificate: while its value is
+    // unestablished under a retention cap, a certificate not yet certified
+    // has a net payable that restates it, and the context — stored on the
+    // run, routed on, and shown to every approver — leaves it out
+    // (utils/boq-figures withheldCertificateContext; PC-7a review).
+    load: ({ tx, projectId, recordId }) =>
+      tx.ipcCertificate.findFirst({
+        where: { id: recordId, projectId },
+        include: { project: { select: { primeContract: { select: { originalValueSource: true, retentionCapRate: true } } } } },
+      }),
+    context: (row) =>
+      require("../utils/boq-figures").withheldCertificateContext(
+        { ref: row.period, title: `IPC ${row.period}`, status: row.status, amount: money(row.netPayable), totalCert: money(row.totalCert), period: row.period },
+        row.project?.primeContract || null,
+      ),
     path: ({ projectId, recordId }) => pathOr({ projectId, recordType: "ipc_certificate", recordId, fallback: `/projects/${projectId}/commercial/ipc?recordId=${recordId}` }),
     apply: async ({ orgId, projectId, record, outcome, actor, comment }) => {
       if (outcome !== "success") return null; // a failed run leaves the period submitted for the QS to rework
