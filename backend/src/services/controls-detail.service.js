@@ -683,7 +683,9 @@ const getActivityDetail = async ({ orgId, projectId, activityId, can, partyScope
           ? fig(toMoneyNumber(record.forecast), "projection", "CostRecord.forecast as the cost module stores it", [{ type: "cost_record", id: record.id }])
           : notAvailable("PC-7", "No forecast is stored for this activity; forecast intelligence is PC-7"),
       actualThroughDate: iso(record?.actualThroughDate),
-      href: link("cost_record", record?.id ?? null),
+      // The cost module's By Activity table: it has no deep link to one
+      // record yet, so the link names none rather than one it would not open.
+      href: link("cost_record"),
     };
   } else {
     sections.cost = denied("cost");

@@ -437,6 +437,7 @@ export type Milestone = z.infer<typeof milestoneSchema>
 // may not read the BOQ — cost readers included (E1): such a section arrives
 // as `{ allowed: false, module: 'boq', reason }`, never as zeroes.
 const activityDetailRow = z.object({ id: z.string() }).passthrough()
+const ControlsWithheldNoteSchema = z.object({ reason: z.string() })
 
 const activityDetailQuality = z.union([
   ControlsSectionDeniedSchema,
@@ -533,7 +534,13 @@ export const ActivityDetailSchema = z.object({
       ControlsSectionDeniedSchema,
       z.object({
         allowed: z.literal(true),
-        changeOrders: z.union([ControlsSectionDeniedSchema, controlsCappedList(activityDetailRow)]),
+        // boqWithheld: always present (with no count) for a member who may
+        // not read the BOQ — orders reached through an allocation link are
+        // not listed, so "none" is never a claim.
+        changeOrders: z.union([
+          ControlsSectionDeniedSchema,
+          controlsCappedList(activityDetailRow).extend({ boqWithheld: ControlsWithheldNoteSchema.optional() }),
+        ]),
         changeEvents: z.union([ControlsSectionDeniedSchema, controlsCappedList(activityDetailRow)]),
       }),
     ]),
@@ -578,6 +585,7 @@ export const ActivityDetailSchema = z.object({
         note: z.string().optional(),
         events: z.array(activityDetailRow),
         total: z.number(),
+        boqWithheld: ControlsWithheldNoteSchema.optional(),
       }),
     ]),
   }),

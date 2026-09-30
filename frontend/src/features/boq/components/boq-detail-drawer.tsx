@@ -146,7 +146,13 @@ function BoqDetailBody({
                 {allocations.items.map((row) => (
                   <tr key={row.allocationId} className='border-t align-top'>
                     <td className='py-1.5 pr-2'>
-                      {row.activity ? (
+                      {row.activity?.schedule ? (
+                        // The schedule module refuses this member: the name
+                        // only, and no link to a drawer the server would refuse.
+                        <span data-testid={`boq-detail-activity-${row.activity.id}`} data-withheld-module='schedule'>
+                          {[row.activity.code, row.activity.name].filter(Boolean).join(' · ')}
+                        </span>
+                      ) : row.activity ? (
                         <>
                           <DrawerLink
                             onClick={() => onOpenActivity(row.activity!.id)}
@@ -172,12 +178,22 @@ function BoqDetailBody({
                       )}
                     </td>
                     <td className='py-1.5 pr-2 text-xs text-muted-foreground'>
-                      {row.activity
-                        ? `${formatDate(row.activity.startDate)} → ${formatDate(row.activity.endDate)}`
-                        : '—'}
+                      {row.activity?.schedule ? (
+                        <span title={row.activity.schedule.reason} data-testid={`boq-detail-activity-schedule-withheld-${row.activity.id}`}>
+                          — {row.activity.schedule.reason}
+                        </span>
+                      ) : row.activity ? (
+                        `${formatDate(row.activity.startDate ?? null)} → ${formatDate(row.activity.endDate ?? null)}`
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className='py-1.5 pr-2 text-right tabular-nums'>
-                      {row.activity?.pctComplete ? (
+                      {row.activity?.schedule ? (
+                        <span className='text-xs text-muted-foreground' title={row.activity.schedule.reason}>
+                          —
+                        </span>
+                      ) : row.activity?.pctComplete ? (
                         <span title={row.activity.pctComplete.basis}>
                           {formatQuantity(row.activity.pctComplete.value)}%
                           {row.activity.progressSource && (

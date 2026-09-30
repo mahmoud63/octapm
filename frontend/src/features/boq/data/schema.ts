@@ -355,14 +355,17 @@ export const BoqItemDetailSchema = z.object({
               id: z.string(),
               code: z.string().nullable(),
               name: z.string(),
-              startDate: z.string().nullable(),
-              endDate: z.string().nullable(),
-              isCritical: z.boolean(),
-              totalFloat: z.number().nullable(),
+              // Sent only to a schedule reader; anyone else gets id, code and
+              // name, href null and `schedule: { allowed: false, ... }`.
+              startDate: z.string().nullable().optional(),
+              endDate: z.string().nullable().optional(),
+              isCritical: z.boolean().optional(),
+              totalFloat: z.number().nullable().optional(),
               isActive: z.boolean().optional(),
-              pctComplete: ControlsFigureSchema.nullable(),
-              progressSource: z.string().nullable(),
+              pctComplete: ControlsFigureSchema.nullable().optional(),
+              progressSource: z.string().nullable().optional(),
               href: z.string().nullable().optional(),
+              schedule: ControlsSectionDeniedSchema.optional(),
             })
             .nullable(),
         })

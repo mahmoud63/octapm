@@ -77,6 +77,15 @@ function RecordList({
   )
 }
 
+/** Part of a list the server left out, with its reason: "—", never "none". */
+function PartlyWithheld({ reason, testId }: { reason: string; testId: string }) {
+  return (
+    <p className='text-sm text-muted-foreground' data-testid={testId} data-withheld-module='boq'>
+      — {reason}
+    </p>
+  )
+}
+
 function ActivityDetailBody({
   detail,
   currency,
@@ -282,12 +291,22 @@ function ActivityDetailBody({
                     )
                   })}
                 </ul>
-              ) : (
+              ) : sections.changes.changeOrders.boqWithheld ? null : (
                 <Empty>No change order touches this activity.</Empty>
               )
             ) : (
               <Withheld section={sections.changes.changeOrders as ControlsSectionDenied} />
             )}
+            {sections.changes.changeOrders &&
+              'items' in sections.changes.changeOrders &&
+              sections.changes.changeOrders.boqWithheld && (
+                // Orders reached through a BOQ allocation are left out for a
+                // member who may not read the BOQ: say so, never "none".
+                <PartlyWithheld
+                  reason={sections.changes.changeOrders.boqWithheld.reason}
+                  testId='activity-detail-change-orders-boq-withheld'
+                />
+              )}
             {sections.changes.changeEvents && 'items' in sections.changes.changeEvents ? (
               sections.changes.changeEvents.items.length ? (
                 <ul className='space-y-1 text-sm'>
@@ -464,6 +483,9 @@ function ActivityDetailBody({
           <>
             {sections.history.note && <p className='text-xs text-muted-foreground'>{sections.history.note}</p>}
             <HistoryList events={sections.history.events} />
+            {sections.history.boqWithheld && (
+              <PartlyWithheld reason={sections.history.boqWithheld.reason} testId='activity-detail-history-boq-withheld' />
+            )}
           </>
         ) : (
           <Withheld section={sections.history} />
