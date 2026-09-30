@@ -1973,6 +1973,12 @@ model CostRecord {
   actual            Decimal   @default(0) @db.Decimal(18, 2)
   actualThroughDate DateTime?
   forecast          Decimal   @default(0) @db.Decimal(18, 2)
+  // Where the stored forecast came from (owner decision R5-2, 2026-09-30):
+  // entered (a caller supplied it; never overwritten by an unrelated edit) or
+  // default (the initial default max(budget, actual), written only because no
+  // forecast was supplied). The server alone sets it. NULL predates this
+  // column: the source was not recorded, so the row is treated as entered.
+  forecastSource    String?
   updatedAt         DateTime  @default(now()) @updatedAt
 
   activity Activity @relation(fields: [activityId], references: [id])
