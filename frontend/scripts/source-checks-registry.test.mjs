@@ -287,4 +287,38 @@ assert.deepEqual(
   ['../src/x.ts']
 )
 
+// ...and reads an import however it is spaced: no import slips past because a
+// space is missing, and nothing that is not an import is read as one. The
+// forms live in a fixture file because this test's own source is read too.
+const forms = JSON.parse(
+  readFileSync(
+    new URL('./source-checks-import-forms.json', import.meta.url),
+    'utf8'
+  )
+)
+assert.ok(forms.imports.length >= 20 && forms.notImports.length >= 5)
+for (const [source, expected] of forms.imports)
+  assert.deepEqual(
+    importSpecifiers(source),
+    expected,
+    `imports read from ${JSON.stringify(source)}`
+  )
+for (const source of forms.notImports)
+  assert.deepEqual(
+    importSpecifiers(source),
+    [],
+    `no import in ${JSON.stringify(source)}`
+  )
+// Every form of a forbidden import is a registry error for a static check.
+for (const [source, expected] of forms.imports)
+  for (const spec of expected.filter((s) => !s.startsWith('.')))
+    assert.ok(
+      run({
+        readCheck: (name) => (name === 'b.test.mjs' ? source : clean),
+      }).includes(
+        `static b.test.mjs imports "${spec}"; a static check may import only node:assert, node:assert/strict, node:fs, node:fs/promises, node:path, node:url and repository files; register it as runtime if it needs more`
+      ),
+      `a static check containing ${JSON.stringify(source)} is refused`
+    )
+
 console.log('source-checks-registry: ok')

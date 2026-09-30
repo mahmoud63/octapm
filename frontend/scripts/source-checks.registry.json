@@ -1,5 +1,5 @@
 {
-  "$comment": "R5-6: every frontend/scripts/*.test.mjs is classified here. STATIC = reads repository files only (no network, database, browser, dev server, child process, file write or fixture reset); run-source-checks.mjs runs each one in its own node process under the Node permission model (read-only access to the repository, no child processes, no writes) with network APIs disabled. RUNTIME = anything else; each entry names what it needs, why, and either the isolated CI job that provides it or why it is excluded from CI. scripts/source-checks-registry.test.mjs fails when a file or a test:* script is not accounted for.",
+  "$comment": "R5-6: every frontend/scripts/*.test.mjs is classified here. STATIC = reads repository files only (no network, database, browser, dev server, child process, file write or fixture reset); run-source-checks.mjs runs each one in its own node process under the Node permission model (read-only access to the repository, no child processes, no writes) with the network closed (TCP, UDP, DNS and fetch; scripts/source-checks-static-guard.mjs). RUNTIME = anything else; each entry names what it needs, why, and either the job of .github/workflows/quality-gates.yml that runs it or \"excluded: <why>\"; the runner names every one it leaves out. scripts/source-checks-registry.test.mjs fails when a file or a test:* script is not accounted for.",
   "static": [
     "assistant-ui.test.mjs",
     "attachments-photos-ui.test.mjs",
@@ -73,6 +73,7 @@
     "setup-stages.test.mjs",
     "site-reporting-mobile-ui.test.mjs",
     "source-checks-registry.test.mjs",
+    "source-checks-static-guard.test.mjs",
     "specifications-ui.test.mjs",
     "submittals-ui.test.mjs",
     "subscription-gate-ui.test.mjs",

@@ -108,17 +108,41 @@ export const describeRuntimeCheck = ({ file, needs, ci }) => {
 }
 
 // The static import specifiers of a module's source (`import ... from 'x'`,
-// `import 'x'`, `export ... from 'x'`) and any `require('x')`.
+// `import 'x'`, `export ... from 'x'`) and any `require('x')`, however the
+// statement is spaced: `import{a}from'x'` and `import/**/a/**/from/**/'x'` are
+// the same import as the formatted one. A statement starts a line or follows
+// `;` or `}`. This is the readable first line of "a static check imports only
+// these"; a dynamic import() is not read here (checks quote them in strings),
+// and whatever a check loads, the permission model and the static guard decide
+// at run time what it can do.
+// Whitespace or one whole comment (never part of one).
+const GAP = String.raw`(?:\s|/\*(?:(?!\*/)[\s\S])*\*/|//[^\n]*(?=\n|$))`
+const NAME = String.raw`[\w$]+`
+const STRING = String.raw`(?:'[^'\n]*'|"[^"\n]*")`
+const BRACES = String.raw`\{(?:[^}'"]|${STRING})*\}`
+const START = String.raw`(?:^|[;}])${GAP}*`
+const SPEC = String.raw`(?:'([^'\n]+)'|"([^"\n]+)")`
+const BINDINGS = String.raw`(?:${NAME}${GAP}*(?:,${GAP}*)?)?(?:\*${GAP}*as${GAP}+${NAME}|${BRACES})?`
+const IMPORT_PATTERNS = [
+  // import a from 'x', import{a}from'x', import*as a from'x', import a,{b}from'x'
+  new RegExp(
+    `${START}import(?:${GAP}+|(?=[{*]))${BINDINGS}${GAP}*from${GAP}*${SPEC}`,
+    'gm'
+  ),
+  // import 'x', import'x'
+  new RegExp(`${START}import${GAP}*${SPEC}`, 'gm'),
+  // export * from 'x', export*as a from'x', export{a}from'x'
+  new RegExp(
+    `${START}export${GAP}*(?:\\*(?:${GAP}*as${GAP}+(?:${NAME}|${STRING}))?|${BRACES})${GAP}*from${GAP}*${SPEC}`,
+    'gm'
+  ),
+  new RegExp(String.raw`\brequire\s*\(\s*${SPEC}\s*\)`, 'g'),
+]
 export const importSpecifiers = (source) => {
   const specs = []
-  const patterns = [
-    /^\s*import\s+[^'"]*?\sfrom\s+['"]([^'"]+)['"]/gms,
-    /^\s*import\s+['"]([^'"]+)['"]/gm,
-    /^\s*export\s+[^'"]*?\sfrom\s+['"]([^'"]+)['"]/gms,
-    /\brequire\(\s*['"]([^'"]+)['"]\s*\)/g,
-  ]
-  for (const pattern of patterns)
-    for (const match of source.matchAll(pattern)) specs.push(match[1])
+  for (const pattern of IMPORT_PATTERNS)
+    for (const match of source.matchAll(pattern))
+      specs.push(match[1] ?? match[2])
   return specs
 }
 

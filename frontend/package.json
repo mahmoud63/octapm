@@ -89,6 +89,7 @@
     "test:workflow-engine": "node scripts/workflow-engine-ui.test.mjs",
     "test:setup-stages": "node scripts/setup-stages.test.mjs",
     "test:source-registry": "node scripts/source-checks-registry.test.mjs",
+    "test:source-guard": "node scripts/source-checks-static-guard.test.mjs",
     "test:source": "node scripts/run-source-checks.mjs",
     "test:e2e": "playwright test",
     "lint": "eslint .",
