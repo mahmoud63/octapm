@@ -24,8 +24,9 @@ its slip, its risk level and the critical driver). It feeds nothing else.
 
 ## 2. Method (read only)
 
-- Script: `C:\Temp\r5\census\forecast-change-impacts-census.js` (scratch,
-  not in the repository). It loads the backend in-process and builds the
+- Script: `backend/scripts/project-controls/forecast-change-impacts-census.js`
+  (moved into the repository in Round 6; the first run used the same method
+  from a scratch copy — see §6 for the command and the re-run). It loads the backend in-process and builds the
   forecast twice per project at one fixed instant (`asOf`
   2026-09-30T07:37:42.165Z):
   - **before** — `forecast.service.js` as of `06308dc` (the commit before
@@ -51,7 +52,15 @@ its slip, its risk level and the critical driver). It feeds nothing else.
 |---|---|---|---|---|---|---|
 | `0ce999f2` OCTA PHASE21 GREENFIELD (certified) | 7 / 63 | 6 → 63 | 2027-04-08 → **2027-05-23** | 0 → **45** | medium → **high** | yes |
 | `4735659e` Marina Bay Residences (showcase) | 1 / 5 | 0 → 5 | 2027-08-05 → 2027-08-05 | 0 → 0 | medium → medium | no |
-| `225d9477` Riverside Tower (E2E) | 2 / 6 | 0 → 6 | 2030-02-15 → 2030-02-15 | 1142 → 1142 | high → high | no |
+| `225d9477` Riverside Tower (E2E) — `655bb5ad` at the Round-6 re-run (see the note below) | 2 / 6 | 0 → 6 | 2030-02-15 → 2030-02-15 | 1142 → 1142 | high → high | no |
+
+**The E2E project's id.** The E2E organisation is deleted and seeded again by its
+specs, so "Riverside Tower (E2E)" has a new id after every reset: it was
+`225d9477` at the Round-5 run and is `655bb5ad` at the Round-6 re-run (§6), with
+the same figures. Wherever this document says `225d9477`, the command of §6
+prints the row under the id the project has on the day — find it by its name
+and organisation, not by its id. The certified project (`0ce999f2`), the
+showcase (`4735659e`) and the archived fixture (`95c188f3`) keep their ids.
 
 - `0ce999f2`: six approved orders (VO-10, 12, 14, 16, 18, 20) each give
   "Blockwork walls" 10 days, and VO-22 gives "Foundation concrete" 3. Before,
@@ -64,7 +73,7 @@ its slip, its risk level and the critical driver). It feeds nothing else.
 - `4735659e`: the 5-day approved impact lands on an activity that does not
   drive the finish (the schedule's "low" risk count goes from 1 to 2); the
   finish does not move.
-- `225d9477`: the 6-day impact lands on an activity of a project already
+- `225d9477` (`655bb5ad` at the Round-6 re-run): the 6-day impact lands on an activity of a project already
   1,142 days late, driven by "Unitised facade installation"; the finish does
   not move. Its `cost.topRisks[2].impactDays` reads 0 → 6 (see 3.3).
 
@@ -77,9 +86,10 @@ its slip, its risk level and the critical driver). It feeds nothing else.
 | **move** (projected finish, slip or level) | **71** |
 | — 70 "GREENFIELD REGRESSION …" certification copies | +3 days each, low → medium |
 | — `0ce999f2` | +45 days, medium → high |
-| with links that do not move | 4 (`4735659e`, `5c492505` Marina Bay first build, `225d9477`, `95c188f3` archived Riverside fixture) |
+| with links that do not move | 4 (`4735659e`, `5c492505` Marina Bay first build, `225d9477` — `655bb5ad` at the Round-6 re-run —, `95c188f3` archived Riverside fixture) |
 | without such links | 356 — every summary identical before and after |
-| forecast unavailable before or after | 0 |
+| no schedule (forecast not available, the same reason before and after) | 111 |
+| forecast errored before or after | 0 |
 
 No project moves without an approved change-order link. No E2E-org project
 moves (the E2E specs read projected dates from the project they create).
@@ -94,7 +104,8 @@ moves (the E2E specs read projected dates from the project they create).
   `earnedValueCutoff`) are identical in all 431.
 - The cost block differs in two projects only in `cost.topRisks[].impactDays`
   — a schedule field of the activity rows the cost view lists, not money:
-  `95c188f3` 0 → 564, `225d9477` 0 → 6.
+  `95c188f3` 0 → 564, `225d9477` 0 → 6 (the Round-6 re-run prints this project
+  as `655bb5ad`: "cost block not identical | 2 (95c188f3, 655bb5ad)").
 
 ## 4. The forecast is not an input to any financial record
 
@@ -117,6 +128,304 @@ So item 4 moves only the projections a reader sees on the Forecast panel and
 in its explanation (projected finish, slip, risk levels, critical driver,
 each activity's `impactDays`). No stored row, no snapshot, no certified
 figure and no money figure moves, and existing rows are not rewritten.
+
+## 5. Trace of the certified project's 45 days (owner decision R5-1)
+
+The census shows what the calculation does; it does not show that the
+certified project `0ce999f2` is 45 days late. This section is the narrow
+trace R5-1 asks for. Every figure below was read on 2026-09-30 through one
+database connection whose session was `SET SESSION CHARACTERISTICS AS
+TRANSACTION READ ONLY` (`SHOW transaction_read_only` = `on` before and after
+every query); no endpoint was called and nothing was written. The forecast
+itself was built in-process by `forecast.service.buildForecast` at
+`asOf` 2026-09-30T09:01:37Z on the same read-only connection and gave the
+census figures: planned finish 2027-04-08, projected finish 2027-05-23, slip
+45, basis `activities`, critical driver "Blockwork walls" (60), SPI and CPI
+null (so no EV-based finish).
+
+### 5.1 The seven approved change-order links
+
+| order | id | description (after the harness tag `P21-20260910093852`) | value | created | approved | activity | approvedScheduleImpactDays |
+|---|---|---|---|---|---|---|---|
+| VO-10 | `2ac52caf` | Client instruction: upgrade blockwork to fair-faced, grid A-F | 0.00 | 2026-09-10 16:55:48.246Z | 16:55:49.668Z | Blockwork walls (A310) | 10 |
+| VO-12 | `a6bb2d69` | same text | 0.00 | 16:56:07.013Z | 16:56:08.207Z | A310 | 10 |
+| VO-14 | `6b571a8b` | same text | 0.00 | 16:56:17.098Z | 16:56:18.091Z | A310 | 10 |
+| VO-16 | `1ba56d05` | same text | 0.00 | 16:56:48.920Z | 16:56:50.382Z | A310 | 10 |
+| VO-18 | `536ee046` | same text | 125,000.00 | 16:57:49.978Z | 16:57:51.230Z | A310 | 10 |
+| VO-20 | `84ec8b03` | same text | 125,000.00 | 16:58:36.943Z | 16:58:38.066Z | A310 | 10 |
+| VO-22 | `939d5357` | From RFI-01: additional 150mm excavation to competent stratum at grid A-D | 4,500.00 | 2026-09-12 17:59:08.531Z | 17:59:10.516Z | Foundation concrete (A130) | 3 |
+
+- All seven are `approved`, none archived. VO-10…VO-20 were created by the
+  QS demo user (`qs@octapm.demo`) and approved by the PM demo user
+  (`pm@octapm.demo`); each has the same five audit events — `created`,
+  `updated`, `updated`, `status_changed` draft → pending, `approved` — inside
+  about 1.5 seconds, which is a script, not a person.
+- The six Blockwork orders share one description, one
+  `scheduleImpactSummary` ("Ten working days on the blockwork chain (A310).
+  The completion milestone moves ten days; the MEP spur absorbs its share in
+  float."), one link note ("Blockwork upgraded to fair-faced") and one
+  relation (`impacted`, 10 days, critical-path impact 10).
+- They are what the Phase-21 harness stage 8 writes:
+  `backend/scripts/phase21/stage8-change-directcost.js:74` (the
+  description), `:108` (the schedule summary), `:117` (the link note) and
+  `:126` (the attached "Client instruction 07": "Programme effect: 10
+  working days"). The stage ran eleven times on 2026-09-10 between 16:52:49
+  and 17:01:01 — each run first raises the retaining-wall draft on A130
+  (VO-01, 03, …, 21), then the blockwork order (VO-02, 04, …, 20). Runs 1–4
+  left their blockwork order in draft, runs 5–10 approved theirs (VO-10…20;
+  the first four with value 0.00, the last two with 125,000.00 as the
+  script evolved), and run 11 created only the draft VO-21. The committed
+  script (`e901e7a`, 2026-09-10 17:01:32Z, three minutes after VO-20's
+  approval) carries a re-run guard at `:76–:85`: "approving a second
+  identical variation would move the budget again", reusing an already
+  approved order with the same description.
+- Across every durable project, this is the only group of approved,
+  unarchived orders on one project with an identical description (a read-only
+  `GROUP BY projectId, description HAVING count(*) > 1`).
+
+**Finding.** The six ten-day Blockwork impacts are one client instruction
+recorded six times by the certification harness while stage 8 was being
+written, not six distinct approved changes. For this data "additive" is not
+right: the evidenced delay on Blockwork is one change of 10 working days,
+not 60 days. (VO-18 and VO-20 also each posted a 125,000.00 `change_order`
+budget-line change, so the same instruction stands twice in the approved
+changes — and the certification's own expected figures count both: the
+Phase-21 snapshot expects approved changes of 250,000 + 4,500, and it
+reconciles today, 36 of 36 checks, delta 0.00. Nothing here changes that; it
+is the owner's to decide, see 5.6.)
+
+VO-22 is distinct: it came from RFI-001 ("Founding level at grid A-D
+against borehole BH-3", now `closed`, `changeOrderId` = VO-22). RFI-001 has
+two workflow links of 3 days on Foundation concrete (`impacted` and
+`schedule_impact`); both are dropped in favour of VO-22's approved 3 days
+(`forecast.service.js:126–:131`), so A130 counts 3, not 9.
+
+### 5.2 Blockwork walls and the arithmetic of 45
+
+| | value |
+|---|---|
+| activity | A310 Blockwork walls, `02c09d81`, calendar `six_day` |
+| planned | 2027-03-13 → 2027-03-24 (duration 9 working days; ES 59 / EF 68, LS 59 / LF 68 in working days from 2027-01-04) |
+| progress | 0 % — no `ActivityProgress` row |
+| projected finish (engine) | 2027-03-24, basis `planned` (not started, today before its start: no velocity, pace or late start applies) |
+| total float / critical | 0 / true |
+| predecessor | A230 Columns level 2, FS 0 |
+| successor chain | A310 → A320 Internal plastering (7 wd, 03-24 → 04-01) → A330 Painting and decoration (6 wd, 04-01 → 04-08) → M900 Practical completion (2027-04-08), all FS 0, all TF 0 |
+| project planned finish (forecast) | 2027-04-08 — the latest activity finish (M900). `Project.endDate` and the prime contract's `completionDate` are 2027-12-17; the forecast does not read either |
+
+The engine's steps (`forecast.service.js`):
+
+1. `impactDays` for A310 = Σ impacts = 6 × 10 = **60** (`:291–:292`).
+2. `slipDays` for A310 = projected − planned = 0; A310 is a driver because
+   it is critical and `totalSlip` 60 > float 0 (`:295–:296`, `:418`).
+3. activity-based finish = the latest, over the drivers, of
+   `projectedFinish + impactDays × DAY` (`:419`): A310 2027-03-24 + 60 × 24 h
+   = **2027-05-23**; A130 (50 %, velocity basis, projected 2026-10-02) + 3 =
+   2026-10-05; every other driver + 0.
+4. SPI is null, so there is no EV-based finish; projected finish =
+   2027-05-23 (`:428`).
+5. project slip = 2027-05-23 − 2027-04-08 = **45** days (`:429`).
+
+So 45 = 60 − 15: the 15 calendar days between Blockwork's own planned
+finish (2027-03-24) and the project's planned finish (2027-04-08). The
+engine does not move successors — A320, A330 and M900 keep their planned
+dates in the forecast — it compares the delayed activity's own finish with
+the project finish, so the 13 working days (15 calendar days) of
+zero-float work after Blockwork are treated as if they could absorb the
+delay. They cannot: their total float is 0.
+
+### 5.3 Are the impacts already in the current schedule?
+
+No, on every marker the data has:
+
+- The project has **no `ScheduleRevision` row** — no import, revision,
+  activation or baseline after the change orders were approved.
+- Every activity was last written at 2026-09-10 09:38:58Z, one second after
+  it was created and seven hours before the first approval, except A100 Site clearance
+  (2026-09-15 03:23:59Z), which starts the project and is not downstream of
+  Blockwork. Blockwork's dates are the dates it was created with.
+- No `AuditEvent` records an activity or schedule change on the project.
+- The change-order links carry no incorporation evidence: `impactedStart`,
+  `impactedFinish`, `baselineStart`, `baselineFinish` and `impactBasis` are
+  null, and `cpmSnapshotJson` holds only the figures typed on the link. The
+  schema has no "applied to schedule" marker on `ChangeOrder` or
+  `ChangeOrderActivityLink`. There is no EOT claim on the project.
+
+So nothing is double counted in this data. But the engine does not check:
+if a later revision or re-import moved Blockwork's (or the project's) dates
+to include an approved delay, the forecast would add the same approved
+days again on top of the moved dates.
+
+### 5.4 Overlap
+
+The engine sums every counted impact on an activity (`:292`). Its only
+de-duplication is one count per (activity, order) — the largest of an
+order's relation rows — and dropping a workflow link whose record became
+that order (`recordedImpacts`, `:115–:136`). It has no concurrency or
+overlap handling: two delays covering the same days on one activity count
+twice. The six Blockwork links carry no delay window (the dates above are
+null; the link has no `delayStart`/`delayEnd`), so the data cannot place
+them in time; by content (5.1) they are the same event, i.e. they overlap
+completely.
+
+### 5.5 Calendar and day convention
+
+- **Entry.** The web form asks for "Schedule Impact (days)"
+  (`frontend/src/features/commercial/components/change-order-form.tsx:258`)
+  and per activity "Days" (`:404`); the API accepts any integer
+  (`backend/src/routes/change-orders.js:63–:67`, `:170–:174`) and the
+  OpenAPI `ActivityLinkInput` says only `integer`
+  (`backend/src/openapi/spec.js:6215–:6216`). No surface says whether the
+  days are working or calendar days. On approval the typed
+  `scheduleImpactDays` is copied unchanged into `approvedScheduleImpactDays`
+  (`backend/src/services/change-order.service.js:646`, `:674`). The
+  certified data's own wording is working days ("Ten working days",
+  "Programme effect: 10 working days").
+- **Engine.** The forecast adds `impactDays × DAY`, `DAY` = 86,400,000 ms
+  (`forecast.service.js:53`, `:419`): calendar days, whatever the
+  activity's calendar.
+- **Schedule.** The project calendar and every activity's calendar is
+  `six_day`; durations, float and the CPM engine are in working days
+  (`backend/src/services/cpm.service.js:20–:23`, `resolveCalendar` `:78`,
+  `workingDayToDate` `:107`), and the importers convert P6 hours ÷ 8 to
+  working days (`backend/src/parsers/xer-parser.js:43`,
+  `p6xml-parser.js:51`, `msp-parser.js:39`).
+- **Mismatch.** A working-day impact is added as the same number of
+  calendar days. On this six-day calendar 10 working days after a Thursday
+  is 12 calendar days, so each such impact is understated by about one day
+  in six (two in seven on a five-day calendar).
+
+### 5.6 Conclusion — the calculation cannot support "45 days late"
+
+The 45 days are a faithful result of the engine's conventions applied to
+this data, but they are not a validated projection. Three limitations
+combine, and they point in opposite directions:
+
+1. **Duplicated orders (data).** Five of the six Blockwork impacts are
+   harness re-creations of one instruction; the evidence supports one
+   10-working-day delay on Blockwork plus VO-22's 3 working days on
+   Foundation concrete.
+2. **No successor propagation (engine).** An impact moves only its own
+   activity's projected finish; the project slip is that finish minus the
+   project finish. Downstream zero-float work is ignored: here it hides 15
+   calendar days. With the one real Blockwork change the engine would show
+   **0** days project slip (2027-03-24 + 10 = 2027-04-03, before
+   2027-04-08) although the change's own summary says completion moves ten
+   days.
+3. **Calendar days (engine).** Impacts entered as working days are added
+   as calendar days.
+
+For comparison only (not computed by the product): propagated through the
+existing CPM logic on the six-day calendar, 10 working days on A310 and 3
+on A130 (the same zero-float chain A130 → A200 → A210 → A220 → A230 → A310
+→ A320 → A330 → M900) move Practical completion 13 working days, from
+2027-04-08 to 2027-04-23 (15 calendar days); counting all six Blockwork
+orders it would be 63 working days, to 2027-06-21. Neither is 45.
+
+**Proposed smallest corrections — proposals awaiting the owner; none is
+implemented, and the calculation is unchanged:**
+
+- **P1 — the duplicated orders (data, owner's decision).** Decide whether
+  VO-12, VO-14, VO-16, VO-18 and VO-20 are duplicates of VO-10. The product
+  refuses to archive an approved order ("Approved change orders cannot be
+  archived after contract budget revision sync"), and VO-18/VO-20 carry
+  money that the certified reconciliation expects (250,000 of approved
+  changes), so any correction is a financial decision, would move certified
+  figures, and needs an explicit, owner-approved procedure. In the engine, do not dedupe by description
+  automatically (two genuine identical instructions can exist); instead add
+  a data-quality note when one activity carries approved orders with the
+  same description and impact.
+- **P2 — working days.** Convert each impact through the activity's
+  calendar with the existing `cpm.service` `dateToWorkingDay` /
+  `workingDayToDate` instead of `× DAY`, and say "working days" on the entry
+  field and in the API description.
+- **P3 — successor propagation.** Take the project's projected finish from
+  the existing CPM engine (`cpm.service calculateCpm`) run in memory on the
+  activities with each impacted activity's remaining duration extended by
+  its impact — no new engine, nothing written — rather than comparing one
+  activity's finish with the project finish.
+- **P4 — incorporation.** There is no marker today; until one exists the
+  forecast should say in its data-quality notes that approved impacts are
+  assumed not yet in the schedule dates. (An option for the owner: ignore
+  an impact whose order was approved before the active schedule revision
+  was activated.)
+
+What R5-1 requires holds regardless: approved impacts stay in the forecast;
+the forecast writes nothing (no activity, baseline, contract completion
+date, order or amount — see §4 and the regression case below); and every
+surface calls it a projection, never an extension of time.
+
+The behaviour described here — additive, calendar days, no successor
+propagation, a pending or archived order not counted, an RFI's days not
+counted twice — is pinned by
+`backend/src/services/__live__/r5-1-forecast-change-impacts.live.test.js`,
+each convention marked there as a documented limitation.
+
+**The 45 days are a reading at an instant.** A forecast is built as of an
+instant; `GET /forecast` always reads as of now. Every figure in this
+section was read while Blockwork (and, in the regression case, every
+activity) was still ahead of its planned start, so its projected finish was
+its planned finish. Once an unstarted activity's planned start passes with
+no approved progress, the engine's late-start rule moves it by the time lost
+(and, past its planned finish, the overdue rule), whatever the change
+orders say. On the regression case's geometry the project slip is still 45
+on 2027-01-06 (Foundation concrete has moved to 2027-02-10 by late start;
+Blockwork still drives), but by 2027-03-20 it is more than 45 and
+Foundation concrete is the driver. The regression case therefore takes its
+figures from `forecast.service.buildForecast` at a fixed instant
+(2026-09-30T12:00Z) and asserts those two later readings too; it keeps the
+route for what no instant changes (shape, recorded impact days, planned
+dates, wording, and that nothing is written). The route has no `asOf`
+parameter and none was added.
+
+## 6. How to reproduce
+
+From `backend`, under the cross-wave database lock (it builds two forecasts
+for each of about 430 projects):
+
+```
+node C:/Temp/octapm-dblock.js acquire "<track>:census"
+node scripts/project-controls/forecast-change-impacts-census.js \
+  --as-of 2026-09-30T07:37:42.165Z --before-ref 06308dc \
+  --out <scratch>/forecast-census.json \
+  --project 0ce999f2-b175-432b-8551-20182b4fc990
+node C:/Temp/octapm-dblock.js release "<track>:census"
+```
+
+- `--as-of` fixes the instant (default now); `--before-ref` compiles that
+  ref's `forecast.service.js` in memory from `git show` (no file written) and
+  compares it with this checkout's; without it the script reports the current
+  forecast only. `--out` writes the per-project result; `--project` also
+  prints one project's approved change-order links and forecast (the trace
+  of §5).
+- It is read-only by construction: one connection, `SET SESSION
+  CHARACTERISTICS AS TRANSACTION READ ONLY` before anything runs, and
+  `SHOW transaction_read_only` must read `on` before the run, before every
+  project and after the run, or it stops with exit 2 having read nothing
+  further. (Checked by removing the `SET SESSION` line: exit 2, "the session
+  is not read-only before the run".) Organisations named `LiveTest <uuid>`
+  are excluded. It prints the §3.2 table and the appendix table.
+
+**Re-run, Round 6 (2026-09-30, this repository's script, `--as-of`
+2026-09-30T07:37:42.165Z, `--before-ref` 06308dc, after = `fu/r5-forecast-trace`,
+session read-only `on` throughout, exit 0).** The figures of §3 are
+confirmed, with two corrections:
+
+- 431 durable projects, 75 with approved impacts, 71 moving (the 70
+  certification copies +3 days low → medium, `0ce999f2` +45 medium → high),
+  4 with links that do not move, 0 moving without a link, 0 money figures
+  changed, 0 EV differences, 2 cost blocks differing only in
+  `topRisks[].impactDays`. The 427 projects present in both runs give
+  identical summaries, money and EV comparisons.
+- **Correction 1.** The E2E organisation is rebuilt by its specs; its four
+  projects now have new ids. Riverside Tower (E2E) is `655bb5ad`, not
+  `225d9477` (same figures: 2 links / 6 days, slip 1142, does not move); the
+  three "Zz Cert Isolation" projects were replaced likewise.
+- **Correction 2.** "Forecast unavailable before or after: 0" meant "no
+  forecast errored". 111 projects have no schedule, so their forecast is not
+  available — identically before and after (§3.2 now says so).
+- The script also counts approved, unarchived orders on one project sharing
+  one description: exactly one group, `0ce999f2` × 6 (VO-10…VO-20, §5.1).
 
 ## Appendix — every project with an approved CO impact
 
@@ -195,5 +504,5 @@ figure and no money figure moves, and existing rows are not rewritten.
 | `0ce999f2` | OCTA PHASE21 GREENFIELD 20260910093852 | 7 / 63 | 6 → 63 | 2027-04-08 → 2027-05-23 | 0 → 45 | medium → high | yes |
 | `4735659e` | Marina Bay Residences | 1 / 5 | 0 → 5 | 2027-08-05 → 2027-08-05 | 0 → 0 | medium → medium | no |
 | `5c492505` | Marina Bay Residences (first build, superseded) | 1 / 5 | 0 → 5 | 2027-08-05 → 2027-08-05 | 0 → 0 | medium → medium | no |
-| `225d9477` | Riverside Tower | 2 / 6 | 0 → 6 | 2030-02-15 → 2030-02-15 | 1142 → 1142 | high → high | no |
+| `225d9477` (Round 5); `655bb5ad` (Round-6 re-run, after the E2E organisation was rebuilt) | Riverside Tower | 2 / 6 | 0 → 6 | 2030-02-15 → 2030-02-15 | 1142 → 1142 | high → high | no |
 | `95c188f3` | Riverside Tower (original test fixture, archived Phase 22B) | 94 / 564 | 0 → 564 | 2030-02-15 → 2030-02-15 | 1176 → 1176 | high → high | no |

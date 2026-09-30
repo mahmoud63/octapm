@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { evCutoffNote, formatEvCutoff } from '@/lib/ev-cutoff'
+import { formatShortDate } from '@/lib/dates'
 import { capitalise, eacIsBudgetFallback } from '@/lib/eac-basis'
 import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
@@ -37,8 +38,17 @@ const money = (value: number | null | undefined) =>
   value === null || value === undefined
     ? '—'
     : Number(value).toLocaleString('en-US', { maximumFractionDigits: 0 })
-const formatDate = (value: string | null | undefined) =>
+// The forecast's planned and projected finishes are calendar dates
+// (YYYY-MM-DD): shown as that date in every timezone, never the day before
+// for a reader west of UTC. Only `asOf` is an instant, read in local time.
+const formatDay = (value: string | null | undefined) =>
+  value ? formatShortDate(value) : '—'
+const formatInstantDay = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleDateString() : '—'
+// What the two figures of the "Projected slip" column are, and how they
+// reach the main driver's days and the project's finish. Wording only.
+const RECORDED_IMPACT_LEGEND =
+  'Projected slip is the activity’s own projected finish against its planned finish. “+N d recorded impact” is the days recorded against the activity by approved change orders, RFIs, submittals, risks and weather: they are not in its projected date, and are added to it when the project’s finish is projected. The main driver’s days are its projected slip plus its recorded impact.'
 const levelVariant = (level: ForecastLevel) =>
   level === 'high'
     ? 'destructive'
@@ -168,11 +178,17 @@ function ActivityRow({
         <td className='px-2 py-1.5 tabular-nums'>
           {activity.velocity === null ? '—' : `${activity.velocity}%/d`}
         </td>
-        <td className='px-2 py-1.5 tabular-nums'>
-          {formatDate(activity.plannedFinish)}
+        <td
+          className='px-2 py-1.5 tabular-nums'
+          data-testid='uat-forecast-activity-planned'
+        >
+          {formatDay(activity.plannedFinish)}
         </td>
-        <td className='px-2 py-1.5 tabular-nums'>
-          {formatDate(activity.projectedFinish)}
+        <td
+          className='px-2 py-1.5 tabular-nums'
+          data-testid='uat-forecast-activity-projected'
+        >
+          {formatDay(activity.projectedFinish)}
         </td>
         <td
           className={cn(
@@ -181,7 +197,17 @@ function ActivityRow({
           )}
         >
           {activity.slipDays > 0 ? `+${activity.slipDays}d` : '—'}
-          {activity.impactDays > 0 ? ` (+${activity.impactDays})` : ''}
+          {activity.impactDays > 0 ? (
+            // Said in words: a bare "(+60)" beside a slip of nothing read as
+            // an unexplained second slip. The figure is the server's.
+            <span
+              className='block text-[11px] font-normal whitespace-nowrap text-muted-foreground'
+              title={RECORDED_IMPACT_LEGEND}
+              data-testid='uat-forecast-activity-impact'
+            >
+              +{activity.impactDays} d recorded impact
+            </span>
+          ) : null}
         </td>
         <td className='px-2 py-1.5 tabular-nums'>
           {activity.float === null ? '—' : `${activity.float}d`}
@@ -500,7 +526,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
           <h3 className='text-base font-semibold'>Forecast</h3>
           <p className='text-xs text-muted-foreground'>
             From approved progress, float, recorded impacts, open items and the
-            burn rate — as of {formatDate(forecast.asOf)}. Nothing here is a
+            burn rate — as of {formatInstantDay(forecast.asOf)}. Nothing here is a
             model guess; the explanation below is.
           </p>
           {forecast.earnedValueCutoff?.cutoffDate ? (
@@ -551,11 +577,11 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
       <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6'>
         <Kpi
           label='Projected finish'
-          value={formatDate(schedule.projectedFinish)}
+          value={formatDay(schedule.projectedFinish)}
           sub={
             schedule.slipDays > 0
-              ? `${schedule.slipDays} days after the plan (${formatDate(schedule.plannedFinish)})`
-              : `On the planned ${formatDate(schedule.plannedFinish)}`
+              ? `${schedule.slipDays} days after the plan (${formatDay(schedule.plannedFinish)})`
+              : `On the planned ${formatDay(schedule.plannedFinish)}`
           }
           level={summary?.scheduleLevel}
           testId='uat-forecast-finish'
@@ -565,7 +591,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
           value={schedule.criticalDriver?.name ?? '—'}
           sub={
             schedule.criticalDriver
-              ? `${schedule.criticalDriver.slipDays} days of slip`
+              ? `${schedule.criticalDriver.slipDays} days of projected slip`
               : 'No activity moves the finish'
           }
         />
@@ -653,7 +679,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
                   <th className='px-2 py-1.5 text-left font-medium'>
                     Projected
                   </th>
-                  <th className='px-2 py-1.5 text-left font-medium'>Slip</th>
+                  <th className='px-2 py-1.5 text-left font-medium'>Projected slip</th>
                   <th className='px-2 py-1.5 text-left font-medium'>Float</th>
                   <th className='px-2 py-1.5 text-left font-medium'>Risk</th>
                 </tr>
@@ -677,6 +703,12 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
             .map(([, label]) => label)
             .join(', ')}
           . Click a row for the reasons.
+        </p>
+        <p
+          className='text-[11px] text-muted-foreground'
+          data-testid='uat-forecast-slip-legend'
+        >
+          {RECORDED_IMPACT_LEGEND}
         </p>
       </section>
 

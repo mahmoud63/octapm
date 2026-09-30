@@ -142,7 +142,7 @@ export default function ProjectScreen() {
               <View style={styles.kpis}>
                 <KPI label="SPI" value={ratio(schedule?.spi)} tone={schedule?.spi != null && schedule.spi < 0.9 ? 'error' : 'default'} />
                 <KPI label="CPI" value={ratio(schedule?.cpi ?? null)} tone={schedule?.cpi != null && schedule.cpi < 0.9 ? 'error' : 'default'} />
-                <KPI label="Slip" value={num(schedule?.slipDays, ' d')} tone={(schedule?.slipDays ?? 0) > 0 ? 'warning' : 'default'} />
+                <KPI label="Projected slip" value={num(schedule?.slipDays, ' d')} tone={(schedule?.slipDays ?? 0) > 0 ? 'warning' : 'default'} />
               </View>
               <View style={styles.kpis}>
                 <KPI label="Budget" value={money(cost?.budget ?? null, currency)} />
@@ -157,7 +157,7 @@ export default function ProjectScreen() {
               ))}
               {schedule?.criticalDriver ? (
                 <Text variant="caption" tone="muted" testID="project-critical-driver">
-                  Longest slip: {schedule.criticalDriver.name}
+                  Longest projected slip: {schedule.criticalDriver.name}
                   {schedule.criticalDriver.slipDays != null ? ` · ${schedule.criticalDriver.slipDays} days` : ''}
                 </Text>
               ) : null}

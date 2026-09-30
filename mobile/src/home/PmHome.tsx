@@ -78,7 +78,7 @@ export function PmHome({ projectId, currency, actions }: { projectId: string; cu
                   qualifier="of 100"
                   tone={healthTone(health.data.overallScore) === 'muted' ? 'default' : (healthTone(health.data.overallScore) as 'default' | 'error' | 'success' | 'warning')}
                 />
-                <KPI label="Slip" value={schedule?.slipDays != null ? `${schedule.slipDays} d` : '—'} tone={(schedule?.slipDays ?? 0) > 0 ? 'error' : 'default'} />
+                <KPI label="Projected slip" value={schedule?.slipDays != null ? `${schedule.slipDays} d` : '—'} tone={(schedule?.slipDays ?? 0) > 0 ? 'error' : 'default'} />
                 <KPI label="Overrun" value={cost?.overrunPct != null ? `${cost.overrunPct}%` : '—'} tone={(cost?.overrunPct ?? 0) > 0 ? 'error' : 'default'} />
               </View>
               {costReason ? <Text variant="caption" tone="muted" testID="pm-status-cost-withheld">— {costReason}</Text> : null}
@@ -139,7 +139,7 @@ export function PmHome({ projectId, currency, actions }: { projectId: string; cu
               ) : null}
               {schedule?.criticalDriver ? (
                 <Text testID="pm-critical-driver">
-                  Longest slip: <Text style={styles.strong}>{schedule.criticalDriver.name}</Text>
+                  Longest projected slip: <Text style={styles.strong}>{schedule.criticalDriver.name}</Text>
                   {schedule.criticalDriver.slipDays != null ? ` — ${schedule.criticalDriver.slipDays} days` : ''}
                 </Text>
               ) : null}
