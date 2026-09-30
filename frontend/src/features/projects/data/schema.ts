@@ -278,9 +278,12 @@ export type ProjectSetupHeadlineEntry = {
   withheld?: boolean
   reason?: string
   /**
-   * On the critical_unmapped entry while no schedule is active
-   * (summary.scheduleState none or staged): nothing has been assessed, so
-   * the value is "Waiting for active schedule" — no count, for anyone.
+   * On an entry whose figure has not been assessed — the engine's words,
+   * for anyone, never a count: critical_unmapped while no schedule is active
+   * (summary.scheduleState none or staged, "Waiting for active schedule") or
+   * while the active schedule has no critical path ("No critical path yet");
+   * mapping, unmapped_quantity and unmapped_boq while the project has no
+   * bill ("Waiting for the BOQ").
    */
   waiting?: boolean
 }
@@ -361,8 +364,10 @@ export type ProjectSetupReadiness = {
      * Critical activities with no approved allocation, assessed on the
      * active schedule only. While none is active (scheduleState none or
      * staged) there is no count for anyone: criticalUnmappedWaiting is true
-     * and criticalUnmappedReason says "Waiting for active schedule". With an
-     * active schedule the count is read off the mapping, so it is absent for
+     * and criticalUnmappedReason says "Waiting for active schedule"; on an
+     * active schedule with no activity marked critical the same, with the
+     * reason "No critical path yet". With an active schedule that has a
+     * critical path the count is read off the mapping, so it is absent for
      * a caller who may not read the BOQ — criticalUnmappedWithheld is true
      * then, and criticalUnmappedReason says why ("Mapping details
      * unavailable to you").
@@ -371,6 +376,13 @@ export type ProjectSetupReadiness = {
     criticalUnmappedWithheld?: boolean
     criticalUnmappedWaiting?: boolean
     criticalUnmappedReason?: string
+    /**
+     * While the project has no bill the mapping's share, quantity and value
+     * are figures of nothing: mappingWaiting is true and mappingReason says
+     * "Waiting for the BOQ" — for anyone, since the wait is not the bill's.
+     */
+    mappingWaiting?: boolean
+    mappingReason?: string
     /** From the ten original steps only (setup doc §3: unchanged). */
     nextAction: {
       stepKey: string

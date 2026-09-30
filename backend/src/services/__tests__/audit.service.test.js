@@ -249,6 +249,83 @@ describe('audit service', () => {
     });
   });
 
+  it("stores a Prisma Decimal handed to any summary as the amount, never as the Decimal's internals, for every caller", async () => {
+    const { Prisma } = require('@prisma/client');
+    const occurredAt = new Date('2026-09-30T09:00:00.000Z');
+    mockPrisma.auditEvent.create.mockImplementation(({ data }) => Promise.resolve({ id: 'audit-3', createdAt: occurredAt, ...data }));
+
+    const value = new Prisma.Decimal('4321.09');
+    // The internals a raw Decimal carries as own properties: walked field by
+    // field they were what the event stored until 2026-09-30.
+    expect(Object.keys(value).sort()).toEqual(['constructor', 'd', 'e', 's']);
+
+    const event = await auditService.recordEvent({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      entityType: auditService.ENTITY_TYPES.CHANGE_ORDER,
+      entityId: 'co-1',
+      action: auditService.ACTIONS.UPDATED,
+      occurredAt,
+      oldSummary: { ref: 'VO-01', value: new Prisma.Decimal('1500.00') },
+      newSummary: { ref: 'VO-01', value, links: [{ amount: new Prisma.Decimal('-0.50') }] },
+      summary: { transition: 'change_order.update', value, quantity: new Prisma.Decimal('12.345') },
+      metadata: { huge: new Prisma.Decimal('12345678901234567890.12') },
+    });
+
+    const { data } = mockPrisma.auditEvent.create.mock.calls[0][0];
+    expect(data.summaryJson).toEqual({ transition: 'change_order.update', value: 4321.09, quantity: 12.345 });
+    expect(data.oldSummaryJson).toEqual({ ref: 'VO-01', value: 1500 });
+    expect(data.newSummaryJson).toEqual({ ref: 'VO-01', value: 4321.09, links: [{ amount: -0.5 }] });
+    // An amount a double cannot carry exactly is stored as its exact text.
+    expect(data.metadataJson).toEqual({ huge: '12345678901234567890.12' });
+    expect(JSON.stringify(data)).not.toMatch(/"d":|"constructor"|function/);
+
+    const snapshot = mockPrisma.recordHistorySnapshot.create.mock.calls[0][0].data;
+    expect(snapshot.snapshotJson.value).toBe(4321.09);
+    expect(snapshot.previousSnapshotJson.value).toBe(1500);
+    expect(snapshot.changeSetJson.value).toEqual({ before: 1500, after: 4321.09 });
+    expect(event.summary.value).toBe(4321.09);
+  });
+
+  it('reads a row written with the old Decimal-internals shape as the amount, without rewriting the row', async () => {
+    const { Prisma } = require('@prisma/client');
+    const at = new Date('2026-09-10T10:00:00.000Z');
+    // Exactly what the old writer stored: the Decimal's own properties, the
+    // constructor function turned into its source text.
+    const stored = (text) => {
+      const decimal = new Prisma.Decimal(text);
+      return { d: [...decimal.d], e: decimal.e, s: decimal.s, constructor: String(decimal.constructor) };
+    };
+    const row = {
+      id: 'audit-old', orgId: 'org-1', projectId: 'project-1', entityType: 'change_order', entityId: 'co-1', action: 'approved', actorId: null, actorRole: null, occurredAt: at, createdAt: at,
+      oldSummaryJson: { ref: 'VO-01', value: stored('1500.00') },
+      newSummaryJson: { ref: 'VO-01', value: stored('4321.09'), costImpact: { d: [1234567, 8900000], e: 6, s: 1 }, links: [{ amount: stored('-0.005') }] },
+      summaryJson: { transition: 'change_order.approve', value: stored('98765432109876.54'), zero: stored('0'), truncated: { d: '[truncated]', e: 3, s: 1, constructor: 'function Decimal(v) {}' }, plain: { d: [1], e: 0 } },
+      attachmentsJson: [],
+      metadataJson: { big: stored('12345678901234567890.12') },
+    };
+    const before = JSON.stringify(row);
+    mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1' });
+    mockPrisma.auditEvent.findMany.mockResolvedValue([row]);
+
+    const { events } = await auditService.listEvents({ orgId: 'org-1', projectId: 'project-1', entityType: 'change_order', entityId: 'co-1', source: 'audit' });
+
+    expect(events).toHaveLength(1);
+    expect(events[0].oldSummary).toEqual({ ref: 'VO-01', value: 1500 });
+    expect(events[0].newSummary).toEqual({ ref: 'VO-01', value: 4321.09, costImpact: 1234567.89, links: [{ amount: -0.005 }] });
+    expect(events[0].summary.value).toBe(98765432109876.55);
+    expect(events[0].summary.zero).toBe(0);
+    expect(events[0].metadata.big).toBe(12345678901234567000);
+    // Digits lost at the depth limit cannot be recovered (no value, not the
+    // internals); a look-alike that is not the shape stays what it is.
+    expect(events[0].summary.truncated).toBeNull();
+    expect(events[0].summary.plain).toEqual({ d: [1], e: 0 });
+    expect(JSON.stringify(events[0]).includes('function')).toBe(false);
+    // The read decodes; nothing is written back.
+    expect(JSON.stringify(row)).toBe(before);
+    expect(mockPrisma.auditEvent.create).not.toHaveBeenCalled();
+  });
+
   it('lists events by tenant-scoped project and entity filters', async () => {
     const occurredAt = new Date('2026-06-09T11:00:00.000Z');
     mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1' });

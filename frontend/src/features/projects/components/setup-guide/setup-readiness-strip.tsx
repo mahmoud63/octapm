@@ -14,9 +14,14 @@ import type { ProjectSetupHeadlineEntry } from '../../data/schema'
  *
  * The schedule entries follow the engine's three states (R5-4): "Schedule
  * No schedule yet", "Schedule imported PASS (waiting for activation)" for a
- * staged revision, PASS / FAIL for an active one — and "Critical unmapped
- * activities" is a count only on an active schedule; until then the engine
- * says "Waiting for active schedule" (data-waiting), and so does the strip.
+ * staged revision, what the engine judges for a staged one it fails
+ * ("Imported — revision rejected, resubmit", "Imported — no activities"),
+ * PASS / FAIL for an active one — and "Critical unmapped activities" is a
+ * count only on an active schedule with a critical path; until then the
+ * engine says "Waiting for active schedule" or "No critical path yet"
+ * (data-waiting), and so does the strip. With no bill the mapping entries
+ * wait the same way ("Waiting for the BOQ"): a waiting share is no share
+ * of the bill's value, so it carries no "(by value)".
  */
 export function SetupReadinessStrip({ entries }: { entries: ProjectSetupHeadlineEntry[] }) {
   if (entries.length === 0) return null
@@ -49,7 +54,7 @@ export function SetupReadinessStrip({ entries }: { entries: ProjectSetupHeadline
             {entry.value}
           </span>
           {/* The engine's share is of the bill's value, not its rows. */}
-          {entry.key === 'mapping' && !entry.withheld && (
+          {entry.key === 'mapping' && !entry.withheld && !entry.waiting && (
             <span className='text-[11px] text-muted-foreground'>(by value)</span>
           )}
           {entry.withheld && (

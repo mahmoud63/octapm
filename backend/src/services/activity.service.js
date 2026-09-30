@@ -547,11 +547,74 @@ const updateActivity = async ({ orgId, projectId, activityId, payload }) => {
   return sanitizeActivity(updated, null, project);
 };
 
-const deleteActivity = async ({ orgId, projectId, activityId }) => {
-  const project = await ensureProject(orgId, projectId);
-  await ensureActivity(projectId, activityId);
+// The records that keep an activity (ON DELETE RESTRICT on their activityId):
+// the activity-linked data model never lets a cost record, a progress record
+// or a daily report lose its activity. An activated revision writes a cost
+// record per activated activity, so an activity of the active schedule leaves
+// the programme through a schedule revision, never through this endpoint —
+// the raw delete used to hit the constraint (Prisma P2003) and answer 500.
+const ACTIVITY_KEEPERS = [
+  { key: 'costRecords', model: 'costRecord', noun: 'cost record' },
+  { key: 'progress', model: 'activityProgress', noun: 'progress record' },
+  { key: 'dailyReports', model: 'dailyReport', noun: 'daily report' },
+];
 
-  await prisma.activity.delete({ where: { id: activityId } });
+const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+
+// The activity's code, or the P6 id an import gave it, or its name.
+const activityLabel = (activity) =>
+  activity.activityCode || activity.p6ActivityId || null;
+
+const activityInUse = (activity, keptBy, kept) =>
+  new HttpError(
+    409,
+    'ACTIVITY_IN_USE',
+    `Activity ${activityLabel(activity) || activity.name} cannot be deleted: ${kept} linked to it. Records stay on their activity; take it out of the programme through a schedule revision instead.`,
+    {
+      activityId: activity.id,
+      activityCode: activityLabel(activity),
+      partOfActiveSchedule: Boolean(activity.isActive),
+      keptBy,
+    },
+  );
+
+const deleteActivity = async ({ orgId, projectId, activityId }) => {
+  await ensureProject(orgId, projectId);
+  const activity = await ensureActivity(projectId, activityId);
+
+  const counts = await Promise.all(
+    ACTIVITY_KEEPERS.map(({ model }) =>
+      prisma[model].count({ where: { activityId } }),
+    ),
+  );
+  const keptBy = Object.fromEntries(
+    ACTIVITY_KEEPERS.map(({ key }, index) => [key, counts[index]]),
+  );
+  const kept = ACTIVITY_KEEPERS.filter(({ key }) => keptBy[key] > 0)
+    .map(({ key, noun }) => plural(keptBy[key], noun))
+    .join(', ');
+  if (kept) {
+    throw activityInUse(
+      activity,
+      keptBy,
+      `${kept} ${counts.reduce((sum, count) => sum + count, 0) === 1 ? 'is' : 'are'}`,
+    );
+  }
+
+  try {
+    await prisma.activity.delete({ where: { id: activityId } });
+  } catch (error) {
+    // A record this list does not know keeps it: still a refusal, naming the
+    // constraint, never a 500.
+    if (error?.code === 'P2003') {
+      throw activityInUse(
+        activity,
+        { ...keptBy, constraint: error.meta?.field_name || error.meta?.constraint || null },
+        'another record is',
+      );
+    }
+    throw error;
+  }
   return { deleted: true };
 };
 

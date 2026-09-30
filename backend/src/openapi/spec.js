@@ -841,6 +841,7 @@ const components = {
     ErrorCode: {
       type: "string",
       enum: [
+        "ACTIVITY_IN_USE",
         "ACTIVITY_NOT_FOUND",
         "ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED",
         "AI_LIMIT_REACHED",
@@ -2337,20 +2338,20 @@ const components = {
           type: "string",
           enum: ["boq_imported", "schedule_imported", "mapping", "unmapped_quantity", "unmapped_boq", "critical_unmapped", "baseline", "cost_loading"],
           description:
-            "unmapped_quantity and unmapped_boq are given only to a caller who may read the BOQ; unmapped_quantity lists the open quantity by unit (never added across units), the three units leaving most value open first.",
+            "unmapped_quantity and unmapped_boq are given only to a caller who may read the BOQ — except while the project has no bill, when both (and mapping) are given to every caller as waiting entries (\"Waiting for the BOQ\"); unmapped_quantity lists the open quantity by unit (never added across units), the three units leaving most value open first.",
         },
         label: { type: "string", description: "As shown. schedule_imported reads \"Schedule\" while there is no schedule (summary.scheduleState none) and \"Schedule imported\" otherwise." },
         value: {
           type: "string",
           description:
-            "As shown: PASS / FAIL, a percentage, a money figure, a count, or a state. schedule_imported follows summary.scheduleState: none → \"No schedule yet\" (tone blocked, raw false); staged with no schedule blocker → \"PASS (waiting for activation)\" (tone info, raw true — the import is complete before activation); active → PASS / FAIL as the schedule step's blockers say. critical_unmapped is a count only when scheduleState is active; otherwise \"Waiting for active schedule\" (tone neutral, raw null, waiting true) — never 0 and never the done tone.",
+            "As shown: PASS / FAIL, a percentage, a money figure, a count, or a state. schedule_imported follows summary.scheduleState: none → \"No schedule yet\" (tone blocked, raw false); staged with no schedule blocker → \"PASS (waiting for activation)\" (tone info, raw true — the import is complete before activation); staged and failed by the engine → what it judges, \"Imported — no activities\" (NO_ACTIVITIES) or \"Imported — revision rejected, resubmit\" (tone blocked, raw false, the blocker kept); active → PASS / FAIL as the schedule step's blockers say. critical_unmapped is a count only when scheduleState is active and at least one active activity is marked critical; otherwise \"Waiting for active schedule\" or, on an active schedule with no critical path (the NO_CRITICAL_PATH warning), \"No critical path yet\" (tone neutral, raw null, waiting true) — never 0 and never the done tone. mapping, unmapped_quantity and unmapped_boq read \"Waiting for the BOQ\" (tone neutral, raw null, waiting true) while the project has no bill — never \"0%\", \"0\" or a zero value in the done tone.",
         },
         tone: { type: "string", enum: ["done", "review", "blocked", "info", "neutral"] },
         raw: { description: "The figure behind the text, when there is one." },
         waiting: {
           type: "boolean",
           description:
-            "Present and true on the critical_unmapped entry while no schedule is active (summary.scheduleState none or staged): nothing has been assessed, so there is no count. Given to every caller — whether a schedule is active is not BOQ-derived — and never together with withheld.",
+            "Present and true on an entry whose figure has not been assessed: critical_unmapped while no schedule is active (summary.scheduleState none or staged) or while the active schedule has no critical path; mapping, unmapped_quantity and unmapped_boq while the project has no bill. Given to every caller — whether a schedule is active, has a critical path, or a bill exists is not BOQ-derived — and never together with withheld.",
         },
         withheld: {
           type: "boolean",
@@ -2384,7 +2385,7 @@ const components = {
         summary: {
           ...ref("GenericObject"),
           description:
-            "Step counts, the three ready flags, nextAction (chosen from the ten original steps only, as before PC-4), advisoryAction (the first of the two advisory steps, structure_setup and boq_approval, still asking for something, or null), and `headline` — the §33 status line (BOQ imported, schedule imported, mapping %, unmapped BOQ quantity by unit, unmapped BOQ value, critical unmapped activities, baseline, cost loading), each entry a ProjectSetupHeadlineEntry. scheduleState says which schedule the line speaks of: \"none\" (no schedule revision and no active activity), \"staged\" (a revision was imported or generated and none of its activities is active yet) or \"active\" (active activities exist); it is given to every caller. criticalUnmappedActivities (critical activities with no approved BOQ allocation, read off the mapping) is present only when scheduleState is active and only for a caller who may read the BOQ; with an active schedule anyone else gets criticalUnmappedWithheld true and criticalUnmappedReason \"Mapping details unavailable to you\" instead, and the critical_unmapped headline entry withheld. While scheduleState is none or staged nothing has been assessed: every caller gets criticalUnmappedWaiting true and criticalUnmappedReason \"Waiting for active schedule\", no count and no withheld flag. The critical activities themselves (steps[schedule_generation].counts.criticalActivities) are every caller's once scheduleState is active; while it is none or staged that count, like every step count read off the active schedule, is left out (see ProjectSetupStep.counts).",
+            "Step counts, the three ready flags, nextAction (chosen from the ten original steps only, as before PC-4), advisoryAction (the first of the two advisory steps, structure_setup and boq_approval, still asking for something, or null), and `headline` — the §33 status line (BOQ imported, schedule imported, mapping %, unmapped BOQ quantity by unit, unmapped BOQ value, critical unmapped activities, baseline, cost loading), each entry a ProjectSetupHeadlineEntry. scheduleState says which schedule the line speaks of: \"none\" (no schedule revision and no active activity), \"staged\" (a revision was imported or generated and none of its activities is active yet) or \"active\" (active activities exist); it is given to every caller. criticalUnmappedActivities (critical activities with no approved BOQ allocation, read off the mapping) is present only when scheduleState is active and only for a caller who may read the BOQ; with an active schedule anyone else gets criticalUnmappedWithheld true and criticalUnmappedReason \"Mapping details unavailable to you\" instead, and the critical_unmapped headline entry withheld. While scheduleState is none or staged nothing has been assessed: every caller gets criticalUnmappedWaiting true and criticalUnmappedReason \"Waiting for active schedule\", no count and no withheld flag; on an active schedule with no activity marked critical, criticalUnmappedWaiting true and criticalUnmappedReason \"No critical path yet\" the same way (and steps[schedule_generation].counts leaves criticalActivities out). While the project has no bill every caller gets mappingWaiting true and mappingReason \"Waiting for the BOQ\" (the mapping, unmapped_quantity and unmapped_boq entries wait), and steps[boq_allocation].counts leaves the bill's value figures out. The critical activities themselves (steps[schedule_generation].counts.criticalActivities) are every caller's once scheduleState is active; while it is none or staged that count, like every step count read off the active schedule, is left out (see ProjectSetupStep.counts).",
         },
         gates: {
           ...ref("GenericObject"),
@@ -8563,7 +8564,9 @@ add(
   "delete",
   operation({
     tag: "Activities",
-    summary: "Delete an activity.",
+    summary: "Delete an activity that no record keeps.",
+    description:
+      "Deletes an activity with no cost record, progress record or daily report (the activity-linked data model keeps those on their activity). Otherwise 409 ACTIVITY_IN_USE with details { activityId, activityCode, partOfActiveSchedule, keptBy: { costRecords, progress, dailyReports } } — an activated revision writes a cost record per activity, so an activity of the active schedule leaves the programme through a schedule revision, never through this endpoint.",
     operationId: "deleteActivity",
     parameters: projectRecordParams,
     permissions: modulePermission("schedule", "delete"),

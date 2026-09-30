@@ -275,7 +275,53 @@ assert.ok(
     !/criticalUnmappedActivities|scheduleState/.test(source),
     `${name} computes nothing of its own from the schedule state`
   )
+  // R6 (the R5-4 family): the engine's waiting words — "No critical path
+  // yet", "Waiting for the BOQ", "Imported — revision rejected, resubmit" —
+  // are the engine's alone; no screen words a state of its own.
+  assert.ok(
+    !/No critical path yet|Waiting for the BOQ|Imported — /.test(uncommented(source).replace(/\/\*[\s\S]*?\*\//g, '')),
+    `${name} words no headline state of its own`
+  )
 })
+// A waiting mapping share is no share of the bill's value: the guide strip
+// puts "(by value)" beside a share the engine gave, never beside its wait.
+assert.ok(
+  guideStrip.includes("entry.key === 'mapping' && !entry.withheld && !entry.waiting"),
+  'the setup guide strip shows "(by value)" only beside a mapping share the engine gave'
+)
+// No bill (R6): the engine says the mapping waits (summary.mappingWaiting,
+// mappingReason "Waiting for the BOQ"); the controls tiles read "—" with its
+// words — never "0%", never "0 of 0 rows covered", never "0 unmapped".
+;['mappingWaiting?: boolean', 'mappingReason?: string'].forEach((copy) => {
+  assert.ok(schema.includes(copy), `the readiness type carries ${copy}`)
+})
+;[
+  'summary.mappingWaiting',
+  "summary.mappingReason ?? 'Waiting for the BOQ'",
+  "value={coverageWithheld || mappingWaiting ? '—' : formatPct(coveragePct)}",
+  "data-testid='uat-controls-coverage-waiting'",
+  'const unmappedRows = counts && !coverageWithheld && !mappingWaiting ? counts.unmapped + counts.partial : null',
+  "truth={mappingWaiting ? 'none' : 'derived'}",
+].forEach((copy) => {
+  assert.ok(strip.includes(copy), `controls strip follows the mapping wait: ${copy}`)
+})
+assert.match(
+  strip,
+  /coverageWithheld\s*\|\|\s*mappingWaiting\s*\|\|\s*coveragePct == null/,
+  'a waiting coverage share takes the neutral tone'
+)
+assert.match(
+  strip,
+  /\?\s*'Unavailable'\s*:\s*mappingWaiting\s*\?\s*mappingWaitingText\s*:\s*counts/,
+  'the coverage badge says the engine\'s wait before it counts rows'
+)
+// An active schedule with no critical path (R6): the engine's
+// criticalUnmappedWaiting + reason already drive the critical figure; the
+// figure never shows the step's criticalActivities count while waiting.
+assert.ok(
+  strip.includes("summary.criticalUnmappedReason ?? 'Waiting for active schedule'"),
+  'the critical figure shows the engine\'s own reason for waiting (active-schedule wait or "No critical path yet")'
+)
 // §19: one Project Controls group inside the project, built from the
 // sidebar's group data, with the entries that open other modules carrying
 // their target; the module bar keeps it beside the schedule.

@@ -301,6 +301,11 @@ export function ControlsStrip({
   // it never shows a figure it was not given.
   const coverageWithheld = Boolean(coverage?.withheld)
   const coverageValuesShown = coverage?.totalBoqAmount != null
+  // No bill yet (R6, the R5-4 family): the mapping's share and its row
+  // counts are figures of nothing — the engine says they wait for the BOQ,
+  // and the tiles read "—" with its words, never "0%" or "0".
+  const mappingWaiting = Boolean(summary.mappingWaiting)
+  const mappingWaitingText = summary.mappingReason ?? 'Waiting for the BOQ'
   const nextAction = summary.nextAction ?? summary.advisoryAction ?? null
   const stepCounts = (key: string) =>
     (readiness.steps.find((step) => step.key === key)?.counts ?? {}) as Record<string, unknown>
@@ -352,7 +357,7 @@ export function ControlsStrip({
   const coveragePct = coverage?.coveragePct ?? null
   const counts = coverage?.counts
   const coverageTone: StatusTone =
-    coverageWithheld || coveragePct == null || coverage?.totalBoqAmount === 0
+    coverageWithheld || mappingWaiting || coveragePct == null || coverage?.totalBoqAmount === 0
       ? 'neutral'
       : coveragePct >= 99.995
         ? 'done'
@@ -489,7 +494,7 @@ export function ControlsStrip({
   const criticalWaitingText = summary.criticalUnmappedWaiting
     ? (summary.criticalUnmappedReason ?? 'Waiting for active schedule')
     : 'Waiting for active schedule'
-  const unmappedRows = counts && !coverageWithheld ? counts.unmapped + counts.partial : null
+  const unmappedRows = counts && !coverageWithheld && !mappingWaiting ? counts.unmapped + counts.partial : null
   const overAllocatedRows = coverageWithheld ? null : (counts?.over ?? null)
   const dataQuality = forecast?.dataQuality ?? []
   const forecastCounts = forecast?.schedule?.counts ?? null
@@ -558,13 +563,15 @@ export function ControlsStrip({
       <Tile
         icon={Link2}
         label='Allocation coverage'
-        value={coverageWithheld ? '—' : formatPct(coveragePct)}
+        value={coverageWithheld || mappingWaiting ? '—' : formatPct(coveragePct)}
         valueTestId='uat-controls-coverage-pct'
         tone={coverageTone}
         badge={
           coverageWithheld
             ? 'Unavailable'
-            : counts
+            : mappingWaiting
+              ? mappingWaitingText
+              : counts
               ? `${counts.complete} of ${counts.complete + counts.partial + counts.unmapped} rows covered`
               : 'No bill'
         }
@@ -573,6 +580,8 @@ export function ControlsStrip({
             <span data-testid='uat-controls-coverage-withheld'>
               {coverage?.reason ?? 'Mapping details unavailable to you'}
             </span>
+          ) : mappingWaiting ? (
+            <span data-testid='uat-controls-coverage-waiting'>{mappingWaitingText}</span>
           ) : !coverageValuesShown ? (
             <span data-testid='uat-controls-coverage-values-withheld'>
               Values are shown to people who can open the BOQ
@@ -755,13 +764,15 @@ export function ControlsStrip({
       <Figure
         label='Unmapped items'
         value={unmappedRows == null ? '—' : unmappedRows.toLocaleString()}
-        truth='derived'
+        truth={mappingWaiting ? 'none' : 'derived'}
         basis={
           coverageWithheld
             ? 'Mapping details unavailable to you'
-            : counts
-              ? `${counts.unmapped.toLocaleString()} unmapped · ${counts.partial.toLocaleString()} partial`
-              : 'no bill yet'
+            : mappingWaiting
+              ? mappingWaitingText
+              : counts
+                ? `${counts.unmapped.toLocaleString()} unmapped · ${counts.partial.toLocaleString()} partial`
+                : 'no bill yet'
         }
         tone={unmappedRows != null && unmappedRows > 0 ? 'review' : 'neutral'}
         testId='uat-controls-figure-unmapped'
