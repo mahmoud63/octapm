@@ -39,6 +39,8 @@ const attachmentService = require("./attachment.service");
 const commitmentService = require("./commitment.service");
 const readinessService = require("./project-setup-readiness.service");
 const { getApprovedVariationAllowance } = require("./ipc.service");
+const { applyPartyWorkflowVisibility } = require("./company-party.service");
+const { withDraftVisibility } = require("./rfi-workflow.service");
 
 const LIST_CAP = 50;
 // The allocation summary's and the IPC module's certified statuses.
@@ -500,6 +502,47 @@ const WORKFLOW_LINK_MODULES = {
   punch_item: "punch",
 };
 
+// An RFI or a submittal linked to the activity is listed only where its own
+// register would list it to this viewer: a party-scoped member sees the
+// records routed to their company (company-party applyPartyWorkflowVisibility)
+// and an RFI draft is its author's or its manager's (rfi-workflow
+// withDraftVisibility) — the where clauses rfi.service and submittal.service
+// list with, asked here of the linked ids.
+const WORKFLOW_LINK_VISIBILITY = {
+  rfi: {
+    model: "rfi",
+    where: (where, { projectAccess, viewerId }) => withDraftVisibility(applyPartyWorkflowVisibility(where, projectAccess), viewerId),
+  },
+  submittal: {
+    model: "submittal",
+    where: (where, { projectAccess }) => applyPartyWorkflowVisibility(where, projectAccess),
+  },
+};
+
+const visibleWorkflowLinks = async ({ projectId, links, can, partyScoped, projectAccess, viewerId }) => {
+  const readable = links.filter(
+    (entry) =>
+      WORKFLOW_LINK_MODULES[entry.recordType] &&
+      can(WORKFLOW_LINK_MODULES[entry.recordType]) &&
+      // Punch items reach a party-scoped member only through the punch
+      // module's own rule, as in the quality section.
+      !(partyScoped && entry.recordType === "punch_item"),
+  );
+  const visible = new Set();
+  await Promise.all(
+    Object.entries(WORKFLOW_LINK_VISIBILITY).map(async ([recordType, rule]) => {
+      const ids = [...new Set(readable.filter((entry) => entry.recordType === recordType).map((entry) => entry.recordId))];
+      if (!ids.length) return;
+      const rows = await prisma[rule.model].findMany({
+        where: rule.where({ projectId, id: { in: ids } }, { projectAccess, viewerId }),
+        select: { id: true },
+      });
+      for (const row of rows) visible.add(`${recordType}:${row.id}`);
+    }),
+  );
+  return readable.filter((entry) => !WORKFLOW_LINK_VISIBILITY[entry.recordType] || visible.has(`${entry.recordType}:${entry.recordId}`));
+};
+
 const activityHistory = async ({ orgId, projectId, activityId, allocationIds, changeOrders }) => {
   const submissionIds = (await prisma.progressSubmission.findMany({ where: { projectId, activityId }, select: { id: true } })).map((entry) => entry.id);
   const [progressEvents, allocationEvents, revisionEvents] = await Promise.all([
@@ -543,7 +586,16 @@ const activityHistory = async ({ orgId, projectId, activityId, allocationIds, ch
   ].sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
 };
 
-const getActivityDetail = async ({ orgId, projectId, activityId, can, partyScoped = false, attachmentViewer = null }) => {
+const getActivityDetail = async ({
+  orgId,
+  projectId,
+  activityId,
+  can,
+  partyScoped = false,
+  attachmentViewer = null,
+  projectAccess = {},
+  viewerId = null,
+}) => {
   const { link, controls } = await loadContext({ orgId, projectId });
   const row = await prisma.activity.findFirst({
     where: { id: activityId, projectId },
@@ -874,13 +926,12 @@ const getActivityDetail = async ({ orgId, projectId, activityId, can, partyScope
   ]);
   const photos = attachments.items.filter((entry) => entry.role === "photo");
   const files = attachments.items.filter((entry) => entry.role !== "photo");
+  const linkedRecords = await visibleWorkflowLinks({ projectId, links: workflowLinks, can, partyScoped, projectAccess, viewerId });
   sections.documents = {
     allowed: true,
     attachments: capped(files, files.length, null),
     photos: capped(photos, photos.length, null),
-    linkedRecords: workflowLinks
-      .filter((entry) => WORKFLOW_LINK_MODULES[entry.recordType] && can(WORKFLOW_LINK_MODULES[entry.recordType]))
-      .map((entry) => ({ ...entry, href: link(entry.recordType, entry.recordId) })),
+    linkedRecords: linkedRecords.map((entry) => ({ ...entry, href: link(entry.recordType, entry.recordId) })),
   };
 
   // Activity has no audit entity of its own yet (follow-up): its history is
@@ -939,7 +990,8 @@ const getActivityDetail = async ({ orgId, projectId, activityId, can, partyScope
  * permission module's own read decision (template, role, party, API-key
  * scope — rbac.hasPermission), and the attachment viewer is the one the
  * attachments route builds, so party-scoped members see only the files
- * their own rule admits.
+ * their own rule admits. projectAccess and viewerId are what the RFI and
+ * submittal registers list with (party routing, RFI drafts).
  */
 const detailReader = (req) => {
   const { hasPermission } = require("../middleware/rbac");
@@ -950,6 +1002,8 @@ const detailReader = (req) => {
   return {
     can,
     partyScoped,
+    projectAccess: req.projectAccess || {},
+    viewerId: req.user.id,
     attachmentViewer: {
       id: req.user.id,
       userId: req.user.id,

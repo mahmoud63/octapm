@@ -21,7 +21,8 @@
  * - a BOQ reader whose template refuses the schedule sees a linked activity's
  *   name on the BOQ detail and none of its dates, float, criticality or progress;
  * - a subcontractor's person (party-scoped) gets no commitment, punch or
- *   lookahead rows from either detail;
+ *   lookahead rows from either detail, and no linked RFI or submittal its
+ *   register would not list to them (party routing; RFI drafts);
  * - the activity's EV is the allocation summary's, on amounts where a second
  *   formula over the total would round differently;
  * - another organisation's ids answer exactly as a random id does (404).
@@ -66,6 +67,7 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
   const allocations = {};
   const members = {};
   const orders = {};
+  let subParty;
   const auth = () => ({ authorization: `Bearer ${live.token}` });
   const as = (user) => ({ authorization: `Bearer ${mintAccessToken(user)}` });
   const at = (route, projectId = project.id) => `/api/v1/projects/${projectId}${route}`;
@@ -114,6 +116,7 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     const party = await prisma.projectParty.create({ data: { projectId: project.id, companyId: company.id, role: "subcontractor" } });
     await prisma.projectPartyMember.create({ data: { projectPartyId: party.id, userId: sub.id } });
     members.sub = sub;
+    subParty = party;
 
     // Two priced rows and two activities, through the API.
     for (const [key, body] of Object.entries({
@@ -392,6 +395,48 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     expect(activity.body.data.sections.constraints.lookahead).toEqual({ ...partyRefusal, module: "lookahead" });
     expect(item.text.includes("SC-PC5-")).toBe(false);
     expect(activity.text.includes("SC-PC5-")).toBe(false);
+  });
+
+  it("a linked RFI or submittal is listed only where its own register lists it to the viewer", async () => {
+    const tag = Date.now();
+    const rfi = (key, data) => prisma.rfi.create({ data: { projectId: project.id, ref: `RFI-PC5-${key}-${tag}`, subject: `LiveTest PC-5 ${key}`, status: "open", ...data } });
+    const submittal = (key, data) => prisma.submittal.create({ data: { projectId: project.id, ref: `SUB-PC5-${key}-${tag}`, title: `LiveTest PC-5 ${key}`, ...data } });
+    const records = {
+      rfiRouted: await rfi("ROUTED", { ownerPartyId: subParty.id }),
+      rfiOther: await rfi("OTHER", {}),
+      // Another member's draft: its register shows it to its author and manager only.
+      rfiDraft: await rfi("DRAFT", { status: "draft", createdBy: members.site.id }),
+      subRouted: await submittal("ROUTED", { reviewerPartyId: subParty.id }),
+      subOther: await submittal("OTHER", {}),
+      punch: await prisma.punchItem.create({ data: { orgId: live.org.id, projectId: project.id, number: 9001, ref: `PI-PC5-${tag}`, title: "LiveTest PC-5 punch", status: "open" } }),
+    };
+    const typeOf = { rfiRouted: "rfi", rfiOther: "rfi", rfiDraft: "rfi", subRouted: "submittal", subOther: "submittal", punch: "punch_item" };
+    for (const [key, record] of Object.entries(records)) {
+      await prisma.workflowActivityLink.create({ data: { projectId: project.id, recordType: typeOf[key], recordId: record.id, activityId: acts.X.id } });
+    }
+    const ids = Object.values(records).map((record) => record.id);
+    const linkedIds = (body) => body.data.sections.documents.linkedRecords.map((entry) => entry.recordId).sort();
+    // What the RFI and submittal registers themselves list to the same viewer.
+    const registerIds = async (headers) => {
+      const [rfis, submittals] = await Promise.all([api.get(at("/rfi"), headers), api.get(at("/submittals"), headers)]);
+      expect([rfis.status, submittals.status]).toEqual([200, 200]);
+      return [...rfis.body.data.rows, ...submittals.body.data.rows].map((row) => row.id).filter((id) => ids.includes(id)).sort();
+    };
+
+    // The owner: every RFI and submittal but another member's draft, and the punch item.
+    const owner = await api.get(at(`/activities/${acts.X.id}/detail`), auth());
+    expect([owner.status, owner.body?.error]).toEqual([200, undefined]);
+    expect(linkedIds(owner.body)).toEqual([records.rfiRouted.id, records.rfiOther.id, records.subRouted.id, records.subOther.id, records.punch.id].sort());
+    expect(linkedIds(owner.body).filter((id) => id !== records.punch.id)).toEqual(await registerIds(auth()));
+
+    // The subcontractor's person may read RFIs and submittals: only those routed to their company.
+    const sub = await api.get(at(`/activities/${acts.X.id}/detail`), as(members.sub));
+    expect([sub.status, sub.body?.error]).toEqual([200, undefined]);
+    expect(linkedIds(sub.body)).toEqual([records.rfiRouted.id, records.subRouted.id].sort());
+    expect(linkedIds(sub.body)).toEqual(await registerIds(as(members.sub)));
+    for (const hidden of [records.rfiOther.id, records.rfiDraft.id, records.subOther.id, records.punch.id]) {
+      expect([hidden, sub.text.includes(hidden)]).toEqual([hidden, false]);
+    }
   });
 
   it("another organisation's ids answer exactly as a random id does", async () => {
