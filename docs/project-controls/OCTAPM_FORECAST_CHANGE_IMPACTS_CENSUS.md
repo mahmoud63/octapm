@@ -180,7 +180,10 @@ written, not six distinct approved changes. For this data "additive" is not
 right: the evidenced delay on Blockwork is one change of 10 working days,
 not 60 days. (VO-18 and VO-20 also each posted a 125,000.00 `change_order`
 budget-line change, so the same instruction stands twice in the approved
-changes. Nothing here changes that; it is the owner's to decide, see 5.6.)
+changes — and the certification's own expected figures count both: the
+Phase-21 snapshot expects approved changes of 250,000 + 4,500, and it
+reconciles today, 36 of 36 checks, delta 0.00. Nothing here changes that; it
+is the owner's to decide, see 5.6.)
 
 VO-22 is distinct: it came from RFI-001 ("Founding level at grid A-D
 against borehole BH-3", now `closed`, `changeOrderId` = VO-22). RFI-001 has
@@ -317,8 +320,9 @@ implemented, and the calculation is unchanged:**
   VO-12, VO-14, VO-16, VO-18 and VO-20 are duplicates of VO-10. The product
   refuses to archive an approved order ("Approved change orders cannot be
   archived after contract budget revision sync"), and VO-18/VO-20 carry
-  money, so any correction is a financial decision and needs an explicit,
-  owner-approved procedure. In the engine, do not dedupe by description
+  money that the certified reconciliation expects (250,000 of approved
+  changes), so any correction is a financial decision, would move certified
+  figures, and needs an explicit, owner-approved procedure. In the engine, do not dedupe by description
   automatically (two genuine identical instructions can exist); instead add
   a data-quality note when one activity carries approved orders with the
   same description and impact.
