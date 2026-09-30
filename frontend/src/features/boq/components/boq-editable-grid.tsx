@@ -32,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { CommentThread } from '@/features/comments/components/comment-thread'
+import { OpenDetailButton } from '@/features/controls/components/controls-detail-drawers'
 import type { BoqItemWithActivities, BoqFinancialSummary } from '../data/schema'
 import {
   useUpdateBoqItem,
@@ -275,6 +276,12 @@ export function BoqEditableGrid({
                   <ChevronRight className='h-3.5 w-3.5' />
                 )}
               </button>
+              <OpenDetailButton
+                kind='boq_item'
+                id={item.id}
+                label={`Open ${item.code} detail`}
+                testId={`boq-row-open-detail-${item.id}`}
+              />
 
               <div className='w-24 text-sm'>
                 <EditableCell

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { AxiosError } from 'axios'
 import { apiClient } from '@/services/api/client'
+import { activityDetailKey, boqItemDetailKey } from '@/features/controls/hooks/use-controls-detail'
 import { projectSetupReadinessKey } from '@/features/projects/hooks/use-projects'
 import type {
   ProjectBoq,
@@ -78,6 +79,9 @@ const invalidateAllocationConsumers = async (
     qc.invalidateQueries({ queryKey: ['cost-summary', projectId] }),
     qc.invalidateQueries({ queryKey: ['audit-events', projectId] }),
     qc.invalidateQueries({ queryKey: projectSetupReadinessKey(projectId) }),
+    // The PC-5 detail drawers show allocations, mapped quantity and the figures worked from them.
+    qc.invalidateQueries({ queryKey: boqItemDetailKey(projectId) }),
+    qc.invalidateQueries({ queryKey: activityDetailKey(projectId) }),
   ])
 }
 

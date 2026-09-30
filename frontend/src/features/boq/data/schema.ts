@@ -262,3 +262,182 @@ export type CreateBoqActivityInput = z.infer<
 export type UpdateBoqActivityInput = z.infer<
   typeof UpdateBoqActivityInputSchema
 >
+
+// ─── PC-5: BOQ item detail (GET /projects/:id/boq/items/:itemId/detail) ───
+// Every figure says where it comes from (the three truths, OCTAPM_PROJECT_
+// CONTROL_MODEL §3). A figure no service can prove yet is `notAvailable` and
+// names the wave that brings it; a section the viewer may not read is
+// `{ allowed: false, module, reason }` with no data — the server omits it.
+export const ControlsFigureSchema = z.object({
+  value: z.number().nullable(),
+  truth: z.enum(['source', 'derived', 'projection']).nullable(),
+  basis: z.string(),
+  derivedFrom: z.array(z.record(z.string(), z.unknown())).optional(),
+  notAvailable: z.boolean().optional(),
+  wave: z.string().optional(),
+})
+
+export const ControlsSectionDeniedSchema = z.object({
+  allowed: z.literal(false),
+  module: z.string(),
+  reason: z.string(),
+})
+
+/** A capped list: its first rows, how many there are, and where the rest live. */
+export const controlsCappedList = <T extends z.ZodTypeAny>(item: T) =>
+  z.object({
+    items: z.array(item),
+    total: z.number(),
+    viewAll: z.string().nullable().optional(),
+  })
+
+const ControlsStructureRefSchema = z
+  .object({
+    id: z.string(),
+    code: z.string().nullable().optional(),
+    name: z.string().nullable().optional(),
+    path: z.string().nullable().optional(),
+    href: z.string().nullable().optional(),
+  })
+  .nullable()
+
+export const ControlsStructureSchema = z.object({
+  allowed: z.literal(true),
+  wbsCode: z.string().nullable().optional(),
+  wbs: ControlsStructureRefSchema,
+  location: ControlsStructureRefSchema,
+  costCode: ControlsStructureRefSchema,
+  costCodeNote: z.string().optional(),
+})
+
+const looseRow = z.object({ id: z.string() }).passthrough()
+
+export const BoqItemDetailSchema = z.object({
+  kind: z.literal('boq_item'),
+  id: z.string(),
+  href: z.string().nullable().optional(),
+  header: z.object({
+    id: z.string(),
+    code: z.string(),
+    description: z.string().nullable().optional(),
+    section: z.string().nullable().optional(),
+    unit: z.string().nullable().optional(),
+    isActive: z.boolean().optional(),
+    supersededAt: z.string().nullable().optional(),
+    revision: z
+      .object({
+        id: z.string(),
+        revisionNumber: z.number().nullable().optional(),
+        label: z.string().nullable().optional(),
+        status: z.string().nullable().optional(),
+      })
+      .nullable()
+      .optional(),
+    baselineLock: z.record(z.string(), z.unknown()).nullable().optional(),
+  }),
+  sections: z.object({
+    structure: ControlsStructureSchema,
+    mapping: z.object({
+      allowed: z.literal(true),
+      mappingRule: z.string(),
+      mappingState: z.string().nullable(),
+      allocationCount: z.number(),
+      allocations: controlsCappedList(
+        z.object({
+          allocationId: z.string(),
+          status: z.string(),
+          basis: z.string().nullable().optional(),
+          quantity: ControlsFigureSchema,
+          amount: ControlsFigureSchema,
+          authorisedQuantity: ControlsFigureSchema,
+          activity: z
+            .object({
+              id: z.string(),
+              code: z.string().nullable(),
+              name: z.string(),
+              startDate: z.string().nullable(),
+              endDate: z.string().nullable(),
+              isCritical: z.boolean(),
+              totalFloat: z.number().nullable(),
+              isActive: z.boolean().optional(),
+              pctComplete: ControlsFigureSchema.nullable(),
+              progressSource: z.string().nullable(),
+              href: z.string().nullable().optional(),
+            })
+            .nullable(),
+        })
+      ),
+    }),
+    quantities: z.object({
+      allowed: z.literal(true),
+      unit: z.string().nullable(),
+      unitCode: z.string().nullable().optional(),
+      original: ControlsFigureSchema,
+      current: ControlsFigureSchema,
+      authorised: ControlsFigureSchema,
+      approvedVariation: ControlsFigureSchema,
+      mapped: ControlsFigureSchema.nullable(),
+      unallocated: ControlsFigureSchema.nullable(),
+      installed: ControlsFigureSchema,
+      paid: ControlsFigureSchema,
+      forecast: ControlsFigureSchema,
+    }),
+    money: z.object({
+      allowed: z.literal(true),
+      rate: ControlsFigureSchema,
+      amount: ControlsFigureSchema,
+      approvedAllocated: ControlsFigureSchema.nullable(),
+      earnedValue: ControlsFigureSchema.nullable(),
+      forecast: ControlsFigureSchema,
+    }),
+    certification: z.union([
+      ControlsSectionDeniedSchema,
+      z.object({
+        allowed: z.literal(true),
+        certifiedQuantity: ControlsFigureSchema,
+        certifiedAmount: ControlsFigureSchema.nullable(),
+        lines: controlsCappedList(looseRow),
+      }),
+    ]),
+    commitments: z.union([
+      ControlsSectionDeniedSchema,
+      z.object({
+        allowed: z.literal(true),
+        committed: ControlsFigureSchema,
+        lines: controlsCappedList(looseRow),
+      }),
+    ]),
+    changes: z.union([
+      ControlsSectionDeniedSchema,
+      z.object({ allowed: z.literal(true), changeOrders: controlsCappedList(looseRow) }),
+    ]),
+    procurement: z.union([
+      ControlsSectionDeniedSchema,
+      z.object({
+        allowed: z.literal(true),
+        note: z.string().optional(),
+        poLines: controlsCappedList(looseRow),
+      }),
+    ]),
+    readiness: z.object({
+      allowed: z.literal(true),
+      basis: z.string().optional(),
+      flags: z.array(z.record(z.string(), z.unknown())),
+      notItemised: z.array(z.record(z.string(), z.unknown())),
+      note: z.string().nullable().optional(),
+    }),
+    history: z.union([
+      ControlsSectionDeniedSchema,
+      z.object({ allowed: z.literal(true), events: z.array(looseRow) }).passthrough(),
+    ]),
+    documents: z.object({
+      allowed: z.literal(true),
+      attachments: controlsCappedList(looseRow),
+    }),
+  }),
+})
+
+export type ControlsFigure = z.infer<typeof ControlsFigureSchema>
+export type ControlsSectionDenied = z.infer<typeof ControlsSectionDeniedSchema>
+export type ControlsStructure = z.infer<typeof ControlsStructureSchema>
+export type BoqItemDetail = z.infer<typeof BoqItemDetailSchema>

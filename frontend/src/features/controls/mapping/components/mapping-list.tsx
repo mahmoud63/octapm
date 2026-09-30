@@ -42,6 +42,7 @@ import {
   type MappingAllocation,
   type MappingRule,
 } from '../hooks/use-mapping'
+import { OpenDetailButton } from '../../components/controls-detail-drawers'
 
 /**
  * The list view: every allocation row with inline edit of a draft's
@@ -256,6 +257,12 @@ export function MappingList({
                         <span className='truncate font-medium'>
                           {row.boqItem?.code || 'BOQ'}
                         </span>
+                        <OpenDetailButton
+                          kind='boq_item'
+                          id={row.boqItemId}
+                          label={`Open ${row.boqItem?.code || 'BOQ item'} detail`}
+                          testId={`mapping-row-open-boq-${row.id}`}
+                        />
                         {row.boqItem?.mappingRule &&
                           row.boqItem.mappingRule !== 'required' && (
                             <Badge variant='outline' className='text-[10px]'>
@@ -268,8 +275,16 @@ export function MappingList({
                       </div>
                     </td>
                     <td className='max-w-72 px-3 py-2'>
-                      <div className='truncate font-medium'>
-                        {row.activity?.activityId}
+                      <div className='flex items-center gap-1'>
+                        <span className='truncate font-medium'>
+                          {row.activity?.activityId}
+                        </span>
+                        <OpenDetailButton
+                          kind='activity'
+                          id={row.activityId}
+                          label={`Open ${row.activity?.name || 'activity'} detail`}
+                          testId={`mapping-row-open-activity-${row.id}`}
+                        />
                       </div>
                       <div className='truncate text-xs text-muted-foreground'>
                         {row.activity?.name}

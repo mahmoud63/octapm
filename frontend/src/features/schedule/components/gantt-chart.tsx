@@ -52,6 +52,7 @@ import {
   type NamedLayout,
   type TimeScale,
 } from '../lib/gantt-layouts'
+import { OpenDetailButton } from '@/features/controls/components/controls-detail-drawers'
 import { ActivityInlineEditDialog } from './activity-inline-edit-dialog'
 import { ResourcePane } from './resource-histogram'
 
@@ -2032,6 +2033,15 @@ function ScheduleGridRow({
           <span className='truncate' title={row.name}>
             {row.name}
           </span>
+          {row.type === 'activity' && (
+            <OpenDetailButton
+              kind='activity'
+              id={row.activity.id}
+              label={`Open ${row.name} detail`}
+              testId={`gantt-open-detail-${row.activity.id}`}
+              className='ml-auto'
+            />
+          )}
           {row.type === 'summary' && (
             <span className='ml-auto shrink-0 font-mono text-[10px] text-muted-foreground'>
               {row.activityCount}

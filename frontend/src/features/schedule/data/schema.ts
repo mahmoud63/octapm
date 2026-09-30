@@ -1,4 +1,10 @@
 import { z } from 'zod'
+import {
+  ControlsFigureSchema,
+  ControlsSectionDeniedSchema,
+  ControlsStructureSchema,
+  controlsCappedList,
+} from '@/features/boq/data/schema'
 
 export const dependencyRelationshipSchema = z.enum(['FS', 'SS', 'FF', 'SF'])
 
@@ -424,3 +430,157 @@ export type ScheduleRevision = z.infer<typeof scheduleRevisionSchema>
 export type ProjectSchedule = z.infer<typeof projectScheduleSchema>
 export type Risk = z.infer<typeof riskSchema>
 export type Milestone = z.infer<typeof milestoneSchema>
+
+// ─── PC-5: activity detail (GET /projects/:id/activities/:id/detail) ───
+// The bill's side of an activity (its BOQ allocations, mapped quantity and
+// every figure worked from them) is omitted by the server for a member who
+// may not read the BOQ — cost readers included (E1): such a section arrives
+// as `{ allowed: false, module: 'boq', reason }`, never as zeroes.
+const activityDetailRow = z.object({ id: z.string() }).passthrough()
+
+const activityDetailQuality = z.union([
+  ControlsSectionDeniedSchema,
+  z.object({ allowed: z.literal(true), items: z.array(activityDetailRow) }),
+])
+
+export const ActivityDetailSchema = z.object({
+  kind: z.literal('activity'),
+  id: z.string(),
+  href: z.string().nullable().optional(),
+  header: z.object({
+    id: z.string(),
+    code: z.string().nullable(),
+    name: z.string(),
+    p6ActivityId: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    status: z.string().nullable().optional(),
+    isActive: z.boolean().optional(),
+    isMilestone: z.boolean().optional(),
+    isCritical: z.boolean(),
+    totalFloat: z.number().nullable(),
+    duration: z.number().nullable().optional(),
+    startDate: z.string().nullable(),
+    endDate: z.string().nullable(),
+    earlyStartDate: z.string().nullable().optional(),
+    earlyFinishDate: z.string().nullable().optional(),
+    lateStartDate: z.string().nullable().optional(),
+    lateFinishDate: z.string().nullable().optional(),
+    baselineStartDate: z.string().nullable().optional(),
+    baselineFinishDate: z.string().nullable().optional(),
+    actualStart: z.string().nullable().optional(),
+    actualFinish: z.string().nullable().optional(),
+  }),
+  sections: z.object({
+    structure: ControlsStructureSchema,
+    mapping: z.union([
+      ControlsSectionDeniedSchema,
+      z.object({
+        allowed: z.literal(true),
+        mappedQuantity: ControlsFigureSchema,
+        budget: ControlsFigureSchema,
+        generatedBudget: ControlsFigureSchema,
+        earnedValue: ControlsFigureSchema,
+        allocations: controlsCappedList(
+          z.object({
+            allocationId: z.string(),
+            status: z.string(),
+            quantity: ControlsFigureSchema,
+            amount: ControlsFigureSchema,
+            authorisedQuantity: ControlsFigureSchema,
+            boqItem: z.object({
+              id: z.string(),
+              code: z.string().nullable(),
+              description: z.string().nullable(),
+              unit: z.string().nullable(),
+              href: z.string().nullable().optional(),
+            }),
+          })
+        ),
+      }),
+    ]),
+    progress: z.union([
+      ControlsSectionDeniedSchema,
+      z.object({
+        allowed: z.literal(true),
+        method: z.unknown(),
+        pctComplete: ControlsFigureSchema,
+        progressSource: z.string().nullable(),
+        installedQuantity: ControlsFigureSchema,
+        approvedHistory: controlsCappedList(activityDetailRow),
+        submissions: controlsCappedList(activityDetailRow),
+      }),
+    ]),
+    cost: z.union([
+      ControlsSectionDeniedSchema,
+      z.object({
+        allowed: z.literal(true),
+        committed: ControlsFigureSchema,
+        actual: ControlsFigureSchema,
+        forecast: ControlsFigureSchema,
+        actualThroughDate: z.string().nullable(),
+        href: z.string().nullable().optional(),
+      }),
+    ]),
+    certification: z.union([
+      ControlsSectionDeniedSchema,
+      z.object({
+        allowed: z.literal(true),
+        certifiedAmount: ControlsFigureSchema,
+        lines: controlsCappedList(activityDetailRow),
+      }),
+    ]),
+    changes: z.union([
+      ControlsSectionDeniedSchema,
+      z.object({
+        allowed: z.literal(true),
+        changeOrders: z.union([ControlsSectionDeniedSchema, controlsCappedList(activityDetailRow)]),
+        changeEvents: z.union([ControlsSectionDeniedSchema, controlsCappedList(activityDetailRow)]),
+      }),
+    ]),
+    procurement: z.union([
+      ControlsSectionDeniedSchema,
+      z.object({
+        allowed: z.literal(true),
+        note: z.string().optional(),
+        packages: z.array(activityDetailRow),
+        orders: z.array(activityDetailRow),
+        poLines: z.array(activityDetailRow),
+        longLeadItems: z.array(activityDetailRow),
+        leadTimeAlerts: z.array(activityDetailRow),
+      }),
+    ]),
+    quality: z.union([
+      ControlsSectionDeniedSchema,
+      z.object({
+        allowed: z.literal(true),
+        ncrs: activityDetailQuality,
+        itps: activityDetailQuality,
+        punchItems: activityDetailQuality,
+      }),
+    ]),
+    constraints: z.object({
+      allowed: z.literal(true),
+      note: z.string().optional(),
+      predecessors: z.array(activityDetailRow),
+      successors: z.array(activityDetailRow),
+      lookahead: activityDetailQuality,
+    }),
+    documents: z.object({
+      allowed: z.literal(true),
+      attachments: controlsCappedList(activityDetailRow),
+      photos: controlsCappedList(activityDetailRow),
+      linkedRecords: z.array(activityDetailRow),
+    }),
+    history: z.union([
+      ControlsSectionDeniedSchema,
+      z.object({
+        allowed: z.literal(true),
+        note: z.string().optional(),
+        events: z.array(activityDetailRow),
+        total: z.number(),
+      }),
+    ]),
+  }),
+})
+
+export type ActivityDetail = z.infer<typeof ActivityDetailSchema>

@@ -10,6 +10,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import {
+  ControlsDetailHost,
+  OpenDetailButton,
+} from '@/features/controls/components/controls-detail-drawers'
 import { MaterialsSection } from '@/features/materials/components/materials-section'
 import type { Activity } from '../data/schema'
 import { useActivities, useDeleteActivity } from '../hooks/use-activities'
@@ -114,7 +118,9 @@ export function ActivitiesList({
   }
 
   return (
-    <>
+    // An activity opens its detail drawer (PC-5); a readiness item's or a
+    // notification's ?recordId=&source=activity link lands on it.
+    <ControlsDetailHost projectId={projectId}>
       <div className='flex items-center justify-between'>
         <h2 className='text-lg font-semibold'>Activities</h2>
         {canCreateActivity && (
@@ -166,7 +172,15 @@ export function ActivitiesList({
                       A-1000?" — could not be found here
                       (OCTA-UX-ACTCODE-103). */}
                   <td className='p-3 font-mono text-xs'>
-                    {activity.activityCode ?? activity.p6ActivityId ?? '—'}
+                    <span className='inline-flex items-center gap-1'>
+                      {activity.activityCode ?? activity.p6ActivityId ?? '—'}
+                      <OpenDetailButton
+                        kind='activity'
+                        id={activity.id}
+                        label={`Open ${activity.name} detail`}
+                        testId={`activity-row-open-detail-${activity.id}`}
+                      />
+                    </span>
                   </td>
                   <td className='p-3 font-medium'>
                     {activity.isMilestone && (
@@ -351,6 +365,6 @@ export function ActivitiesList({
           </SheetContent>
         )}
       </Sheet>
-    </>
+    </ControlsDetailHost>
   )
 }
