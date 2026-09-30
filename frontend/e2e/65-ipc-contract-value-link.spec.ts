@@ -21,10 +21,12 @@ import { expectNoToastBeside, toast } from './support-toasts'
  * client contract is the BOQ's total (boq_fallback), and IPC P01 claimed and
  * submitted.
  *
- *   the PM certifies: refused in the server's words with an "Open Contract
- *      terms" link, and nothing is certified or advanced; the link lands on
- *      Client Billing for the same project, where the PM — who manages the
- *      contract and reads the BOQ — may confirm the value or enter one
+ *   the PM certifies: refused in the server's words — one toast with an
+ *      "Open Contract terms" link, never two, and a notice kept on the
+ *      workbook with the same sentence and link after the toast is gone —
+ *      and nothing is certified or advanced; either link lands on Client
+ *      Billing for the same project, where the PM — who manages the contract
+ *      and reads the BOQ — may confirm the value or enter one
  *   a quantity surveyor whose template takes the BOQ away (a contract
  *      manager without BOQ read): the original value reads "—" with the
  *      server's reason, no confirm-as-is button; they enter a value
@@ -235,24 +237,58 @@ test('a refused IPC certification links to Contract terms, which offers each per
     'CONTRACT_VALUE_NOT_ESTABLISHED',
     REFUSAL,
   ])
-  // The server's words, in the one toast that carries the link (the app-wide
-  // mutation default may repeat the sentence without it).
-  const link = page.getByRole('button', { name: 'Open Contract terms' })
-  const refusal = toast(page, REFUSAL).filter({ has: link })
-  await expect(refusal).toBeVisible()
-  await expect(link).toBeVisible()
+  // The server's words, in ONE toast — the workbook's own, carrying the
+  // link; the app-wide mutation handler no longer repeats the sentence
+  // (the certify mutation reports its own error, lib/mutation-meta.ts).
+  const refusals = toast(page, REFUSAL)
+  await expect(refusals).toHaveCount(1)
+  const refusal = refusals.first()
+  const toastLink = refusal.getByRole('button', { name: 'Open Contract terms' })
+  await expect(toastLink).toBeVisible()
+  expect(await refusals.count(), 'toasts carrying the refusal').toBe(1)
   // Never the generic failure beside it.
   await expectNoToastBeside(page, 'Failed to certify IPC', refusal)
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/commercial/ipc(\\?|$)`))
 
-  // The link lands on Contract terms (Client Billing) for the same project.
-  await link.click()
+  // ... and the same sentence kept on the workbook, with the same way to
+  // Contract terms, for as long as the period stays refused — a toast is
+  // gone in five seconds. No amount in it (the server's sentence has none).
+  const notice = page.getByTestId('uat-ipc-contract-value-notice')
+  await expect(notice).toBeVisible()
+  await expect(notice).toContainText('Certification of P01 was refused')
+  await expect(notice).toContainText(REFUSAL)
+  await expect(notice).not.toContainText('10,000')
+  await expect(notice).not.toContainText('10000')
+  const noticeLink = notice.getByTestId('uat-ipc-open-contract-terms')
+  await expect(noticeLink).toHaveText('Open Contract terms')
+  // Certify is still offered: the server decides on each attempt.
+  await expect(certify).toBeEnabled()
+  // Past the toast's five seconds: the toast has gone, the notice has not.
+  await expect(refusals).toHaveCount(0, { timeout: 20_000 })
+  await expect(notice).toBeVisible()
+  await expect(noticeLink).toBeVisible()
+
+  // The notice's link lands on Contract terms (Client Billing) for the same project.
+  await noticeLink.click()
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/commercial/client-billing(\\?|$)`))
   await expect(page.getByTestId('uat-client-billing')).toBeVisible({ timeout: 45_000 })
 
   // Nothing was certified or advanced by the refused attempt.
   expect(await footprint(projectId)).toEqual(before)
   expect((await contractOf(projectId)).originalValueSource).toBe('boq_fallback')
+
+  // The toast's own link lands there too: refused once more, followed at once.
+  const certifyAgain = await openIpc(page, base)
+  const [refusedAgain] = await Promise.all([
+    page.waitForResponse((response) => response.url().includes('/ipc/P01/certify') && response.request().method() === 'POST'),
+    certifyAgain.click(),
+  ])
+  expect(refusedAgain.status()).toBe(409)
+  await expect(refusals).toHaveCount(1)
+  await refusal.getByRole('button', { name: 'Open Contract terms' }).click()
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/commercial/client-billing(\\?|$)`))
+  await expect(page.getByTestId('uat-client-billing')).toBeVisible({ timeout: 45_000 })
+  expect(await footprint(projectId)).toEqual(before)
 
   const card = page.getByTestId('uat-contract-card')
   await expect(card).toBeVisible()

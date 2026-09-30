@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { REPORTS_OWN_ERROR } from '@/lib/mutation-meta'
 import { apiClient } from '@/services/api/client'
 
 /** Budget by cost code (OCTA-FIN-COSTCODE-019). */
@@ -322,6 +323,8 @@ export const useCreateBudgetLine = (projectId: string) => {
             }
         ),
     onSuccess: () => invalidateBudget(qc, projectId),
+    // The budget line dialog toasts the refusal itself (the lock's sentence).
+    meta: REPORTS_OWN_ERROR,
   })
 }
 
@@ -339,6 +342,7 @@ export const useUpdateBudgetLine = (projectId: string) => {
         .patch(`${base(projectId)}/lines/${lineId}`, payload)
         .then((response) => response.data.data as BudgetLine),
     onSuccess: () => invalidateBudget(qc, projectId),
+    meta: REPORTS_OWN_ERROR,
   })
 }
 
