@@ -136,10 +136,37 @@ export interface ProjectForecast {
     reason?: string
     activityCostWithheld?: true
     activityCostReason?: string
+    /**
+     * Source / derived / projection per figure, and from what (PC-7a).
+     * Labels only; the same for every reader who receives the figures.
+     * Absent when the cost block is withheld (withheld: true): no label for
+     * a figure the reader does not receive.
+     */
+    truth?: {
+      budget: string
+      bac: string
+      actual: string
+      eac: string
+      bottomUp: string
+      projected: string
+      overrun: string
+      labels?: { budget?: string; bac?: string }
+      derivedFrom?: Record<string, string>
+    }
   } | null
   summary: { scheduleLevel: ForecastLevel; costLevel: ForecastLevel } | null
   dataQuality: string[]
+  // The same notes, in the same order, with a stable kind (PC-7a);
+  // dataQualityItems[i].message === dataQuality[i]. Optional for an older API.
+  dataQualityItems?: ForecastDataQualityItem[]
   activities: ForecastActivity[]
+}
+
+export type ForecastDataQualityItem = {
+  kind: string
+  severity: 'info' | 'warning'
+  subject: string
+  message: string
 }
 
 // The basis and its words are shared with the EV tab (lib/eac-basis).

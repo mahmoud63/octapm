@@ -68,6 +68,8 @@ describe("Phase 22A — estimate at completion", () => {
   it("the summary carries the budget register's own figures, so the cockpit and the register agree on original, changes, revisions and revised budget", async () => {
     mockPrisma.costRecord.findMany.mockResolvedValue([record("a", { budget: 225000, actual: 71204, forecast: 0 })]);
     const summary = await service.getCostSummary({ orgId: "org-1", projectId: "project-1" });
-    expect(summary.budget).toEqual({ originalBudget: 170000, approvedChanges: 25000, revisions: 5000, revisedBudget: 200000, source: "budget_register", allocatedToActivities: 225000 });
+    expect(summary.budget).toEqual({ originalBudget: 170000, approvedChanges: 25000, revisions: 5000, revisedBudget: 200000, source: "budget_register", label: "Budget", allocatedToActivities: 225000 });
+    // PC-7a: the register's budget is named "Budget" and its truth is derived.
+    expect(summary.truth.budget).toMatchObject({ truth: "derived", label: "Budget" });
   });
 });

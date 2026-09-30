@@ -50,6 +50,7 @@ import {
   BudgetSnapshotsDialog,
   BudgetTransferDialog,
 } from './budget-dialogs'
+import { TruthBadge } from './truth-badge'
 
 const money = (currency: string) => {
   try {
@@ -67,14 +68,20 @@ function Stat({
   label,
   value,
   tone,
+  truth,
 }: {
   label: string
   value: string
   tone?: 'good' | 'bad'
+  /** Source, derived or projection:<basis>, as the server labels the line figures (PC-7a). */
+  truth?: string
 }) {
   return (
     <div className='rounded-lg border p-3'>
-      <p className='text-xs text-muted-foreground'>{label}</p>
+      <p className='text-xs text-muted-foreground'>
+        {label}
+        <TruthBadge truth={truth} />
+      </p>
       <p
         className={cn(
           'text-lg font-semibold tabular-nums',
@@ -134,6 +141,10 @@ export function BudgetPanel({ projectId }: { projectId: string }) {
   }
   const lines = data?.items ?? []
   const totals = data?.summary.totals
+  // The server's three-truths labels are the same words on every line
+  // (the forecast's typed/default split aside), so the totals take the
+  // first line's; the forecast total mixes both and is a projection.
+  const lineTruth = lines[0]?.truth
 
   return (
     <div className='space-y-3' data-testid='uat-budget-panel'>
@@ -141,21 +152,32 @@ export function BudgetPanel({ projectId }: { projectId: string }) {
         <Stat
           label='Original'
           value={formatMoney(totals?.originalBudget ?? 0)}
+          truth={lineTruth?.originalBudget}
         />
         <Stat
           label='Approved changes'
           value={formatMoney(totals?.approvedChanges ?? 0)}
         />
         <Stat label='Revisions' value={formatMoney(totals?.revisions ?? 0)} />
-        <Stat label='Revised' value={formatMoney(totals?.revisedBudget ?? 0)} />
+        <Stat
+          label='Revised'
+          value={formatMoney(totals?.revisedBudget ?? 0)}
+          truth={lineTruth?.revised}
+        />
         <Stat
           label={FINANCIAL_TERMS.executedCommitments.label}
           value={formatMoney(totals?.committed ?? 0)}
+          truth={lineTruth?.committed}
         />
-        <Stat label='Actual' value={formatMoney(totals?.actual ?? 0)} />
+        <Stat
+          label='Actual'
+          value={formatMoney(totals?.actual ?? 0)}
+          truth={lineTruth?.actual}
+        />
         <Stat
           label='Forecast (budget lines)'
           value={formatMoney(totals?.forecast ?? 0)}
+          truth={lineTruth ? 'projection:budget_line_forecasts' : undefined}
         />
         <Stat
           label='Variance'
@@ -391,6 +413,7 @@ export function BudgetPanel({ projectId }: { projectId: string }) {
                         auto
                       </span>
                     )}
+                    <TruthBadge truth={line.truth?.forecast} />
                   </td>
                   <td
                     className={cn(

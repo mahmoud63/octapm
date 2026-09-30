@@ -19,6 +19,58 @@ const {
   getApprovedActivityAllocationTotals,
 } = require('./activity-boq-allocation.service');
 const auditService = require('./audit.service');
+// Source / derived / projection labels (control model §3) — labels only.
+const {
+  TRUTHS,
+  projection,
+  BUDGET_LABELS,
+  COST_RECORD_FORECAST_DEFAULT_BASIS,
+  COST_RECORD_FORECAST_DEFAULT_RULE,
+} = require('../utils/figure-truth');
+
+// What each figure of the cost summary is, and from what. The same words for
+// every project and reader; they describe keys, never values, so a figure
+// utils/boq-figures withholds leaves only its label behind.
+const COST_SUMMARY_TRUTH = Object.freeze({
+  budget: {
+    truth: TRUTHS.DERIVED,
+    label: BUDGET_LABELS.register,
+    derivedFrom: 'Budget register: original budget + approved changes + revisions on the budget lines',
+    // The other two budgets the product states, each under its own name
+    // (control model §3, consequence 1) — neither is this one.
+    otherBudgets: [
+      { label: BUDGET_LABELS.evBudgetAtCompletion, derivedFrom: 'Approved allocations + approved budget revisions', where: 'the earned-value report (totalBudget)' },
+      { label: BUDGET_LABELS.contractWaterfall, derivedFrom: 'Project contract value + approved budget revisions', where: 'the budget revisions waterfall' },
+    ],
+  },
+  allocatedToActivities: {
+    truth: TRUTHS.DERIVED,
+    label: 'Allocated to activities',
+    derivedFrom: "The approved BOQ allocations of the activities with a cost record — not the project's budget",
+  },
+  totals: {
+    budget: TRUTHS.DERIVED,
+    committed: TRUTHS.DERIVED,
+    actual: TRUTHS.DERIVED,
+    forecast: projection('estimate_at_completion'),
+    derivedFrom: {
+      budget: "Each cost record's approved allocation",
+      committed: 'Executed commitments and approved commitment change orders (commitment.service)',
+      actual: 'The cost ledger (CostLedgerEntry)',
+      forecast: "Σ each record's estimate at completion: its forecast when set and not below actual, otherwise the larger of its budget and actual",
+    },
+  },
+  records: {
+    forecast: projection(`typed_or_${COST_RECORD_FORECAST_DEFAULT_BASIS}`),
+    derivedFrom: {
+      forecast: `Typed on the record, or when its writer gave none: ${COST_RECORD_FORECAST_DEFAULT_RULE}`,
+    },
+  },
+  eac: {
+    truth: projection('estimate_at_completion'),
+    derivedFrom: 'Actual + the cost to complete (most likely − actual): optimistic × 0.9, pessimistic × 1.15',
+  },
+});
 
 const ensureProject = async ({ orgId, projectId }) => {
   const project = await prisma.project.findFirst({
@@ -244,7 +296,8 @@ const getCostSummary = async ({ orgId, projectId }) => {
     })),
     totals,
     eac,
-    budget: { ...budget, allocatedToActivities: totals.budget },
+    budget: { ...budget, label: BUDGET_LABELS.register, allocatedToActivities: totals.budget },
+    truth: COST_SUMMARY_TRUTH,
   };
 };
 
@@ -298,12 +351,49 @@ const canonicalBudget = async ({ orgId, projectId }) => {
   }
 };
 
+// A record's stored forecast. A typed forecast stands as typed; without one
+// the default below is a projection, labelled on the cost summary
+// (truth.records.forecast: COST_RECORD_FORECAST_DEFAULT_RULE) — it is never
+// a source figure and never feeds a certified one.
+//
+// PC-7a 3d (owner, 2026-09-29): the default is the larger of budget and
+// actual — the same estimate at completion the cost summary already gives a
+// record without a forecast (estimateAtCompletion), so the stored default and
+// the summary state one rule. The former budget + 1.1 × (actual − budget)
+// was −0.1 × budget with no actual yet: the CostRecord money check refused
+// the write and every cost record created without a forecast on an allocated
+// activity answered 500.
 const resolveForecast = ({ budget, actual, payloadForecast }) => {
   if (payloadForecast !== undefined && payloadForecast !== null) {
     return Number(payloadForecast) || 0;
   }
 
-  return addMoney(budget, multiplyMoney(subtractMoney(actual, budget), 1.1));
+  return Math.max(0, toMoneyNumber(budget), toMoneyNumber(actual));
+};
+
+const COST_RECORD_MONEY_FIELDS = ['labour', 'material', 'equipment', 'subcontract', 'indirect', 'overhead', 'contingency', 'budget', 'committed', 'actual', 'forecast'];
+
+/**
+ * The figures about to be written obey the CostRecord money check (each a
+ * finite amount of 0 or more). The route validators refuse a negative figure
+ * a caller sends; this catches one the service would compute, or a caller
+ * that is not a route, as a business error naming the field — never the
+ * database's refusal, which answered 500 and quoted the Prisma call
+ * (PC-7a 3d).
+ */
+const assertCostRecordMoney = (data) => {
+  for (const field of COST_RECORD_MONEY_FIELDS) {
+    if (data[field] === undefined || data[field] === null) continue;
+    let value = Number.NaN;
+    try {
+      value = toMoneyNumber(data[field]);
+    } catch {
+      // not an amount at all — refused below like a negative one
+    }
+    if (!Number.isFinite(value) || value < 0) {
+      throw new HttpError(400, 'COST_RECORD_MONEY_INVALID', `${field} must be an amount of 0 or more`);
+    }
+  }
 };
 
 const runInTransaction = (fn) =>
@@ -433,17 +523,22 @@ const upsertCostRecord = async ({
     if (existing) {
       // A row found under the lock keeps the committed a commitment gave it
       // (Phase 21D, CX21-482) and every figure the caller did not mention.
+      assertCostRecordMoney(data);
       record = await tx.costRecord.update({ where: { id: existing.id }, data });
     } else {
       const budget = data.budget ?? approvedBudget;
+      const created = {
+        committed: 0,
+        ...data,
+        budget,
+        forecast: data.forecast ?? resolveForecast({ budget, actual: 0 }),
+      };
+      assertCostRecordMoney(created);
       record = await tx.costRecord.create({
         data: {
           projectId,
           activityId,
-          committed: 0,
-          ...data,
-          budget,
-          forecast: data.forecast ?? resolveForecast({ budget, actual: 0 }),
+          ...created,
         },
       });
     }
@@ -504,6 +599,7 @@ const updateCostRecord = async ({
     await assertCommittedIsTheCommitments({ tx, payload, existing, projectId, activityId: existing.activityId });
 
     const data = suppliedCostFields({ payload, existing });
+    assertCostRecordMoney(data);
     const record = await tx.costRecord.update({ where: { id: costRecordId }, data });
 
     await auditService.recordEvent({

@@ -325,6 +325,15 @@ const listOrders = async ({ orgId, projectId, status = null, supplierId = null, 
   const items = orders.map((order) => serializeOrder(order, viewer));
   const sum = (predicate, key) =>
     round2(items.filter(predicate).reduce((total, item) => addMoney(total, item[key]), 0));
+  // The value of orders neither planned nor cancelled. It is an order value,
+  // NOT committed cost: committed cost is executed commitments + approved
+  // commitment change orders (commitment.service recomputeCommitted), and this
+  // figure is never summed into the budget register (control model §3,
+  // consequence 3).
+  const orderValue = sum(
+    (item) => ![STATUS.CANCELLED, STATUS.PLANNED].includes(item.status),
+    "value"
+  );
 
   return {
     items,
@@ -334,10 +343,11 @@ const listOrders = async ({ orgId, projectId, status = null, supplierId = null, 
         (acc, key) => ({ ...acc, [key]: items.filter((item) => item.lifecycleStatus === key).length }),
         {}
       ),
-      committed: sum(
-        (item) => ![STATUS.CANCELLED, STATUS.PLANNED].includes(item.status),
-        "value"
-      ),
+      orderValue,
+      orderValueLabel: "Order value — not committed cost",
+      // Deprecated alias of orderValue, kept for one release because the
+      // mobile generated client still reads it. It is not committed cost.
+      committed: orderValue,
       invoiced: sum(() => true, "invoicedAmount"),
       awaitingApproval: items.filter((item) => item.status === STATUS.PENDING).length,
       awaitingAcknowledgement: items.filter((item) => item.status === STATUS.ISSUED).length,

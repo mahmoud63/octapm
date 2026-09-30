@@ -114,7 +114,8 @@ describe('Phase 21D — integrity (release challenge, ninth pass)', () => {
     // the forecast follows a budget that is set, from the row's own actual
     mockPrisma.costRecord.update.mockClear();
     await service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { budget: 2000 } });
-    expect(written()).toEqual({ budget: 2000, forecast: 240 }); // 2000 + (400 - 2000) × 1.1, to the cent
+    // PC-7a 3d: the larger of budget and actual (was 2000 + (400 − 2000) × 1.1 = 240, below the 400 already spent)
+    expect(written()).toEqual({ budget: 2000, forecast: 2000 });
   });
 
   it('CX21-497: an upsert on an existing row that names one category leaves the budget and the rest alone', async () => {
@@ -153,5 +154,21 @@ describe('Phase 21D — integrity (release challenge, tenth pass)', () => {
     mockPrisma.costRecord.update.mockClear();
     await service.upsertCostRecord({ orgId: 'org-1', projectId: 'p1', activityId: 'act-1', payload: { committed: 0, budget: 1000 } });
     expect(Object.prototype.hasOwnProperty.call(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data, 'committed')).toBe(false);
+  });
+});
+describe("PC-7a 3d — a cost record never gets a forecast below 0", () => {
+  it("a record created with no forecast on an allocated activity stores the larger of budget and actual", async () => {
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    mockPrisma.costRecord.findFirst.mockResolvedValueOnce(null);
+    mockPrisma.costRecord.create.mockClear();
+    await service.upsertCostRecord({ orgId: "org-1", projectId: "p1", activityId: "act-1", payload: { budget: 10000 } });
+    expect(mockPrisma.costRecord.create.mock.calls.at(-1)[0].data).toMatchObject({ budget: 10000, forecast: 10000 });
+  });
+
+  it("a figure the service would write below 0 is COST_RECORD_MONEY_INVALID, and nothing is written", async () => {
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    mockPrisma.costRecord.update.mockClear();
+    await expect(service.updateCostRecord({ orgId: "org-1", projectId: "p1", costRecordId: "cr-1", payload: { forecast: -5 } })).rejects.toMatchObject({ status: 400, code: "COST_RECORD_MONEY_INVALID" });
+    expect(mockPrisma.costRecord.update).not.toHaveBeenCalled();
   });
 });

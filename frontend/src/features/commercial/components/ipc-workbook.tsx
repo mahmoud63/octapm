@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { formatShortDate } from '@/lib/dates'
+import { getServerErrorMessage } from '@/lib/handle-server-error'
 import {
   AlertTriangle,
   Banknote,
@@ -54,6 +56,13 @@ function statusTone(status?: string) {
   return 'border-muted-foreground/30 bg-muted text-muted-foreground'
 }
 
+const errorCodeFrom = (error: unknown) =>
+  (
+    error as {
+      response?: { data?: { error?: { code?: string } } }
+    }
+  )?.response?.data?.error?.code
+
 function StatusBadge({ label, value }: { label: string; value?: string }) {
   return (
     <Badge variant='outline' className={statusTone(value)}>
@@ -90,6 +99,15 @@ export function IpcWorkbook({
   const issueInvoice = useIssueIpcInvoice(projectId)
   const recordPayment = useRecordIpcPayment(projectId)
   const releaseRetention = useReleaseIpcRetention(projectId)
+  const navigate = useNavigate()
+  // Certification waits for an established contract value (409
+  // CONTRACT_VALUE_NOT_ESTABLISHED): the refusal says so in the server's
+  // words and offers the way to Contract terms (Client Billing).
+  const openContractTerms = () =>
+    navigate({
+      to: '/projects/$projectId/$module/$child',
+      params: { projectId, module: 'commercial', child: 'client-billing' },
+    })
 
   const [selectedPeriod, setSelectedPeriod] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
@@ -140,6 +158,20 @@ export function IpcWorkbook({
     0,
     totals.totalRet - totals.retentionReleased
   )
+  // Retention, net payable and balance of a period not yet certified, where
+  // the server withheld them with the contract value (the cap is a rate of
+  // it): shown as "—" with the server's reason, never a zero.
+  const figure = (key: 'totalRet' | 'netPayable' | 'balanceDue') => {
+    const withheld = detail?.valueWithheld?.keys.includes(key) ? detail.valueWithheld : null
+    return withheld ? (
+      <span className='inline-flex flex-col' data-testid='ipc-total-withheld'>
+        <span>—</span>
+        <span className='text-[11px] font-normal text-muted-foreground'>{withheld.reason}</span>
+      </span>
+    ) : (
+      fmtUSD(totals[key])
+    )
+  }
   const certificationReview = detail?.certificationReview
   const requiresOverride = Boolean(certificationReview?.requiresPmOverride)
   const hasReviewWarning = Boolean(
@@ -250,8 +282,19 @@ export function IpcWorkbook({
                   setCertificationComment('')
                   setOverrideReason('')
                   toast.success('IPC certified')
-                } catch {
-                  toast.error('Failed to certify IPC')
+                } catch (error) {
+                  if (
+                    errorCodeFrom(error) === 'CONTRACT_VALUE_NOT_ESTABLISHED'
+                  ) {
+                    toast.error(getServerErrorMessage(error), {
+                      action: {
+                        label: 'Open Contract terms',
+                        onClick: openContractTerms,
+                      },
+                    })
+                  } else {
+                    toast.error('Failed to certify IPC')
+                  }
                 }
               }}
             >
@@ -625,13 +668,13 @@ export function IpcWorkbook({
         <div className='rounded-lg border p-3'>
           <p className='text-xs text-muted-foreground'>Retention Held</p>
           <p className='text-xl font-bold text-amber-600'>
-            {fmtUSD(totals.totalRet)}
+            {figure('totalRet')}
           </p>
         </div>
         <div className='rounded-lg border p-3'>
           <p className='text-xs text-muted-foreground'>Net Payable</p>
           <p className='text-xl font-bold text-green-600'>
-            {fmtUSD(totals.netPayable)}
+            {figure('netPayable')}
           </p>
         </div>
         <div className='rounded-lg border p-3'>
@@ -647,7 +690,7 @@ export function IpcWorkbook({
         <div className='rounded-lg border p-3'>
           <p className='text-xs text-muted-foreground'>Balance Due</p>
           <p className='text-xl font-bold text-rose-600'>
-            {fmtUSD(totals.balanceDue)}
+            {figure('balanceDue')}
           </p>
         </div>
       </div>
@@ -834,10 +877,10 @@ export function IpcWorkbook({
                 <td className='p-2' />
                 <td className='p-2' />
                 <td className='p-2 text-right text-xs font-semibold'>
-                  {fmtUSD(totals.totalRet)}
+                  {figure('totalRet')}
                 </td>
                 <td className='p-2 text-right text-xs font-semibold'>
-                  {fmtUSD(totals.netPayable)}
+                  {figure('netPayable')}
                 </td>
               </tr>
             </tfoot>

@@ -51,14 +51,31 @@ function Row({
   negative = false,
   strong = false,
   rule = false,
+  withheld = null,
 }: {
   label: string
-  value: number
+  value: number | undefined
   hint?: string
   negative?: boolean
   strong?: boolean
   rule?: boolean
+  /** The server withheld the figure: "—" and its reason, never a zero. */
+  withheld?: ValueWithheld | null
 }) {
+  if (withheld) {
+    return (
+      <div className={cn('flex items-baseline justify-between gap-4 py-1.5', rule && 'border-t mt-1 pt-2', strong && 'font-semibold')}>
+        <span className={cn('text-sm', !strong && 'text-muted-foreground')}>
+          {label}
+          {hint && <span className='ms-1.5 text-[11px] opacity-70'>{hint}</span>}
+        </span>
+        <span className='text-right text-sm'>
+          <Withheld reason={withheld.reason} />
+        </span>
+      </div>
+    )
+  }
+  value = value ?? 0
   if (!strong && !negative && !value && !hint) return null
   return (
     <div
@@ -275,6 +292,7 @@ export function ClientBillingPanel({ projectId }: { projectId: string }) {
                 <Row
                   label='Retention'
                   value={summary.retentionThisPeriod}
+                  withheld={withheldKey(summary.valueWithheld, 'retentionThisPeriod')}
                   hint={
                     c.retentionCapRate
                       ? `${c.retentionRate}%, capped at ${c.retentionCapRate}%`
@@ -297,11 +315,23 @@ export function ClientBillingPanel({ projectId }: { projectId: string }) {
                 <Row
                   label='Tax'
                   value={summary.taxAmount}
+                  withheld={withheldKey(summary.valueWithheld, 'taxAmount')}
                   hint={summary.taxRate ? `${summary.taxRate}%` : undefined}
                 />
-                <Row label='Total due' value={summary.totalDue} strong rule />
+                <Row
+                  label='Total due'
+                  value={summary.totalDue}
+                  withheld={withheldKey(summary.valueWithheld, 'totalDue')}
+                  strong
+                  rule
+                />
                 <Row label='Received' value={current.amountPaid} />
-                <Row label='Outstanding' value={current.balanceDue} strong />
+                <Row
+                  label='Outstanding'
+                  value={current.balanceDue}
+                  withheld={withheldKey(current.valueWithheld, 'balanceDue')}
+                  strong
+                />
               </div>
             ) : (
               <p className='py-6 text-center text-sm text-muted-foreground'>

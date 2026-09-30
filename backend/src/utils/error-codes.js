@@ -241,6 +241,50 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "commercial",
     message: "The original value is already established; there is nothing to confirm",
   },
+  // PC-7a (owner decision 2026-09-29): IPC certification and advance receipts
+  // rely on the contract amount, so they wait for an established value.
+  CONTRACT_VALUE_NOT_ESTABLISHED: {
+    status: 409,
+    category: "commercial",
+    message:
+      "Establish the contract value first (Contract terms: enter it, or confirm it if you may read the BOQ)",
+  },
+  // PC-7a (owner decision 2026-09-29): a contract-terms change — an entered or
+  // confirmed contract value above all — and its contract.manage audit record
+  // are written together or not at all. A deliberate 5xx: in production the
+  // body carries this message.
+  CONTRACT_AUDIT_UNAVAILABLE: {
+    status: 503,
+    category: "commercial",
+    message:
+      "The contract terms were not saved because their audit record could not be written; try again",
+  },
+  // PC-7a (owner decision 2026-09-29): a budget line's Original Budget is
+  // immutable once an approved change, an executed commitment, a ledger
+  // posting or a locked period's snapshot stands on it; a new amount is a
+  // budget revision that flows into Revised Budget.
+  BUDGET_ORIGINAL_LOCKED: {
+    status: 409,
+    category: "cost",
+    message:
+      "The original budget of this line is locked; record the change as a budget revision, which flows into the revised budget",
+  },
+  // PC-7a 3d (owner, 2026-09-29): a cost record figure the service would
+  // write below 0 (or not an amount) is refused as a business error, never
+  // the database's CostRecord money check as a 500.
+  COST_RECORD_MONEY_INVALID: {
+    status: 400,
+    category: "cost",
+    message: "Every cost record figure must be an amount of 0 or more",
+  },
+  // PC-7a review: a locked reporting period's figures (its EV cost loading,
+  // its budget snapshot taken at the lock) cannot be written again; the code
+  // was already answered by earned-value.service and is registered here.
+  REPORTING_PERIOD_LOCKED: {
+    status: 409,
+    category: "cost",
+    message: "Reporting period is locked",
+  },
   EOT_WORKFLOW_ACTION_REQUIRED: {
     status: 400,
     category: "commercial",

@@ -866,6 +866,8 @@ const components = {
         "BOQ_SCOPE_REQUIRED_FOR_BASELINE",
         "BOQ_VALIDATION_FAILED",
         "BOQ_VALUE_REQUIRED_FOR_BASELINE",
+        // PC-7a: a budget line's Original Budget cannot move once a lock condition stands on it.
+        "BUDGET_ORIGINAL_LOCKED",
         "CARD_DECLINED",
         "CHANGE_ORDER_APPROVED_LOCKED",
         "CHANGE_ORDER_ARCHIVED",
@@ -877,9 +879,14 @@ const components = {
         "COMPANY_REQUIRED",
         "CONFIG_ERROR",
         "CONFLICT",
+        // PC-7a: a contract-terms change is refused when its audit record cannot be written.
+        "CONTRACT_AUDIT_UNAVAILABLE",
         "CONTRACT_VALUE_ALREADY_ESTABLISHED",
         "CONTRACT_VALUE_CONFIRM_CONFLICT",
         "CONTRACT_VALUE_CONFIRM_FORBIDDEN",
+        "CONTRACT_VALUE_NOT_ESTABLISHED",
+        // PC-7a 3d: a cost record figure below 0 is a business error, not the database's refusal.
+        "COST_RECORD_MONEY_INVALID",
         "COST_RECORD_NOT_FOUND",
         "CPM_DEPENDENCY_CYCLE",
         "DAILY_REPORT_LINK_INVALID",
@@ -1034,6 +1041,8 @@ const components = {
         "SAFETY_NOT_READY_FOR_REOPEN",
         "SAFETY_REOPEN_REASON_REQUIRED",
         "SAFETY_WORKFLOW_ACTION_REQUIRED",
+        // PC-7a review: a locked period's EV cost loading or budget snapshot cannot be written again.
+        "REPORTING_PERIOD_LOCKED",
         "REVISION_NOT_FOUND",
         "RECEIPT_LINE_NOT_FOUND",
         "RECEIPT_LINES_REQUIRED",
@@ -1268,6 +1277,7 @@ const components = {
           {
             parts: arrayOf({ type: "string" }),
             keys: arrayOf({ type: "string" }),
+            source: { type: "string", enum: ["boq_fallback", "unestablished"] },
             reason: { type: "string" },
           },
           ["parts", "keys", "reason"],
@@ -5272,6 +5282,30 @@ const components = {
       progressStatus: { type: "string" },
       isCritical: { type: "boolean" },
     }),
+    // PC-7a item 3: one locked reporting period's EV point, read as stored.
+    EarnedValueHistoryPoint: objectSchema(
+      {
+        periodId: uuid,
+        code: { type: "string" },
+        label: { type: "string" },
+        cutoffDate: { ...dateString, description: "The cutoff instant stored in the period's snapshot at the lock (the end of cutoffLocalDate in timeZone); never re-read against today's zone." },
+        cutoffLocalDate: { type: "string", nullable: true, description: "The reporting date (YYYY-MM-DD) recorded at the lock." },
+        timeZone: { type: "string", nullable: true },
+        timeZoneSource: { type: "string", nullable: true, description: "project, organisation or utc, as recorded at the lock." },
+        timeZoneNote: { type: "string", nullable: true, description: "As recorded at the lock: null when the project's own zone applied, else \"Project timezone is not configured; UTC is being used\" or the organisation-default sentence." },
+        totalBudget: money,
+        pv: money,
+        ev: money,
+        ac: money,
+        eac: { ...signedMoney, nullable: true },
+        spi: { type: "number", nullable: true },
+        cpi: { type: "number", nullable: true },
+        formulaVersion: { type: "string" },
+        lockedAt: dateString,
+        snapshotId: uuid,
+      },
+      ["periodId", "code", "label", "cutoffDate", "pv", "ev", "ac", "lockedAt", "snapshotId"],
+    ),
     EarnedValueReport: objectSchema(
       {
         totalBudget: money,
@@ -5290,10 +5324,15 @@ const components = {
         sv: signedMoney,
         cv: signedMoney,
         etc: signedMoney,
+        truth: {
+          ...ref("GenericObject"),
+          description:
+            "PC-7a three truths (labels only): pv, ev, ac, totalBudget, spi, cpi, sv and cv are \"derived\"; eac is \"projection:eacBasis\" (its rule is the eacBasis key) and etc \"projection:eac_minus_ac\"; labels.totalBudget is \"Budget at completion (EV basis)\" — not the budget register's \"Budget\" nor the \"Contract value + approved changes\" waterfall; derivedFrom says from what. The same object on every report, live or locked; never stored with a snapshot.",
+        },
         reporting: {
           ...ref("GenericObject"),
           description:
-            "cutoffDate is the one cutoff PV (approved cost loading whose plannedDate calendar date is on or before cutoffLocalDate), EV (progress approved on or before the cutoffDate instant) and AC (cost records whose actualThroughDate calendar date is on or before cutoffLocalDate) are selected against. plannedDate and actualThroughDate are calendar dates (a date input stores them at 00:00 UTC of the date; the date is the UTC calendar date of the stored value), so a row dated the day after the cutoff date never counts, in any zone; real instants (approvedAt, budget-revision effectiveDate) compare with the cutoffDate instant. The cutoffDate instant is the end of cutoffLocalDate (YYYY-MM-DD) in timeZone (IANA), whose timeZoneSource says where the zone came from — project (Project.timezone), organisation (Organisation.defaultTimezone) or utc. The instant is computed for that date from the zone's own rules, daylight saving included (for America/Chicago a date in CDT ends at 04:59:59.999Z the next day, a date in CST at 05:59:59.999Z), never a fixed offset. timeZoneNote is null when the project's own zone applied, otherwise the sentence to show beside the cutoff: \"Project timezone is not configured; UTC is being used\" or \"Project timezone is not configured; the organisation default <zone> is being used\" (also appended to basisWarnings). sourceSummary.pv/ev/ac.selectedThrough state the cutoff instant each figure is reported through — the same one. When the cutoffDate instant is still in the future, basisWarnings says so: EV and AC are measured through today while PV runs to the cutoff. A locked period answers with its stored snapshot (isSnapshot true), never recomputed; its cutoffDate, zone and note are those recorded at the lock, and a snapshot stored before the zone was recorded carries no timeZone. An open period may move when records fall between an earlier cutoff and this one.",
+            "cutoffDate is the one cutoff PV (approved cost loading whose plannedDate calendar date is on or before cutoffLocalDate), EV (progress approved on or before the cutoffDate instant) and AC (cost records whose actualThroughDate calendar date is on or before cutoffLocalDate) are selected against. plannedDate and actualThroughDate are calendar dates: the date is the UTC calendar date of the stored value. A date typed in (a cost loading's plannedDate, a cost record's actualThroughDate, a direct cost's costDate, a timesheet or equipment day, a pay application's periodEnd) is stored at 00:00 UTC of that date, kept as entered. A cost that happens at an instant (a material issue's occurredAt; a subcontractor pay application approved without a periodEnd, at its approval) is dated by the cost ledger's writer on the calendar date that instant falls on in the same reporting zone as the cutoff below (Project.timezone, else Organisation.defaultTimezone, else UTC) and stored at 00:00 UTC of that date, so an issue at 23:30 local on the cutoff date counts and one at 00:30 local the next day does not, exactly as a progress approval at those moments would. Ledger entries written before this rule keep their stored value. A row dated the day after the cutoff date never counts, in any zone; real instants (approvedAt, budget-revision effectiveDate) compare with the cutoffDate instant. The cutoffDate instant is the end of cutoffLocalDate (YYYY-MM-DD) in timeZone (IANA), whose timeZoneSource says where the zone came from — project (Project.timezone), organisation (Organisation.defaultTimezone) or utc. The instant is computed for that date from the zone's own rules, daylight saving included (for America/Chicago a date in CDT ends at 04:59:59.999Z the next day, a date in CST at 05:59:59.999Z), never a fixed offset. timeZoneNote is null when the project's own zone applied, otherwise the sentence to show beside the cutoff: \"Project timezone is not configured; UTC is being used\" or \"Project timezone is not configured; the organisation default <zone> is being used\" (also appended to basisWarnings). sourceSummary.pv/ev/ac.selectedThrough state the cutoff instant each figure is reported through — the same one. When the cutoffDate instant is still in the future, basisWarnings says so: EV and AC are measured through today while PV runs to the cutoff. A locked period answers with its stored snapshot (isSnapshot true), never recomputed; its cutoffDate, zone and note are those recorded at the lock, and a snapshot stored before the zone was recorded carries no timeZone. An open period may move when records fall between an earlier cutoff and this one.",
         },
         basis: ref("GenericObject"),
         sourceSummary: ref("GenericObject"),
@@ -5316,6 +5355,16 @@ const components = {
         sCurveNote: {
           type: "string",
           description: "What the sCurve's EV points are; for a snapshot stored before EV was given only at the cutoff, that its earlier months repeat the cutoff's EV and are not a measured history.",
+        },
+        history: {
+          ...arrayOf(ref("EarnedValueHistoryPoint")),
+          description:
+            "GET /reports/ev and the answer to POST /reports/periods/{periodId}/lock (the same report for the period it locked, the point it made included) (PC-7a). The measured S-curve history: one point per LOCKED reporting period of the project whose stored cutoff instant is on or before this report's cutoffDate, earliest first, each read from its EvPeriodSnapshot exactly as stored at the lock (figures, instant, date and zone). Nothing is recomputed, interpolated or filled between periods: an open period, an ad hoc cutoff or a later record never adds or moves a point. Project-level totals, so every cost reader receives it; empty when no period is locked.",
+        },
+        historyNote: { type: "string", description: "GET /reports/ev and a period lock's answer: what the history points are (locked snapshots as stored; nothing filled in)." },
+        historyTruth: {
+          ...ref("GenericObject"),
+          description: "GET /reports/ev and a period lock's answer (labels): pv, ev, ac, totalBudget, spi and cpi are \"derived\" at the lock and frozen since (frozenAt \"locked_period_snapshot\"); eac is \"projection:eac_at_lock\"; derivedFrom says from what.",
         },
         activityBreakdown: {
           ...arrayOf(ref("EarnedValueActivityBreakdown")),
@@ -7482,7 +7531,7 @@ add(
     tag: "Projects",
     summary: "Get workspace-level construction health and workflow queues.",
     description:
-      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview. Each projectHealth row carries bac (the official EV budget: the approved BOQ allocations), eac (bac / CPI), ev (approved allocations × % complete), pv (approved cost loading) and ac (the cost ledger's official actuals) only for a caller who may read the BOQ or the cost module on that project, decided as that project's own routes decide it (permission template, role, party); otherwise those keys are absent, not zero. The IPC queue (workflowQueues ipcActions, pendingReview ipcActions, each project's workflowActions) counts and lists a project's certificates only for a caller who may read its IPC (ipc:read, as GET /projects/{projectId}/ipc), and its certificate lines (target.source ipc_item: one per approved BOQ allocation, valued off the row) only for one who may also read its BOQ, as GET /projects/{projectId}/ipc/{period} withholds them; for anyone else those items are absent and not counted. Scores, spi and cpi are the same for every caller. dataFreshness.cutoffDate is the official cutoff: the latest EV cutoff among the projects' EV reports (each on its default basis), never a project data date — the answer's own time only when no project has an EV report; when it is a project's EV cutoff, dataFreshness also states cutoffLocalDate, cutoffTimeZone, cutoffTimeZoneSource and cutoffTimeZoneNote (null when that project's own zone applied, otherwise \"Project timezone is not configured; UTC is being used\" or the organisation default it names) — otherwise those are null." + DEFAULT_EV_PERIOD,
+      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview. Each projectHealth row carries bac (the official EV budget: the approved BOQ allocations), eac (bac / CPI), ev (approved allocations × % complete), pv (approved cost loading) and ac (the cost ledger's official actuals) only for a caller who may read the BOQ or the cost module on that project, decided as that project's own routes decide it (permission template, role, party); otherwise those keys are absent, not zero. The IPC queue (workflowQueues ipcActions, pendingReview ipcActions, each project's workflowActions) counts and lists a project's certificates only for a caller who may read its IPC (ipc:read, as GET /projects/{projectId}/ipc), and its certificate lines (target.source ipc_item: one per approved BOQ allocation, valued off the row) only for one who may also read its BOQ, as GET /projects/{projectId}/ipc/{period} withholds them; for anyone else those items are absent and not counted. A submitted certificate's item states its net payable in meta, except where the project's contract value is withheld from the caller (a boq_fallback or unestablished originalValueSource, no boq:read) and a retention cap is set: the net payable follows retention the cap may limit, so meta reads \"<currency> —\" and the item carries valueWithheld { keys, source, reason }, as GET /projects/{projectId}/ipc withholds it. Scores, spi and cpi are the same for every caller. dataFreshness.cutoffDate is the official cutoff: the latest EV cutoff among the projects' EV reports (each on its default basis), never a project data date — the answer's own time only when no project has an EV report; when it is a project's EV cutoff, dataFreshness also states cutoffLocalDate, cutoffTimeZone, cutoffTimeZoneSource and cutoffTimeZoneNote (null when that project's own zone applied, otherwise \"Project timezone is not configured; UTC is being used\" or the organisation default it names) — otherwise those are null." + DEFAULT_EV_PERIOD,
     operationId: "getWorkspaceDashboard",
     responseSchema: ref("GenericObject"),
   }),
@@ -8776,7 +8825,7 @@ add(
   operation({
     tag: "Reports",
     summary: "Lock a reporting period EV snapshot.",
-    description: `${EV_REPORT_FIGURES} A lock refused by the official-reporting readiness gate (409 REPORTING_READINESS_BLOCKED, 403 REPORTING_READINESS_OVERRIDE_FORBIDDEN) states the gate in error.details.gate, withheld the same way.`,
+    description: `${EV_REPORT_FIGURES} The answer is the locked period's report exactly as GET /reports/ev?periodId= then gives it to the same caller — the stored snapshot's report with history, historyNote and historyTruth (the point this lock made included) — withheld the same way. A lock refused by the official-reporting readiness gate (409 REPORTING_READINESS_BLOCKED, 403 REPORTING_READINESS_OVERRIDE_FORBIDDEN) states the gate in error.details.gate, withheld the same way.`,
     operationId: "lockReportingPeriod",
     parameters: [
       ...projectParams,
@@ -9150,7 +9199,7 @@ add(
             "true confirms the stored original value as it stands (a boq_fallback or unestablished value) as the contract's: originalValueSource becomes contract_entry and the contract.manage audit event records who and when (summary.originalValueConfirmation = confirmed). Needs boq:read on the project as well (403 CONTRACT_VALUE_CONFIRM_FORBIDDEN), cannot be sent with originalValue (400 CONTRACT_VALUE_CONFIRM_CONFLICT), and an established value has nothing to confirm (409 CONTRACT_VALUE_ALREADY_ESTABLISHED).",
         },
       }),
-      "Contract fields to change. The advance amount follows the advance rate unless it is given explicitly. An originalValue different from the stored one is an entry (originalValueSource becomes contract_entry; summary.originalValueConfirmation = entered); the stored value sent back, or a save without originalValue, never changes the source. originalValueSource cannot be sent (400 VALIDATION_ERROR). The answer is the contract, withheld as GET withholds it.",
+      "Contract fields to change. The advance amount follows the advance rate unless it is given explicitly. An originalValue different from the stored one is an entry (originalValueSource becomes contract_entry; summary.originalValueConfirmation = entered); the stored value sent back, or a save without originalValue, never changes the source — except by a caller who may not read the BOQ while the value is boq_fallback or unestablished: any originalValue they send is their own entry (contract_entry, entered), so a sent amount never answers whether it was the withheld one. originalValueSource cannot be sent (400 VALIDATION_ERROR). The change and its contract.manage audit event are written in one transaction: if the audit record cannot be written nothing is saved and the answer is 503 CONTRACT_AUDIT_UNAVAILABLE (retry). The answer is the contract, withheld as GET withholds it.",
       false,
     ),
   }),
@@ -9164,7 +9213,7 @@ add(
     summary:
       "The client billing statement: contract, approved changes, previously certified, this period, retention, advance recovery, deductions, tax, total due — and the same story per BOQ line.",
     description:
-      "`lines` (the schedule of values) are the project's live BOQ rows — boqItemId, code, section, description, unit, quantity, rate, contractAmount — with what the period certified against each. A caller who may not read the BOQ (boq:read) is given the statement without `lines`, and `linesWithheld: { reason }` in their place; the contract, summary, current certificate and periods are the commercial module's own records and are returned to every ipc reader — except the contract's original value while it is boq_fallback or unestablished (see getPrimeContract): such a caller is given the contract and the summary without originalValue, revisedValue, remainingToCertify (summary) and, when advanceRate > 0, advanceAmount, each with `valueWithheld: { keys, source, reason }`.",
+      "`lines` (the schedule of values) are the project's live BOQ rows — boqItemId, code, section, description, unit, quantity, rate, contractAmount — with what the period certified against each. A caller who may not read the BOQ (boq:read) is given the statement without `lines`, and `linesWithheld: { reason }` in their place; the contract, summary, current certificate and periods are the commercial module's own records and are returned to every ipc reader — except the contract's original value while it is boq_fallback or unestablished (see getPrimeContract): such a caller is given the contract and the summary without originalValue, revisedValue, remainingToCertify (summary) and, when advanceRate > 0, advanceAmount, each with `valueWithheld: { keys, source, reason }`. Where the contract also sets a retention cap (retentionCapRate > 0), the cap-limited figures of a period not yet certified are withheld the same way: the summary's retentionThisPeriod, taxAmount and totalDue while the current period is draft or submitted, and totalRet, netPayable and balanceDue of each such period in `current` and `periods`, each with `valueWithheld`.",
     operationId: "getClientBillingStatement",
     parameters: [
       ...projectParams,
@@ -9218,7 +9267,7 @@ add(
         occurredAt: { type: "string", format: "date-time", nullable: true },
         note: { type: "string", nullable: true },
       }),
-      "The advance received. Refused if it takes the total past the agreed advance (409 ADVANCE_OVER_AGREED; the message states the agreed figure only to a caller who may receive it). The answer is the contract, withheld as GET /prime-contract withholds it.",
+      "The advance received. Refused first, before the amount is looked at, while the contract's original value is not established — a boq_fallback or unestablished source (409 CONTRACT_VALUE_NOT_ESTABLISHED, one response whatever the stored figure, nothing written; enter or confirm it through PATCH /prime-contract). Refused if it takes the total past the agreed advance (409 ADVANCE_OVER_AGREED; the message states the agreed figure only to a caller who may receive it). The answer is the contract, withheld as GET /prime-contract withholds it.",
     ),
     status: 201,
   }),
@@ -9231,7 +9280,7 @@ add(
     tag: "Commercial",
     summary: "List IPC certificates.",
     description:
-      "A caller who may not read the BOQ (boq:read) is given each certificate without the certification review stamped on it from the BOQ rows and their allocations (earnedValueAtCertification, approvedLimitAtCertification, overCertificationAmount); `boqWithheld: { keys, reason }` names what was left out.",
+      "A caller who may not read the BOQ (boq:read) is given each certificate without the certification review stamped on it from the BOQ rows and their allocations (earnedValueAtCertification, approvedLimitAtCertification, overCertificationAmount); `boqWithheld: { keys, reason }` names what was left out. While the original value is withheld from such a caller and the contract sets a retention cap (retentionCapRate > 0) — the cap is a rate of the revised value, so the retention of a certificate it limits restates that value — a certificate not yet certified (draft or submitted) is given without its cap-limited totals (totalRet, netPayable, taxAmount, balanceDue) and with `valueWithheld: { keys, source, reason }` (never zero); decided on the source, the cap rate and the status only. A certified or paid certificate's totals — the retention it holds — stay.",
     operationId: "listIpcCertificates",
     parameters: projectParams,
     permissions: modulePermission("ipc", "read"),
@@ -9263,7 +9312,7 @@ add(
     tag: "Commercial",
     summary: "Get an IPC period with certification items.",
     description:
-      "`items` are the certificate's lines — each a live BOQ row (boqItem: id, code, ref, description, unit, qty, rate) with its allocation and progress link — and `certificationReview` is worked over them. A caller who may not read the BOQ (boq:read) is given the certificate without `items`, `certificationReview` and the review stamped at certification, and `boqWithheld: { keys, reason }` in their place; the certificate's own totals, invoices, payments and retention releases are returned to every ipc reader. The certificate answered by create, adjustments, submit, certify, a payment and a retention release is withheld the same way.",
+      "`items` are the certificate's lines — each a live BOQ row (boqItem: id, code, ref, description, unit, qty, rate) with its allocation and progress link — and `certificationReview` is worked over them. A caller who may not read the BOQ (boq:read) is given the certificate without `items`, `certificationReview` and the review stamped at certification, and `boqWithheld: { keys, reason }` in their place; the certificate's own totals, invoices, payments and retention releases are returned to every ipc reader. The certificate answered by create, adjustments, submit, certify, a payment and a retention release is withheld the same way. While the original value is withheld from such a caller and the contract sets a retention cap (retentionCapRate > 0) — the cap is a rate of the revised value, so the retention of a certificate it limits restates that value — a certificate not yet certified (draft or submitted) is given without its cap-limited totals (totalRet, netPayable, taxAmount, balanceDue) and with `valueWithheld: { keys, source, reason }` (never zero); decided on the source, the cap rate and the status only. A certified or paid certificate's totals — the retention it holds — stay.",
     operationId: "getIpcPeriod",
     parameters: [
       ...projectParams,
@@ -9344,7 +9393,7 @@ add(
     "certify",
     "period.certify",
     ref("IpcCertifyRequest"),
-    "A period that claims more than approved progress earned, or more than the approved allocation or its quantity, needs a PM override: without an overrideReason it is refused with 400 IPC_PM_OVERRIDE_REASON_REQUIRED, and by anyone but a PM with 403 IPC_PM_OVERRIDE_REQUIRED. Outside production error.details on those refusals is the certification review, worked from the BOQ rows and their allocations (currentClaimedAmount, earnedAmount, approvedLimitAmount, overEarnedAmount, overApprovedQuantity, overrideLineCount …) — for a caller who may read the BOQ (boq:read); anyone else is given `{ boqWithheld: { keys: [\"certificationReview\"], reason } }` in its place, and the same code and message.",
+    "Refused with 409 CONTRACT_VALUE_NOT_ESTABLISHED while the client contract's original value is not established (a boq_fallback or unestablished source, or no contract yet and no project contract value): certification applies the retention cap, a rate of the revised value, so it waits until the value is entered or confirmed through PATCH /prime-contract. The refusal comes before the certification review, is the same whatever the stored figure, and changes nothing. A period that claims more than approved progress earned, or more than the approved allocation or its quantity, needs a PM override: without an overrideReason it is refused with 400 IPC_PM_OVERRIDE_REASON_REQUIRED, and by anyone but a PM with 403 IPC_PM_OVERRIDE_REQUIRED. Outside production error.details on those refusals is the certification review, worked from the BOQ rows and their allocations (currentClaimedAmount, earnedAmount, approvedLimitAmount, overEarnedAmount, overApprovedQuantity, overrideLineCount …) — for a caller who may read the BOQ (boq:read); anyone else is given `{ boqWithheld: { keys: [\"certificationReview\"], reason } }` in its place, and the same code and message.",
   ],
 ].forEach(([suffix, operationId, summary, action, transition, bodySchema, description]) => {
   add(
@@ -9826,7 +9875,7 @@ add(
     summary:
       "Purchase orders with their three states — commercial status, delivery, and billing — plus a derived lifecycleStatus of draft / pending_approval / approved / issued / acknowledged / partially_delivered / delivered / partially_invoiced / fully_invoiced / closed / cancelled.",
     description:
-      "An order that is fully delivered and half invoiced cannot pick one word, so the three facts are stored separately and the single name is computed from them.",
+      "An order that is fully delivered and half invoiced cannot pick one word, so the three facts are stored separately and the single name is computed from them. summary.orderValue is the value of the orders neither planned nor cancelled (summary.orderValueLabel \"Order value — not committed cost\"): it is NOT committed cost, which is executed commitments plus approved commitment change orders on the budget register. summary.committed is a deprecated alias of orderValue (same figure), kept for one release for the mobile client.",
     operationId: "listPurchaseOrders",
     parameters: [
       ...projectParams,
@@ -11286,7 +11335,7 @@ addGenericRoute({
   method: "get",
   tag: "Audit",
   summary:
-    "List project audit events. The history of the BOQ's records (boq_item, boq_revision, activity_boq_allocation) is present only for a caller who may read the BOQ, a cost_record event's budget (and generatedBudget) in its summaries — the budget written on the record, its activity's approved BOQ allocation when the record was made (owner decision E1) — only for a caller who may read the BOQ, and a schedule_revision event's totalBudget in its summaries only for a caller who may read the BOQ or the cost module. An ipc_certificate event's certificationReview and progressLinks (the review of the certificate's lines — the BOQ rows and their allocations — recorded at certification in the audit summary and the approval metadata: approvedLimitAmount, earnedAmount, overEarnedAmount, overApprovedLimitAmount, overApprovedQuantity, overrideLineCount …) are present only for a caller who may read the BOQ; anyone else is given the event without them and `boqWithheld: { keys, reason }` — who certified, when, the status, the certificate's totals and the override reason stay. A project event recording contract.manage (summary.transition) states the client contract's original value before and after (oldSummary / newSummary, each with its originalValueSource; an event written before that states none and is taken as project_value only while the contract is project_value now): for a caller who may not read the BOQ an original value that was not established (boq_fallback or unestablished) is left out of that summary and `valueWithheld: { parts, keys, reason }` names it; who, when and the rates stay. Output only: the stored events are not changed.",
+    "List project audit events. The history of the BOQ's records (boq_item, boq_revision, activity_boq_allocation) is present only for a caller who may read the BOQ, a cost_record event's budget (and generatedBudget) in its summaries — the budget written on the record, its activity's approved BOQ allocation when the record was made (owner decision E1) — only for a caller who may read the BOQ, and a schedule_revision event's totalBudget in its summaries only for a caller who may read the BOQ or the cost module. An ipc_certificate event's certificationReview and progressLinks (the review of the certificate's lines — the BOQ rows and their allocations — recorded at certification in the audit summary and the approval metadata: approvedLimitAmount, earnedAmount, overEarnedAmount, overApprovedLimitAmount, overApprovedQuantity, overrideLineCount …) are present only for a caller who may read the BOQ; anyone else is given the event without them and `boqWithheld: { keys, reason }` — who certified, when, the status, the certificate's totals and the override reason stay. A project event recording contract.manage (summary.transition) states the client contract's original value before and after (oldSummary / newSummary, each with its originalValueSource; an event written before that states none and is taken as project_value only while the contract is project_value now): for a caller who may not read the BOQ an original value that was not established (boq_fallback or unestablished) is left out of that summary and `valueWithheld: { parts, keys, reason }` names it; who, when and the rates stay. Where that value is withheld and the contract sets a retention cap, an ipc_certificate event's totals recorded for a certificate not yet certified (totalRet, netPayable, taxAmount, balanceDue in a before/after summary whose status is draft or submitted, and in the summary and approval metadata of an event that moved it to one) are left out, and `valueWithheld: { parts, keys, source, reason }` names the parts; a certification's after-state and the invoice, payment and release events stay. Output only: the stored events are not changed.",
   description:
     "Returns tenant-scoped centralized audit events. Each write also persists a compact redacted RecordHistorySnapshot row for contractual record history reconstruction.",
   operationId: "listProjectAuditEvents",
@@ -11859,6 +11908,9 @@ const costRecordListParams = [
 // Owner decision E1 (2026-09-28), as utils/boq-figures applies it to the Cost module.
 const COST_RECORD_BUDGETS =
   "Each record's budget is its activity's approved BOQ allocation, and generatedBudget the budget first written on the record: both are present only for a caller who may read the BOQ — reading the cost module does not override this (owner decision E1, 2026-09-28). The cost ledger's own figures on each record (the cost categories, committed, actual, actualThroughDate, forecast) are every cost reader's.";
+// PC-7a 3d (owner, 2026-09-29): the forecast a cost record is written with when its writer gives none.
+const COST_RECORD_FORECAST_DEFAULT_NOTE =
+  "When no forecast is given and the record is created, or its budget is written, the forecast stored is the larger of the record's budget and its actual (a projection — the cost summary's own estimate at completion for a record without a forecast; never below 0, never below actual). A figure the service would write below 0 is refused with 400 COST_RECORD_MONEY_INVALID naming the field; nothing is written.";
 
 [
   {
@@ -11875,7 +11927,7 @@ const COST_RECORD_BUDGETS =
     method: "get",
     path: "/projects/{projectId}/cost/summary",
     summary: "Get project cost summary.",
-    description: `${COST_RECORD_BUDGETS} The summary's figures built from those budgets — they add up the approved allocations of the activities that have a cost record, per category and in total, and a record with no forecast counts its budget in the forecast — are present only for a caller who may read the BOQ: byPhase[].budget, forecast, variance and variancePct; totals.budget and totals.forecast; eac.toComplete, optimistic, mostLikely and pessimistic; budget.allocatedToActivities. Anyone else receives each byPhase row's phase, committed and actual, totals.committed and totals.actual, eac.basis and eac.actual, and the budget register's original, approved changes, revisions and revised budget, with activityBudgetsWithheld true and activityBudgetsReason "Mapping details unavailable to you". Moving an approved allocation between activities changes nothing such a caller receives (owner decision E1). The project's own totals — EV, PV, AC, SPI, CPI, EAC — are on the EV report and the forecast.`,
+    description: `${COST_RECORD_BUDGETS} The summary's figures built from those budgets — they add up the approved allocations of the activities that have a cost record, per category and in total, and a record with no forecast counts its budget in the forecast — are present only for a caller who may read the BOQ: byPhase[].budget, forecast, variance and variancePct; totals.budget and totals.forecast; eac.toComplete, optimistic, mostLikely and pessimistic; budget.allocatedToActivities. Anyone else receives each byPhase row's phase, committed and actual, totals.committed and totals.actual, eac.basis and eac.actual, and the budget register's original, approved changes, revisions and revised budget, with activityBudgetsWithheld true and activityBudgetsReason "Mapping details unavailable to you". Moving an approved allocation between activities changes nothing such a caller receives (owner decision E1). The project's own totals — EV, PV, AC, SPI, CPI, EAC — are on the EV report and the forecast. PC-7a three truths (labels only, the same words for every project and caller): budget.label is "Budget" (the budget register; derived) and truth says what each figure is — truth.budget (derived, with otherBudgets naming "Budget at completion (EV basis)" on the EV report and "Contract value + approved changes" on the budget revisions waterfall), truth.allocatedToActivities (derived), truth.totals (budget, committed, actual derived; forecast "projection:estimate_at_completion"), truth.records.forecast (a record's stored forecast: typed, or when none is given the default the larger of the record's budget and its actual — a projection, "projection:typed_or_greater_of_budget_and_actual"; PC-7a 3d replaced budget + 1.1 × (actual − budget), which was below 0 before any actual) and truth.eac (a projection). A label is present even where the figure it describes is withheld.`,
     operationId: "getCostSummary",
     permissions: modulePermission("cost", "read"),
   },
@@ -11950,7 +12002,7 @@ const COST_RECORD_BUDGETS =
     method: "post",
     path: "/projects/{projectId}/cost/activity/{activityId}",
     summary: "Create or update a cost record for an activity.",
-    description: `A record made here is written with its activity's approved BOQ allocation as its budget when none is given. ${COST_RECORD_BUDGETS} The answer is the record as written, without budget and generatedBudget for a caller who may not read the BOQ.`,
+    description: `A record made here is written with its activity's approved BOQ allocation as its budget when none is given. ${COST_RECORD_BUDGETS} ${COST_RECORD_FORECAST_DEFAULT_NOTE} The answer is the record as written, without budget and generatedBudget for a caller who may not read the BOQ.`,
     operationId: "upsertActivityCostRecord",
     parameters: [...projectParams, activityIdParam],
     permissions: modulePermission("cost", "create", "activity_cost.upsert"),
@@ -11961,7 +12013,7 @@ const COST_RECORD_BUDGETS =
     method: "patch",
     path: "/projects/{projectId}/cost/{id}",
     summary: "Update an activity cost record.",
-    description: `${COST_RECORD_BUDGETS} The answer is the record as written, without budget and generatedBudget for a caller who may not read the BOQ.`,
+    description: `${COST_RECORD_BUDGETS} ${COST_RECORD_FORECAST_DEFAULT_NOTE} The answer is the record as written, without budget and generatedBudget for a caller who may not read the BOQ.`,
     operationId: "updateCostRecord",
     parameters: projectRecordParams,
     permissions: modulePermission("cost", "update", "activity_cost.update"),
@@ -14453,6 +14505,26 @@ const budgetLineSchema = objectSchema({
   actual: budgetMoney,
   forecast: { ...budgetMoney, description: "Manual forecast, else max(revised, actual, committed)." },
   forecastIsManual: { type: "boolean" },
+  // PC-7a: whether the Original Budget may still move (read answers only).
+  originalBudgetLock: {
+    ...objectSchema({
+      locked: { type: "boolean" },
+      conditions: arrayOf(objectSchema({ condition: { type: "string", enum: ["approved_budget_baseline", "approved_change", "executed_commitment", "ledger_posting", "locked_period_snapshot"] }, number: { type: "integer", minimum: 1, maximum: 5 }, reason: { type: "string" } })),
+    }),
+    description: "GET /budget/lines and GET /budget/lines/{lineId} only (not on write answers, not stored with budget snapshots): locked is true when a lock condition stands on the line, and conditions lists each (condition, its number in the rule, and a plain reason) — the same conditions a PATCH of originalBudget would be refused with. A screen shows originalBudget read-only on a locked line and points to a budget revision.",
+  },
+  // PC-7a three truths (control model §3): labels only, no figure changes.
+  truth: {
+    ...objectSchema({
+      originalBudget: { type: "string", enum: ["source"] },
+      revised: { type: "string", enum: ["derived"] },
+      committed: { type: "string", enum: ["derived"] },
+      actual: { type: "string", enum: ["derived"] },
+      forecast: { type: "string", enum: ["projection:typed", "projection:greatest_of_revised_actual_committed"] },
+      derivedFrom: ref("GenericObject"),
+    }),
+    description: "Whether each figure is a source fact, derived from source rows, or a projection with its basis, and derivedFrom saying from what. The same words on every line (only forecast's typed/default split varies, as forecastIsManual says). Not stored with budget snapshots.",
+  },
   variance: { ...budgetMoney, description: "revised − forecast." },
   allocatedWeight: { type: "number" },
   allocatedAmount: budgetMoney,
@@ -14501,6 +14573,10 @@ const budgetReconciliationSchema = objectSchema({
   activityBudgetsReason: { type: "string", description: "Why: \"Mapping details unavailable to you\"." },
 });
 // Owner decision E1 (2026-09-28), as utils/boq-figures applies it to the reconciliation.
+// PC-7a (owner decision 2026-09-29): when a line's Original Budget stops moving.
+const BUDGET_ORIGINAL_LOCK_RULE =
+  "A line's originalBudget is locked once the first of these stands on that line (per line — a sibling stays editable): (1) an approved financial/budget baseline including it — none exists yet, so this condition is inert; (2) an approved change on it (any budget-line change: an approved change order, a revision or a transfer); (3) an executed or closed commitment whose SOV lines or approved commitment change-order lines name it (by id, or by cost code for an active line of the commitment's cost type), or committedFromCommitments ≠ 0; (4) a cost-ledger entry posted to it (or a non-zero actual); (5) the budget snapshot of a LOCKED reporting period including it. An ad-hoc snapshot, an open period's snapshot and a schedule baseline approval never lock it. After the lock a changed amount is a budget revision (POST /budget/lines/{lineId}/revisions), which flows into revisedBudget while originalBudget stays — original 100,000 + an approved revision of +50,000 reads revised 150,000, original 100,000.";
+
 const BUDGET_RECONCILIATION_FIGURES =
   "Each activity's boqBudget is its approved BOQ allocation, and its activityBudget and difference are built from it; they, mismatches and activitiesWithoutLines are present only for a caller who may read the BOQ — reading the cost module does not override this (owner decision E1, 2026-09-28). For anyone else each activity keeps activityId, name, code, approvedChanges and budgetFromLines, and the answer carries activityBudgetsWithheld: true and activityBudgetsReason \"Mapping details unavailable to you\". generatedAt, balanced, totals and underAllocatedLines are every cost reader's.";
 const budgetSnapshotSchema = objectSchema({
@@ -14560,6 +14636,7 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
     method: "post",
     path: "/projects/{projectId}/budget/lines",
     summary: "Create a budget line (selects the cost code for the project when needed). One line per cost code and cost type.",
+    description: `An archived line for the same cost code and cost type is re-activated instead, and it keeps the originalBudget it has whatever the request says (a re-activation is never an Original Budget edit): when the two differ the answer adds originalBudgetKept { existing, proposed, locked, conditions } (conditions: [{ condition, number, reason }]); change the amount afterwards with PATCH while the line is unlocked, or with a budget revision once it is locked. ${BUDGET_ORIGINAL_LOCK_RULE}`,
     operationId: "createBudgetLine",
     parameters: projectParams,
     permissions: modulePermission("cost", "create"),
@@ -14571,11 +14648,12 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
     method: "post",
     path: "/projects/{projectId}/budget/lines/import",
     summary: "Import lines as rows of { code, name?, costType, originalBudget, description }. Unknown codes with a name are created in the organisation; existing lines are updated.",
+    description: `An existing line whose originalBudget is locked is never overwritten: its description and status are written, its originalBudget stays, it is not counted in updated, and it is listed in lockedLines [{ code, costType, existing, proposed, conditions }] — raise a budget revision for the difference. A row that sends a locked line's stored amount back is an ordinary update. New lines are created as before. ${BUDGET_ORIGINAL_LOCK_RULE}`,
     operationId: "importBudgetLines",
     parameters: projectParams,
     permissions: modulePermission("cost", "create"),
     requestBody: jsonBody(objectSchema({ rows: arrayOf(objectSchema({ code: { type: "string" }, name: { type: "string", nullable: true }, costType: { type: "string", enum: budgetCostTypes }, originalBudget: budgetMoney, description: { type: "string", nullable: true } })) }, ["rows"]), "Rows."),
-    responseSchema: objectSchema({ created: { type: "integer" }, updated: { type: "integer" }, missingCodes: arrayOf({ type: "string" }) }),
+    responseSchema: objectSchema({ created: { type: "integer" }, updated: { type: "integer" }, missingCodes: arrayOf({ type: "string" }), lockedLines: arrayOf(objectSchema({ code: { type: "string" }, costType: { type: "string", enum: budgetCostTypes }, existing: budgetMoney, proposed: budgetMoney, conditions: arrayOf(objectSchema({ condition: { type: "string", enum: ["approved_budget_baseline", "approved_change", "executed_commitment", "ledger_posting", "locked_period_snapshot"] }, number: { type: "integer" }, reason: { type: "string" } })) })) }),
     status: 201,
   },
   {
@@ -14612,6 +14690,8 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
     method: "post",
     path: "/projects/{projectId}/budget/snapshots",
     summary: "Freeze the budget (lines, allocations, reconciliation); with `reportingPeriodId` it is the period's one snapshot. Locking a period takes one automatically.",
+    description:
+      "With the `reportingPeriodId` of an open period the snapshot replaces that period's earlier one. A LOCKED period's snapshot was taken at the lock and is its frozen budget history (and Original Budget lock condition 5 reads its lines): it is refused with 409 REPORTING_PERIOD_LOCKED and nothing is written; take a snapshot without a period instead.",
     operationId: "createBudgetSnapshot",
     parameters: projectParams,
     permissions: modulePermission("cost", "approve"),
@@ -14652,6 +14732,7 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
     method: "patch",
     path: "/projects/{projectId}/budget/lines/{lineId}",
     summary: "Edit a line (original budget, committed, actual, forecast, description, cost type, status). Allocation amounts follow the revised budget.",
+    description: `originalBudget is refused with 409 BUDGET_ORIGINAL_LOCKED once the line is locked, and nothing is written: the message names the lock conditions in plain words and says to record the changed amount as a budget revision on the line; error.details carries { lineId, code, costType, originalBudget, proposed, conditions: [{ condition, number, reason }], revisionPath } — revisionPath ("/budget/lines/{lineId}/revisions", under the project) is where that revision is posted. GET /budget/lines states each line's originalBudgetLock beforehand; sending the stored amount back (|Δ| ≤ 0.005) is an echo and passes. ${BUDGET_ORIGINAL_LOCK_RULE}`,
     operationId: "updateBudgetLine",
     parameters: [...projectParams, budgetLineIdParam],
     permissions: modulePermission("cost", "update"),
@@ -14889,7 +14970,7 @@ const workflowInstanceSchema = objectSchema({
   currentStepKey: { type: "string", nullable: true },
   currentStep: nullableRef("GenericObject"),
   steps: arrayOf(ref("GenericObject")),
-  context: ref("GenericObject"),
+  context: { ...ref("GenericObject"), description: "The record's context when the run started (routed on by template rules). A payment-certificate run started while the contract's original value is unestablished under a retention cap has no `amount` (the certificate's net payable, which restates that value) and names it in `valueWithheld`; a run stored earlier loses it on the way out to a member who may not read the BOQ." },
   applyStatus: { type: "string", nullable: true, description: "applied, failed (outcome could not be written to the record) or skipped." },
   applyError: { type: "string", nullable: true },
   escalationLevel: { type: "integer" },
@@ -15185,7 +15266,7 @@ const reportResultSchema = objectSchema({
     withheld: { type: "boolean", description: "Present (true) only when this column was withheld on at least one project of the run — see `withheld`." },
     withheldReason: { type: "string", description: "Present with `withheld`: \"Mapping details unavailable to you\"." },
   })),
-  rows: { ...arrayOf(ref("GenericObject")), description: "Flattened rows: id, projectId, projectName and one value per column. A row of a project where the caller may not read the BOQ carries null for each withheld column and names them in `withheldColumns`." },
+  rows: { ...arrayOf(ref("GenericObject")), description: "Flattened rows: id, projectId, projectName and one value per column. A row of a project where the caller may not read the BOQ carries null for each withheld column and names them in `withheldColumns`. On the payment-certificate source that includes, for a certificate not yet certified on a project whose contract value is unestablished under a retention cap, the cap-limited totalRet, netPayable, taxAmount and balanceDue (as GET /ipc withholds them)." },
   rowCount: { type: "integer" },
   total: { type: "integer" },
   truncated: { type: "boolean" },
@@ -15445,13 +15526,16 @@ const forecastLevel = { type: "string", enum: ["high", "medium", "low"] };
 // §12, as utils/boq-figures applies it to the forecast.
 const FORECAST_FIGURES =
   "cost.eac is the official EV report's EAC — revised BAC / CPI when CPI > 0, otherwise the revised BAC — and cost.bac the revised BAC it was computed from (approved allocations plus approved budget revisions); cost.eacBasis says which rule applied (budget_over_cpi, budget_cpi_zero — CPI 0: actual cost with nothing earned, so the EAC is the revised BAC and dataQuality says so —, budget_no_cost_performance, no_budget; null without an EV report). The EV figures are the same answer the health card and the EV report give for the latest reporting period: when that period is locked, its stored snapshot (SPI, CPI, EAC and the cutoff instant and zone recorded at the lock), never a live recomputation. cost.projected is max(eac, bottomUp). earnedValueCutoff states the EV cutoff SPI, CPI and EAC were measured through: cutoffDate (the instant), cutoffLocalDate, timeZone, timeZoneSource and timeZoneNote (null when the project's own zone applied, otherwise the sentence also added to dataQuality: \"Project timezone is not configured; UTC is being used\" or the organisation default it names). dataQuality also carries the server's reason when SPI or CPI is missing or CPI is 0 (with no_budget: that there is no approved budget to earn against), and, when the EV cutoff is still ahead of asOf, that EV and AC are measured through today while PV runs to the cutoff. The explanation never calls a budget handed back (budget_cpi_zero, budget_no_cost_performance) or a project with no budget \"within budget\". " +
-  "The cost view's money (cost.budget, bac, eac, bottomUp, projected, overrun, overrunPct and actual; each activity's cost.budget, actual, committed, projected, overrun, overrunPct and reasons; each budget line's revised, committed, actual, forecast, overrun and overrunPct) is present only for a caller who may read the BOQ or the cost module. For anyone else nothing of the cost view that is read off the BOQ mapping is given either (owner decision, 2026-09-28): an activity has a cost basis, and a cost level above low, only when it has a budget (an approved allocation), so each activity's cost (in activities and schedule.topRisks) is replaced by { withheld: true, reason: \"Cost figures are not available to you\" }; cost.topRisks, cost.counts.atRisk and cost.eacBasis are omitted, and cost carries withheld: true and the same reason. A cost reader who may not read the BOQ keeps the project's cost (cost.budget, bac, eac, eacBasis, bottomUp, projected, overrun, overrunPct, actual) and the budget lines, but nothing per activity that an approved allocation gives (owner decision E1, 2026-09-28): each activity's cost (in activities and schedule.topRisks) keeps only actual and committed (the cost ledger's) with { withheld: true, reason: \"Mapping details unavailable to you\" }; cost.topRisks and cost.counts.atRisk are omitted, and cost carries activityCostWithheld: true and activityCostReason with the same reason. The schedule view (levels, bases, counts, criticality), each budget line's name and level, cost.counts.lines, summary and dataQuality are the same for every caller.";
+  "The cost view's money (cost.budget, bac, eac, bottomUp, projected, overrun, overrunPct and actual; each activity's cost.budget, actual, committed, projected, overrun, overrunPct and reasons; each budget line's revised, committed, actual, forecast, overrun and overrunPct) is present only for a caller who may read the BOQ or the cost module. For anyone else nothing of the cost view that is read off the BOQ mapping is given either (owner decision, 2026-09-28): an activity has a cost basis, and a cost level above low, only when it has a budget (an approved allocation), so each activity's cost (in activities and schedule.topRisks) is replaced by { withheld: true, reason: \"Cost figures are not available to you\" }; cost.topRisks, cost.counts.atRisk and cost.eacBasis are omitted, and cost carries withheld: true and the same reason. A cost reader who may not read the BOQ keeps the project's cost (cost.budget, bac, eac, eacBasis, bottomUp, projected, overrun, overrunPct, actual) and the budget lines, but nothing per activity that an approved allocation gives (owner decision E1, 2026-09-28): each activity's cost (in activities and schedule.topRisks) keeps only actual and committed (the cost ledger's) with { withheld: true, reason: \"Mapping details unavailable to you\" }; cost.topRisks and cost.counts.atRisk are omitted, and cost carries activityCostWithheld: true and activityCostReason with the same reason. The schedule view (levels, bases, counts, criticality), each budget line's name and level, cost.counts.lines, summary and dataQuality are the same for every caller. cost.truth (PC-7a three truths, labels only; the same object for every project, and for every caller who receives the cost block's figures — a caller given cost.withheld true receives no cost.truth, since every figure it labels is withheld from them): budget, bac and actual are \"derived\" (labels.budget and labels.bac \"Budget at completion (EV basis)\"); eac is \"projection:eacBasis\", bottomUp \"projection:activity_projections\", projected \"projection:greater_of_eac_and_bottom_up\" and overrun \"projection:projected_minus_budget\"; derivedFrom says from what.";
 const forecastBlockerSchema = objectSchema({ type: { type: "string", enum: ["rfi", "submittal", "long_lead"] }, id: uuid, ref: { type: "string", nullable: true }, title: { type: "string" }, status: { type: "string", nullable: true }, due: nullableDateString, overdue: { type: "boolean" } });
-const forecastActivitySchema = objectSchema({ id: uuid, name: { type: "string" }, code: { type: "string", nullable: true }, isCritical: { type: "boolean" }, isMilestone: { type: "boolean" }, status: { type: "string" }, pct: { type: "number" }, expectedPct: { type: "number", nullable: true }, gap: { type: "number" }, velocity: { type: "number", nullable: true, description: "% per day from approved progress in the last 45 days." }, lastProgressAt: nullableDateString, plannedStart: { type: "string", nullable: true }, plannedFinish: { type: "string", nullable: true }, projectedFinish: { type: "string", nullable: true }, basis: { type: "string", enum: ["complete", "planned", "velocity", "pace", "overdue", "late_start"] }, slipDays: { type: "integer" }, impactDays: { type: "number" }, float: { type: "number", nullable: true }, floatBreached: { type: "boolean" }, stalledDays: { type: "integer" }, blockers: arrayOf(forecastBlockerSchema), score: { type: "integer" }, level: forecastLevel, reasons: arrayOf({ type: "string" }), cost: objectSchema({ budget: { type: "number" }, actual: { type: "number" }, committed: { type: "number" }, projected: { type: "number", nullable: true }, basis: { type: "string", nullable: true, description: "burn, forecast, commitments or budget; null when the activity has no budget. Omitted for a caller who reads neither the BOQ nor the cost module." }, overrun: { type: "number" }, overrunPct: { type: "number" }, level: { ...forecastLevel, description: "Omitted for a caller who reads neither the BOQ nor the cost module." }, reasons: arrayOf({ type: "string" }), withheld: { type: "boolean", description: "true when the activity's cost is withheld from this caller (it then carries only withheld and reason)." }, reason: { type: "string", description: "Why the cost is withheld." } }) });
-const forecastSchema = objectSchema({ available: { type: "boolean" }, reason: { type: "string", nullable: true }, asOf: dateString, schedule: nullableRef("GenericObject"), cost: nullableRef("GenericObject"), summary: nullableRef("GenericObject"), dataQuality: arrayOf({ type: "string" }), activities: arrayOf(forecastActivitySchema) });
+const forecastActivitySchema = objectSchema({ id: uuid, name: { type: "string" }, code: { type: "string", nullable: true }, isCritical: { type: "boolean" }, isMilestone: { type: "boolean" }, status: { type: "string" }, pct: { type: "number" }, expectedPct: { type: "number", nullable: true }, gap: { type: "number" }, velocity: { type: "number", nullable: true, description: "% per day from approved progress in the last 45 days." }, lastProgressAt: nullableDateString, plannedStart: { type: "string", nullable: true }, plannedFinish: { type: "string", nullable: true }, projectedFinish: { type: "string", nullable: true }, basis: { type: "string", enum: ["complete", "planned", "velocity", "pace", "overdue", "late_start"] }, slipDays: { type: "integer" }, impactDays: { type: "number", description: "Recorded schedule impact on the activity, one list (PC-7a): RFI / submittal and other workflow links (scheduleImpactDays > 0), approved change orders' approved impact (ChangeOrderActivityLink.approvedScheduleImpactDays > 0 on an approved, unarchived order — a pending order's estimate is not counted), and weather delays. An approved order's impact on an activity counts once (the largest of its relation rows), and a workflow link whose record became that order (a link on the order itself, an RFI whose changeOrderId names it, or a record a change event converted into it) is dropped for the same activity in favour of the approved order. A projection input, never a certified figure." }, float: { type: "number", nullable: true }, floatBreached: { type: "boolean" }, stalledDays: { type: "integer" }, blockers: arrayOf(forecastBlockerSchema), score: { type: "integer" }, level: forecastLevel, reasons: arrayOf({ type: "string" }), cost: objectSchema({ budget: { type: "number" }, actual: { type: "number" }, committed: { type: "number" }, projected: { type: "number", nullable: true }, basis: { type: "string", nullable: true, description: "burn, forecast, commitments or budget; null when the activity has no budget. Omitted for a caller who reads neither the BOQ nor the cost module." }, overrun: { type: "number" }, overrunPct: { type: "number" }, level: { ...forecastLevel, description: "Omitted for a caller who reads neither the BOQ nor the cost module." }, reasons: arrayOf({ type: "string" }), withheld: { type: "boolean", description: "true when the activity's cost is withheld from this caller (it then carries only withheld and reason)." }, reason: { type: "string", description: "Why the cost is withheld." } }) });
+// PC-7a: dataQuality stays string[] (web, mobile and generated clients type it
+// so); dataQualityItems is the same list, in the same order, with a kind.
+const forecastDataQualityItemSchema = { ...objectSchema({ kind: { type: "string", description: "Stable key: activities_undated, pace_estimated, earned_value_unavailable, spi_unavailable, cpi_unavailable, cpi_unavailable_no_budget, cpi_zero, cpi_zero_no_budget, cutoff_not_reached, timezone_default, no_budget_lines." }, severity: { type: "string", enum: ["info", "warning"] }, subject: { type: "string", description: "What the note is about, for a heading (Schedule, Progress, Earned value, SPI, CPI, Reporting cutoff, Time zone, Budget lines)." }, message: { type: "string", description: "The same sentence as dataQuality at the same index." } }, ["kind", "severity", "subject", "message"]), description: "dataQualityItems[i].message === dataQuality[i]." };
+const forecastSchema = objectSchema({ available: { type: "boolean" }, reason: { type: "string", nullable: true }, asOf: dateString, schedule: nullableRef("GenericObject"), cost: nullableRef("GenericObject"), summary: nullableRef("GenericObject"), dataQuality: arrayOf({ type: "string" }), dataQualityItems: arrayOf(forecastDataQualityItemSchema), activities: arrayOf(forecastActivitySchema) });
 const forecastActionSchema = objectSchema({ type: { type: "string", enum: ["create_risk", "create_task", "open"] }, label: { type: "string" }, activityId: nullableUuid, activityName: { type: "string", nullable: true }, title: { type: "string", nullable: true }, description: { type: "string", nullable: true }, probability: { ...forecastLevel, nullable: true }, impact: { ...forecastLevel, nullable: true }, mitigation: { type: "string", nullable: true } });
 [
-  { method: "get", path: "/projects/{projectId}/forecast", summary: "Schedule and cost forecast from the project's own records: per-activity velocity from approved progress, projected finish vs plan, float and critical path, recorded impacts (RFI / submittal / risk / weather links), open items holding the activity, burn-rate cost projection, budget lines over; project finish = later of EV-based and activity-based, cost = higher of EAC and bottom-up. No model call. " + FORECAST_FIGURES + DEFAULT_EV_PERIOD, operationId: "getProjectForecast", parameters: projectParams, permissions: modulePermission("schedule", "read"), responseSchema: forecastSchema },
+  { method: "get", path: "/projects/{projectId}/forecast", summary: "Schedule and cost forecast from the project's own records: per-activity velocity from approved progress, projected finish vs plan, float and critical path, recorded impacts (RFI / submittal / risk / weather links and approved change orders' approved impact, de-duplicated — see impactDays), open items holding the activity, burn-rate cost projection, budget lines over; project finish = later of EV-based and activity-based, cost = higher of EAC and bottom-up. No model call. " + FORECAST_FIGURES + DEFAULT_EV_PERIOD, operationId: "getProjectForecast", parameters: projectParams, permissions: modulePermission("schedule", "read"), responseSchema: forecastSchema },
   { method: "post", path: "/projects/{projectId}/forecast/explain", summary: "Plain-language narrative of the forecast with up to five draft actions (create_risk, create_task, open); built from the forecast itself when no provider answers (`degraded`). 409 FORECAST_UNAVAILABLE without a schedule. The explanation is written from the forecast this caller receives. " + FORECAST_FIGURES, operationId: "explainProjectForecast", parameters: projectParams, permissions: modulePermission("schedule", "read"), responseSchema: objectSchema({ degraded: { type: "boolean" }, reason: { type: "string", nullable: true }, forecast: forecastSchema, narrative: objectSchema({ headline: { type: "string" }, schedule: { type: "string" }, cost: { type: "string" }, watch: arrayOf({ type: "string" }), actions: arrayOf(forecastActionSchema) }), message: nullableRef("GenericObject") }) },
   { method: "post", path: "/projects/{projectId}/forecast/actions", summary: "Run a confirmed action: create_risk (risk register, linked to the activity; needs risk.create) or create_task (needs task.create).", operationId: "runProjectForecastAction", parameters: projectParams, permissions: modulePermission("schedule", "read"), requestBody: jsonBody(objectSchema({ action: forecastActionSchema }, ["action"]), "Action."), responseSchema: objectSchema({ type: { type: "string" }, record: ref("GenericObject"), url: { type: "string" } }), status: 201 },
 ].forEach((route) => addGenericRoute({ tag: "Assistant", ...route }));
@@ -16737,6 +16821,13 @@ add(
       boqItemId: nullableUuid,
       locationRefId: nullableUuid,
       commitmentId: nullableUuid,
+      occurredAt: {
+        type: "string",
+        format: "date-time",
+        nullable: true,
+        description:
+          "When the stock left (default: now). The cost is dated on the calendar date this instant falls on in the project's reporting time zone (Project.timezone, else Organisation.defaultTimezone, else UTC) — the same zone the EV cutoff uses — so an issue at 23:30 local counts in that day's reporting period and one at 00:30 local the next day does not.",
+      },
     }),
     status: 201,
   }),

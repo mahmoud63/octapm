@@ -106,7 +106,11 @@ export type StatementSummary = {
   currentCertified: number
   materialsOnSite: number
   grossThisPeriod: number
-  retentionThisPeriod: number
+  /**
+   * Absent when withheld: on a period not yet certified the retention cap (a
+   * rate of the contract value) limits it, and tax and total due follow.
+   */
+  retentionThisPeriod?: number
   retentionCumulative: number
   /** Absent when withheld (see valueWithheld). */
   advanceAmount?: number
@@ -116,8 +120,10 @@ export type StatementSummary = {
   advanceOutstanding: number
   deductions: number
   taxRate: number
-  taxAmount: number
-  totalDue: number
+  /** Absent when withheld (see retentionThisPeriod). */
+  taxAmount?: number
+  /** Absent when withheld (see retentionThisPeriod). */
+  totalDue?: number
   cumulativeCertified: number
   /** Absent when withheld (see valueWithheld). */
   remainingToCertify?: number
@@ -139,21 +145,25 @@ export type ClientStatement = {
     issueDate: string | null
     dueDate: string | null
     totalCert: number
-    totalRet: number
-    netPayable: number
+    /** Absent, with valueWithheld, on a period not yet certified (see retentionThisPeriod). */
+    totalRet?: number
+    netPayable?: number
     amountPaid: number
-    balanceDue: number
+    balanceDue?: number
     deductionsNote: string | null
+    valueWithheld?: ValueWithheld
   } | null
   periods: Array<{
     id: string
     period: string
     status: string
     totalCert: number
-    totalRet: number
-    netPayable: number
+    /** Absent, with valueWithheld, on a period not yet certified (see retentionThisPeriod). */
+    totalRet?: number
+    netPayable?: number
     amountPaid: number
-    balanceDue: number
+    balanceDue?: number
+    valueWithheld?: ValueWithheld
   }>
   /**
    * The schedule of values: the BOQ's rows. Omitted by the server for a

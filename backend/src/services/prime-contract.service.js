@@ -63,9 +63,59 @@ const ESTABLISHED_VALUE_SOURCES = Object.freeze([
   VALUE_SOURCES.CONTRACT_ENTRY,
 ]);
 
+/** Refusal when the contract.manage audit record cannot be written (updateContract). */
+const CONTRACT_AUDIT_UNAVAILABLE_MESSAGE =
+  "The contract terms were not saved because their audit record could not be written; try again";
+
 const valueSourceOf = (contract) =>
   (contract && contract.originalValueSource) || VALUE_SOURCES.UNESTABLISHED;
 const valueEstablished = (contract) => ESTABLISHED_VALUE_SOURCES.includes(valueSourceOf(contract));
+
+/**
+ * The retention/advance provenance prerequisite (owner decision, 2026-09-29).
+ *
+ * A BOQ fallback, or a value whose source cannot be shown, is the bill's
+ * figure, not yet the contract's. Drafting and review carry on with it; a
+ * financial action that relies on the contract amount does not — certifying
+ * an IPC (which locks retention against the cap, a rate of the revised value)
+ * and recording an advance receipt (checked against the agreed advance, a
+ * rate of the original value). Those wait until the value is established
+ * through the one existing road: a contract manager enters it, or one who
+ * may read the BOQ confirms it (updateContract).
+ *
+ * The refusal is one response, decided on the value's source alone and raised
+ * before any amount is looked at, so asking again reveals nothing about the
+ * withheld figure and writes nothing.
+ *
+ * A project whose contract row does not exist yet is judged by what
+ * ensureContract would record for it — the project's own value is
+ * established, the BOQ total is a fallback — without creating the row: a
+ * refusal leaves no record behind, and nobody can step round the rule by not
+ * having opened the contract.
+ */
+const CONTRACT_VALUE_NOT_ESTABLISHED_MESSAGE =
+  "Establish the contract value first (Contract terms: enter it, or confirm it if you may read the BOQ)";
+
+const assertContractValueEstablished = async ({ orgId, projectId, tx = prisma }) => {
+  const contract = await tx.primeContract.findFirst({
+    where: { projectId, project: { orgId } },
+    select: { originalValueSource: true },
+  });
+  let established;
+  if (contract) {
+    established = valueEstablished(contract);
+  } else {
+    const project = await tx.project.findFirst({
+      where: { id: projectId, orgId },
+      select: { contractValue: true },
+    });
+    // Mirrors ensureContract: a non-zero project value is project_value.
+    established = Boolean(num(project?.contractValue));
+  }
+  if (!established) {
+    throw new HttpError(409, "CONTRACT_VALUE_NOT_ESTABLISHED", CONTRACT_VALUE_NOT_ESTABLISHED_MESSAGE);
+  }
+};
 
 const CONTRACT_TYPES = ["lump_sum", "remeasured", "cost_plus", "gmp"];
 const CONTRACT_STATUSES = ["draft", "active", "closed"];
@@ -284,7 +334,9 @@ const EDITABLE = [
  *   confirm.
  *
  * Either is recorded by the existing contract.manage audit event — its
- * actor and time, the source before and after, and which it was.
+ * actor and time, the source before and after, and which it was. The event is
+ * written inside the update's transaction: if it cannot be written, nothing
+ * is saved and the request answers 503 CONTRACT_AUDIT_UNAVAILABLE.
  */
 const updateContract = async ({ orgId, projectId, userId, payload = {}, canConfirmFallback = false }) => {
   const contract = await ensureContract({ orgId, projectId, userId });
@@ -336,7 +388,13 @@ const updateContract = async ({ orgId, projectId, userId, payload = {}, canConfi
     data.originalValue = value;
     data.revisedValue = addMoney(value, num(contract.approvedChangesValue));
     // A different amount is an entry; the stored amount sent back is a save.
-    if (round2(value) !== round2(num(contract.originalValue))) {
+    // Except where the stored amount is withheld from this caller (not
+    // established, and they may not read the BOQ): whatever they send is
+    // their own entry. Otherwise sending a guess would answer whether it was
+    // the hidden amount (the source staying a fallback while any other amount
+    // becomes an entry), and an amount they typed would stay unestablished.
+    const withheldFromCaller = !valueEstablished(contract) && !canConfirmFallback;
+    if (withheldFromCaller || round2(value) !== round2(num(contract.originalValue))) {
       data.originalValueSource = VALUE_SOURCES.CONTRACT_ENTRY;
       valueConfirmation = "entered";
     }
@@ -392,39 +450,54 @@ const updateContract = async ({ orgId, projectId, userId, payload = {}, canConfi
     // before this module existed has never seen them, and saving the terms is
     // exactly the moment somebody would notice the total was wrong.
     await recomputeChangeValues(tx, { orgId, projectId });
-    return tx.primeContract.findUnique({
+    const saved = await tx.primeContract.findUnique({
       where: { id: contract.id },
       include: contractInclude,
     });
-  });
 
-  await auditService.recordEvent({
-    orgId,
-    projectId,
-    entityType: auditService.ENTITY_TYPES.PROJECT,
-    entityId: projectId,
-    action: auditService.ACTIONS.UPDATED,
-    actorId: userId,
-    summary: {
-      transition: "contract.manage",
-      ref: updated.ref,
-      ...(valueConfirmation ? { originalValueConfirmation: valueConfirmation } : {}),
-    },
-    oldSummary: {
-      originalValue: num(contract.originalValue),
-      originalValueSource: valueSourceOf(contract),
-      retentionRate: contract.retentionRate,
-      advanceRate: contract.advanceRate,
-      taxRate: contract.taxRate,
-    },
-    newSummary: {
-      originalValue: num(updated.originalValue),
-      originalValueSource: valueSourceOf(updated),
-      retentionRate: updated.retentionRate,
-      advanceRate: updated.advanceRate,
-      taxRate: updated.taxRate,
-    },
-  }).catch(() => null);
+    // The contract.manage event is the evidence of who entered or confirmed
+    // the contract value, and when (PC-7a, owner decision 2026-09-29). It is
+    // written on the same transaction client, so the change and its audit
+    // record commit together or not at all: a confirmation can never stand
+    // without the record that it was made. A failed audit write fails the
+    // request and rolls the change back; it is never swallowed.
+    try {
+      await auditService.recordEvent({
+        tx,
+        orgId,
+        projectId,
+        entityType: auditService.ENTITY_TYPES.PROJECT,
+        entityId: projectId,
+        action: auditService.ACTIONS.UPDATED,
+        actorId: userId,
+        summary: {
+          transition: "contract.manage",
+          ref: saved.ref,
+          ...(valueConfirmation ? { originalValueConfirmation: valueConfirmation } : {}),
+        },
+        oldSummary: {
+          originalValue: num(contract.originalValue),
+          originalValueSource: valueSourceOf(contract),
+          retentionRate: contract.retentionRate,
+          advanceRate: contract.advanceRate,
+          taxRate: contract.taxRate,
+        },
+        newSummary: {
+          originalValue: num(saved.originalValue),
+          originalValueSource: valueSourceOf(saved),
+          retentionRate: saved.retentionRate,
+          advanceRate: saved.advanceRate,
+          taxRate: saved.taxRate,
+        },
+      });
+    } catch (error) {
+      // The client is told only that nothing was saved; the cause is for the
+      // server log.
+      console.error("[prime-contract-audit]", error?.code || error?.name, error?.message);
+      throw new HttpError(503, "CONTRACT_AUDIT_UNAVAILABLE", CONTRACT_AUDIT_UNAVAILABLE_MESSAGE);
+    }
+    return saved;
+  });
 
   return serializeContract(updated);
 };
@@ -440,6 +513,23 @@ const contractValueSource = async ({ orgId, projectId }) => {
     select: { originalValueSource: true },
   });
   return contract ? valueSourceOf(contract) : null;
+};
+
+/**
+ * The contract terms a reader of the payment certificates needs to know
+ * whether their cap-limited totals restate a withheld contract value
+ * (utils/boq-figures retentionCapWithheld): where the original value came
+ * from and the retention cap rate. Null when the project has no contract row
+ * — its certificates were worked without a cap. Never creates the row.
+ */
+const contractValueTerms = async ({ orgId, projectId }) => {
+  const contract = await prisma.primeContract.findFirst({
+    where: { projectId, project: { orgId } },
+    select: { originalValueSource: true, retentionCapRate: true },
+  });
+  return contract
+    ? { originalValueSource: valueSourceOf(contract), retentionCapRate: contract.retentionCapRate }
+    : null;
 };
 
 // ─── the advance ───────────────────────────────────────────────────────────
@@ -462,6 +552,10 @@ const nextAdvanceReference = async (tx, { projectId, prefix }) =>
 
 /** The client pays the advance. */
 const recordAdvancePayment = async ({ orgId, projectId, userId, payload = {}, canReadBoq = false }) => {
+  // Checked against the agreed advance, a rate of the original value: that
+  // value must be the contract's before a receipt is taken against it. First,
+  // before the amount is read, and before ensureContract could write a row.
+  await assertContractValueEstablished({ orgId, projectId });
   const contract = await ensureContract({ orgId, projectId, userId });
   const amount = num(payload.amount);
   if (amount <= 0) {
@@ -482,6 +576,8 @@ const recordAdvancePayment = async ({ orgId, projectId, userId, payload = {}, ca
     if (agreed > 0 && paid > agreed + MONEY_EPSILON) {
       // The agreed advance is a rate of the original value: while that value
       // is withheld from the caller (utils/boq-figures), so is the figure.
+      // The prerequisite above already refuses an unestablished value; this
+      // stays as the second line should that ever change.
       const agreedWithheld = !canReadBoq && !valueEstablished(contract) && Number(contract.advanceRate) > 0;
       throw new HttpError(
         409,
@@ -898,9 +994,11 @@ module.exports = {
   VALUE_SOURCES,
   advanceOutstanding,
   applyAdvanceRecovery,
+  assertContractValueEstablished,
   buildStatement,
   certificateFinancials,
   contractValueSource,
+  contractValueTerms,
   ensureContract,
   listAdvances,
   receivables,

@@ -5,7 +5,10 @@ const mockPrisma = {
   costCode: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null), create: jest.fn(async ({ data }) => ({ id: "code-co", ...data })) },
   projectCostCode: { findMany: jest.fn(async () => []), create: jest.fn(async ({ data }) => ({ id: "pcc-1", ...data })), update: jest.fn(async () => ({})), updateMany: jest.fn(async () => ({ count: 0 })) },
   budgetLine: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null), create: jest.fn(), update: jest.fn() },
-  budgetLineChange: { create: jest.fn(async ({ data }) => ({ id: "chg", ...data })), deleteMany: jest.fn(async () => ({ count: 0 })) },
+  budgetLineChange: { create: jest.fn(async ({ data }) => ({ id: "chg", ...data })), deleteMany: jest.fn(async () => ({ count: 0 })), findMany: jest.fn(async () => []) },
+  // The Original Budget guard's reads (PC-7a): nothing stands on a line unless a test says so.
+  commitment: { findMany: jest.fn(async () => []) },
+  costLedgerEntry: { findMany: jest.fn(async () => []) },
   budgetLineActivityAllocation: { findMany: jest.fn(async () => []), deleteMany: jest.fn(async () => ({ count: 0 })), create: jest.fn(async ({ data }) => ({ id: "alloc", ...data })), update: jest.fn(async () => ({})) },
   activity: { findMany: jest.fn(async () => []) },
   activityBoqAllocation: { findMany: jest.fn(async () => []) },
@@ -235,14 +238,19 @@ describe("Phase 21D — integrity (Codex round 1)", () => {
 });
 
 describe("Phase 21D — integrity (Codex round 2)", () => {
-  it("CX21-102: bringing an archived line back keeps the actual the ledger posted on it", async () => {
-    mockPrisma.budgetLine.findFirst.mockResolvedValue({ id: "line-9", status: "archived" });
-    mockPrisma.budgetLine.update.mockResolvedValue(line({ id: "line-9", actual: 15000 }));
-    await service.createBudgetLine({ orgId: "org-1", projectId: "project-1", payload: { costCodeId: CODE.id, costType: "material", originalBudget: 1000 }, actor: { id: "user-1", role: "cost_controller" } });
+  // PC-7a adapted this test: it asserted the defect (the payload's 1000 written
+  // as the re-activated line's original). Re-activation now keeps the original.
+  it("CX21-102: bringing an archived line back keeps the actual the ledger posted on it — and its original budget (PC-7a)", async () => {
+    mockPrisma.budgetLine.findFirst.mockResolvedValue(line({ id: "line-9", status: "archived", actual: 15000, originalBudget: 2500 }));
+    mockPrisma.costLedgerEntry.findMany.mockResolvedValueOnce([{ budgetLineId: "line-9", sourceType: "direct_cost" }]);
+    mockPrisma.budgetLine.update.mockResolvedValue(line({ id: "line-9", actual: 15000, originalBudget: 2500 }));
+    const result = await service.createBudgetLine({ orgId: "org-1", projectId: "project-1", payload: { costCodeId: CODE.id, costType: "material", originalBudget: 1000 }, actor: { id: "user-1", role: "cost_controller" } });
     expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "line-9" } }));
     const written = mockPrisma.budgetLine.update.mock.calls.at(-1)[0].data;
     expect(Object.prototype.hasOwnProperty.call(written, "actual")).toBe(false);
-    expect(written).toMatchObject({ status: "active", originalBudget: 1000 });
+    expect(Object.prototype.hasOwnProperty.call(written, "originalBudget")).toBe(false);
+    expect(written).toMatchObject({ status: "active" });
+    expect(result.originalBudgetKept).toMatchObject({ existing: 2500, proposed: 1000, locked: true, conditions: [expect.objectContaining({ condition: "ledger_posting", number: 4 })] });
   });
 });
 

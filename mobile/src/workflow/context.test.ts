@@ -37,6 +37,15 @@ describe('what the approver is shown', () => {
     expect(facts.map((f) => f.key)).toEqual(['amount', 'status'])
   })
 
+  it('reads a figure the server withheld as "—", never 0, and does not show the marker', () => {
+    // An IPC submitted while the contract value is unestablished under a retention cap.
+    const context = { ref: 'P02', title: 'IPC P02', status: 'submitted', totalCert: 6133.7, period: 'P02', valueWithheld: { keys: ['amount'], source: 'boq_fallback', reason: 'withheld' } }
+    const facts = contextFacts('ipc_certificate', context, 'USD')
+    expect(facts.map((f) => [f.label, f.value])).toEqual([['Net payable', '—'], ['Certified', expect.stringContaining('6,133.7')], ['Period', 'P02'], ['Status', 'Submitted']])
+    expect(approvalAmount('ipc_certificate', context)).toBeNull()
+    expect(canDecideHere('ipc_certificate', context)).toBe(false)
+  })
+
   it('does not dress up a submittal as a decision about nothing', () => {
     // The server sends `amount: 0` for a submittal; a submittal approval is not a money decision.
     expect(contextFacts('submittal', { discipline: 'mep', leadTimeWeeks: 12, amount: 0 }, 'USD').map((f) => f.label)).toEqual(['Discipline', 'Lead time (weeks)'])

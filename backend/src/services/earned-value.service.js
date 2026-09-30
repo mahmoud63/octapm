@@ -25,6 +25,8 @@ const {
 } = require("../utils/reporting-cutoff");
 // Which rule gave the EAC (budget / CPI, or the budget with CPI 0 or none).
 const { eacBasisOf } = require("../utils/eac-basis");
+// Source / derived / projection labels on the report (labels only).
+const { EV_REPORT_TRUTH, EV_HISTORY_TRUTH } = require("../utils/figure-truth");
 // The server's sentences beside an EV figure (a cutoff not yet reached).
 const { EV_NOTES, cutoffNotReached } = require("../utils/ev-notes");
 
@@ -124,7 +126,12 @@ const resolveCutoff = (value, zone) => {
  * The bound a CALENDAR-DATE field is selected against (D1 date-only rule,
  * 2026-09-27). plannedDate (cost loadings), actualThroughDate (cost records,
  * fed by the ledger's incurredOn) and incurredOn are dates, not instants: a
- * date input stores them at 00:00 UTC of the date. Such a row counts toward
+ * date input stores them at 00:00 UTC of the date, and a TIMED cost (a
+ * material issue's occurredAt, a pay application approved without a period
+ * end) is stored by the ledger's writer as the date that instant falls on in
+ * the project's reporting zone (cost-ledger economicDateOf, PC-7a 3c) — so a
+ * 23:30 local issue carries the same date as a 23:30 local progress approval
+ * and both count toward that date's cutoff. Such a row counts toward
  * a period when its calendar date — the UTC calendar date of the stored
  * value — is on or before the period's cutoff date, and a row dated the day
  * after never counts, in any zone. Compared as instants against the end of
@@ -643,6 +650,9 @@ const snapshotToReport = ({ snapshot, period }) => {
       totalBudget: snapshot.totalBudget,
       cpi: snapshot.cpi === null || snapshot.cpi === undefined ? null : Number(snapshot.cpi),
     }),
+    // Source / derived / projection, and from what (labels only; not stored
+    // with the snapshot — the stored figures are read back as they were).
+    truth: EV_REPORT_TRUTH,
     reporting: {
       // A snapshot locked before its date was recorded is labelled with the
       // period's reporting date; its instant and figures are as stored.
@@ -949,6 +959,10 @@ const buildOfficialEvReport = async ({
     ...metrics,
     // Which rule gave the EAC (not money; every reader receives it).
     eacBasis: eacBasisOf({ totalBudget: metrics.totalBudget, cpi: metrics.cpi }),
+    // Source / derived / projection, and from what: PV, EV and AC are
+    // derived; the EAC is a projection whose rule is eacBasis; totalBudget is
+    // the "Budget at completion (EV basis)". Labels only.
+    truth: EV_REPORT_TRUTH,
     reporting: {
       cutoffDay: resolveReportingCutoffDay(project),
       projectCalendar: project.projectCalendar || null,
@@ -1066,6 +1080,107 @@ const listReportingPeriods = async ({ orgId, projectId }) => {
     })),
     suggestedCutoffDay: resolveReportingCutoffDay(project),
   };
+};
+
+// PC-7a item 3 — the S-curve's measured history. The formula S-curve gives
+// EV only at the report's own cutoff (S_CURVE_NOTE); every earlier EV point
+// that was ever measured lives in a locked period's EvPeriodSnapshot. The
+// history is those snapshots, read exactly as stored at the lock — the
+// instant, the date and zone recorded then (describePeriodCutoff, PC-4's one
+// cutoff), and the figures. Nothing is recomputed, interpolated or filled in
+// between periods: an open period, an ad hoc cutoff or a period locked
+// without a snapshot has no point, and a later record never moves one.
+const EV_HISTORY_NOTE =
+  "Each history point is a locked reporting period's snapshot, read as stored at the lock: PV, EV and AC measured at that period's cutoff instant in the zone recorded then. Nothing is recomputed or filled in between periods; open periods have no point, and later records never move a locked one.";
+
+const moneyOrNull = (value) =>
+  value === null || value === undefined ? null : toMoneyNumber(value);
+const ratioOrNull = (value) =>
+  value === null || value === undefined ? null : Number(value);
+
+/**
+ * The locked periods' EV points for a project, earliest cutoff first, each
+ * { periodId, code, label, cutoffDate, cutoffLocalDate, timeZone,
+ * timeZoneSource, timeZoneNote, totalBudget, pv, ev, ac, eac, spi, cpi,
+ * formulaVersion, lockedAt, snapshotId }. `through` (an instant) keeps only
+ * the points cut on or before it, so a report never shows a period after
+ * its own cutoff. Scoped by orgId through the project; read only.
+ */
+const listLockedEvHistory = async ({ orgId, projectId, through = null }, tx = prisma) => {
+  await ensureProject({ orgId, projectId }, tx);
+  const throughAt = through ? new Date(through) : null;
+  const rows = await tx.evPeriodSnapshot.findMany({
+    where: {
+      projectId,
+      // A snapshot whose period is not locked is not a history point.
+      reportingPeriod: { projectId, status: LOCKED_PERIOD },
+      ...(throughAt && Number.isFinite(throughAt.getTime())
+        ? { cutoffDate: { lte: throughAt } }
+        : {}),
+    },
+    include: { reportingPeriod: true },
+    orderBy: [{ cutoffDate: "asc" }, { lockedAt: "asc" }, { id: "asc" }],
+  });
+
+  return rows.map((snapshot) => {
+    const period = snapshot.reportingPeriod;
+    const cutoff = describePeriodCutoff({ ...period, evSnapshot: snapshot });
+    return {
+      periodId: period.id,
+      code: period.code,
+      label: period.label || period.code,
+      cutoffDate: toIso(snapshot.cutoffDate),
+      cutoffLocalDate: cutoff.localDate || null,
+      timeZone: cutoff.timeZone || null,
+      timeZoneSource: cutoff.timeZoneSource || null,
+      timeZoneNote: cutoff.timeZoneNote ?? null,
+      totalBudget: toMoneyNumber(snapshot.totalBudget),
+      pv: toMoneyNumber(snapshot.pv),
+      ev: toMoneyNumber(snapshot.ev),
+      ac: toMoneyNumber(snapshot.ac),
+      eac: moneyOrNull(snapshot.eac),
+      spi: ratioOrNull(snapshot.spi),
+      cpi: ratioOrNull(snapshot.cpi),
+      formulaVersion: snapshot.formulaVersion,
+      lockedAt: toIso(snapshot.lockedAt),
+      snapshotId: snapshot.id,
+    };
+  });
+};
+
+/**
+ * An official EV report with the locked-period history through its cutoff
+ * beside the formula S-curve: the report's own keys first, untouched, then
+ * history, historyNote and historyTruth. The one way the history is added,
+ * so every answer that carries it carries the same thing.
+ */
+const withLockedEvHistory = async (report, { orgId, projectId }, tx = prisma) => {
+  const history = await listLockedEvHistory(
+    {
+      orgId,
+      projectId,
+      through: report?.reporting?.cutoffDate || null,
+    },
+    tx,
+  );
+  return {
+    ...report,
+    history,
+    historyNote: EV_HISTORY_NOTE,
+    historyTruth: EV_HISTORY_TRUTH,
+  };
+};
+
+/**
+ * The EV report as GET /reports/ev answers it: the official report
+ * (buildOfficialEvReport, unchanged) with the locked-period history
+ * (withLockedEvHistory). A period lock answers with the same thing for the
+ * period it locked (lockReportingPeriod). Other readers of the report (the
+ * health card, the forecast, the workspace home) do not carry it.
+ */
+const buildEvReportWithHistory = async ({ orgId, projectId, periodId = null, cutoffDate = null }) => {
+  const report = await buildOfficialEvReport({ orgId, projectId, periodId, cutoffDate });
+  return withLockedEvHistory(report, { orgId, projectId });
 };
 
 const createReportingPeriod = async ({ orgId, projectId, userId, payload }) => {
@@ -1586,8 +1701,12 @@ const lockReportingPeriod = async ({
       );
     }
 
+    // The answer is the period's report as GET /reports/ev?periodId= gives
+    // it: the stored snapshot's report with the locked-period history
+    // (withLockedEvHistory), read in this transaction so it includes the
+    // point this lock makes.
     if (period.status === LOCKED_PERIOD && period.evSnapshot) {
-      return snapshotToReport({ snapshot: period.evSnapshot, period });
+      return withLockedEvHistory(snapshotToReport({ snapshot: period.evSnapshot, period }), { orgId, projectId }, tx);
     }
 
     const { gate: readinessGate, override: readinessOverride } =
@@ -1716,10 +1835,14 @@ const lockReportingPeriod = async ({
       });
     }
 
-    return snapshotToReport({
-      snapshot,
-      period: { ...lockedPeriod, evSnapshot: snapshot },
-    });
+    return withLockedEvHistory(
+      snapshotToReport({
+        snapshot,
+        period: { ...lockedPeriod, evSnapshot: snapshot },
+      }),
+      { orgId, projectId },
+      tx,
+    );
   });
 
 module.exports = {
@@ -1729,6 +1852,10 @@ module.exports = {
   computeEvMetrics,
   computeBudgetRevisionDelta,
   buildOfficialEvReport,
+  buildEvReportWithHistory,
+  withLockedEvHistory,
+  listLockedEvHistory,
+  EV_HISTORY_NOTE,
   pickDefaultReportingPeriod,
   periodCutoffReader,
   listReportingPeriods,

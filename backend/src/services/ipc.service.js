@@ -1280,6 +1280,12 @@ const certifyIpcPeriod = async ({
       "Only submitted IPC periods can be certified",
     );
   }
+  // Certifying locks retention against the cap, a rate of the contract's
+  // revised value, and recovers the advance: the value must be established
+  // first (owner decision, 2026-09-29). Raised before the certification
+  // review, the only step here that works any amount out, and whether this
+  // comes through the route or a workflow's final approval.
+  await primeContractService.assertContractValueEstablished({ orgId, projectId });
   if (!viaWorkflow) {
     await require("./workflow-engine.service").assertNotLocked({ tool: "ipc_certificate", projectId, recordId: certificate.id });
   }

@@ -12,6 +12,7 @@ const {
   buildPackageRiskRow,
 } = require("./procurement.service");
 const { getProjectAccessWhere } = require("./project-authorization.service");
+const { withheldCertificateTotals } = require("../utils/boq-figures");
 
 const ACTION_LIMIT = 5;
 const HEALTH_DIMENSIONS = [
@@ -256,6 +257,7 @@ function buildQueueItem({
   child,
   targetFilters = {},
   dueDate = null,
+  valueWithheld = null,
 }) {
   return {
     id,
@@ -269,6 +271,7 @@ function buildQueueItem({
       recordId: id,
       ...targetFilters,
     }),
+    ...(valueWithheld ? { valueWithheld } : {}),
   };
 }
 
@@ -468,6 +471,12 @@ async function getWorkspaceDashboard({
   // lines only where they may also read its BOQ.
   let ipcCertificateProjectIds = projectIds;
   let ipcLineProjectIds = projectIds;
+  // A submitted certificate's net payable follows its retention, which the
+  // cap (a rate of the contract value) may limit: where that value is
+  // withheld from the caller, so is the net payable (utils/boq-figures
+  // withheldCertificateTotals, as GET /ipc decides it). Keyed by project:
+  // the contract's terms, for the projects whose BOQ the caller may not read.
+  const ipcCapTerms = new Map();
   if (typeof ipcAccessFor === "function") {
     const ipcAccess = await Promise.all(
       projectIds.map(async (id) => [id, (await ipcAccessFor(id)) || {}]),
@@ -478,6 +487,16 @@ async function getWorkspaceDashboard({
     ipcLineProjectIds = ipcAccess
       .filter(([, access]) => access.certificates && access.lines)
       .map(([id]) => id);
+    const noBoqIds = ipcAccess
+      .filter(([, access]) => access.certificates && !access.lines)
+      .map(([id]) => id);
+    if (noBoqIds.length) {
+      const contracts = await prisma.primeContract.findMany({
+        where: { orgId, projectId: { in: noBoqIds } },
+        select: { projectId: true, originalValueSource: true, retentionCapRate: true },
+      });
+      for (const contract of contracts) ipcCapTerms.set(contract.projectId, contract);
+    }
   }
   const ipcCertificateProjectFilter = { in: ipcCertificateProjectIds };
   const ipcLineProjectFilter = { in: ipcLineProjectIds };
@@ -1253,13 +1272,24 @@ async function getWorkspaceDashboard({
       module: "commercial",
       child: "ipc",
       items: [
-        ...ipcCertificates.map((row) =>
-          buildQueueItem({
+        ...ipcCertificates.map((row) => {
+          // Only projects whose BOQ the caller may not read have terms here.
+          const shown = ipcCapTerms.has(row.projectId)
+            ? withheldCertificateTotals(
+                { status: "submitted", netPayable: row.netPayable },
+                ipcCapTerms.get(row.projectId),
+                { boq: false },
+              )
+            : row;
+          return buildQueueItem({
             id: row.id,
             projectId: row.projectId,
             projectName: row.project.name,
             title: row.period,
-            meta: `${row.project.currency} ${toNumber(row.netPayable || row.totalCert).toLocaleString()}`,
+            meta: shown.valueWithheld
+              ? `${row.project.currency} —`
+              : `${row.project.currency} ${toNumber(row.netPayable || row.totalCert).toLocaleString()}`,
+            valueWithheld: shown.valueWithheld || null,
             module: "commercial",
             child: "ipc",
             targetFilters: {
@@ -1267,8 +1297,8 @@ async function getWorkspaceDashboard({
               source: "ipc_certificate",
             },
             dueDate: row.submittedAt,
-          }),
-        ),
+          });
+        }),
         ...ipcPaymentCertificates.map((row) =>
           buildQueueItem({
             id: `payment-${row.id}`,

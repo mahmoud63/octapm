@@ -787,7 +787,9 @@ const postConsumptionCost = async ({ tx, orgId, item, movement }) => {
     commitmentId: movement.commitmentId,
     quantity: movement.quantity,
     unitCost: movement.unitCost,
-    incurredOn: movement.occurredAt,
+    // A movement happens at a moment, not on a date: the ledger dates it in
+    // the project's reporting zone, as PV/EV/AC are cut (PC-7a 3c).
+    incurredAt: movement.occurredAt,
     postedBy: movement.performedBy,
     note: `${item.sku} · ${item.name}`,
   });

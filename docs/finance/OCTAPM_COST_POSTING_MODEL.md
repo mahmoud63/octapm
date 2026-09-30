@@ -19,6 +19,44 @@ originalBudget = BudgetLine.originalBudget          (stored)
 
 Set when the budget is created or imported. **Never moved by a change order.**
 
+#### 1.1.1 Clarification — when Original Budget stops moving (PC-7a, owner decision 2026-09-29)
+
+This states the certified rule precisely; no formula changes. A budget line's
+`originalBudget` is immutable from the **first** of these, **for that line**
+(one locked line does not lock its siblings):
+
+1. the line is included in an approved financial/budget baseline — **no such
+   record exists in the codebase today** (`BudgetRevision` is a project-level
+   ledger from `Project.contractValue` with no budget-line link), so this
+   condition is inert until one is built;
+2. an approved change stands on the line — any `BudgetLineChange` row: an
+   approved change order posted at approval, a revision or a transfer (both
+   need `cost.approve` and take effect when written);
+3. an **executed** commitment references it — as `commitment.service
+   recomputeCommitted` posts committed cost: a commitment in `executed` or
+   `closed` whose SOV lines or approved CCO lines name the line (by id, or by
+   cost code for an active line of the commitment's cost type), or
+   `committedFromCommitments ≠ 0`;
+4. the cost ledger posts to it — any `CostLedgerEntry` on the line (openings
+   and reversals included), or a non-zero `actual` projection;
+5. the line is in the budget snapshot of a **locked** reporting period.
+
+Never a lock: a schedule baseline approval (the schedule baseline and the
+financial budget are separate controls), an ad-hoc budget snapshot, or the
+snapshot of a period that is still open.
+
+After the lock a changed required amount is a budget revision
+(`POST /budget/lines/{lineId}/revisions`) and flows into Revised Budget:
+original 100,000 + an approved revision of +50,000 reads **revised 150,000,
+original 100,000** — never original 150,000. The one guard is
+`budget.service assertOriginalBudgetWritable`, used by every write path:
+
+| Path | After the lock |
+|---|---|
+| `PATCH /budget/lines/{lineId}` | 409 `BUDGET_ORIGINAL_LOCKED`, naming the condition(s) and pointing to revisions; nothing written. Sending the stored figure back (|Δ| ≤ 0.005) is an echo and passes. |
+| `POST /budget/lines/import` | the existing line's description/status are written, its original is kept, and it is listed in `lockedLines [{ code, costType, existing, proposed, conditions }]`; new lines are created as before |
+| `POST /budget/lines` re-activating an archived line | the line **always** keeps its original, locked or not (a re-activation is never an Original Budget edit); `originalBudgetKept` reports a differing payload |
+
 ### 1.2 Budget Changes
 
 ```
@@ -75,6 +113,33 @@ Official earned-value AC keeps its existing rule, unchanged:
 AC = Σ latest CostRecord.actual by activity where actualThroughDate ≤ cutoffDate
 ```
 
+#### 1.5.1 Clarification — the date a timed cost is incurred on (PC-7a 3c, owner decision 2026-09-28)
+
+`CostLedgerEntry.incurredOn` — and from it `CostRecord.actualThroughDate` — is a
+**calendar date**: the UTC calendar date of the stored value, stored at 00:00
+UTC, and compared with a reporting period by that date (PC-4's date-only rule).
+The formula above is unchanged; what changed is how a writer arrives at the
+date.
+
+- **Date-only records** keep the date typed: a direct cost's `costDate`, a
+  timesheet's or equipment report's day, a pay application's `periodEnd`, a
+  cost record's `actualThroughDate`, a cost loading's `plannedDate`.
+- **Timed records** happen at an instant: a material issue
+  (`StockTransaction.occurredAt`) and a subcontractor pay application
+  certified without a `periodEnd` (its approval). The writer passes the
+  instant as `incurredAt` to `cost-ledger.post`, which dates it on the
+  calendar date the instant falls on in the project's reporting zone —
+  `Project.timezone`, else `Organisation.defaultTimezone`, else UTC, the same
+  resolution the EV cutoff uses (`backend/src/utils/reporting-cutoff.js`) —
+  and stores that date. The instant stays on the source record.
+
+The distinction is carried by the writer, never guessed from a stored time of
+day. So a material issue at 23:30 local on the cutoff date counts in that
+period's AC, exactly as a progress approval at 23:30 counts in its EV, and an
+issue at 00:30 local the next day counts in neither. Ledger entries written
+before this rule keep their stored value (no history is rewritten); a locked
+period's `EvPeriodSnapshot` is never recomputed.
+
 ### 1.6 Forecast to Complete / Projected Final Cost
 
 Existing rule, unchanged:
@@ -90,6 +155,59 @@ Newly defined, and the reason Option B below matters:
 remainingCommitment = committed − certifiedAgainstCommitments
 projectedFinalCost  = actual + remainingCommitment + uncommittedForecast
 ```
+
+#### 1.6.1 Clarification — a cost record's default forecast (PC-7a 3d, owner 2026-09-29)
+
+A cost record (one per activity) stores a forecast. When its writer gives
+none — the record is created, or its budget is written, without a forecast —
+the stored default is:
+
+```
+CostRecord.forecast (default) = max(budget, actual)          // never < 0, never < actual
+                                (cost.service resolveForecast: Math.max(0, budget, actual))
+```
+
+Authority: the owner's own example in the PC-7a wave text, "forecast =
+max(budget, actual)". The `0` only keeps the figure an amount the
+CostRecord money check accepts; budget and actual are never below 0.
+
+This is the estimate at completion the cost summary already gave a record
+without a forecast (`cost.service estimateAtCompletion`), so the stored
+default and the summary now state one rule; `figure-truth`
+`COST_RECORD_FORECAST_DEFAULT_BASIS` = `greater_of_budget_and_actual`, and the
+summary labels it `projection:typed_or_greater_of_budget_and_actual`. It is a
+projection: it never feeds Original, Revised, Committed or Actual.
+
+It replaces `budget + 1.1 × (actual − budget)`, which was −0.1 × budget on a
+record with no actual yet — the CostRecord money check refused the write, and
+every cost record created without a forecast on an activity with an approved
+allocation answered 500 and quoted the Prisma call — and which fell below
+actual whenever actual was under budget. The one other change: with actual
+above budget the default is now actual (the old rule extrapolated the overrun
+by 10%); a forecast typed on the record still stands as typed.
+
+Where the two defaults differ (a record written without a forecast):
+
+| budget | actual | old default `budget + 1.1 × (actual − budget)` | new default `max(0, budget, actual)` |
+|---:|---:|---:|---:|
+| 10,000 | 0 | −1,000 — refused by the money check, answered 500 | 10,000 |
+| 10,000 | 4,000 | 3,400 — below actual | 10,000 |
+| 10,000 | 10,000 | 10,000 | 10,000 (same) |
+| 10,000 | 12,000 | 12,200 — overrun extrapolated by 10% | 12,000 |
+| 0 | 5,000 | 5,500 | 5,000 |
+| 0 | 0 | 0 | 0 (same) |
+
+They agree only when actual equals budget. In practice records are created
+with actual 0 (`POST /cost/activity/{id}` without a forecast), which is the
+first row: every such record on an activity with an approved allocation
+failed before the change.
+
+Nothing stored moves: only records written after the change take the new
+default. There is no migration or backfill; an existing record's stored
+forecast is read as it is (verified on the certified project `0ce999f2`:
+its cost records and budget lines hashed identical before and after). A figure the service would write below 0 is refused with
+`400 COST_RECORD_MONEY_INVALID` naming the field, never the database's 500.
+Proof: `backend/src/services/__live__/pc-7a-cost-record-forecast.live.test.js`.
 
 ### 1.7 Cash Flow
 

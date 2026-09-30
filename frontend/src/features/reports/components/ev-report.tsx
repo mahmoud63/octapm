@@ -43,6 +43,8 @@ import type {
 import { useProjectSetupReadiness } from '@/features/projects/hooks/use-projects'
 import { formatLongDate } from '@/lib/dates'
 import { evCutoffNote, formatEvCutoff } from '@/lib/ev-cutoff'
+import { FINANCIAL_TERMS } from '@/lib/financial-terms'
+import { TruthBadge } from '@/features/cost/components/truth-badge'
 
 interface Props {
   projectId: string
@@ -80,6 +82,30 @@ type EvActivityBreakdownRow = {
   isCritical?: boolean
 }
 
+/**
+ * One locked reporting period's EV point (PC-7a item 3): its snapshot as
+ * stored at the lock — the figures, and the cutoff instant, date and zone
+ * recorded then. Never recomputed; an open period has none.
+ */
+type EvHistoryPoint = {
+  periodId: string
+  code: string
+  label: string
+  cutoffDate: string
+  cutoffLocalDate?: string | null
+  timeZone?: string | null
+  timeZoneSource?: string | null
+  timeZoneNote?: string | null
+  totalBudget?: number | null
+  pv: number
+  ev: number
+  ac: number
+  eac?: number | null
+  spi?: number | null
+  cpi?: number | null
+  lockedAt?: string | null
+}
+
 type EvReportResponse = {
   pv: number | null
   ev: number | null
@@ -93,7 +119,35 @@ type EvReportResponse = {
   cv: number
   etc: number | null
   totalBudget: number | null
+  /**
+   * Source / derived / projection per figure (PC-7a three truths): PV, EV,
+   * AC and the BAC are derived, the EAC a projection whose rule is eacBasis.
+   * Labels only; absent on reports from before PC-7a.
+   */
+  truth?: {
+    pv?: string
+    ev?: string
+    ac?: string
+    totalBudget?: string
+    eac?: string
+    etc?: string
+    labels?: { totalBudget?: string }
+    derivedFrom?: Record<string, string>
+  }
   sCurve?: Record<string, string | number | null>[]
+  /**
+   * The locked periods cut on or before this report's cutoff, earliest
+   * first (GET /reports/ev only; absent from reports before PC-7a).
+   */
+  history?: EvHistoryPoint[]
+  historyNote?: string
+  historyTruth?: {
+    pv?: string
+    ev?: string
+    ac?: string
+    eac?: string
+    derivedFrom?: Record<string, string>
+  }
   activityBreakdown?: EvActivityBreakdownRow[]
   // Withheld by the server from a member who may not read the BOQ, cost
   // readers included (owner decision E1): each row's budget is the
@@ -287,16 +341,22 @@ function MetricCard({
   sub,
   color,
   testId,
+  truth,
 }: {
   label: string
   value: string
   sub?: string
   color?: string
   testId?: string
+  /** The server's truth label: source, derived or projection:<basis> (PC-7a). */
+  truth?: string
 }) {
   return (
     <div className='rounded-lg border p-3 text-center' data-testid={testId}>
-      <p className='text-xs text-muted-foreground'>{label}</p>
+      <p className='text-xs text-muted-foreground'>
+        {label}
+        <TruthBadge truth={truth} />
+      </p>
       <p className={`mt-1 text-xl font-bold ${color || ''}`}>{value}</p>
       {sub && <p className='text-xs text-muted-foreground'>{sub}</p>}
     </div>
@@ -365,7 +425,11 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
     cv,
     etc,
     totalBudget,
+    truth,
     sCurve,
+    history,
+    historyNote,
+    historyTruth,
     activityBreakdown,
     activityBreakdownWithheld,
     activityBreakdownReason,
@@ -423,14 +487,35 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
   const otherBasisWarnings = (basisWarnings || []).filter(
     (warning: string) => warning !== cutoffNote
   )
+  // The measured EV points come from the report's own history when the
+  // server gives one (the locked snapshots through this cutoff, as stored);
+  // an older server's report falls back to the period list's snapshots.
+  const lockedHistory = history ?? null
+  const measuredPeriods: ReportingPeriod[] = lockedHistory
+    ? lockedHistory.map((point) => ({
+        id: point.periodId,
+        code: point.code,
+        label: point.label,
+        cutoffDate: point.cutoffDate,
+        cutoffLocalDate: point.cutoffLocalDate,
+        status: 'locked',
+        snapshot: { ev: point.ev, pv: point.pv, lockedAt: point.lockedAt },
+      }))
+    : periods
   const curve = shapeSCurve({
     sCurve,
     cutoffDate: reporting?.cutoffDate,
     cutoffLocalDate: reporting?.cutoffLocalDate,
     ev,
     pv,
-    periods,
+    periods: measuredPeriods,
   })
+  // Each history point is labelled by its reporting date (the date recorded
+  // at the lock), so two periods in one month stay two points.
+  const historyRows = (lockedHistory || []).map((point) => ({
+    ...point,
+    at: point.cutoffLocalDate || point.cutoffDate.slice(0, 10),
+  }))
 
   return (
     <div className='space-y-6'>
@@ -556,20 +641,32 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
       )}
 
       <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
-        <MetricCard label='Total Budget (BAC)' value={fmt(totalBudget)} />
+        <MetricCard
+          label={
+            truth?.labels?.totalBudget ??
+            FINANCIAL_TERMS.evBudgetAtCompletion.label
+          }
+          value={fmt(totalBudget)}
+          sub={FINANCIAL_TERMS.evBudgetAtCompletion.hint}
+          truth={truth?.totalBudget}
+          testId='uat-ev-bac'
+        />
         <MetricCard
           label='Planned Value (PV)'
           value={fmt(pv)}
+          truth={truth?.pv}
           sub={`${sourceSummary?.pv?.approvedRows ?? 0} approved load rows`}
         />
         <MetricCard
           label='Earned Value (EV)'
           value={fmt(ev)}
+          truth={truth?.ev}
           color='text-blue-600'
         />
         <MetricCard
           label='Actual Cost (AC)'
           value={fmt(ac)}
+          truth={truth?.ac}
           sub={`${sourceSummary?.ac?.officialActualActivities ?? 0} official actual rows`}
           color='text-orange-600'
         />
@@ -614,12 +711,14 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
         <MetricCard
           label='EAC'
           value={noBudget ? '—' : fmt(eac)}
+          truth={truth?.eac}
           sub={eacSub}
           testId='uat-ev-eac'
         />
         <MetricCard
           label='ETC'
           value={noBudget || etcNotProjected ? '—' : fmt(etc)}
+          truth={truth?.etc}
           sub={etcSub}
           testId='uat-ev-etc'
         />
@@ -727,6 +826,105 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
           </ComposedChart>
         </ResponsiveContainer>
       </div>
+
+      {lockedHistory && (
+        // Beside the formula S-curve: what each locked period measured, as
+        // stored at its lock. Only locked periods have a point — none is
+        // drawn for an open month.
+        <div
+          className='rounded-lg border p-4'
+          data-testid='uat-ev-history'
+          data-history-points={JSON.stringify(
+            historyRows.map((point) => [point.code, point.at, point.pv, point.ev, point.ac])
+          )}
+        >
+          <h3 className='mb-1 font-semibold'>
+            Locked-period history
+            <TruthBadge truth={historyTruth?.ev ?? 'derived'} />
+          </h3>
+          <p className='mb-3 text-xs text-muted-foreground' data-testid='uat-ev-history-note'>
+            {historyNote ??
+              'Each point is a locked reporting period as stored at its lock; nothing is recomputed or filled in between periods.'}
+          </p>
+          {historyRows.length === 0 ? (
+            <p className='text-sm text-muted-foreground' data-testid='uat-ev-history-empty'>
+              No reporting period is locked on or before this cutoff yet. Lock a
+              period (above) to record its PV, EV and AC as a history point.
+            </p>
+          ) : (
+            <>
+              <ResponsiveContainer width='100%' height={260}>
+                <ComposedChart data={historyRows}>
+                  <CartesianGrid strokeDasharray='3 3' />
+                  <XAxis dataKey='at' tick={{ fontSize: 11 }} />
+                  <YAxis
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v) => fmt(Number(v))}
+                  />
+                  <Tooltip
+                    formatter={(value) =>
+                      fmt(typeof value === 'number' ? value : Number(value) || 0)
+                    }
+                  />
+                  <Legend />
+                  <Line type='linear' dataKey='pv' name='PV at lock' stroke='#6366f1' strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type='linear' dataKey='ev' name='EV at lock' stroke='#22c55e' strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type='linear' dataKey='ac' name='AC at lock' stroke='#f97316' strokeWidth={2} dot={{ r: 3 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+              <div className='mt-3 overflow-x-auto rounded-lg border'>
+                <Table>
+                  <TableHeader className='bg-muted/50'>
+                    <TableRow>
+                      {['Period', 'Cutoff', 'PV', 'EV', 'AC', 'EAC at lock', 'SPI', 'CPI'].map((h) => (
+                        <TableHead key={h} className='px-3'>
+                          {h}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {historyRows.map((point) => (
+                      <TableRow key={point.periodId}>
+                        <TableCell className='px-3'>
+                          {/* Opens that period's stored report in this tab. */}
+                          <Button
+                            variant='link'
+                            size='sm'
+                            className='h-auto p-0'
+                            onClick={() => setSelectedPeriodId(point.periodId)}
+                          >
+                            {point.label}
+                          </Button>
+                        </TableCell>
+                        <TableCell className='px-3 text-xs'>
+                          {formatEvCutoff(point)}
+                          {point.timeZoneNote && (
+                            <span className='block text-muted-foreground'>{point.timeZoneNote}</span>
+                          )}
+                        </TableCell>
+                        <TableCell className='px-3'>{fmt(point.pv)}</TableCell>
+                        <TableCell className='px-3'>{fmt(point.ev)}</TableCell>
+                        <TableCell className='px-3'>{fmt(point.ac)}</TableCell>
+                        <TableCell className='px-3'>
+                          {fmt(point.eac ?? null)}
+                          <TruthBadge truth={historyTruth?.eac} />
+                        </TableCell>
+                        <TableCell className='px-3'>
+                          {point.spi === null || point.spi === undefined ? '—' : point.spi.toFixed(2)}
+                        </TableCell>
+                        <TableCell className='px-3'>
+                          {point.cpi === null || point.cpi === undefined ? '—' : point.cpi.toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       <div>
         <h3 className='mb-2 font-semibold'>Top Activities by Budget</h3>

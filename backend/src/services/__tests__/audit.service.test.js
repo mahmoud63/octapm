@@ -132,6 +132,63 @@ describe('audit service', () => {
     });
   });
 
+  // PC-7a: the audit is not optional, and the best-effort outbound log may
+  // never break the caller's transaction.
+  const callerTransaction = ({ outboundCreate, auditCreate, raw } = {}) => {
+    const sql = [];
+    return {
+      sql,
+      tx: {
+        $executeRawUnsafe: jest.fn(raw || (async (statement) => {
+          sql.push(statement.replace(/outbound_event_[0-9a-f]{16}/, 'sp'));
+          return 0;
+        })),
+        auditEvent: { create: auditCreate || jest.fn(async ({ data }) => ({ id: 'audit-tx', createdAt: new Date(), ...data })) },
+        recordHistorySnapshot: { create: jest.fn(async ({ data }) => ({ id: 'snapshot-tx', ...data })) },
+        outboundEvent: { create: outboundCreate || jest.fn(async ({ data }) => ({ id: data.id })) },
+      },
+    };
+  };
+  const txEvent = (tx) => ({
+    tx,
+    orgId: 'org-1',
+    projectId: 'project-1',
+    entityType: 'prime_contract',
+    entityId: 'contract-1',
+    action: 'updated',
+    actorId: 'pm-1',
+    summary: { transition: 'contract.manage' },
+  });
+
+  it("a refused outbound insert inside the caller's transaction is rolled back to its own savepoint: the audit event and its history snapshot stand, and the call succeeds", async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const refused = Object.assign(new Error('Unique constraint failed on the fields: (`id`)'), { code: 'P2002' });
+    const { tx, sql } = callerTransaction({ outboundCreate: jest.fn().mockRejectedValue(refused) });
+    const event = await auditService.recordEvent(txEvent(tx));
+    expect(event.id).toBe('audit-tx');
+    expect(tx.auditEvent.create).toHaveBeenCalledTimes(1);
+    expect(tx.recordHistorySnapshot.create).toHaveBeenCalledTimes(1);
+    expect(sql).toEqual(['SAVEPOINT sp', 'ROLLBACK TO SAVEPOINT sp', 'RELEASE SAVEPOINT sp']);
+    expect(errorSpy).toHaveBeenCalledWith('[audit-domain-event]', refused);
+    errorSpy.mockRestore();
+  });
+
+  it("a caller's transaction that can no longer commit is not swallowed", async () => {
+    const { tx } = callerTransaction({
+      raw: async () => {
+        throw new Error('current transaction is aborted, commands ignored until end of transaction block');
+      },
+    });
+    await expect(auditService.recordEvent(txEvent(tx))).rejects.toMatchObject({ transactionAborted: true });
+  });
+
+  it('an audit event that cannot be written fails the call (it is not best-effort)', async () => {
+    const refused = Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
+    const { tx } = callerTransaction({ auditCreate: jest.fn().mockRejectedValue(refused) });
+    await expect(auditService.recordEvent(txEvent(tx))).rejects.toBe(refused);
+    expect(tx.outboundEvent.create).not.toHaveBeenCalled();
+  });
+
   it('stores old and new record snapshots with a compact change set', async () => {
     const occurredAt = new Date('2026-06-09T12:00:00.000Z');
     mockPrisma.auditEvent.create.mockImplementation(({ data }) =>

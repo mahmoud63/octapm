@@ -209,7 +209,7 @@ describe("IPC allocation impact", () => {
       totalRet: 50,
       netPayable: 950,
     };
-    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", contractValue: 1_000_000 });
     mockPrisma.ipcCertificate.findFirst.mockResolvedValue(certificate);
     mockPrisma.ipcItem.findMany.mockResolvedValue([]);
     mockPrisma.ipcItem.updateMany.mockResolvedValue({ count: 2 });
@@ -447,7 +447,7 @@ describe("IPC allocation impact", () => {
       totalRet: 0,
       netPayable: 0,
     };
-    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", contractValue: 1_000_000 });
     mockPrisma.ipcCertificate.findFirst.mockResolvedValue(certificate);
 
     await expect(
@@ -493,7 +493,7 @@ describe("IPC allocation impact", () => {
       },
     };
 
-    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", contractValue: 1_000_000 });
     mockPrisma.ipcCertificate.findFirst.mockResolvedValue(certificate);
     mockPrisma.ipcItem.findMany
       .mockResolvedValueOnce([item])
@@ -549,7 +549,7 @@ describe("IPC allocation impact", () => {
       },
     };
 
-    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", contractValue: 1_000_000 });
     mockPrisma.ipcCertificate.findFirst.mockResolvedValue(certificate);
     mockPrisma.ipcItem.findMany
       .mockResolvedValueOnce([item])
@@ -1043,7 +1043,7 @@ describe("Phase 21D — integrity (Codex round 4)", () => {
 describe("Phase 21D — integrity (release challenge)", () => {
   it("CX21-413: certifying holds the project row before the certificate, so two periods cannot both pass the shared ceiling", async () => {
     const certificate = { id: "ipc-1", projectId: "project-1", period: "IPC-1", status: "submitted", totalCert: 1000, totalRet: 50, netPayable: 950 };
-    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", contractValue: 1_000_000 });
     mockPrisma.ipcCertificate.findFirst.mockResolvedValue(certificate);
     mockPrisma.ipcItem.findMany.mockResolvedValue([]);
     mockPrisma.ipcItem.updateMany.mockResolvedValue({ count: 0 });

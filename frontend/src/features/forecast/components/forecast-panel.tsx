@@ -19,6 +19,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { AiRunFeedback } from '@/features/assistant/components/ai-run-feedback'
+import { TruthBadge } from '@/features/cost/components/truth-badge'
 import { workspaceLink } from '@/features/workflows/hooks/use-workflow-engine'
 import {
   COST_FIGURES_WITHHELD,
@@ -65,6 +66,7 @@ function Kpi({
   note,
   level,
   testId,
+  truth,
 }: {
   label: string
   value: string
@@ -73,11 +75,14 @@ function Kpi({
   note?: string | null
   level?: ForecastLevel
   testId?: string
+  /** The server's truth label: source, derived or projection:<basis> (PC-7a). */
+  truth?: string
 }) {
   return (
     <div className='rounded-lg border bg-card p-3' data-testid={testId}>
       <p className='text-[10px] tracking-wide text-muted-foreground uppercase'>
         {label}
+        <TruthBadge truth={truth} className='normal-case' />
       </p>
       <p
         className={cn(
@@ -584,6 +589,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
         <Kpi
           label='Estimate at completion (EAC)'
           value={money(eac.value)}
+          truth={cost.truth?.eac}
           sub={eac.label}
           note={cpiNote}
           level={eac.over ? 'medium' : undefined}
@@ -592,6 +598,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
         <Kpi
           label='Projected cost'
           value={noBudget ? '—' : money(cost.projected)}
+          truth={cost.truth?.projected}
           sub={
             !costFiguresShown
               ? 'Cost figures are not available to you'

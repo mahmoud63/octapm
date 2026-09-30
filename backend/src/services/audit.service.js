@@ -545,7 +545,15 @@ const recordEvent = async ({
 
   // Fan out a domain event: persist it in the same transaction for the durable
   // outbound log, then publish (deferred) for realtime subscribers. Neither
-  // step may break the audited business action.
+  // step may break the audited business action — and neither may break its
+  // transaction: inside a caller's transaction the outbound insert runs under
+  // its own savepoint (events/bus recordOutboundEvent), so a refused insert is
+  // rolled back alone and the audit event, its history snapshot and the
+  // caller's writes commit. The audit event and snapshot above are not
+  // best-effort: their failure propagates. Only a transaction that can no
+  // longer commit (transactionAborted) is rethrown from here, so the caller
+  // fails loudly instead of answering for writes a COMMIT would drop. The
+  // event is announced only once its transaction has committed.
   try {
     const domainEvent = domainEvents.buildRecordEvent({
       orgId,
@@ -559,9 +567,10 @@ const recordEvent = async ({
       newStatus,
       summary: newSummaryJson || summaryJson,
     });
-    await domainEvents.recordOutboundEvent({ tx, event: domainEvent });
-    domainEvents.publish(domainEvent);
+    const recorded = await domainEvents.recordOutboundEvent({ tx, event: domainEvent });
+    domainEvents.publishRecorded(recorded?.id ? { ...domainEvent, id: recorded.id } : domainEvent, { tx, client: prisma });
   } catch (error) {
+    if (error?.transactionAborted) throw error;
     console.error("[audit-domain-event]", error);
   }
 

@@ -84,6 +84,11 @@ const format = (value: unknown, kind: 'money' | 'days' | 'percent' | undefined, 
   return humanise(String(value))
 }
 
+const withheldKeys = (context: WorkflowContext): Set<string> => {
+  const marker = context.valueWithheld as { keys?: unknown } | null | undefined
+  return new Set(Array.isArray(marker?.keys) ? marker.keys.filter((key): key is string => typeof key === 'string') : [])
+}
+
 export interface ContextFact {
   key: string
   label: string
@@ -99,13 +104,21 @@ export function contextFacts(tool: string, context: WorkflowContext | null | und
   if (!context) return []
   const known = FIELDS[tool] ?? []
   const facts: ContextFact[] = []
-  const used = new Set<string>([...HEADER_KEYS, ...ALWAYS_LAST.map((f) => f.key)])
+  const used = new Set<string>([...HEADER_KEYS, ...ALWAYS_LAST.map((f) => f.key), 'valueWithheld'])
+  // A figure the server withheld (it names it in `valueWithheld.keys`: an IPC's
+  // net payable while the contract value is unestablished) reads "—", never 0;
+  // the marker itself is not a fact.
+  const withheld = withheldKeys(context)
   // `amount` is a money field only where the approval is a money decision:
   // the server sends `amount: 0` for a submittal, and a submittal approval is
   // not worth nothing, it is worth nothing to say.
   if (!isFinancialTool(tool)) used.add('amount')
   for (const field of known) {
     used.add(field.key)
+    if (withheld.has(field.key)) {
+      facts.push({ key: field.key, label: field.label, value: '—' })
+      continue
+    }
     if (!present(context[field.key])) continue
     facts.push({ key: field.key, label: field.label, value: format(context[field.key], field.kind, currency) })
   }

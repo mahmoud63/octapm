@@ -166,6 +166,10 @@ export type PurchaseOrderList = {
   summary: {
     total: number
     byLifecycle: Record<string, number>
+    /** Order value — not committed cost (orders neither planned nor cancelled). */
+    orderValue: number
+    orderValueLabel?: string
+    /** @deprecated alias of orderValue kept for the mobile client; not committed cost. */
     committed: number
     invoiced: number
     awaitingApproval: number

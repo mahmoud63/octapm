@@ -208,4 +208,53 @@ describe("schedule delay and cost overrun prediction", () => {
     await expect(service.executeAction({ orgId: "org-1", user, projectId: "p1", action: { type: "open" } })).rejects.toMatchObject({ code: "FORECAST_ACTION_UNKNOWN" });
     await expect(service.executeAction({ orgId: "org-1", user, projectId: "p1", action: { type: "create_risk" } })).rejects.toMatchObject({ code: "FORECAST_ACTION_DESCRIPTION" });
   });
+  it("counts an approved change order's approved impact once, preferring it to the RFI it took over (PC-7a item 4)", async () => {
+    // rfi-9 (3 days on the slab) became co-1, approved with 6 days on the slab.
+    mockPrisma.changeOrderActivityLink = { findMany: jest.fn(async () => [{ activityId: "a-slab", changeOrderId: "co-1", approvedScheduleImpactDays: 6 }, { activityId: "a-slab", changeOrderId: "co-1", approvedScheduleImpactDays: 4 }, { activityId: "a-mep", changeOrderId: "co-2", approvedScheduleImpactDays: 2 }]) };
+    mockPrisma.changeEvent = { findMany: jest.fn(async () => [{ sourceRecordType: "rfi", sourceRecordId: "rfi-9", changeOrderId: "co-1" }]) };
+    try {
+      const forecast = await service.buildForecast({ orgId: "org-1", projectId: "p1", asOf: ASOF });
+      const byId = Object.fromEntries(forecast.activities.map((row) => [row.id, row]));
+      expect(byId["a-slab"].impactDays).toBe(8); // co-1 once (6, not 6 + 4 + the RFI's 3) + weather 2
+      expect(byId["a-slab"].reasons).toContain("8 days of recorded impact from change order, weather");
+      expect(byId["a-mep"].impactDays).toBe(2);
+      const where = mockPrisma.changeOrderActivityLink.findMany.mock.calls[0][0].where;
+      expect(where).toEqual({ projectId: "p1", approvedScheduleImpactDays: { gt: 0 }, changeOrder: { projectId: "p1", status: "approved", archivedAt: null } });
+    } finally {
+      delete mockPrisma.changeOrderActivityLink;
+      delete mockPrisma.changeEvent;
+    }
+  });
+
+  it("keeps an RFI impact whose order is not approved or does not touch that activity", () => {
+    const convertedTo = service.conversionMap({ rfiOrders: [{ id: "rfi-1", changeOrderId: "co-1" }], changeEventOrders: [{ sourceRecordType: "submittal", sourceRecordId: "sub-1", changeOrderId: "co-2" }] });
+    const { rows, superseded } = service.recordedImpacts({
+      workflowLinks: [
+        { activityId: "a1", recordType: "rfi", recordId: "rfi-1", scheduleImpactDays: 3 },
+        { activityId: "a2", recordType: "rfi", recordId: "rfi-1", scheduleImpactDays: 5 },
+        { activityId: "a1", recordType: "submittal", recordId: "sub-1", scheduleImpactDays: 4 },
+      ],
+      changeOrderLinks: [{ activityId: "a1", changeOrderId: "co-1", approvedScheduleImpactDays: 7 }],
+      convertedTo,
+    });
+    expect(superseded).toBe(1);
+    expect(rows).toEqual([
+      { activityId: "a2", kind: "rfi", days: 5, recordId: "rfi-1" },
+      { activityId: "a1", kind: "submittal", days: 4, recordId: "sub-1" },
+      { activityId: "a1", kind: "change_order", days: 7, recordId: "co-1" },
+    ]);
+  });
+
+  it("gives dataQualityItems in step with the dataQuality strings", async () => {
+    mockEv.buildOfficialEvReport.mockResolvedValueOnce(null);
+    mockBudget.listBudgetLines.mockResolvedValueOnce({ items: [] });
+    const forecast = await service.buildForecast({ orgId: "org-1", projectId: "p1", asOf: ASOF });
+    expect(forecast.dataQuality.length).toBeGreaterThan(1);
+    expect(forecast.dataQualityItems.map((item) => item.message)).toEqual(forecast.dataQuality);
+    for (const item of forecast.dataQualityItems) {
+      expect(Object.keys(item).sort()).toEqual(["kind", "message", "severity", "subject"]);
+      expect(["info", "warning"]).toContain(item.severity);
+    }
+    expect(forecast.dataQualityItems.map((item) => item.kind)).toEqual(expect.arrayContaining(["earned_value_unavailable", "no_budget_lines"]));
+  });
 });

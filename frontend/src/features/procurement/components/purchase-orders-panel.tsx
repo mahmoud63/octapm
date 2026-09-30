@@ -88,7 +88,7 @@ export function PurchaseOrdersPanel({
       <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
         {[
           ['Orders', String(data?.summary.total ?? 0)],
-          [FINANCIAL_TERMS.poValue.label, money(data?.summary.committed ?? 0, currency)],
+          [FINANCIAL_TERMS.poValue.label, money(data?.summary.orderValue ?? 0, currency)],
           ['Invoiced', money(data?.summary.invoiced ?? 0, currency)],
           [
             'Waiting on you',

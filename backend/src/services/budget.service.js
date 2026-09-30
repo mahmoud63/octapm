@@ -3,6 +3,8 @@ const { HttpError } = require("../utils/http-error");
 const { addMoney, subtractMoney, multiplyMoney, toMoneyNumber } = require("../utils/money");
 const auditService = require("./audit.service");
 const { getApprovedActivityAllocationTotals } = require("./activity-boq-allocation.service");
+// Source / derived / projection labels on each line (labels only).
+const { budgetLineTruth } = require("../utils/figure-truth");
 
 /**
  * Budget by cost code (OCTA-FIN-COSTCODE-019).
@@ -148,8 +150,18 @@ const deriveLine = (line) => {
   return { original, approvedChanges, revisions, revised, committed, actual, forecast, variance: subtractMoney(revised, forecast), allocatedWeight, allocatedAmount, unallocatedAmount: subtractMoney(revised, allocatedAmount) };
 };
 
+// A stored budget snapshot keeps the figures only: the three-truths labels
+// describe the live register and are not part of what a period froze.
+const withoutTruth = (line) => {
+  if (!line || typeof line !== "object" || !Object.prototype.hasOwnProperty.call(line, "truth")) return line;
+  const rest = { ...line };
+  delete rest.truth;
+  return rest;
+};
+
 const serializeLine = (line) => {
   const derived = deriveLine(line);
+  const forecastIsManual = line.forecast !== null && line.forecast !== undefined;
   return {
     id: line.id,
     projectId: line.projectId,
@@ -168,7 +180,11 @@ const serializeLine = (line) => {
     committedFromCommitments: toMoneyNumber(line.committedFromCommitments),
     actual: derived.actual,
     forecast: derived.forecast,
-    forecastIsManual: line.forecast !== null && line.forecast !== undefined,
+    forecastIsManual,
+    // Which figure is a source fact, which is derived and which is a
+    // projection, and from what (control model §3). The same words on every
+    // line; only the forecast's typed/default split varies.
+    truth: budgetLineTruth(forecastIsManual),
     variance: derived.variance,
     allocatedWeight: derived.allocatedWeight,
     allocatedAmount: derived.allocatedAmount,
@@ -214,7 +230,31 @@ const loadLines = async ({ projectId, includeArchived = false }, tx = prisma) =>
     orderBy: [{ costCode: { code: "asc" } }, { sortOrder: "asc" }, { costType: "asc" }],
   });
 
-const listBudgetLines = async ({ orgId, projectId, query = {} }) => {
+// What a screen says of each lock condition beside a read-only Original
+// Budget (GET /budget/lines, GET /budget/lines/:lineId). Plain words, the
+// same on every line; the 409 of a refused write names the particular
+// change order, commitment or period.
+const ORIGINAL_LOCK_WORDS = Object.freeze({
+  approved_budget_baseline: "an approved budget baseline includes it",
+  approved_change: "an approved change order, revision or transfer stands on it",
+  executed_commitment: "an executed commitment is committed against it",
+  ledger_posting: "the cost ledger has posted cost to it",
+  locked_period_snapshot: "a locked reporting period's budget snapshot includes it",
+});
+
+// Each line's Original Budget lock, read once for the whole list with the
+// one guard's own conditions (originalBudgetLocks): { locked, conditions:
+// [{ condition, number, reason }] }. On the read answers only — never on a
+// stored budget snapshot (buildSnapshotPayload lists without it).
+const withOriginalBudgetLocks = async ({ projectId, items }) => {
+  const locks = await originalBudgetLocks({ projectId, lineIds: items.map((line) => line.id) });
+  return items.map((line) => {
+    const conditions = (locks.get(line.id) || []).map(({ condition, number }) => ({ condition, number, reason: ORIGINAL_LOCK_WORDS[condition] || condition }));
+    return { ...line, originalBudgetLock: { locked: conditions.length > 0, conditions } };
+  });
+};
+
+const listBudgetLines = async ({ orgId, projectId, query = {}, originalLocks = false }) => {
   await ensureProject({ orgId, projectId });
   const rows = await loadLines({ projectId, includeArchived: Boolean(query.includeArchived) });
   let items = rows.map(serializeLine);
@@ -224,6 +264,7 @@ const listBudgetLines = async ({ orgId, projectId, query = {} }) => {
     const needle = String(query.search).toLowerCase();
     items = items.filter((line) => [line.costCode?.code, line.costCode?.name, line.description].some((text) => text && String(text).toLowerCase().includes(needle)));
   }
+  if (originalLocks) items = await withOriginalBudgetLocks({ projectId, items });
   return { items, summary: summarize(items) };
 };
 
@@ -233,9 +274,10 @@ const loadLine = async ({ projectId, lineId }, tx = prisma) => {
   return line;
 };
 
-const getBudgetLine = async ({ orgId, projectId, lineId }) => {
+const getBudgetLine = async ({ orgId, projectId, lineId, originalLocks = false }) => {
   await ensureProject({ orgId, projectId });
-  return serializeLine(await loadLine({ projectId, lineId }));
+  const line = serializeLine(await loadLine({ projectId, lineId }));
+  return originalLocks ? (await withOriginalBudgetLocks({ projectId, items: [line] }))[0] : line;
 };
 
 /** Allocation amounts follow the revised budget; call after anything that changes it. */
@@ -251,6 +293,136 @@ const recomputeAllocations = async (tx, lineId) => {
 
 const audit = ({ tx, orgId, projectId, entityId, action, actor, summary, reason = null }) =>
   auditService.recordEvent({ tx, orgId, projectId, entityType: auditService.ENTITY_TYPES.BUDGET_LINE, entityId, action, actorId: actor?.id || null, actorRole: actor?.role || null, reason, summary, metadata: { source: "cost_control.budget" } });
+
+// ─── The Original Budget boundary (PC-7a, owner decision 2026-09-29) ──────────
+//
+// Original Budget is a source figure (certified rule §121): once something
+// stands on a line's original amount, a new required amount is a budget
+// revision that flows into Revised Budget — original 100,000 + an approved
+// revision of +50,000 reads revised 150,000 with the original still 100,000,
+// never original 150,000. The lock is per line and starts at the FIRST of:
+//   1. the line is in an approved financial/budget baseline — no such record
+//      exists in this codebase (BudgetRevision is a project-level ledger with
+//      no budget-line link, and a schedule baseline is a separate control that
+//      never locks the budget), so this condition is inert until one exists;
+//   2. an approved change stands on it — any BudgetLineChange row (an approved
+//      change order posted at approval, a revision or a transfer, both of which
+//      need cost.approve and take effect when written);
+//   3. an executed commitment references it — the certified definition in
+//      commitment.service recomputeCommitted: a commitment in a posting status
+//      (executed, closed) whose SOV lines or approved CCO lines name the line
+//      (by id, or by cost code for an active line of the commitment's cost
+//      type), or committedFromCommitments ≠ 0;
+//   4. the cost ledger posts to it — any CostLedgerEntry on the line (openings
+//      and reversals included), or a non-zero actual projection;
+//   5. the line is in the budget snapshot of a LOCKED reporting period. An
+//      ad-hoc snapshot (no period) or an open period's snapshot never locks.
+const ORIGINAL_LOCK = Object.freeze({
+  BUDGET_BASELINE: Object.freeze({ condition: "approved_budget_baseline", number: 1 }),
+  APPROVED_CHANGE: Object.freeze({ condition: "approved_change", number: 2 }),
+  EXECUTED_COMMITMENT: Object.freeze({ condition: "executed_commitment", number: 3 }),
+  LEDGER_POSTING: Object.freeze({ condition: "ledger_posting", number: 4 }),
+  LOCKED_PERIOD_SNAPSHOT: Object.freeze({ condition: "locked_period_snapshot", number: 5 }),
+});
+// A PATCH that sends the stored figure back is an echo, not an edit.
+const ORIGINAL_ECHO_TOLERANCE = 0.005;
+const CHANGE_KIND_WORDS = Object.freeze({ change_order: "an approved change order", revision: "a budget revision", transfer_in: "a budget transfer into it", transfer_out: "a budget transfer out of it" });
+
+const formatAmount = (value) => toMoneyNumber(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * Which lock conditions stand on each line, read inside the caller's
+ * transaction: Map<lineId, [{ condition, number, reason }]> (an empty list =
+ * the original is still writable). A line of another project answers as none.
+ */
+const originalBudgetLocks = async ({ tx = prisma, projectId, lineIds }) => {
+  const ids = [...new Set((lineIds || []).filter(Boolean))];
+  const locks = new Map(ids.map((id) => [id, []]));
+  if (!ids.length) return locks;
+  const add = (lineId, kind, reason) => {
+    const list = locks.get(lineId);
+    if (list && !list.some((row) => row.condition === kind.condition)) list.push({ ...kind, reason });
+  };
+  const lines = await tx.budgetLine.findMany({ where: { projectId, id: { in: ids } }, select: { id: true, costCodeId: true, costType: true, status: true, actual: true, committedFromCommitments: true } });
+  // Condition 1 is inert: there is no approved financial/budget baseline record to consult (see above).
+
+  // Condition 2.
+  const changes = await tx.budgetLineChange.findMany({ where: { projectId, budgetLineId: { in: ids } }, select: { budgetLineId: true, kind: true }, orderBy: { createdAt: "asc" } });
+  for (const row of changes) add(row.budgetLineId, ORIGINAL_LOCK.APPROVED_CHANGE, `${CHANGE_KIND_WORDS[row.kind] || "an approved budget change"} stands on it`);
+
+  // Condition 3, read exactly as recomputeCommitted posts committed cost.
+  const { POSTING_STATUSES, CO_STATUS, costTypeForCommitment } = require("./commitment.service");
+  const lineIdSet = new Set(lines.map((line) => line.id));
+  const activeByKey = new Map(lines.filter((line) => line.status === "active").map((line) => [`${line.costCodeId}:${line.costType}`, line.id]));
+  const commitments = await tx.commitment.findMany({
+    where: { projectId, status: { in: POSTING_STATUSES } },
+    select: { ref: true, type: true, lines: { select: { budgetLineId: true, costCodeId: true } }, changeOrders: { where: { status: CO_STATUS.APPROVED }, select: { linesJson: true } } },
+  });
+  for (const commitment of commitments) {
+    const costType = costTypeForCommitment(commitment.type);
+    const entries = [...commitment.lines, ...commitment.changeOrders.flatMap((co) => (Array.isArray(co.linesJson) ? co.linesJson.filter(Boolean) : []))];
+    for (const entry of entries) {
+      const lineId = entry.budgetLineId ? (lineIdSet.has(entry.budgetLineId) ? entry.budgetLineId : null) : entry.costCodeId ? activeByKey.get(`${entry.costCodeId}:${costType}`) : null;
+      if (lineId) add(lineId, ORIGINAL_LOCK.EXECUTED_COMMITMENT, `executed commitment ${commitment.ref || commitment.type} is committed against it`);
+    }
+  }
+  for (const line of lines) {
+    if (toMoneyNumber(line.committedFromCommitments) !== 0) add(line.id, ORIGINAL_LOCK.EXECUTED_COMMITMENT, "executed commitments are committed against it");
+  }
+
+  // Condition 4.
+  const ledger = await tx.costLedgerEntry.findMany({ where: { projectId, budgetLineId: { in: ids } }, select: { budgetLineId: true, sourceType: true }, distinct: ["budgetLineId"] });
+  for (const row of ledger) add(row.budgetLineId, ORIGINAL_LOCK.LEDGER_POSTING, `the cost ledger has posted to it (${row.sourceType})`);
+  for (const line of lines) {
+    if (toMoneyNumber(line.actual) !== 0) add(line.id, ORIGINAL_LOCK.LEDGER_POSTING, "the cost ledger has posted actual cost to it");
+  }
+
+  // Condition 5: only a LOCKED period's snapshot; an ad-hoc or open-period one never locks.
+  const snapshots = await tx.budgetSnapshot.findMany({ where: { projectId, reportingPeriod: { is: { status: "locked" } } }, select: { linesJson: true, reportingPeriod: { select: { code: true } } } });
+  for (const snapshot of snapshots) {
+    for (const row of Array.isArray(snapshot.linesJson) ? snapshot.linesJson : []) {
+      if (row && locks.has(row.id)) add(row.id, ORIGINAL_LOCK.LOCKED_PERIOD_SNAPSHOT, `it is in the budget snapshot of locked reporting period ${snapshot.reportingPeriod?.code || ""}`.trim());
+    }
+  }
+  for (const list of locks.values()) list.sort((a, b) => a.number - b.number);
+  return locks;
+};
+
+const originalBudgetLockedError = ({ line, proposed, reasons }) => {
+  const label = [line.costCode?.code, line.costType].filter(Boolean).join(" / ") || "this line";
+  const original = formatAmount(line.originalBudget);
+  const because = reasons.map((row) => `condition ${row.number}: ${row.reason}`).join("; ");
+  return new HttpError(
+    409,
+    "BUDGET_ORIGINAL_LOCKED",
+    // Plain words for a person; where to record the revision is a field of
+    // the details (revisionPath), not part of the sentence.
+    `The original budget of ${label} is locked at ${original} (${because}). Record a changed amount as a budget revision on this line: it flows into the Revised Budget and the Original Budget stays ${original} — for example, original 100,000 + an approved revision of +50,000 reads revised 150,000 with the original still 100,000.`,
+    { lineId: line.id, code: line.costCode?.code || null, costType: line.costType, originalBudget: toMoneyNumber(line.originalBudget), proposed, conditions: reasons, revisionPath: `/budget/lines/${line.id}/revisions` },
+  );
+};
+
+const isOriginalEcho = (stored, proposed) => Math.abs(subtractMoney(proposed, stored)) <= ORIGINAL_ECHO_TOLERANCE;
+
+/**
+ * The one Original Budget guard. Every write path that could move
+ * originalBudget asks it first, inside its transaction, with the line held.
+ * Returns the lock reasons (empty = writable); with `refuse` (the default) it
+ * throws 409 BUDGET_ORIGINAL_LOCKED instead when the amount would move.
+ */
+const assertOriginalBudgetWritable = async ({ tx, projectId, line, proposed, refuse = true }) => {
+  if (proposed === undefined || proposed === null || isOriginalEcho(line.originalBudget, proposed)) return [];
+  const reasons = (await originalBudgetLocks({ tx, projectId, lineIds: [line.id] })).get(line.id) || [];
+  if (reasons.length && refuse) throw originalBudgetLockedError({ line, proposed, reasons });
+  return reasons;
+};
+
+// Held for the transaction (FOR UPDATE also blocks a new child row naming the
+// line), so a ledger posting, change or commitment recompute on the line waits
+// for this write, or this write reads it once it has landed.
+const holdLine = async (tx, lineId) => {
+  if (tx.$queryRaw) await tx.$queryRaw`SELECT id FROM "BudgetLine" WHERE id = ${lineId} FOR UPDATE`;
+};
 
 const normalizeCostType = (value) => {
   const costType = String(value || "other").toLowerCase();
@@ -270,12 +442,25 @@ const createBudgetLine = async ({ orgId, projectId, payload = {}, actor = null }
   if (round2(money(payload, "actual") ?? 0) !== 0) {
     throw new HttpError(400, "BUDGET_ACTUAL_IS_DERIVED", "Actual cost is posted through the cost ledger; it cannot be typed onto a budget line");
   }
+  let originalBudgetKept = null;
   const created = await prisma.$transaction(async (tx) => {
     await ensureProjectCostCodes({ tx, orgId, projectId, costCodeIds: [costCodeId], actorId: actor?.id || null });
     const clash = await tx.budgetLine.findFirst({ where: { projectId, costCodeId, costType }, select: { id: true, status: true } });
     if (clash && clash.status === "active") throw new HttpError(409, "BUDGET_LINE_DUPLICATE", "A line for this cost code and cost type already exists");
+    if (clash) {
+      // Re-activating an archived line is never a hidden Original Budget edit
+      // (PC-7a): the line keeps the original it has, whatever the payload
+      // says, and the answer says so when the two differ — with the lock
+      // conditions, if any, that would refuse a PATCH of it too.
+      await holdLine(tx, clash.id);
+      const archived = await loadLine({ projectId, lineId: clash.id }, tx);
+      if (!isOriginalEcho(archived.originalBudget, originalBudget)) {
+        const conditions = await assertOriginalBudgetWritable({ tx, projectId, line: archived, proposed: originalBudget, refuse: false });
+        originalBudgetKept = { existing: toMoneyNumber(archived.originalBudget), proposed: originalBudget, locked: conditions.length > 0, conditions };
+      }
+    }
     const data = {
-      originalBudget,
+      ...(clash ? {} : { originalBudget }),
       description: trimOrNull(payload.description)?.slice(0, 500) || null,
       committed: money(payload, "committed") ?? 0,
       forecast: payload.forecast === undefined || payload.forecast === null || payload.forecast === "" ? null : money(payload, "forecast"),
@@ -289,10 +474,10 @@ const createBudgetLine = async ({ orgId, projectId, payload = {}, actor = null }
     const row = clash
       ? await tx.budgetLine.update({ where: { id: clash.id }, data, include: lineInclude })
       : await tx.budgetLine.create({ data: { orgId, projectId, costCodeId, costType, createdBy: actor?.id || null, actual: 0, ...data }, include: lineInclude });
-    await audit({ tx, orgId, projectId, entityId: row.id, action: auditService.ACTIONS.CREATED, actor, summary: { code: row.costCode?.code, costType, originalBudget } });
+    await audit({ tx, orgId, projectId, entityId: row.id, action: auditService.ACTIONS.CREATED, actor, summary: { code: row.costCode?.code, costType, originalBudget: toMoneyNumber(row.originalBudget), ...(clash ? { reactivated: true } : {}), ...(originalBudgetKept ? { originalBudgetKept } : {}) } });
     return row;
   });
-  return serializeLine(created);
+  return originalBudgetKept ? { ...serializeLine(created), originalBudgetKept } : serializeLine(created);
 };
 
 const updateBudgetLine = async ({ orgId, projectId, lineId, payload = {}, actor = null }) => {
@@ -313,6 +498,13 @@ const updateBudgetLine = async ({ orgId, projectId, lineId, payload = {}, actor 
     data.status = payload.status;
   }
   const updated = await prisma.$transaction(async (tx) => {
+    if (data.originalBudget !== undefined) {
+      await holdLine(tx, lineId);
+      const held = await loadLine({ projectId, lineId }, tx);
+      await assertOriginalBudgetWritable({ tx, projectId, line: held, proposed: data.originalBudget });
+      // An echo writes nothing new: the stored figure stays exactly as it is.
+      if (isOriginalEcho(held.originalBudget, data.originalBudget)) delete data.originalBudget;
+    }
     if (data.costType && data.costType !== existing.costType) {
       const clash = await tx.budgetLine.findFirst({ where: { projectId, costCodeId: existing.costCodeId, costType: data.costType, id: { not: lineId } }, select: { id: true } });
       if (clash) throw new HttpError(409, "BUDGET_LINE_DUPLICATE", "A line for this cost code and cost type already exists");
@@ -327,7 +519,7 @@ const updateBudgetLine = async ({ orgId, projectId, lineId, payload = {}, actor 
 
 const archiveBudgetLine = ({ orgId, projectId, lineId, actor }) => updateBudgetLine({ orgId, projectId, lineId, payload: { status: "archived" }, actor });
 
-/** CSV-style import: rows of { code, costType, originalBudget, description }. Existing lines are updated. */
+/** CSV-style import: rows of { code, costType, originalBudget, description }. Existing lines are updated, except a locked original (see lockedLines). */
 const importBudgetLines = async ({ orgId, projectId, rows = [], actor = null }) => {
   await ensureProject({ orgId, projectId });
   if (!Array.isArray(rows) || !rows.length) throw new HttpError(400, "BUDGET_ROWS_REQUIRED", "Provide at least one row");
@@ -338,6 +530,10 @@ const importBudgetLines = async ({ orgId, projectId, rows = [], actor = null }) 
     let created = 0;
     let updated = 0;
     const missing = [];
+    // An existing line whose original is locked is never overwritten (PC-7a):
+    // its description and status are written, its original stays, and the
+    // answer lists it so the importer can raise a budget revision instead.
+    const lockedLines = [];
     for (const [index, row] of rows.entries()) {
       const code = trimOrNull(row.code)?.toUpperCase();
       if (!code) throw new HttpError(400, "BUDGET_ROW_CODE_REQUIRED", `Row ${index + 1} needs a cost code`);
@@ -356,7 +552,16 @@ const importBudgetLines = async ({ orgId, projectId, rows = [], actor = null }) 
       const originalBudget = money(row, "originalBudget") ?? 0;
       const existing = await tx.budgetLine.findFirst({ where: { projectId, costCodeId, costType }, select: { id: true } });
       if (existing) {
-        await tx.budgetLine.update({ where: { id: existing.id }, data: { originalBudget, description: trimOrNull(row.description)?.slice(0, 500) || null, status: "active", updatedBy: actor?.id || null } });
+        await holdLine(tx, existing.id);
+        const line = await loadLine({ projectId, lineId: existing.id }, tx);
+        const conditions = await assertOriginalBudgetWritable({ tx, projectId, line, proposed: originalBudget, refuse: false });
+        const description = trimOrNull(row.description)?.slice(0, 500) || null;
+        if (conditions.length) {
+          await tx.budgetLine.update({ where: { id: existing.id }, data: { description, status: "active", updatedBy: actor?.id || null } });
+          lockedLines.push({ code, costType, existing: toMoneyNumber(line.originalBudget), proposed: originalBudget, conditions });
+          continue;
+        }
+        await tx.budgetLine.update({ where: { id: existing.id }, data: { originalBudget, description, status: "active", updatedBy: actor?.id || null } });
         await recomputeAllocations(tx, existing.id);
         updated += 1;
       } else {
@@ -364,8 +569,8 @@ const importBudgetLines = async ({ orgId, projectId, rows = [], actor = null }) 
         created += 1;
       }
     }
-    await audit({ tx, orgId, projectId, entityId: projectId, action: auditService.ACTIONS.UPDATED, actor, summary: { import: true, created, updated, missing: missing.length } });
-    return { created, updated, missingCodes: missing };
+    await audit({ tx, orgId, projectId, entityId: projectId, action: auditService.ACTIONS.UPDATED, actor, summary: { import: true, created, updated, missing: missing.length, lockedLines: lockedLines.length } });
+    return { created, updated, missingCodes: missing, lockedLines };
   });
   return result;
 };
@@ -655,7 +860,18 @@ const snapshotInclude = { reportingPeriod: { select: { id: true, code: true, lab
 
 const buildSnapshotPayload = async ({ orgId, projectId }) => {
   const [{ items, summary }, reconciliation] = await Promise.all([listBudgetLines({ orgId, projectId, query: { includeArchived: true } }), reconcile({ orgId, projectId })]);
-  return { totals: { ...summary.totals, byType: summary.byType, lines: summary.lines }, lines: items, reconciliation };
+  return { totals: { ...summary.totals, byType: summary.byType, lines: summary.lines }, lines: items.map(withoutTruth), reconciliation };
+};
+
+// A locked period's snapshot is the budget frozen with it: the period's
+// history, and Original Budget lock condition 5, which reads its lines. Only
+// the lock itself writes it (snapshotForPeriod, inside the lock
+// transaction); re-taking it by hand would rewrite that history and pull
+// every line added since into the lock (PC-7a review). Nothing is written.
+const assertPeriodSnapshotWritable = (period) => {
+  if (period?.status === "locked") {
+    throw new HttpError(409, "REPORTING_PERIOD_LOCKED", `Reporting period ${period.code} is locked: its budget snapshot was taken at the lock and cannot be replaced; take a snapshot without a period instead`);
+  }
 };
 
 const takeSnapshot = async ({ orgId, projectId, payload = {}, actor = null }) => {
@@ -665,12 +881,20 @@ const takeSnapshot = async ({ orgId, projectId, payload = {}, actor = null }) =>
   if (reportingPeriodId) {
     period = await prisma.reportingPeriod.findFirst({ where: { id: reportingPeriodId, projectId } });
     if (!period) throw new HttpError(404, "REPORTING_PERIOD_NOT_FOUND", "Reporting period not found");
+    assertPeriodSnapshotWritable(period);
   }
   const label = trimOrNull(payload.label) || (period ? `Period ${period.code}` : `Budget as of ${new Date().toISOString().slice(0, 10)}`);
   const body = await buildSnapshotPayload({ orgId, projectId });
   const data = { orgId, projectId, reportingPeriodId: reportingPeriodId || null, label: label.slice(0, 160), takenBy: actor?.id || null, takenAt: new Date(), totalsJson: body.totals, linesJson: body.lines, reconciliationJson: body.reconciliation };
   const row = reportingPeriodId
-    ? await prisma.budgetSnapshot.upsert({ where: { reportingPeriodId }, create: data, update: { label: data.label, takenBy: data.takenBy, takenAt: data.takenAt, totalsJson: data.totalsJson, linesJson: data.linesJson, reconciliationJson: data.reconciliationJson }, include: snapshotInclude })
+    ? await prisma.$transaction(async (tx) => {
+        // Checked again under a share lock on the period: a lock committing
+        // meanwhile (it updates the period row) either waits for this write,
+        // then takes its own snapshot over it, or has committed and is seen.
+        const [held] = await tx.$queryRaw`SELECT "status", "code" FROM "ReportingPeriod" WHERE "id" = ${reportingPeriodId} FOR SHARE`;
+        assertPeriodSnapshotWritable(held || period);
+        return tx.budgetSnapshot.upsert({ where: { reportingPeriodId }, create: data, update: { label: data.label, takenBy: data.takenBy, takenAt: data.takenAt, totalsJson: data.totalsJson, linesJson: data.linesJson, reconciliationJson: data.reconciliationJson }, include: snapshotInclude });
+      })
     : await prisma.budgetSnapshot.create({ data, include: snapshotInclude });
   await auditService.recordEvent({ orgId, projectId, entityType: auditService.ENTITY_TYPES.BUDGET_SNAPSHOT, entityId: row.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, actorRole: actor?.role || null, summary: { label: row.label, reportingPeriodId: reportingPeriodId || null, balanced: body.reconciliation.balanced, budgetLines: body.totals.revisedBudget }, metadata: { source: "cost_control.budget" } });
   return serializeSnapshot(row, { withLines: true, cutoffOf: await periodCutoffReader({ orgId, projectId }) });
@@ -679,7 +903,7 @@ const takeSnapshot = async ({ orgId, projectId, payload = {}, actor = null }) =>
 /** Locking a reporting period freezes the budget with it (called inside the lock transaction). */
 const snapshotForPeriod = async ({ tx = prisma, orgId, projectId, periodId, userId = null }) => {
   if (!tx.budgetSnapshot?.upsert || !tx.budgetLine?.findMany) return null;
-  const lines = (await loadLines({ projectId, includeArchived: true }, tx)).map(serializeLine);
+  const lines = (await loadLines({ projectId, includeArchived: true }, tx)).map((line) => withoutTruth(serializeLine(line)));
   if (!lines.length) return null;
   const summary = summarize(lines);
   const period = await tx.reportingPeriod.findFirst({ where: { id: periodId }, select: { code: true } });
@@ -723,6 +947,9 @@ module.exports = {
   updateBudgetLine,
   archiveBudgetLine,
   importBudgetLines,
+  ORIGINAL_LOCK,
+  originalBudgetLocks,
+  assertOriginalBudgetWritable,
   setLineAllocations,
   suggestAllocations,
   transferBudget,

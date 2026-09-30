@@ -8,6 +8,31 @@ const budgetService = require("./budget.service");
 const { forecastCostWithheld, withheldForecast } = require("../utils/boq-figures");
 const { EAC_BASES, EAC_BASIS_LABELS, eacBasisOf, eacIsBudgetFallback } = require("../utils/eac-basis");
 const { EV_NOTES, cpiNoteFor, spiNoteFor, cutoffNotReached } = require("../utils/ev-notes");
+// Source / derived / projection labels (control model §3) — labels only.
+const { TRUTHS, projection, BUDGET_LABELS } = require("../utils/figure-truth");
+
+// What each figure of the forecast's cost block is, and from what. Static
+// words, the same for every project and reader: when utils/boq-figures
+// withholds a figure its label says nothing about its value.
+const FORECAST_COST_TRUTH = Object.freeze({
+  budget: TRUTHS.DERIVED,
+  bac: TRUTHS.DERIVED,
+  actual: TRUTHS.DERIVED,
+  eac: projection("eacBasis"),
+  bottomUp: projection("activity_projections"),
+  projected: projection("greater_of_eac_and_bottom_up"),
+  overrun: projection("projected_minus_budget"),
+  labels: { budget: BUDGET_LABELS.evBudgetAtCompletion, bac: BUDGET_LABELS.evBudgetAtCompletion },
+  derivedFrom: {
+    budget: "The earned-value report's budget at completion; Σ activity budgets when there is no report",
+    bac: "Approved allocations + approved budget revisions (the earned-value report's totalBudget)",
+    actual: "Official actual cost from the earned-value report; Σ activity actual cost when there is none",
+    eac: "The earned-value report's EAC: revised budget ÷ CPI, or the revised budget when there is no CPI or CPI is 0 (eacBasis)",
+    bottomUp: "Σ each activity's projection (actual ÷ progress, or the greatest of budget, commitments, actual and forecast; cost.basis) or its budget",
+    projected: "The greater of the EAC and the bottom-up projection",
+    overrun: "Projected cost − budget",
+  },
+});
 
 /**
  * Schedule delay and cost overrun prediction (OCTA-AI-PREDICT-031).
@@ -64,6 +89,86 @@ const safeMany = async (model, args) => {
   }
 };
 
+/**
+ * One "recorded impact" list for the forecast (docs/project-controls/
+ * OCTAPM_CHANGE_INTELLIGENCE.md §3): the schedule impacts recorded on RFIs,
+ * submittals and other workflow records, the approved change orders'
+ * approved impact (ChangeOrderActivityLink.approvedScheduleImpactDays > 0 on
+ * an approved, unarchived order — an approved impact is source, a pending
+ * one is not counted), and weather delays.
+ *
+ * The same days are never counted twice. An approved order's impact on an
+ * activity is keyed (activityId, changeOrderId) and counted once — the
+ * largest of its relation rows, since one order's delay to one activity is
+ * one delay whatever relation it was recorded under. A workflow link whose
+ * record became that order — a link recorded against the order itself, an
+ * RFI whose changeOrderId names it, or a record a change event converted
+ * into it — is keyed by the same (activityId, order) and dropped in favour
+ * of the approved order. A workflow link whose order is not approved, or
+ * that the order does not link to the same activity, stays.
+ *
+ * `convertedTo` maps "<recordType>:<recordId>" to the set of change-order
+ * ids that record became. Returns { rows, superseded } where rows are
+ * { activityId, kind, days, recordId } and superseded counts the dropped
+ * workflow links.
+ */
+const recordedImpacts = ({ workflowLinks = [], changeOrderLinks = [], weatherLinks = [], convertedTo = new Map() }) => {
+  const orders = new Map();
+  for (const link of changeOrderLinks) {
+    const days = num(link.approvedScheduleImpactDays);
+    if (!(days > 0) || !link.activityId || !link.changeOrderId) continue;
+    const key = `${link.activityId}|${link.changeOrderId}`;
+    const previous = orders.get(key);
+    if (!previous || days > previous.days) orders.set(key, { activityId: link.activityId, kind: "change_order", days, recordId: link.changeOrderId });
+  }
+  let superseded = 0;
+  const workflow = [];
+  for (const row of workflowLinks) {
+    const orderIds = row.recordType === "change_order" ? new Set([row.recordId]) : convertedTo.get(`${row.recordType}:${row.recordId}`) || new Set();
+    if ([...orderIds].some((orderId) => orders.has(`${row.activityId}|${orderId}`))) {
+      superseded += 1;
+      continue;
+    }
+    workflow.push({ activityId: row.activityId, kind: row.recordType, days: num(row.scheduleImpactDays), recordId: row.recordId });
+  }
+  const weather = weatherLinks.map((row) => ({ activityId: row.activityId, kind: "weather", days: num(row.delayDays), recordId: row.weatherDelayId }));
+  return { rows: [...workflow, ...orders.values(), ...weather], superseded };
+};
+
+const conversionMap = ({ rfiOrders = [], changeEventOrders = [] }) => {
+  const map = new Map();
+  const add = (recordType, recordId, changeOrderId) => {
+    if (!recordType || !recordId || !changeOrderId) return;
+    const key = `${recordType}:${recordId}`;
+    if (!map.has(key)) map.set(key, new Set());
+    map.get(key).add(changeOrderId);
+  };
+  for (const row of rfiOrders) add("rfi", row.id, row.changeOrderId);
+  for (const row of changeEventOrders) add(row.sourceRecordType, row.sourceRecordId, row.changeOrderId);
+  return map;
+};
+
+/**
+ * The data-quality notes, twice: `dataQuality` stays the string[] the web,
+ * mobile and OpenAPI clients type it as, and `dataQualityItems` is the same
+ * list, in the same order, as { kind, severity, subject, message } —
+ * dataQualityItems[i].message === dataQuality[i] always.
+ */
+const EV_NOTE_KINDS = new Map(Object.entries(EV_NOTES).map(([key, message]) => [message, key.toLowerCase()]));
+const dataQualityList = () => {
+  const strings = [];
+  const items = [];
+  return {
+    strings,
+    items,
+    add(kind, severity, subject, message) {
+      if (!message) return;
+      strings.push(message);
+      items.push({ kind, severity, subject, message });
+    },
+  };
+};
+
 const groupBy = (rows, key) => {
   const map = new Map();
   for (const row of rows) {
@@ -79,7 +184,7 @@ const groupBy = (rows, key) => {
 
 const loadContext = async ({ orgId, projectId, asOf }) => {
   const since = new Date(asOf.getTime() - HISTORY_DAYS * DAY);
-  const [history, costs, workflowLinks, weatherLinks, rfis, submittals, longLead] = await Promise.all([
+  const [history, costs, workflowLinks, weatherLinks, rfis, submittals, longLead, changeOrderLinks, rfiOrders, changeEventOrders] = await Promise.all([
     safeMany("activityProgress", { where: { activity: { projectId, isActive: true }, status: "approved", updatedAt: { gte: since } }, select: { activityId: true, pctComplete: true, approvedAt: true, updatedAt: true }, orderBy: { updatedAt: "asc" }, take: 5000 }),
     safeMany("costRecord", { where: { projectId }, select: { activityId: true, budget: true, committed: true, actual: true, forecast: true } }),
     safeMany("workflowActivityLink", { where: { projectId, scheduleImpactDays: { gt: 0 } }, select: { activityId: true, recordType: true, recordId: true, scheduleImpactDays: true, relationType: true } }),
@@ -87,7 +192,15 @@ const loadContext = async ({ orgId, projectId, asOf }) => {
     safeMany("rfi", { where: { projectId, activityId: { not: null }, status: { in: ["open", "answered"] } }, select: { id: true, ref: true, subject: true, activityId: true, responseRequiredBy: true, dueDate: true, status: true } }),
     safeMany("submittal", { where: { projectId, activityId: { not: null }, status: { in: ["pending", "under_review", "resubmit"] } }, select: { id: true, ref: true, title: true, activityId: true, dueDate: true, submitBy: true, status: true } }),
     safeMany("longLeadItem", { where: { projectId, activityId: { not: null }, status: { not: "delivered" } }, select: { id: true, item: true, activityId: true, status: true, expectedDeliveryDate: true, warehouseStatus: true } }),
+    // Approved change orders' approved impact (the order's own project,
+    // approved and not archived); a pending order's estimate is not counted.
+    safeMany("changeOrderActivityLink", { where: { projectId, approvedScheduleImpactDays: { gt: 0 }, changeOrder: { projectId, status: "approved", archivedAt: null } }, select: { activityId: true, changeOrderId: true, approvedScheduleImpactDays: true } }),
+    // Which records became which order, so an RFI's (or a converted
+    // record's) days and the order's approved days are not both counted.
+    safeMany("rfi", { where: { projectId, changeOrderId: { not: null } }, select: { id: true, changeOrderId: true } }),
+    safeMany("changeEvent", { where: { orgId, projectId, changeOrderId: { not: null }, sourceRecordType: { not: null }, sourceRecordId: { not: null } }, select: { sourceRecordType: true, sourceRecordId: true, changeOrderId: true } }),
   ]);
+  const impacts = recordedImpacts({ workflowLinks, changeOrderLinks, weatherLinks, convertedTo: conversionMap({ rfiOrders, changeEventOrders }) });
   let ev = null;
   try {
     // The same EV answer the health card and the EV tab read: the latest
@@ -107,7 +220,7 @@ const loadContext = async ({ orgId, projectId, asOf }) => {
   return {
     history: groupBy(history.map((row) => ({ activityId: row.activityId, pct: clampPct(row.pctComplete), at: new Date(row.approvedAt || row.updatedAt) })), "activityId"),
     costs: new Map(costs.map((row) => [row.activityId, row])),
-    impacts: groupBy([...workflowLinks.map((row) => ({ activityId: row.activityId, kind: row.recordType, days: num(row.scheduleImpactDays), recordId: row.recordId })), ...weatherLinks.map((row) => ({ activityId: row.activityId, kind: "weather", days: num(row.delayDays), recordId: row.weatherDelayId }))], "activityId"),
+    impacts: groupBy(impacts.rows, "activityId"),
     rfis: groupBy(rfis, "activityId"),
     submittals: groupBy(submittals, "activityId"),
     longLead: groupBy(longLead, "activityId"),
@@ -296,7 +409,7 @@ const budgetLineRisks = (lines) =>
 /** The forecast for one project; `asOf` defaults to now. */
 const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
   const schedule = await scheduleService.getProjectSchedule({ orgId, projectId });
-  if (!schedule) return { available: false, reason: "No schedule yet — generate or import one first.", asOf: asOf.toISOString(), activities: [], schedule: null, cost: null, summary: null, dataQuality: [] };
+  if (!schedule) return { available: false, reason: "No schedule yet — generate or import one first.", asOf: asOf.toISOString(), activities: [], schedule: null, cost: null, summary: null, dataQuality: [], dataQualityItems: [] };
   const ctx = await loadContext({ orgId, projectId, asOf });
   const activities = (schedule.activities || []).filter((activity) => activity.isActive !== false).map((activity) => forecastActivity(activity, ctx, asOf));
   const open = activities.filter((activity) => activity.status !== "complete");
@@ -335,12 +448,12 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
   const costRisks = activities.filter((activity) => activity.cost.overrun > 0).sort((a, b) => b.cost.overrun - a.cost.overrun).slice(0, 10);
   const levels = (rows, key) => ({ high: rows.filter((row) => (key ? row[key].level : row.level) === "high").length, medium: rows.filter((row) => (key ? row[key].level : row.level) === "medium").length, low: rows.filter((row) => (key ? row[key].level : row.level) === "low").length });
 
-  const dataQuality = [];
+  const notes = dataQualityList();
   const undated = open.filter((activity) => !activity.plannedFinish).length;
-  if (undated) dataQuality.push(`${plural(undated, "open activity", "open activities")} without planned dates are not projected.`);
+  if (undated) notes.add("activities_undated", "warning", "Schedule", `${plural(undated, "open activity", "open activities")} without planned dates are not projected.`);
   const noHistory = open.filter((activity) => activity.pct > 0 && activity.velocity === null).length;
-  if (noHistory) dataQuality.push(`${plural(noHistory, "activity", "activities")} in progress ${noHistory === 1 ? "has" : "have"} fewer than two approved progress updates in the last ${HISTORY_DAYS} days; the pace is estimated from time used.`);
-  if (!ev) dataQuality.push("Official earned value could not be computed; the finish and cost projections use activity data only.");
+  if (noHistory) notes.add("pace_estimated", "info", "Progress", `${plural(noHistory, "activity", "activities")} in progress ${noHistory === 1 ? "has" : "have"} fewer than two approved progress updates in the last ${HISTORY_DAYS} days; the pace is estimated from time used.`);
+  if (!ev) notes.add("earned_value_unavailable", "warning", "Earned value", "Official earned value could not be computed; the finish and cost projections use activity data only.");
   else {
     // One note per missing index, each with its own cause: SPI is EV / PV
     // and PV is the approved time-phased cost loading; CPI is EV / AC and AC
@@ -349,16 +462,16 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
     // budget, or no approved budget to earn against at all (no_budget).
     const spiNote = spiNoteFor({ spi });
     const cpiNote = cpiNoteFor({ cpi, eacBasis });
-    if (spiNote) dataQuality.push(spiNote);
-    if (cpiNote) dataQuality.push(cpiNote);
+    if (spiNote) notes.add(EV_NOTE_KINDS.get(spiNote) || "spi", "warning", "SPI", spiNote);
+    if (cpiNote) notes.add(EV_NOTE_KINDS.get(cpiNote) || "cpi", "warning", "CPI", cpiNote);
     // The latest period's cutoff still ahead: PV runs to it while EV and AC
     // stop at today, so SPI (and the EV-based finish) compare a future plan
     // with to-date work. Said beside them, never changed.
-    if (cutoffNotReached(earnedValueCutoff?.cutoffDate, asOf)) dataQuality.push(EV_NOTES.CUTOFF_NOT_REACHED);
+    if (cutoffNotReached(earnedValueCutoff?.cutoffDate, asOf)) notes.add("cutoff_not_reached", "info", "Reporting cutoff", EV_NOTES.CUTOFF_NOT_REACHED);
     // The EV report's own sentence when the project has no zone of its own.
-    if (earnedValueCutoff?.timeZoneNote) dataQuality.push(earnedValueCutoff.timeZoneNote);
+    if (earnedValueCutoff?.timeZoneNote) notes.add("timezone_default", "info", "Time zone", earnedValueCutoff.timeZoneNote);
   }
-  if (!ctx.budgetLines.length) dataQuality.push("No budget lines by cost code; the cost view uses activity budgets only.");
+  if (!ctx.budgetLines.length) notes.add("no_budget_lines", "info", "Budget lines", "No budget lines by cost code; the cost view uses activity budgets only.");
 
   return {
     available: true,
@@ -394,9 +507,11 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
       counts: { atRisk: levels(costRisks, "cost"), lines: lines.length },
       topRisks: costRisks,
       budgetLines: lines,
+      truth: FORECAST_COST_TRUTH,
     },
     summary: { scheduleLevel: projectSlip > 14 || scheduleRisks.some((row) => row.level === "high") ? "high" : projectSlip > 0 || scheduleRisks.length ? "medium" : "low", costLevel: totalBudget > 0 && costOverrun / totalBudget > 0.05 ? "high" : costOverrun > 0 ? "medium" : "low" },
-    dataQuality,
+    dataQuality: notes.strings,
+    dataQualityItems: notes.items,
     activities,
   };
 };
@@ -579,4 +694,4 @@ const executeAction = async ({ orgId, user, projectId, action = {}, projectAcces
   throw new HttpError(400, "FORECAST_ACTION_UNKNOWN", "Unknown action");
 };
 
-module.exports = { ACTION_TYPES, EXPLAIN_PROMPT, HISTORY_DAYS, STALL_DAYS, buildForecast, forecastActivity, budgetLineRisks, explain, executeAction, normalizeActions, deterministicNarrative, forecastBlock };
+module.exports = { ACTION_TYPES, EXPLAIN_PROMPT, HISTORY_DAYS, STALL_DAYS, buildForecast, forecastActivity, budgetLineRisks, recordedImpacts, conversionMap, explain, executeAction, normalizeActions, deterministicNarrative, forecastBlock };

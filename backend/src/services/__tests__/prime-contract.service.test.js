@@ -287,11 +287,24 @@ describe("where the original value came from (owner decisions 1-3)", () => {
     return service.updateContract({ orgId: "org-1", projectId: "project-1", userId: "user-1", payload, ...extra });
   };
 
-  it("a save without an original value, or with the stored one sent back, leaves the fallback a fallback", async () => {
+  it("a save without an original value, or (by a BOQ reader) with the stored one sent back, leaves the fallback a fallback", async () => {
+    await run(stored(), { taxRate: 5 });
+    expect(written.originalValueSource).toBeUndefined();
     for (const payload of [{ taxRate: 5 }, { originalValue: 7_727_000 }, { originalValue: "7727000.00" }]) {
-      const answer = await run(stored(), payload);
+      const answer = await run(stored(), payload, { canConfirmFallback: true });
       expect([payload, written.originalValueSource, answer.originalValueSource]).toEqual([payload, undefined, "boq_fallback"]);
     }
+  });
+
+  it("a caller who may not read the BOQ sending the withheld amount enters it: a guess is never answered", async () => {
+    const answer = await run(stored(), { originalValue: 7_727_000 });
+    expect([written.originalValueSource, answer.originalValueSource]).toEqual(["contract_entry", "contract_entry"]);
+    const event = require("../audit.service").recordEvent.mock.calls.at(-1)[0];
+    expect(event.summary.originalValueConfirmation).toBe("entered");
+    // Once established, the stored amount sent back is a save again.
+    written = null;
+    await run(stored({ originalValueSource: "contract_entry" }), { originalValue: 7_727_000 });
+    expect(written.originalValueSource).toBeUndefined();
   });
 
   it("a different original value is an entry, recorded by the audit event", async () => {
@@ -324,6 +337,33 @@ describe("where the original value came from (owner decisions 1-3)", () => {
       const answer = await run(stored({ originalValueSource: source }), { confirmOriginalValue: true }, { canConfirmFallback: true });
       expect([source, written.originalValueSource, written.originalValue, answer.originalValue]).toEqual([source, "contract_entry", undefined, 7_727_000]);
       expect(audit.recordEvent.mock.calls.at(-1)[0].summary.originalValueConfirmation).toBe("confirmed");
+    }
+  });
+
+  // The rollback itself is proven against Postgres in
+  // __live__/contract-confirmation-audit.live.test.js; here, the shape.
+  it("writes the audit event on the update's transaction client and fails the update when it cannot", async () => {
+    const audit = require("../audit.service");
+    const txSeen = [];
+    const original = mockPrisma.$transaction;
+    mockPrisma.$transaction = (fn) => {
+      const tx = { ...mockPrisma, marker: "tx" };
+      txSeen.push(tx);
+      return fn(tx);
+    };
+    try {
+      await run(stored(), { confirmOriginalValue: true }, { canConfirmFallback: true });
+      expect(audit.recordEvent.mock.calls.at(-1)[0].tx).toBe(txSeen.at(-1));
+
+      audit.recordEvent.mockRejectedValueOnce(Object.assign(new Error("insert failed"), { code: "P2002" }));
+      const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+      await expect(run(stored(), { confirmOriginalValue: true }, { canConfirmFallback: true })).rejects.toMatchObject({
+        status: 503,
+        code: "CONTRACT_AUDIT_UNAVAILABLE",
+      });
+      spy.mockRestore();
+    } finally {
+      mockPrisma.$transaction = original;
     }
   });
 });
@@ -426,7 +466,7 @@ describe("advance payments", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockPrisma.primeContract.findFirst.mockResolvedValue(
-      contract({ advanceAmount: 100_000, advancePaidAmount: 0 })
+      contract({ advanceAmount: 100_000, advancePaidAmount: 0, originalValueSource: "project_value" })
     );
     mockPrisma.primeContractAdvance.count.mockResolvedValue(0);
     mockPrisma.primeContractAdvance.findFirst.mockResolvedValue(null);
@@ -450,6 +490,21 @@ describe("advance payments", () => {
       })
     );
     expect(result.advancePaidAmount).toBe(100_000);
+  });
+
+  it("waits for an established contract value, before the amount is read and without writing", async () => {
+    for (const originalValueSource of ["boq_fallback", "unestablished", null]) {
+      mockPrisma.primeContract.findFirst.mockResolvedValue(
+        contract({ advanceAmount: 100_000, advancePaidAmount: 0, originalValueSource })
+      );
+      for (const amount of [1, 150_000, -5]) {
+        await expect(
+          service.recordAdvancePayment({ orgId: "org-1", projectId: "project-1", userId: "user-1", payload: { amount } })
+        ).rejects.toMatchObject({ status: 409, code: "CONTRACT_VALUE_NOT_ESTABLISHED" });
+      }
+    }
+    expect(mockPrisma.primeContractAdvance.create).not.toHaveBeenCalled();
+    expect(mockPrisma.primeContract.update).not.toHaveBeenCalled();
   });
 
   it("refuses more than the advance agreed in the contract", async () => {
@@ -505,7 +560,7 @@ describe("advance payments", () => {
 describe("Phase 21D — integrity (release challenge, ninth pass)", () => {
   it("CX21-495: a receipt is decided on the contract as held — a receipt that landed since the read counts against the agreed advance, and the aggregate carries both", async () => {
     mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", orgId: "org-1", name: "P" });
-    mockPrisma.primeContract.findFirst.mockResolvedValue(contract({ advanceAmount: 100_000, advancePaidAmount: 0 }));
+    mockPrisma.primeContract.findFirst.mockResolvedValue(contract({ advanceAmount: 100_000, advancePaidAmount: 0, originalValueSource: "contract_entry" }));
     mockPrisma.primeContractAdvance.findFirst.mockResolvedValue(null);
     mockPrisma.primeContractAdvance.create.mockClear();
     mockPrisma.primeContract.update.mockClear();

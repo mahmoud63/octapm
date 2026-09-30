@@ -441,6 +441,28 @@ const withheldMappedForecast = (forecast) => {
   return result;
 };
 
+// A three-truths block (utils/figure-truth) without the labels of the
+// figures withheld from this caller: a label says what a figure is and from
+// what, so whoever is not given the figure is not given its label either —
+// at the top level, in labels and in derivedFrom. When no figure's label is
+// left, there is no truth block at all (undefined).
+const TRUTH_DESCRIPTION_KEYS = ["labels", "derivedFrom"];
+const truthWithout = (truth, keys) => {
+  if (!truth || typeof truth !== "object" || Array.isArray(truth)) return truth;
+  const withheld = new Set(keys);
+  const result = {};
+  for (const [key, value] of Object.entries(truth)) {
+    if (withheld.has(key)) continue;
+    if (TRUTH_DESCRIPTION_KEYS.includes(key) && value && typeof value === "object" && !Array.isArray(value)) {
+      const kept = Object.fromEntries(Object.entries(value).filter(([figure]) => !withheld.has(figure)));
+      if (Object.keys(kept).length) result[key] = kept;
+      continue;
+    }
+    result[key] = value;
+  }
+  return Object.keys(result).some((key) => !TRUTH_DESCRIPTION_KEYS.includes(key)) ? result : undefined;
+};
+
 /** GET /forecast (and the forecast inside its explanation) as this caller may receive it. */
 const withheldForecast = (forecast, access = FULL_ACCESS) => {
   // A BOQ reader receives the forecast exactly as built.
@@ -453,8 +475,12 @@ const withheldForecast = (forecast, access = FULL_ACCESS) => {
     result.schedule = { ...forecast.schedule, topRisks: mapList(forecast.schedule.topRisks, withheldForecastActivity) };
   }
   if (forecast.cost && typeof forecast.cost === "object") {
+    // The cost block is withheld: no label for a figure it does not carry
+    // (every figure cost.truth describes is withheld, so it goes whole).
+    const truth = truthWithout(forecast.cost.truth, FORECAST_COST_KEYS);
     result.cost = {
-      ...withoutKeys(forecast.cost, [...FORECAST_COST_KEYS, ...FORECAST_MAPPING_COST_KEYS]),
+      ...withoutKeys(forecast.cost, [...FORECAST_COST_KEYS, ...FORECAST_MAPPING_COST_KEYS, "truth"]),
+      ...(truth ? { truth } : {}),
       ...(has(forecast.cost, "counts") ? { counts: withoutKeys(forecast.cost.counts, ["atRisk"]) } : {}),
       budgetLines: mapList(forecast.cost.budgetLines, (line) => withoutKeys(line, FORECAST_LINE_KEYS)),
       withheld: true,
@@ -708,6 +734,113 @@ const withheldPrimeContract = (contract, access = FULL_ACCESS) => {
   return withoutContractValue(contract, CONTRACT_VALUE_KEYS, source, contract.advanceRate);
 };
 
+// ─── retention against the cap (PC-7a item 2, owner 2026-09-29) ─────────────
+//
+// A certificate's retention stops at the cap, a rate of the revised value
+// (prime-contract.service certificateFinancials): on a certificate the cap
+// limits, its retention is the cap less what earlier certificates hold, and
+// its net payable, tax and balance follow from it — the revised value
+// restated. While the contract's value is withheld from the caller, those
+// figures of a certificate not yet certified are withheld with it: the draft
+// and submitted certificates' totals, the statement's retention, tax and
+// total due for such a period, and the same totals as the history recorded
+// them. Decided on what the caller already sees — the value's source, the cap
+// rate (a term) and the certificate's status — never on whether the cap bit,
+// so the answer says nothing about the amount. The retention a certified
+// certificate holds, its net payable, invoices, payments and releases are
+// the certificate's own record and stay; so do certified work, gross,
+// materials, deductions and the advance recovered.
+const RETENTION_HELD_STATUSES = new Set(["certified", "paid"]);
+const CERTIFICATE_CAP_KEYS = ["totalRet", "netPayable", "taxAmount", "balanceDue"];
+const STATEMENT_CAP_KEYS = ["retentionThisPeriod", "taxAmount", "totalDue"];
+const RETENTION_CAP_WITHHELD =
+  "Retention on a certificate not yet certified is limited by the retention cap, a rate of the contract value, which is not established: it and the figures that follow from it are available only to members who may read the BOQ until a contract manager enters or confirms the value";
+
+/**
+ * Whether this caller is refused the cap-limited figures of certificates not
+ * yet certified. `terms` is the project's contract as
+ * prime-contract.service contractValueTerms reads it ({ originalValueSource,
+ * retentionCapRate }), or null when the project has no contract row — then no
+ * cap was applied and nothing is withheld.
+ */
+const retentionCapWithheld = (terms, access = FULL_ACCESS) =>
+  Boolean(
+    terms &&
+      Number(terms.retentionCapRate) > 0 &&
+      contractValueWithheld(terms.originalValueSource, access),
+  );
+
+const retentionHeld = (status) => RETENTION_HELD_STATUSES.has(status);
+
+// `row` without the keys of `keys` it carries, and `valueWithheld` naming
+// them; `row` itself when it carries none.
+const withoutCapFigures = (row, keys, terms) => {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return row;
+  const present = keys.filter((key) => has(row, key));
+  if (!present.length) return row;
+  return {
+    ...withoutKeys(row, present),
+    valueWithheld: {
+      keys: present,
+      source: contractValueSourceOf(terms && terms.originalValueSource),
+      reason: RETENTION_CAP_WITHHELD,
+    },
+  };
+};
+
+/** A certificate row (status + totals) as this caller may receive it. */
+const withheldCertificateTotals = (row, terms, access = FULL_ACCESS) => {
+  if (!retentionCapWithheld(terms, access) || !row || typeof row !== "object" || retentionHeld(row.status)) return row;
+  return withoutCapFigures(row, CERTIFICATE_CAP_KEYS, terms);
+};
+
+// The report builder's payment-certificate source (report-sources
+// ipc_certificate) states the same cap-limited totals as columns. A row of a
+// certificate not yet certified, on a project where the caller is refused
+// them (retentionCapWithheld), has each such column null — the same row, the
+// same place, as withheldReportRow does for a mapping column — and
+// `withheldColumns` names them. `status` is the certificate's own, read from
+// the record whether or not the run shows the status column.
+const REPORT_CERTIFICATE_CAP_COLUMNS = Object.freeze({
+  ipc_certificate: Object.freeze(["totalRet", "netPayable", "taxAmount", "balanceDue"]),
+});
+
+/** The columns of a report source that a retention cap on an unestablished contract value limits. */
+const reportCertificateCapColumns = (sourceKey) => REPORT_CERTIFICATE_CAP_COLUMNS[sourceKey] || [];
+
+const withheldReportCertificateRow = (row, { status, keys, terms, access = FULL_ACCESS }) => {
+  if (!row || typeof row !== "object" || retentionHeld(status) || !retentionCapWithheld(terms, access)) return row;
+  const present = (keys || []).filter((key) => has(row, key));
+  if (!present.length) return row;
+  const result = { ...row };
+  for (const key of present) result[key] = null;
+  result.withheldColumns = [...new Set([...(Array.isArray(row.withheldColumns) ? row.withheldColumns : []), ...present])];
+  return result;
+};
+
+// A workflow run on a payment certificate (workflow-tools ipc_certificate)
+// keeps the certificate's net payable as its context's `amount`, taken when
+// the run started (on submission). While the cap limits it (see
+// retentionCapWithheld) that amount restates the unestablished value, so:
+// the engine leaves it out of the context it stores and routes on — decided
+// for a reader who may not read the BOQ (NO_ACCESS), since every approver
+// and every reader of the run sees the same stored context and the template
+// it chose — and a run stored before that rule loses it on the way out to
+// such a reader. `valueWithheld` names it. The context's status is the
+// certificate's when the run started.
+const WORKFLOW_CERTIFICATE_CAP_KEYS = ["amount"];
+const withheldCertificateContext = (context, terms, access = NO_ACCESS) => {
+  if (!context || typeof context !== "object" || retentionHeld(context.status) || !retentionCapWithheld(terms, access)) return context;
+  return withoutCapFigures(context, WORKFLOW_CERTIFICATE_CAP_KEYS, terms);
+};
+
+/** A serialized workflow instance as this caller may receive it (only an ipc_certificate run can change). */
+const withheldWorkflowInstance = (instance, terms, access = FULL_ACCESS) => {
+  if (!instance || typeof instance !== "object" || instance.tool !== "ipc_certificate") return instance;
+  const context = withheldCertificateContext(instance.context, terms, access);
+  return context === instance.context ? instance : { ...instance, context };
+};
+
 const isContractManageEvent = (event) =>
   Boolean(
     event &&
@@ -751,6 +884,43 @@ const withheldIpcCertificateEvent = (event) => {
   return { ...stripped, boqWithheld: { keys: IPC_EVENT_BOQ_KEYS, reason: IPC_REVIEW_WITHHELD } };
 };
 
+// A certificate event's totals as recorded (submission, certification: the
+// before and after summaries, the event's own summary and the approval
+// metadata), where the cap-limited figures are withheld (see
+// retentionCapWithheld): each part recorded for a certificate not yet
+// certified — a before/after summary by its own status, the summary and the
+// metadata by the status the event moved to (draft or submitted) — loses
+// them, and `valueWithheld` names the parts. A certification's after-state
+// is the certificate's held retention and stays, and so do the invoice,
+// payment and release events, which only a certified certificate has (their
+// statuses are the invoice's, the payment's and the retention's).
+const PRE_CERTIFICATION_STATUSES = new Set(["draft", "submitted"]);
+const withheldIpcCertificateEventTotals = (event, terms) => {
+  const toStatus = event.newStatus ?? event.toStatus ?? null;
+  const parts = [];
+  const copy = { ...event };
+  for (const part of IPC_EVENT_PARTS) {
+    const value = event[part];
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const status = part === "oldSummary" || part === "newSummary" ? value.status : toStatus;
+    if (!PRE_CERTIFICATION_STATUSES.has(status)) continue;
+    const present = CERTIFICATE_CAP_KEYS.filter((key) => has(value, key));
+    if (!present.length) continue;
+    copy[part] = withoutKeys(value, present);
+    parts.push(part);
+  }
+  if (!parts.length) return event;
+  return {
+    ...copy,
+    valueWithheld: {
+      parts,
+      keys: CERTIFICATE_CAP_KEYS,
+      source: contractValueSourceOf(terms && terms.originalValueSource),
+      reason: RETENTION_CAP_WITHHELD,
+    },
+  };
+};
+
 /**
  * A project's history (GET /audit, which the schedule's status history
  * reads) as this caller may receive it. Someone who may not read the BOQ is
@@ -766,17 +936,29 @@ const withheldIpcCertificateEvent = (event) => {
  * Nor is the client contract's original value where it is not established
  * (withheldContractManageEvent below): `contractValueSource` is the project's
  * contract's source now (prime-contract.service contractValueSource).
+ * Nor, where the contract's value is withheld and a retention cap is set
+ * (`contractTerms`: prime-contract.service contractValueTerms), are the
+ * cap-limited totals recorded for a certificate not yet certified
+ * (withheldIpcCertificateEventTotals).
  * Everything else is as built; the stored events are not changed.
  */
-const withheldAuditHistory = (history, access = FULL_ACCESS, { contractValueSource = null } = {}) => {
+const withheldAuditHistory = (
+  history,
+  access = FULL_ACCESS,
+  { contractValueSource = null, contractTerms = null } = {},
+) => {
   if (access.boq || !history || typeof history !== "object" || !Array.isArray(history.events)) return history;
+  const capWithheld = retentionCapWithheld(contractTerms, access);
   const events = history.events
     .filter((event) => !(event && BOQ_RECORD_TYPES.has(event.recordType || event.entityType)))
     .map((event) => {
       const type = event && (event.recordType || event.entityType);
       if (isContractManageEvent(event)) return withheldContractManageEvent(event, contractValueSource);
       if (type === "cost_record") return withSummaries(event, withoutRecordBudget);
-      if (type === "ipc_certificate") return withheldIpcCertificateEvent(event);
+      if (type === "ipc_certificate") {
+        const withoutReview = withheldIpcCertificateEvent(event);
+        return capWithheld ? withheldIpcCertificateEventTotals(withoutReview, contractTerms) : withoutReview;
+      }
       if (!access.budget && type === "schedule_revision") return withSummaries(event, withoutRevisionTotals);
       return event;
     });
@@ -954,8 +1136,12 @@ const BILLING_LINES_WITHHELD =
  * the current certificate and the periods are the commercial module's own
  * and stay as built — except the contract's original value where it is not
  * established (see withheldPrimeContract): the contract and the summary then
- * lose the amount and every figure stating it, each with `valueWithheld`. A
- * BOQ reader's statement is returned untouched (the same object).
+ * lose the amount and every figure stating it, each with `valueWithheld`;
+ * where a retention cap is set too, so do the cap-limited figures of a
+ * period not yet certified (retentionCapWithheld): the summary's retention,
+ * tax and total due when the current period is one, and the totals of each
+ * such period in `current` and `periods`. A BOQ reader's statement is
+ * returned untouched (the same object).
  */
 const withheldBillingStatement = (statement, access = FULL_ACCESS) => {
   if (access.boq || !statement || typeof statement !== "object" || Array.isArray(statement)) return statement;
@@ -967,12 +1153,25 @@ const withheldBillingStatement = (statement, access = FULL_ACCESS) => {
   if (contract && typeof contract === "object" && contractValueWithheld(contract.originalValueSource, access)) {
     const source = contractValueSourceOf(contract.originalValueSource);
     const withheldContract = withheldPrimeContract(contract, access);
+    // The contract row is the terms: its source and its cap rate.
+    const capWithheld = retentionCapWithheld(contract, access);
+    const current = statement.current;
+    const currentUncertified = capWithheld && current && typeof current === "object" && !retentionHeld(current.status);
+    const summaryKeys = currentUncertified ? [...STATEMENT_VALUE_KEYS, ...STATEMENT_CAP_KEYS] : STATEMENT_VALUE_KEYS;
     const summary =
       statement.summary && typeof statement.summary === "object"
-        ? withoutContractValue(statement.summary, STATEMENT_VALUE_KEYS, source, contract.advanceRate)
+        ? withoutContractValue(statement.summary, summaryKeys, source, contract.advanceRate)
         : statement.summary;
     if (withheldContract !== contract || summary !== statement.summary) {
       answer = { ...answer, contract: withheldContract, summary };
+    }
+    if (capWithheld) {
+      const withheldCurrent = withheldCertificateTotals(current, contract, access);
+      const periods = mapList(statement.periods, (row) => withheldCertificateTotals(row, contract, access));
+      const periodsChanged = Array.isArray(periods) && periods.some((row, index) => row !== statement.periods[index]);
+      if (withheldCurrent !== current || periodsChanged) {
+        answer = { ...answer, current: withheldCurrent, periods: periodsChanged ? periods : statement.periods };
+      }
     }
   }
   return answer;
@@ -1002,17 +1201,22 @@ const IPC_BOQ_KEYS = [
  * receive it: for a caller who may not read the BOQ, the certificate without
  * the keys above, and `boqWithheld` names those left out and why. The
  * certificate's own record — period, status, totals certified, retained and
- * payable, invoices, payments, retention releases — stays. A BOQ reader's
- * certificate, and one that carries none of the keys, is returned untouched
- * (the same object).
+ * payable, invoices, payments, retention releases — stays, except that a
+ * certificate not yet certified loses its cap-limited totals while the
+ * contract's value is withheld and a retention cap is set (`contractTerms`:
+ * prime-contract.service contractValueTerms; see retentionCapWithheld), with
+ * `valueWithheld` saying why. A BOQ reader's certificate, and one that
+ * carries none of the keys, is returned untouched (the same object).
  */
-const withheldIpcCertificate = (certificate, access = FULL_ACCESS) => {
+const withheldIpcCertificate = (certificate, access = FULL_ACCESS, { contractTerms = null } = {}) => {
   if (access.boq || !certificate || typeof certificate !== "object" || Array.isArray(certificate)) {
     return certificate;
   }
   const keys = IPC_BOQ_KEYS.filter((key) => has(certificate, key));
-  if (!keys.length) return certificate;
-  return { ...withoutKeys(certificate, keys), boqWithheld: { keys, reason: IPC_LINES_WITHHELD } };
+  const withoutLines = keys.length
+    ? { ...withoutKeys(certificate, keys), boqWithheld: { keys, reason: IPC_LINES_WITHHELD } }
+    : certificate;
+  return withheldCertificateTotals(withoutLines, contractTerms, access);
 };
 
 /**
@@ -1186,6 +1390,16 @@ module.exports = {
   IPC_REVIEW_WITHHELD,
   withheldIpcCertificate,
   withheldIpcItem,
+  // The workspace home's IPC queue (a submitted certificate's net payable).
+  withheldCertificateTotals,
+  // PC-7a review: the report builder's certificate columns and a workflow run's context.
+  REPORT_CERTIFICATE_CAP_COLUMNS,
+  RETENTION_CAP_WITHHELD,
+  retentionCapWithheld,
+  reportCertificateCapColumns,
+  withheldReportCertificateRow,
+  withheldCertificateContext,
+  withheldWorkflowInstance,
   JOB_BILL_WITHHELD,
   withheldJob,
   BOQ_FIGURE_KEYS,

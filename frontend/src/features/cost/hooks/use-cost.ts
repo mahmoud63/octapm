@@ -72,6 +72,26 @@ export interface CostSummary {
     revisedBudget: number | null
     allocatedToActivities?: number
     source: 'budget_register' | null
+    /** "Budget" — the register's budget, not the EV basis nor the waterfall (PC-7a). */
+    label?: string
+  }
+  /**
+   * Source / derived / projection, and from what (PC-7a three truths).
+   * Labels only, the same for every project and reader; present even where
+   * the figure it describes is withheld.
+   */
+  truth?: {
+    budget?: { truth: string; label: string; derivedFrom: string }
+    allocatedToActivities?: { truth: string; label: string; derivedFrom: string }
+    totals?: {
+      budget: string
+      committed: string
+      actual: string
+      forecast: string
+      derivedFrom: Record<string, string>
+    }
+    records?: { forecast: string; derivedFrom: Record<string, string> }
+    eac?: { truth: string; derivedFrom: string }
   }
   activityBudgetsWithheld?: boolean
   activityBudgetsReason?: string

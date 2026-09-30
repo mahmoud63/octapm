@@ -119,4 +119,40 @@ describe("the forecast's cost view and the mapping (owner decision, 2026-09-28)"
     withheldForecast(forecast, NEITHER);
     expect(forecast).toEqual(built());
   });
+
+  // PC-7a three truths: cost.truth labels the cost block's figures. A label
+  // for a figure the caller is not given is not given either.
+  const truth = () => ({
+    budget: "derived",
+    bac: "derived",
+    actual: "derived",
+    eac: "projection:eacBasis",
+    bottomUp: "projection:activity_projections",
+    projected: "projection:greater_of_eac_and_bottom_up",
+    overrun: "projection:projected_minus_budget",
+    labels: { budget: "Budget at completion (EV basis)", bac: "Budget at completion (EV basis)" },
+    derivedFrom: { budget: "b", bac: "c", actual: "a", eac: "e", bottomUp: "u", projected: "p", overrun: "o" },
+  });
+  const withTruth = (extra = {}) => {
+    const forecast = built();
+    forecast.cost.truth = { ...truth(), ...extra };
+    return forecast;
+  };
+
+  it("three truths: a member who reads neither receives no cost.truth — every figure it labels is withheld", () => {
+    const answer = withheldForecast(withTruth(), NEITHER);
+    expect("truth" in answer.cost).toBe(false);
+    expect(JSON.stringify(answer.cost)).not.toMatch(/derived|projection|Budget at completion/);
+  });
+
+  it("three truths: a label for a figure the caller still receives stays, with its own derivedFrom only", () => {
+    const forecast = withTruth({ lines: "derived", derivedFrom: { ...truth().derivedFrom, lines: "Budget lines counted" } });
+    const answer = withheldForecast(forecast, NEITHER);
+    expect(answer.cost.truth).toEqual({ lines: "derived", derivedFrom: { lines: "Budget lines counted" } });
+  });
+
+  it("three truths: a BOQ reader and a cost reader without BOQ read receive cost.truth as built", () => {
+    expect(withheldForecast(withTruth(), BOQ).cost.truth).toEqual(truth());
+    expect(withheldForecast(withTruth(), COST).cost.truth).toEqual(truth());
+  });
 });

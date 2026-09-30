@@ -139,6 +139,18 @@ export function EvDashboard({
 
   return (
     <div className='space-y-5'>
+      {/* PC-7a three truths: every figure here is a local prototype
+          projection (activity budgets × % complete, a 1.03 actual-cost
+          fallback) — not official EV, never a source or certified figure.
+          The official figures are the EV report's. */}
+      <p
+        className='rounded-md border border-dashed border-amber-300 p-2 text-xs text-amber-800'
+        data-truth='projection'
+        data-testid='ev-dashboard-prototype'
+      >
+        Prototype estimate — a projection, not official earned value. The
+        official PV, EV, AC and EAC are on the Earned Value report.
+      </p>
       <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
         {cards.map((card) => (
           <div key={card.label} className='rounded-lg border bg-card p-3'>
