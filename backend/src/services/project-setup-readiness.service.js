@@ -376,6 +376,17 @@ const MAPPING_DETAILS_WITHHELD = "Mapping details unavailable to you";
 // schedule is active (owner decision R5-4): never a count, never a zero.
 const WAITING_FOR_ACTIVE_SCHEDULE = "Waiting for active schedule";
 const NO_SCHEDULE_YET = "No schedule yet";
+// The same family (owner, R5-4: never a zero for something not assessed).
+// An active schedule on which no activity is marked critical has no critical
+// path to count unmapped activities on; a project with no bill has no
+// mapping share, quantity or value to read. Neither state is the bill's:
+// every caller is told it.
+const NO_CRITICAL_PATH_YET = "No critical path yet";
+const WAITING_FOR_BOQ = "Waiting for the BOQ";
+// A staged revision the engine fails reads what it judges — never "FAIL"
+// alone, and never the words a missing schedule has.
+const IMPORTED_REVISION_REJECTED = "Imported — revision rejected, resubmit";
+const IMPORTED_NO_ACTIVITIES = "Imported — no activities";
 
 const withoutMappingCounts = (values) =>
   values && typeof values === "object"
@@ -886,6 +897,15 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
   // ("Activities: 0 · Critical: 0" beside an import that reads complete):
   // the step leaves them out, as the headline leaves out its count (R5-4).
   const onActiveSchedule = (counts) => (activeScheduleAssessed ? counts : {});
+  // An active schedule with no activity marked critical (the engine's own
+  // NO_CRITICAL_PATH warning): the critical path has not been assessed, so
+  // "critical unmapped" is a count of nothing — the headline says so.
+  const noCriticalPath = activeScheduleAssessed && criticalActivityCount === 0;
+  // No bill: the mapping's share, the unmapped quantity and value are figures
+  // of nothing. They wait for the BOQ, for every caller, in place of "0%",
+  // "0" and "0" in the done tone.
+  const noBill = boqCount === 0;
+  const onBill = (counts) => (noBill ? {} : counts);
 
   // ── Structure (setup doc §2 b): what the rows and activities are filed
   // under. All of it is soft (§91): missing structure changes no figure.
@@ -1403,7 +1423,11 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
               failingLogicSentence(currentRevisionReadiness)
               ? `${failingLogicSentence(currentRevisionReadiness)} Its activities are mapped once a revision is approved and activated.`
               : STAGED_WAITING_MESSAGES[revisionStatus]
-            : "Generate or import a schedule before mapping allocations.",
+            : currentRevision
+              ? // A staged revision with nothing in it: what the engine
+                // judges (NO_ACTIVITIES), not the words a missing schedule has.
+                "The staged schedule revision has no activities: import a corrected schedule or regenerate it (Schedule › Update Schedule) before mapping allocations."
+              : "Generate or import a schedule before mapping allocations.",
       ),
     boqCount > 0 &&
       requiredBoqAmount > MONEY_EPSILON &&
@@ -1956,7 +1980,9 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         ...onActiveSchedule({
           activeActivities: activeActivityCount,
           progressActivities: progressActivityCount,
-          criticalActivities: criticalActivityCount,
+          // No critical path yet: no "Critical: 0" chip; the card's own
+          // NO_CRITICAL_PATH warning says what the schedule lacks.
+          ...(noCriticalPath ? {} : { criticalActivities: criticalActivityCount }),
           milestones: milestoneCount,
           activitiesWithoutWbs: activitiesWithoutWbs.length,
           activitiesWithUnmappedCalendar: activitiesWithUnmappedCalendar.length,
@@ -1983,7 +2009,9 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       blockers: allocationBlockers,
       warnings: allocationWarnings,
       advisories: allocationAdvisories,
-      counts: {
+      // With no bill the value figures are sums of nothing ("BOQ value 0 ·
+      // Unallocated 0" beside a step that waits for the BOQ): left out.
+      counts: onBill({
         totalBoqAmount: totalBoqFromSummary,
         allocatableBoqAmount,
         approvedAllocatedAmount,
@@ -1994,7 +2022,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         suggestionsPending: suggestedDrafts.length,
         unitMismatchCount: unitMismatches.length,
         locationMismatchCount: locationMismatches.length,
-      },
+      }),
       successMessage: "Approved allocations cover the BOQ value.",
     }),
     buildStep({
@@ -2231,6 +2259,19 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         ]
           .filter(Boolean)
           .join(" · ");
+  // An entry that waits: no count, no zero, no "done" — the engine's words,
+  // for every caller, since what it waits for is not read off the bill.
+  const waitingItem = (key, label, value) => ({
+    ...headlineItem(key, label, value, "neutral", null),
+    waiting: true,
+  });
+  // A staged revision the engine fails (c): what it judges — an empty
+  // revision, or one that was rejected — with the blocker kept.
+  const stagedFailureText = scheduleBlockers.some((blocker) => blocker && blocker.code === "NO_ACTIVITIES")
+    ? IMPORTED_NO_ACTIVITIES
+    : revisionStatus === "rejected"
+      ? IMPORTED_REVISION_REJECTED
+      : "FAIL";
   const headline = [
     headlineItem(
       "boq_imported",
@@ -2241,18 +2282,21 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
     ),
     // The three schedule states (R5-4). No revision: there is nothing to
     // pass or fail yet. A staged revision: the import is complete — said so
-    // — and what it waits for is its activation, so the tone is not "done".
-    // An active schedule reads as it always has.
+    // — and what it waits for is its activation, so the tone is not "done";
+    // one the engine fails says what it judges. An active schedule reads as
+    // it always has.
     scheduleState === "none"
       ? headlineItem("schedule_imported", "Schedule", NO_SCHEDULE_YET, "blocked", false)
-      : scheduleState === "staged" && scheduleImported
-        ? headlineItem(
-            "schedule_imported",
-            "Schedule imported",
-            "PASS (waiting for activation)",
-            "info",
-            true,
-          )
+      : scheduleState === "staged"
+        ? scheduleImported
+          ? headlineItem(
+              "schedule_imported",
+              "Schedule imported",
+              "PASS (waiting for activation)",
+              "info",
+              true,
+            )
+          : headlineItem("schedule_imported", "Schedule imported", stagedFailureText, "blocked", false)
         : headlineItem(
             "schedule_imported",
             "Schedule imported",
@@ -2262,56 +2306,59 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
           ),
     // The mapping share is the bill's (decision C): a member who may not
     // read the BOQ is told the details are withheld — no figure, and no
-    // tone that would say whether the bill is fully covered.
-    canReadBoq
-      ? headlineItem(
-          "mapping",
-          "Mapping",
-          `${Math.round(coveragePct)}%`,
-          baselineBlockerCodes.has("UNALLOCATED_BOQ") ||
-            baselineBlockerCodes.has("NO_APPROVED_ALLOCATIONS")
-            ? "blocked"
-            : coveragePct >= 99.995
-              ? "done"
-              : "review",
-          coveragePct,
-        )
-      : { ...headlineItem("mapping", "Mapping", "—", "neutral", null), withheld: true, reason: MAPPING_DETAILS_WITHHELD },
-    // The bill's quantities and value are for those who may read the BOQ.
-    canReadBoq &&
-      headlineItem(
-        "unmapped_quantity",
-        "Unmapped BOQ quantity",
-        unmappedQuantityText,
-        unmappedQuantities.length > 0 ? "review" : "done",
-        unmappedQuantities.map(({ unit, quantity }) => ({ unit, quantity })),
-      ),
-    canReadBoq &&
-      headlineItem(
-        "unmapped_boq",
-        "Unmapped BOQ value",
-        formatHeadlineMoney(unallocatedAmount),
-        unallocatedAmount > MONEY_EPSILON ? "review" : "done",
-        unallocatedAmount,
-      ),
+    // tone that would say whether the bill is fully covered. With no bill
+    // (b) there is no share to read: the entry waits for the BOQ, for every
+    // caller — the wait is not a figure of the bill.
+    noBill
+      ? waitingItem("mapping", "Mapping", WAITING_FOR_BOQ)
+      : canReadBoq
+        ? headlineItem(
+            "mapping",
+            "Mapping",
+            `${Math.round(coveragePct)}%`,
+            baselineBlockerCodes.has("UNALLOCATED_BOQ") ||
+              baselineBlockerCodes.has("NO_APPROVED_ALLOCATIONS")
+              ? "blocked"
+              : coveragePct >= 99.995
+                ? "done"
+                : "review",
+            coveragePct,
+          )
+        : { ...headlineItem("mapping", "Mapping", "—", "neutral", null), withheld: true, reason: MAPPING_DETAILS_WITHHELD },
+    // The bill's quantities and value are for those who may read the BOQ;
+    // with no bill they wait for it, for every caller.
+    noBill
+      ? waitingItem("unmapped_quantity", "Unmapped BOQ quantity", WAITING_FOR_BOQ)
+      : canReadBoq &&
+        headlineItem(
+          "unmapped_quantity",
+          "Unmapped BOQ quantity",
+          unmappedQuantityText,
+          unmappedQuantities.length > 0 ? "review" : "done",
+          unmappedQuantities.map(({ unit, quantity }) => ({ unit, quantity })),
+        ),
+    noBill
+      ? waitingItem("unmapped_boq", "Unmapped BOQ value", WAITING_FOR_BOQ)
+      : canReadBoq &&
+        headlineItem(
+          "unmapped_boq",
+          "Unmapped BOQ value",
+          formatHeadlineMoney(unallocatedAmount),
+          unallocatedAmount > MONEY_EPSILON ? "review" : "done",
+          unallocatedAmount,
+        ),
     // How many critical activities have no approved allocation is read off
     // the mapping (owner decision, 2026-09-28): a member who may not read
     // the BOQ is told the details are withheld — no count, and no tone that
     // would say whether there are any. The critical path itself is theirs.
     // With no active schedule nothing has been assessed (R5-4): the entry
     // waits — no count, no zero, no "done" — and says so to every caller,
-    // since whether a schedule is active is not read off the bill.
+    // since whether a schedule is active is not read off the bill. An active
+    // schedule with no critical path yet (a) waits the same way.
     !activeScheduleAssessed
-      ? {
-          ...headlineItem(
-            "critical_unmapped",
-            "Critical unmapped activities",
-            WAITING_FOR_ACTIVE_SCHEDULE,
-            "neutral",
-            null,
-          ),
-          waiting: true,
-        }
+      ? waitingItem("critical_unmapped", "Critical unmapped activities", WAITING_FOR_ACTIVE_SCHEDULE)
+      : noCriticalPath
+        ? waitingItem("critical_unmapped", "Critical unmapped activities", NO_CRITICAL_PATH_YET)
       : canReadBoq
         ? headlineItem(
             "critical_unmapped",
@@ -2368,9 +2415,14 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       // no active schedule there is no count for anyone: it is waiting.
       ...(!activeScheduleAssessed
         ? { criticalUnmappedWaiting: true, criticalUnmappedReason: WAITING_FOR_ACTIVE_SCHEDULE }
-        : canReadBoq
-          ? { criticalUnmappedActivities: criticalUnmappedActivities.length }
-          : { criticalUnmappedWithheld: true, criticalUnmappedReason: MAPPING_DETAILS_WITHHELD }),
+        : noCriticalPath
+          ? { criticalUnmappedWaiting: true, criticalUnmappedReason: NO_CRITICAL_PATH_YET }
+          : canReadBoq
+            ? { criticalUnmappedActivities: criticalUnmappedActivities.length }
+            : { criticalUnmappedWithheld: true, criticalUnmappedReason: MAPPING_DETAILS_WITHHELD }),
+      // No bill: the mapping share, quantity and value wait for the BOQ, for
+      // every caller (they are figures of nothing, not figures of the bill).
+      ...(noBill ? { mappingWaiting: true, mappingReason: WAITING_FOR_BOQ } : {}),
       nextAction: toAction(nextStep),
       advisoryAction: toAction(advisoryStep),
     },

@@ -216,15 +216,25 @@ describe("project setup readiness service", () => {
       "BOQ imported FAIL",
       // No schedule at all (R5-4): said as that, not as a failed import.
       "Schedule No schedule yet",
-      "Mapping 0%",
-      "Unmapped BOQ quantity 0",
-      "Unmapped BOQ value 0",
+      // No bill (R6, same family as R5-4): the mapping's share, quantity
+      // and value are figures of nothing — they wait, never "0%" / "0" done.
+      "Mapping Waiting for the BOQ",
+      "Unmapped BOQ quantity Waiting for the BOQ",
+      "Unmapped BOQ value Waiting for the BOQ",
       // Nothing assessed yet: no count, never "0".
       "Critical unmapped activities Waiting for active schedule",
       "Baseline NOT APPROVED",
       "Cost loading INCOMPLETE",
     ]);
     expect(result.summary.headline[0].tone).toBe("blocked");
+    for (const key of ["mapping", "unmapped_quantity", "unmapped_boq"]) {
+      const entry = result.summary.headline.find((item) => item.key === key);
+      expect([key, entry.tone, entry.raw, entry.waiting, entry.withheld]).toEqual([key, "neutral", null, true, undefined]);
+    }
+    expect([result.summary.mappingWaiting, result.summary.mappingReason]).toEqual([true, "Waiting for the BOQ"]);
+    // The allocation step's value chips are sums of nothing: left out.
+    const allocationStep = result.steps.find((step) => step.key === "boq_allocation");
+    expect(allocationStep.counts).toEqual({});
     expect(result.summary.scheduleState).toBe("none");
     expect(mockPrisma.approvalWorkflowEvent.findMany).not.toHaveBeenCalled();
   });
@@ -1030,25 +1040,92 @@ describe("project setup readiness service", () => {
           const critical = entry(readiness, "critical_unmapped");
           expect(critical.value).not.toMatch(/\d/);
           expect(critical.tone).not.toBe("done");
-          // The mapping share stays the bill's: withheld from the member.
-          expect(Boolean(entry(readiness, "mapping").withheld)).toBe(!canReadBoq);
+          // No bill yet: the mapping share is a figure of nothing and waits
+          // for the BOQ — for every caller, with no claim of withholding.
+          expect([status, canReadBoq, entry(readiness, "mapping")]).toEqual([
+            status,
+            canReadBoq,
+            { key: "mapping", label: "Mapping", value: "Waiting for the BOQ", tone: "neutral", raw: null, waiting: true },
+          ]);
         }
+        // With a bill the mapping share stays the bill's: withheld from the
+        // member, exactly as before.
+        mockPrisma.boqItem.findMany.mockResolvedValue([filedBoqItem]);
+        for (const canReadBoq of [true, false]) {
+          const readiness = await check(canReadBoq);
+          expect([status, canReadBoq, Boolean(entry(readiness, "mapping").withheld), entry(readiness, "mapping").waiting]).toEqual([status, canReadBoq, !canReadBoq, undefined]);
+          expect([status, canReadBoq, readiness.summary.mappingWaiting]).toEqual([status, canReadBoq, undefined]);
+        }
+        mockPrisma.boqItem.findMany.mockResolvedValue([]);
       }
     });
 
-    it("a staged revision that was rejected, or has no activities, still fails — and the critical entry still waits", async () => {
-      for (const overrides of [{ status: "rejected" }, { activityCount: 0 }]) {
+    it("a staged revision that was rejected, or has no activities, reads what the engine judges — the blocker kept — and the critical entry still waits", async () => {
+      const cases = [
+        [{ status: "rejected" }, "Imported — revision rejected, resubmit", "SCHEDULE_REJECTED"],
+        [{ activityCount: 0 }, "Imported — no activities", "NO_ACTIVITIES"],
+        // Rejected and empty: there is nothing in it, which is what to fix.
+        [{ status: "rejected", activityCount: 0 }, "Imported — no activities", "NO_ACTIVITIES"],
+      ];
+      for (const [overrides, value, blocker] of cases) {
         revisions({ latest: stagedRevision(overrides) });
-        const readiness = await check(true);
-        expect(readiness.summary.scheduleState).toBe("staged");
-        expect(entry(readiness, "schedule_imported")).toMatchObject({
-          label: "Schedule imported",
-          value: "FAIL",
-          tone: "blocked",
-          raw: false,
-        });
-        expectWaiting(readiness);
+        for (const canReadBoq of [true, false]) {
+          const readiness = await check(canReadBoq);
+          const tag = `${JSON.stringify(overrides)} / ${canReadBoq ? "reader" : "member"}`;
+          expect([tag, readiness.summary.scheduleState]).toEqual([tag, "staged"]);
+          expect([tag, entry(readiness, "schedule_imported")]).toEqual([
+            tag,
+            { key: "schedule_imported", label: "Schedule imported", value, tone: "blocked", raw: false },
+          ]);
+          const step = readiness.steps.find((item) => item.key === "schedule_generation");
+          expect([tag, step.blockers.map((item) => item.code).includes(blocker)]).toEqual([tag, true]);
+          expectWaiting(readiness);
+        }
       }
+      // The allocation step of an empty staged revision says so — not the
+      // words a missing schedule has ("Generate or import a schedule …").
+      revisions({ latest: stagedRevision({ activityCount: 0 }) });
+      const empty = await check(true);
+      const allocation = empty.steps.find((item) => item.key === "boq_allocation");
+      expect(allocation.blockers.find((item) => item.code === "ALLOCATION_WAITING_FOR_SCHEDULE").message).toBe(
+        "The staged schedule revision has no activities: import a corrected schedule or regenerate it (Schedule › Update Schedule) before mapping allocations.",
+      );
+      revisions({});
+      const none = await check(true);
+      expect(none.steps.find((item) => item.key === "boq_allocation").blockers.find((item) => item.code === "ALLOCATION_WAITING_FOR_SCHEDULE").message).toBe(
+        "Generate or import a schedule before mapping allocations.",
+      );
+    });
+
+    it("an active schedule with no critical path (the engine's NO_CRITICAL_PATH warning): 'No critical path yet' for every caller — never '0' in the done tone — and no 'Critical' chip", async () => {
+      revisions({ active: activeRevision, latest: activeRevision });
+      mockPrisma.boqItem.findMany.mockResolvedValue([filedBoqItem]);
+      mockPrisma.activity.findMany.mockResolvedValue([
+        criticalActivity("activity-1", { isCritical: false }),
+        criticalActivity("activity-2", { isCritical: false }),
+      ]);
+      for (const canReadBoq of [true, false]) {
+        const readiness = await check(canReadBoq);
+        expect([canReadBoq, readiness.summary.scheduleState]).toEqual([canReadBoq, "active"]);
+        expect([canReadBoq, entry(readiness, "critical_unmapped")]).toEqual([
+          canReadBoq,
+          { key: "critical_unmapped", label: "Critical unmapped activities", value: "No critical path yet", tone: "neutral", raw: null, waiting: true },
+        ]);
+        expect(readiness.summary).not.toHaveProperty("criticalUnmappedActivities");
+        expect(readiness.summary).not.toHaveProperty("criticalUnmappedWithheld");
+        expect(readiness.summary).toMatchObject({ criticalUnmappedWaiting: true, criticalUnmappedReason: "No critical path yet" });
+        const step = readiness.steps.find((item) => item.key === "schedule_generation");
+        expect([canReadBoq, step.warnings.map((item) => item.code)]).toEqual([canReadBoq, ["NO_CRITICAL_PATH"]]);
+        expect([canReadBoq, step.counts.activeActivities, "criticalActivities" in step.counts]).toEqual([canReadBoq, 2, false]);
+        // The bill's share is still the bill's: withheld from the member.
+        expect([canReadBoq, Boolean(entry(readiness, "mapping").withheld)]).toEqual([canReadBoq, !canReadBoq]);
+      }
+      // One activity marked critical: the count is a fact again, and the chip is back.
+      mockPrisma.activity.findMany.mockResolvedValue([criticalActivity("activity-1"), criticalActivity("activity-2", { isCritical: false })]);
+      const assessed = await check(true);
+      expect(entry(assessed, "critical_unmapped")).toEqual({ key: "critical_unmapped", label: "Critical unmapped activities", value: "1", tone: "review", raw: 1 });
+      expect(assessed.steps.find((item) => item.key === "schedule_generation").counts.criticalActivities).toBe(1);
+      expect(assessed.summary).not.toHaveProperty("criticalUnmappedWaiting");
     });
 
     it("an active schedule: the count for a BOQ reader (1, then 0 once mapped), withheld from a member who may not read the BOQ", async () => {

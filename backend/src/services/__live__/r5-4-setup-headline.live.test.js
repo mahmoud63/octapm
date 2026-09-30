@@ -18,6 +18,27 @@
  *             approved, never activated
  *   active  — the same import, approved and activated
  *
+ * and, in the same family (R6 residual, api item 3: never a zero for
+ * something not assessed):
+ *
+ *   nobill     — no BOQ row at all: the mapping share, the unmapped quantity
+ *                and value read "Waiting for the BOQ" (neutral) for every
+ *                caller, never "0%" / "0" in the done tone, and the
+ *                allocation step carries no value chips;
+ *   nocritical — two activities entered by hand (no duration, no logic, so
+ *                the CPM never ran) — an active schedule with no critical
+ *                path (the engine's NO_CRITICAL_PATH warning): the critical
+ *                entry reads "No critical path yet" (neutral) for every
+ *                caller, never "0" done, and no "Critical: 0" chip;
+ *   rejected   — the same import, submitted and rejected: the headline reads
+ *                what the engine judges ("Imported — revision rejected,
+ *                resubmit", blocked), the blocker kept, the critical entry
+ *                waiting;
+ *
+ * the member without boq:read still gets no mapping-derived count and the
+ * withheld reason wherever a bill exists — the waiting states are the
+ * schedule's and the bill's absence, not the bill's figures.
+ *
  * and two callers: the organisation's admin (who may read the BOQ) and a
  * site engineer whose permission template takes the BOQ away (the BOQ and
  * coverage endpoints refuse them).
@@ -40,6 +61,8 @@ const { createLiveOrg, createLiveUser, dropLiveOrg, liveDescribe, mintAccessToke
 const { startApi } = require("./auth-live-kit");
 
 const WAITING = "Waiting for active schedule";
+const WAITING_FOR_BOQ = "Waiting for the BOQ";
+const NO_CRITICAL_PATH = "No critical path yet";
 const WITHHELD = "Mapping details unavailable to you";
 
 /** A two-activity XER (an FS link between them), both on the critical path. */
@@ -112,16 +135,25 @@ liveDescribe("R5-4: the setup headline tells no schedule, a staged schedule and 
         tools: { create: [{ module: "boq", level: "none" }] },
       },
     });
-    for (const state of ["none", "staged", "active"]) {
+    for (const state of ["none", "staged", "active", "nobill", "nocritical", "rejected"]) {
       const project = await prisma.project.create({
         data: { orgId: live.org.id, currency: "USD", name: `LiveTest R5-4 headline ${state}`, startDate: new Date("2026-01-05"), endDate: new Date("2027-12-17") },
       });
       await prisma.projectAssignment.create({ data: { projectId: project.id, userId: member.id, role: "site_engineer", orgId: live.org.id } });
       await prisma.projectUserPermission.create({ data: { orgId: live.org.id, projectId: project.id, userId: member.id, templateId: template.id } });
-      // The same bill on each, through the BOQ API.
-      const item = (await post(project.id, "/boq/items", { code: "1.1", description: "Excavation", quantity: 10, unit: "m3", rate: 100 }, 201)).item;
+      // The same bill on each — except the project with no bill.
+      const item = state === "nobill" ? null : (await post(project.id, "/boq/items", { code: "1.1", description: "Excavation", quantity: 10, unit: "m3", rate: 100 }, 201)).item;
       projects[state] = { id: project.id, item };
     }
+    // nocritical: two activities entered by hand, no duration and no logic —
+    // nothing ran the CPM, so neither is marked critical.
+    for (const [code, name] of [["H100", "Hoarding"], ["H200", "Site cabins"]]) {
+      await post(projects.nocritical.id, "/activities", { engineerIds: [live.user.id], name, activityCode: code, startDate: "2026-02-02", endDate: "2026-02-06" }, 201);
+    }
+    // rejected: the same import, submitted for review and rejected.
+    projects.rejected.revisionId = await importXer(projects.rejected.id);
+    await post(projects.rejected.id, `/schedule/revisions/${projects.rejected.revisionId}/submit-review`, {});
+    await post(projects.rejected.id, `/schedule/revisions/${projects.rejected.revisionId}/reject`, { reason: "LiveTest: logic incomplete, resubmit" });
     // staged: imported, submitted and approved — never activated.
     projects.staged.revisionId = await importXer(projects.staged.id);
     // active: the same import, taken all the way to activation.
@@ -358,6 +390,83 @@ liveDescribe("R5-4: the setup headline tells no schedule, a staged schedule and 
     const mappedLimited = await readiness(id, memberAuth());
     expect(entry(mappedLimited, "critical_unmapped")).toEqual(entry(limited, "critical_unmapped"));
     expect(mappedLimited.summary).not.toHaveProperty("criticalUnmappedActivities");
+  });
+
+  it("no bill: the mapping share, quantity and value wait for the BOQ — for every caller, never '0%' / '0' done — and the allocation step carries no value chips", async () => {
+    const { id } = projects.nobill;
+    expect(await prisma.boqItem.count({ where: { projectId: id } })).toBe(0);
+    const full = await readiness(id, pmAuth());
+    const limited = await readiness(id, memberAuth());
+    for (const [who, result] of [["reader", full], ["member", limited]]) {
+      for (const [key, label] of [["mapping", "Mapping"], ["unmapped_quantity", "Unmapped BOQ quantity"], ["unmapped_boq", "Unmapped BOQ value"]]) {
+        expect([who, key, entry(result, key)]).toEqual([who, key, { key, label, value: WAITING_FOR_BOQ, tone: "neutral", raw: null, waiting: true }]);
+      }
+      expect([who, result.summary.mappingWaiting, result.summary.mappingReason]).toEqual([who, true, WAITING_FOR_BOQ]);
+      // Nothing on the line reads as a figure of the bill.
+      for (const item of result.summary.headline) {
+        expect([who, item.key, item.value === "0" || item.value === "0%" || /^0 USD$/.test(item.value)]).toEqual([who, item.key, false]);
+      }
+      expect([who, stepCounts(result, "boq_allocation")]).toEqual([who, {}]);
+      expectWaiting(`no bill / ${who}`, result);
+      expect([who, entry(result, "boq_imported")]).toEqual([who, { key: "boq_imported", label: "BOQ imported", value: "FAIL", tone: "blocked", raw: false }]);
+    }
+    // The member is still refused the bill's endpoints; with no bill there
+    // is nothing withheld from the line — the wait is not the bill's.
+    expect((await api.get(at(id, "/boq"), memberAuth())).status).toBe(403);
+    expect(limited.coverage).toEqual({ withheld: true, reason: WITHHELD });
+    expect(entry(limited, "mapping").withheld).toBeUndefined();
+    // With a bill the mapping share is a figure again, and withheld from the member.
+    await post(id, "/boq/items", { code: "1.1", description: "Excavation", quantity: 10, unit: "m3", rate: 100 }, 201);
+    const billed = await readiness(id, pmAuth());
+    expect(entry(billed, "mapping")).toEqual({ key: "mapping", label: "Mapping", value: "0%", tone: "blocked", raw: 0 });
+    expect(billed.summary).not.toHaveProperty("mappingWaiting");
+    expect(stepCounts(billed, "boq_allocation")).toEqual(expect.objectContaining({ totalBoqAmount: 1000, unallocatedAmount: 1000 }));
+    await expectMemberRestricted(id, await readiness(id, memberAuth()));
+  });
+
+  it("an active schedule with no critical path: 'No critical path yet' for every caller — never '0' done — and no 'Critical' chip; the mapping share stays the bill's", async () => {
+    const { id } = projects.nocritical;
+    const active = await prisma.activity.findMany({ where: { projectId: id, isActive: true }, select: { isCritical: true } });
+    expect(active.map((row) => row.isCritical)).toEqual([false, false]);
+    const full = await readiness(id, pmAuth());
+    const limited = await readiness(id, memberAuth());
+    for (const [who, result] of [["reader", full], ["member", limited]]) {
+      expect([who, result.summary.scheduleState]).toEqual([who, "active"]);
+      expect([who, entry(result, "critical_unmapped")]).toEqual([
+        who,
+        { key: "critical_unmapped", label: "Critical unmapped activities", value: NO_CRITICAL_PATH, tone: "neutral", raw: null, waiting: true },
+      ]);
+      expect([who, result.summary.criticalUnmappedWaiting, result.summary.criticalUnmappedReason]).toEqual([who, true, NO_CRITICAL_PATH]);
+      expect(result.summary).not.toHaveProperty("criticalUnmappedActivities");
+      expect(result.summary).not.toHaveProperty("criticalUnmappedWithheld");
+      const step = result.steps.find((item) => item.key === "schedule_generation");
+      expect([who, step.warnings.map((item) => item.code)]).toEqual([who, ["NO_CRITICAL_PATH"]]);
+      expect([who, step.counts.activeActivities, "criticalActivities" in step.counts]).toEqual([who, 2, false]);
+    }
+    // The bill exists: its share is the reader's and withheld from the member.
+    expect(entry(full, "mapping")).toMatchObject({ value: "0%", raw: 0 });
+    await expectMemberRestricted(id, limited);
+  });
+
+  it("a rejected staged revision reads what the engine judges — the blocker kept, the critical entry waiting — for every caller", async () => {
+    const { id, revisionId } = projects.rejected;
+    const row = await prisma.scheduleRevision.findUnique({ where: { id: revisionId }, select: { status: true, isActive: true, activityCount: true } });
+    expect([row.status, row.isActive, row.activityCount]).toEqual(["rejected", false, 2]);
+    const full = await readiness(id, pmAuth());
+    const limited = await readiness(id, memberAuth());
+    for (const [who, result] of [["reader", full], ["member", limited]]) {
+      expect([who, result.summary.scheduleState]).toEqual([who, "staged"]);
+      expect([who, entry(result, "schedule_imported")]).toEqual([
+        who,
+        { key: "schedule_imported", label: "Schedule imported", value: "Imported — revision rejected, resubmit", tone: "blocked", raw: false },
+      ]);
+      const step = result.steps.find((item) => item.key === "schedule_generation");
+      expect([who, step.blockers.map((item) => item.code)]).toEqual([who, ["SCHEDULE_REJECTED"]]);
+      expect([who, stepCounts(result, "schedule_generation")]).toEqual([who, { revisionId, revisionStatus: "rejected", revisionActivities: 2 }]);
+      expectWaiting(`rejected / ${who}`, result);
+      expectNoActiveScheduleCounts(`rejected / ${who}`, result);
+    }
+    await expectMemberRestricted(id, limited);
   });
 
   it("the three states side by side never put a count beside a schedule that is not active", async () => {

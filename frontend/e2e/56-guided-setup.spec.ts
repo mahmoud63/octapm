@@ -609,6 +609,9 @@ test('the import previews show the dry run on screen and write nothing', async (
 // ── The three schedule states (owner decision R5-4) ─────────────────────────
 
 const WAITING_FOR_ACTIVE_SCHEDULE = 'Waiting for active schedule'
+const WAITING_FOR_BOQ = 'Waiting for the BOQ'
+const NO_CRITICAL_PATH_YET = 'No critical path yet'
+const IMPORTED_REJECTED = 'Imported — revision rejected, resubmit'
 
 const stepCard = (view: Page, key: string) => view.getByTestId(`uat-setup-step-${key}`)
 /**
@@ -885,8 +888,10 @@ test('a rejected staged revision is not waiting for activation: the Schedule til
   const answer = await engine()
   expect(answer.summary.scheduleState).toBe('staged')
   expect(answer.context.currentRevision?.status).toBe('rejected')
+  // The engine judges the staged revision (R6): rejected, to be resubmitted
+  // — not "FAIL" alone, and not the words a missing schedule has.
   expect(answer.summary.headline.find((entry) => entry.key === 'schedule_imported')).toMatchObject({
-    value: 'FAIL',
+    value: IMPORTED_REJECTED,
     tone: 'blocked',
     raw: false,
   })
@@ -896,8 +901,10 @@ test('a rejected staged revision is not waiting for activation: the Schedule til
 
   await open()
   for (const shown of [page.getByTestId('setup-guide-strip-schedule_imported'), page.getByTestId('uat-setup-headline-schedule_imported')]) {
-    await expect(shown).toContainText('Schedule importedFAIL')
+    await expect(shown).toContainText(`Schedule imported${IMPORTED_REJECTED}`)
     await expect(shown).toHaveAttribute('data-tone', 'blocked')
+    await expect(shown).not.toContainText('FAIL')
+    await expect(shown).not.toContainText('No schedule yet')
   }
   // The tile agrees with the headline beside it: rejected, to be resubmitted
   // — not "waiting for activation", and no count of activities.
@@ -912,6 +919,91 @@ test('a rejected staged revision is not waiting for activation: the Schedule til
   await expect(stepCard(page, 'schedule_generation')).toContainText('Revision activities: 2')
   await expect(stepCard(page, 'schedule_generation')).toContainText('Status: rejected')
   await expectStripIsEngine(page, projectId)
+})
+
+test('no bill, and an active schedule with no critical path (R6): the strips wait in the engine\'s words — never "Mapping 0%", never "Critical unmapped 0"', async ({
+  page,
+}) => {
+  test.setTimeout(240_000)
+  // Two greenfield projects: one with nothing at all, one with a bill and
+  // two activities entered by hand (no duration, no logic: the CPM never
+  // ran, so neither is marked critical — the engine's NO_CRITICAL_PATH).
+  const { noBill, noCritical } = await withApi(async (client) => {
+    if (!org) org = await registerLiveOrg(client, 'pc8guide')
+    const noBill = await createProject(client, org.adminToken, `No bill ${Date.now()}`)
+    const noCritical = await createProject(client, org.adminToken, `No critical path ${Date.now()}`)
+    await post(client, noCritical, '/boq/items', { code: '1.1', description: 'Excavation', quantity: 12, unit: 'm3', rate: 100 }, 201)
+    for (const [code, name] of [['H100', 'Hoarding'], ['H200', 'Site cabins']]) {
+      await post(client, noCritical, '/activities', { engineerIds: [org.adminId], name, activityCode: code, startDate: '2026-02-02', endDate: '2026-02-06' }, 201)
+    }
+    return { noBill, noCritical }
+  })
+  const guideEntry = (key: string) => page.getByTestId(`setup-guide-strip-${key}`)
+  const cardEntry = (key: string) => page.getByTestId(`uat-setup-headline-${key}`)
+  const open = async (projectId: string) => {
+    await openGuide(page, `/o/${org!.segment}/projects/${projectId}`)
+    const expand = page.getByTestId('uat-setup-readiness-expand')
+    if (await expand.isVisible().catch(() => false)) await expand.click()
+    await expect(page.getByTestId('uat-setup-headline')).toBeVisible({ timeout: 30_000 })
+  }
+  const expectWaitingEntry = async (key: string, label: string, value: string) => {
+    for (const shown of [guideEntry(key), cardEntry(key)]) {
+      await expect(shown, key).toContainText(`${label}${value}`)
+      await expect(shown, key).toHaveAttribute('data-waiting', 'true')
+      await expect(shown, key).toHaveAttribute('data-tone', 'neutral')
+      await expect(shown, key).not.toHaveAttribute('data-withheld', 'true')
+      await expect(shown, key).not.toContainText(/\d/)
+    }
+    await expect(guideEntry(key), key).toHaveAttribute('data-value', value)
+  }
+
+  await page.routeWebSocket(/socket\.io/, () => {})
+  await signInForm(page, org!.adminEmail)
+
+  // ── No bill: the mapping entries wait for the BOQ; the tiles read "—".
+  const noBillEngine = await engineHeadline(noBill)
+  expect(noBillEngine.find((entry) => entry.key === 'mapping')?.value).toBe(WAITING_FOR_BOQ)
+  await open(noBill)
+  await expectWaitingEntry('mapping', 'Mapping', WAITING_FOR_BOQ)
+  await expectWaitingEntry('unmapped_quantity', 'Unmapped BOQ quantity', WAITING_FOR_BOQ)
+  await expectWaitingEntry('unmapped_boq', 'Unmapped BOQ value', WAITING_FOR_BOQ)
+  // A waiting share is no share of the bill's value.
+  await expect(guideEntry('mapping')).not.toContainText('(by value)')
+  await expect(page.getByTestId('uat-controls-coverage-pct')).toHaveText('—')
+  await expect(page.getByTestId('uat-controls-coverage-waiting')).toHaveText(WAITING_FOR_BOQ)
+  await expect(page.getByTestId('uat-controls-coverage')).not.toContainText('0%')
+  await expect(page.getByTestId('uat-controls-coverage')).not.toContainText('0 of 0 rows')
+  await expect(page.getByTestId('uat-controls-figure-unmapped-value')).toHaveText('—')
+  await expect(page.getByTestId('uat-controls-figure-unmapped-truth')).toHaveText('no figure')
+  await expect(page.getByTestId('uat-controls-figure-unmapped-basis')).toContainText(WAITING_FOR_BOQ)
+  // The allocation step card carries no "BOQ value: 0 · Unallocated: 0".
+  for (const chip of ['BOQ value: ', 'Unallocated: ', 'Approved: ', 'Pending: ']) {
+    await expect(stepCard(page, 'boq_allocation')).not.toContainText(chip)
+  }
+  for (const value of await page.getByTestId('setup-guide-strip').locator('> li').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-value')))) {
+    expect(value).not.toBe('0')
+    expect(value).not.toBe('0%')
+  }
+  await expectStripIsEngine(page, noBill)
+
+  // ── An active schedule with no critical path: the critical entry waits
+  // with the engine's words, the tile reads "—", and no "Critical: 0" chip.
+  const noCriticalEngine = await engineHeadline(noCritical)
+  expect(noCriticalEngine.find((entry) => entry.key === 'critical_unmapped')?.value).toBe(NO_CRITICAL_PATH_YET)
+  await open(noCritical)
+  await expectWaitingEntry('critical_unmapped', 'Critical unmapped activities', NO_CRITICAL_PATH_YET)
+  await expect(page.getByTestId('uat-controls-figure-critical-value')).toHaveText('—')
+  await expect(page.getByTestId('uat-controls-figure-critical-truth')).toHaveText('no figure')
+  await expect(page.getByTestId('uat-controls-figure-critical-basis')).toContainText(NO_CRITICAL_PATH_YET)
+  await expect(page.getByTestId('uat-controls-figure-critical')).not.toContainText(/\d/)
+  const scheduleCard = stepCard(page, 'schedule_generation')
+  await expect(scheduleCard).toContainText('Activities: 2')
+  await expect(scheduleCard).not.toContainText('Critical: ')
+  await expect(scheduleCard).toContainText('No critical path activities are marked yet')
+  // The bill exists here: its share is a figure again (the PM may read it).
+  await expect(guideEntry('mapping')).toHaveAttribute('data-value', '0%')
+  await expect(guideEntry('mapping')).not.toHaveAttribute('data-waiting', 'true')
+  await expectStripIsEngine(page, noCritical)
 })
 
 // ── The withheld view ───────────────────────────────────────────────────────
