@@ -68,7 +68,7 @@ assert.match(projectDetail, /\{ key: 'lookahead', label: 'Lookahead' \}/, 'sideb
 assert.match(permissionsTs, /\| 'lookahead'/, 'permission module union')
 
 assert.equal(permissions.modules.lookahead.label, 'Lookahead')
-assert.deepEqual(permissions.modules.lookahead.transitions['lookahead.publish'], ['pm', 'planning_eng', 'site_engineer'])
+assert.deepEqual(permissions.modules.lookahead.transitions['lookahead.publish'], ['pm', 'planning_eng', 'site_engineer', 'quality_engineer'])
 assert.deepEqual(permissions.modules.lookahead.transitions['lookahead.archive'], ['pm', 'planning_eng'])
 assert.deepEqual(permissions.partyPermissions.subcontractor.modules.lookahead, { actions: ['read', 'update', 'export'], transitions: ['lookahead.item_status'] })
 assert.deepEqual(permissions.partyPermissions.owner.modules.lookahead, { actions: ['read', 'export'], transitions: [] })

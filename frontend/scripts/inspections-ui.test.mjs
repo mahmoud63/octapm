@@ -98,7 +98,13 @@ assert.match(read('src/features/projects/lib/project-modules.ts'), /'punch', 'in
 assert.match(read('src/features/attachments/components/attachment-panel.tsx'), /form_response: 'inspection'/, 'answer photos guarded by inspection')
 assert.match(read('src/features/drawings/hooks/use-markups.ts'), /'form_instance'/, 'pins can target inspections')
 assert.match(read('src/features/company/index.tsx'), /\/company\/form-templates/, 'company nav has the template library')
-assert.match(read('src/routes/_authenticated/company/form-templates.tsx'), /CompanyFormTemplates/, 'company route')
+// The page lives under the workspace (ENT-4); the old path is kept only as a
+// component-less child of the redirecting legacy /company layout.
+const workspaceFormTemplates = read('src/routes/_authenticated/o/$orgSlug/company/form-templates.tsx')
+assert.match(workspaceFormTemplates, /import \{ CompanyFormTemplates \} from '@\/features\/company\/form-templates'/, 'company route imports the library page')
+assert.match(workspaceFormTemplates, /createFileRoute\('\/_authenticated\/o\/\$orgSlug\/company\/form-templates'\)\(\{\s*component: CompanyFormTemplates,/, 'company route')
+assert.doesNotMatch(read('src/routes/_authenticated/company/form-templates.tsx'), /component:/, 'the legacy company path renders nothing of its own')
+assert.match(read('src/routes/_authenticated/company/route.tsx'), /beforeLoad: legacyWorkspaceRedirect/, 'the legacy company path redirects into the workspace')
 
 // ── Backend contract ────────────────────────────────────────────────────
 const service = read('../backend/src/services/form.service.js')
@@ -110,7 +116,8 @@ assert.match(service, /FORM_INCOMPLETE/, 'completion validated server-side')
 assert.match(read('../backend/src/services/progress.service.js'), /ITP_HOLD_POINT_OPEN/, 'progress approval blocked by open hold points')
 const policy = JSON.parse(read('../shared/permissions.json'))
 assert.ok(policy.modules.inspection, 'inspection module in the policy')
-assert.deepEqual(policy.modules.inspection.transitions['inspection.close'], ['pm', 'planning_eng'], 'PM / planning close by base policy')
+// The quality engineer joined the closers in aceaef7.
+assert.deepEqual(policy.modules.inspection.transitions['inspection.close'], ['pm', 'planning_eng', 'quality_engineer'], 'PM / planning / quality close by base policy')
 assert.ok(policy.partyPermissions.subcontractor.modules.inspection.transitions.includes('inspection.complete'), 'subcontractors can complete')
 assert.ok(!policy.partyPermissions.subcontractor.modules.inspection.transitions.includes('inspection.close'), 'subcontractors cannot close')
 const migration = read('../backend/prisma/migrations/20260906080000_add_form_templates/migration.sql')

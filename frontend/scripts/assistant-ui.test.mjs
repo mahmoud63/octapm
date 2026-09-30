@@ -35,7 +35,14 @@ assert.match(navbar, /<AssistantButton \/>/, 'mounted in the top bar')
 
 assert.match(permissions, /\| 'assistant'/, 'assistant module typed')
 assert.ok(policy.modules.assistant, 'assistant module in policy')
-assert.equal(policy.modules.assistant.actions.read.length, 8, 'every role can ask')
+// Every role in the policy's own role list can ask, and nothing else is listed:
+// a count would pass with a duplicate in place of a missing role, and broke
+// when quality_engineer joined the policy (aceaef7).
+assert.deepEqual(
+  [...policy.modules.assistant.actions.read].sort(),
+  policy.roles.map((role) => role.id).sort(),
+  'every role can ask',
+)
 for (const party of ['owner', 'consultant', 'contractor', 'subcontractor']) {
   assert.ok(policy.partyPermissions[party].modules.assistant, `${party} party can ask`)
 }

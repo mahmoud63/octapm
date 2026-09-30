@@ -70,9 +70,23 @@ assert.deepEqual(permissions.partyPermissions.subcontractor.modules.timesheet.tr
 
 assert.match(projectsRoutes, /"\/:projectId\/timesheets",\s*nestedProjectAccess,\s*require\("\.\/timesheets"\)/, 'routes mounted')
 assert.match(service, /TIMESHEET_ENTRY_ACTIVITY_REQUIRED/, 'activity required at submission')
-assert.match(service, /costRecord\.update\(\{ where: \{ id: record\.id \}, data: \{ actual: \{ increment: amount \}/, 'labour cost posted to the activity')
-assert.match(service, /budgetLine\.update\(\{ where: \{ id: line\.id \}, data: \{ actual: \{ increment: amount \} \} \}\)/, 'labour cost posted to the budget line')
-assert.match(service, /actual: \{ decrement: posted \}/, 'reopen reverses the posting')
+// Actual cost is written only through the cost ledger (ef5b6f9; the certified
+// rule "Actual Cost only from CostLedgerEntry"): approval posts each entry as
+// labour with its activity and cost code, the ledger resolves the labour
+// budget line for that code and applies the entry to both projections, and a
+// reopen writes negative mirrors through the same path.
+const ledger = backend('src/services/cost-ledger.service.js')
+const postCall = service.match(/costLedger\.post\(\{([\s\S]*?)\n\s*\}\);/)
+assert.ok(postCall, 'approval posts through the cost ledger')
+assert.match(postCall[1], /sourceType: "timesheet",[\s\S]*\bamount,\s*costType: "labour",/, 'each entry posts its amount as labour')
+assert.match(postCall[1], /activityId: entry\.activityId \|\| null,/, 'labour cost posted to the activity')
+assert.match(postCall[1], /costCodeId: entry\.costCodeId \|\| null,\s*budgetLineId: entry\.budgetLineId \|\| null,/, 'labour cost posted to the budget line')
+assert.match(ledger, /where: \{ projectId, costCodeId, costType, status: "active" \}/, 'the ledger finds the active budget line for the cost code and type')
+assert.match(ledger, /budgetLine\.update\(\{\s*where: \{ id: entry\.budgetLineId \},\s*data: \{ actual: \{ increment: amount \} \},/, 'the ledger applies the entry to the budget line')
+assert.match(ledger, /costRecord\.update\(\{\s*where: \{ id: record\.id \},\s*data: \{\s*actual: \{ increment: amount \},/, 'the ledger applies the entry to the activity')
+assert.doesNotMatch(service, /actual: \{ (increment|decrement)/, 'the service never writes actual cost itself, around the ledger')
+assert.match(service, /costLedger\.reverse\(\{ tx, orgId, projectId, sourceType: "timesheet", sourceId: timesheetId,/, 'reopen reverses the posting')
+assert.match(ledger, /amount: round2\(-num\(original\.amount\)\),[\s\S]*?reversalOfId: original\.id,[\s\S]*?await applyToProjections\(\{ tx, entry \}\);/, 'a reversal is a negative mirror applied to the same projections')
 assert.match(reportSources, /time_entry: \{/, 'report source')
 assert.match(recordLinks, /timesheet: \{ module: "site-reporting" \}/, 'record link')
 assert.match(attachments, /timesheet: "timesheet"/, 'attachments on timesheets')

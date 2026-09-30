@@ -49,9 +49,21 @@ assert.deepEqual(permissions.modules.cost.transitions['direct_cost.submit'], ['p
 
 assert.match(projectsRoutes, /"\/:projectId\/direct-costs",\s*nestedProjectAccess,\s*require\("\.\/direct-costs"\)/, 'routes mounted')
 assert.match(service, /DIRECT_COST_LINE_COST_CODE_REQUIRED/, 'coded lines required at submission')
-assert.match(service, /budgetLine\.update\(\{ where: \{ id: budgetLine\.id \}, data: \{ actual: \{ increment: amount \} \} \}\)/, 'posts to the budget line')
-assert.match(service, /costRecord\.update\(\{ where: \{ id: record\.id \}, data: \{ actual: \{ increment: amount \}/, 'posts to the activity')
-assert.match(service, /actual: \{ decrement: posted \}/, 'void reverses the posting')
+// Actual cost is written only through the cost ledger (ef5b6f9; the certified
+// rule "Actual Cost only from CostLedgerEntry"): approval posts each line with
+// its budget line and activity, the ledger applies the entry to both
+// projections, and a void writes negative mirrors through the same path.
+const ledger = backend('src/services/cost-ledger.service.js')
+const postCall = service.match(/costLedger\.post\(\{([\s\S]*?)\n\s*\}\);/)
+assert.ok(postCall, 'approval posts through the cost ledger')
+assert.match(postCall[1], /sourceType: "direct_cost",[\s\S]*\bamount,/, 'each line posts its own amount as a direct cost')
+assert.match(postCall[1], /budgetLineId: budgetLine\?\.id \|\| null,/, 'posts to the budget line')
+assert.match(postCall[1], /activityId: line\.activityId \|\| null,/, 'posts to the activity')
+assert.match(ledger, /budgetLine\.update\(\{\s*where: \{ id: entry\.budgetLineId \},\s*data: \{ actual: \{ increment: amount \} \},/, 'the ledger applies the entry to the budget line')
+assert.match(ledger, /costRecord\.update\(\{\s*where: \{ id: record\.id \},\s*data: \{\s*actual: \{ increment: amount \},/, 'the ledger applies the entry to the activity')
+assert.doesNotMatch(service, /actual: \{ (increment|decrement)/, 'the service never writes actual cost itself, around the ledger')
+assert.match(service, /costLedger\.reverse\(\{ tx, orgId, projectId, sourceType: "direct_cost", sourceId: directCostId,/, 'void reverses the posting')
+assert.match(ledger, /amount: round2\(-num\(original\.amount\)\),[\s\S]*?reversalOfId: original\.id,[\s\S]*?await applyToProjections\(\{ tx, entry \}\);/, 'a reversal is a negative mirror applied to the same projections')
 assert.match(service, /DIRECT_COST_DUPLICATE_INVOICE/, 'duplicate invoices refused')
 assert.match(cashFlow, /directCostPayment\.findMany/, 'payments are cash-flow outflows')
 assert.match(reportSources, /direct_cost: \{/, 'report source')
