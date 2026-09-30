@@ -1,3 +1,6 @@
+import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 import { API, apiClient } from './support'
 import {
@@ -26,6 +29,11 @@ import {
  *   value left unmapped again (a new priced row; no route removes an approved
  *      allocation): Mapping back to Blocked, the baseline stage refuses
  *      Continue and names the gate's blockers
+ *
+ * and the import previews: a BOQ workbook and a schedule workbook are
+ * previewed through the server's dry run on screen, the figures shown are the
+ * dry run's own, and the project's rows are counted before and after — the
+ * preview writes nothing.
  */
 
 let org: LiveOrg | null = null
@@ -239,4 +247,189 @@ test('guided setup walks the readiness engine: warnings continue, the baseline g
   const unmapped = await expectStripIsEngine(page, projectId)
   // The engine gives the unmapped quantity per unit; the strip shows it as given.
   expect(unmapped.find((entry) => entry.key === 'unmapped_quantity')?.value).toBe('5 m2')
+})
+
+// ── Import previews ─────────────────────────────────────────────────────────
+
+const backendDir = fileURLToPath(new URL('../../backend/', import.meta.url))
+const CONSTRUCTION_BOQ = fileURLToPath(new URL('../../docs/Construction_BOQ.xlsx', import.meta.url))
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+/**
+ * Runs `body` (with prisma, orgId, projectId) in the backend, for one project
+ * of a "LiveTest <uuid>" organisation only. Used read-only here: to count the
+ * project's rows around a preview.
+ */
+const backendRead = (orgId: string, projectId: string, body: string) => {
+  const script = `
+require('./src/utils/data-script-guard').exitUnlessDataScriptAllowed('e2e:pc8-import-previews');
+const { prisma } = require('./src/config/db');
+const [orgId, projectId] = process.argv.slice(1);
+(async () => {
+  const org = await prisma.organisation.findUnique({ where: { id: orgId }, select: { name: true } });
+  if (!org || !/^LiveTest [0-9a-f-]{36}$/.test(org.name)) throw new Error('refusing: not a LiveTest organisation');
+  const project = await prisma.project.findFirst({ where: { id: projectId, orgId }, select: { id: true } });
+  if (!project) throw new Error('refusing: the project is not in that organisation');
+  const out = await (async () => { ${body} })();
+  process.stdout.write(JSON.stringify(out ?? null));
+})()
+  .catch((error) => { process.stderr.write(String(error && error.message)); process.exitCode = 1; })
+  .finally(() => prisma.$disconnect());
+`
+  const result = spawnSync(process.execPath, ['-e', script, orgId, projectId], {
+    cwd: backendDir,
+    env: process.env,
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) throw new Error(`backend read (exit ${result.status}): ${result.stderr || result.stdout}`)
+  return JSON.parse(result.stdout || 'null')
+}
+
+/** Every table an upload or an import writes to, counted for the one project. */
+const countProjectRows = (orgId: string, projectId: string) =>
+  backendRead(
+    orgId,
+    projectId,
+    `const where = { projectId };
+     return {
+       boqItems: await prisma.boqItem.count({ where }),
+       boqRevisions: await prisma.boqRevision.count({ where }),
+       documents: await prisma.projectDocument.count({ where }),
+       jobs: await prisma.backgroundJob.count({ where }),
+       scheduleRevisions: await prisma.scheduleRevision.count({ where }),
+       activities: await prisma.activity.count({ where }),
+       wbsNodes: await prisma.wbsNode.count({ where }),
+     };`,
+  ) as Record<string, number>
+
+/**
+ * A three-activity programme workbook in the schedule parser's column
+ * contract; A300 names a predecessor that is not in the file (one issue).
+ */
+const scheduleWorkbook = () => {
+  const script = `
+const XLSX = require('@e965/xlsx');
+const rows = [
+  ['activity_code', 'name', 'wbs_code', 'duration_days', 'predecessors'],
+  ['A100', 'Excavate', '1.1', 5, ''],
+  ['A200', 'Pour', '1.1', 10, 'A100'],
+  ['A300', 'Cure', '1.2', 3, 'A200, A999'],
+];
+const book = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), 'Programme');
+process.stdout.write(XLSX.write(book, { type: 'base64', bookType: 'xlsx' }));
+`
+  const result = spawnSync(process.execPath, ['-e', script], { cwd: backendDir, encoding: 'utf8' })
+  if (result.status !== 0) throw new Error(`workbook (exit ${result.status}): ${result.stderr}`)
+  return Buffer.from(result.stdout, 'base64')
+}
+
+const dryRun = async (client: APIRequestContext, projectId: string, route: string, name: string, buffer: Buffer) => {
+  const response = await client.post(`${API}/projects/${projectId}${route}?dryRun=true`, {
+    headers: { authorization: `Bearer ${org!.adminToken}` },
+    multipart: { file: { name, mimeType: XLSX_MIME, buffer } },
+  })
+  const body = await response.json()
+  expect(response.status(), `${route} dry run -> ${JSON.stringify(body?.error)}`).toBe(200)
+  expect(body.data.dryRun).toBe(true)
+  return body.data
+}
+
+test('the import previews show the dry run on screen and write nothing', async ({ page }) => {
+  test.setTimeout(240_000)
+  const boqFile = readFileSync(CONSTRUCTION_BOQ)
+  const programme = scheduleWorkbook()
+
+  const { projectId, boqReport, scheduleReport } = await withApi(async (client) => {
+    if (!org) org = await registerLiveOrg(client, 'pc8guide')
+    const project = await createProject(client, org.adminToken, `Import previews ${Date.now()}`)
+    // A bill already uploaded (the product's own template), so the preview
+    // has something to compare against. The API runs with no job worker, so
+    // the queued AI job never runs and never moves the counts below.
+    const template = await client.get(`${API}/projects/${project}/boq/template`, {
+      headers: { authorization: `Bearer ${org.adminToken}` },
+    })
+    expect(template.status()).toBe(200)
+    const uploaded = await client.post(`${API}/projects/${project}/boq/upload`, {
+      headers: { authorization: `Bearer ${org.adminToken}` },
+      multipart: { file: { name: 'boq-template.xlsx', mimeType: XLSX_MIME, buffer: await template.body() } },
+    })
+    expect(uploaded.status(), JSON.stringify((await uploaded.json())?.error)).toBe(200)
+    // The server's own dry runs of the two files: the figures the screen must show.
+    return {
+      projectId: project,
+      boqReport: await dryRun(client, project, '/boq/upload', 'Construction_BOQ.xlsx', boqFile),
+      scheduleReport: await dryRun(client, project, '/import/xlsx', 'programme.xlsx', programme),
+    }
+  })
+  const summary = boqReport.comparison.summary as Record<string, number>
+  expect(summary.added + summary.updated + summary.unchanged + summary.removed).toBeGreaterThan(0)
+  expect(scheduleReport.activityCount).toBe(3)
+  expect(scheduleReport.issueCount).toBe(1)
+
+  const before = countProjectRows(org!.orgId, projectId)
+  expect(before.boqItems, 'the template bill is in place').toBeGreaterThan(0)
+  const base = `/o/${org!.segment}/projects/${projectId}`
+
+  // Any upload or import that is not a dry run would be a write.
+  const writes: string[] = []
+  page.on('request', (request) => {
+    const url = request.url()
+    if (request.method() === 'POST' && /\/(boq\/upload|import\/[a-z0-9]+)(\?|$)/.test(url) && !/[?&]dryRun=true/.test(url)) {
+      writes.push(url)
+    }
+  })
+  await page.routeWebSocket(/socket\.io/, () => {})
+  await signInForm(page, org!.adminEmail)
+
+  // ── BOQ: choosing a workbook previews it against the current bill.
+  await page.goto(`${base}/boq`)
+  const boqInput = page.locator("input[type=file][accept='.xlsx,.xls']")
+  await expect(boqInput).toHaveCount(1, { timeout: 45_000 })
+  const boqPreviewed = page.waitForResponse((r) => r.url().includes('/boq/upload') && r.request().method() === 'POST')
+  await boqInput.setInputFiles({ name: 'Construction_BOQ.xlsx', mimeType: XLSX_MIME, buffer: boqFile })
+  expect((await boqPreviewed).status()).toBe(200)
+  // Counted as soon as the preview has answered: nothing was written.
+  expect(countProjectRows(org!.orgId, projectId), 'the BOQ preview wrote nothing').toEqual(before)
+
+  const boqPanel = page.getByTestId('boq-upload-preview')
+  await expect(boqPanel).toBeVisible()
+  await expect(boqPanel).toHaveAttribute('data-mode', boqReport.mode)
+  for (const key of ['added', 'updated', 'unchanged', 'removed', 'blocked']) {
+    await expect(page.getByTestId(`boq-upload-preview-${key}`)).toHaveAttribute('data-value', String(summary[key]))
+  }
+  await expect(boqPanel).toContainText('nothing has been saved yet')
+  await expect(page.getByTestId('boq-upload-preview-confirm')).toBeEnabled()
+  await page.getByTestId('boq-upload-preview-cancel').click()
+  await expect(boqPanel).toHaveCount(0)
+
+  // ── Schedule: the Excel option, and Import waits for its preview.
+  await page.goto(`${base}/schedule`)
+  await page.getByRole('button', { name: /Import Schedule/ }).click({ timeout: 45_000 })
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Excel (.xlsx)').check()
+  await dialog.locator('#import-schedule-file').setInputFiles({ name: 'programme.xlsx', mimeType: XLSX_MIME, buffer: programme })
+  await expect(dialog.getByTestId('schedule-import-confirm')).toBeDisabled()
+  const schedulePreviewed = page.waitForResponse((r) => r.url().includes('/import/xlsx') && r.request().method() === 'POST')
+  await dialog.getByTestId('schedule-import-preview-run').click()
+  const scheduleAnswer = await schedulePreviewed
+  expect(countProjectRows(org!.orgId, projectId), 'the schedule preview wrote nothing').toEqual(before)
+  expect(scheduleAnswer.status()).toBe(200)
+
+  await expect(dialog.getByTestId('schedule-import-preview')).toBeVisible()
+  for (const [key, value] of [
+    ['activities', scheduleReport.activityCount],
+    ['dependencies', scheduleReport.dependencyCount],
+    ['wbs', scheduleReport.wbsNodeCount],
+    ['critical', scheduleReport.criticalActivities],
+    ['issues', scheduleReport.issueCount],
+  ] as const) {
+    await expect(dialog.getByTestId(`schedule-import-preview-${key}`)).toHaveAttribute('data-value', String(value))
+  }
+  await expect(dialog.getByText(/Predecessor "A999" of "A300"/)).toBeVisible()
+  await expect(dialog.getByTestId('schedule-import-confirm')).toBeEnabled()
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+
+  expect(writes, 'no upload or import was sent without dryRun').toEqual([])
+  expect(countProjectRows(org!.orgId, projectId), 'still nothing written').toEqual(before)
 })

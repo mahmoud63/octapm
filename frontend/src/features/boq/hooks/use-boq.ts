@@ -118,6 +118,74 @@ export function useBoqUpload(projectId: string) {
   })
 }
 
+/** One row as the dry-run comparison describes it (the file's or the bill's). */
+export interface BoqPreviewRow {
+  id: string | null
+  code: string
+  description: string
+  quantity: number | null
+  unit: string | null
+  rate: number | null
+  amount: number | null
+}
+
+/**
+ * What an upload would do, as the server's dry run reports it: the same
+ * comparison the real upload runs, with nothing stored. Counts are complete;
+ * the row lists are a sample of at most `rowLimit` each.
+ */
+export interface BoqUploadPreview {
+  dryRun: true
+  mode: 'imported' | 'comparison_only'
+  baselineLocked: boolean
+  label: string | null
+  rowCount: number
+  totalAmount: number
+  comparison: {
+    summary: {
+      added: number
+      updated: number
+      unchanged: number
+      removed: number
+      blocked: number
+    }
+    added: BoqPreviewRow[]
+    updated: Array<{ code: string; existingId: string; before: BoqPreviewRow; after: BoqPreviewRow }>
+    removed: BoqPreviewRow[]
+    unchanged: Array<{ code: string; existingId: string }>
+    blocked: Array<{ code: string; existingId: string; reason: string; message: string }>
+    rowLimit: number
+  }
+  unitWarnings?: Array<{ code: string; message: string }>
+  mappingRules?: {
+    required: number
+    optional: number
+    notApplicable: number
+    unspecified: number
+  }
+}
+
+/**
+ * The upload's dry run (POST …/boq/upload?dryRun=true). The server parses and
+ * compares the workbook and stores nothing — no document, revision, row or
+ * job — so this invalidates no query: there is nothing new to read.
+ */
+export function useBoqUploadPreview(projectId: string) {
+  return useMutation({
+    mutationFn: ({ file, label }: { file: File; label?: string }) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      if (label?.trim()) fd.append('label', label.trim())
+      return apiClient
+        .post(`/projects/${projectId}/boq/upload`, fd, {
+          params: { dryRun: true },
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+        .then((r) => r.data.data as BoqUploadPreview)
+    },
+  })
+}
+
 export interface BoqJob {
   id: string
   jobId: string
