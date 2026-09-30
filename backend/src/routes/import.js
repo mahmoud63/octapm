@@ -9,7 +9,7 @@ const { query } = require('express-validator');
 const { HttpError } = require('../utils/http-error');
 const { authenticate } = require('../middleware/auth');
 const { uploadLimiter } = require('../middleware/rate-limit');
-const { requirePermission } = require('../middleware/rbac');
+const { getEffectiveRole, hasPermission, requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const importService = require('../services/import.service');
 const fileStorageService = require('../services/file-storage.service');
@@ -256,19 +256,47 @@ router.post(
   }),
 );
 
+// POST /projects/:projectId/import/progress — the file's percentages become
+// progress submissions in the importer's own authority (PC-6): submitting
+// them takes progress `submission.submit`; approving them takes progress
+// `submission.approve` on this project, decided by the same permission engine
+// the approve route asks (template, project role, party profile, API-key
+// scope), never by a role list of this route's own. With ?dryRun=true the
+// file is parsed and the per-row outcome for this person reported, and
+// nothing is stored: no document, no submission.
 router.post(
   '/progress',
   requirePermission('progress', 'submit', {
     transition: 'submission.submit',
   }),
   uploadLimiter,
+  [query('dryRun').optional().isBoolean().toBoolean(), validate],
   upload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
 
     const format = String(req.body?.format || '');
+    const identity = {
+      projectId: req.params.projectId,
+      orgId: req.user.orgId,
+      format,
+      userId: req.user.id,
+      userRole: getEffectiveRole(req),
+      canApprove: hasPermission(req, 'progress', 'approve', {
+        transition: 'submission.approve',
+      }),
+    };
     let document = null;
     try {
+      if (req.query.dryRun === true) {
+        const report = await importService.importProgress({
+          ...identity,
+          content: await readUploadText(req.file),
+          dryRun: true,
+        });
+        return sendSuccess(res, report);
+      }
+
       document = await fileStorageService.uploadProgressImportFile({
         projectId: req.params.projectId,
         orgId: req.user.orgId,
@@ -276,9 +304,7 @@ router.post(
         file: req.file,
       });
       const result = await importService.importProgress({
-        projectId: req.params.projectId,
-        orgId: req.user.orgId,
-        format,
+        ...identity,
         content: await readUploadText(req.file),
       });
       await fileStorageService.markDocumentLinked({

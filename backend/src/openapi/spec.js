@@ -2639,6 +2639,62 @@ const components = {
       message: { type: "string" },
       document: ref("ProjectDocumentUpload"),
     }),
+    ProgressImportRow: objectSchema(
+      {
+        activityId: uuid,
+        p6ActivityId: { type: "string" },
+        name: { type: "string" },
+        pctComplete: { type: "number", minimum: 0, maximum: 100, description: "The percentage the file carries." },
+        officialPctComplete: { type: "number", nullable: true, description: "The activity's latest approved percentage before this import, null when none." },
+        activityMethod: { type: "string", enum: ["percent", "quantity", "weighted_milestone", "inspection", "manual"] },
+        methodMismatch: { type: "boolean", description: "True when the activity is measured by a method other than percent; the submission still names percent, as the writer records the method a submission names." },
+        status: {
+          type: "string",
+          enum: ["submit", "approve", "submitted", "draft", "approved", "pending", "unchanged", "already_pending", "refused"],
+          description:
+            "Dry run: submit or approve (what this person's authority would do), unchanged, already_pending. Import: submitted (awaiting approval), draft (kept as a draft because the activity requires evidence), approved (official, through the approval writer), pending (the importer may approve but a gate refused — see reason), unchanged (already the official figure), already_pending (an import submission at this figure is already open), refused (the writer refused the submission — see reason).",
+        },
+        submissionId: nullableUuid,
+        progressId: { ...nullableUuid, description: "The ActivityProgress row an approval created." },
+        reason: {
+          nullable: true,
+          allOf: [objectSchema({ code: { type: "string" }, message: { type: "string" } }, ["code", "message"])],
+          description: "The gate's or writer's refusal, or why nothing was written.",
+        },
+      },
+      ["activityId", "p6ActivityId", "pctComplete", "activityMethod", "status"],
+    ),
+    ProgressImportAuthority: objectSchema(
+      {
+        canApprove: { type: "boolean", description: "Whether this person holds progress submission.approve on this project (the permission engine's answer)." },
+        basis: { type: "string" },
+        outcome: { type: "string", enum: ["submitted", "approved"], description: "What this person's import produces: pending submissions, or approvals through the approval writer." },
+      },
+      ["canApprove", "outcome"],
+    ),
+    ProgressImportResponse: objectSchema(
+      {
+        dryRun: { type: "boolean" },
+        authority: ref("ProgressImportAuthority"),
+        matched: { type: "integer", minimum: 0 },
+        notMatched: { type: "integer", minimum: 0 },
+        submitted: { type: "integer", minimum: 0, description: "Rows now awaiting approval — not official." },
+        draft: { type: "integer", minimum: 0, description: "Rows kept as drafts because the activity requires evidence." },
+        approved: { type: "integer", minimum: 0, description: "Rows made official through the approval writer." },
+        pending: { type: "integer", minimum: 0, description: "Rows an approver imported that a gate (evidence, ITP hold point) refused; they wait with the reason." },
+        unchanged: { type: "integer", minimum: 0 },
+        alreadyPending: { type: "integer", minimum: 0 },
+        refused: { type: "integer", minimum: 0 },
+        wouldSubmit: { type: "integer", minimum: 0, description: "Dry run only." },
+        wouldApprove: { type: "integer", minimum: 0, description: "Dry run only." },
+        rows: arrayOf(ref("ProgressImportRow")),
+        rowLimit: { type: "integer" },
+        updated: { type: "integer", minimum: 0, description: "Legacy: the number of official figures this call changed (= approved; 0 for a dry run or a submit-only import)." },
+        message: { type: "string" },
+        document: ref("ProjectDocumentUpload"),
+      },
+      ["dryRun", "authority", "matched", "notMatched", "submitted", "approved", "pending", "rows", "message"],
+    ),
     ActivityDependencyInput: objectSchema({
       predecessorId: uuid,
       predecessorActivityId: uuid,
@@ -8784,17 +8840,26 @@ add(
   "post",
   operation({
     tag: "Imports",
-    summary: "Import activity progress from an uploaded file.",
+    summary: "Import activity progress from an uploaded file, in the importer's own authority.",
+    description:
+      "Percentages matched by p6ActivityId become progress submissions (source import, method percent), one per activity; nothing is written to ActivityProgress directly. Two outcomes, decided by the same permission engine as the approve route: a person with progress submission.submit but not submission.approve on this project gets every matched row as a submitted submission (authority.outcome = submitted) — nothing is official until an approver approves it; a person who holds submission.approve gets each row submitted and then approved through the progress approval writer and its gates (authority.outcome = approved) — a row the evidence gate or an open ITP hold point refuses stays pending with the gate's reason and never fails the file. An existing approved figure is never rewritten; a row already at the official figure is unchanged, one already waiting in an open import submission is already_pending. With dryRun=true the per-row outcome for this person is reported and nothing is stored: no document, no submission.",
     operationId: "importProgress",
-    parameters: projectParams,
+    parameters: [
+      ...projectParams,
+      queryParam(
+        "dryRun",
+        "Report what this person's import would do (submit or approve) per row; nothing is written.",
+        { type: "boolean", default: false },
+      ),
+    ],
     permissions: modulePermission("progress", "submit", "submission.submit"),
     requestBody: fileUploadBody({
       description: "Progress import upload.",
       accepted: ".xer or .xml file, maximum 50 MB.",
-      extraProperties: { format: { type: "string" } },
+      extraProperties: { format: { type: "string", enum: ["xer", "p6xml"] } },
       required: ["file", "format"],
     }),
-    responseSchema: ref("ImportResponse"),
+    responseSchema: ref("ProgressImportResponse"),
   }),
 );
 

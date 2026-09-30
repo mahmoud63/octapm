@@ -22,6 +22,7 @@ const { applyCpmToProject, dateToWorkingDay } = require('./cpm.service');
 // the counts are complete, the rows are a sample to review.
 const DRY_RUN_ROW_LIMIT = 50;
 const { runPostImportSeeding } = require('./post-import.service');
+const progressService = require('./progress.service');
 
 const REVISION_STATUS = Object.freeze({
   DRAFT: 'draft',
@@ -563,75 +564,263 @@ async function importScheduleXlsx({
   return { ...result, issues: parsed.issues, issueCount: parsed.issues.length };
 }
 
-async function importProgress({ projectId, orgId, format, content }) {
-  await ensureProject(orgId, projectId);
+// How many per-row outcomes a progress import answers with; the counts are
+// complete, the rows are what a reviewer reads first.
+const PROGRESS_IMPORT_ROW_LIMIT = 500;
 
+/** The percentages a progress file carries, keyed by P6 activity id. */
+async function parseProgressFile({ format, content }) {
   const normalized = String(format || '').toLowerCase();
-  let progressMap = new Map();
-
+  let activities;
   if (normalized === 'xer') {
-    const tables = parseXer(content);
-    const parsed = extractXerActivities(tables);
-    progressMap = new Map(
-      parsed.activities
-        .filter((a) => a.p6ActivityId)
-        .map((a) => [String(a.p6ActivityId), normalizePct(a.physComplete)]),
-    );
+    activities = extractXerActivities(parseXer(content)).activities;
   } else if (normalized === 'p6xml') {
-    const parsed = await parseP6Xml(content);
-    progressMap = new Map(
-      parsed.activities
-        .filter((a) => a.p6ActivityId)
-        .map((a) => [String(a.p6ActivityId), normalizePct(a.physComplete)]),
-    );
+    activities = (await parseP6Xml(content)).activities;
   } else {
     throw new HttpError(400, 'INVALID_FORMAT', 'format must be xer or p6xml');
   }
+  return new Map(
+    activities
+      .filter((a) => a.p6ActivityId)
+      .map((a) => [String(a.p6ActivityId), normalizePct(a.physComplete)]),
+  );
+}
+
+// A structured refusal (an HttpError, or anything shaped like one) is a
+// row's outcome; anything else is a fault and fails the request.
+const refusalOf = (error) =>
+  error && error.code && error.status
+    ? { code: error.code, message: error.message }
+    : null;
+
+const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+
+/**
+ * POST /projects/:id/import/progress — the percentages in a P6 file become
+ * progress the way progress is made everywhere else in the product: a
+ * ProgressSubmission per activity, official only when the approval writer
+ * (progress.service approveProgressSubmissionWithClient: evidence gate, ITP
+ * hold points, audit, ActivityProgress row) says so.
+ *
+ * Authority is the importer's own (PC-6, owner decision). `canApprove` is the
+ * permission engine's answer to progress `submission.approve` on this
+ * project for this person — the same answer the approve route gets. Without
+ * it every matched row is a 'submitted' submission and nothing is official.
+ * With it each row is submitted and then approved through the writer; a row
+ * a gate refuses stays pending with the gate's reason and never fails the
+ * file. Nothing here writes ActivityProgress and no approved row is ever
+ * rewritten — a later approval is a new row, exactly as the writer does.
+ *
+ * The file's figure is a percentage, so the submission names the `percent`
+ * method as a manual percentage entry would; on an activity measured another
+ * way the writer records the method the submission names (it does not
+ * refuse), and the row is flagged `methodMismatch` for the reviewer.
+ *
+ * Re-import of the same file: a row whose figure is already the activity's
+ * official percentage is 'unchanged' (nothing written); a row whose figure
+ * already waits in an open import submission is 'already_pending' (no second
+ * submission). Any other row is written again — the writer keeps no
+ * idempotency key of its own.
+ *
+ * `dryRun` answers the same per-row plan for this person without writing.
+ */
+async function importProgress({
+  projectId,
+  orgId,
+  format,
+  content,
+  userId = null,
+  userRole = null,
+  canApprove = false,
+  dryRun = false,
+}) {
+  await ensureProject(orgId, projectId);
+  const progressMap = await parseProgressFile({ format, content });
 
   const dbActivities = await prisma.activity.findMany({
-    where: {
-      projectId,
-      isActive: true,
-      p6ActivityId: { not: null },
-    },
+    where: { projectId, isActive: true, p6ActivityId: { not: null } },
     select: {
       id: true,
+      name: true,
       p6ActivityId: true,
-      budget: true,
+      progressMethod: { select: { method: true, evidenceRequired: true } },
+      progress: {
+        where: { status: 'approved' },
+        orderBy: { updatedAt: 'desc' },
+        take: 1,
+        select: { id: true, pctComplete: true, source: true },
+      },
+      progressSubmissions: {
+        where: { status: { in: ['draft', 'submitted'] }, source: 'import' },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, pctComplete: true, status: true },
+      },
     },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
   });
-  const updates = [];
-  const matched = new Set();
 
+  const matchedKeys = new Set();
+  const plan = [];
   for (const activity of dbActivities) {
     const key = String(activity.p6ActivityId || '');
     if (!progressMap.has(key)) continue;
-
-    const pct = normalizePct(progressMap.get(key));
-
-    updates.push({
+    matchedKeys.add(key);
+    const pctComplete = normalizePct(progressMap.get(key));
+    const activityMethod = progressService.normalizeMethod(
+      activity.progressMethod?.method || 'percent',
+    );
+    const official = activity.progress[0] || null;
+    const waiting = activity.progressSubmissions.find(
+      (row) => normalizePct(row.pctComplete) === pctComplete,
+    );
+    const row = {
       activityId: activity.id,
-      pctComplete: pct,
-      actualCost: null,
-      progressMethod: 'percent_complete',
-      source: 'import',
-      status: 'approved',
-      approvedBy: 'import',
-      approvedAt: new Date(),
-      notes: 'Imported from progress file',
-      updatedBy: 'import',
-    });
-    matched.add(key);
+      p6ActivityId: key,
+      name: activity.name,
+      pctComplete,
+      officialPctComplete: official ? normalizePct(official.pctComplete) : null,
+      activityMethod,
+      methodMismatch: activityMethod !== 'percent',
+      submissionId: null,
+      progressId: null,
+      reason: null,
+    };
+    if (official && normalizePct(official.pctComplete) === pctComplete) {
+      row.status = 'unchanged';
+      row.reason = {
+        code: 'PROGRESS_ALREADY_OFFICIAL',
+        message: `Already the official figure (${pctComplete}%); nothing written`,
+      };
+    } else if (waiting) {
+      row.status = 'already_pending';
+      row.submissionId = waiting.id;
+      row.reason = {
+        code: 'PROGRESS_ALREADY_PENDING',
+        message: `An import submission at ${pctComplete}% is already awaiting approval; no second submission`,
+      };
+    } else {
+      row.status = canApprove ? 'approve' : 'submit';
+    }
+    plan.push(row);
   }
 
-  if (updates.length > 0) {
-    await prisma.activityProgress.createMany({ data: updates });
+  const notMatched = Math.max(0, progressMap.size - matchedKeys.size);
+  const authority = {
+    canApprove: Boolean(canApprove),
+    basis: 'progress submission.approve on this project',
+    outcome: canApprove ? 'approved' : 'submitted',
+  };
+  const summarize = (rows) => {
+    const count = (status) => rows.filter((row) => row.status === status).length;
+    return {
+      matched: rows.length,
+      notMatched,
+      submitted: count('submitted'),
+      draft: count('draft'),
+      approved: count('approved'),
+      pending: count('pending'),
+      unchanged: count('unchanged'),
+      alreadyPending: count('already_pending'),
+      refused: count('refused'),
+    };
+  };
+
+  if (dryRun) {
+    const toWrite = plan.filter((row) => row.status === 'approve' || row.status === 'submit');
+    const counts = summarize(plan);
+    return {
+      dryRun: true,
+      authority,
+      ...counts,
+      wouldSubmit: canApprove ? 0 : toWrite.length,
+      wouldApprove: canApprove ? toWrite.length : 0,
+      rows: plan.slice(0, PROGRESS_IMPORT_ROW_LIMIT),
+      rowLimit: PROGRESS_IMPORT_ROW_LIMIT,
+      // The legacy field: how many official figures this call would change.
+      updated: 0,
+      message: canApprove
+        ? `Dry run: nothing was written. For you ${plural(toWrite.length, 'row')} would be submitted and approved through the progress approval gates (a row a gate refuses stays pending); ${counts.unchanged} already official, ${counts.alreadyPending} already pending, ${notMatched} not matched.`
+        : `Dry run: nothing was written. For you ${plural(toWrite.length, 'row')} would be submitted for approval — not official until an approver approves them; ${counts.unchanged} already official, ${counts.alreadyPending} already pending, ${notMatched} not matched.`,
+    };
   }
+
+  const notes = `Imported from progress file (${String(format).toLowerCase()})`;
+  for (const row of plan) {
+    if (row.status !== 'approve' && row.status !== 'submit') continue;
+    const submit = (status) =>
+      progressService.createProgressSubmission({
+        orgId,
+        projectId,
+        activityId: row.activityId,
+        userId,
+        userRole,
+        payload: { pctComplete: row.pctComplete, method: 'percent', source: 'import', status, notes },
+      });
+    let submission;
+    try {
+      submission = await submit('submitted');
+    } catch (error) {
+      // The writer's own allowance: a row without the evidence the activity
+      // demands may still be kept as a draft, for someone to attach it to.
+      if (error?.code !== 'PROGRESS_EVIDENCE_REQUIRED') {
+        const reason = refusalOf(error);
+        if (!reason) throw error;
+        row.status = 'refused';
+        row.reason = reason;
+        continue;
+      }
+      try {
+        submission = await submit('draft');
+      } catch (draftError) {
+        const reason = refusalOf(draftError);
+        if (!reason) throw draftError;
+        row.status = 'refused';
+        row.reason = reason;
+        continue;
+      }
+      row.reason = refusalOf(error);
+    }
+    row.submissionId = submission.id;
+    row.status = submission.status;
+    if (!canApprove) continue;
+
+    try {
+      const approved = await progressService.approveProgressSubmission({
+        orgId,
+        projectId,
+        activityId: row.activityId,
+        submissionId: submission.id,
+        userId,
+      });
+      row.status = 'approved';
+      row.reason = null;
+      const progress = await prisma.activityProgress.findUnique({
+        where: { submissionId: approved.id },
+        select: { id: true },
+      });
+      row.progressId = progress?.id || null;
+    } catch (error) {
+      const reason = refusalOf(error);
+      if (!reason) throw error;
+      row.status = 'pending';
+      row.reason = reason;
+    }
+  }
+
+  const counts = summarize(plan);
+  const message = canApprove
+    ? `${plural(counts.approved, 'row')} approved through the progress approval gates, ${counts.pending} left pending (a gate refused), ${counts.refused} refused, ${counts.unchanged} already official, ${counts.alreadyPending} already pending, ${notMatched} not matched.`
+    : `${plural(counts.submitted, 'row')} submitted for approval — not official until approved; ${counts.draft} kept as draft (evidence required), ${counts.refused} refused, ${counts.unchanged} already official, ${counts.alreadyPending} already pending, ${notMatched} not matched.`;
 
   return {
-    updated: updates.length,
-    notMatched: Math.max(0, progressMap.size - matched.size),
-    message: `Updated progress for ${updates.length} activities`,
+    dryRun: false,
+    authority,
+    ...counts,
+    rows: plan.slice(0, PROGRESS_IMPORT_ROW_LIMIT),
+    rowLimit: PROGRESS_IMPORT_ROW_LIMIT,
+    // The legacy field: how many official figures this call changed.
+    updated: counts.approved,
+    message,
   };
 }
 
