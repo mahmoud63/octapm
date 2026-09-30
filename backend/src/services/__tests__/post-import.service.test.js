@@ -11,6 +11,8 @@ const mockPrisma = {
   $executeRaw: jest.fn(async (strings, ...values) => { calls.push(`lock:${strings.join("?")}|${values.join(",")}`); return 0; }),
   activity: { findMany: jest.fn(async () => [{ id: "act-1", name: "Excavate", earlyStart: 0 }]) },
   costRecord: { findMany: jest.fn(async () => { calls.push("read"); return []; }), createMany: jest.fn(async ({ data }) => { calls.push(`create:${data.length}`); return { count: data.length }; }) },
+  // The approved allocations the seed's default forecast is worked from (R5-2).
+  activityBoqAllocation: { findMany: jest.fn(async () => []) },
   longLeadItem: { findMany: jest.fn(async () => [{ id: "ll-1" }]), createMany: jest.fn(async () => ({ count: 0 })) },
 };
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
@@ -23,6 +25,21 @@ describe("Phase 21D — integrity (release challenge, seventh pass)", () => {
     expect(lockAt).toBeGreaterThanOrEqual(0);
     expect(calls.lastIndexOf("read")).toBeGreaterThan(lockAt);
     expect(calls.findIndex((c) => c.startsWith("create:"))).toBeGreaterThan(calls.lastIndexOf("read"));
+  });
+
+  // Owner decision R5-2: the seed supplies no forecast, so each record gets
+  // the initial default — the larger of the activity's approved allocation and
+  // its actual (0) — and is marked 'default', never left unmarked.
+  it("R5-2: every seeded record is marked 'default' and carries max(0, approved allocation, actual 0)", async () => {
+    mockPrisma.activity.findMany.mockResolvedValueOnce([{ id: "act-1" }, { id: "act-2" }]);
+    mockPrisma.activityBoqAllocation.findMany.mockResolvedValueOnce([{ activityId: "act-2", quantity: 1, amount: 2500, weight: 0 }]);
+    mockPrisma.costRecord.createMany.mockClear();
+    await service.runPostImportSeeding("p1");
+    const [{ data }] = mockPrisma.costRecord.createMany.mock.calls[0];
+    expect(data.map((row) => ({ activityId: row.activityId, budget: row.budget, actual: row.actual, forecast: row.forecast, forecastSource: row.forecastSource }))).toEqual([
+      { activityId: "act-1", budget: 0, actual: 0, forecast: 0, forecastSource: "default" },
+      { activityId: "act-2", budget: 0, actual: 0, forecast: 2500, forecastSource: "default" },
+    ]);
   });
 
   it("CX21-474: the schema forbids a second projection row for one activity", () => {

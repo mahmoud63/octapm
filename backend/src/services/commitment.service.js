@@ -9,7 +9,7 @@ const notificationService = require("./notification.service");
 const { isPartyScopedAccess } = require("./company-party.service");
 const fileStorageService = require("./file-storage.service");
 const { nextNumber: nextCounterNumber } = require("../utils/reference-number");
-const { forecastOnCreate } = require("../utils/cost-forecast");
+const { defaultForecastOnCreate } = require("./cost-record-default.service");
 
 /**
  * Commitments (OCTA-FIN-COMMIT-020): subcontracts and purchase-order
@@ -478,9 +478,10 @@ const recomputeCommitted = async ({ tx = prisma, orgId, projectId }) => {
         if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${activityId}`}))`;
         const again = tx.costRecord.findFirst ? await tx.costRecord.findFirst({ where: { projectId, activityId }, select: { id: true } }) : null;
         if (again) await tx.costRecord.update({ where: { id: again.id }, data: { committed: round2(amount) } });
-        // Created with no forecast supplied: the initial default max(0, budget
-        // 0, actual 0), marked 'default' (R5-2).
-        else await tx.costRecord.create({ data: { projectId, activityId, committed: round2(amount), ...forecastOnCreate({ budget: 0, actual: 0 }) } });
+        // Created with no forecast supplied: the initial default, marked
+        // 'default' (R5-2) — the activity's approved allocation (actual 0), as
+        // the cost API's creator reads it, not a budget of 0.
+        else await tx.costRecord.create({ data: { projectId, activityId, committed: round2(amount), ...(await defaultForecastOnCreate({ tx, projectId, activityId, actual: 0 })) } });
       }
     }
     for (const row of records) {

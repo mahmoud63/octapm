@@ -180,6 +180,8 @@ const mockPrisma = {
       return clone(row);
     }),
   },
+  // The approved allocations a first posting's default forecast is worked from (R5-2): none here.
+  activityBoqAllocation: { findMany: jest.fn(async () => []) },
 };
 
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));

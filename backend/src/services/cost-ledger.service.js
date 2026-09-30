@@ -2,7 +2,7 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { addMoney, toMoneyNumber } = require("../utils/money");
 const { localDateOf, resolveReportingTimeZone } = require("../utils/reporting-cutoff");
-const { forecastOnCreate } = require("../utils/cost-forecast");
+const { defaultForecastOnCreate } = require("./cost-record-default.service");
 
 /**
  * The cost ledger (OCTA-FIN-LEDGER-059).
@@ -187,15 +187,18 @@ const applyToProjections = async ({ tx, entry }) => {
       });
     } else {
       // The posting creates the record, with no forecast supplied: it gets
-      // the initial default max(0, budget 0, this actual), marked 'default'
-      // (R5-2) — not the column's 0 below the cost it was created to carry.
+      // the initial default, marked 'default' (R5-2) — the larger of the
+      // activity's approved allocation and this actual, the same input the
+      // cost API's creator uses. Worked from a budget of 0 it was just this
+      // posting's amount: "Default 500" beside a Budget of 10,000, which the
+      // projected final cost then counted as the activity's forecast.
       await tx.costRecord.create({
         data: {
           projectId: entry.projectId,
           activityId: entry.activityId,
           actual: amount,
           actualThroughDate: incurredOn,
-          ...forecastOnCreate({ budget: 0, actual: amount }),
+          ...(await defaultForecastOnCreate({ tx, projectId: entry.projectId, activityId: entry.activityId, actual: amount })),
         },
       });
     }

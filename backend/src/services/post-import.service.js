@@ -1,5 +1,5 @@
 const { prisma } = require('../config/db');
-const { forecastOnCreate } = require('../utils/cost-forecast');
+const { defaultForecastsOnCreate } = require('./cost-record-default.service');
 
 const PROCUREMENT_KEYWORDS = [
   'procure',
@@ -50,6 +50,17 @@ async function seedCostRecords(projectId) {
 
   if (!toCreate.length) return 0;
 
+  // No forecast supplied: the initial default, marked 'default' (owner
+  // decision R5-2) — the larger of the activity's approved allocation and its
+  // actual (0 here). An activity just imported has no allocation yet, so the
+  // default is 0 until one is entered or a budget is written on the record.
+  const defaults = await defaultForecastsOnCreate({
+    tx,
+    projectId,
+    activityIds: toCreate.map((activity) => activity.id),
+    actual: 0,
+  });
+
   await tx.costRecord.createMany({
     data: toCreate.map((activity) => ({
       projectId,
@@ -64,9 +75,7 @@ async function seedCostRecords(projectId) {
       budget: 0,
       committed: 0,
       actual: 0,
-      // No forecast supplied: the initial default max(0, budget 0, actual 0)
-      // = 0, marked 'default' (owner decision R5-2).
-      ...forecastOnCreate({ budget: 0, actual: 0 }),
+      ...defaults.get(activity.id),
     })),
     skipDuplicates: true,
   });

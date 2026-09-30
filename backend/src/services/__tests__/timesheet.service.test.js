@@ -120,6 +120,8 @@ const mockPrisma = {
   timesheet: table("timesheets", { hydrate: hydrateTimesheet }),
   timeEntry: table("entries", { hydrate: hydrateEntry }),
   costRecord: table("costRecords"),
+  // The approved allocations a first posting's default forecast is worked from (R5-2): none here.
+  activityBoqAllocation: { findMany: jest.fn(async () => []) },
   budgetLine: table("budgetLines"),
   // Approving now posts labour through the cost ledger (OCTA-FIN-LEDGER-059).
   costLedgerEntry: mockLedger.tables.costLedgerEntry,

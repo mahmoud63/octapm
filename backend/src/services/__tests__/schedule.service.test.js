@@ -683,13 +683,20 @@ describe('schedule revision lifecycle service', () => {
         }),
       }),
     );
+    // Owner decision R5-2: activation supplies no forecast, so the record gets
+    // the initial default — its staged budget (actual 0) — and is marked
+    // 'default'. Unmarked, it would read as entered: never re-derived, and
+    // sent to a member who may not read the BOQ.
     expect(mockPrisma.costRecord.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.arrayContaining([
-          expect.objectContaining({ activityId: 'activity-3' }),
+          expect.objectContaining({ activityId: 'activity-3', budget: 80, actual: 0, forecast: 80, forecastSource: 'default' }),
         ]),
       }),
     );
+    for (const row of mockPrisma.costRecord.createMany.mock.calls.flatMap(([call]) => call.data)) {
+      expect([row.activityId, row.forecastSource, row.forecast]).toEqual([row.activityId, 'default', Math.max(0, row.budget, row.actual)]);
+    }
 
     expect(mockPrisma.activityProgress.deleteMany).not.toHaveBeenCalled();
     expect(mockPrisma.costRecord.deleteMany).not.toHaveBeenCalled();

@@ -226,6 +226,27 @@ describe("schedule delay and cost overrun prediction", () => {
     }
   });
 
+  // Owner decision R5-2: a cost record's DEFAULT forecast is the placeholder
+  // the server wrote because nobody forecast the activity. It is never
+  // reported as "the cost forecast"; an entered one, and one whose source was
+  // not recorded, still are.
+  it("R5-2: a default cost-record forecast is not a cost forecast — no 'forecast' basis, no 'Cost forecast … above the budget'; an entered or not-recorded one is", () => {
+    const activity = { id: "a1", name: "Blockwork", isActive: true, startDate: day("2026-08-01"), endDate: day("2026-10-01"), duration: 61, totalFloat: 10, budget: 10000, pctComplete: 0, status: "todo" };
+    const cost = (forecastSource) =>
+      service.forecastActivity(activity, { history: new Map(), impacts: new Map(), rfis: new Map(), submittals: new Map(), longLead: new Map(), costs: new Map([["a1", { activityId: "a1", budget: 0, committed: 0, actual: 12000, forecast: 12000, forecastSource }]]) }, ASOF).cost;
+    // The ledger's first posting of 12,000 on an activity allocated 10,000 made this row.
+    expect(cost("default")).toMatchObject({ budget: 10000, actual: 12000, projected: 12000, basis: "budget" });
+    expect(cost("default").reasons.join(" | ")).not.toContain("Cost forecast");
+    for (const source of ["entered", null, undefined]) {
+      expect([source, cost(source).basis]).toEqual([source, "forecast"]);
+      expect(cost(source).reasons).toContain("Cost forecast 12000 above the budget");
+      expect(cost(source).projected).toBe(12000);
+    }
+    // A default above everything else adds nothing to the projection either.
+    const stale = service.forecastActivity(activity, { history: new Map(), impacts: new Map(), rfis: new Map(), submittals: new Map(), longLead: new Map(), costs: new Map([["a1", { activityId: "a1", budget: 0, committed: 0, actual: 0, forecast: 55555, forecastSource: "default" }]]) }, ASOF).cost;
+    expect(stale).toMatchObject({ projected: 10000, basis: "budget", overrun: 0 });
+  });
+
   it("keeps an RFI impact whose order is not approved or does not touch that activity", () => {
     const convertedTo = service.conversionMap({ rfiOrders: [{ id: "rfi-1", changeOrderId: "co-1" }], changeEventOrders: [{ sourceRecordType: "submittal", sourceRecordId: "sub-1", changeOrderId: "co-2" }] });
     const { rows, superseded } = service.recordedImpacts({

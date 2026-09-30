@@ -2,7 +2,7 @@ const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const auditService = require('./audit.service');
 const { addMoney, multiplyMoney, toMoneyNumber } = require('../utils/money');
-const { forecastOnCreate } = require('../utils/cost-forecast');
+const { defaultForecastOnCreate } = require('./cost-record-default.service');
 
 const RATE_TYPES = ['hourly', 'daily'];
 const DAY_RATE_HOURS = 8;
@@ -317,10 +317,11 @@ const postEquipmentCostImpact = async ({
   };
 
   // Created here only if the ledger made none: no forecast supplied, so the
-  // initial default max(0, budget, actual 0), marked 'default' (R5-2).
+  // initial default, marked 'default' (R5-2) — from the activity's approved
+  // allocation, as every creator reads it.
   const record = existing
     ? await tx.costRecord.update({ where: { id: existing.id }, data })
-    : await tx.costRecord.create({ data: { ...data, actual: 0, ...forecastOnCreate({ budget: data.budget, actual: 0 }) } });
+    : await tx.costRecord.create({ data: { ...data, actual: 0, ...(await defaultForecastOnCreate({ tx, projectId, activityId: report.activityId, actual: 0 })) } });
 
   await auditService.recordEvent({
     tx,

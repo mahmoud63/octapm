@@ -15,7 +15,7 @@
  *   // and in beforeEach: ledger.reset();
  */
 const createCostLedgerMock = ({ idPrefix = "cle" } = {}) => {
-  const store = { entries: [], budgetLines: [], costRecords: [] };
+  const store = { entries: [], budgetLines: [], costRecords: [], allocations: [] };
   let seq = 0;
   const nextId = (p) => `${p}-${(seq += 1)}`;
   const clone = (row) => (row ? JSON.parse(JSON.stringify(row)) : row);
@@ -92,6 +92,11 @@ const createCostLedgerMock = ({ idPrefix = "cle" } = {}) => {
         return clone(row);
       }),
     },
+    // The approved allocations a record's initial default forecast is worked
+    // from (R5-2, cost-record-default.service). None unless a test seeds one.
+    activityBoqAllocation: {
+      findMany: jest.fn(async ({ where = {} } = {}) => store.allocations.filter((row) => matches(row, { projectId: where.projectId, activityId: where.activityId })).map(clone)),
+    },
   };
 
   return {
@@ -101,6 +106,7 @@ const createCostLedgerMock = ({ idPrefix = "cle" } = {}) => {
       store.entries.length = 0;
       store.budgetLines.length = 0;
       store.costRecords.length = 0;
+      store.allocations.length = 0;
       seq = 0;
     },
     seedBudgetLine(row) {
@@ -112,6 +118,12 @@ const createCostLedgerMock = ({ idPrefix = "cle" } = {}) => {
       const record = { id: row.id || nextId("cr"), actual: 0, ...row };
       store.costRecords.push(record);
       return record;
+    },
+    /** An approved allocation of `amount` on an activity. */
+    seedAllocation(row) {
+      const allocation = { id: row.id || nextId("alloc"), quantity: 1, weight: 0, status: "approved", isActive: true, ...row };
+      store.allocations.push(allocation);
+      return allocation;
     },
     /** Net ledger total, optionally filtered — what a reconciliation would derive. */
     total(filter = {}) {
