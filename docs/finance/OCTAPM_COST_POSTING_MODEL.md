@@ -273,8 +273,17 @@ never the database's 500.
 
 Proof: `backend/src/services/__live__/r5-2-default-forecast.live.test.js`
 (every rule, live, mutation-proven), `backend/src/utils/__tests__/cost-forecast.test.js`
-(the pure rules) and `backend/src/services/__live__/pc-7a-cost-record-forecast.live.test.js`
-(the 3d defect).
+(the pure rules), `frontend/e2e/64-cost-default-forecast.spec.ts` (the marker,
+the basis and the withheld dash on screen) and
+`backend/src/services/__live__/pc-7a-cost-record-forecast.live.test.js` (the 3d
+defect).
+
+Known limits, reported to the owner with R5-2: the summary's projected final
+cost still treats a forecast *entered as 0* as unset (formula unchanged); a
+row whose source is NULL may in fact hold a pre-R5-2 default built from its
+allocation, and it stays visible to a cost reader without BOQ access, as it
+was before the column existed; an audit event written before R5-2 carries no
+source, so its forecast is not stripped either.
 
 ### 1.7 Cash Flow
 
