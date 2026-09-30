@@ -1,5 +1,6 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
+const { isPrismaDecimal } = require("../utils/money");
 const domainEvents = require("../events/bus");
 
 const ENTITY_TYPES = Object.freeze({
@@ -108,6 +109,77 @@ const compactString = (value) =>
     ? `${value.slice(0, MAX_STRING_LENGTH)}...`
     : value;
 
+const isPlainObject = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+// A Prisma Decimal is an object. Walked field by field it was stored as its
+// internals — { d: [...], e, s, constructor: "function Decimal…" } — instead
+// of the amount, on every caller that hands a raw row's Decimal to a summary
+// (change orders did, for `value`). It is stored as the plain number it
+// represents, or as its exact text where a double cannot carry it.
+const decimalToJson = (value) => {
+  const number = value.toNumber();
+  return Number.isFinite(number) && value.equals(number)
+    ? number
+    : value.toString();
+};
+
+// The rows written before the writer was fixed are history and are not
+// rewritten: the read path decodes the stored internals back into the number
+// so a screen prints the amount, never an object. decimal.js internals: `d`
+// holds base-1e7 words, most significant first (the last word without its
+// trailing zeros); `e` is the exponent of the leading digit; `s` the sign.
+const isStoredDecimalInternals = (value) =>
+  isPlainObject(value) &&
+  (Array.isArray(value.d) || value.d === "[truncated]") &&
+  Number.isInteger(value.e) &&
+  (value.s === 1 || value.s === -1) &&
+  Object.keys(value).every((key) =>
+    ["d", "e", "s", "constructor"].includes(key),
+  );
+
+const decodeStoredDecimal = (value) => {
+  const words = value.d;
+  if (
+    !Array.isArray(words) ||
+    !words.length ||
+    !words.every(
+      (word) => Number.isInteger(word) && word >= 0 && word < 10_000_000,
+    )
+  ) {
+    return null;
+  }
+  let digits = String(words[0]);
+  for (let index = 1; index < words.length; index += 1) {
+    digits += String(words[index]).padStart(7, "0");
+  }
+  digits = digits.replace(/0+$/, "");
+  if (!digits) return 0;
+  const exponent = value.e;
+  let text;
+  if (exponent < 0) text = `0.${"0".repeat(-exponent - 1)}${digits}`;
+  else if (exponent + 1 >= digits.length) {
+    text = digits + "0".repeat(exponent + 1 - digits.length);
+  } else {
+    text = `${digits.slice(0, exponent + 1)}.${digits.slice(exponent + 1)}`;
+  }
+  const number = Number(text) * value.s;
+  return Number.isFinite(number) ? number : null;
+};
+
+const decodeStoredDecimals = (value) => {
+  if (Array.isArray(value)) return value.map(decodeStoredDecimals);
+  if (!isPlainObject(value)) return value;
+  // A Decimal that sat at the depth limit lost its digits ("[truncated]"):
+  // nothing can be recovered, and the screen gets no value rather than the
+  // internals.
+  if (isStoredDecimalInternals(value)) return decodeStoredDecimal(value);
+  return Object.entries(value).reduce((acc, [key, child]) => {
+    acc[key] = decodeStoredDecimals(child);
+    return acc;
+  }, {});
+};
+
 const compactJson = (value, depth = 0) => {
   if (value === null || value === undefined) return null;
   if (value instanceof Date) return value.toISOString();
@@ -115,6 +187,7 @@ const compactJson = (value, depth = 0) => {
   if (typeof value === "string") return compactString(value);
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value !== "object") return String(value);
+  if (isPrismaDecimal(value)) return decimalToJson(value);
 
   if (depth >= MAX_DEPTH) return "[truncated]";
 
@@ -139,9 +212,6 @@ const compactJson = (value, depth = 0) => {
 };
 
 const hasValue = (value) => value !== null && value !== undefined;
-
-const isPlainObject = (value) =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
 
 const sameJsonValue = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -227,11 +297,11 @@ const serializeEvent = (event) => ({
   toStatus: event.newStatus || null,
   reason: event.reason || null,
   comment: null,
-  oldSummary: event.oldSummaryJson || null,
-  newSummary: event.newSummaryJson || null,
-  summary: event.summaryJson || {},
+  oldSummary: decodeStoredDecimals(event.oldSummaryJson) || null,
+  newSummary: decodeStoredDecimals(event.newSummaryJson) || null,
+  summary: decodeStoredDecimals(event.summaryJson) || {},
   attachments: event.attachmentsJson || [],
-  metadata: event.metadataJson || {},
+  metadata: decodeStoredDecimals(event.metadataJson) || {},
   createdAt: toIso(event.createdAt),
 });
 
