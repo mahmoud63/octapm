@@ -120,4 +120,40 @@ liveDescribe("Tenant constraint teeth (M7)", () => {
     expect(after.projectId).toBeNull();
     expect(after.orgId).toBe(a.org.id);
   });
+
+  test("the PC-6 quantity tables refuse a disagreeing (projectId, orgId) pair and a replayed clientRequestId (20261005050000)", async () => {
+    // Raw SQL on purpose: the two tables exist only once the orchestrator has
+    // applied migration 20261005050000_quantity_progress to this database, and
+    // the shared Prisma client may predate them. Until then the case reports
+    // itself as not yet applicable instead of failing on a missing table —
+    // the same assertions run green on a throwaway database through
+    // scripts/db/prove-quantity-progress-constraints.js.
+    const present = await prisma.$queryRaw`SELECT to_regclass('"QuantityProgressEntry"') IS NOT NULL AS ok`;
+    if (!present[0]?.ok) {
+      console.warn("tenant-constraint-teeth: 20261005050000_quantity_progress is not applied to this database; PC-6 case not yet applicable");
+      return;
+    }
+    const activity = await prisma.activity.create({ data: { projectId: projectA.id, name: "Teeth blockwork" } });
+    const item = await prisma.boqItem.create({ data: { projectId: projectA.id, description: "Teeth blockwork 200mm", unitCode: "m2" } });
+    const key = `teeth-${crypto.randomUUID().slice(0, 8)}`;
+    const insertEntry = ({ orgId, clientRequestId }) =>
+      prisma.$executeRaw`
+        INSERT INTO "QuantityProgressEntry" ("id", "orgId", "projectId", "activityId", "boqItemId", "unitCode", "quantity", "date", "clientRequestId", "updatedAt")
+        VALUES (${crypto.randomUUID()}, ${orgId}, ${projectA.id}, ${activity.id}, ${item.id}, 'm2', 12.5, '2027-02-03', ${clientRequestId}, now())`;
+
+    await expect(insertEntry({ orgId: b.org.id, clientRequestId: key })).rejects.toThrow(/QuantityProgressEntry_projectId_orgId_fkey/);
+    await insertEntry({ orgId: a.org.id, clientRequestId: key });
+    await expect(insertEntry({ orgId: a.org.id, clientRequestId: key })).rejects.toThrow(/QuantityProgressEntry_projectId_clientRequestId_key/);
+    const rows = await prisma.$queryRaw`SELECT count(*)::int AS n FROM "QuantityProgressEntry" WHERE "projectId" = ${projectA.id}`;
+    expect(rows[0].n).toBe(1);
+
+    // The section row's key has the same teeth.
+    const log = await prisma.dailyLog.create({ data: { orgId: a.org.id, projectId: projectA.id, date: new Date("2027-02-03") } });
+    const insertSection = ({ orgId }) =>
+      prisma.$executeRaw`
+        INSERT INTO "DailyLogQuantity" ("id", "orgId", "projectId", "dailyLogId", "activityId", "boqItemId", "unitCode", "quantity", "updatedAt")
+        VALUES (${crypto.randomUUID()}, ${orgId}, ${projectA.id}, ${log.id}, ${activity.id}, ${item.id}, 'm2', 12.5, now())`;
+    await expect(insertSection({ orgId: b.org.id })).rejects.toThrow(/DailyLogQuantity_projectId_orgId_fkey/);
+    await insertSection({ orgId: a.org.id });
+  });
 });
