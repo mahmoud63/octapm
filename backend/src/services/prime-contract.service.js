@@ -388,7 +388,13 @@ const updateContract = async ({ orgId, projectId, userId, payload = {}, canConfi
     data.originalValue = value;
     data.revisedValue = addMoney(value, num(contract.approvedChangesValue));
     // A different amount is an entry; the stored amount sent back is a save.
-    if (round2(value) !== round2(num(contract.originalValue))) {
+    // Except where the stored amount is withheld from this caller (not
+    // established, and they may not read the BOQ): whatever they send is
+    // their own entry. Otherwise sending a guess would answer whether it was
+    // the hidden amount (the source staying a fallback while any other amount
+    // becomes an entry), and an amount they typed would stay unestablished.
+    const withheldFromCaller = !valueEstablished(contract) && !canConfirmFallback;
+    if (withheldFromCaller || round2(value) !== round2(num(contract.originalValue))) {
       data.originalValueSource = VALUE_SOURCES.CONTRACT_ENTRY;
       valueConfirmation = "entered";
     }

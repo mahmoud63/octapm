@@ -287,11 +287,24 @@ describe("where the original value came from (owner decisions 1-3)", () => {
     return service.updateContract({ orgId: "org-1", projectId: "project-1", userId: "user-1", payload, ...extra });
   };
 
-  it("a save without an original value, or with the stored one sent back, leaves the fallback a fallback", async () => {
+  it("a save without an original value, or (by a BOQ reader) with the stored one sent back, leaves the fallback a fallback", async () => {
+    await run(stored(), { taxRate: 5 });
+    expect(written.originalValueSource).toBeUndefined();
     for (const payload of [{ taxRate: 5 }, { originalValue: 7_727_000 }, { originalValue: "7727000.00" }]) {
-      const answer = await run(stored(), payload);
+      const answer = await run(stored(), payload, { canConfirmFallback: true });
       expect([payload, written.originalValueSource, answer.originalValueSource]).toEqual([payload, undefined, "boq_fallback"]);
     }
+  });
+
+  it("a caller who may not read the BOQ sending the withheld amount enters it: a guess is never answered", async () => {
+    const answer = await run(stored(), { originalValue: 7_727_000 });
+    expect([written.originalValueSource, answer.originalValueSource]).toEqual(["contract_entry", "contract_entry"]);
+    const event = require("../audit.service").recordEvent.mock.calls.at(-1)[0];
+    expect(event.summary.originalValueConfirmation).toBe("entered");
+    // Once established, the stored amount sent back is a save again.
+    written = null;
+    await run(stored({ originalValueSource: "contract_entry" }), { originalValue: 7_727_000 });
+    expect(written.originalValueSource).toBeUndefined();
   });
 
   it("a different original value is an entry, recorded by the audit event", async () => {

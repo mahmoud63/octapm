@@ -1213,6 +1213,8 @@ module.exports = {
   IPC_REVIEW_WITHHELD,
   withheldIpcCertificate,
   withheldIpcItem,
+  // The workspace home's IPC queue (a submitted certificate's net payable).
+  withheldCertificateTotals,
   JOB_BILL_WITHHELD,
   withheldJob,
   BOQ_FIGURE_KEYS,
