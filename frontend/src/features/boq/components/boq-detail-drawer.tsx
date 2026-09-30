@@ -271,6 +271,11 @@ function BoqDetailBody({
           <>
             <FigureRow label='Certified quantity' figure={sections.certification.certifiedQuantity} suffix={unit} testId='boq-detail-certified-qty' />
             <FigureRow label='Certified amount' figure={sections.certification.certifiedAmount} format='money' currency={currency} testId='boq-detail-certified-amount' />
+            {sections.certification.note && (
+              <p className='text-xs text-muted-foreground' data-testid='boq-detail-certification-note'>
+                {sections.certification.note}
+              </p>
+            )}
             <ul className='space-y-1 text-sm'>
               {sections.certification.lines.items.map((line) => (
                 <li key={line.id} className='flex justify-between gap-3'>

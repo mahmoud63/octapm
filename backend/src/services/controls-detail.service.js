@@ -46,6 +46,10 @@ const { withDraftVisibility } = require("./rfi-workflow.service");
 const LIST_CAP = 50;
 // The allocation summary's and the IPC module's certified statuses.
 const CERTIFIED_IPC_STATUSES = ["certified", "paid"];
+// Both certified figures on a BOQ item stand on the allocation summary's basis.
+const CERTIFIED_BASIS =
+  "the allocation summary's certified basis — IpcItem status ∈ {certified, paid} on an approved, active allocation (activity-boq-allocation certifiedIpcItemWhere)";
+const CERTIFIED_ROWS = { type: "ipc_item", filter: "boqItemId, status in (certified, paid), allocation approved and active" };
 
 const fig = (value, truth, basis, derivedFrom = []) => ({ value, truth, basis, derivedFrom });
 const notAvailable = (wave, basis) => ({ value: null, truth: null, notAvailable: true, wave, basis, derivedFrom: [] });
@@ -335,25 +339,32 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
   };
 
   if (can("ipc")) {
-    const ipcItems = await prisma.ipcItem.findMany({
-      where: { projectId, boqItemId: itemId },
-      orderBy: [{ createdAt: "desc" }],
-      select: { id: true, ipcPeriod: true, qty: true, currentCert: true, status: true, certDate: true, ipcCertificateId: true },
-    });
-    const certified = ipcItems.filter((entry) => CERTIFIED_IPC_STATUSES.includes(entry.status));
+    // The certified amount is the allocation summary's certifiedValue; the
+    // certified quantity is counted on the very rows it sums. A row the
+    // summary does not report (a superseded one) states neither.
+    const [ipcItems, certifiedRows] = await Promise.all([
+      prisma.ipcItem.findMany({
+        where: { projectId, boqItemId: itemId },
+        orderBy: [{ createdAt: "desc" }],
+        select: { id: true, ipcPeriod: true, qty: true, currentCert: true, status: true, certDate: true, ipcCertificateId: true },
+      }),
+      summaryItem
+        ? prisma.ipcItem.findMany({ where: { ...allocationService.certifiedIpcItemWhere(projectId), boqItemId: itemId }, select: { qty: true } })
+        : [],
+    ]);
     sections.certification = {
       allowed: true,
-      certifiedQuantity: fig(
-        certified.reduce((sum, entry) => sum + toNumber(entry.qty), 0),
-        "derived",
-        "Σ IpcItem.qty for this item where status ∈ {certified, paid}",
-        [{ type: "ipc_item", filter: "boqItemId, status in (certified, paid)" }],
-      ),
-      certifiedAmount: summaryItem
-        ? fig(summaryItem.certifiedValue, "derived", "Σ IpcItem.currentCert where status ∈ {certified, paid} on approved allocations (allocation summary)", [
-            { type: "ipc_item", filter: "status in (certified, paid)" },
+      certifiedQuantity: summaryItem
+        ? fig(certifiedRows.reduce((sum, entry) => sum + toNumber(entry.qty), 0), "derived", `Σ IpcItem.qty for this item on ${CERTIFIED_BASIS}: the rows the certified amount sums`, [
+            CERTIFIED_ROWS,
           ])
         : null,
+      certifiedAmount: summaryItem
+        ? fig(summaryItem.certifiedValue, "derived", `Σ IpcItem.currentCert for this item on ${CERTIFIED_BASIS} (allocation summary certifiedValue)`, [
+            CERTIFIED_ROWS,
+          ])
+        : null,
+      note: "Every IPC line of this row is listed, in any status; the certified figures count only certified or paid lines on an approved, active allocation",
       lines: capped(
         ipcItems.map((entry) => ({
           id: entry.id,

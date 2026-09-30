@@ -401,8 +401,11 @@ export const BoqItemDetailSchema = z.object({
       ControlsSectionDeniedSchema,
       z.object({
         allowed: z.literal(true),
-        certifiedQuantity: ControlsFigureSchema,
+        // Both on the allocation summary's certified basis; null for a row
+        // the summary does not report.
+        certifiedQuantity: ControlsFigureSchema.nullable(),
         certifiedAmount: ControlsFigureSchema.nullable(),
+        note: z.string().nullable().optional(),
         lines: controlsCappedList(looseRow),
       }),
     ]),

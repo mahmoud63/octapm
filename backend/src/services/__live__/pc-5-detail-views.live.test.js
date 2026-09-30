@@ -25,6 +25,8 @@
  * - a subcontractor's person (party-scoped) gets no commitment, punch or
  *   lookahead rows from either detail, and no linked RFI or submittal its
  *   register would not list to them (party routing; RFI drafts);
+ * - the certified quantity and the certified amount on a BOQ item count the
+ *   same rows: the allocation summary's certified basis;
  * - every authorised quantity (row and allocation) is the IPC cap's
  *   approved-variation rule for its own pair, as the single-pair query
  *   stated it, though the detail asks for every pair in one query;
@@ -296,6 +298,31 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
       if (figure.notAvailable) expect([path, figure.wave]).toEqual([path, expect.stringMatching(/^PC-\d$/)]);
       else expect([path, TRUTHS.has(figure.truth), typeof figure.basis]).toEqual([path, true, "string"]);
     }
+  });
+
+  it("the two certified figures on a BOQ item stand on the allocation summary's one basis", async () => {
+    // A certified line on row A with no allocation: listed, and counted by neither figure.
+    const unallocated = await prisma.ipcItem.create({
+      data: { projectId: project.id, boqItemId: rows.A.id, ipcPeriod: "P02", qty: 4, rate: 10, currentCert: 40, cumulativeCert: 40, status: "certified" },
+    });
+    const answer = await api.get(at(`/boq/items/${rows.A.id}/detail`), auth());
+    expect([answer.status, answer.body?.error]).toEqual([200, undefined]);
+    const { certification } = answer.body.data.sections;
+    const onBasis = await prisma.ipcItem.findMany({
+      where: { ...allocationService.certifiedIpcItemWhere(project.id), boqItemId: rows.A.id },
+      select: { qty: true, currentCert: true },
+    });
+    const { summary } = await allocationService.listAllocations({ orgId: live.org.id, projectId: project.id, boqItemId: rows.A.id });
+    const item = summary.items.find((entry) => entry.boqItemId === rows.A.id);
+    expect(certification.certifiedQuantity.value).toBe(onBasis.reduce((sum, entry) => sum + entry.qty, 0));
+    expect(certification.certifiedAmount.value).toBe(item.certifiedValue);
+    expect(onBasis.reduce((sum, entry) => sum + toMoneyNumber(entry.currentCert), 0)).toBe(item.certifiedValue);
+    expect([certification.certifiedQuantity.value, certification.certifiedAmount.value]).toEqual([30, 300]);
+    for (const figure of [certification.certifiedQuantity, certification.certifiedAmount]) {
+      expect(figure.basis).toMatch(/allocation summary's certified basis/);
+    }
+    expect(certification.lines.items.map((line) => line.id)).toContain(unallocated.id);
+    expect(certification.note).toEqual(expect.any(String));
   });
 
   it("the activity detail states its allocations, budget and cost as their owners do", async () => {
