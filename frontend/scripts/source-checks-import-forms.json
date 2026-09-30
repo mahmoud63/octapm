@@ -1,0 +1,174 @@
+{
+  "$comment": "Fixtures for source-checks-registry.test.mjs: module source -> the import specifiers importSpecifiers() must read from it. Kept here, not in the test, because the test is itself a static check and its own source is read for imports.",
+  "imports": [
+    [
+      "import { execSync } from 'node:child_process'",
+      [
+        "node:child_process"
+      ]
+    ],
+    [
+      "import{execSync}from'node:child_process'",
+      [
+        "node:child_process"
+      ]
+    ],
+    [
+      "import{execSync}from\"node:child_process\"",
+      [
+        "node:child_process"
+      ]
+    ],
+    [
+      "import*as cp from'node:child_process'",
+      [
+        "node:child_process"
+      ]
+    ],
+    [
+      "import cp from'node:child_process'",
+      [
+        "node:child_process"
+      ]
+    ],
+    [
+      "import cp,{execSync}from'node:child_process'",
+      [
+        "node:child_process"
+      ]
+    ],
+    [
+      "import cp,*as all from'node:child_process'",
+      [
+        "node:child_process"
+      ]
+    ],
+    [
+      "import {\n  execSync,\n}from 'node:child_process'",
+      [
+        "node:child_process"
+      ]
+    ],
+    [
+      "import {\r\n  execSync,\r\n} from 'node:child_process'\r\n",
+      [
+        "node:child_process"
+      ]
+    ],
+    [
+      "import{\"execSync\"as run}from'node:child_process'",
+      [
+        "node:child_process"
+      ]
+    ],
+    [
+      "import/**/cp/**/from/**/'node:child_process'",
+      [
+        "node:child_process"
+      ]
+    ],
+    [
+      "import cp // why\n  from 'node:child_process'",
+      [
+        "node:child_process"
+      ]
+    ],
+    [
+      "import'pg'",
+      [
+        "pg"
+      ]
+    ],
+    [
+      "import\"pg\"",
+      [
+        "pg"
+      ]
+    ],
+    [
+      "import 'pg'",
+      [
+        "pg"
+      ]
+    ],
+    [
+      "export*from'pg'",
+      [
+        "pg"
+      ]
+    ],
+    [
+      "export*as db from'pg'",
+      [
+        "pg"
+      ]
+    ],
+    [
+      "export{Client}from'pg'",
+      [
+        "pg"
+      ]
+    ],
+    [
+      "export { Client } from 'pg'",
+      [
+        "pg"
+      ]
+    ],
+    [
+      "const a = 1;import pg from 'pg'",
+      [
+        "pg"
+      ]
+    ],
+    [
+      "function f() {}import{Client}from'pg'",
+      [
+        "pg"
+      ]
+    ],
+    [
+      "/* header */import pg from 'pg'",
+      [
+        "pg"
+      ]
+    ],
+    [
+      "/* a */ /* b */\n// c\nimport pg from 'pg'",
+      [
+        "pg"
+      ]
+    ],
+    [
+      "const pg = require('pg')",
+      [
+        "pg"
+      ]
+    ],
+    [
+      "const pg = require ( \"pg\" )",
+      [
+        "pg"
+      ]
+    ],
+    [
+      "import a from './a.mjs';import{b}from'./b.mjs'\nimport'./c.mjs'",
+      [
+        "./a.mjs",
+        "./b.mjs",
+        "./c.mjs"
+      ]
+    ]
+  ],
+  "notImports": [
+    "const lazy = \"import('@/y')\"",
+    "const lazy = await import('node:dns')",
+    "const here = import.meta.url\nconst from = 'pg'",
+    "// import pg from 'pg'",
+    "// a word like \"import\" or a \"from\" in a comment",
+    "/* import pg from 'pg' */",
+    "/* a */ const x = 1 /* b */\nconst important = 'pg'",
+    "importantFrom('pg')\nconst s = Array.from('pg')",
+    "export const from = 'pg'\nexport function f() {}"
+  ]
+}
