@@ -30,6 +30,8 @@ const canPollBoqJob = (req, res, next) =>
     ? next()
     : next(Object.assign(new HttpError(403, 'FORBIDDEN', 'You do not have permission for this action'), { details: { module: 'boq', action: 'read', source: req.projectAccess?.template ? 'template' : 'role' } }));
 const boqService = require('../services/boq.service');
+const controlsDetailService = require('../services/controls-detail.service');
+const { boqFigureAccess, withheldBoqItemDetail } = require('../utils/boq-figures');
 const fileStorageService = require('../services/file-storage.service');
 const jobService = require('../jobs/job.service');
 const { assertMoneyInput } = require('../utils/money');
@@ -275,6 +277,28 @@ router.get(
       orgId: req.user.orgId,
     });
     return sendSuccess(res, data);
+  }),
+);
+
+// GET /projects/:projectId/boq/items/:itemId/detail — the BOQ item's whole
+// story (PC-5): its structure, mapping and linked activities, quantities,
+// money, certification, commitments, changes, procurement, readiness flags,
+// documents and history, each section gated by the module that owns it
+// (controls-detail.service). Another organisation's item, or a missing one,
+// is 404 BOQ_ITEM_NOT_FOUND.
+router.get(
+  '/items/:itemId/detail',
+  authenticate,
+  requirePermission('boq', 'read'),
+  [param('itemId').isUUID().withMessage('The BOQ item id is not valid'), validate],
+  asyncHandler(async (req, res) => {
+    const detail = await controlsDetailService.getBoqItemDetail({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      itemId: req.params.itemId,
+      ...controlsDetailService.detailReader(req),
+    });
+    return sendSuccess(res, withheldBoqItemDetail(detail, boqFigureAccess(req)));
   }),
 );
 

@@ -1056,4 +1056,33 @@ describe("Phase 21D — integrity (release challenge)", () => {
     expect(project).toBeGreaterThanOrEqual(0);
     expect(cert).toBeGreaterThan(project);
   });
+
+  it("answers every allocation/BOQ pair of the approved-variation rule from one query", async () => {
+    const findMany = jest.fn(async () => [
+      { allocationId: "alloc-a", boqItemId: "boq-1", quantity: 5, amount: 50 },
+      { allocationId: "alloc-b", boqItemId: "boq-2", quantity: 3, amount: 30 },
+      { allocationId: null, boqItemId: "boq-1", quantity: 2, amount: 20 },
+    ]);
+    const pairs = [
+      { boqItemId: "boq-1" },
+      { allocationId: "alloc-a", boqItemId: "boq-1" },
+      { allocationId: "alloc-c", boqItemId: "boq-1" },
+      { allocationId: "alloc-b", boqItemId: "boq-2" },
+    ];
+    const answers = await ipcService.getApprovedVariationAllowances({ tx: { changeOrderAllocationLink: { findMany } }, projectId: "project-1", pairs });
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany.mock.calls[0][0].where).toEqual({
+      projectId: "project-1",
+      OR: [{ allocationId: { in: ["alloc-a", "alloc-c", "alloc-b"] } }, { boqItemId: { in: ["boq-1", "boq-2"] } }],
+      changeOrder: { status: "approved" },
+    });
+    // A pair sums the rows naming its allocation OR its BOQ item.
+    expect(answers).toEqual([
+      { quantity: 7, amount: 70 },
+      { quantity: 7, amount: 70 },
+      { quantity: 7, amount: 70 },
+      { quantity: 3, amount: 30 },
+    ]);
+  });
 });

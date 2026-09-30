@@ -1,5 +1,6 @@
 import { Main } from '@/components/layout/main'
 import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
+import { ControlsDetailHost } from '@/features/controls/components/controls-detail-drawers'
 import { useProject } from '@/features/projects/hooks/use-projects'
 import { useProjectBoq } from '../hooks/use-boq'
 import { BoqUploadZone } from './boq-upload-zone'
@@ -121,13 +122,16 @@ function BoqContent({ projectId }: { projectId: string }) {
 }
 
 export function BoqPage({ projectId, embedded = false }: Props) {
+  // A row opens its detail drawer; a readiness item's or a notification's
+  // ?recordId=&source=boq_item (or source=activity) link lands on it (PC-5).
+  const content = (
+    <ControlsDetailHost projectId={projectId}>
+      <BoqContent projectId={projectId} />
+    </ControlsDetailHost>
+  )
   if (embedded) {
-    return <BoqContent projectId={projectId} />
+    return content
   }
 
-  return (
-    <Main className='flex flex-1 flex-col gap-6'>
-      <BoqContent projectId={projectId} />
-    </Main>
-  )
+  return <Main className='flex flex-1 flex-col gap-6'>{content}</Main>
 }

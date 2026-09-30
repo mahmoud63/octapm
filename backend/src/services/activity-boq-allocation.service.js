@@ -732,6 +732,23 @@ const groupOfItem = ({ item, groupBy, labels }) => {
 };
 
 /**
+ * The certified basis of the coverage figures: IPC lines certified or paid on
+ * an approved, active allocation. certifiedValue sums their currentCert; the
+ * BOQ item detail (PC-5) counts their qty on the same rows.
+ */
+const certifiedIpcItemWhere = (projectId) => ({
+  projectId,
+  allocationId: { not: null },
+  status: { in: CERTIFIED_IPC_STATUSES },
+  allocation: {
+    is: {
+      status: 'approved',
+      isActive: true,
+    },
+  },
+});
+
+/**
  * The coverage figures (§69). Per item and in total: BOQ amount, allocated
  * (approved / pending), unallocated, not-applicable, earned, certified, and
  * the mapping-state counts. Items whose rule is not_applicable are reported
@@ -804,17 +821,7 @@ const buildAllocationSummary = async (
       },
     }),
     tx.ipcItem.findMany({
-      where: {
-        projectId,
-        allocationId: { not: null },
-        status: { in: CERTIFIED_IPC_STATUSES },
-        allocation: {
-          is: {
-            status: 'approved',
-            isActive: true,
-          },
-        },
-      },
+      where: certifiedIpcItemWhere(projectId),
       select: {
         boqItemId: true,
         currentCert: true,
@@ -1860,6 +1867,7 @@ module.exports = {
   setMappingRules,
   rederiveAllocationsForBoqItem,
   buildAllocationSummary,
+  certifiedIpcItemWhere,
   getApprovedActivityAllocationTotals,
   assertAllocationCapacity,
   assertMappingRuleAllows,

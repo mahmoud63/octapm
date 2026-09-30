@@ -180,17 +180,28 @@ const sumMoneyRows = (rows, field) =>
 const sumNumberRows = (rows, field) =>
   (rows || []).reduce((sum, row) => sum + (Number(row?.[field]) || 0), 0);
 
-const getApprovedVariationAllowance = async ({
-  tx,
-  projectId,
-  allocationId = null,
-  boqItemId = null,
-}) => {
+// The certification cap's variation allowance: the approved change-order
+// allocation links naming the allocation OR the BOQ item. One query answers
+// any number of { allocationId, boqItemId } pairs, each summing the rows it
+// names; the single-pair function below is this one with one pair.
+const variationLinkNames = (row, { allocationId, boqItemId }) =>
+  Boolean(
+    (allocationId && row.allocationId === allocationId) ||
+      (boqItemId && row.boqItemId === boqItemId),
+  );
+
+const getApprovedVariationAllowances = async ({ tx, projectId, pairs = [] }) => {
+  const allocationIds = [
+    ...new Set(pairs.map((pair) => pair.allocationId).filter(Boolean)),
+  ];
+  const boqItemIds = [
+    ...new Set(pairs.map((pair) => pair.boqItemId).filter(Boolean)),
+  ];
   const filters = [];
-  if (allocationId) filters.push({ allocationId });
-  if (boqItemId) filters.push({ boqItemId });
+  if (allocationIds.length) filters.push({ allocationId: { in: allocationIds } });
+  if (boqItemIds.length) filters.push({ boqItemId: { in: boqItemIds } });
   if (filters.length === 0 || !tx.changeOrderAllocationLink?.findMany) {
-    return { quantity: 0, amount: 0 };
+    return pairs.map(() => ({ quantity: 0, amount: 0 }));
   }
 
   const rows = await tx.changeOrderAllocationLink.findMany({
@@ -199,16 +210,37 @@ const getApprovedVariationAllowance = async ({
       OR: filters,
       changeOrder: { status: "approved" },
     },
+    // A fixed order: a pair sums its rows the same way however many pairs ask.
+    orderBy: { id: "asc" },
     select: {
+      allocationId: true,
+      boqItemId: true,
       quantity: true,
       amount: true,
     },
   });
 
-  return {
-    quantity: sumNumberRows(rows, "quantity"),
-    amount: sumMoneyRows(rows, "amount"),
-  };
+  return pairs.map((pair) => {
+    const named = rows.filter((row) => variationLinkNames(row, pair));
+    return {
+      quantity: sumNumberRows(named, "quantity"),
+      amount: sumMoneyRows(named, "amount"),
+    };
+  });
+};
+
+const getApprovedVariationAllowance = async ({
+  tx,
+  projectId,
+  allocationId = null,
+  boqItemId = null,
+}) => {
+  const [allowance] = await getApprovedVariationAllowances({
+    tx,
+    projectId,
+    pairs: [{ allocationId, boqItemId }],
+  });
+  return allowance;
 };
 
 const getCertificationLimit = async ({
@@ -1936,4 +1968,8 @@ module.exports = {
   issueIpcInvoice,
   recordIpcPayment,
   releaseIpcRetention,
+  // The authorised-quantity rule of the certification cap, read by the PC-5
+  // detail views so there is one formula for it (controls-detail.service).
+  getApprovedVariationAllowance,
+  getApprovedVariationAllowances,
 };

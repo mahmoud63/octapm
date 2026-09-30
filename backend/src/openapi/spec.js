@@ -1993,6 +1993,52 @@ const components = {
       before: ref("GenericObject"),
       after: ref("GenericObject"),
     }),
+    // PC-5 detail views: one envelope for every figure they state (three
+    // truths, OCTAPM_PROJECT_CONTROL_MODEL.md §3), and the section shape.
+    ControlsFigure: {
+      type: "object",
+      description:
+        "A figure and where it comes from. truth is source (read from its own row), derived (worked by the service that owns the rule, from source rows) or projection (an estimate that never feeds a certified figure). A figure no service can prove yet has value null, truth null, notAvailable true and the wave that brings it.",
+      additionalProperties: false,
+      properties: {
+        value: { type: "number", nullable: true },
+        truth: { type: "string", enum: ["source", "derived", "projection"], nullable: true },
+        basis: { type: "string", description: "What the figure is and the rule or filter that produced it." },
+        derivedFrom: arrayOf(freeObject("A record type (and id or filter) the figure is read or derived from.")),
+        notAvailable: { type: "boolean" },
+        wave: { type: "string", description: "The programme wave that will bring a figure not available yet (PC-6, PC-7)." },
+      },
+      required: ["value", "truth", "basis", "derivedFrom"],
+    },
+    ControlsDetailSection: {
+      type: "object",
+      description:
+        "One section of a detail view. allowed false means the viewer may not read the module that owns it (or, for the bill's figures, the BOQ): no data is sent, only module and reason. Lists inside a section are capped at 50 rows as { items, total, viewAll }. Every numeric figure is a ControlsFigure.",
+      additionalProperties: true,
+      properties: {
+        allowed: { type: "boolean" },
+        module: { type: "string" },
+        reason: { type: "string" },
+      },
+      required: ["allowed"],
+    },
+    ControlsDetail: objectSchema(
+      {
+        kind: { type: "string", enum: ["boq_item", "activity"] },
+        id: { type: "string", format: "uuid" },
+        href: { type: "string", description: "The record's web link (/o/{slug}/projects/{id}/...?recordId=&source=)." },
+        header: freeObject("Identity, dates and status of the record (source fields)."),
+        sections: {
+          type: "object",
+          additionalProperties: ref("ControlsDetailSection"),
+          description:
+            "BOQ item: structure, mapping, quantities, money, certification (ipc), commitments (commitment), changes (change_order), procurement, readiness, history (audit), documents. Activity: structure, mapping (BOQ readers only), progress, cost, certification (ipc and BOQ), changes, procurement, quality, constraints, documents, history (audit).",
+        },
+        withheld: { type: "boolean" },
+        reason: { type: "string" },
+      },
+      ["kind", "id"],
+    ),
     BoqItemUpdateResponse: objectSchema({
       item: ref("GenericObject"),
       financial: ref("GenericObject"),
@@ -7844,6 +7890,21 @@ add(
 );
 
 add(
+  "/projects/{projectId}/boq/items/{id}/detail",
+  "get",
+  operation({
+    tag: "BOQ",
+    summary: "BOQ item detail: the row's story across the modules (PC-5).",
+    description:
+      "Composed read-only from the services that own each figure: structure (WBS, location, cost code), mapping and linked activities (dates, critical flag, float, approved progress, authorised quantity per allocation — the schedule fields only for a schedule reader: anyone else gets each activity's id, code and name, href null and schedule: { allowed: false, module: \"schedule\", reason }; the approved % complete and its source only for a progress reader, as on the activity detail: a schedule reader who may not read progress gets progress: { allowed: false, module: \"progress\", reason } in their place), quantities (original from the baseline-locked revision, current, authorised = current + approved change-order allocation-link quantity by the IPC certification cap's rule, mapped, unallocated; installed, paid and forecast are not available yet and name their wave), money (rate, amount, approved allocation, EV derived as of now — not the official reporting-cutoff EV), certification (ipc:read; the certified quantity and the certified amount count the same rows, the allocation summary's certified basis — certified or paid lines on an approved, active allocation — and every line of the row is listed in any status), commitments (commitment:read; SOV lines on executed/closed commitments, excluding variations), changes (change_order:read), procurement (procurement:read; order values, not committed cost), PC-4 readiness flags (a row beyond a capped list is reported as not itemised, never as clean), history (audit:read) and documents. A section the viewer may not read is { allowed: false, module, reason }. Another organisation's item, or a missing one, is 404 BOQ_ITEM_NOT_FOUND.",
+    operationId: "getBoqItemDetail",
+    parameters: projectRecordParams,
+    permissions: modulePermission("boq", "read"),
+    responseSchema: ref("ControlsDetail"),
+  }),
+);
+
+add(
   "/projects/{projectId}/boq/items/{id}",
   "patch",
   operation({
@@ -8350,6 +8411,21 @@ add(
     parameters: projectRecordParams,
     permissions: modulePermission("schedule", "read"),
     responseSchema: ref("Activity"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/activities/{id}/detail",
+  "get",
+  operation({
+    tag: "Activities",
+    summary: "Activity detail: the activity's story across the modules (PC-5).",
+    description:
+      "Composed read-only from the services that own each figure: header (dates, float, critical flag), structure (WBS, location; an activity has no cost code of its own), mapping (BOQ allocations with links to each BOQ item, mapped quantity, budget = Σ approved allocations, generated budget as a projection, EV derived as of now = the allocation summary's per-allocation EV scoped to this activity) — for BOQ readers only, cost readers included (owner decision E1), otherwise { allowed: false, module: \"boq\" } —; for a member who may not read the BOQ, a change order reached only through an allocation link is left out, every listed order carries no allocationLinks and boqWithheld: { keys: [\"allocationLinks\"], reason }, and changes.changeOrders and history carry boqWithheld: { reason } (always, with no count) — their pages and totals leave out what is withheld over every row, not only the first 50 —, progress (progress:read; method, approved history, progress source, submissions), cost (cost:read; CostRecord committed and actual, stored forecast), certification (ipc:read and BOQ read; the certified or paid lines on the activity's approved, active allocations — the BOQ item detail's and the allocation summary's certified basis — listed and summed), changes (change orders and change events), procurement, quality (NCR, ITP, punch), constraints (logic ties and open lookahead constraints), documents and photos (a linked RFI or submittal only where its own register lists it to the viewer — routed to a party-scoped member's company, an RFI draft to its author or manager — and a linked punch item never to a party-scoped member), and history (audit:read; progress-submission, allocation-approval, change-order and schedule-revision events — activities have no audit trail of their own). Another organisation's activity, or a missing one, is 404 ACTIVITY_NOT_FOUND.",
+    operationId: "getActivityDetail",
+    parameters: projectRecordParams,
+    permissions: modulePermission("schedule", "read"),
+    responseSchema: ref("ControlsDetail"),
   }),
 );
 

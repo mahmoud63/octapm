@@ -28,6 +28,7 @@ import {
   type MappingSuggestion,
   type SuggestionsResponse,
 } from '../hooks/use-mapping'
+import { OpenDetailButton } from '../../components/controls-detail-drawers'
 
 /**
  * The matrix: BOQ rows (grouped by the chosen structure dimension) against
@@ -329,7 +330,15 @@ export function MappingMatrix({
                       data-testid={`uat-mapping-col-${activityLabel(activity)}`}
                     />
                     <div className='min-w-0'>
-                      <div className='truncate font-semibold'>{activityLabel(activity)}</div>
+                      <div className='flex items-center gap-0.5'>
+                        <span className='truncate font-semibold'>{activityLabel(activity)}</span>
+                        <OpenDetailButton
+                          kind='activity'
+                          id={activity.id}
+                          label={`Open ${activity.name} detail`}
+                          testId={`mapping-matrix-open-activity-${activity.id}`}
+                        />
+                      </div>
                       <div className='truncate font-normal text-muted-foreground'>{activity.name}</div>
                       {activity.wbsCode && (
                         <div className='truncate font-normal text-muted-foreground/70'>{activity.wbsCode}</div>
@@ -444,6 +453,12 @@ function GroupRows({
                   <div className='flex items-center gap-1'>
                     <span className='font-semibold'>{item.code}</span>
                     <StateBadge state={item.mappingState} />
+                    <OpenDetailButton
+                      kind='boq_item'
+                      id={item.boqItemId}
+                      label={`Open ${item.code} detail`}
+                      testId={`mapping-matrix-open-boq-${item.boqItemId}`}
+                    />
                   </div>
                   <div className='truncate text-muted-foreground' title={item.description}>
                     {item.description}

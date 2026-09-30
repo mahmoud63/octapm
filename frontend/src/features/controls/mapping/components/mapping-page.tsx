@@ -38,6 +38,7 @@ import {
   type CoverageGroupBy,
   type MappingAllocation,
 } from '../hooks/use-mapping'
+import { ControlsDetailHost } from '../../components/controls-detail-drawers'
 import { CoveragePanel } from './coverage-panel'
 import { MappingImportDialog } from './mapping-import-dialog'
 import { MappingList } from './mapping-list'
@@ -148,6 +149,9 @@ export function MappingPage({
   const isLoading = activitiesLoading || allocationsLoading || coverageLoading
 
   return (
+    // A row's BOQ item or activity opens its detail drawer (PC-5), and a
+    // readiness item's ?recordId=&source=boq_item|activity link lands on it.
+    <ControlsDetailHost projectId={projectId}>
     <div className='space-y-3' data-testid='uat-mapping-page'>
       <div className='flex flex-wrap items-center gap-2'>
         <div className='flex rounded-md border'>
@@ -318,5 +322,6 @@ export function MappingPage({
         currency={currency}
       />
     </div>
+    </ControlsDetailHost>
   )
 }

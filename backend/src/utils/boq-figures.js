@@ -1066,6 +1066,110 @@ const withheldAllocationLinks = (record, access = FULL_ACCESS) => {
   return { ...record, allocationLinks: record.allocationLinks.map(withheldAllocationLink) };
 };
 
+// ─── PC-5: the BOQ item and activity detail views ─────────────────────────
+//
+// GET /boq/items/:itemId/detail is admitted on boq:read, so its reader may
+// have every figure: withheldBoqItemDetail hands a BOQ reader the service's
+// answer untouched (the same object) and anyone else the row's id only.
+//
+// GET /activities/:id/detail is admitted on schedule:read. What it says of
+// the bill is withheld from a member who may not read the BOQ — cost readers
+// included (E1): the mapping section whole (the allocations, the mapped
+// quantity, the activity's budget and generated budget, the EV worked from
+// them), certification (worked from the allocations), the approval history
+// of the allocations, a change order that reaches the activity only through
+// an allocation link (its presence says the activity is mapped), and the BOQ
+// row a change order's or a PO line's link points at. Omitted, never zeroed:
+// the section is { allowed: false, module: "boq", reason }.
+//
+// A change order's allocation links on this view are filtered to THIS
+// activity's allocations, so a link's existence, its count, its quantity and
+// its amount are per-activity mapping facts: every kept order loses them
+// whole, however else it reaches the activity (an order with activityId = X
+// and a link to X's allocation is still listed, without the link). The
+// marker is put on every order and on the list, whether or not anything was
+// removed, and carries no count — its presence says nothing about a mapping.
+const CHANGE_ORDERS_BY_ALLOCATION_WITHHELD =
+  "Change orders reached through BOQ allocations are available only to members who may read the BOQ";
+const ACTIVITY_HISTORY_BOQ_WITHHELD =
+  "BOQ allocation approvals and change orders reached through them are available only to members who may read the BOQ";
+
+// A capped list on the detail views (the first 50 rows, a total, a viewAll
+// link) carries every row it was cut from under this key. What is withheld is
+// decided over every row, so neither the page nor its total says anything of
+// a withheld row beyond the first page. JSON never writes a symbol key (nor
+// does normalizeMoneyTree copy one): the full set is never sent to anyone.
+const DETAIL_ALL_ROWS = Symbol("controls-detail.allRows");
+const allRowsOf = (list, pageKey) => (Array.isArray(list[DETAIL_ALL_ROWS]) ? list[DETAIL_ALL_ROWS] : list[pageKey]);
+// The list as sent, without the full set it was cut from.
+const pageOf = (list) => {
+  const { [DETAIL_ALL_ROWS]: _allRows, ...page } = list;
+  return page;
+};
+
+const withheldBoqItemDetail = (detail, access = FULL_ACCESS) => {
+  if (access.boq || !detail || typeof detail !== "object") return detail;
+  return { kind: detail.kind, id: detail.id, withheld: true, reason: MAPPING_DETAILS_WITHHELD };
+};
+
+const boqSectionWithheld = (reason = MAPPING_DETAILS_WITHHELD) => ({ allowed: false, module: "boq", reason });
+
+const withheldActivityDetail = (detail, access = FULL_ACCESS) => {
+  if (access.boq || !detail || typeof detail !== "object" || !detail.sections) return detail;
+  const sections = { ...detail.sections };
+  if (has(sections, "mapping")) sections.mapping = boqSectionWithheld();
+  if (sections.certification && sections.certification.allowed) sections.certification = boqSectionWithheld(IPC_LINES_WITHHELD);
+
+  const droppedOrderIds = new Set();
+  const orders = sections.changes && sections.changes.changeOrders;
+  if (orders && Array.isArray(orders.items)) {
+    const kept = [];
+    for (const order of allRowsOf(orders, "items")) {
+      const matchedBy = Array.isArray(order.matchedBy) ? order.matchedBy : [];
+      if (matchedBy.length && matchedBy.every((how) => how === "allocation_link")) {
+        droppedOrderIds.add(order.id);
+        continue;
+      }
+      kept.push({
+        ...withoutKeys(order, ["matchedBy", "allocationLinks"]),
+        boqWithheld: { keys: ["allocationLinks"], reason: ALLOCATION_LINK_WITHHELD },
+      });
+    }
+    sections.changes = {
+      ...sections.changes,
+      changeOrders: {
+        ...pageOf(orders),
+        // The page refills from beyond the cap as the full set allows.
+        items: kept.slice(0, orders.items.length),
+        total: Math.max(0, (orders.total || 0) - droppedOrderIds.size),
+        boqWithheld: { reason: CHANGE_ORDERS_BY_ALLOCATION_WITHHELD },
+      },
+    };
+  }
+
+  if (sections.procurement && Array.isArray(sections.procurement.poLines)) {
+    sections.procurement = {
+      ...sections.procurement,
+      poLines: sections.procurement.poLines.map((line) => withoutKeys(line, ["boqItemId", "boqItemHref"])),
+    };
+  }
+
+  if (sections.history && Array.isArray(sections.history.events)) {
+    const allEvents = allRowsOf(sections.history, "events");
+    const events = allEvents.filter(
+      (event) => event.kind !== "allocation_approval" && !(event.kind === "change_order_link" && droppedOrderIds.has(event.recordId)),
+    );
+    const removed = allEvents.length - events.length;
+    sections.history = {
+      ...pageOf(sections.history),
+      events: events.slice(0, sections.history.events.length),
+      total: Math.max(0, (sections.history.total || 0) - removed),
+      boqWithheld: { reason: ACTIVITY_HISTORY_BOQ_WITHHELD },
+    };
+  }
+  return { ...detail, sections };
+};
+
 module.exports = {
   ALLOCATION_LINK_BOQ_KEYS,
   ALLOCATION_LINK_WITHHELD,
@@ -1113,4 +1217,10 @@ module.exports = {
   withheldWbsList,
   withheldWorkspaceDashboard,
   withoutBoqFigures,
+  // PC-5 detail views
+  DETAIL_ALL_ROWS,
+  withheldActivityDetail,
+  withheldBoqItemDetail,
+  CHANGE_ORDERS_BY_ALLOCATION_WITHHELD,
+  ACTIVITY_HISTORY_BOQ_WITHHELD,
 };

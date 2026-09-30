@@ -53,6 +53,7 @@ import { ProgressTab } from './progress-tab'
 import { ResourcePlan } from './resource-plan'
 import { RevisionHistoryPanel } from './revision-history-panel'
 import { ScheduleReviewPanel } from './schedule-review-panel'
+import { ControlsDetailHost } from '@/features/controls/components/controls-detail-drawers'
 import { WbsTree } from './wbs-tree'
 import {
   scheduleHasWbs,
@@ -576,6 +577,9 @@ export function ScheduleDashboard({
   const showUpdateScheduleActions = canCreateSchedule || canSubmitProgress
 
   return (
+    // A Gantt row opens the activity's detail drawer (PC-5), and a
+    // ?recordId=&source=activity (or boq_item) link lands on it.
+    <ControlsDetailHost projectId={projectId}>
     <div className='space-y-4'>
       {/* Actions sit on their own row at the top right, above the figures, so
           they are always in the same place and never wrap between the cards. */}
@@ -1474,5 +1478,6 @@ export function ScheduleDashboard({
         />
       )}
     </div>
+    </ControlsDetailHost>
   )
 }
