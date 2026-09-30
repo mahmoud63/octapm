@@ -271,12 +271,26 @@ export type ProjectSetupHeadlineEntry = {
   tone: 'done' | 'review' | 'blocked' | 'info' | 'neutral'
   raw?: unknown
   /**
-   * On the mapping and critical_unmapped entries, for a caller who may not
-   * read the BOQ: value "—", tone neutral, raw null, reason says why.
+   * On the mapping entry, and on the critical_unmapped entry once a
+   * schedule is active, for a caller who may not read the BOQ: value "—",
+   * tone neutral, raw null, reason says why.
    */
   withheld?: boolean
   reason?: string
+  /**
+   * On the critical_unmapped entry while no schedule is active
+   * (summary.scheduleState none or staged): nothing has been assessed, so
+   * the value is "Waiting for active schedule" — no count, for anyone.
+   */
+  waiting?: boolean
 }
+
+/**
+ * Which schedule the setup headline speaks of (owner decision R5-4): none —
+ * no revision and no active activity; staged — a revision imported or
+ * generated, not activated; active — active activities exist.
+ */
+export type ProjectSetupScheduleState = 'none' | 'staged' | 'active'
 
 export type ProjectSetupStep = {
   key: string
@@ -334,14 +348,21 @@ export type ProjectSetupReadiness = {
     readyForReporting?: boolean
     /** The §33 status line, in reading order. */
     headline?: ProjectSetupHeadlineEntry[]
+    /** Absent from an API older than R5-4: read as "not said", never as none. */
+    scheduleState?: ProjectSetupScheduleState
     /**
-     * Critical activities with no approved allocation: read off the
-     * mapping, so absent for a caller who may not read the BOQ —
-     * criticalUnmappedWithheld is true then, and criticalUnmappedReason
-     * says why ("Mapping details unavailable to you").
+     * Critical activities with no approved allocation, assessed on the
+     * active schedule only. While none is active (scheduleState none or
+     * staged) there is no count for anyone: criticalUnmappedWaiting is true
+     * and criticalUnmappedReason says "Waiting for active schedule". With an
+     * active schedule the count is read off the mapping, so it is absent for
+     * a caller who may not read the BOQ — criticalUnmappedWithheld is true
+     * then, and criticalUnmappedReason says why ("Mapping details
+     * unavailable to you").
      */
     criticalUnmappedActivities?: number
     criticalUnmappedWithheld?: boolean
+    criticalUnmappedWaiting?: boolean
     criticalUnmappedReason?: string
     /** From the ten original steps only (setup doc §3: unchanged). */
     nextAction: {

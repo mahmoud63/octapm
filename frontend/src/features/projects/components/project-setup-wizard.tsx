@@ -645,7 +645,14 @@ function Headline({ entries }: { entries: ProjectSetupHeadlineEntry[] }) {
       aria-label='Setup status'
     >
       {entries.map((entry, index) => (
-        <li key={entry.key} className='flex items-center gap-1' data-testid={`uat-setup-headline-${entry.key}`}>
+        <li
+          key={entry.key}
+          className='flex items-center gap-1'
+          data-testid={`uat-setup-headline-${entry.key}`}
+          data-tone={entry.tone}
+          // No active schedule yet (R5-4): the engine's words, never a count.
+          data-waiting={entry.waiting ? 'true' : undefined}
+        >
           {index > 0 && <span aria-hidden className='text-muted-foreground'>·</span>}
           <span className='text-muted-foreground'>{entry.label}</span>
           <span

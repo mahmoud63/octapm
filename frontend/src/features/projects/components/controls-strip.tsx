@@ -478,6 +478,16 @@ export function ControlsStrip({
   // critical activities themselves are the schedule's and stay.
   const criticalUnmappedWithheld = Boolean(summary.criticalUnmappedWithheld)
   const criticalUnmapped = criticalUnmappedWithheld ? null : (summary.criticalUnmappedActivities ?? null)
+  // No schedule, or one imported and not activated yet (R5-4): nothing has
+  // been assessed, so neither figure is a fact — the tile reads "—" with the
+  // server's words ("Waiting for active schedule"), never 0. The state is
+  // the engine's; an answer that does not say it is read as before.
+  const scheduleState = summary.scheduleState ?? null
+  const criticalWaiting =
+    Boolean(summary.criticalUnmappedWaiting) || scheduleState === 'none' || scheduleState === 'staged'
+  const criticalWaitingText = summary.criticalUnmappedWaiting
+    ? (summary.criticalUnmappedReason ?? 'Waiting for active schedule')
+    : 'Waiting for active schedule'
   const unmappedRows = counts && !coverageWithheld ? counts.unmapped + counts.partial : null
   const overAllocatedRows = coverageWithheld ? null : (counts?.over ?? null)
   const dataQuality = forecast?.dataQuality ?? []
@@ -591,11 +601,15 @@ export function ControlsStrip({
         badge={baselineLocked ? 'Baseline locked' : gates.baseline.ready ? 'Baseline ready' : 'No baseline'}
         detail={
           scheduleRevision
-            ? `${activities.toLocaleString()} activities${scheduleRevision.label ? ` · ${scheduleRevision.label}` : ''}${
-                baselineLocked && scheduleRevision.baselinedAt
-                  ? ` · locked ${new Date(scheduleRevision.baselinedAt).toLocaleDateString()}`
-                  : ''
-              }`
+            ? scheduleState === 'staged'
+              ? // Imported, not in force: its activities are the revision's
+                // own, none is active — "0 activities" would misstate it.
+                `Imported${scheduleRevision.label ? ` · ${scheduleRevision.label}` : ''} · waiting for activation`
+              : `${activities.toLocaleString()} activities${scheduleRevision.label ? ` · ${scheduleRevision.label}` : ''}${
+                  baselineLocked && scheduleRevision.baselinedAt
+                    ? ` · locked ${new Date(scheduleRevision.baselinedAt).toLocaleDateString()}`
+                    : ''
+                }`
             : activities > 0
               ? 'No revision — import or generate one to review and baseline'
               : 'Generate or import a schedule'
@@ -732,16 +746,18 @@ export function ControlsStrip({
       />
       <Figure
         label='Critical activities'
-        value={criticalActivities.toLocaleString()}
-        truth='derived'
+        value={criticalWaiting ? '—' : criticalActivities.toLocaleString()}
+        truth={criticalWaiting ? 'none' : 'derived'}
         basis={
-          criticalUnmappedWithheld
-            ? `on the critical path · ${summary.criticalUnmappedReason ?? 'Mapping details unavailable to you'}`
-            : criticalUnmapped != null && criticalUnmapped > 0
-              ? `${criticalUnmapped.toLocaleString()} without an approved allocation`
-              : 'on the critical path'
+          criticalWaiting
+            ? criticalWaitingText
+            : criticalUnmappedWithheld
+              ? `on the critical path · ${summary.criticalUnmappedReason ?? 'Mapping details unavailable to you'}`
+              : criticalUnmapped != null && criticalUnmapped > 0
+                ? `${criticalUnmapped.toLocaleString()} without an approved allocation`
+                : 'on the critical path'
         }
-        tone={criticalUnmapped != null && criticalUnmapped > 0 ? 'review' : 'neutral'}
+        tone={!criticalWaiting && criticalUnmapped != null && criticalUnmapped > 0 ? 'review' : 'neutral'}
         testId='uat-controls-figure-critical'
         onClick={linkTo(TARGETS.critical)}
       />

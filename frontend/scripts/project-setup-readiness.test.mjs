@@ -109,6 +109,50 @@ assert.ok(
 ].forEach((copy) => {
   assert.ok(wizard.includes(copy), `setup wizard shows ${copy}`)
 })
+// R5-4: the headline's three schedule states. The engine says which state
+// the schedule is in and writes the entries; the screens show its words and
+// never put a count beside a schedule that is not active.
+const schema = read('src/features/projects/data/schema.ts')
+const guideStrip = read('src/features/projects/components/setup-guide/setup-readiness-strip.tsx')
+assert.ok(
+  schema.includes("export type ProjectSetupScheduleState = 'none' | 'staged' | 'active'"),
+  'the readiness type names the three schedule states'
+)
+;['scheduleState?: ProjectSetupScheduleState', 'criticalUnmappedWaiting?: boolean', 'waiting?: boolean'].forEach(
+  (copy) => {
+    assert.ok(schema.includes(copy), `the readiness type carries ${copy}`)
+  }
+)
+;[
+  'summary.scheduleState',
+  'summary.criticalUnmappedWaiting',
+  "scheduleState === 'none' || scheduleState === 'staged'",
+  "value={criticalWaiting ? '—' : criticalActivities.toLocaleString()}",
+  "truth={criticalWaiting ? 'none' : 'derived'}",
+  "'Waiting for active schedule'",
+  'waiting for activation',
+].forEach((copy) => {
+  assert.ok(strip.includes(copy), `controls strip follows the schedule state: ${copy}`)
+})
+assert.ok(
+  !strip.includes('value={criticalActivities.toLocaleString()}'),
+  'the critical figure is never shown unconditionally: no count while no schedule is active'
+)
+;[
+  [guideStrip, 'setup guide strip'],
+  [wizard, 'setup wizard headline'],
+].forEach(([source, name]) => {
+  assert.ok(
+    source.includes("data-waiting={entry.waiting ? 'true' : undefined}") && source.includes('data-tone={entry.tone}'),
+    `${name} marks the engine's waiting entry and its tone`
+  )
+  // The value shown is the engine's own, whatever the state.
+  assert.ok(source.includes('{entry.value}'), `${name} shows the engine's value`)
+  assert.ok(
+    !/criticalUnmappedActivities|scheduleState/.test(source),
+    `${name} computes nothing of its own from the schedule state`
+  )
+})
 // §19: one Project Controls group inside the project, built from the
 // sidebar's group data, with the entries that open other modules carrying
 // their target; the module bar keeps it beside the schedule.

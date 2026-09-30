@@ -598,6 +598,194 @@ test('the import previews show the dry run on screen and write nothing', async (
   expect(countProjectRows(org!.orgId, projectId), 'still nothing written').toEqual(before)
 })
 
+// ── The three schedule states (owner decision R5-4) ─────────────────────────
+
+const WAITING_FOR_ACTIVE_SCHEDULE = 'Waiting for active schedule'
+
+test('the headline tells no schedule, a staged schedule and an active schedule apart — and never counts on a schedule that is not active', async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(300_000)
+  const email = `live-pc8guide-r54-${crypto.randomUUID()}@octapm-live.test`
+  const projectId = await withApi(async (client) => {
+    if (!org) org = await registerLiveOrg(client, 'pc8guide')
+    const project = await createProject(client, org.adminToken, `Headline states ${Date.now()}`)
+    // A member whose own template sets the BOQ tool to none on this project.
+    const memberId = await addMember(client, org, { name: 'No BOQ Planner R5-4', email, role: 'planning_eng' })
+    const joined = await apiJson(client, 'post', `/projects/${project}/team`, {
+      token: org.adminToken,
+      data: { userId: memberId },
+    })
+    expect(joined.status, JSON.stringify(joined.body?.error)).toBeLessThan(300)
+    const template = await apiJson(client, 'post', '/permissions/templates', {
+      token: org.adminToken,
+      data: { name: `No BOQ planner R5-4 ${Date.now()}`, baseRole: 'planning_eng', tools: [{ module: 'boq', level: 'none' }] },
+    })
+    expect(template.status, JSON.stringify(template.body?.error)).toBe(201)
+    const applied = await apiJson(client, 'put', `/projects/${project}/team/${memberId}/permissions`, {
+      token: org.adminToken,
+      data: { templateId: template.body!.data!.id },
+    })
+    expect(applied.status, JSON.stringify(applied.body?.error)).toBe(200)
+    // A priced row, unmapped throughout: on the active schedule both
+    // critical activities have no approved allocation.
+    await post(client, project, '/boq/items', { code: '1.1', description: 'Excavation', quantity: 12, unit: 'm3', rate: 100 }, 201)
+    return project
+  })
+  const base = `/o/${org!.segment}/projects/${projectId}`
+
+  await page.routeWebSocket(/socket\.io/, () => {})
+  await signInForm(page, org!.adminEmail)
+  const memberContext = await browser.newContext()
+  try {
+    const memberPage = await memberContext.newPage()
+    await memberPage.routeWebSocket(/socket\.io/, () => {})
+    await signInForm(memberPage, email, LIVE_PASSWORD)
+
+    const guideEntry = (view: Page, key: string) => view.getByTestId(`setup-guide-strip-${key}`)
+    const cardEntry = (view: Page, key: string) => view.getByTestId(`uat-setup-headline-${key}`)
+    const figure = (view: Page) => view.getByTestId('uat-controls-figure-critical')
+    const open = async (view: Page) => {
+      await openGuide(view, base)
+      // The Setup Readiness card's own line, when this browser kept it collapsed.
+      const expand = view.getByTestId('uat-setup-readiness-expand')
+      if (await expand.isVisible().catch(() => false)) await expand.click()
+      await expect(view.getByTestId('uat-setup-headline')).toBeVisible({ timeout: 30_000 })
+    }
+    /**
+     * No active schedule: the critical entry waits, in the engine's words, on
+     * the guide's strip, the readiness card's line and the controls tile —
+     * no count, no zero, no done tone, and nothing said to be withheld.
+     */
+    const expectWaiting = async (view: Page, who: string) => {
+      for (const shown of [guideEntry(view, 'critical_unmapped'), cardEntry(view, 'critical_unmapped')]) {
+        await expect(shown, who).toContainText(`Critical unmapped activities${WAITING_FOR_ACTIVE_SCHEDULE}`)
+        await expect(shown, who).toHaveAttribute('data-waiting', 'true')
+        await expect(shown, who).toHaveAttribute('data-tone', 'neutral')
+        await expect(shown, who).not.toContainText(/\d/)
+      }
+      await expect(guideEntry(view, 'critical_unmapped'), who).toHaveAttribute('data-value', WAITING_FOR_ACTIVE_SCHEDULE)
+      await expect(guideEntry(view, 'critical_unmapped'), who).not.toHaveAttribute('data-withheld', 'true')
+      await expect(view.getByTestId('setup-guide-strip-critical_unmapped-withheld'), who).toHaveCount(0)
+      await expect(view.getByTestId('uat-setup-headline-critical_unmapped-withheld'), who).toHaveCount(0)
+      await expect(view.getByTestId('uat-controls-figure-critical-value'), who).toHaveText('—')
+      await expect(view.getByTestId('uat-controls-figure-critical-truth'), who).toHaveText('no figure')
+      await expect(view.getByTestId('uat-controls-figure-critical-basis'), who).toContainText(WAITING_FOR_ACTIVE_SCHEDULE)
+      await expect(figure(view), who).toHaveAttribute('data-tone', 'neutral')
+      await expect(figure(view), who).not.toContainText(/\d/)
+    }
+    /** The member's mapping share stays withheld in every state. */
+    const expectMappingWithheld = async (view: Page) => {
+      await expect(guideEntry(view, 'mapping')).toHaveAttribute('data-withheld', 'true')
+      await expect(guideEntry(view, 'mapping')).toHaveAttribute('data-value', '—')
+      await expect(view.getByTestId('setup-guide-strip-mapping-withheld')).toHaveText('(Mapping details unavailable to you)')
+      await expect(guideEntry(view, 'unmapped_quantity')).toHaveCount(0)
+      await expect(guideEntry(view, 'unmapped_boq')).toHaveCount(0)
+    }
+    const views: Array<[string, Page]> = [
+      ['pm', page],
+      ['member', memberPage],
+    ]
+
+    // ── No schedule: "No schedule yet", not a failed import.
+    for (const [who, view] of views) {
+      await open(view)
+      for (const shown of [guideEntry(view, 'schedule_imported'), cardEntry(view, 'schedule_imported')]) {
+        await expect(shown, who).toContainText('ScheduleNo schedule yet')
+        await expect(shown, who).toHaveAttribute('data-tone', 'blocked')
+      }
+      await expectWaiting(view, `no schedule / ${who}`)
+    }
+    await expectMappingWithheld(memberPage)
+    await expectStripIsEngine(page, projectId)
+    await expect(page.getByTestId('uat-controls-schedule')).toHaveText('No schedule')
+
+    // ── Imported and staged — a draft, then under review, then approved:
+    // the import reads complete at each, and nothing is counted.
+    const revisionId = await withApi(async (client) => {
+      const imported = await client.post(`${API}/projects/${projectId}/import/xer`, {
+        headers: { authorization: `Bearer ${org!.adminToken}` },
+        multipart: { file: { name: 'states.xer', mimeType: 'application/octet-stream', buffer: Buffer.from(XER) } },
+      })
+      const body = await imported.json()
+      expect(imported.status(), JSON.stringify(body?.error)).toBe(201)
+      return body.data.revisionId as string
+    })
+    const expectStaged = async (label: string) => {
+      for (const [who, view] of views) {
+        await open(view)
+        for (const shown of [guideEntry(view, 'schedule_imported'), cardEntry(view, 'schedule_imported')]) {
+          await expect(shown, `${label} / ${who}`).toContainText('Schedule importedPASS (waiting for activation)')
+          await expect(shown, `${label} / ${who}`).toHaveAttribute('data-tone', 'info')
+        }
+        await expectWaiting(view, `${label} / ${who}`)
+        // The tile names the import, not "0 activities".
+        const tile = view.getByTestId('uat-controls-schedule-tile')
+        await expect(tile, `${label} / ${who}`).toContainText('waiting for activation')
+        await expect(tile, `${label} / ${who}`).not.toContainText('0 activities')
+      }
+      await expectMappingWithheld(memberPage)
+      await expectStripIsEngine(page, projectId)
+    }
+    await expectStaged('staged draft')
+    await withApi(async (client) => {
+      for (const step of ['submit-review', 'approve']) {
+        await post(client, projectId, `/schedule/revisions/${revisionId}/${step}`, {})
+      }
+    })
+    await expectStaged('staged approved')
+
+    // ── Active: the PM reads the count the engine assessed; the member is
+    // told the mapping's details are withheld — no count, not "waiting".
+    await withApi((client) => post(client, projectId, `/schedule/revisions/${revisionId}/activate`, { mappings: [] }))
+    const engine = await engineHeadline(projectId)
+    expect(engine.find((entry) => entry.key === 'critical_unmapped')?.value).toBe('2')
+
+    await open(page)
+    for (const shown of [guideEntry(page, 'schedule_imported'), cardEntry(page, 'schedule_imported')]) {
+      await expect(shown).toContainText('Schedule importedPASS')
+      await expect(shown).not.toContainText('waiting for activation')
+      await expect(shown).toHaveAttribute('data-tone', 'done')
+    }
+    for (const shown of [guideEntry(page, 'critical_unmapped'), cardEntry(page, 'critical_unmapped')]) {
+      await expect(shown).toContainText('Critical unmapped activities2')
+      await expect(shown).toHaveAttribute('data-tone', 'review')
+      await expect(shown).not.toHaveAttribute('data-waiting', 'true')
+    }
+    await expect(page.getByTestId('uat-controls-figure-critical-value')).toHaveText('2')
+    await expect(page.getByTestId('uat-controls-figure-critical-truth')).toHaveText('derived')
+    await expect(page.getByTestId('uat-controls-figure-critical-basis')).toContainText('2 without an approved allocation')
+    await expectStripIsEngine(page, projectId)
+
+    await open(memberPage)
+    for (const shown of [guideEntry(memberPage, 'schedule_imported'), cardEntry(memberPage, 'schedule_imported')]) {
+      await expect(shown).toContainText('Schedule importedPASS')
+      await expect(shown).not.toContainText('waiting for activation')
+    }
+    for (const [shown, reason] of [
+      [guideEntry(memberPage, 'critical_unmapped'), memberPage.getByTestId('setup-guide-strip-critical_unmapped-withheld')],
+      [cardEntry(memberPage, 'critical_unmapped'), memberPage.getByTestId('uat-setup-headline-critical_unmapped-withheld')],
+    ] as const) {
+      await expect(shown).toContainText('Critical unmapped activities—')
+      await expect(shown).toHaveAttribute('data-tone', 'neutral')
+      await expect(shown).not.toHaveAttribute('data-waiting', 'true')
+      await expect(shown).not.toContainText(/\d/)
+      await expect(shown).not.toContainText(WAITING_FOR_ACTIVE_SCHEDULE)
+      await expect(reason).toHaveText('(Mapping details unavailable to you)')
+    }
+    await expect(guideEntry(memberPage, 'critical_unmapped')).toHaveAttribute('data-withheld', 'true')
+    // The critical activities are the schedule's and the member's; how many
+    // of them are unmapped is not.
+    await expect(memberPage.getByTestId('uat-controls-figure-critical-value')).toHaveText('2')
+    await expect(memberPage.getByTestId('uat-controls-figure-critical-basis')).toContainText('Mapping details unavailable to you')
+    await expect(figure(memberPage)).not.toContainText('without an approved allocation')
+    await expectMappingWithheld(memberPage)
+  } finally {
+    await memberContext.close()
+  }
+})
+
 // ── The withheld view ───────────────────────────────────────────────────────
 
 test('a member without BOQ access sees the guide with the mapping withheld: "—" with the reason, never zero', async ({
@@ -636,19 +824,26 @@ test('a member without BOQ access sees the guide with the mapping withheld: "—
   const pmHeadline = await engineHeadline(projectId)
   expect(pmHeadline.find((entry) => entry.key === 'unmapped_quantity')?.value).toBe('12 m3')
   expect(pmHeadline.find((entry) => entry.key === 'unmapped_boq')).toBeTruthy()
-  // The member's answer withholds them: mapping and critical unmapped are
-  // "—" and withheld, the bill's quantity and value are left out.
+  // The member's answer withholds them: the mapping share is "—" and
+  // withheld, the bill's quantity and value are left out. This project has
+  // no schedule, so the critical-unmapped entry is waiting for one (R5-4) —
+  // for the member as for the PM, with no count; its withholding on an
+  // active schedule is the three-states test above.
   const memberHeadline = await withApi(async (client) => {
     const readiness = await apiJson(client, 'get', `/projects/${projectId}/setup-readiness`, { token: memberToken })
     expect(readiness.status).toBe(200)
-    return (readiness.body!.data as { summary: { headline: Array<Headline & { withheld?: boolean; reason?: string }> } })
-      .summary.headline
+    return (readiness.body!.data as {
+      summary: { headline: Array<Headline & { withheld?: boolean; reason?: string; waiting?: boolean }> }
+    }).summary.headline
   })
-  const withheldKeys = ['mapping', 'critical_unmapped']
+  const withheldKeys = ['mapping']
   for (const key of withheldKeys) {
     const entry = memberHeadline.find((row) => row.key === key)
     expect(entry, key).toMatchObject({ value: '—', withheld: true })
   }
+  const memberCritical = memberHeadline.find((row) => row.key === 'critical_unmapped')
+  expect(memberCritical).toMatchObject({ value: WAITING_FOR_ACTIVE_SCHEDULE, waiting: true })
+  expect(memberCritical?.withheld).toBeUndefined()
   expect(memberHeadline.find((row) => row.key === 'unmapped_quantity')).toBeUndefined()
   expect(memberHeadline.find((row) => row.key === 'unmapped_boq')).toBeUndefined()
 
@@ -664,6 +859,11 @@ test('a member without BOQ access sees the guide with the mapping withheld: "—
     await expect(shown).toHaveAttribute('data-value', '—')
     await expect(page.getByTestId(`setup-guide-strip-${key}-withheld`)).toHaveText('(Mapping details unavailable to you)')
   }
+  await expect(page.getByTestId('setup-guide-strip-critical_unmapped')).toHaveAttribute('data-waiting', 'true')
+  await expect(page.getByTestId('setup-guide-strip-critical_unmapped')).toHaveAttribute(
+    'data-value',
+    WAITING_FOR_ACTIVE_SCHEDULE,
+  )
   await expect(page.getByTestId('setup-guide-strip-unmapped_quantity')).toHaveCount(0)
   await expect(page.getByTestId('setup-guide-strip-unmapped_boq')).toHaveCount(0)
   // Nothing withheld reads as zero.

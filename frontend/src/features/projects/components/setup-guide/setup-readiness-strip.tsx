@@ -11,6 +11,12 @@ import type { ProjectSetupHeadlineEntry } from '../../data/schema'
  * critical unmapped) reads "—" with the server's reason, never zero, and an
  * entry the engine left out (the bill's quantities and value, for a viewer
  * who may not read the BOQ) is not shown at all.
+ *
+ * The schedule entries follow the engine's three states (R5-4): "Schedule
+ * No schedule yet", "Schedule imported PASS (waiting for activation)" for a
+ * staged revision, PASS / FAIL for an active one — and "Critical unmapped
+ * activities" is a count only on an active schedule; until then the engine
+ * says "Waiting for active schedule" (data-waiting), and so does the strip.
  */
 export function SetupReadinessStrip({ entries }: { entries: ProjectSetupHeadlineEntry[] }) {
   if (entries.length === 0) return null
@@ -26,7 +32,9 @@ export function SetupReadinessStrip({ entries }: { entries: ProjectSetupHeadline
           className='flex items-center gap-1'
           data-testid={`setup-guide-strip-${entry.key}`}
           data-value={entry.value}
+          data-tone={entry.tone}
           data-withheld={entry.withheld ? 'true' : undefined}
+          data-waiting={entry.waiting ? 'true' : undefined}
         >
           {index > 0 && (
             <span aria-hidden className='text-muted-foreground'>
