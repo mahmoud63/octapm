@@ -38,7 +38,9 @@
  * - the BOQ item's base-only commitment figure is baseCommitmentValue, "Base
  *   commitment value (excluding approved variations)" (R5-3): an approved
  *   commitment change order moves the activity's canonical committed cost
- *   (recomputeCommitted, unchanged) and never that figure;
+ *   (recomputeCommitted, unchanged) and never that figure; an SOV line on a
+ *   commitment that is not executed or closed (a draft, a void one) is in
+ *   neither — not in the figure, not in its list;
  * - another organisation's ids answer exactly as a random id does (404).
  *
  * Everything lives in throwaway "LiveTest <uuid>" organisations, dropped
@@ -201,6 +203,27 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
         },
       },
     });
+    // Commitments that post nothing: a draft and a void one, each with an SOV
+    // line naming row A and activity X. Neither is "on executed/closed
+    // commitments", so neither may reach the base commitment value, its list
+    // or X's committed cost.
+    for (const [number, status, amount] of [[2, "draft", 70], [3, "void", 110]]) {
+      await prisma.commitment.create({
+        data: {
+          orgId: live.org.id,
+          projectId: project.id,
+          number,
+          ref: `SC-PC5-${tag}-${status}`,
+          title: `LiveTest PC-5 ${status} subcontract`,
+          status,
+          lines: {
+            create: [
+              { orgId: live.org.id, projectId: project.id, lineNumber: 1, description: `Slabs (${status})`, boqItemId: rows.A.id, activityId: acts.X.id, qty: 10, rate: amount / 10, amount },
+            ],
+          },
+        },
+      });
+    }
     // The certified writer of CostRecord.committed, as an executed commitment's own transition calls it.
     await commitmentService.recomputeCommitted({ orgId: live.org.id, projectId: project.id });
     await prisma.ipcItem.create({
@@ -289,6 +312,25 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     expect(detail.sections.commitments.baseCommitmentValue.basis).toMatch(/^Base commitment value \(excluding approved variations\): /);
     expect(detail.sections.commitments.baseCommitmentValue.basis).toMatch(/approved commitment change orders are not included/);
     expect(detail.sections.commitments).not.toHaveProperty("committed");
+    // "…on executed/closed commitments": the draft (70) and the void (110)
+    // commitments' lines name this row too, and count for nothing — 900, not
+    // 970, 1,010 or 1,080 — and are not listed.
+    const namingRowA = await prisma.commitmentSovLine.findMany({
+      where: { projectId: project.id, boqItemId: rows.A.id },
+      select: { amount: true, commitment: { select: { status: true } } },
+    });
+    expect(namingRowA.map((line) => [line.commitment.status, toMoneyNumber(line.amount)]).sort((a, b) => a[1] - b[1])).toEqual([
+      ["draft", 70],
+      ["void", 110],
+      ["executed", 360],
+      ["executed", 540],
+    ]);
+    expect(commitmentService.POSTING_STATUSES).toEqual(["executed", "closed"]);
+    expect(detail.sections.commitments.lines.total).toBe(2);
+    expect(detail.sections.commitments.lines.items.map((line) => [line.commitment.status, line.amount]).sort((a, b) => a[1] - b[1])).toEqual([
+      ["executed", 360],
+      ["executed", 540],
+    ]);
     expect(detail.sections.changes.changeOrders.total).toBe(2);
 
     // The linked activities, each linked back with its schedule and progress.
