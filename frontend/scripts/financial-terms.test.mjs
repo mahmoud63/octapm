@@ -76,5 +76,15 @@ if (!/baseCommitmentValue: fig\(/.test(serviceSection) || /\bcommitted:/.test(se
 if (!serviceSection.includes(`"${BASE_LABEL}:`)) failR53(`the server's basis does not open with "${BASE_LABEL}"`)
 const spec = readFileSync(join(root, '..', '..', 'backend', 'src', 'openapi', 'spec.js'), 'utf8')
 if (!spec.includes(`baseCommitmentValue, the \\"${BASE_LABEL}\\"`)) failR53('the OpenAPI BOQ item detail does not name baseCommitmentValue')
+// ... and the design document that describes the BOQ Detail payload: the
+// figure is described by its name there too, never as a plain "committed"
+// (R5-3: the name goes wherever the figure is shown or described).
+const designDoc = readFileSync(join(root, '..', '..', 'docs', 'project-controls', 'OCTAPM_BOQ_SCHEDULE_INTEGRATION.md'), 'utf8')
+const boqDetailStart = designDoc.indexOf('**BOQ Detail** (`GET ')
+const boqDetailTable = boqDetailStart < 0 ? '' : designDoc.slice(boqDetailStart, designDoc.indexOf('**Activity Detail** (`GET ', boqDetailStart))
+if (!boqDetailTable) failR53('OCTAPM_BOQ_SCHEDULE_INTEGRATION.md has no BOQ Detail table')
+if (!boqDetailTable.includes(`"${BASE_LABEL}"`)) failR53(`the design document's BOQ Detail table does not name the figure "${BASE_LABEL}"`)
+if (!boqDetailTable.includes('executed/closed commitments') || !boqDetailTable.includes('not the committed cost')) failR53('the design document does not say what the base commitment value counts and that it is not the committed cost')
+if (/\bcommitted \(SOV lines/i.test(boqDetailTable)) failR53('the design document still describes the BOQ item figure as "committed (SOV lines …)"')
 
-console.log(`financial terms: ${files.length} feature files carry no bare Committed label; vocabulary names executed commitments and PO value apart; the BOQ item's base commitment value is named as such (R5-3)`)
+console.log(`financial terms: ${files.length} feature files carry no bare Committed label; vocabulary names executed commitments and PO value apart; the BOQ item's base commitment value is named as such, in the design document too (R5-3)`)
