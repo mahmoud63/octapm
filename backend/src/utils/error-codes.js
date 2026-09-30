@@ -702,6 +702,18 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "not_found",
     message: "No allocations carry this import batch id",
   },
+  // PC-5 detail views: the two records they open (another organisation's id
+  // answers exactly as a missing one does).
+  BOQ_ITEM_NOT_FOUND: {
+    status: 404,
+    category: "not_found",
+    message: "BOQ item not found",
+  },
+  ACTIVITY_NOT_FOUND: {
+    status: 404,
+    category: "not_found",
+    message: "Activity not found",
+  },
   // ENT-6 personal workspaces and conversion
   PERSONAL_WORKSPACE_CONVERT_REQUIRED: {
     status: 409,

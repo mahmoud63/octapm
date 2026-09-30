@@ -11,7 +11,8 @@ const activityService = require('../services/activity.service');
 // those who may read the BOQ, its budget for those who may read the BOQ or
 // the cost module (§12); every answer that carries an activity goes through
 // utils/boq-figures, and a BOQ reader's is the service's own.
-const { boqFigureAccess, withheldActivity } = require('../utils/boq-figures');
+const { boqFigureAccess, withheldActivity, withheldActivityDetail } = require('../utils/boq-figures');
+const controlsDetailService = require('../services/controls-detail.service');
 const progressService = require('../services/progress.service');
 
 const VALID_CATEGORIES = [
@@ -176,6 +177,27 @@ router.get(
       activityId: req.params.id,
     });
     return sendSuccess(res, withheldActivity(result, boqFigureAccess(req)));
+  }),
+);
+
+// GET /projects/:projectId/activities/:id/detail — the activity's whole
+// story (PC-5): structure, BOQ allocations, progress, cost, certification,
+// changes, procurement, quality, constraints, documents and history, each
+// section gated by the module that owns it (controls-detail.service); what
+// it says of the bill goes to BOQ readers only (utils/boq-figures). Another
+// organisation's activity, or a missing one, is 404 ACTIVITY_NOT_FOUND.
+router.get(
+  '/:id/detail',
+  requirePermission('schedule', 'read'),
+  [param('id').isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    const detail = await controlsDetailService.getActivityDetail({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      activityId: req.params.id,
+      ...controlsDetailService.detailReader(req),
+    });
+    return sendSuccess(res, withheldActivityDetail(detail, boqFigureAccess(req)));
   }),
 );
 

@@ -1936,4 +1936,7 @@ module.exports = {
   issueIpcInvoice,
   recordIpcPayment,
   releaseIpcRetention,
+  // The authorised-quantity rule of the certification cap, read by the PC-5
+  // detail views so there is one formula for it (controls-detail.service).
+  getApprovedVariationAllowance,
 };

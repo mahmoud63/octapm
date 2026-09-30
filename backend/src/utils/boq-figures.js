@@ -1066,6 +1066,77 @@ const withheldAllocationLinks = (record, access = FULL_ACCESS) => {
   return { ...record, allocationLinks: record.allocationLinks.map(withheldAllocationLink) };
 };
 
+// ─── PC-5: the BOQ item and activity detail views ─────────────────────────
+//
+// GET /boq/items/:itemId/detail is admitted on boq:read, so its reader may
+// have every figure: withheldBoqItemDetail hands a BOQ reader the service's
+// answer untouched (the same object) and anyone else the row's id only.
+//
+// GET /activities/:id/detail is admitted on schedule:read. What it says of
+// the bill is withheld from a member who may not read the BOQ — cost readers
+// included (E1): the mapping section whole (the allocations, the mapped
+// quantity, the activity's budget and generated budget, the EV worked from
+// them), certification (worked from the allocations), the approval history
+// of the allocations, a change order that reaches the activity only through
+// an allocation link (its presence says the activity is mapped), and the BOQ
+// row a change order's or a PO line's link points at. Omitted, never zeroed:
+// the section is { allowed: false, module: "boq", reason }.
+const DETAIL_BOQ_LINK_KEYS = ["allocationId", "boqItemId", "boqItemHref"];
+
+const withheldBoqItemDetail = (detail, access = FULL_ACCESS) => {
+  if (access.boq || !detail || typeof detail !== "object") return detail;
+  return { kind: detail.kind, id: detail.id, withheld: true, reason: MAPPING_DETAILS_WITHHELD };
+};
+
+const boqSectionWithheld = (reason = MAPPING_DETAILS_WITHHELD) => ({ allowed: false, module: "boq", reason });
+
+const withheldActivityDetail = (detail, access = FULL_ACCESS) => {
+  if (access.boq || !detail || typeof detail !== "object" || !detail.sections) return detail;
+  const sections = { ...detail.sections };
+  if (has(sections, "mapping")) sections.mapping = boqSectionWithheld();
+  if (sections.certification && sections.certification.allowed) sections.certification = boqSectionWithheld(IPC_LINES_WITHHELD);
+
+  const droppedOrderIds = new Set();
+  const orders = sections.changes && sections.changes.changeOrders;
+  if (orders && Array.isArray(orders.items)) {
+    const kept = [];
+    for (const order of orders.items) {
+      const matchedBy = Array.isArray(order.matchedBy) ? order.matchedBy : [];
+      if (matchedBy.length && matchedBy.every((how) => how === "allocation_link")) {
+        droppedOrderIds.add(order.id);
+        continue;
+      }
+      kept.push({
+        ...withoutKeys(order, ["matchedBy"]),
+        allocationLinks: mapList(order.allocationLinks, (link) => {
+          const keys = DETAIL_BOQ_LINK_KEYS.filter((key) => has(link, key));
+          return keys.length ? { ...withoutKeys(link, keys), boqWithheld: { keys, reason: ALLOCATION_LINK_WITHHELD } } : link;
+        }),
+      });
+    }
+    sections.changes = {
+      ...sections.changes,
+      changeOrders: { ...orders, items: kept, total: Math.max(0, (orders.total || 0) - droppedOrderIds.size) },
+    };
+  }
+
+  if (sections.procurement && Array.isArray(sections.procurement.poLines)) {
+    sections.procurement = {
+      ...sections.procurement,
+      poLines: sections.procurement.poLines.map((line) => withoutKeys(line, ["boqItemId", "boqItemHref"])),
+    };
+  }
+
+  if (sections.history && Array.isArray(sections.history.events)) {
+    const events = sections.history.events.filter(
+      (event) => event.kind !== "allocation_approval" && !(event.kind === "change_order_link" && droppedOrderIds.has(event.recordId)),
+    );
+    const removed = sections.history.events.length - events.length;
+    sections.history = { ...sections.history, events, total: Math.max(0, (sections.history.total || 0) - removed) };
+  }
+  return { ...detail, sections };
+};
+
 module.exports = {
   ALLOCATION_LINK_BOQ_KEYS,
   ALLOCATION_LINK_WITHHELD,
@@ -1113,4 +1184,7 @@ module.exports = {
   withheldWbsList,
   withheldWorkspaceDashboard,
   withoutBoqFigures,
+  // PC-5 detail views
+  withheldActivityDetail,
+  withheldBoqItemDetail,
 };
