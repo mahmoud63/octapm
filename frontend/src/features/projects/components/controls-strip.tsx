@@ -17,6 +17,7 @@ import { useCostSummary } from '@/features/cost/hooks/use-cost'
 import { eacStatement, useForecast } from '@/features/forecast/hooks/use-forecast'
 import { useProjectHealth } from '../hooks/use-project-health'
 import type { ProjectSetupReadiness, ProjectSetupTarget } from '../data/schema'
+import { noProgressActivitiesBadge, scheduleTileDetail } from '../lib/schedule-tile'
 
 type Props = {
   projectId: string
@@ -478,6 +479,16 @@ export function ControlsStrip({
   // critical activities themselves are the schedule's and stay.
   const criticalUnmappedWithheld = Boolean(summary.criticalUnmappedWithheld)
   const criticalUnmapped = criticalUnmappedWithheld ? null : (summary.criticalUnmappedActivities ?? null)
+  // No schedule, or one imported and not activated yet (R5-4): nothing has
+  // been assessed, so neither figure is a fact — the tile reads "—" with the
+  // server's words ("Waiting for active schedule"), never 0. The state is
+  // the engine's; an answer that does not say it is read as before.
+  const scheduleState = summary.scheduleState ?? null
+  const criticalWaiting =
+    Boolean(summary.criticalUnmappedWaiting) || scheduleState === 'none' || scheduleState === 'staged'
+  const criticalWaitingText = summary.criticalUnmappedWaiting
+    ? (summary.criticalUnmappedReason ?? 'Waiting for active schedule')
+    : 'Waiting for active schedule'
   const unmappedRows = counts && !coverageWithheld ? counts.unmapped + counts.partial : null
   const overAllocatedRows = coverageWithheld ? null : (counts?.over ?? null)
   const dataQuality = forecast?.dataQuality ?? []
@@ -589,17 +600,11 @@ export function ControlsStrip({
         valueTestId='uat-controls-schedule'
         tone={scheduleTone}
         badge={baselineLocked ? 'Baseline locked' : gates.baseline.ready ? 'Baseline ready' : 'No baseline'}
-        detail={
-          scheduleRevision
-            ? `${activities.toLocaleString()} activities${scheduleRevision.label ? ` · ${scheduleRevision.label}` : ''}${
-                baselineLocked && scheduleRevision.baselinedAt
-                  ? ` · locked ${new Date(scheduleRevision.baselinedAt).toLocaleDateString()}`
-                  : ''
-              }`
-            : activities > 0
-              ? 'No revision — import or generate one to review and baseline'
-              : 'Generate or import a schedule'
-        }
+        // The engine's state and its verdict on a staged revision, in the
+        // tile's words (lib/schedule-tile.ts): "waiting for activation" only
+        // for a revision the engine passes — a rejected or empty one is said
+        // as that, as the headline beside it says FAIL.
+        detail={scheduleTileDetail(readiness)}
         action={scheduleRevision || activities === 0 ? 'Open revisions' : 'Create a revision'}
         onClick={linkTo(TARGETS.revisions)}
         testId='uat-controls-schedule-tile'
@@ -612,7 +617,7 @@ export function ControlsStrip({
         tone={methodsTone}
         badge={
           !methods || methods.total === 0
-            ? 'No activities'
+            ? noProgressActivitiesBadge(readiness)
             : methods.configured >= methods.total
               ? 'Configured'
               : 'Defaults in use'
@@ -732,16 +737,18 @@ export function ControlsStrip({
       />
       <Figure
         label='Critical activities'
-        value={criticalActivities.toLocaleString()}
-        truth='derived'
+        value={criticalWaiting ? '—' : criticalActivities.toLocaleString()}
+        truth={criticalWaiting ? 'none' : 'derived'}
         basis={
-          criticalUnmappedWithheld
-            ? `on the critical path · ${summary.criticalUnmappedReason ?? 'Mapping details unavailable to you'}`
-            : criticalUnmapped != null && criticalUnmapped > 0
-              ? `${criticalUnmapped.toLocaleString()} without an approved allocation`
-              : 'on the critical path'
+          criticalWaiting
+            ? criticalWaitingText
+            : criticalUnmappedWithheld
+              ? `on the critical path · ${summary.criticalUnmappedReason ?? 'Mapping details unavailable to you'}`
+              : criticalUnmapped != null && criticalUnmapped > 0
+                ? `${criticalUnmapped.toLocaleString()} without an approved allocation`
+                : 'on the critical path'
         }
-        tone={criticalUnmapped != null && criticalUnmapped > 0 ? 'review' : 'neutral'}
+        tone={!criticalWaiting && criticalUnmapped != null && criticalUnmapped > 0 ? 'review' : 'neutral'}
         testId='uat-controls-figure-critical'
         onClick={linkTo(TARGETS.critical)}
       />

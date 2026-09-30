@@ -25,6 +25,7 @@ import {
 } from '@/features/controls/lib/detail-format'
 import { useBoqItemDetail } from '@/features/controls/hooks/use-controls-detail'
 import { useProject } from '@/features/projects/hooks/use-projects'
+import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import type { BoqItemDetail, ControlsStructure } from '../data/schema'
 
 /**
@@ -296,7 +297,14 @@ function BoqDetailBody({
       <DetailSection title='Commitments' testId='boq-detail-commitments'>
         {sections.commitments.allowed ? (
           <>
-            <FigureRow label='Committed on this row' figure={sections.commitments.committed} format='money' currency={currency} testId='boq-detail-committed' />
+            <FigureRow
+              label={FINANCIAL_TERMS.baseCommitmentValue.label}
+              hint={FINANCIAL_TERMS.baseCommitmentValue.hint}
+              figure={sections.commitments.baseCommitmentValue}
+              format='money'
+              currency={currency}
+              testId='boq-detail-base-commitment-value'
+            />
             <ul className='space-y-1 text-sm'>
               {sections.commitments.lines.items.map((line) => {
                 const commitment = line.commitment as { id: string; number?: string; title?: string; href?: string }

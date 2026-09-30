@@ -41,6 +41,14 @@ export const FINANCIAL_TERMS = {
     label: 'Executed commitments',
     hint: 'Value of executed subcontracts and purchase orders',
   },
+  // A BOQ item's share of executed contracts before any approved commitment
+  // change order (owner decision R5-3): a partial figure, never called
+  // "Committed" — the committed cost on cost records and the budget register
+  // includes approved variations.
+  baseCommitmentValue: {
+    label: 'Base commitment value (excluding approved variations)',
+    hint: 'Executed or closed commitment SOV lines naming this BOQ item — approved commitment change orders are not included',
+  },
   manualCommitted: {
     label: 'Committed (manual)',
     hint: 'A figure typed on the budget line; replaced by executed commitments once any exist',

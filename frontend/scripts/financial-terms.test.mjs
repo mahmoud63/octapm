@@ -25,6 +25,10 @@ const BARE = [
   />\s*Committed\s*</,
   /label=['"]Committed \(executed\)['"]/,
   /\[['"]Committed \(executed\)['"],/,
+  // Any literal label that opens with "Committed" ("Committed on this row"):
+  // the only committed labels are FINANCIAL_TERMS entries (R5-3).
+  /label=\{?['"`]Committed\b/,
+  />\s*Committed on this row\s*</,
 ]
 const offenders = []
 for (const file of files) {
@@ -44,4 +48,43 @@ for (const needle of ["executedCommitments", "poValue", "actualCost", "certified
     process.exit(1)
   }
 }
-console.log(`financial terms: ${files.length} feature files carry no bare Committed label; vocabulary names executed commitments and PO value apart`)
+// R5-3: the BOQ item's base-only commitment figure (executed/closed SOV lines
+// naming the row, no approved commitment change orders) is never called
+// "Committed". The vocabulary names it, the BOQ drawer shows it by that name
+// from the renamed key, the server's basis and the API document say the same.
+const BASE_LABEL = 'Base commitment value (excluding approved variations)'
+const failR53 = (message) => {
+  console.error(`R5-3 base commitment value: ${message}`)
+  process.exit(1)
+}
+if (!terms.includes('baseCommitmentValue') || !terms.includes(`'${BASE_LABEL}'`)) failR53(`financial-terms.ts has no baseCommitmentValue entry labelled '${BASE_LABEL}'`)
+const drawerPath = join(root, 'features', 'boq', 'components', 'boq-detail-drawer.tsx')
+const drawer = readFileSync(drawerPath, 'utf8')
+const commitmentsSection = drawer.slice(drawer.indexOf("testId='boq-detail-commitments'"), drawer.indexOf("testId='boq-detail-commitments-withheld'"))
+if (!commitmentsSection) failR53('boq-detail-drawer.tsx has no commitments section')
+if (!/label=\{FINANCIAL_TERMS\.baseCommitmentValue\.label\}/.test(commitmentsSection)) failR53('the BOQ drawer does not label the figure with FINANCIAL_TERMS.baseCommitmentValue')
+if (!/figure=\{sections\.commitments\.baseCommitmentValue\}/.test(commitmentsSection)) failR53('the BOQ drawer does not read sections.commitments.baseCommitmentValue')
+if (/Committed/.test(commitmentsSection.replace(/FINANCIAL_TERMS\.\w+/g, ''))) failR53('the BOQ drawer\'s commitments section still carries a "Committed" label')
+if (/commitments\.committed\b/.test(drawer)) failR53('the BOQ drawer still reads commitments.committed')
+const schema = readFileSync(join(root, 'features', 'boq', 'data', 'schema.ts'), 'utf8')
+const schemaCommitments = schema.slice(schema.indexOf('commitments: z.union'), schema.indexOf('changes: z.union'))
+if (!/baseCommitmentValue: ControlsFigureSchema/.test(schemaCommitments) || /\bcommitted:/.test(schemaCommitments)) failR53('schema.ts commitments section is not { baseCommitmentValue }')
+const service = readFileSync(join(root, '..', '..', 'backend', 'src', 'services', 'controls-detail.service.js'), 'utf8')
+const serviceStart = service.indexOf('sections.commitments = {')
+const serviceSection = serviceStart < 0 ? '' : service.slice(serviceStart, service.indexOf('lines: capped(', serviceStart))
+if (!/baseCommitmentValue: fig\(/.test(serviceSection) || /\bcommitted:/.test(serviceSection)) failR53('the server does not send the BOQ item figure as baseCommitmentValue')
+if (!serviceSection.includes(`"${BASE_LABEL}:`)) failR53(`the server's basis does not open with "${BASE_LABEL}"`)
+const spec = readFileSync(join(root, '..', '..', 'backend', 'src', 'openapi', 'spec.js'), 'utf8')
+if (!spec.includes(`baseCommitmentValue, the \\"${BASE_LABEL}\\"`)) failR53('the OpenAPI BOQ item detail does not name baseCommitmentValue')
+// ... and the design document that describes the BOQ Detail payload: the
+// figure is described by its name there too, never as a plain "committed"
+// (R5-3: the name goes wherever the figure is shown or described).
+const designDoc = readFileSync(join(root, '..', '..', 'docs', 'project-controls', 'OCTAPM_BOQ_SCHEDULE_INTEGRATION.md'), 'utf8')
+const boqDetailStart = designDoc.indexOf('**BOQ Detail** (`GET ')
+const boqDetailTable = boqDetailStart < 0 ? '' : designDoc.slice(boqDetailStart, designDoc.indexOf('**Activity Detail** (`GET ', boqDetailStart))
+if (!boqDetailTable) failR53('OCTAPM_BOQ_SCHEDULE_INTEGRATION.md has no BOQ Detail table')
+if (!boqDetailTable.includes(`"${BASE_LABEL}"`)) failR53(`the design document's BOQ Detail table does not name the figure "${BASE_LABEL}"`)
+if (!boqDetailTable.includes('executed/closed commitments') || !boqDetailTable.includes('not the committed cost')) failR53('the design document does not say what the base commitment value counts and that it is not the committed cost')
+if (/\bcommitted \(SOV lines/i.test(boqDetailTable)) failR53('the design document still describes the BOQ item figure as "committed (SOV lines …)"')
+
+console.log(`financial terms: ${files.length} feature files carry no bare Committed label; vocabulary names executed commitments and PO value apart; the BOQ item's base commitment value is named as such, in the design document too (R5-3)`)

@@ -35,6 +35,12 @@
  *   every row, not over the first page (more than 50 change orders);
  * - the activity's EV is the allocation summary's, on amounts where a second
  *   formula over the total would round differently;
+ * - the BOQ item's base-only commitment figure is baseCommitmentValue, "Base
+ *   commitment value (excluding approved variations)" (R5-3): an approved
+ *   commitment change order moves the activity's canonical committed cost
+ *   (recomputeCommitted, unchanged) and never that figure; an SOV line on a
+ *   commitment that is not executed or closed (a draft, a void one) is in
+ *   neither — not in the figure, not in its list;
  * - another organisation's ids answer exactly as a random id does (404).
  *
  * Everything lives in throwaway "LiveTest <uuid>" organisations, dropped
@@ -197,6 +203,27 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
         },
       },
     });
+    // Commitments that post nothing: a draft and a void one, each with an SOV
+    // line naming row A and activity X. Neither is "on executed/closed
+    // commitments", so neither may reach the base commitment value, its list
+    // or X's committed cost.
+    for (const [number, status, amount] of [[2, "draft", 70], [3, "void", 110]]) {
+      await prisma.commitment.create({
+        data: {
+          orgId: live.org.id,
+          projectId: project.id,
+          number,
+          ref: `SC-PC5-${tag}-${status}`,
+          title: `LiveTest PC-5 ${status} subcontract`,
+          status,
+          lines: {
+            create: [
+              { orgId: live.org.id, projectId: project.id, lineNumber: 1, description: `Slabs (${status})`, boqItemId: rows.A.id, activityId: acts.X.id, qty: 10, rate: amount / 10, amount },
+            ],
+          },
+        },
+      });
+    }
     // The certified writer of CostRecord.committed, as an executed commitment's own transition calls it.
     await commitmentService.recomputeCommitted({ orgId: live.org.id, projectId: project.id });
     await prisma.ipcItem.create({
@@ -280,8 +307,30 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     expect(detail.sections.money.earnedValue.basis).toMatch(/not the official reporting-cutoff EV/);
     expect(detail.sections.certification.certifiedQuantity.value).toBe(30);
     expect(detail.sections.certification.certifiedAmount.value).toBe(item.certifiedValue);
-    expect(detail.sections.commitments.committed.value).toBe(900);
-    expect(detail.sections.commitments.committed.basis).toMatch(/excludes variations/);
+    // R5-3: the base-only figure has its own name and key — no "committed" on the BOQ item.
+    expect(detail.sections.commitments.baseCommitmentValue).toMatchObject({ value: 900, truth: "derived" });
+    expect(detail.sections.commitments.baseCommitmentValue.basis).toMatch(/^Base commitment value \(excluding approved variations\): /);
+    expect(detail.sections.commitments.baseCommitmentValue.basis).toMatch(/approved commitment change orders are not included/);
+    expect(detail.sections.commitments).not.toHaveProperty("committed");
+    // "…on executed/closed commitments": the draft (70) and the void (110)
+    // commitments' lines name this row too, and count for nothing — 900, not
+    // 970, 1,010 or 1,080 — and are not listed.
+    const namingRowA = await prisma.commitmentSovLine.findMany({
+      where: { projectId: project.id, boqItemId: rows.A.id },
+      select: { amount: true, commitment: { select: { status: true } } },
+    });
+    expect(namingRowA.map((line) => [line.commitment.status, toMoneyNumber(line.amount)]).sort((a, b) => a[1] - b[1])).toEqual([
+      ["draft", 70],
+      ["void", 110],
+      ["executed", 360],
+      ["executed", 540],
+    ]);
+    expect(commitmentService.POSTING_STATUSES).toEqual(["executed", "closed"]);
+    expect(detail.sections.commitments.lines.total).toBe(2);
+    expect(detail.sections.commitments.lines.items.map((line) => [line.commitment.status, line.amount]).sort((a, b) => a[1] - b[1])).toEqual([
+      ["executed", 360],
+      ["executed", 540],
+    ]);
     expect(detail.sections.changes.changeOrders.total).toBe(2);
 
     // The linked activities, each linked back with its schedule and progress.
@@ -365,6 +414,58 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     for (const { path, figure } of figuresOf(detail.sections)) {
       if (!figure.notAvailable) expect([path, TRUTHS.has(figure.truth), typeof figure.basis]).toEqual([path, true, "string"]);
     }
+  });
+
+  it("R5-3: an approved commitment change order moves the activity's committed cost, never the BOQ item's base commitment value", async () => {
+    const readBoth = async () => {
+      const [activity, item] = await Promise.all([api.get(at(`/activities/${acts.X.id}/detail`), auth()), api.get(at(`/boq/items/${rows.A.id}/detail`), auth())]);
+      expect([activity.status, activity.body?.error, item.status, item.body?.error]).toEqual([200, undefined, 200, undefined]);
+      const record = await prisma.costRecord.findFirst({ where: { projectId: project.id, activityId: acts.X.id }, select: { committed: true } });
+      return { activityCommitted: activity.body.data.sections.cost.committed, base: item.body.data.sections.commitments.baseCommitmentValue, record: toMoneyNumber(record.committed) };
+    };
+    // The canonical total the certified writer keeps: SOV lines and approved CCO lines naming X on executed/closed commitments.
+    const canonicalOnX = async () => {
+      const sov = await prisma.commitmentSovLine.findMany({ where: { activityId: acts.X.id, commitment: { projectId: project.id, status: { in: commitmentService.POSTING_STATUSES } } }, select: { amount: true } });
+      const ccos = await prisma.commitmentChangeOrder.findMany({ where: { projectId: project.id, status: "approved", commitment: { status: { in: commitmentService.POSTING_STATUSES } } }, select: { linesJson: true } });
+      const ccoLines = ccos.flatMap((order) => (Array.isArray(order.linesJson) ? order.linesJson : [])).filter((line) => line?.activityId === acts.X.id);
+      return [...sov.map((line) => toMoneyNumber(line.amount)), ...ccoLines.map((line) => Number(line.amount))].reduce((sum, amount) => Math.round((sum + amount) * 100) / 100, 0);
+    };
+
+    // Before: the activity's committed is the canonical 540 it always was (unchanged by R5-3).
+    const before = await readBoth();
+    expect(before.activityCommitted).toMatchObject({ value: 540, truth: "derived" });
+    expect(before.activityCommitted.value).toBe(before.record);
+    expect(before.activityCommitted.value).toBe(await canonicalOnX());
+    expect(before.base.value).toBe(900);
+
+    const commitment = await prisma.commitment.findFirst({ where: { projectId: project.id, number: 1 }, select: { id: true } });
+    const cco = await prisma.commitmentChangeOrder.create({
+      data: {
+        orgId: live.org.id,
+        projectId: project.id,
+        commitmentId: commitment.id,
+        number: 1,
+        ref: `CCO-PC5-R53-${Date.now()}`,
+        title: "LiveTest R5-3 approved variation",
+        status: "approved",
+        value: 25,
+        approvedAt: new Date("2026-02-07T12:00:00.000Z"),
+        linesJson: [{ description: "Extra slab edge", activityId: acts.X.id, amount: 25 }],
+      },
+    });
+    try {
+      await commitmentService.recomputeCommitted({ orgId: live.org.id, projectId: project.id });
+      // After: the canonical total includes the approved variation; the BOQ item's base value does not move.
+      const after = await readBoth();
+      expect(after.activityCommitted.value).toBe(565);
+      expect(after.activityCommitted.value).toBe(after.record);
+      expect(after.activityCommitted.value).toBe(await canonicalOnX());
+      expect(after.base).toEqual(before.base);
+    } finally {
+      await prisma.commitmentChangeOrder.delete({ where: { id: cco.id } });
+      await commitmentService.recomputeCommitted({ orgId: live.org.id, projectId: project.id });
+    }
+    expect((await readBoth()).activityCommitted.value).toBe(540);
   });
 
   it("every authorised quantity is the IPC cap's approved-variation rule, per allocation, as the single-pair query stated it", async () => {

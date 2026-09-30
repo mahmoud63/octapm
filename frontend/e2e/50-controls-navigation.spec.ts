@@ -288,6 +288,13 @@ test('a BOQ item leads to its activities and back, an activity to its BOQ rows a
   const forecast = page.getByTestId('boq-detail-money-forecast')
   await expect(forecast.locator('[data-not-available="PC-7"]')).toHaveText('Not available yet (PC-7)')
   await expect(forecast.locator('[data-value]')).toHaveCount(0)
+  // R5-3: the row's base-only commitment figure carries its own name, never "Committed".
+  const base = page.getByTestId('boq-detail-base-commitment-value')
+  // The label itself (the server's basis beneath it opens with the same words).
+  await expect(base.locator('p').first()).toHaveText('Base commitment value (excluding approved variations)')
+  await expect(base.locator('[data-value]')).toHaveAttribute('data-value', '540')
+  // Case-sensitive: the section title "Commitments" and the basis's "committed cost" do not match.
+  await expect(page.getByTestId('boq-detail-commitments')).not.toContainText('Committed')
   await expect(drawer.getByTestId(`boq-detail-change-order-${changeOrderId}`)).toBeVisible()
   // Its two activities.
   await expect(drawer.getByTestId(`boq-detail-activity-${acts.Y}`)).toContainText('N5Y')
@@ -300,6 +307,9 @@ test('a BOQ item leads to its activities and back, an activity to its BOQ rows a
   await expect(page.getByTestId('activity-detail-mapped-qty')).toContainText('110')
   await expect(page.getByTestId('activity-detail-progress-source')).toContainText('manual')
   await expect(page.getByTestId('activity-detail-pct')).toContainText('40%')
+  // The activity's committed cost stays the canonical executed-commitments figure (R5-3 changes only the BOQ row's name).
+  await expect(page.getByTestId('activity-detail-committed')).toContainText('Executed commitments')
+  await expect(page.getByTestId('activity-detail-committed').locator('[data-value]')).toHaveAttribute('data-value', '540')
   await expect(page.getByTestId('activity-detail-generated-budget').locator('[data-truth="projection"]')).toBeVisible()
   await expect(drawer.getByTestId(`activity-detail-change-order-${changeOrderId}`)).toBeVisible()
   // A BOQ reader is told nothing is withheld.

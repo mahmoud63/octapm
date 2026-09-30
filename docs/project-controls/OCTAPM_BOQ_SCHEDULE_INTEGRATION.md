@@ -37,8 +37,8 @@ Both are record drawers opened from any grid, written to the URL with the existi
 |---|---|---|
 | Header: code, description, unit (typed + normalised), qty, rate, amount, section, WBS node, location, cost code, mapping rule, revision, baseline lock | `BoqItem` + new keys | source |
 | Activities: each allocation (qty, amount, weight, status, actor), activity dates, pct, EV | `buildAllocationSummary` per item (`activity-boq-allocation.service.js:286-474`) | source (allocation) / derived (EV) |
-| Quantities: allocated, installed (approved quantity entries), certified (`IpcItemProgressLink.certifiedQuantity`), paid (pro-rata), committed (SOV lines), forecast | progress doc §4-§6 | derived / projection |
-| Money: allocated, earned, certified, committed (SOV lines naming this item), actual (ledger entries with `boqItemId` via `StockTransaction`/SOV lineage), forecast | ledger + summary | derived / projection |
+| Quantities: allocated, installed (approved quantity entries), certified (`IpcItemProgressLink.certifiedQuantity`), paid (pro-rata), base commitment quantity (the quantity on each SOV line naming this item on executed/closed commitments, excluding approved variations; listed per line under the base commitment value), forecast | progress doc §4-§6 | derived / projection |
+| Money: allocated, earned, certified, "Base commitment value (excluding approved variations)" (Σ SOV lines naming this item on executed/closed commitments; approved commitment change orders are not included, so it is not the committed cost — owner decision R5-3, `sections.commitments.baseCommitmentValue`), actual (ledger entries with `boqItemId` via `StockTransaction`/SOV lineage), forecast | ledger + summary | derived / projection |
 | Changes: `ChangeOrderAllocationLink`, `ChangeEventLine` naming this item's activities | change doc | source |
 | History: `AuditEvent` for the item and its allocations | audit service | source |
 | Exceptions on this item | exception engine | derived |

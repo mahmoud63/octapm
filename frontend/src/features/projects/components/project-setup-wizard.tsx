@@ -61,6 +61,10 @@ const statusMeta = {
 const countLabels: Record<string, string> = {
   boqItems: 'BOQ',
   totalBoqAmount: 'BOQ value',
+  // A staged revision's own activities (R5-4): the engine sends this in
+  // place of the active schedule's counts while none is active, so a card
+  // never reads "Activities: 0" beside an import that reads complete.
+  revisionActivities: 'Revision activities',
   activeActivities: 'Activities',
   progressActivities: 'Progress acts',
   criticalActivities: 'Critical',
@@ -645,7 +649,14 @@ function Headline({ entries }: { entries: ProjectSetupHeadlineEntry[] }) {
       aria-label='Setup status'
     >
       {entries.map((entry, index) => (
-        <li key={entry.key} className='flex items-center gap-1' data-testid={`uat-setup-headline-${entry.key}`}>
+        <li
+          key={entry.key}
+          className='flex items-center gap-1'
+          data-testid={`uat-setup-headline-${entry.key}`}
+          data-tone={entry.tone}
+          // No active schedule yet (R5-4): the engine's words, never a count.
+          data-waiting={entry.waiting ? 'true' : undefined}
+        >
           {index > 0 && <span aria-hidden className='text-muted-foreground'>·</span>}
           <span className='text-muted-foreground'>{entry.label}</span>
           <span
