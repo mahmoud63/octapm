@@ -275,6 +275,12 @@ export const ControlsFigureSchema = z.object({
   derivedFrom: z.array(z.record(z.string(), z.unknown())).optional(),
   notAvailable: z.boolean().optional(),
   wave: z.string().optional(),
+  // A cost record's stored forecast (owner decision R5-2): where it came from
+  // — entered, the server's initial default, or null when not recorded — and
+  // whether the server withheld a default from a member who may not read the
+  // BOQ (its basis is then the reason).
+  forecastSource: z.enum(['entered', 'default']).nullable().optional(),
+  withheld: z.boolean().optional(),
 })
 
 export const ControlsSectionDeniedSchema = z.object({

@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
 
+export type CostForecastSource = 'entered' | 'default'
+
 export interface CostRecord {
   id: string
   activityId: string
@@ -20,7 +22,17 @@ export interface CostRecord {
   committed: number
   actual: number
   actualThroughDate: string | null
-  forecast: number
+  // The stored forecast and where it came from (owner decision R5-2): entered
+  // by a caller, the server's initial default (the larger of budget and
+  // actual when it was set), or null — not recorded, a row older than the
+  // column. The server alone sets the source. A DEFAULT forecast is built
+  // from the record's budget, so the server omits it (forecastWithheld, with
+  // its reason) for a member who may not read the BOQ.
+  forecast?: number
+  forecastSource?: CostForecastSource | null
+  forecastBasis?: string
+  forecastWithheld?: boolean
+  forecastWithheldReason?: string
   /** committed is the executed commitments' figure on this activity — the API refuses a typed one (CX21-493). */
   committedDerived?: boolean
   updatedAt: string
@@ -59,7 +71,10 @@ export interface CostSummary {
     optimistic?: number
     mostLikely?: number
     pessimistic?: number
-    /** Estimate at completion: actual to date + cost to complete (Phase 22A). */
+    /**
+     * The cost records' projected final cost: actual to date + cost to
+     * complete (Phase 22A). Not the earned-value EAC (revised budget ÷ CPI).
+     */
     basis?: 'estimate_at_completion'
     actual?: number
     toComplete?: number
@@ -88,10 +103,27 @@ export interface CostSummary {
       committed: string
       actual: string
       forecast: string
+      /** "Projected final cost (cost records)" — never "EAC" (R5-2). */
+      labels?: { forecast?: string }
       derivedFrom: Record<string, string>
     }
-    records?: { forecast: string; derivedFrom: Record<string, string> }
-    eac?: { truth: string; derivedFrom: string }
+    records?: {
+      forecast: string
+      derivedFrom: Record<string, string>
+      /** The basis text of each forecast source (R5-2). */
+      basis?: { entered: string; default: string; notRecorded: string }
+    }
+    eac?: { truth: string; label?: string; derivedFrom: string }
+  }
+  /**
+   * How many records' forecasts were entered, are the initial default, or
+   * were not recorded (R5-2) — the forecast total mixes them and says so.
+   */
+  forecastSources?: {
+    entered: number
+    default: number
+    notRecorded: number
+    total: number
   }
   activityBudgetsWithheld?: boolean
   activityBudgetsReason?: string
