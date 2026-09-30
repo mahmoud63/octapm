@@ -1415,19 +1415,27 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     // made with its activity's approved allocation as its budget, then
     // edited. No forecast is set, so its estimate at completion is that
     // budget — in the summary's category, its totals and its EAC.
+    //
+    // "No forecast is set" is a write that sends none (owner decision R5-2).
+    // These writes used to send `forecast: 0`, which meant "unset" when this
+    // test was written; R5-2 makes a supplied 0 an ENTERED forecast of 0,
+    // which the projection now counts as 0 — it would no longer follow the
+    // budget. Sent without one, the record carries the DEFAULT forecast: the
+    // allocation itself (10031.81, the secret), withheld from the controller
+    // in every answer below, and not counted as a forecast by the summary.
     const controller = as(members.costController);
-    const upsert = () => api.post(at(`/cost/activity/${withRecord}`), { committed: 0, forecast: 0 }, controller);
+    const upsert = () => api.post(at(`/cost/activity/${withRecord}`), { committed: 0 }, controller);
     const firstUpsert = await upsert();
     expect([firstUpsert.status, firstUpsert.body?.error]).toEqual([201, undefined]);
     const recordId = firstUpsert.body.data.id;
-    const stored = await prisma.costRecord.findUnique({ where: { id: recordId }, select: { budget: true, activityId: true } });
-    expect([Number(stored.budget), stored.activityId]).toEqual([10031.81, withRecord]);
-    const patch = () => api.request("PATCH", at(`/cost/${recordId}`), { body: { forecast: 0 }, headers: controller });
+    const stored = await prisma.costRecord.findUnique({ where: { id: recordId }, select: { budget: true, activityId: true, forecast: true, forecastSource: true } });
+    expect([Number(stored.budget), stored.activityId, Number(stored.forecast), stored.forecastSource]).toEqual([10031.81, withRecord, 10031.81, "default"]);
+    const patch = () => api.request("PATCH", at(`/cost/${recordId}`), { body: { committed: 0 }, headers: controller });
     const firstPatch = await patch();
     expect([firstPatch.status, firstPatch.body?.error]).toEqual([200, undefined]);
     // A BOQ reader's write is answered with the record exactly as written.
-    const readerPatch = await api.request("PATCH", at(`/cost/${recordId}`), { body: { forecast: 0 }, headers: auth() });
-    expect([readerPatch.status, readerPatch.body?.error, readerPatch.body.data.budget]).toEqual([200, undefined, 10031.81]);
+    const readerPatch = await api.request("PATCH", at(`/cost/${recordId}`), { body: { committed: 0 }, headers: auth() });
+    expect([readerPatch.status, readerPatch.body?.error, readerPatch.body.data.budget, readerPatch.body.data.forecast, readerPatch.body.data.forecastSource]).toEqual([200, undefined, 10031.81, 10031.81, "default"]);
 
     const answers = [
       ...differentialAnswers(),
@@ -1519,7 +1527,9 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       ["upsert (after the move)", secondUpsert],
       ["patch (after the move)", secondPatch],
     ]) {
-      expect([name, response.text.includes(SECRET), keyPaths(response.body.data, new Set(["budget", "generatedBudget"]))]).toEqual([name, false, []]);
+      expect([name, response.text.includes(SECRET), keyPaths(response.body.data, new Set(["budget", "generatedBudget", "forecast"]))]).toEqual([name, false, []]);
+      // The default forecast is the allocation: withheld, and said to be.
+      expect([name, response.body.data.forecastSource, response.body.data.forecastWithheld]).toEqual([name, "default", true]);
     }
     expect(unstampedWrite(secondUpsert)).toEqual(unstampedWrite(firstUpsert));
     expect(unstampedWrite(secondPatch)).toEqual(unstampedWrite(firstPatch));

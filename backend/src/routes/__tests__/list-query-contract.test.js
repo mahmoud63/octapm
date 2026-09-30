@@ -167,6 +167,9 @@ describe('list API query contracts', () => {
         sortBy: 'actual',
         sortDir: 'desc',
       }),
+      // The caller's BOQ access goes with the query: it decides the order on
+      // sortBy=forecast (R5-2 — a withheld default is not sorted by).
+      boqAccess: { boq: expect.any(Boolean), budget: expect.any(Boolean) },
     });
   });
 

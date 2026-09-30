@@ -5,6 +5,8 @@
  */
 const {
   FORECAST_BASIS,
+  isAmountShaped,
+  projectedFinalCost,
   isForecastSupplied,
   suppliedForecast,
   defaultForecast,
@@ -21,6 +23,7 @@ const {
   withheldReportRow,
   reportDefaultForecastColumns,
   rowHasDefaultForecast,
+  costRecordsByVisibleForecast,
   DEFAULT_FORECAST_WITHHELD,
 } = require("../boq-figures");
 
@@ -44,11 +47,15 @@ describe("R5-2 — a supplied forecast is a forecast, falsy or not", () => {
   });
 
   it("an invalid supplied value is a business error — Number(x) || 0 would have stored 0", () => {
-    for (const value of ["lots", "", "-1", -1, Number.NaN, Number.POSITIVE_INFINITY, "1.234", {}]) {
+    for (const value of ["lots", "", "-1", -1, Number.NaN, Number.POSITIVE_INFINITY, "1.234", {}, [7], [0], ["12.5"], [], true, false]) {
       expect(() => suppliedForecast(value)).toThrow(expect.objectContaining({ status: 400, code: "COST_RECORD_MONEY_INVALID" }));
       expect(() => forecastOnCreate({ payloadForecast: value, budget: 100 })).toThrow(expect.objectContaining({ status: 400 }));
       expect(() => forecastOnUpdate({ payloadForecast: value, existing: { forecastSource: "default", budget: 1 } })).toThrow(expect.objectContaining({ status: 400 }));
     }
+    // An amount is text, a number or a Decimal — [7] reads as "7" to a text
+    // check and was then stored as 0, marked entered.
+    for (const value of [[7], [0], ["12.5"], {}, true]) expect(isAmountShaped(value)).toBe(false);
+    for (const value of [0, "0", 12.5, "12.50"]) expect(isAmountShaped(value)).toBe(true);
     // What the former `Number(payload.forecast) || 0` made of the same values.
     expect(Number("lots") || 0).toBe(0);
     expect(Number("") || 0).toBe(0);
@@ -87,7 +94,9 @@ describe("R5-2 — an edit without a forecast", () => {
 describe("R5-2 — honest basis labels", () => {
   it("names each source, and a not-recorded one as such", () => {
     expect(forecastBasisOf("entered")).toBe("Entered forecast");
-    expect(forecastBasisOf("default")).toBe("Default forecast: the larger of budget and actual when it was set (no forecast was entered)");
+    expect(forecastBasisOf("default")).toBe(
+      "Default forecast: the larger of the budget and the actual cost as they stood when it was set; it does not follow them afterwards (no forecast was entered)",
+    );
     expect(forecastBasisOf(null)).toBe("Stored forecast (its source was not recorded)");
     expect(forecastBasisOf("typed-by-client")).toBe(FORECAST_BASIS.notRecorded);
     expect(withForecastBasis({ id: "r", forecast: 5, forecastSource: "default" })).toMatchObject({ forecastSource: "default", forecastBasis: FORECAST_BASIS.default });
@@ -96,6 +105,81 @@ describe("R5-2 — honest basis labels", () => {
 
   it("counts the mix", () => {
     expect(forecastSourceMix([{ forecastSource: "entered" }, { forecastSource: "default" }, { forecastSource: "default" }, { forecastSource: null }, {}])).toEqual({ entered: 1, default: 2, notRecorded: 2, total: 5 });
+  });
+});
+
+describe("R5-2 — the projected final cost counts an entered forecast as entered, 0 included", () => {
+  it("an entered 0 counts as 0 — it used to be replaced by the budget; a default or not-recorded 0 still falls back", () => {
+    expect(projectedFinalCost({ forecast: 0, forecastSource: "entered", budget: 10000, actual: 0 })).toBe(0);
+    expect(projectedFinalCost({ forecast: "0", forecastSource: "entered", budget: 10000, actual: 0 })).toBe(0);
+    expect(projectedFinalCost({ forecast: 0, forecastSource: "default", budget: 10000, actual: 0 })).toBe(10000);
+    expect(projectedFinalCost({ forecast: 0, forecastSource: null, budget: 10000, actual: 0 })).toBe(10000);
+    expect(projectedFinalCost({ forecast: 0, budget: 10000, actual: 0 })).toBe(10000);
+  });
+
+  it("an entered forecast is never counted below what the record has cost: the actual counts, not the budget", () => {
+    expect(projectedFinalCost({ forecast: 0, forecastSource: "entered", budget: 10000, actual: 2000 })).toBe(2000);
+    expect(projectedFinalCost({ forecast: 5000, forecastSource: "entered", budget: 10000, actual: 6000 })).toBe(6000);
+    expect(projectedFinalCost({ forecast: 5000, forecastSource: "entered", budget: 10000, actual: 1000 })).toBe(5000);
+    expect(projectedFinalCost({ forecast: 25000, forecastSource: "entered", budget: 10000, actual: 1000 })).toBe(25000);
+  });
+
+  it("a DEFAULT is not counted as a forecast: the record counts the larger of its budget and actual as they are now, whatever the stored default says", () => {
+    // Set when the allocation was 10,000; the allocation has since moved away.
+    expect(projectedFinalCost({ forecast: 10000, forecastSource: "default", budget: 0, actual: 0 })).toBe(0);
+    // Set by a first posting of 500 worked from a budget of 0 (before the creators read the allocation).
+    expect(projectedFinalCost({ forecast: 500, forecastSource: "default", budget: 10000, actual: 500 })).toBe(10000);
+    expect(projectedFinalCost({ forecast: 500, forecastSource: "default", budget: 10000, actual: 800 })).toBe(10000);
+    // Set at 0 by an import, the allocation approved afterwards.
+    expect(projectedFinalCost({ forecast: 0, forecastSource: "default", budget: 10000, actual: 0 })).toBe(10000);
+    // Never below what it has cost.
+    expect(projectedFinalCost({ forecast: 10000, forecastSource: "default", budget: 10000, actual: 12000 })).toBe(12000);
+    expect(projectedFinalCost({ forecast: 55555, forecastSource: "default", budget: 10000, actual: 2000 })).toBe(10000);
+  });
+
+  it("a not-recorded forecast counts exactly as before R5-2 — every existing row has a NULL source, so no existing project's total moves", () => {
+    // Number(x) > 0 && >= actual ? x : max(budget, actual) — the rule at 1f27e04.
+    const before = ({ forecast, budget, actual }) => (forecast > 0 && forecast >= actual ? forecast : Math.max(budget, actual));
+    for (const forecastSource of [null, undefined, "typed-by-client"]) {
+      for (const figures of [
+        { forecast: 0, budget: 10000, actual: 0 },
+        { forecast: 500, budget: 10000, actual: 500 },
+        { forecast: 500, budget: 10000, actual: 800 },
+        { forecast: 12000, budget: 10000, actual: 3000 },
+        { forecast: 7777, budget: 0, actual: 0 },
+        { forecast: 0, budget: 0, actual: 450 },
+      ]) {
+        expect([forecastSource, figures, projectedFinalCost({ ...figures, forecastSource })]).toEqual([forecastSource, figures, before(figures)]);
+      }
+    }
+  });
+});
+
+describe("R5-2 — the register's order on sortBy=forecast for a member who may not read the BOQ", () => {
+  const keys = (hidden) => [
+    { id: "d1", forecast: hidden, forecastSource: "default" },
+    { id: "e2", forecast: 40000, forecastSource: "entered" },
+    { id: "b-default", forecast: 1, forecastSource: "default" },
+    { id: "e1", forecast: 20000, forecastSource: "entered" },
+    { id: "legacy", forecast: 500, forecastSource: null },
+    { id: "e0", forecast: 0, forecastSource: "entered" },
+    { id: "e1-twin", forecast: 20000, forecastSource: "entered" },
+  ];
+  const ids = (rows) => rows.map((row) => row.id);
+
+  it("orders the visible forecasts by figure and puts the withheld (default) rows after them, by id — in both directions", () => {
+    expect(ids(costRecordsByVisibleForecast(keys(31337.77), "asc"))).toEqual(["e0", "legacy", "e1", "e1-twin", "e2", "b-default", "d1"]);
+    expect(ids(costRecordsByVisibleForecast(keys(31337.77), "desc"))).toEqual(["e2", "e1-twin", "e1", "legacy", "e0", "b-default", "d1"]);
+    expect(costRecordsByVisibleForecast([], "asc")).toEqual([]);
+  });
+
+  it("no stored default moves the order: the same ids come back whatever the hidden figure is", () => {
+    for (const dir of ["asc", "desc"]) {
+      const reference = ids(costRecordsByVisibleForecast(keys(31337.77), dir));
+      for (const hidden of [0, 0.01, 19999.99, 20000, 20000.01, 39999, 40000.01, 9e9]) {
+        expect([dir, hidden, ids(costRecordsByVisibleForecast(keys(hidden), dir))]).toEqual([dir, hidden, reference]);
+      }
+    }
   });
 });
 

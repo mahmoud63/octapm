@@ -34,8 +34,13 @@ const {
   forecastOnCreate,
   forecastOnUpdate,
   forecastSourceMix,
+  isAmountShaped,
+  projectedFinalCost,
   withForecastBasis,
 } = require('../utils/cost-forecast');
+// Which order a caller who may not read the BOQ is given on sortBy=forecast:
+// decided where every BOQ withholding is (utils/boq-figures).
+const { costRecordsByVisibleForecast } = require('../utils/boq-figures');
 
 // What each figure of the cost summary is, and from what. The same words for
 // every project and reader; they describe keys, never values, so a figure
@@ -70,7 +75,7 @@ const COST_SUMMARY_TRUTH = Object.freeze({
       committed: 'Executed commitments and approved commitment change orders (commitment.service)',
       actual: 'The cost ledger (CostLedgerEntry)',
       forecast:
-        "Σ each record's projected final cost: its stored forecast (entered, default or not recorded — forecastSources counts each) when above 0 and not below actual, otherwise the larger of its budget and actual. Not the earned-value EAC (revised budget ÷ CPI)",
+        "Σ each record's projected final cost (forecastSources counts each kind). An entered forecast counts as entered — 0 included — and never below the record's actual: below it, the actual counts. A default is not counted as a forecast: the larger of the record's budget and actual, as they are now, counts. A forecast whose source was not recorded counts when above 0 and not below actual; otherwise the larger of the record's budget and actual counts. Not the earned-value EAC (revised budget ÷ CPI)",
     },
   },
   records: {
@@ -230,7 +235,43 @@ const findCostRecords = ({ projectId, query = {}, listQuery = null }) => {
   });
 };
 
-const getCostRecords = async ({ orgId, projectId, query = {} }) => {
+/**
+ * One page of the register on sortBy=forecast for a caller who may not read
+ * the BOQ: the default forecasts are withheld from that caller, so they do
+ * not take part in the order either (utils/boq-figures
+ * costRecordsByVisibleForecast). The order is worked from the three columns it
+ * needs and the page's rows are then read by id; the cursor is the last row's
+ * id, as on every other sort.
+ */
+const findCostRecordsByVisibleForecast = async ({ projectId, query, listQuery }) => {
+  const keys = await prisma.costRecord.findMany({
+    where: buildCostWhere({ projectId, query }),
+    select: { id: true, forecast: true, forecastSource: true },
+  });
+  const ordered = costRecordsByVisibleForecast(keys, listQuery.sortDir);
+  let start = 0;
+  if (listQuery.cursor) {
+    const at = ordered.findIndex((key) => key.id === listQuery.cursor);
+    // A cursor that names no row of this list ends it, as the database's does.
+    start = at < 0 ? ordered.length : at + 1;
+  }
+  const ids = ordered.slice(start, start + listQuery.limit + 1).map((key) => key.id);
+  if (!ids.length) return [];
+  const rows = await prisma.costRecord.findMany({
+    where: { projectId, id: { in: ids } },
+    include: COST_RECORD_INCLUDE,
+  });
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return ids.map((id) => byId.get(id)).filter(Boolean);
+};
+
+/**
+ * `boqAccess` is the caller's BOQ access (utils/boq-figures boqFigureAccess).
+ * It decides one thing here — the order on sortBy=forecast; what each row
+ * carries is withheld by the route, as before. A caller that passes none is
+ * treated as a BOQ reader (the service's other callers are not requests).
+ */
+const getCostRecords = async ({ orgId, projectId, query = {}, boqAccess = null }) => {
   await ensureProject({ orgId, projectId });
 
   const listQuery = normalizeListQuery(query, {
@@ -238,7 +279,10 @@ const getCostRecords = async ({ orgId, projectId, query = {} }) => {
     defaultSortBy: 'activity',
     defaultSortDir: 'asc',
   });
-  const records = await findCostRecords({ projectId, query, listQuery });
+  const forecastOrderWithheld = Boolean(boqAccess && !boqAccess.boq && listQuery.sortBy === 'forecast');
+  const records = forecastOrderWithheld
+    ? await findCostRecordsByVisibleForecast({ projectId, query, listQuery })
+    : await findCostRecords({ projectId, query, listQuery });
   const page = toCursorPage(records, listQuery.limit);
   const rows = await attachApprovedBudgets({
     projectId,
@@ -248,6 +292,17 @@ const getCostRecords = async ({ orgId, projectId, query = {} }) => {
   return {
     rows,
     pagination: page.pagination,
+    // Said, not silent: the rows whose forecast this caller is not given are
+    // not ordered by it.
+    ...(forecastOrderWithheld
+      ? {
+          sortWithheld: {
+            sortBy: 'forecast',
+            reason:
+              'Records with a default forecast are not ordered by it: they follow the others, in a fixed order. A default forecast is available only to members who may read the BOQ',
+          },
+        }
+      : {}),
   };
 };
 
@@ -336,17 +391,17 @@ const getCostSummary = async ({ orgId, projectId }) => {
  *
  * Labelled "Projected final cost (cost records)", never "the EAC": the EAC is
  * the earned-value report's revised budget ÷ CPI (owner decision D2), which
- * reads no cost record's forecast (R5-2). Unchanged by R5-2: a stored forecast
- * of 0 still falls back here, even when it was entered (label only; the
- * formula is not the follow-up's to change).
+ * reads no cost record's forecast (R5-2).
+ *
+ * R5-2: an ENTERED forecast is never read as missing because it is falsy — an
+ * entered 0 counts as 0 (never below the record's actual), where it used to be
+ * replaced by the budget. A DEFAULT is not a forecast anybody made: the record
+ * counts the larger of its budget and actual as they are now, not the default
+ * frozen when it was set. The rule is keyed on the source; a row whose source
+ * was not recorded counts exactly as before, and every existing row is one, so
+ * no existing project's total moves (utils/cost-forecast projectedFinalCost).
  */
-const estimateAtCompletion = (record) => {
-  const actual = toMoneyNumber(record.actual);
-  const forecast = toMoneyNumber(record.forecast);
-  const budget = toMoneyNumber(record.budget);
-  if (forecast > 0 && forecast >= actual) return forecast;
-  return Math.max(budget, actual);
-};
+const estimateAtCompletion = (record) => projectedFinalCost(record);
 
 /**
  * Scenarios vary only the cost to complete (EAC − actual), so they order
@@ -482,6 +537,25 @@ const assertCommittedIsTheCommitments = async ({ tx, payload, existing, projectI
  * budget, actual, its through-date and committed each have their own owner.
  * The forecast is decided apart (forecastFields), by R5-2's rules.
  */
+/**
+ * The payload as the service reads it: a money field sent as null is not
+ * supplied — as the forecast's null is, and as the route's validator treats it
+ * — so `{ budget: null }` writes nothing, where it wrote a budget of 0 and
+ * dragged a default forecast down with it. A money field that is not an
+ * amount at all (an array, an object) is refused; [7] used to be stored as 0.
+ * actualThroughDate keeps its null: that one clears the date.
+ */
+const suppliedPayload = (payload = {}) => {
+  const result = { ...payload };
+  for (const field of COST_RECORD_MONEY_FIELDS) {
+    if (result[field] === null) delete result[field];
+    else if (result[field] !== undefined && !isAmountShaped(result[field])) {
+      throw new HttpError(400, 'COST_RECORD_MONEY_INVALID', `${field} must be an amount of 0 or more`);
+    }
+  }
+  return result;
+};
+
 const suppliedCostFields = ({ payload, existing }) => {
   const data = {};
   for (const field of CATEGORY_FIELDS) {
@@ -514,10 +588,11 @@ const upsertCostRecord = async ({
   orgId,
   projectId,
   activityId,
-  payload,
+  payload: sent,
   userId = null,
   userRole = null,
 }) => {
+  const payload = suppliedPayload(sent);
   await ensureProject({ orgId, projectId });
 
   const activity = await prisma.activity.findFirst({
@@ -602,10 +677,11 @@ const updateCostRecord = async ({
   orgId,
   projectId,
   costRecordId,
-  payload,
+  payload: sent,
   userId = null,
   userRole = null,
 }) => {
+  const payload = suppliedPayload(sent);
   await ensureProject({ orgId, projectId });
 
   const found = await prisma.costRecord.findFirst({

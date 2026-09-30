@@ -176,3 +176,43 @@ describe("PC-7a 3d — a cost record never gets a forecast below 0", () => {
     expect(mockPrisma.costRecord.update).not.toHaveBeenCalled();
   });
 });
+
+// R5-2 review: null is "not supplied" for every money field, as it is for the
+// forecast; and a money field that is not an amount at all is refused.
+describe("R5-2 — a money field sent as null writes nothing; one that is not an amount is refused", () => {
+  const defaultRow = { id: "cr-1", projectId: "p1", activityId: "act-1", budget: 10000, actual: 400, committed: 250, forecast: 10000, forecastSource: "default", labour: 7, material: 0, equipment: 0, subcontract: 0, indirect: 0, overhead: 0, contingency: 0, actualThroughDate: null };
+
+  it("budget: null leaves the budget — and the default forecast hanging off it — alone; it used to write 0 and re-derive the default down", async () => {
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    for (const payload of [{ budget: null }, { budget: null, labour: null, committed: null, actual: null, forecast: null }]) {
+      mockPrisma.costRecord.findFirst.mockResolvedValue(defaultRow);
+      mockPrisma.costRecord.update.mockClear();
+      await service.updateCostRecord({ orgId: "org-1", projectId: "p1", costRecordId: "cr-1", payload });
+      expect(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data).toEqual({});
+      mockPrisma.costRecord.update.mockClear();
+      await service.upsertCostRecord({ orgId: "org-1", projectId: "p1", activityId: "act-1", payload });
+      expect(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data).toEqual({});
+    }
+    // A real budget still re-derives the default; a real 0 is a budget of 0.
+    mockPrisma.costRecord.update.mockClear();
+    await service.updateCostRecord({ orgId: "org-1", projectId: "p1", costRecordId: "cr-1", payload: { budget: 0 } });
+    expect(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data).toEqual({ budget: 0, forecast: 400, forecastSource: "default" });
+    // actualThroughDate keeps its null: that one clears the date.
+    mockPrisma.costRecord.update.mockClear();
+    await service.updateCostRecord({ orgId: "org-1", projectId: "p1", costRecordId: "cr-1", payload: { actualThroughDate: null } });
+    expect(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data).toEqual({ actualThroughDate: null });
+  });
+
+  it("an array or an object in a money field is COST_RECORD_MONEY_INVALID naming the field — [7] used to be stored as 0 — and nothing is written", async () => {
+    mockPrisma.costRecord.findFirst.mockResolvedValue(defaultRow);
+    mockPrisma.costRecord.update.mockClear();
+    mockPrisma.costRecord.create.mockClear();
+    for (const [field, value] of [["forecast", [7]], ["forecast", [0]], ["forecast", ["12.5"]], ["budget", [7]], ["labour", {}], ["committed", [0]], ["budget", true]]) {
+      const refused = expect.objectContaining({ status: 400, code: "COST_RECORD_MONEY_INVALID", message: `${field} must be an amount of 0 or more` });
+      await expect(service.updateCostRecord({ orgId: "org-1", projectId: "p1", costRecordId: "cr-1", payload: { [field]: value } })).rejects.toEqual(refused);
+      await expect(service.upsertCostRecord({ orgId: "org-1", projectId: "p1", activityId: "act-1", payload: { [field]: value } })).rejects.toEqual(refused);
+    }
+    expect(mockPrisma.costRecord.update).not.toHaveBeenCalled();
+    expect(mockPrisma.costRecord.create).not.toHaveBeenCalled();
+  });
+});

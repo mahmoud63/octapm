@@ -24,14 +24,19 @@
  * cost record use these, so one rule is written once.
  */
 const { HttpError } = require("./http-error");
-const { assertMoneyInput, toMoneyNumber } = require("./money");
+const { assertMoneyInput, isPrismaDecimal, toMoneyNumber } = require("./money");
 
 const FORECAST_SOURCES = Object.freeze({ ENTERED: "entered", DEFAULT: "default" });
 
 // The basis text every read of a cost record carries beside its forecast.
 const FORECAST_BASIS = Object.freeze({
   entered: "Entered forecast",
-  default: "Default forecast: the larger of budget and actual when it was set (no forecast was entered)",
+  // "The budget" is the one the default was worked from: the activity's
+  // approved allocation when the record was made (every creator passes it), or
+  // the budget a later edit wrote on the record. The default is a stored
+  // figure; it says so, and that it does not move with them afterwards.
+  default:
+    "Default forecast: the larger of the budget and the actual cost as they stood when it was set; it does not follow them afterwards (no forecast was entered)",
   notRecorded: "Stored forecast (its source was not recorded)",
 });
 
@@ -42,14 +47,20 @@ const MONEY_ECHO = 0.005;
 /** A forecast is supplied when the payload carries one at all — 0, "0" and "" included. */
 const isForecastSupplied = (value) => value !== undefined && value !== null;
 
+// An amount arrives as text, a number or a Decimal. Anything else (an array,
+// an object, a boolean) is not one: [7] reads as "7" to a text check, passed
+// it, and was then stored as 0 and marked entered.
+const isAmountShaped = (value) => typeof value === "string" || typeof value === "number" || isPrismaDecimal(value);
+
 /**
  * A supplied forecast as the amount to store. A value that is not an amount of
- * 0 or more (a word, "", NaN, a negative, too many decimals) is refused as a
- * business error naming the field — `Number(x) || 0` turned every one of them
- * into a stored 0 for any caller the route validator did not stand in front of.
+ * 0 or more (a word, "", NaN, a negative, too many decimals, an array, an
+ * object) is refused as a business error naming the field — `Number(x) || 0`
+ * turned every one of them into a stored 0 for any caller the route validator
+ * did not stand in front of.
  */
 const suppliedForecast = (value) => {
-  let valid = value !== "";
+  let valid = value !== "" && isAmountShaped(value);
   if (valid) {
     try {
       assertMoneyInput("forecast", value);
@@ -93,6 +104,39 @@ const forecastOnUpdate = ({ payloadForecast, existing, budget } = {}) => {
   };
 };
 
+/**
+ * What one record counts for in the cost records' projected final cost (GET
+ * /cost/summary: totals.forecast, byPhase and the scenario cards). `budget`
+ * is the record's budget as the summary reads it (its activity's approved
+ * allocation).
+ *
+ * - An ENTERED forecast counts as entered — 0 included: a supplied value is
+ *   never read as missing because it is falsy (R5-2) — and never below what
+ *   the record has already cost (then the actual counts).
+ * - A DEFAULT is not a forecast anybody made, so it is not counted as one:
+ *   the record counts the larger of its budget and its actual as they are NOW.
+ *   The stored default is that same rule frozen when it was set; trusting it
+ *   froze the projection too — a record whose allocation moved afterwards
+ *   went on counting the old one, and a record the ledger created counted its
+ *   first posting. (A record with no forecast set always followed its budget
+ *   here; a default keeps doing so.)
+ * - A forecast whose source was not recorded (NULL, a row older than the
+ *   column) is counted as it always was: the stored figure when it is above 0
+ *   and not below actual, otherwise the larger of budget and actual.
+ *
+ * Every row written before the column has a NULL source, so no existing
+ * project's figure moves.
+ */
+const projectedFinalCost = ({ forecast = 0, forecastSource = null, budget = 0, actual = 0 } = {}) => {
+  const spent = toMoneyNumber(actual ?? 0);
+  const stored = toMoneyNumber(forecast ?? 0);
+  if (forecastSource === FORECAST_SOURCES.ENTERED) return Math.max(stored, spent);
+  const unforecast = Math.max(toMoneyNumber(budget ?? 0), spent);
+  if (forecastSource === FORECAST_SOURCES.DEFAULT) return unforecast;
+  if (stored > 0 && stored >= spent) return stored;
+  return unforecast;
+};
+
 /** The basis text of a stored forecast by its source. */
 const forecastBasisOf = (source) => {
   if (source === FORECAST_SOURCES.ENTERED) return FORECAST_BASIS.entered;
@@ -126,11 +170,13 @@ const forecastSourceMix = (records = []) => {
 module.exports = {
   FORECAST_SOURCES,
   FORECAST_BASIS,
+  isAmountShaped,
   isForecastSupplied,
   suppliedForecast,
   defaultForecast,
   forecastOnCreate,
   forecastOnUpdate,
+  projectedFinalCost,
   forecastBasisOf,
   withForecastBasis,
   forecastSourceMix,

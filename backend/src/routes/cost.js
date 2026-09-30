@@ -54,14 +54,18 @@ router.get(
     validate,
   ],
   asyncHandler(async (req, res) => {
+    const access = boqFigureAccess(req);
     const result = await costService.getCostRecords({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       query: req.query,
+      // The order on sortBy=forecast is a read of the forecasts too: a caller
+      // who is not given the default ones is not given their order (R5-2).
+      boqAccess: access,
     });
     // A record's budget is its activity's approved BOQ allocation: withheld
     // from a caller who may not read the BOQ (owner decision E1).
-    return sendSuccess(res, withheldCostRecords(result, boqFigureAccess(req)));
+    return sendSuccess(res, withheldCostRecords(result, access));
   }),
 );
 

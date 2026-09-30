@@ -541,6 +541,26 @@ const withheldCostRecords = (result, access = FULL_ACCESS) => {
   return { ...result, rows: result.rows.map((record) => withheldCostRecord(record, access)) };
 };
 
+/**
+ * The cost register's order on sortBy=forecast for a caller who may not read
+ * the BOQ (GET /projects/:id/cost). A withheld figure must not be readable
+ * from where its row sorts: ordered by the stored forecast in the database, a
+ * default row's place among the entered forecasts bounded it, and a member who
+ * may edit a forecast of their own bisected it to the cent. So the rows whose
+ * forecast this caller is given (entered, or source not recorded) are ordered
+ * by it, and the rows whose forecast is withheld (the default ones) tie: they
+ * follow, in the order of their ids, whatever the direction — an order no
+ * stored figure can move (the report builder does the same over its withheld
+ * null). `keys` are { id, forecast, forecastSource }; pure.
+ */
+const costRecordsByVisibleForecast = (keys = [], sortDir = "asc") => {
+  const dir = sortDir === "desc" ? -1 : 1;
+  const byId = (a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
+  const visible = keys.filter((key) => !isDefaultForecast(key)).sort((a, b) => (Number(a.forecast) - Number(b.forecast)) * dir || byId(a, b) * dir);
+  const withheld = keys.filter(isDefaultForecast).sort(byId);
+  return [...visible, ...withheld];
+};
+
 // What the cost summary builds from the records' budgets (the approved
 // allocations of the activities with a record): each category's budget,
 // forecast (a record without a forecast counts its budget) and variance;
@@ -1458,6 +1478,7 @@ module.exports = {
   REPORT_DEFAULT_FORECAST_COLUMNS,
   reportDefaultForecastColumns,
   rowHasDefaultForecast,
+  costRecordsByVisibleForecast,
   WBS_OUTLINE_KEYS,
   boqFigureAccess,
   canReadBoq,
