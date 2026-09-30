@@ -24,8 +24,9 @@ its slip, its risk level and the critical driver). It feeds nothing else.
 
 ## 2. Method (read only)
 
-- Script: `C:\Temp\r5\census\forecast-change-impacts-census.js` (scratch,
-  not in the repository). It loads the backend in-process and builds the
+- Script: `backend/scripts/project-controls/forecast-change-impacts-census.js`
+  (moved into the repository in Round 6; the first run used the same method
+  from a scratch copy — see §6 for the command and the re-run). It loads the backend in-process and builds the
   forecast twice per project at one fixed instant (`asOf`
   2026-09-30T07:37:42.165Z):
   - **before** — `forecast.service.js` as of `06308dc` (the commit before
@@ -79,7 +80,8 @@ its slip, its risk level and the critical driver). It feeds nothing else.
 | — `0ce999f2` | +45 days, medium → high |
 | with links that do not move | 4 (`4735659e`, `5c492505` Marina Bay first build, `225d9477`, `95c188f3` archived Riverside fixture) |
 | without such links | 356 — every summary identical before and after |
-| forecast unavailable before or after | 0 |
+| no schedule (forecast not available, the same reason before and after) | 111 |
+| forecast errored before or after | 0 |
 
 No project moves without an approved change-order link. No E2E-org project
 moves (the E2E specs read projected dates from the project they create).
@@ -345,6 +347,55 @@ propagation, a pending or archived order not counted, an RFI's days not
 counted twice — is pinned by
 `backend/src/services/__live__/r5-1-forecast-change-impacts.live.test.js`,
 each convention marked there as a documented limitation.
+
+## 6. How to reproduce
+
+From `backend`, under the cross-wave database lock (it builds two forecasts
+for each of about 430 projects):
+
+```
+node C:/Temp/octapm-dblock.js acquire "<track>:census"
+node scripts/project-controls/forecast-change-impacts-census.js \
+  --as-of 2026-09-30T07:37:42.165Z --before-ref 06308dc \
+  --out <scratch>/forecast-census.json \
+  --project 0ce999f2-b175-432b-8551-20182b4fc990
+node C:/Temp/octapm-dblock.js release "<track>:census"
+```
+
+- `--as-of` fixes the instant (default now); `--before-ref` compiles that
+  ref's `forecast.service.js` in memory from `git show` (no file written) and
+  compares it with this checkout's; without it the script reports the current
+  forecast only. `--out` writes the per-project result; `--project` also
+  prints one project's approved change-order links and forecast (the trace
+  of §5).
+- It is read-only by construction: one connection, `SET SESSION
+  CHARACTERISTICS AS TRANSACTION READ ONLY` before anything runs, and
+  `SHOW transaction_read_only` must read `on` before the run, before every
+  project and after the run, or it stops with exit 2 having read nothing
+  further. (Checked by removing the `SET SESSION` line: exit 2, "the session
+  is not read-only before the run".) Organisations named `LiveTest <uuid>`
+  are excluded. It prints the §3.2 table and the appendix table.
+
+**Re-run, Round 6 (2026-09-30, this repository's script, `--as-of`
+2026-09-30T07:37:42.165Z, `--before-ref` 06308dc, after = `fu/r5-forecast-trace`,
+session read-only `on` throughout, exit 0).** The figures of §3 are
+confirmed, with two corrections:
+
+- 431 durable projects, 75 with approved impacts, 71 moving (the 70
+  certification copies +3 days low → medium, `0ce999f2` +45 medium → high),
+  4 with links that do not move, 0 moving without a link, 0 money figures
+  changed, 0 EV differences, 2 cost blocks differing only in
+  `topRisks[].impactDays`. The 427 projects present in both runs give
+  identical summaries, money and EV comparisons.
+- **Correction 1.** The E2E organisation is rebuilt by its specs; its four
+  projects now have new ids. Riverside Tower (E2E) is `655bb5ad`, not
+  `225d9477` (same figures: 2 links / 6 days, slip 1142, does not move); the
+  three "Zz Cert Isolation" projects were replaced likewise.
+- **Correction 2.** "Forecast unavailable before or after: 0" meant "no
+  forecast errored". 111 projects have no schedule, so their forecast is not
+  available — identically before and after (§3.2 now says so).
+- The script also counts approved, unarchived orders on one project sharing
+  one description: exactly one group, `0ce999f2` × 6 (VO-10…VO-20, §5.1).
 
 ## Appendix — every project with an approved CO impact
 
