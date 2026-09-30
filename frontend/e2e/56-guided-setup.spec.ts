@@ -10,6 +10,7 @@ import {
   dropLiveOrg,
   registerLiveOrg,
   signInForm,
+  workspaceToken,
   LIVE_PASSWORD,
   type LiveOrg,
 } from './support-workspaces'
@@ -23,12 +24,20 @@ import {
  *      offers "Continue with warning" and moves on; the strip's figures are
  *      the engine's own (GET /setup-readiness)
  *   a planning engineer (no schedule approval) sees "Ask Project Manager …"
- *      where the PM sees Approve; the PM approves through the guide
+ *      where the PM sees Approve; Validation on the staged revision shows no
+ *      active-schedule check (none a FAIL the approval ignores) and links to
+ *      its own review; the PM approves through the guide
  *   activated and fully mapped: Mapping PASS, the baseline gate ready — the
  *      baseline stage continues with a warning and offers the lock
  *   value left unmapped again (a new priced row; no route removes an approved
  *      allocation): Mapping back to Blocked, the baseline stage refuses
- *      Continue and names the gate's blockers
+ *      Continue and names the gate's blockers; Ready for Execution continues
+ *      into Progress with a warning and says official reporting is blocked
+ *      and who may override it
+ *
+ * a member without BOQ access: the strip's mapping figures read "—" with the
+ * server's reason, the bill's quantity and value are absent, nothing reads
+ * zero;
  *
  * and the import previews: a BOQ workbook and a schedule workbook are
  * previewed through the server's dry run on screen, the figures shown are the
@@ -190,9 +199,19 @@ test('guided setup walks the readiness engine: warnings continue, the baseline g
     await plannerContext.close()
   }
 
-  // ── The PM approves through the guide; the one readiness query refreshes.
+  // ── Validation on a staged revision: the engine's schedule checks are the
+  // ACTIVE activities' (none yet), not what this revision's approval judges,
+  // so the guide shows none of them — no FAIL the approval below ignores —
+  // and sends the PM to the revision's own review.
   await openGuide(page, base)
   await stage(page, 'validation').click()
+  await expect(panel(page)).toHaveAttribute('data-stage', 'validation')
+  await expect(page.getByTestId('setup-guide-checks-staged')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId('setup-guide-schedule-checks')).toHaveCount(0)
+  await expect(panel(page)).not.toContainText('FAIL')
+  await expect(page.getByTestId('setup-guide-checks-open-revisions')).toBeEnabled()
+
+  // ── The PM approves through the guide; the one readiness query refreshes.
   await page.getByTestId('setup-guide-action-schedule-approve').click()
   await expect(page.getByText('Schedule approved')).toBeVisible({ timeout: 30_000 })
   await expect(stage(page, 'validation')).toHaveAttribute('data-status', 'complete', { timeout: 30_000 })
@@ -224,6 +243,17 @@ test('guided setup walks the readiness engine: warnings continue, the baseline g
   })
   await openGuide(page, base)
   await expect(stage(page, 'mapping')).toHaveAttribute('data-status', 'complete', { timeout: 30_000 })
+  // Active and approved: the checks are the ones the baseline reads, each in
+  // the review panel's verdicts (PASS / Before baseline / Warning /
+  // Blocking), never a bare FAIL.
+  await stage(page, 'validation').click()
+  await expect(page.getByTestId('setup-guide-checks-staged')).toHaveCount(0)
+  const checks = page.getByTestId('setup-guide-schedule-checks').locator('> li')
+  await expect(checks.first()).toBeVisible({ timeout: 30_000 })
+  for (const verdict of await checks.evaluateAll((rows) => rows.map((row) => row.getAttribute('data-verdict')))) {
+    expect(['pass', 'before_baseline', 'warning', 'blocking']).toContain(verdict)
+  }
+  await expect(panel(page)).not.toContainText('FAIL')
   await stage(page, 'baseline').click()
   await expect(page.getByTestId('setup-guide-continue')).toHaveAttribute('data-mode', 'warn')
   await expect(page.getByTestId('setup-guide-continue')).toBeEnabled()
@@ -247,6 +277,43 @@ test('guided setup walks the readiness engine: warnings continue, the baseline g
   const unmapped = await expectStripIsEngine(page, projectId)
   // The engine gives the unmapped quantity per unit; the strip shows it as given.
   expect(unmapped.find((entry) => entry.key === 'unmapped_quantity')?.value).toBe('5 m2')
+
+  // Validation on the active, approved revision with value unmapped: the
+  // failing check reads in the review panel's words, never a bare FAIL.
+  await stage(page, 'validation').click()
+  const failing = page.getByTestId('setup-guide-schedule-checks').locator('> li[data-passed="false"]')
+  await expect(failing.first()).toBeVisible({ timeout: 30_000 })
+  const VERDICT_WORDS: Record<string, string> = {
+    before_baseline: 'Before baseline',
+    warning: 'Warning',
+    blocking: 'Blocking',
+  }
+  for (const row of await failing.all()) {
+    const verdict = (await row.getAttribute('data-verdict')) ?? ''
+    expect(Object.keys(VERDICT_WORDS)).toContain(verdict)
+    await expect(row).toContainText(VERDICT_WORDS[verdict])
+  }
+  await expect(panel(page)).not.toContainText('FAIL')
+
+  // ── Ready for Execution: progress is the warn gate (proceed with the
+  // warning), official reporting a block gate the PM overrides with a reason
+  // when locking a period — said, not offered here.
+  await stage(page, 'execution').click()
+  await expect(panel(page)).toHaveAttribute('data-stage', 'execution')
+  const reporting = page.getByTestId('setup-guide-gate-reporting')
+  await expect(reporting).toHaveAttribute('data-ready', 'false')
+  await expect(reporting).toHaveAttribute('data-mode', 'block')
+  await expect(reporting).toContainText('Blocked.')
+  await expect(reporting).toContainText('Override: Project Manager, with a reason, when locking a period.')
+  const progressGate = page.getByTestId('setup-guide-gate-progress')
+  await expect(progressGate).toHaveAttribute('data-mode', 'warn')
+  await expect(progressGate).toHaveAttribute('data-ready', 'false')
+  const toProgress = progressGate.getByTestId('setup-guide-continue')
+  await expect(toProgress).toHaveAttribute('data-mode', 'warn')
+  await expect(toProgress).toHaveText(/Continue with warning/)
+  await expect(toProgress).toBeEnabled()
+  await toProgress.click()
+  await expect(page).toHaveURL(new RegExp(`/o/${org!.segment}/projects/${projectId}/schedule/progress`), { timeout: 30_000 })
 })
 
 // ── Import previews ─────────────────────────────────────────────────────────
@@ -432,4 +499,85 @@ test('the import previews show the dry run on screen and write nothing', async (
 
   expect(writes, 'no upload or import was sent without dryRun').toEqual([])
   expect(countProjectRows(org!.orgId, projectId), 'still nothing written').toEqual(before)
+})
+
+// ── The withheld view ───────────────────────────────────────────────────────
+
+test('a member without BOQ access sees the guide with the mapping withheld: "—" with the reason, never zero', async ({
+  page,
+}) => {
+  test.setTimeout(240_000)
+  const email = `live-pc8guide-noboq-${crypto.randomUUID()}@octapm-live.test`
+  const { projectId, memberToken } = await withApi(async (client) => {
+    if (!org) org = await registerLiveOrg(client, 'pc8guide')
+    const project = await createProject(client, org.adminToken, `Guide withheld ${Date.now()}`)
+    const memberId = await addMember(client, org, { name: 'No BOQ Planner', email, role: 'planning_eng' })
+    const joined = await apiJson(client, 'post', `/projects/${project}/team`, {
+      token: org.adminToken,
+      data: { userId: memberId },
+    })
+    expect(joined.status, JSON.stringify(joined.body?.error)).toBeLessThan(300)
+    // The member's own template sets the BOQ tool to none on this project.
+    const template = await apiJson(client, 'post', '/permissions/templates', {
+      token: org.adminToken,
+      data: { name: `No BOQ planner ${Date.now()}`, baseRole: 'planning_eng', tools: [{ module: 'boq', level: 'none' }] },
+    })
+    expect(template.status, JSON.stringify(template.body?.error)).toBe(201)
+    const applied = await apiJson(client, 'put', `/projects/${project}/team/${memberId}/permissions`, {
+      token: org.adminToken,
+      data: { templateId: template.body!.data!.id },
+    })
+    expect(applied.status, JSON.stringify(applied.body?.error)).toBe(200)
+    // A priced, unmapped row: the PM's strip has a mapping share and an
+    // unmapped quantity and value to show — the member's must not.
+    await post(client, project, '/boq/items', { code: '1.1', description: 'Excavation', quantity: 12, unit: 'm3', rate: 100 }, 201)
+    return { projectId: project, memberToken: await workspaceToken(client, email, org.orgId) }
+  })
+  const base = `/o/${org!.segment}/projects/${projectId}`
+
+  // The PM's engine answer carries the figures (the test is not vacuous).
+  const pmHeadline = await engineHeadline(projectId)
+  expect(pmHeadline.find((entry) => entry.key === 'unmapped_quantity')?.value).toBe('12 m3')
+  expect(pmHeadline.find((entry) => entry.key === 'unmapped_boq')).toBeTruthy()
+  // The member's answer withholds them: mapping and critical unmapped are
+  // "—" and withheld, the bill's quantity and value are left out.
+  const memberHeadline = await withApi(async (client) => {
+    const readiness = await apiJson(client, 'get', `/projects/${projectId}/setup-readiness`, { token: memberToken })
+    expect(readiness.status).toBe(200)
+    return (readiness.body!.data as { summary: { headline: Array<Headline & { withheld?: boolean; reason?: string }> } })
+      .summary.headline
+  })
+  const withheldKeys = ['mapping', 'critical_unmapped']
+  for (const key of withheldKeys) {
+    const entry = memberHeadline.find((row) => row.key === key)
+    expect(entry, key).toMatchObject({ value: '—', withheld: true })
+  }
+  expect(memberHeadline.find((row) => row.key === 'unmapped_quantity')).toBeUndefined()
+  expect(memberHeadline.find((row) => row.key === 'unmapped_boq')).toBeUndefined()
+
+  await page.routeWebSocket(/socket\.io/, () => {})
+  await signInForm(page, email, LIVE_PASSWORD)
+  await openGuide(page, base)
+
+  const strip = page.getByTestId('setup-guide-strip')
+  await expect(strip.locator('> li')).toHaveCount(memberHeadline.length)
+  for (const key of withheldKeys) {
+    const shown = page.getByTestId(`setup-guide-strip-${key}`)
+    await expect(shown).toHaveAttribute('data-withheld', 'true')
+    await expect(shown).toHaveAttribute('data-value', '—')
+    await expect(page.getByTestId(`setup-guide-strip-${key}-withheld`)).toHaveText('(Mapping details unavailable to you)')
+  }
+  await expect(page.getByTestId('setup-guide-strip-unmapped_quantity')).toHaveCount(0)
+  await expect(page.getByTestId('setup-guide-strip-unmapped_boq')).toHaveCount(0)
+  // Nothing withheld reads as zero.
+  for (const value of await strip.locator('> li').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-value')))) {
+    expect(value).not.toBe('0')
+    expect(value).not.toBe('0%')
+  }
+
+  // The Mapping stage says it is withheld, and shows no figure.
+  await stage(page, 'mapping').click()
+  await expect(panel(page)).toHaveAttribute('data-stage', 'mapping')
+  await expect(panel(page)).toContainText('Mapping details unavailable to you')
+  await expect(panel(page)).not.toContainText('0%')
 })

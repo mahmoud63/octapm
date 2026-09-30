@@ -130,12 +130,60 @@ function IssueList({
   )
 }
 
-type ScheduleCheck = { key: string; label?: string; passed: boolean; severity?: string; message?: string }
+type ScheduleCheck = {
+  key: string
+  label?: string
+  passed: boolean
+  severity?: string
+  message?: string
+  requiredFor?: string[]
+}
 
-/** The schedule's own checks, as the engine's context carries them (stage 8). */
-function scheduleChecksOf(readiness: ProjectSetupReadiness): ScheduleCheck[] {
+type CheckVerdict = 'pass' | 'before_baseline' | 'warning' | 'blocking'
+
+const CHECK_VERDICT: Record<CheckVerdict, { label: string; tone: StatusTone }> = {
+  pass: { label: 'PASS', tone: 'done' },
+  before_baseline: { label: 'Before baseline', tone: 'review' },
+  warning: { label: 'Warning', tone: 'review' },
+  blocking: { label: 'Blocking', tone: 'blocked' },
+}
+
+const REVISIONS_TARGET: ProjectSetupTarget = { module: 'schedule', child: 'revisions' }
+
+/**
+ * Stage 8's schedule checks, as the engine's context carries them — and only
+ * when they are the checks that matter. context.scheduleReadiness is built on
+ * the ACTIVE activities; a staged revision (imported or generated, not yet
+ * activated) is judged by its approval on its own snapshot, which the Schedule
+ * › Revisions review shows. Showing the active schedule's checks against a
+ * staged revision would put FAILs on screen that its approval does not judge.
+ */
+function scheduleChecksOf(readiness: ProjectSetupReadiness): {
+  checks: ScheduleCheck[]
+  staged: boolean
+  judgedForBaseline: boolean
+} {
+  const revision = readiness.context?.currentRevision
+  if (!revision) return { checks: [], staged: false, judgedForBaseline: false }
+  if (!revision.isActive) return { checks: [], staged: true, judgedForBaseline: false }
   const scheduleReadiness = readiness.context?.scheduleReadiness as { checks?: unknown } | null | undefined
-  return Array.isArray(scheduleReadiness?.checks) ? (scheduleReadiness.checks as ScheduleCheck[]) : []
+  return {
+    checks: Array.isArray(scheduleReadiness?.checks) ? (scheduleReadiness.checks as ScheduleCheck[]) : [],
+    staged: false,
+    // As the Schedule review panel reads it: once approved (and active), a
+    // check is judged for the baseline; before that, a check the approval
+    // does not need (BOQ coverage, D5) is the step before the lock.
+    judgedForBaseline: revision.status === 'approved' || revision.status === 'baselined',
+  }
+}
+
+/** A check's verdict in the review panel's words: never FAIL for a warning. */
+function verdictOf(check: ScheduleCheck, judgedForBaseline: boolean): CheckVerdict {
+  if (check.passed) return 'pass'
+  if (!judgedForBaseline && Array.isArray(check.requiredFor) && !check.requiredFor.includes('approval')) {
+    return 'before_baseline'
+  }
+  return check.severity === 'warning' ? 'warning' : 'blocking'
 }
 
 type Props = {
@@ -159,7 +207,8 @@ export function SetupGuideStage({
   canNavigate,
 }: Props) {
   const tone = STAGE_TONE[stage.status]
-  const checks = stage.key === 'validation' ? scheduleChecksOf(readiness) : []
+  const validation = stage.key === 'validation' ? scheduleChecksOf(readiness) : null
+  const checks = validation?.checks ?? []
   const progressGate = readiness.gates.progress
   const reportingGate = readiness.gates.reporting
   const executionAction = stage.steps.find((view) => view.step.key === 'progress_readiness')?.step.action
@@ -206,16 +255,47 @@ export function SetupGuideStage({
         </ul>
       )}
 
+      {validation?.staged && (
+        <div className='flex flex-wrap items-center gap-2 text-xs' data-testid='setup-guide-checks-staged'>
+          <span className='text-muted-foreground'>
+            {readiness.context?.currentRevision?.label
+              ? `Revision “${readiness.context.currentRevision.label}” is staged`
+              : 'The schedule revision is staged'}
+            : its approval judges its own activities, and its checks are on Schedule › Revisions.
+          </span>
+          <Button
+            size='sm'
+            variant='outline'
+            onClick={() => onNavigate(REVISIONS_TARGET)}
+            disabled={!canNavigate(REVISIONS_TARGET)}
+            title={canNavigate(REVISIONS_TARGET) ? undefined : NOT_OFFERED}
+            data-testid='setup-guide-checks-open-revisions'
+          >
+            Open revisions
+            <ArrowRight className='h-3.5 w-3.5' />
+          </Button>
+        </div>
+      )}
+
       {checks.length > 0 && (
         <ul className='space-y-0.5' data-testid='setup-guide-schedule-checks'>
-          {checks.map((check) => (
-            <li key={check.key} className='text-xs' data-testid={`setup-guide-check-${check.key}`} data-passed={String(check.passed)}>
-              <span className={cn('font-semibold', check.passed ? 'text-success' : 'text-destructive')}>
-                {check.passed ? 'PASS' : 'FAIL'}
-              </span>{' '}
-              <span className='text-muted-foreground'>{check.label ?? check.key}{check.message ? ` — ${check.message}` : ''}</span>
-            </li>
-          ))}
+          {checks.map((check) => {
+            const verdict = verdictOf(check, validation?.judgedForBaseline ?? false)
+            return (
+              <li
+                key={check.key}
+                className='text-xs'
+                data-testid={`setup-guide-check-${check.key}`}
+                data-passed={String(check.passed)}
+                data-verdict={verdict}
+              >
+                <span className={cn('rounded px-1 font-semibold', statusBadge(CHECK_VERDICT[verdict].tone))}>
+                  {CHECK_VERDICT[verdict].label}
+                </span>{' '}
+                <span className='text-muted-foreground'>{check.label ?? check.key}{check.message ? ` — ${check.message}` : ''}</span>
+              </li>
+            )
+          })}
         </ul>
       )}
 
