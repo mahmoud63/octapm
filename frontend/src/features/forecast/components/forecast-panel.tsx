@@ -565,7 +565,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
           value={schedule.criticalDriver?.name ?? '—'}
           sub={
             schedule.criticalDriver
-              ? `${schedule.criticalDriver.slipDays} days of slip`
+              ? `${schedule.criticalDriver.slipDays} days of projected slip`
               : 'No activity moves the finish'
           }
         />
@@ -653,7 +653,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
                   <th className='px-2 py-1.5 text-left font-medium'>
                     Projected
                   </th>
-                  <th className='px-2 py-1.5 text-left font-medium'>Slip</th>
+                  <th className='px-2 py-1.5 text-left font-medium'>Projected slip</th>
                   <th className='px-2 py-1.5 text-left font-medium'>Float</th>
                   <th className='px-2 py-1.5 text-left font-medium'>Risk</th>
                 </tr>

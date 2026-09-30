@@ -57,7 +57,7 @@ export function GeneralHome({ projectId, currency, actions, emphasis }: { projec
     <Counts
       items={[
         { id: 'spi', label: 'SPI', value: ratio(schedule?.spi), tone: schedule?.spi != null && schedule.spi < 0.9 ? 'error' : 'default' },
-        { id: 'slip', label: 'Slip', value: schedule?.slipDays != null ? `${schedule.slipDays} d` : '—', tone: (schedule?.slipDays ?? 0) > 0 ? 'error' : 'default' },
+        { id: 'slip', label: 'Projected slip', value: schedule?.slipDays != null ? `${schedule.slipDays} d` : '—', tone: (schedule?.slipDays ?? 0) > 0 ? 'error' : 'default' },
         { id: 'critical', label: 'On the critical path', value: String(schedule?.counts.critical ?? '—'), onPress: () => router.push('/activities') },
         { id: 'at-risk', label: 'At high risk', value: String(schedule?.counts.atRisk.high ?? '—'), tone: (schedule?.counts.atRisk.high ?? 0) > 0 ? 'error' : 'default' },
       ]}
