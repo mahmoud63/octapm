@@ -58,8 +58,14 @@ value whenever that value is non-zero.
 
 No row was ambiguous. `backend/scripts/prime-contract-value-source-backfill.js` wrote only this column,
 inside one transaction, and checked every other column of every row byte-identical before committing. The
-apply's snapshot checksum was `d40dfe23…`. The original, revised and advance amounts are unchanged. Before
-the backfill, a cold copy of the whole local cluster was kept outside Git.
+apply's snapshot checksum was `d40dfe23…`. The original, revised and advance amounts are unchanged.
+
+**Actual sequence (recorded as it happened):** the migration was applied FIRST, by an interrupted run,
+before any backup existed. The cold copy of the whole local cluster
+(`C:\Temp\octapm-pg-backup-20260929-pre-contract-source`, outside Git) was taken AFTERWARDS, while the
+database was stopped, and BEFORE the backfill. It is a pre-backfill backup, not a pre-migration backup. The
+migration was not replayed to manufacture a missing checkpoint; it is additive (one nullable column) and
+reversible by dropping that column. Future migrations follow docs/qa/OCTAPM_MIGRATION_PREFLIGHT.md.
 
 The migration was also proven on a throwaway database. The 133 earlier migrations were applied, contract
 rows inserted, then this migration applied. Across 30 columns there were 0 differences, and the database was
