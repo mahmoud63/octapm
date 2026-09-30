@@ -120,7 +120,11 @@ const auditService = read('../backend/src/services/audit.service.js')
 const projectsRoute = read('../backend/src/routes/projects.js')
 
 assert.match(backendIndex, /attachRealtime\(io\)/, 'socket server attached to the bus')
-assert.match(auditService, /domainEvents\.publish\(domainEvent\)/, 'audit publishes domain events')
+// PC-7a: audit announces its event through publishRecorded, which publishes it
+// only once its outbound row is visible after COMMIT (never for a rollback).
+const eventBus = read('../backend/src/events/bus.js')
+assert.match(auditService, /domainEvents\.publishRecorded\(/, 'audit publishes domain events')
+assert.match(eventBus, /const publishRecorded = [\s\S]*?return publish\(event/, 'publishRecorded publishes the event')
 assert.match(auditService, /recordOutboundEvent/, 'audit persists outbound events')
 assert.match(projectsRoute, /"\/:projectId\/locations"/, 'locations route mounted')
 

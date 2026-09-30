@@ -25,6 +25,7 @@ import {
   formatMoney,
   formatQuantity,
 } from '@/features/controls/lib/detail-format'
+import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { useActivityDetail } from '@/features/controls/hooks/use-controls-detail'
 import { useProject } from '@/features/projects/hooks/use-projects'
 import type { ActivityDetail } from '../data/schema'
@@ -231,7 +232,7 @@ function ActivityDetailBody({
       <DetailSection title='Cost' testId='activity-detail-cost'>
         {sections.cost.allowed ? (
           <>
-            <FigureRow label='Committed' figure={sections.cost.committed} format='money' currency={currency} testId='activity-detail-committed' />
+            <FigureRow label={FINANCIAL_TERMS.executedCommitments.label} figure={sections.cost.committed} format='money' currency={currency} testId='activity-detail-committed' />
             <FigureRow label='Actual cost' figure={sections.cost.actual} format='money' currency={currency} testId='activity-detail-actual' />
             <FigureRow label='Forecast' figure={sections.cost.forecast} format='money' currency={currency} testId='activity-detail-forecast' />
             <RecordLink href={sections.cost.href} testId='activity-detail-cost-link'>
