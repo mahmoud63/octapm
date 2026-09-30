@@ -81,6 +81,15 @@ export interface BudgetLine {
   actual: number
   forecast: number
   forecastIsManual: boolean
+  /** Source / derived / projection per figure, and from what (PC-7a). */
+  truth?: {
+    originalBudget: string
+    revised: string
+    committed: string
+    actual: string
+    forecast: string
+    derivedFrom: Record<string, string>
+  }
   variance: number
   allocatedWeight: number
   allocatedAmount: number

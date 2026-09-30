@@ -8,6 +8,31 @@ const budgetService = require("./budget.service");
 const { forecastCostWithheld, withheldForecast } = require("../utils/boq-figures");
 const { EAC_BASES, EAC_BASIS_LABELS, eacBasisOf, eacIsBudgetFallback } = require("../utils/eac-basis");
 const { EV_NOTES, cpiNoteFor, spiNoteFor, cutoffNotReached } = require("../utils/ev-notes");
+// Source / derived / projection labels (control model §3) — labels only.
+const { TRUTHS, projection, BUDGET_LABELS } = require("../utils/figure-truth");
+
+// What each figure of the forecast's cost block is, and from what. Static
+// words, the same for every project and reader: when utils/boq-figures
+// withholds a figure its label says nothing about its value.
+const FORECAST_COST_TRUTH = Object.freeze({
+  budget: TRUTHS.DERIVED,
+  bac: TRUTHS.DERIVED,
+  actual: TRUTHS.DERIVED,
+  eac: projection("eacBasis"),
+  bottomUp: projection("activity_projections"),
+  projected: projection("greater_of_eac_and_bottom_up"),
+  overrun: projection("projected_minus_budget"),
+  labels: { budget: BUDGET_LABELS.evBudgetAtCompletion, bac: BUDGET_LABELS.evBudgetAtCompletion },
+  derivedFrom: {
+    budget: "The earned-value report's budget at completion; Σ activity budgets when there is no report",
+    bac: "Approved allocations + approved budget revisions (the earned-value report's totalBudget)",
+    actual: "Official actual cost from the earned-value report; Σ activity actual cost when there is none",
+    eac: "The earned-value report's EAC: revised budget ÷ CPI, or the revised budget when there is no CPI or CPI is 0 (eacBasis)",
+    bottomUp: "Σ each activity's projection (actual ÷ progress, or the greatest of budget, commitments, actual and forecast; cost.basis) or its budget",
+    projected: "The greater of the EAC and the bottom-up projection",
+    overrun: "Projected cost − budget",
+  },
+});
 
 /**
  * Schedule delay and cost overrun prediction (OCTA-AI-PREDICT-031).
@@ -394,6 +419,7 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
       counts: { atRisk: levels(costRisks, "cost"), lines: lines.length },
       topRisks: costRisks,
       budgetLines: lines,
+      truth: FORECAST_COST_TRUTH,
     },
     summary: { scheduleLevel: projectSlip > 14 || scheduleRisks.some((row) => row.level === "high") ? "high" : projectSlip > 0 || scheduleRisks.length ? "medium" : "low", costLevel: totalBudget > 0 && costOverrun / totalBudget > 0.05 ? "high" : costOverrun > 0 ? "medium" : "low" },
     dataQuality,

@@ -3,6 +3,8 @@ const { HttpError } = require("../utils/http-error");
 const { addMoney, subtractMoney, multiplyMoney, toMoneyNumber } = require("../utils/money");
 const auditService = require("./audit.service");
 const { getApprovedActivityAllocationTotals } = require("./activity-boq-allocation.service");
+// Source / derived / projection labels on each line (labels only).
+const { budgetLineTruth } = require("../utils/figure-truth");
 
 /**
  * Budget by cost code (OCTA-FIN-COSTCODE-019).
@@ -148,8 +150,18 @@ const deriveLine = (line) => {
   return { original, approvedChanges, revisions, revised, committed, actual, forecast, variance: subtractMoney(revised, forecast), allocatedWeight, allocatedAmount, unallocatedAmount: subtractMoney(revised, allocatedAmount) };
 };
 
+// A stored budget snapshot keeps the figures only: the three-truths labels
+// describe the live register and are not part of what a period froze.
+const withoutTruth = (line) => {
+  if (!line || typeof line !== "object" || !Object.prototype.hasOwnProperty.call(line, "truth")) return line;
+  const rest = { ...line };
+  delete rest.truth;
+  return rest;
+};
+
 const serializeLine = (line) => {
   const derived = deriveLine(line);
+  const forecastIsManual = line.forecast !== null && line.forecast !== undefined;
   return {
     id: line.id,
     projectId: line.projectId,
@@ -168,7 +180,11 @@ const serializeLine = (line) => {
     committedFromCommitments: toMoneyNumber(line.committedFromCommitments),
     actual: derived.actual,
     forecast: derived.forecast,
-    forecastIsManual: line.forecast !== null && line.forecast !== undefined,
+    forecastIsManual,
+    // Which figure is a source fact, which is derived and which is a
+    // projection, and from what (control model §3). The same words on every
+    // line; only the forecast's typed/default split varies.
+    truth: budgetLineTruth(forecastIsManual),
     variance: derived.variance,
     allocatedWeight: derived.allocatedWeight,
     allocatedAmount: derived.allocatedAmount,
@@ -816,7 +832,7 @@ const snapshotInclude = { reportingPeriod: { select: { id: true, code: true, lab
 
 const buildSnapshotPayload = async ({ orgId, projectId }) => {
   const [{ items, summary }, reconciliation] = await Promise.all([listBudgetLines({ orgId, projectId, query: { includeArchived: true } }), reconcile({ orgId, projectId })]);
-  return { totals: { ...summary.totals, byType: summary.byType, lines: summary.lines }, lines: items, reconciliation };
+  return { totals: { ...summary.totals, byType: summary.byType, lines: summary.lines }, lines: items.map(withoutTruth), reconciliation };
 };
 
 const takeSnapshot = async ({ orgId, projectId, payload = {}, actor = null }) => {
@@ -840,7 +856,7 @@ const takeSnapshot = async ({ orgId, projectId, payload = {}, actor = null }) =>
 /** Locking a reporting period freezes the budget with it (called inside the lock transaction). */
 const snapshotForPeriod = async ({ tx = prisma, orgId, projectId, periodId, userId = null }) => {
   if (!tx.budgetSnapshot?.upsert || !tx.budgetLine?.findMany) return null;
-  const lines = (await loadLines({ projectId, includeArchived: true }, tx)).map(serializeLine);
+  const lines = (await loadLines({ projectId, includeArchived: true }, tx)).map((line) => withoutTruth(serializeLine(line)));
   if (!lines.length) return null;
   const summary = summarize(lines);
   const period = await tx.reportingPeriod.findFirst({ where: { id: periodId }, select: { code: true } });

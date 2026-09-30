@@ -136,6 +136,21 @@ export interface ProjectForecast {
     reason?: string
     activityCostWithheld?: true
     activityCostReason?: string
+    /**
+     * Source / derived / projection per figure, and from what (PC-7a).
+     * Labels only; the same for every reader, present where figures are withheld.
+     */
+    truth?: {
+      budget: string
+      bac: string
+      actual: string
+      eac: string
+      bottomUp: string
+      projected: string
+      overrun: string
+      labels?: { budget?: string; bac?: string }
+      derivedFrom?: Record<string, string>
+    }
   } | null
   summary: { scheduleLevel: ForecastLevel; costLevel: ForecastLevel } | null
   dataQuality: string[]

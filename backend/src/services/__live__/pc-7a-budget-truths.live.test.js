@@ -20,7 +20,7 @@
  *   npm run test:live -- src/services/__live__/pc-7a-budget-truths.live.test.js
  */
 const { prisma } = require("../../config/db");
-const { createLiveOrg, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
+const { createLiveOrg, createLiveUser, dropLiveOrg, liveDescribe, mintAccessToken } = require("../../__live__/helpers");
 const { startApi } = require("./auth-live-kit");
 
 const cents = (value) => Math.round(Number(value || 0) * 100);
@@ -34,6 +34,7 @@ liveDescribe("PC-7a: the Original Budget cannot be rewritten once changes, posti
   const lines = {};
   let activityId;
   let certifiedBefore;
+  let lockedPeriodId;
 
   const auth = (who = live) => ({ authorization: `Bearer ${who.token}` });
   const at = (key, route) => `/api/v1/projects/${projects[key].id}${route}`;
@@ -243,6 +244,127 @@ liveDescribe("PC-7a: the Original Budget cannot be rewritten once changes, posti
     await expectLocked("PERIOD", line.id, 55000, 5);
     const later = await newLine(live, "PERIOD", "PER", "labour", 9000);
     ok(await patchLine("PERIOD", later.id, { originalBudget: 9500 }));
+    lockedPeriodId = periodId;
+  });
+
+  // PC-7a item 2 — three truths. Labels only: each figure says whether it is
+  // source, derived or a projection, and from what; no figure moves, nothing
+  // stored takes the labels, and a reader who may not read the BOQ receives
+  // the same labels and no more figures than before.
+  const withoutTruth = (value) => {
+    const copy = { ...value };
+    delete copy.truth;
+    return copy;
+  };
+
+  it("three truths — budget lines, cost summary, forecast and EV report label every figure; stored snapshots keep figures only", async () => {
+    // A typed forecast on one line, the default on the others.
+    ok(await patchLine("GUARD", lines["FREE:material"], { forecast: 111000 }));
+    const register = await api.get(at("GUARD", "/budget/lines"), auth());
+    ok(register);
+    const items = register.body.data.items;
+    expect(items.length).toBeGreaterThan(3);
+    for (const line of items) {
+      expect(line.truth).toMatchObject({ originalBudget: "source", revised: "derived", committed: "derived", actual: "derived" });
+      expect(line.truth.forecast).toBe(line.forecastIsManual ? "projection:typed" : "projection:greatest_of_revised_actual_committed");
+      expect(Object.keys(line.truth.derivedFrom).sort()).toEqual(["actual", "committed", "forecast", "originalBudget", "revised"]);
+    }
+    expect(items.find((line) => line.id === lines["FREE:material"]).truth.forecast).toBe("projection:typed");
+    // The default forecast is still max(revised, actual, committed): a label, not a formula change.
+    for (const line of items.filter((row) => !row.forecastIsManual)) {
+      expect(line.forecast).toBe(Math.max(line.revisedBudget, line.actual, line.committed));
+    }
+
+    // An ad-hoc snapshot stores the figures only — the register's lines
+    // without their labels, figure for figure.
+    const taken = await api.post(at("GUARD", "/budget/snapshots"), { label: "LiveTest truths" }, auth());
+    ok(taken, 201);
+    const stored = await prisma.budgetSnapshot.findUnique({ where: { id: taken.body.data.id } });
+    expect(stored.linesJson.some((row) => Object.prototype.hasOwnProperty.call(row, "truth"))).toBe(false);
+    const figures = (row) => [row.id, row.originalBudget, row.revisedBudget, row.committed, row.actual, row.forecast, row.variance];
+    const registerAll = await api.get(at("GUARD", "/budget/lines?includeArchived=true"), auth());
+    ok(registerAll);
+    expect(stored.linesJson.map(figures)).toEqual(registerAll.body.data.items.map(figures));
+    // And the locked period's snapshot (taken at the lock) carries none either.
+    const lockedBudget = await prisma.budgetSnapshot.findUnique({ where: { reportingPeriodId: lockedPeriodId } });
+    expect(lockedBudget.linesJson.some((row) => Object.prototype.hasOwnProperty.call(row, "truth"))).toBe(false);
+
+    // Cost summary: the register's budget is "Budget"; the other two are named apart.
+    const summary = await api.get(at("GUARD", "/cost/summary"), auth());
+    ok(summary);
+    const cost = summary.body.data;
+    expect(cost.budget).toMatchObject({ label: "Budget", source: "budget_register" });
+    expect(cost.truth.budget).toMatchObject({ truth: "derived", label: "Budget" });
+    expect(cost.truth.budget.otherBudgets.map((row) => row.label)).toEqual(["Budget at completion (EV basis)", "Contract value + approved changes"]);
+    expect(cost.truth.totals).toMatchObject({ budget: "derived", committed: "derived", actual: "derived", forecast: "projection:estimate_at_completion" });
+    expect(cost.truth.records.forecast).toBe("projection:typed_or_budget_plus_1.1x_actual_minus_budget");
+    expect(cost.truth.records.derivedFrom.forecast).toContain("budget + 1.1 × (actual − budget)");
+    expect(cost.truth.eac.truth).toBe("projection:estimate_at_completion");
+
+    // EV report, live and locked: the EAC is a projection whose rule is
+    // eacBasis; the BAC is the "Budget at completion (EV basis)".
+    const report = await api.get(at("GUARD", "/reports/ev"), auth());
+    ok(report);
+    expect(report.body.data.truth).toMatchObject({ pv: "derived", ev: "derived", ac: "derived", totalBudget: "derived", eac: "projection:eacBasis", labels: { totalBudget: "Budget at completion (EV basis)" } });
+    const locked = await api.get(at("PERIOD", `/reports/ev?periodId=${lockedPeriodId}`), auth());
+    ok(locked);
+    expect(locked.body.data.reporting.isSnapshot).toBe(true);
+    expect(locked.body.data.truth).toEqual(report.body.data.truth);
+    const evSnapshot = await prisma.evPeriodSnapshot.findFirst({ where: { reportingPeriodId: lockedPeriodId } });
+    expect(Object.prototype.hasOwnProperty.call(evSnapshot.basisJson || {}, "truth")).toBe(false);
+
+    // Forecast cost block.
+    const forecast = await api.get(at("GUARD", "/forecast"), auth());
+    ok(forecast);
+    if (forecast.body.data.cost) {
+      expect(forecast.body.data.cost.truth).toMatchObject({ budget: "derived", bac: "derived", actual: "derived", eac: "projection:eacBasis", projected: "projection:greater_of_eac_and_bottom_up" });
+    } else {
+      // No schedule: no cost block to label (the service answers available: false).
+      expect(forecast.body.data.available).toBe(false);
+    }
+  });
+
+  it("three truths — a purchase order summary's orderValue is order value, not committed cost; committed stays as its alias and the register ignores it", async () => {
+    const projectId = projects.GUARD.id;
+    const registerBefore = await api.get(at("GUARD", "/budget/lines"), auth());
+    ok(registerBefore);
+    await prisma.procurementOrder.create({ data: { projectId, ref: `LT7A-PO-${Date.now()}`, item: "LiveTest rebar", status: "approved", value: 4321.5 } });
+    await prisma.procurementOrder.create({ data: { projectId, ref: `LT7A-PL-${Date.now()}`, item: "LiveTest planned", status: "planned", value: 1000 } });
+    const list = await api.get(at("GUARD", "/purchase-orders"), auth());
+    ok(list);
+    expect(list.body.data.summary).toMatchObject({ orderValue: 4321.5, committed: 4321.5, orderValueLabel: "Order value — not committed cost" });
+    const registerAfter = await api.get(at("GUARD", "/budget/lines"), auth());
+    ok(registerAfter);
+    expect(registerAfter.body.data.summary.totals.committed).toBe(registerBefore.body.data.summary.totals.committed);
+  });
+
+  it("three truths — a cost reader who may not read the BOQ gets the same labels and still no allocation-derived figure", async () => {
+    const reader = await createLiveUser(prisma, { orgId: live.org.id, name: "LiveTest cost reader", email: `live-7a-cost-${Date.now()}@octapm-live.test`, role: "cost_controller" });
+    await prisma.projectAssignment.create({ data: { projectId: projects.GUARD.id, userId: reader.id, role: "cost_controller", orgId: live.org.id } });
+    const template = await prisma.permissionTemplate.create({
+      data: { orgId: live.org.id, name: `LiveTest cost reader, no BOQ ${Date.now()}`, baseRole: "cost_controller", tools: { create: [{ module: "boq", level: "none" }] } },
+    });
+    await prisma.projectUserPermission.create({ data: { orgId: live.org.id, projectId: projects.GUARD.id, userId: reader.id, templateId: template.id } });
+    const as = { authorization: `Bearer ${mintAccessToken(reader)}` };
+
+    const full = (await api.get(at("GUARD", "/cost/summary"), auth())).body.data;
+    const partial = await api.get(at("GUARD", "/cost/summary"), as);
+    ok(partial);
+    // The labels are the same object for both readers: they describe keys, not values.
+    expect(partial.body.data.truth).toEqual(full.truth);
+    // And the figures built from allocations are still withheld, reason given.
+    expect(partial.body.data.activityBudgetsWithheld).toBe(true);
+    expect(partial.body.data.totals).not.toHaveProperty("forecast");
+    expect(partial.body.data.totals).not.toHaveProperty("budget");
+    expect(partial.body.data.budget).not.toHaveProperty("allocatedToActivities");
+    expect(withoutTruth(partial.body.data.budget)).toEqual(withoutTruth({ ...full.budget, allocatedToActivities: undefined, }));
+
+    const fullReport = (await api.get(at("GUARD", "/reports/ev"), auth())).body.data;
+    const partialReport = await api.get(at("GUARD", "/reports/ev"), as);
+    ok(partialReport);
+    expect(partialReport.body.data.truth).toEqual(fullReport.truth);
+    expect(partialReport.body.data).not.toHaveProperty("activityBreakdown");
+    expect(partialReport.body.data).not.toHaveProperty("unallocatedBoqAmount");
   });
 
   it("§139: the guarded project reconciles to 0.00 — ledger = line actuals = cost-record actuals, register committed = executed SOV", async () => {

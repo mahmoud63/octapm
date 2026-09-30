@@ -41,6 +41,7 @@ import {
   useUpdateCostRecord,
 } from '../hooks/use-cost'
 import { BudgetPanel } from './budget-panel'
+import { TruthBadge } from './truth-badge'
 
 const fmtUSD = (value: number) =>
   '$' + Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
@@ -147,6 +148,8 @@ export function CostDashboard({
   const totals = useMemo(() => summary?.totals, [summary?.totals])
   const eac = useMemo(() => summary?.eac, [summary?.eac])
   const budget = useMemo(() => summary?.budget, [summary?.budget])
+  // Source / derived / projection per figure, as the server labels it (PC-7a).
+  const truth = summary?.truth
   // What the summary adds up from the records' budgets (each activity's
   // approved BOQ allocation) — per phase, in total, and the forecast and EAC
   // that fall back to them — is withheld by the server from a member who may
@@ -214,30 +217,37 @@ export function CostDashboard({
             data-testid='cost-budget-summary'
           >
             <p className='text-xs font-semibold tracking-wide text-muted-foreground uppercase'>
-              Budget
+              {budget?.label ?? FINANCIAL_TERMS.budgetRegister.label}
+              <TruthBadge truth={truth?.budget?.truth ?? 'derived'} />
             </p>
             <p className='text-xs text-muted-foreground'>
               As the budget register states it — original, approved changes,
-              revisions, revised.
+              revisions, revised. Not the{' '}
+              {FINANCIAL_TERMS.evBudgetAtCompletion.label} nor the{' '}
+              {FINANCIAL_TERMS.contractWaterfall.label}.
             </p>
             <div className='mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4'>
               <CostFigure
                 label='Original budget'
+                truth='source'
                 value={fmtUSD(budget?.originalBudget ?? 0)}
                 hint='The approved starting budget'
               />
               <CostFigure
                 label='Approved changes'
+                truth='derived'
                 value={fmtUSD(budget?.approvedChanges ?? 0)}
                 hint='Approved change orders'
               />
               <CostFigure
                 label='Revisions & transfers'
+                truth='derived'
                 value={fmtUSD(budget?.revisions ?? 0)}
                 hint='Approved budget revisions and transfers'
               />
               <CostFigure
                 label='Revised budget'
+                truth='derived'
                 value={fmtUSD(budget?.revisedBudget ?? 0)}
                 hint='Original + approved changes + revisions'
                 emphasis
@@ -248,6 +258,7 @@ export function CostDashboard({
           <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
             <CostFigure
               label='Allocated to activities'
+              truth={truth?.allocatedToActivities?.truth}
               value={summaryFigure(totals?.budget ?? 0)}
               hint={
                 activityBudgetsWithheld
@@ -259,15 +270,18 @@ export function CostDashboard({
             <CostFigure
               label={FINANCIAL_TERMS.executedCommitments.label}
               value={fmtUSD(totals?.committed || 0)}
+              truth={truth?.totals?.committed}
               hint={FINANCIAL_TERMS.executedCommitments.hint}
             />
             <CostFigure
               label='Actual cost'
               value={fmtUSD(totals?.actual || 0)}
+              truth={truth?.totals?.actual}
               hint='Posted to the cost ledger to date'
             />
             <CostFigure
               label='Forecast (EAC)'
+              truth={truth?.totals?.forecast}
               value={summaryFigure(eac?.mostLikely ?? totals?.forecast ?? 0)}
               hint={
                 activityBudgetsWithheld
@@ -892,12 +906,15 @@ function CostFigure({
   hint,
   emphasis = false,
   testId,
+  truth,
 }: {
   label: string
   value: string
   hint?: string
   emphasis?: boolean
   testId?: string
+  /** The server's truth label: source, derived or projection:<basis> (PC-7a). */
+  truth?: string
 }) {
   return (
     <div
@@ -905,7 +922,10 @@ function CostFigure({
       title={hint}
       data-testid={testId}
     >
-      <p className='text-xs text-muted-foreground'>{label}</p>
+      <p className='text-xs text-muted-foreground'>
+        {label}
+        <TruthBadge truth={truth} />
+      </p>
       <p className='text-lg font-bold'>{value}</p>
       {hint && <p className='text-[11px] text-muted-foreground'>{hint}</p>}
     </div>

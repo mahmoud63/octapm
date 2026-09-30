@@ -47,7 +47,21 @@ export const FINANCIAL_TERMS = {
   },
   poValue: {
     label: 'PO value',
-    hint: 'Value of purchase orders that are neither planned nor cancelled',
+    hint: 'Order value — not committed cost: purchase orders that are neither planned nor cancelled',
+  },
+  // The three budgets that coexist (control model §3): each screen says
+  // which one it shows, and none is called by another's name.
+  budgetRegister: {
+    label: 'Budget',
+    hint: 'The budget register: original + approved changes + revisions',
+  },
+  evBudgetAtCompletion: {
+    label: 'Budget at completion (EV basis)',
+    hint: 'Approved BOQ allocations + approved budget revisions — the budget earned value is measured against',
+  },
+  contractWaterfall: {
+    label: 'Contract value + approved changes',
+    hint: 'The project contract value plus approved budget revisions (the revisions waterfall)',
   },
   invoiced: {
     label: 'Invoiced',
@@ -91,3 +105,40 @@ export type FinancialTermKey = keyof typeof FINANCIAL_TERMS
 
 export const term = (key: FinancialTermKey) => FINANCIAL_TERMS[key].label
 export const termHint = (key: FinancialTermKey) => FINANCIAL_TERMS[key].hint
+
+/**
+ * The three truths (PC-7a; control model §3). The server labels each figure
+ * "source", "derived" or "projection:<basis>"; a screen shows which, so a
+ * projection is never read as a fact. Labels only — no figure is computed
+ * from them.
+ */
+export type FigureTruthKind = 'source' | 'derived' | 'projection'
+
+export const FIGURE_TRUTH: Record<
+  FigureTruthKind,
+  { label: string; hint: string }
+> = {
+  source: {
+    label: 'Source',
+    hint: 'A fact somebody approved, executed, certified or posted',
+  },
+  derived: {
+    label: 'Derived',
+    hint: 'Computed only from source records; rebuildable at any time',
+  },
+  projection: {
+    label: 'Projection',
+    hint: 'An estimate about the future — never feeds a certified figure',
+  },
+}
+
+/** Reads a server truth label ("projection:typed" → projection, basis "typed"). */
+export const parseTruth = (
+  value: string | null | undefined
+): { kind: FigureTruthKind; basis: string | null } | null => {
+  if (!value) return null
+  const [kind, ...rest] = value.split(':')
+  if (kind !== 'source' && kind !== 'derived' && kind !== 'projection')
+    return null
+  return { kind, basis: rest.length ? rest.join(':') : null }
+}

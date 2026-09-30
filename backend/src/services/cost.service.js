@@ -19,6 +19,58 @@ const {
   getApprovedActivityAllocationTotals,
 } = require('./activity-boq-allocation.service');
 const auditService = require('./audit.service');
+// Source / derived / projection labels (control model §3) — labels only.
+const {
+  TRUTHS,
+  projection,
+  BUDGET_LABELS,
+  COST_RECORD_FORECAST_DEFAULT_BASIS,
+  COST_RECORD_FORECAST_DEFAULT_RULE,
+} = require('../utils/figure-truth');
+
+// What each figure of the cost summary is, and from what. The same words for
+// every project and reader; they describe keys, never values, so a figure
+// utils/boq-figures withholds leaves only its label behind.
+const COST_SUMMARY_TRUTH = Object.freeze({
+  budget: {
+    truth: TRUTHS.DERIVED,
+    label: BUDGET_LABELS.register,
+    derivedFrom: 'Budget register: original budget + approved changes + revisions on the budget lines',
+    // The other two budgets the product states, each under its own name
+    // (control model §3, consequence 1) — neither is this one.
+    otherBudgets: [
+      { label: BUDGET_LABELS.evBudgetAtCompletion, derivedFrom: 'Approved allocations + approved budget revisions', where: 'the earned-value report (totalBudget)' },
+      { label: BUDGET_LABELS.contractWaterfall, derivedFrom: 'Project contract value + approved budget revisions', where: 'the budget revisions waterfall' },
+    ],
+  },
+  allocatedToActivities: {
+    truth: TRUTHS.DERIVED,
+    label: 'Allocated to activities',
+    derivedFrom: "The approved BOQ allocations of the activities with a cost record — not the project's budget",
+  },
+  totals: {
+    budget: TRUTHS.DERIVED,
+    committed: TRUTHS.DERIVED,
+    actual: TRUTHS.DERIVED,
+    forecast: projection('estimate_at_completion'),
+    derivedFrom: {
+      budget: "Each cost record's approved allocation",
+      committed: 'Executed commitments and approved commitment change orders (commitment.service)',
+      actual: 'The cost ledger (CostLedgerEntry)',
+      forecast: "Σ each record's estimate at completion: its forecast when set and not below actual, otherwise the larger of its budget and actual",
+    },
+  },
+  records: {
+    forecast: projection(`typed_or_${COST_RECORD_FORECAST_DEFAULT_BASIS}`),
+    derivedFrom: {
+      forecast: `Typed on the record, or when its writer gave none: ${COST_RECORD_FORECAST_DEFAULT_RULE}`,
+    },
+  },
+  eac: {
+    truth: projection('estimate_at_completion'),
+    derivedFrom: 'Actual + the cost to complete (most likely − actual): optimistic × 0.9, pessimistic × 1.15',
+  },
+});
 
 const ensureProject = async ({ orgId, projectId }) => {
   const project = await prisma.project.findFirst({
@@ -244,7 +296,8 @@ const getCostSummary = async ({ orgId, projectId }) => {
     })),
     totals,
     eac,
-    budget: { ...budget, allocatedToActivities: totals.budget },
+    budget: { ...budget, label: BUDGET_LABELS.register, allocatedToActivities: totals.budget },
+    truth: COST_SUMMARY_TRUTH,
   };
 };
 
@@ -298,6 +351,10 @@ const canonicalBudget = async ({ orgId, projectId }) => {
   }
 };
 
+// A record's stored forecast. A typed forecast stands as typed; without one
+// the default below is a projection, labelled on the cost summary
+// (truth.records.forecast: COST_RECORD_FORECAST_DEFAULT_RULE) — it is never
+// a source figure and never feeds a certified one.
 const resolveForecast = ({ budget, actual, payloadForecast }) => {
   if (payloadForecast !== undefined && payloadForecast !== null) {
     return Number(payloadForecast) || 0;

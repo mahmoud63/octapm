@@ -25,6 +25,8 @@ const {
 } = require("../utils/reporting-cutoff");
 // Which rule gave the EAC (budget / CPI, or the budget with CPI 0 or none).
 const { eacBasisOf } = require("../utils/eac-basis");
+// Source / derived / projection labels on the report (labels only).
+const { EV_REPORT_TRUTH } = require("../utils/figure-truth");
 // The server's sentences beside an EV figure (a cutoff not yet reached).
 const { EV_NOTES, cutoffNotReached } = require("../utils/ev-notes");
 
@@ -643,6 +645,9 @@ const snapshotToReport = ({ snapshot, period }) => {
       totalBudget: snapshot.totalBudget,
       cpi: snapshot.cpi === null || snapshot.cpi === undefined ? null : Number(snapshot.cpi),
     }),
+    // Source / derived / projection, and from what (labels only; not stored
+    // with the snapshot — the stored figures are read back as they were).
+    truth: EV_REPORT_TRUTH,
     reporting: {
       // A snapshot locked before its date was recorded is labelled with the
       // period's reporting date; its instant and figures are as stored.
@@ -949,6 +954,10 @@ const buildOfficialEvReport = async ({
     ...metrics,
     // Which rule gave the EAC (not money; every reader receives it).
     eacBasis: eacBasisOf({ totalBudget: metrics.totalBudget, cpi: metrics.cpi }),
+    // Source / derived / projection, and from what: PV, EV and AC are
+    // derived; the EAC is a projection whose rule is eacBasis; totalBudget is
+    // the "Budget at completion (EV basis)". Labels only.
+    truth: EV_REPORT_TRUTH,
     reporting: {
       cutoffDay: resolveReportingCutoffDay(project),
       projectCalendar: project.projectCalendar || null,

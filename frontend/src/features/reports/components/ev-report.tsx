@@ -43,6 +43,8 @@ import type {
 import { useProjectSetupReadiness } from '@/features/projects/hooks/use-projects'
 import { formatLongDate } from '@/lib/dates'
 import { evCutoffNote, formatEvCutoff } from '@/lib/ev-cutoff'
+import { FINANCIAL_TERMS } from '@/lib/financial-terms'
+import { TruthBadge } from '@/features/cost/components/truth-badge'
 
 interface Props {
   projectId: string
@@ -93,6 +95,21 @@ type EvReportResponse = {
   cv: number
   etc: number | null
   totalBudget: number | null
+  /**
+   * Source / derived / projection per figure (PC-7a three truths): PV, EV,
+   * AC and the BAC are derived, the EAC a projection whose rule is eacBasis.
+   * Labels only; absent on reports from before PC-7a.
+   */
+  truth?: {
+    pv?: string
+    ev?: string
+    ac?: string
+    totalBudget?: string
+    eac?: string
+    etc?: string
+    labels?: { totalBudget?: string }
+    derivedFrom?: Record<string, string>
+  }
   sCurve?: Record<string, string | number | null>[]
   activityBreakdown?: EvActivityBreakdownRow[]
   // Withheld by the server from a member who may not read the BOQ, cost
@@ -287,16 +304,22 @@ function MetricCard({
   sub,
   color,
   testId,
+  truth,
 }: {
   label: string
   value: string
   sub?: string
   color?: string
   testId?: string
+  /** The server's truth label: source, derived or projection:<basis> (PC-7a). */
+  truth?: string
 }) {
   return (
     <div className='rounded-lg border p-3 text-center' data-testid={testId}>
-      <p className='text-xs text-muted-foreground'>{label}</p>
+      <p className='text-xs text-muted-foreground'>
+        {label}
+        <TruthBadge truth={truth} />
+      </p>
       <p className={`mt-1 text-xl font-bold ${color || ''}`}>{value}</p>
       {sub && <p className='text-xs text-muted-foreground'>{sub}</p>}
     </div>
@@ -365,6 +388,7 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
     cv,
     etc,
     totalBudget,
+    truth,
     sCurve,
     activityBreakdown,
     activityBreakdownWithheld,
@@ -556,20 +580,32 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
       )}
 
       <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
-        <MetricCard label='Total Budget (BAC)' value={fmt(totalBudget)} />
+        <MetricCard
+          label={
+            truth?.labels?.totalBudget ??
+            FINANCIAL_TERMS.evBudgetAtCompletion.label
+          }
+          value={fmt(totalBudget)}
+          sub={FINANCIAL_TERMS.evBudgetAtCompletion.hint}
+          truth={truth?.totalBudget}
+          testId='uat-ev-bac'
+        />
         <MetricCard
           label='Planned Value (PV)'
           value={fmt(pv)}
+          truth={truth?.pv}
           sub={`${sourceSummary?.pv?.approvedRows ?? 0} approved load rows`}
         />
         <MetricCard
           label='Earned Value (EV)'
           value={fmt(ev)}
+          truth={truth?.ev}
           color='text-blue-600'
         />
         <MetricCard
           label='Actual Cost (AC)'
           value={fmt(ac)}
+          truth={truth?.ac}
           sub={`${sourceSummary?.ac?.officialActualActivities ?? 0} official actual rows`}
           color='text-orange-600'
         />
@@ -614,12 +650,14 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
         <MetricCard
           label='EAC'
           value={noBudget ? '—' : fmt(eac)}
+          truth={truth?.eac}
           sub={eacSub}
           testId='uat-ev-eac'
         />
         <MetricCard
           label='ETC'
           value={noBudget || etcNotProjected ? '—' : fmt(etc)}
+          truth={truth?.etc}
           sub={etcSub}
           testId='uat-ev-etc'
         />
