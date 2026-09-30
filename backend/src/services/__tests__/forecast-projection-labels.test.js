@@ -7,7 +7,7 @@
  * Static: no database, no browser. The rendered text is held elsewhere: the
  * mobile screens by mobile/src/testing/screens/home.test.tsx and
  * project.test.tsx, the web panel by
- * frontend/e2e/64-forecast-panel-dates.spec.ts.
+ * frontend/e2e/67-forecast-panel-dates.spec.ts.
  */
 const fs = require("fs");
 const path = require("path");
