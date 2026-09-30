@@ -59,9 +59,15 @@ timesheet approval and worker administration; equipment cost; report schedules.
 3. What happens next: labour cost posts to Actual Cost; productivity figures update.
 
 **Read the budget position**
-1. Project → Cost Control → Overview: the budget block and Forecast (EAC) cards.
+1. Project → Cost Control → Overview: the budget block, the **Projected final cost (cost
+   records)** card and its three scenario cards (optimistic, most likely, pessimistic). This is
+   the cost records' own projection — not the earned-value EAC, which is on the Forecast tab.
 2. Budget tab: per-line figures; the "Off by …" note flags a budget that does not equal the bill.
-3. By Activity: activity budget against actual; By Phase; Burn Rate.
+3. By Activity: activity budget against actual, and each record's **Forecast**. A forecast
+   nobody entered is marked **Default** — the larger of the budget and the actual cost as they
+   stood when it was set; it does not follow them afterwards. Click **Edit** and type a forecast
+   to replace it (0 is a forecast; an emptied field changes nothing). By Phase shows the
+   projected final cost per phase; Burn Rate.
 
 **Add a budget line**
 1. Cost Control → Budget → **Cost codes** → tick the codes the project uses → **Apply** → Close.
