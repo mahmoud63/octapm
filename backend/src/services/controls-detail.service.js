@@ -39,7 +39,7 @@ const auditService = require("./audit.service");
 const attachmentService = require("./attachment.service");
 const commitmentService = require("./commitment.service");
 const readinessService = require("./project-setup-readiness.service");
-const { getApprovedVariationAllowance } = require("./ipc.service");
+const { getApprovedVariationAllowances } = require("./ipc.service");
 const { applyPartyWorkflowVisibility } = require("./company-party.service");
 const { withDraftVisibility } = require("./rfi-workflow.service");
 
@@ -187,11 +187,10 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
   });
   if (!item) throw new HttpError(404, "BOQ_ITEM_NOT_FOUND", "BOQ item not found");
 
-  const [lock, allocationList, structure, variation] = await Promise.all([
+  const [lock, allocationList, structure] = await Promise.all([
     boqService.getBoqBaselineLock(projectId),
     allocationService.listAllocations({ orgId, projectId, boqItemId: itemId }),
     structureOf({ orgId, projectId, wbsNodeId: item.wbsNodeId, locationId: item.locationId, costCodeId: item.costCodeId }, controls),
-    getApprovedVariationAllowance({ tx: prisma, projectId, boqItemId: itemId }),
   ]);
   const summaryItem = (allocationList.summary.items || []).find((entry) => entry.boqItemId === itemId) || null;
   const allocations = allocationList.allocations;
@@ -203,7 +202,15 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
   // shows a BOQ reader (id, code, name) and a { allowed: false } marker, and
   // the schedule is not even read.
   const canReadSchedule = can("schedule");
-  const [activities, progress, original] = await Promise.all([
+  // The IPC certification cap's approved-variation rule, for the row and for
+  // each listed allocation, in one query (ipc.service getApprovedVariationAllowances).
+  const listedAllocations = allocations.slice(0, LIST_CAP);
+  const [[variation, ...perAllocation], activities, progress, original] = await Promise.all([
+    getApprovedVariationAllowances({
+      tx: prisma,
+      projectId,
+      pairs: [{ boqItemId: itemId }, ...listedAllocations.map((allocation) => ({ allocationId: allocation.id, boqItemId: itemId }))],
+    }),
     activityIds.length
       ? prisma.activity.findMany({
           where: { id: { in: activityIds }, projectId },
@@ -220,52 +227,48 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
   ]);
   const activityById = new Map(activities.map((entry) => [entry.id, entry]));
 
-  const allocationRows = await Promise.all(
-    allocations.slice(0, LIST_CAP).map(async (allocation) => {
-      const activity = activityById.get(allocation.activityId);
-      // The IPC certification cap's own rule for this allocation.
-      const perAllocation = await getApprovedVariationAllowance({ tx: prisma, projectId, allocationId: allocation.id, boqItemId: itemId });
-      const latest = progress.get(allocation.activityId);
-      return {
-        allocationId: allocation.id,
-        status: allocation.status,
-        basis: allocation.basis,
-        quantity: fig(toNumber(allocation.quantity), "source", "ActivityBoqAllocation.quantity", [{ type: "activity_boq_allocation", id: allocation.id }]),
-        amount: fig(toMoneyNumber(allocation.amount), "source", "ActivityBoqAllocation.amount", [{ type: "activity_boq_allocation", id: allocation.id }]),
-        authorisedQuantity: fig(
-          toNumber(allocation.quantity) + perAllocation.quantity,
-          "derived",
-          "Allocation quantity + Σ approved change-order allocation-link quantity (ipc.service getApprovedVariationAllowance, the IPC certification cap)",
-          [{ type: "activity_boq_allocation", id: allocation.id }, { type: "change_order_allocation_link", filter: "changeOrder.status = approved" }],
-        ),
-        activity: activity && !canReadSchedule
-          ? {
-              id: activity.id,
-              code: activityCodeOf(activity),
-              name: activity.name,
-              href: null,
-              schedule: denied("schedule", SCHEDULE_WITHHELD_REASON),
-            }
-          : activity
-          ? {
-              id: activity.id,
-              code: activityCodeOf(activity),
-              name: activity.name,
-              startDate: iso(activity.startDate),
-              endDate: iso(activity.endDate),
-              isCritical: Boolean(activity.isCritical),
-              totalFloat: activity.totalFloat ?? null,
-              isActive: activity.isActive,
-              pctComplete: latest
-                ? fig(toNumber(latest.pctComplete), "source", "Latest approved ActivityProgress (most recently updated)", [{ type: "activity_progress" }])
-                : null,
-              progressSource: latest?.source ?? null,
-              href: link("activity", activity.id),
-            }
-          : null,
-      };
-    }),
-  );
+  const allocationRows = listedAllocations.map((allocation, index) => {
+    const activity = activityById.get(allocation.activityId);
+    const latest = progress.get(allocation.activityId);
+    return {
+      allocationId: allocation.id,
+      status: allocation.status,
+      basis: allocation.basis,
+      quantity: fig(toNumber(allocation.quantity), "source", "ActivityBoqAllocation.quantity", [{ type: "activity_boq_allocation", id: allocation.id }]),
+      amount: fig(toMoneyNumber(allocation.amount), "source", "ActivityBoqAllocation.amount", [{ type: "activity_boq_allocation", id: allocation.id }]),
+      authorisedQuantity: fig(
+        toNumber(allocation.quantity) + perAllocation[index].quantity,
+        "derived",
+        "Allocation quantity + Σ approved change-order allocation-link quantity (ipc.service getApprovedVariationAllowance, the IPC certification cap)",
+        [{ type: "activity_boq_allocation", id: allocation.id }, { type: "change_order_allocation_link", filter: "changeOrder.status = approved" }],
+      ),
+      activity: activity && !canReadSchedule
+        ? {
+            id: activity.id,
+            code: activityCodeOf(activity),
+            name: activity.name,
+            href: null,
+            schedule: denied("schedule", SCHEDULE_WITHHELD_REASON),
+          }
+        : activity
+        ? {
+            id: activity.id,
+            code: activityCodeOf(activity),
+            name: activity.name,
+            startDate: iso(activity.startDate),
+            endDate: iso(activity.endDate),
+            isCritical: Boolean(activity.isCritical),
+            totalFloat: activity.totalFloat ?? null,
+            isActive: activity.isActive,
+            pctComplete: latest
+              ? fig(toNumber(latest.pctComplete), "source", "Latest approved ActivityProgress (most recently updated)", [{ type: "activity_progress" }])
+              : null,
+            progressSource: latest?.source ?? null,
+            href: link("activity", activity.id),
+          }
+        : null,
+    };
+  });
 
   const quantity = toNumber(item.qty);
   const sections = {};
@@ -287,10 +290,10 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
     authorised: fig(
       quantity + variation.quantity,
       "derived",
-      "Current quantity + Σ approved change-order allocation-link quantity naming this item (ipc.service getApprovedVariationAllowance)",
+      "Current quantity + Σ approved change-order allocation-link quantity naming this item (ipc.service getApprovedVariationAllowances)",
       [{ type: "boq_item", id: item.id }, { type: "change_order_allocation_link", filter: "boqItemId, changeOrder.status = approved" }],
     ),
-    approvedVariation: fig(variation.quantity, "derived", "Σ approved change-order allocation-link quantity naming this item (ipc.service getApprovedVariationAllowance)", [
+    approvedVariation: fig(variation.quantity, "derived", "Σ approved change-order allocation-link quantity naming this item (ipc.service getApprovedVariationAllowances)", [
       { type: "change_order_allocation_link", filter: "boqItemId, changeOrder.status = approved" },
     ]),
     mapped: summaryItem
@@ -627,11 +630,12 @@ const getActivityDetail = async ({
 
   // The bill's side of the activity — withheld whole by boq-figures for a non-BOQ reader.
   const allocationRows = allocationList.allocations.slice(0, LIST_CAP);
-  const perAllocation = await Promise.all(
-    allocationRows.map((allocation) =>
-      getApprovedVariationAllowance({ tx: prisma, projectId, allocationId: allocation.id, boqItemId: allocation.boqItemId }),
-    ),
-  );
+  // The IPC certification cap's approved-variation rule per allocation, in one query.
+  const perAllocation = await getApprovedVariationAllowances({
+    tx: prisma,
+    projectId,
+    pairs: allocationRows.map((allocation) => ({ allocationId: allocation.id, boqItemId: allocation.boqItemId })),
+  });
   // EV is the allocation summary's own figure, scoped to this activity: Σ per
   // approved allocation of multiplyMoney(amount, clamp(pct, 0, 100) / 100) —
   // not a second formula over the activity's total.

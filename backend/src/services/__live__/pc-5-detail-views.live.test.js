@@ -23,6 +23,9 @@
  * - a subcontractor's person (party-scoped) gets no commitment, punch or
  *   lookahead rows from either detail, and no linked RFI or submittal its
  *   register would not list to them (party routing; RFI drafts);
+ * - every authorised quantity (row and allocation) is the IPC cap's
+ *   approved-variation rule for its own pair, as the single-pair query
+ *   stated it, though the detail asks for every pair in one query;
  * - a list's total counts what a member without BOQ read is refused over
  *   every row, not over the first page (more than 50 change orders);
  * - the activity's EV is the allocation summary's, on amounts where a second
@@ -200,7 +203,24 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
         value: 50,
         status: "approved",
         approvedAt: new Date("2026-02-05T12:00:00.000Z"),
-        allocationLinks: { create: [{ projectId: project.id, allocationId: allocations.AX, boqItemId: rows.A.id, quantity: 5, amount: 50 }] },
+        allocationLinks: {
+          create: [
+            { projectId: project.id, allocationId: allocations.AX, boqItemId: rows.A.id, quantity: 5, amount: 50 },
+            // Names B's allocation to X: BX's allowance, and no one else's.
+            { projectId: project.id, allocationId: allocations.BX, boqItemId: rows.B.id, quantity: 3, amount: 60 },
+          ],
+        },
+      },
+    });
+    // Not approved: counts toward no allowance.
+    await prisma.changeOrder.create({
+      data: {
+        projectId: project.id,
+        ref: `CO-PC5-PENDING-${tag}`,
+        description: "LiveTest PC-5 pending order",
+        value: 5,
+        status: "pending",
+        allocationLinks: { create: [{ projectId: project.id, allocationId: allocations.C1Z, boqItemId: rows.C1.id, quantity: 100, amount: 5 }] },
       },
     });
     // Reaches X twice: directly (activityId) and through an allocation link to AX.
@@ -313,6 +333,47 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     for (const { path, figure } of figuresOf(detail.sections)) {
       if (!figure.notAvailable) expect([path, TRUTHS.has(figure.truth), typeof figure.basis]).toEqual([path, true, "string"]);
     }
+  });
+
+  it("every authorised quantity is the IPC cap's approved-variation rule, per allocation, as the single-pair query stated it", async () => {
+    // The rule as getApprovedVariationAllowance's single-pair query stated it
+    // before the detail asked for every pair at once: approved links naming
+    // the allocation or the BOQ item.
+    const oracle = async (where) => {
+      const links = await prisma.changeOrderAllocationLink.findMany({
+        where: { projectId: project.id, OR: Object.entries(where).map(([key, value]) => ({ [key]: value })), changeOrder: { status: "approved" } },
+        select: { quantity: true },
+      });
+      return links.reduce((sum, entry) => sum + Number(entry.quantity), 0);
+    };
+    const authorised = {};
+    for (const [route, key] of [
+      [`/boq/items/${rows.A.id}/detail`, "boq"],
+      [`/boq/items/${rows.B.id}/detail`, "boq"],
+      [`/boq/items/${rows.C1.id}/detail`, "boq"],
+      [`/activities/${acts.X.id}/detail`, "activity"],
+      [`/activities/${acts.Z.id}/detail`, "activity"],
+    ]) {
+      const answer = await api.get(at(route), auth());
+      expect([route, answer.status, answer.body?.error]).toEqual([route, 200, undefined]);
+      for (const row of answer.body.data.sections.mapping.allocations.items) {
+        const boqItemId = key === "boq" ? answer.body.data.id : row.boqItem.id;
+        const allocation = await prisma.activityBoqAllocation.findUnique({ where: { id: row.allocationId }, select: { quantity: true } });
+        expect([route, row.allocationId, row.authorisedQuantity.value]).toEqual([
+          route,
+          row.allocationId,
+          Number(allocation.quantity) + (await oracle({ allocationId: row.allocationId, boqItemId })),
+        ]);
+        authorised[row.allocationId] = row.authorisedQuantity.value;
+      }
+      if (key === "boq") {
+        const item = await prisma.boqItem.findUnique({ where: { id: answer.body.data.id }, select: { qty: true } });
+        expect([route, answer.body.data.sections.quantities.authorised.value]).toEqual([route, Number(item.qty) + (await oracle({ boqItemId: answer.body.data.id }))]);
+      }
+    }
+    // Each pair gets its own rows: AX and AY share the links naming A (5 + 7),
+    // BX has its own (3), C1Z's pending link counts for nothing.
+    expect([allocations.AX, allocations.AY, allocations.BX, allocations.C1Z].map((id) => authorised[id])).toEqual([72, 52, 53, 1]);
   });
 
   it("the activity's EV is the allocation summary's, per allocation, where a formula over the total rounds differently", async () => {
