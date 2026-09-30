@@ -24,6 +24,10 @@
  *     refuses to archive an approved order, so the archive is written
  *     directly on this LiveTest row: it stands for legacy data, and the
  *     forecast's `archivedAt: null` filter must hold for it.
+ * As on the certified project, the project has a prime contract (value from
+ * the project, completion date 2027-12-17), a bill row, a payment certificate
+ * in draft and a cost record with an entered forecast — so that "the forecast
+ * writes nothing" is checked on rows that exist.
  *
  * The expected figures pin the engine's CURRENT conventions. Each is a
  * documented limitation (census §5.6), asserted so that any change to it is
@@ -53,6 +57,7 @@
  *
  *   npm run test:live -- src/services/__live__/r5-1-forecast-change-impacts.live.test.js
  */
+const { Prisma } = require("@prisma/client");
 const { prisma } = require("../../config/db");
 const { createLiveOrg, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
 const { startApi } = require("./auth-live-kit");
@@ -65,6 +70,62 @@ const AS_OF = new Date("2026-09-30T12:00:00.000Z");
 const LATE_START = new Date("2027-01-06T12:00:00.000Z"); // F two and a half days past its start
 const MID_MARCH = new Date("2027-03-20T12:00:00.000Z"); // F overdue, X past its start
 const AFTER_THE_PLAN = new Date("2027-08-01T12:00:00.000Z"); // every activity overdue
+
+// ─── Every row of the organisation ────────────────────────────────────────
+// "Writes nothing" is checked on every table of the schema that holds rows of
+// an organisation or a project (the LiveTest organisation has this one
+// project), not on a list of tables someone thought of: a table added later is
+// covered the day it is added. Activity progress, assignments and equipment
+// have neither column and are reached through their activity. The few models
+// left (children keyed only by their parent's id, such as an RFI's assignees,
+// and operational tables such as rate-limit buckets) are not compared.
+const scalarField = (model, name) => model.fields.some((field) => field.name === name && field.kind === "scalar");
+const THROUGH_ACTIVITY = new Set(["ActivityProgress", "ActivityAssignment", "ActivityEquipment"]);
+const scopeOf = (model) => {
+  if (model.name === "Organisation") return ({ orgId }) => ({ id: orgId });
+  if (scalarField(model, "orgId")) return ({ orgId }) => ({ orgId });
+  if (scalarField(model, "projectId")) return ({ projectId }) => ({ projectId });
+  if (THROUGH_ACTIVITY.has(model.name)) return ({ projectId }) => ({ activity: { projectId } });
+  return null;
+};
+const TABLES = Prisma.dmmf.datamodel.models.map((model) => ({
+  name: model.name,
+  delegate: model.name[0].toLowerCase() + model.name.slice(1),
+  key: model.primaryKey?.fields?.length ? model.primaryKey.fields : model.fields.filter((field) => field.isId).map((field) => field.name),
+  where: scopeOf(model),
+}));
+const SCOPED = TABLES.filter((table) => table.where);
+const stable = (value) => JSON.stringify(value, (key, inner) => (typeof inner === "bigint" ? `${inner}n` : inner));
+
+/** name → (row key → the row's fields, each as text) for every scoped table. */
+const everyRow = async (scope) => {
+  const snapshot = new Map();
+  for (let index = 0; index < SCOPED.length; index += 3) {
+    await Promise.all(SCOPED.slice(index, index + 3).map(async (table) => {
+      const found = await prisma[table.delegate].findMany({ where: table.where(scope) });
+      snapshot.set(table.name, new Map(found.map((row) => [table.key.map((field) => stable(row[field])).join("|"), Object.fromEntries(Object.entries(row).map(([field, value]) => [field, stable(value)]))])));
+    }));
+  }
+  return snapshot;
+};
+
+/** What differs between two snapshots, one line per row: "Table key: added | removed | changed a, b". */
+const changesBetween = (before, after) => {
+  const changes = [];
+  for (const [name, rowsAfter] of after) {
+    const rowsBefore = before.get(name) || new Map();
+    for (const [key, row] of rowsAfter) {
+      const was = rowsBefore.get(key);
+      if (!was) changes.push(`${name} ${key}: added`);
+      else {
+        const fields = Object.keys({ ...was, ...row }).filter((field) => was[field] !== row[field]);
+        if (fields.length) changes.push(`${name} ${key}: changed ${fields.map((field) => `${field} ${was[field]} → ${row[field]}`).join(", ")}`);
+      }
+    }
+    for (const key of rowsBefore.keys()) if (!rowsAfter.has(key)) changes.push(`${name} ${key}: removed`);
+  }
+  return changes;
+};
 
 const PROOF = { fileName: "LiveTest proof.pdf", fileUrl: "https://example.test/proof.pdf" };
 const DUPLICATE = "LiveTest Client instruction: upgrade blockwork to fair-faced, grid A-F";
@@ -105,25 +166,23 @@ liveDescribe("R5-1: the certified project's 45-day forecast, pinned on its own g
   const forecastAt = (asOf = AS_OF) => buildForecast({ orgId: live.org.id, projectId: built.project.id, asOf });
   const keysOf = (value) => Object.keys(value || {}).sort();
 
-  // Every row the forecast could conceivably touch, read straight from the
-  // database: the schedule (dates, float, baseline fields), the project and
-  // contract dates, the orders and their links, the money they moved.
-  const rows = async () => {
-    const projectId = built.project.id;
-    const byId = { orderBy: { id: "asc" } };
-    return {
-      project: await prisma.project.findUnique({ where: { id: projectId } }),
-      primeContract: await prisma.primeContract.findMany({ where: { projectId }, ...byId }),
-      activities: await prisma.activity.findMany({ where: { projectId }, ...byId }),
-      dependencies: await prisma.activityDependency.findMany({ where: { projectId }, ...byId }),
-      revisions: await prisma.scheduleRevision.findMany({ where: { projectId }, ...byId }),
-      orders: await prisma.changeOrder.findMany({ where: { projectId }, ...byId }),
-      orderLinks: await prisma.changeOrderActivityLink.findMany({ where: { projectId }, ...byId }),
-      workflowLinks: await prisma.workflowActivityLink.findMany({ where: { projectId }, ...byId }),
-      budgetLineChanges: await prisma.budgetLineChange.findMany({ where: { projectId }, ...byId }),
-      rfis: await prisma.rfi.findMany({ where: { projectId }, ...byId }),
-      eotClaims: await prisma.eotClaim.findMany({ where: { projectId }, ...byId }),
-    };
+  // Every row of this organisation, once nothing is still being written: two
+  // snapshots a moment apart must agree (a request answered before its
+  // publish-after-commit work lands is given the time to finish).
+  const settledRows = async () => {
+    const scope = { orgId: live.org.id, projectId: built.project.id };
+    let previous = await everyRow(scope);
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const next = await everyRow(scope);
+      if (!changesBetween(previous, next).length) return next;
+      previous = next;
+    }
+    throw new Error("the organisation's rows never settled");
+  };
+  const ok = async (response, expected = 200) => {
+    expect([response.status, response.body?.error]).toEqual([expected, undefined]);
+    return response.body.data;
   };
 
   beforeAll(async () => {
@@ -132,7 +191,7 @@ liveDescribe("R5-1: the certified project's 45-day forecast, pinned on its own g
     // deterministic narrative, and no request leaves the machine.
     api = await startApi({ DATABASE_CONNECTION_LIMIT: "4", ANTHROPIC_API_KEY: "", OPENAI_API_KEY: "", GEMINI_API_KEY: "", AI_PROVIDER: "" });
     built.project = await prisma.project.create({
-      data: { orgId: live.org.id, name: "LiveTest R5-1 forecast trace", startDate: new Date("2027-01-04"), endDate: new Date("2027-12-17"), projectCalendar: "six_day" },
+      data: { orgId: live.org.id, name: "LiveTest R5-1 forecast trace", startDate: new Date("2027-01-04"), endDate: new Date("2027-12-17"), completionDate: new Date("2027-12-17"), contractValue: 250000, projectCalendar: "six_day" },
     });
     // The chain, laid out by the CPM engine from the project start on the
     // six-day calendar (each create recalculates the project).
@@ -149,7 +208,18 @@ liveDescribe("R5-1: the certified project's 45-day forecast, pinned on its own g
       built.activities[key] = activity.id;
       previous = activity.id;
     }
-    const { F, X } = built.activities;
+    const { F, G, X } = built.activities;
+
+    // The contract and the money, as the certified project has them, written
+    // before the orders so their approval meets a contract that exists: the
+    // prime contract (its completion date taken from the project, 2027-12-17),
+    // one bill row left unallocated (no activity budget, no earned value), a
+    // payment certificate drafted for it, and a cost record on G with an
+    // entered forecast.
+    built.contract = await ok(await api.get(at("/prime-contract"), auth()));
+    await send(at("/boq/items"), { code: "R5.1", description: "LiveTest bill row", quantity: 10, unit: "m3", rate: 100 });
+    built.ipc = await send(at("/ipc"), { period: "P01" });
+    built.costRecord = await send(at(`/cost/activity/${G}`), { budget: 1000, forecast: 1200 });
 
     // Six approved orders on X, one instruction recorded six times.
     built.orders.duplicates = [];
@@ -174,6 +244,11 @@ liveDescribe("R5-1: the certified project's 45-day forecast, pinned on its own g
     await approve(archived.id);
     await prisma.changeOrder.update({ where: { id: archived.id }, data: { archivedAt: new Date("2026-09-01T00:00:00Z") } });
     built.orders.archived = archived.id;
+
+    // Every row of the organisation BEFORE any forecast is built: what the
+    // last test compares with, so a write made by the first forecast of this
+    // file — even one that stores the same value every time — is seen.
+    built.before = await settledRows();
   }, 600_000);
 
   afterAll(async () => {
@@ -292,20 +367,6 @@ liveDescribe("R5-1: the certified project's 45-day forecast, pinned on its own g
     expect(midMarch.schedule.criticalDriver.name).toBe("Foundation concrete");
   });
 
-  it("writes nothing: no activity, baseline or contract date, order, link or amount changes", async () => {
-    const before = await rows();
-    await forecast();
-    const explained = await api.post(at("/forecast/explain"), {}, auth());
-    expect([explained.status, explained.body?.error]).toEqual([200, undefined]);
-    await forecast();
-    const after = await rows();
-    expect(after).toEqual(before);
-    // The contract completion date the forecast never reads, and never moves.
-    expect(after.project.endDate.toISOString().slice(0, 10)).toBe("2027-12-17");
-    expect(after.revisions).toEqual([]);
-    expect(after.eotClaims).toEqual([]);
-  });
-
   it("calls it a projection, never an extension of time", async () => {
     // The wording holds at every reading: the route's (as of now), the
     // pinned one, and the later ones where other rules and reasons apply.
@@ -351,5 +412,55 @@ liveDescribe("R5-1: the certified project's 45-day forecast, pinned on its own g
     expect(degraded).toBe(true);
     expect(narrative.headline).toMatch(/^The project is projected to finish \d+ days late/);
     expect(JSON.stringify(narrative)).not.toMatch(NOT_A_FORECAST);
+  });
+
+  it("writes nothing: not one row of the organisation changes — no activity, baseline or contract date, order, link, amount, certificate or cost record", async () => {
+    // Every forecast the tests above built is behind us; build them once more.
+    const { before } = built;
+    await forecast();
+    const explained = await api.post(at("/forecast/explain"), {}, auth());
+    expect([explained.status, explained.body?.error]).toEqual([200, undefined]);
+    await forecast();
+    // The same service in this process, at every instant this file reads.
+    for (const asOf of [AS_OF, LATE_START, MID_MARCH, AFTER_THE_PLAN]) await forecastAt(asOf);
+    const after = await settledRows();
+    expect(changesBetween(before, after)).toEqual([]);
+
+    // The comparison is over rows that exist, in every table R5-1 names.
+    // No schedule revision and no extension-of-time claim exists, before or
+    // after: a forecast is neither.
+    expect(SCOPED.length).toBeGreaterThan(200);
+    const counted = ["Project", "PrimeContract", "Activity", "ActivityDependency", "ActivityProgress", "ScheduleRevision", "ChangeOrder", "ChangeOrderActivityLink", "WorkflowActivityLink", "Rfi", "EotClaim", "BudgetLine", "BudgetLineChange", "BudgetRevision", "CostRecord", "BoqItem", "IpcCertificate"];
+    expect(Object.fromEntries(counted.map((name) => [name, after.get(name).size]))).toEqual({
+      Project: 1,
+      PrimeContract: 1,
+      Activity: 5,
+      ActivityDependency: 4,
+      ActivityProgress: 0,
+      ScheduleRevision: 0,
+      ChangeOrder: 9,
+      ChangeOrderActivityLink: 9,
+      WorkflowActivityLink: 1,
+      Rfi: 1,
+      EotClaim: 0,
+      BudgetLine: 1,
+      BudgetLineChange: 8,
+      BudgetRevision: 8,
+      CostRecord: 1,
+      BoqItem: 1,
+      IpcCertificate: 1,
+    });
+
+    // And, by name, what the forecast must never move (R5-1).
+    const projectId = built.project.id;
+    const day = (value) => (value ? value.toISOString().slice(0, 10) : null);
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    expect([day(project.endDate), day(project.completionDate), day(project.revisedCompletionDate)]).toEqual(["2027-12-17", "2027-12-17", null]);
+    const contract = await prisma.primeContract.findUnique({ where: { projectId } });
+    expect([day(contract.completionDate), String(contract.originalValue), contract.originalValueSource]).toEqual(["2027-12-17", "250000", "project_value"]);
+    const cost = await prisma.costRecord.findFirst({ where: { projectId } });
+    expect([cost.activityId, String(cost.budget), String(cost.forecast)]).toEqual([built.activities.G, "1000", "1200"]);
+    const baselines = await prisma.activity.findMany({ where: { projectId }, select: { baselineStart: true, baselineFinish: true } });
+    expect(baselines).toEqual(Array(5).fill({ baselineStart: null, baselineFinish: null }));
   });
 });
