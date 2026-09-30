@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page, type Response as PwResponse } from '@playwright/test'
 import { API, apiClient } from './support'
 import {
   addMember,
@@ -379,20 +379,22 @@ const countProjectRows = (orgId: string, projectId: string) =>
  * A three-activity programme workbook in the schedule parser's column
  * contract; A300 names a predecessor that is not in the file (one issue).
  */
-const scheduleWorkbook = () => {
-  const script = `
-const XLSX = require('@e965/xlsx');
-const rows = [
+const PROGRAMME_ROWS = [
   ['activity_code', 'name', 'wbs_code', 'duration_days', 'predecessors'],
   ['A100', 'Excavate', '1.1', 5, ''],
   ['A200', 'Pour', '1.1', 10, 'A100'],
   ['A300', 'Cure', '1.2', 3, 'A200, A999'],
-];
+]
+
+const scheduleWorkbook = (rows: Array<Array<string | number>> = PROGRAMME_ROWS) => {
+  const script = `
+const XLSX = require('@e965/xlsx');
+const rows = JSON.parse(process.argv[1]);
 const book = XLSX.utils.book_new();
 XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), 'Programme');
 process.stdout.write(XLSX.write(book, { type: 'base64', bookType: 'xlsx' }));
 `
-  const result = spawnSync(process.execPath, ['-e', script], { cwd: backendDir, encoding: 'utf8' })
+  const result = spawnSync(process.execPath, ['-e', script, JSON.stringify(rows)], { cwd: backendDir, encoding: 'utf8' })
   if (result.status !== 0) throw new Error(`workbook (exit ${result.status}): ${result.stderr}`)
   return Buffer.from(result.stdout, 'base64')
 }
@@ -408,12 +410,41 @@ const dryRun = async (client: APIRequestContext, projectId: string, route: strin
   return body.data
 }
 
+/**
+ * Holds back the answer to the first request matching `pattern` (the server
+ * has already answered it) until `release()`; later requests pass straight
+ * through.
+ */
+const holdFirstAnswer = async (page: Page, pattern: RegExp) => {
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let held = false
+  await page.route(pattern, async (route) => {
+    if (held) return route.continue()
+    held = true
+    const response = await route.fetch()
+    await gate
+    await route.fulfill({ response })
+  })
+  return { isHeld: () => held, release, stop: () => page.unroute(pattern) }
+}
+
+/** Lets the page run whatever a just-finished response would set on screen. */
+const settle = async (page: Page) => {
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await page.waitForTimeout(300)
+}
+
 test('the import previews show the dry run on screen and write nothing', async ({ page }) => {
   test.setTimeout(240_000)
   const boqFile = readFileSync(CONSTRUCTION_BOQ)
   const programme = scheduleWorkbook()
+  // A second programme (A100 and A200 only), for the stale-preview case.
+  const programmeB = scheduleWorkbook(PROGRAMME_ROWS.slice(0, 3))
 
-  const { projectId, boqReport, scheduleReport } = await withApi(async (client) => {
+  const { projectId, templateBytes, boqReport, scheduleReport } = await withApi(async (client) => {
     if (!org) org = await registerLiveOrg(client, 'pc8guide')
     const project = await createProject(client, org.adminToken, `Import previews ${Date.now()}`)
     // A bill already uploaded (the product's own template), so the preview
@@ -423,14 +454,16 @@ test('the import previews show the dry run on screen and write nothing', async (
       headers: { authorization: `Bearer ${org.adminToken}` },
     })
     expect(template.status()).toBe(200)
+    const templateBody = await template.body()
     const uploaded = await client.post(`${API}/projects/${project}/boq/upload`, {
       headers: { authorization: `Bearer ${org.adminToken}` },
-      multipart: { file: { name: 'boq-template.xlsx', mimeType: XLSX_MIME, buffer: await template.body() } },
+      multipart: { file: { name: 'boq-template.xlsx', mimeType: XLSX_MIME, buffer: templateBody } },
     })
     expect(uploaded.status(), JSON.stringify((await uploaded.json())?.error)).toBe(200)
     // The server's own dry runs of the two files: the figures the screen must show.
     return {
       projectId: project,
+      templateBytes: templateBody,
       boqReport: await dryRun(client, project, '/boq/upload', 'Construction_BOQ.xlsx', boqFile),
       scheduleReport: await dryRun(client, project, '/import/xlsx', 'programme.xlsx', programme),
     }
@@ -476,6 +509,29 @@ test('the import previews show the dry run on screen and write nothing', async (
   await page.getByTestId('boq-upload-preview-cancel').click()
   await expect(boqPanel).toHaveCount(0)
 
+  // ── A stale BOQ answer never replaces a later choice. While a preview runs
+  // the zone takes no click or drop, but its input stays enabled: the first
+  // file's answer is held until the second file's preview is on screen, then
+  // let through — the panel stays on the second file.
+  const boqHold = await holdFirstAnswer(page, /\/boq\/upload\?dryRun=true/)
+  const isBoqAnswer = (r: PwResponse) =>
+    r.url().includes('/boq/upload') && r.request().method() === 'POST'
+  await boqInput.setInputFiles({ name: 'Construction_BOQ.xlsx', mimeType: XLSX_MIME, buffer: boqFile })
+  await expect.poll(boqHold.isHeld).toBe(true)
+  const laterAnswered = page.waitForResponse(isBoqAnswer)
+  await boqInput.setInputFiles({ name: 'boq-later-choice.xlsx', mimeType: XLSX_MIME, buffer: templateBytes })
+  expect((await laterAnswered).status()).toBe(200)
+  await expect(boqPanel).toContainText('boq-later-choice.xlsx')
+  const staleBoq = page.waitForResponse(isBoqAnswer)
+  boqHold.release()
+  await (await staleBoq).finished()
+  await settle(page)
+  await expect(boqPanel).toContainText('boq-later-choice.xlsx')
+  await expect(boqPanel).not.toContainText('Construction_BOQ.xlsx')
+  await boqHold.stop()
+  await page.getByTestId('boq-upload-preview-cancel').click()
+  await expect(boqPanel).toHaveCount(0)
+
   // ── Schedule: the Excel option, and Import waits for its preview.
   await page.goto(`${base}/schedule`)
   await page.getByRole('button', { name: /Import Schedule/ }).click({ timeout: 45_000 })
@@ -502,6 +558,41 @@ test('the import previews show the dry run on screen and write nothing', async (
   await expect(dialog.getByText(/Predecessor "A999" of "A300"/)).toBeVisible()
   await expect(dialog.getByTestId('schedule-import-confirm')).toBeEnabled()
   await dialog.getByRole('button', { name: 'Cancel' }).click()
+
+  // ── A stale schedule answer never enables Import for another file. The
+  // file input stays open while a preview runs: the first file's answer is
+  // held until a second file is chosen, then let through.
+  const scheduleHold = await holdFirstAnswer(page, /\/import\/xlsx\?dryRun=true/)
+  const isScheduleAnswer = (r: PwResponse) =>
+    r.url().includes('/import/xlsx') && r.request().method() === 'POST'
+  await page.getByRole('button', { name: /Import Schedule/ }).click()
+  const raced = page.getByRole('dialog')
+  await raced.getByLabel('Excel (.xlsx)').check()
+  const racedFile = raced.locator('#import-schedule-file')
+  const racedPreview = raced.getByTestId('schedule-import-preview-run')
+  await racedFile.setInputFiles({ name: 'programme.xlsx', mimeType: XLSX_MIME, buffer: programme })
+  const staleSchedule = page.waitForResponse(isScheduleAnswer)
+  await racedPreview.click()
+  await expect.poll(scheduleHold.isHeld).toBe(true)
+  await racedFile.setInputFiles({ name: 'programme-b.xlsx', mimeType: XLSX_MIME, buffer: programmeB })
+  scheduleHold.release()
+  expect((await staleSchedule).status()).toBe(200)
+  // The first file's preview has settled (Preview is offered again) …
+  await expect(racedPreview).toHaveText('Preview')
+  await expect(racedPreview).toBeEnabled()
+  await settle(page)
+  // … and it neither shows nor enables Import for the second file.
+  await expect(raced.getByTestId('schedule-import-preview')).toHaveCount(0)
+  await expect(raced.getByTestId('schedule-import-confirm')).toBeDisabled()
+  // The second file's own preview does.
+  await scheduleHold.stop()
+  const ownSchedule = page.waitForResponse(isScheduleAnswer)
+  await racedPreview.click()
+  expect((await ownSchedule).status()).toBe(200)
+  await expect(raced.getByTestId('schedule-import-preview-activities')).toHaveAttribute('data-value', '2')
+  await expect(raced.getByTestId('schedule-import-preview-issues')).toHaveAttribute('data-value', '0')
+  await expect(raced.getByTestId('schedule-import-confirm')).toBeEnabled()
+  await raced.getByRole('button', { name: 'Cancel' }).click()
 
   expect(writes, 'no upload or import was sent without dryRun').toEqual([])
   expect(countProjectRows(org!.orgId, projectId), 'still nothing written').toEqual(before)

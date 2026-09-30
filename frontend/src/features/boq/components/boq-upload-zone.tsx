@@ -223,6 +223,11 @@ export function BoqUploadZone({
     file: File
     report: BoqUploadPreview
   } | null>(null)
+  // The file chosen last. While a preview is in flight the zone takes no
+  // click or drop, but the input itself stays enabled, so an earlier file's
+  // answer can still arrive after a later choice: only the answer for the
+  // file chosen last is taken.
+  const chosenFile = useRef<File | null>(null)
 
   const upload = useBoqUpload(projectId)
   const preview = useBoqUploadPreview(projectId)
@@ -318,6 +323,7 @@ export function BoqUploadZone({
   // the person confirms that preview.
   const handleFile = useCallback(
     async (file: File) => {
+      chosenFile.current = file
       const ext = file.name.split('.').pop()?.toLowerCase()
       if (!['xlsx', 'xls'].includes(ext || '')) {
         toast.error('Supported formats: .xlsx, .xls')
@@ -332,8 +338,10 @@ export function BoqUploadZone({
       setPreviewed(null)
       try {
         const report = await preview.mutateAsync({ file, label: revisionLabel })
+        if (chosenFile.current !== file) return
         setPreviewed({ file, report })
       } catch (err: unknown) {
+        if (chosenFile.current !== file) return
         showUploadError(err)
       }
     },

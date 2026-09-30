@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
 import { toast } from 'sonner'
@@ -112,21 +112,40 @@ export function ImportScheduleDialog({ projectId, open, onOpenChange }: Props) {
   const [format, setFormat] = useState<ImportFormat>('xer')
   const [file, setFile] = useState<File | null>(null)
   const [result, setResult] = useState<ImportResult | null>(null)
-  // The dry-run report for exactly the file now selected; choosing another
-  // file or format clears it, so Import never rides on a stale preview.
-  const [preview, setPreview] = useState<ImportPreview | null>(null)
+  // A dry-run report with the file and format it was made for. Choosing
+  // another file or format clears it; and since the file input stays open
+  // while a preview is in flight, an answer for a file since replaced may
+  // still land here — so it is shown, and Import waits on it, only while
+  // its file is the one now selected (below).
+  const [previewed, setPreviewed] = useState<{
+    file: File
+    format: ImportFormat
+    report: ImportPreview
+  } | null>(null)
+  // The file now selected, for the callbacks (which outlive their render).
+  const selectedFile = useRef<File | null>(null)
 
   const previewable = FORMAT_CONFIG[format].preview
 
   const previewMutation = useMutation({
-    mutationFn: async () => {
-      if (!file) throw new Error('Select a file first')
-      return (await uploadFile(projectId, format, file, true)) as ImportPreview
-    },
+    mutationFn: async (target: { file: File; format: ImportFormat }) => ({
+      ...target,
+      report: (await uploadFile(projectId, target.format, target.file, true)) as ImportPreview,
+    }),
     // A dry run writes nothing, so it invalidates nothing.
-    onSuccess: (data) => setPreview(data),
-    onError: (error: unknown) => toast.error(errorMessage(error, 'Preview failed')),
+    onSuccess: (data) => setPreviewed(data),
+    // A failure for a file since replaced is not the selected file's.
+    onError: (error: unknown, target) => {
+      if (target.file !== selectedFile.current) return
+      toast.error(errorMessage(error, 'Preview failed'))
+    },
   })
+
+  // The preview of exactly the file (and format) now selected, or none.
+  const preview =
+    previewed && previewed.file === file && previewed.format === format
+      ? previewed.report
+      : null
 
   const importMutation = useMutation({
     mutationFn: async () => {
@@ -156,9 +175,10 @@ export function ImportScheduleDialog({ projectId, open, onOpenChange }: Props) {
   })
 
   const reset = () => {
+    selectedFile.current = null
     setFile(null)
     setResult(null)
-    setPreview(null)
+    setPreviewed(null)
     setFormat('xer')
   }
 
@@ -212,7 +232,7 @@ export function ImportScheduleDialog({ projectId, open, onOpenChange }: Props) {
                       checked={format === value}
                       onChange={() => {
                         setFormat(value)
-                        setPreview(null)
+                        setPreviewed(null)
                       }}
                     />
                     {FORMAT_CONFIG[value].label}
@@ -228,8 +248,9 @@ export function ImportScheduleDialog({ projectId, open, onOpenChange }: Props) {
                 type='file'
                 accept={FORMAT_CONFIG[format].accept}
                 onChange={(e) => {
-                  setFile(e.target.files?.[0] ?? null)
-                  setPreview(null)
+                  selectedFile.current = e.target.files?.[0] ?? null
+                  setFile(selectedFile.current)
+                  setPreviewed(null)
                 }}
               />
               {!previewable && (
@@ -307,7 +328,7 @@ export function ImportScheduleDialog({ projectId, open, onOpenChange }: Props) {
                   variant='outline'
                   className='flex-1'
                   disabled={!file || busy}
-                  onClick={() => previewMutation.mutate()}
+                  onClick={() => file && previewMutation.mutate({ file, format })}
                   data-testid='schedule-import-preview-run'
                 >
                   {previewMutation.isPending ? 'Reading...' : 'Preview'}
