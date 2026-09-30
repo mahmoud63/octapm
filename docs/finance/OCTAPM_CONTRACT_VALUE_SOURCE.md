@@ -78,15 +78,30 @@ row, the nested allocation, and the `boqItemId` / `allocationId` aliases, with a
 to both lists, every write and transition answer, and the RFI convert-to-change answer. The workflow itself
 does not require BOQ read, and a member with both permissions receives the full answer.
 
-## 6. Open items
+## 6. Items raised at the closure, and how Round 5 (PC-7a) settled them
 
-- **P2, owner decision:** the retention cap is calculated as the revised value times the cap rate. Once a cap
-  is set and reached, a member without BOQ read can derive an unconfirmed fallback value from the visible
-  retention figures. Closing it would change a calculation or a validation rule, or hide the cap rate, which
-  is a commercial term.
-- **P3:** accepted or rejected advance receipts can reveal the agreed advance by trial. Advance receipts are
-  not audited; that predates this change.
-- **P3:** the contract-management audit event is written after the transaction on a best-effort basis; that
-  pattern predates this change.
-- **P3:** no differential test yet checks that changing the BOQ total changes nothing a non-BOQ reader
-  receives.
+The owner decided on 2026-09-29: a BOQ fallback or unresolved provenance is not an established amount. The
+actions that depend on the amount wait for it, and no formula, rate or stored amount changes.
+
+- **Retention cap disclosure (was P2): closed.** Certifying an IPC period (by the route or by a workflow's
+  final approval) is refused with `409 CONTRACT_VALUE_NOT_ESTABLISHED` while the source is `boq_fallback`
+  or unestablished. The refusal is decided on the source alone, before any amount is checked, and writes
+  nothing (d987588). The cap-limited totals of a draft or submitted certificate (retention, net payable,
+  tax, balance due) are withheld from a non-BOQ reader wherever they appear: IPC reads and write answers,
+  the billing statement, the history of the certificate's submission, the workspace queue, the report
+  builder's IPC source and the workflow context (109d11e, 2e63e81, 63b7519). A census of the shared
+  database found no unconfirmed contract, so no historical record needed repair.
+- **Advance by trial (was P3): closed.** Recording an advance receipt meets the same prerequisite before
+  its amount is compared with the agreed advance. Both readers get the same refusal, and no record is
+  created (d987588). Advance receipts themselves are still not audited; that predates this work.
+- **Audit written after the transaction (was P3): closed.** The contract-management event is written
+  inside the update's transaction; if it cannot be written, the update rolls back and the API answers
+  503 (b24b1e1). The best-effort outbound-event insert runs under its own savepoint, so its failure cannot
+  silently roll back a confirmation the API reported as saved. The event is announced only after COMMIT
+  (2cdafc3).
+- **Differential test (was P3): closed.** `contract-value-differential.live.test.js` builds two contracts
+  that differ only in the hidden amount. It proves that a non-BOQ reader receives identical answers and
+  identical refusals, and that no record is created (86769ff).
+- **Design note:** an `ipc_certificate` workflow rule that routes on `amount` does not match while a capped
+  contract's value is unestablished. The amount is left out of the stored context because routing on it
+  would disclose it, and certification is refused in that state anyway.
