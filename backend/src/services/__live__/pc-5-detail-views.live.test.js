@@ -26,7 +26,8 @@
  *   lookahead rows from either detail, and no linked RFI or submittal its
  *   register would not list to them (party routing; RFI drafts);
  * - the certified quantity and the certified amount on a BOQ item count the
- *   same rows: the allocation summary's certified basis;
+ *   same rows: the allocation summary's certified basis, which the activity's
+ *   certified amount stands on too (no line on a draft or inactive allocation);
  * - every authorised quantity (row and allocation) is the IPC cap's
  *   approved-variation rule for its own pair, as the single-pair query
  *   stated it, though the detail asks for every pair in one query;
@@ -643,6 +644,50 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
       const direct = await api.get(at(route(foreignId)), outsider);
       expect([code, direct.status]).toEqual([code, direct.status === 403 ? 403 : 404]);
       expect(direct.text.includes("PC5SECRET")).toBe(false);
+    }
+  });
+
+  // Last in the file: its rows and lines move no figure an earlier test states.
+  it("the activity's certified amount stands on the BOQ item's basis: no line on a draft or inactive allocation", async () => {
+    const allocationTo = {};
+    for (const [key, step] of [["E1", "approve"], ["E2", null], ["E3", "approve"]]) {
+      const row = await api.post(at("/boq/items"), { code: `P5.${key}`, description: `PC5SECRET ${key}`, quantity: 10, unit: "nr", rate: 10 }, auth());
+      expect([key, row.status, row.body?.error]).toEqual([key, 201, undefined]);
+      const created = await api.post(at("/activity-boq-allocations"), { boqItemId: row.body.data.item.id, activityId: acts.Y.id, quantity: 5 }, auth());
+      expect([key, created.status, created.body?.error]).toEqual([key, 201, undefined]);
+      if (step) {
+        for (const move of ["submit", step]) {
+          const moved = await api.post(at(`/activity-boq-allocations/${created.body.data.id}/${move}`), {}, auth());
+          expect([key, move, moved.status, moved.body?.error]).toEqual([key, move, 200, undefined]);
+        }
+      }
+      allocationTo[key] = { id: created.body.data.id, boqItemId: row.body.data.item.id };
+    }
+    // E1 approved and active; E2 still a draft; E3 approved, then withdrawn.
+    await prisma.activityBoqAllocation.update({ where: { id: allocationTo.E3.id }, data: { isActive: false } });
+    const lines = {};
+    for (const [key, cert] of [["E1", 40], ["E2", 30], ["E3", 20]]) {
+      lines[key] = await prisma.ipcItem.create({
+        data: { projectId: project.id, boqItemId: allocationTo[key].boqItemId, allocationId: allocationTo[key].id, ipcPeriod: "P03", qty: cert / 10, rate: 10, currentCert: cert, cumulativeCert: cert, status: "certified" },
+      });
+    }
+
+    const answer = await api.get(at(`/activities/${acts.Y.id}/detail`), auth());
+    expect([answer.status, answer.body?.error]).toEqual([200, undefined]);
+    const { certification } = answer.body.data.sections;
+    expect(certification.certifiedAmount.value).toBe(40);
+    expect(certification.certifiedAmount.basis).toMatch(/allocation summary's certified basis/);
+    expect(certification.lines.items.map((line) => line.id)).toEqual([lines.E1.id]);
+    // The owner's rows, read with the owner's filter, for this activity.
+    const onBasis = await prisma.ipcItem.findMany({
+      where: { AND: [allocationService.certifiedIpcItemWhere(project.id), { allocation: { is: { activityId: acts.Y.id } } }] },
+      select: { currentCert: true },
+    });
+    expect(onBasis.reduce((sum, entry) => sum + toMoneyNumber(entry.currentCert), 0)).toBe(40);
+    // The BOQ item drawer agrees, row by row.
+    for (const [key, expected] of [["E1", 40], ["E2", 0], ["E3", 0]]) {
+      const item = await api.get(at(`/boq/items/${allocationTo[key].boqItemId}/detail`), auth());
+      expect([key, item.status, item.body.data.sections.certification.certifiedAmount.value]).toEqual([key, 200, expected]);
     }
   });
 });

@@ -44,9 +44,7 @@ const { applyPartyWorkflowVisibility } = require("./company-party.service");
 const { withDraftVisibility } = require("./rfi-workflow.service");
 
 const LIST_CAP = 50;
-// The allocation summary's and the IPC module's certified statuses.
-const CERTIFIED_IPC_STATUSES = ["certified", "paid"];
-// Both certified figures on a BOQ item stand on the allocation summary's basis.
+// Every certified figure on either detail stands on the allocation summary's basis.
 const CERTIFIED_BASIS =
   "the allocation summary's certified basis — IpcItem status ∈ {certified, paid} on an approved, active allocation (activity-boq-allocation certifiedIpcItemWhere)";
 const CERTIFIED_ROWS = { type: "ipc_item", filter: "boqItemId, status in (certified, paid), allocation approved and active" };
@@ -769,10 +767,12 @@ const getActivityDetail = async ({
     sections.cost = denied("cost");
   }
 
-  // Certified against this activity's allocations (the IPC module's lines).
+  // Certified against this activity's allocations, on the BOQ item's basis:
+  // the allocation summary's certified rows (certifiedIpcItemWhere), those of
+  // this activity's allocations. The lines listed are the rows counted.
   if (can("ipc")) {
     const ipcItems = await prisma.ipcItem.findMany({
-      where: { projectId, allocation: { activityId }, status: { in: CERTIFIED_IPC_STATUSES } },
+      where: { AND: [allocationService.certifiedIpcItemWhere(projectId), { allocation: { is: { activityId } } }] },
       select: { id: true, ipcPeriod: true, qty: true, currentCert: true, status: true, boqItemId: true, ipcCertificateId: true },
       orderBy: { createdAt: "desc" },
     });
@@ -781,8 +781,8 @@ const getActivityDetail = async ({
       certifiedAmount: fig(
         ipcItems.reduce((sum, entry) => addMoney(sum, entry.currentCert), 0),
         "derived",
-        "Σ IpcItem.currentCert on this activity's allocations where status ∈ {certified, paid}",
-        [{ type: "ipc_item", filter: "allocation.activityId, status in (certified, paid)" }],
+        `Σ IpcItem.currentCert on this activity's allocations, on ${CERTIFIED_BASIS}: a line on a draft, submitted, rejected or inactive allocation is not counted or listed`,
+        [{ type: "ipc_item", filter: "allocation.activityId, status in (certified, paid), allocation approved and active" }],
       ),
       lines: capped(
         ipcItems.map((entry) => ({
