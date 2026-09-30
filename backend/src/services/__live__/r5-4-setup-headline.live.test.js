@@ -150,6 +150,26 @@ liveDescribe("R5-4: the setup headline tells no schedule, a staged schedule and 
     expect([label, Object.prototype.hasOwnProperty.call(result.summary, "criticalUnmappedWithheld")]).toEqual([label, false]);
     expect([label, result.summary.criticalUnmappedWaiting, result.summary.criticalUnmappedReason]).toEqual([label, true, WAITING]);
   };
+  // The counts a step reads off the active schedule. While none is active
+  // they are counts of nothing, and the step cards print a step's counts as
+  // chips: they are left out — for every caller, since none is the bill's.
+  const ACTIVE_SCHEDULE_COUNTS = [
+    "activeActivities",
+    "progressActivities",
+    "criticalActivities",
+    "milestones",
+    "activitiesWithoutWbs",
+    "activitiesWithUnmappedCalendar",
+    "assignedProgressActivities",
+    "progressMethodCount",
+    "quantityMethodsWithoutUnit",
+  ];
+  const stepCounts = (result, key) => result.steps.find((step) => step.key === key).counts;
+  const expectNoActiveScheduleCounts = (label, result) => {
+    for (const step of result.steps) {
+      expect([label, step.key, ACTIVE_SCHEDULE_COUNTS.filter((name) => name in step.counts)]).toEqual([label, step.key, []]);
+    }
+  };
   // The member is still refused the bill and the mapping's share.
   const expectMemberRestricted = async (projectId, result) => {
     expect((await api.get(at(projectId, "/boq"), memberAuth())).status).toBe(403);
@@ -190,6 +210,11 @@ liveDescribe("R5-4: the setup headline tells no schedule, a staged schedule and 
       ["cost_loading", "INCOMPLETE"],
     ]);
     await expectMemberRestricted(id, limited);
+    // No schedule, so no step counts one — and no revision is named.
+    for (const [who, result] of [["reader", full], ["member", limited]]) {
+      expectNoActiveScheduleCounts(`no schedule / ${who}`, result);
+      expect([who, stepCounts(result, "schedule_generation")]).toEqual([who, { revisionId: null, revisionStatus: null }]);
+    }
     // The gate is what it was: the schedule step's NO_SCHEDULE blocker.
     expect(full.steps.find((step) => step.key === "schedule_generation").blockers.map((b) => b.code)).toEqual(["NO_SCHEDULE"]);
   });
@@ -215,6 +240,13 @@ liveDescribe("R5-4: the setup headline tells no schedule, a staged schedule and 
         // The old line: a count of zero in the done tone. Never again.
         const critical = entry(result, "critical_unmapped");
         expect([tag, /\d/.test(critical.value), critical.tone === "done"]).toEqual([tag, false, false]);
+        // The step cards under the headline: the revision's two activities,
+        // named as the revision's — and no "Activities: 0 · Critical: 0".
+        expectNoActiveScheduleCounts(tag, result);
+        expect([tag, stepCounts(result, "schedule_generation")]).toEqual([
+          tag,
+          { revisionId, revisionStatus: status, revisionActivities: 2 },
+        ]);
       }
       await expectMemberRestricted(id, limited);
       // The schedule step is complete with the engine's own warning, as before.
@@ -292,6 +324,20 @@ liveDescribe("R5-4: the setup headline tells no schedule, a staged schedule and 
     // The critical activities themselves are the schedule's, and theirs.
     const criticalOf = (result) => result.steps.find((step) => step.key === "schedule_generation").counts.criticalActivities;
     expect([criticalOf(full), criticalOf(limited)]).toEqual([2, 2]);
+    // Active: the steps count the schedule in force, for both callers, and
+    // no longer name a staged revision's activities.
+    for (const [who, result] of [["reader", full], ["member", limited]]) {
+      expect([who, stepCounts(result, "schedule_generation")]).toEqual([
+        who,
+        expect.objectContaining({ revisionStatus: "approved", activeActivities: 2, progressActivities: 2, criticalActivities: 2, milestones: 0 }),
+      ]);
+      expect([who, "revisionActivities" in stepCounts(result, "schedule_generation")]).toEqual([who, false]);
+      expect([who, stepCounts(result, "engineer_assignment")]).toEqual([who, { assignedProgressActivities: 0, progressActivities: 2 }]);
+      expect([who, stepCounts(result, "progress_readiness")]).toEqual([
+        who,
+        expect.objectContaining({ progressActivities: 2, progressMethodCount: expect.any(Number), assignedProgressActivities: 0 }),
+      ]);
+    }
 
     // Map the bill across both critical activities and approve: an assessed
     // zero is a fact, and reads as one — to the reader alone.

@@ -880,6 +880,12 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
   const scheduleState =
     activeActivityCount > 0 ? "active" : currentRevision ? "staged" : "none";
   const activeScheduleAssessed = scheduleState === "active";
+  // The step counts read off the active schedule — its activities, its
+  // critical path, its milestones, who is assigned and how progress is
+  // measured. While no schedule is active they are counts of nothing
+  // ("Activities: 0 · Critical: 0" beside an import that reads complete):
+  // the step leaves them out, as the headline leaves out its count (R5-4).
+  const onActiveSchedule = (counts) => (activeScheduleAssessed ? counts : {});
 
   // ── Structure (setup doc §2 b): what the rows and activities are filed
   // under. All of it is soft (§91): missing structure changes no figure.
@@ -1942,12 +1948,19 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       counts: {
         revisionId: currentRevision?.id || null,
         revisionStatus: currentRevision ? revisionStatus : null,
-        activeActivities: activeActivityCount,
-        progressActivities: progressActivityCount,
-        criticalActivities: criticalActivityCount,
-        milestones: milestoneCount,
-        activitiesWithoutWbs: activitiesWithoutWbs.length,
-        activitiesWithUnmappedCalendar: activitiesWithUnmappedCalendar.length,
+        // A staged revision's own activities, named as the revision's:
+        // what was imported or generated, none of it in force.
+        ...(scheduleState === "staged"
+          ? { revisionActivities: toNumber(currentRevision.activityCount) }
+          : {}),
+        ...onActiveSchedule({
+          activeActivities: activeActivityCount,
+          progressActivities: progressActivityCount,
+          criticalActivities: criticalActivityCount,
+          milestones: milestoneCount,
+          activitiesWithoutWbs: activitiesWithoutWbs.length,
+          activitiesWithUnmappedCalendar: activitiesWithUnmappedCalendar.length,
+        }),
       },
       successMessage: "Schedule activities are available.",
     }),
@@ -2013,10 +2026,10 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         progressActivityCount === 0 ||
         assignedProgressActivityCount >= progressActivityCount,
       warnings: assignmentWarnings,
-      counts: {
+      counts: onActiveSchedule({
         assignedProgressActivities: assignedProgressActivityCount,
         progressActivities: progressActivityCount,
-      },
+      }),
       successMessage: "Field engineer assignments are complete.",
     }),
     buildStep({
@@ -2031,11 +2044,11 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         progressMethodCount >= progressActivityCount,
       blockers: progressMethodBlockers,
       advisories: progressMethodAdvisories,
-      counts: {
+      counts: onActiveSchedule({
         progressMethodCount,
         progressActivities: progressActivityCount,
         quantityMethodsWithoutUnit: quantityMethodsWithoutUnit.length,
-      },
+      }),
       successMessage: "Progress methods are configured.",
     }),
     buildStep({
@@ -2120,9 +2133,11 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       warnings: progressWarnings,
       counts: {
         baselineLocked,
-        progressActivities: progressActivityCount,
-        progressMethodCount,
-        assignedProgressActivities: assignedProgressActivityCount,
+        ...onActiveSchedule({
+          progressActivities: progressActivityCount,
+          progressMethodCount,
+          assignedProgressActivities: assignedProgressActivityCount,
+        }),
       },
       successMessage: "Project is ready for progress entry.",
     }),

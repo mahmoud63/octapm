@@ -17,6 +17,7 @@ import { useCostSummary } from '@/features/cost/hooks/use-cost'
 import { eacStatement, useForecast } from '@/features/forecast/hooks/use-forecast'
 import { useProjectHealth } from '../hooks/use-project-health'
 import type { ProjectSetupReadiness, ProjectSetupTarget } from '../data/schema'
+import { noProgressActivitiesBadge, scheduleTileDetail } from '../lib/schedule-tile'
 
 type Props = {
   projectId: string
@@ -599,21 +600,11 @@ export function ControlsStrip({
         valueTestId='uat-controls-schedule'
         tone={scheduleTone}
         badge={baselineLocked ? 'Baseline locked' : gates.baseline.ready ? 'Baseline ready' : 'No baseline'}
-        detail={
-          scheduleRevision
-            ? scheduleState === 'staged'
-              ? // Imported, not in force: its activities are the revision's
-                // own, none is active — "0 activities" would misstate it.
-                `Imported${scheduleRevision.label ? ` · ${scheduleRevision.label}` : ''} · waiting for activation`
-              : `${activities.toLocaleString()} activities${scheduleRevision.label ? ` · ${scheduleRevision.label}` : ''}${
-                  baselineLocked && scheduleRevision.baselinedAt
-                    ? ` · locked ${new Date(scheduleRevision.baselinedAt).toLocaleDateString()}`
-                    : ''
-                }`
-            : activities > 0
-              ? 'No revision — import or generate one to review and baseline'
-              : 'Generate or import a schedule'
-        }
+        // The engine's state and its verdict on a staged revision, in the
+        // tile's words (lib/schedule-tile.ts): "waiting for activation" only
+        // for a revision the engine passes — a rejected or empty one is said
+        // as that, as the headline beside it says FAIL.
+        detail={scheduleTileDetail(readiness)}
         action={scheduleRevision || activities === 0 ? 'Open revisions' : 'Create a revision'}
         onClick={linkTo(TARGETS.revisions)}
         testId='uat-controls-schedule-tile'
@@ -626,7 +617,7 @@ export function ControlsStrip({
         tone={methodsTone}
         badge={
           !methods || methods.total === 0
-            ? 'No activities'
+            ? noProgressActivitiesBadge(readiness)
             : methods.configured >= methods.total
               ? 'Configured'
               : 'Defaults in use'

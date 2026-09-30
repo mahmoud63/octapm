@@ -307,6 +307,13 @@ export type ProjectSetupStep = {
    * its status, its message or a gate.
    */
   advisories?: ProjectSetupIssue[]
+  /**
+   * The counts read off the active schedule (activeActivities,
+   * progressActivities, criticalActivities, milestones, …) are present only
+   * while summary.scheduleState is active — absent, never 0, with no
+   * schedule or a staged one. A staged revision's own activities are
+   * schedule_generation's revisionActivities.
+   */
   counts: Record<string, unknown>
   action: {
     label: string

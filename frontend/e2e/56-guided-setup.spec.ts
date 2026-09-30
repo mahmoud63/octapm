@@ -35,6 +35,14 @@ import {
  *      into Progress with a warning and says official reporting is blocked
  *      and who may override it
  *
+ * the three schedule states (R5-4) — none, staged, active — on the guide's
+ * strip, the readiness card's line, its step cards and the controls tiles: a
+ * staged revision's import reads complete, nothing counts a schedule that is
+ * not active (no "Critical unmapped 0", no "Activities: 0" chip, no "No
+ * activities" badge), and a rejected staged revision is said to need
+ * resubmission by the tile as by the headline — never "waiting for
+ * activation";
+ *
  * a member without BOQ access: the strip's mapping figures read "—" with the
  * server's reason, the bill's quantity and value are absent, nothing reads
  * zero;
@@ -602,6 +610,22 @@ test('the import previews show the dry run on screen and write nothing', async (
 
 const WAITING_FOR_ACTIVE_SCHEDULE = 'Waiting for active schedule'
 
+const stepCard = (view: Page, key: string) => view.getByTestId(`uat-setup-step-${key}`)
+/**
+ * No step card of the Setup Readiness card counts the active schedule while
+ * none is active: its chips carry no "Activities: 0", "Critical: 0" and the
+ * like — counts of a schedule that is not there.
+ */
+const expectNoActiveScheduleChips = async (view: Page, who: string) => {
+  for (const key of ['schedule_generation', 'engineer_assignment', 'progress_method_configuration', 'progress_readiness']) {
+    const card = stepCard(view, key)
+    await expect(card, `${who} / ${key}`).toBeVisible()
+    for (const chip of ['Activities: ', 'Progress acts: ', 'Critical: ', 'Milestones: ', 'Assigned: ', 'Methods: ']) {
+      await expect(card, `${who} / ${key}`).not.toContainText(chip)
+    }
+  }
+}
+
 test('the headline tells no schedule, a staged schedule and an active schedule apart — and never counts on a schedule that is not active', async ({
   page,
   browser,
@@ -696,6 +720,8 @@ test('the headline tells no schedule, a staged schedule and an active schedule a
         await expect(shown, who).toHaveAttribute('data-tone', 'blocked')
       }
       await expectWaiting(view, `no schedule / ${who}`)
+      await expectNoActiveScheduleChips(view, `no schedule / ${who}`)
+      await expect(stepCard(view, 'schedule_generation'), who).not.toContainText('Revision activities')
     }
     await expectMappingWithheld(memberPage)
     await expectStripIsEngine(page, projectId)
@@ -722,8 +748,17 @@ test('the headline tells no schedule, a staged schedule and an active schedule a
         await expectWaiting(view, `${label} / ${who}`)
         // The tile names the import, not "0 activities".
         const tile = view.getByTestId('uat-controls-schedule-tile')
-        await expect(tile, `${label} / ${who}`).toContainText('waiting for activation')
+        await expect(tile, `${label} / ${who}`).toContainText('Imported · XER Import · waiting for activation')
         await expect(tile, `${label} / ${who}`).not.toContainText('0 activities')
+        // The step cards under the headline: the revision's two activities,
+        // named as the revision's — never "Activities: 0 · Critical: 0".
+        await expectNoActiveScheduleChips(view, `${label} / ${who}`)
+        await expect(stepCard(view, 'schedule_generation'), `${label} / ${who}`).toContainText('Revision activities: 2')
+        // And the Progress method tile does not say there are no activities
+        // beside an import that has two.
+        const methods = view.getByTestId('uat-controls-methods')
+        await expect(methods, `${label} / ${who}`).toContainText(WAITING_FOR_ACTIVE_SCHEDULE)
+        await expect(methods, `${label} / ${who}`).not.toContainText('No activities')
       }
       await expectMappingWithheld(memberPage)
       await expectStripIsEngine(page, projectId)
@@ -757,6 +792,18 @@ test('the headline tells no schedule, a staged schedule and an active schedule a
     await expect(page.getByTestId('uat-controls-figure-critical-truth')).toHaveText('derived')
     await expect(page.getByTestId('uat-controls-figure-critical-basis')).toContainText('2 without an approved allocation')
     await expectStripIsEngine(page, projectId)
+    // In force: the cards count the active schedule, and the tile its activities.
+    for (const [who, view] of views) {
+      if (view !== page) await open(view)
+      const card = stepCard(view, 'schedule_generation')
+      for (const chip of ['Activities: 2', 'Progress acts: 2', 'Critical: 2']) await expect(card, who).toContainText(chip)
+      await expect(card, who).not.toContainText('Revision activities')
+      await expect(stepCard(view, 'engineer_assignment'), who).toContainText('Progress acts: 2')
+      const tile = view.getByTestId('uat-controls-schedule-tile')
+      await expect(tile, who).toContainText('2 activities · XER Import')
+      await expect(tile, who).not.toContainText('Imported')
+      await expect(view.getByTestId('uat-controls-methods'), who).not.toContainText(WAITING_FOR_ACTIVE_SCHEDULE)
+    }
 
     await open(memberPage)
     for (const shown of [guideEntry(memberPage, 'schedule_imported'), cardEntry(memberPage, 'schedule_imported')]) {
@@ -784,6 +831,87 @@ test('the headline tells no schedule, a staged schedule and an active schedule a
   } finally {
     await memberContext.close()
   }
+})
+
+test('a rejected staged revision is not waiting for activation: the Schedule tile says what the headline says', async ({
+  page,
+}) => {
+  test.setTimeout(180_000)
+  const { projectId, revisionId } = await withApi(async (client) => {
+    if (!org) org = await registerLiveOrg(client, 'pc8guide')
+    const project = await createProject(client, org.adminToken, `Rejected staged ${Date.now()}`)
+    await post(client, project, '/boq/items', { code: '1.1', description: 'Excavation', quantity: 12, unit: 'm3', rate: 100 }, 201)
+    const imported = await client.post(`${API}/projects/${project}/import/xer`, {
+      headers: { authorization: `Bearer ${org.adminToken}` },
+      multipart: { file: { name: 'rejected.xer', mimeType: 'application/octet-stream', buffer: Buffer.from(XER) } },
+    })
+    const body = await imported.json()
+    expect(imported.status(), JSON.stringify(body?.error)).toBe(201)
+    return { projectId: project, revisionId: body.data.revisionId as string }
+  })
+  const base = `/o/${org!.segment}/projects/${projectId}`
+  const tile = page.getByTestId('uat-controls-schedule-tile')
+  const open = async () => {
+    await openGuide(page, base)
+    const expand = page.getByTestId('uat-setup-readiness-expand')
+    if (await expand.isVisible().catch(() => false)) await expand.click()
+    await expect(page.getByTestId('uat-setup-headline')).toBeVisible({ timeout: 30_000 })
+  }
+  type Engine = {
+    summary: { scheduleState: string; headline: Array<{ key: string; value: string; tone: string; raw: unknown }> }
+    steps: Array<{ key: string; blockers: Array<{ code: string }>; counts: Record<string, unknown> }>
+    context: { currentRevision: { status: string } | null }
+  }
+  const engine = () =>
+    withApi(async (client) => {
+      const readiness = await apiJson(client, 'get', `/projects/${projectId}/setup-readiness`, { token: org!.adminToken })
+      expect(readiness.status).toBe(200)
+      return readiness.body!.data as unknown as Engine
+    })
+
+  await page.routeWebSocket(/socket\.io/, () => {})
+  await signInForm(page, org!.adminEmail)
+
+  // Under review: the engine passes the import, and the tile says it waits.
+  await withApi((client) => post(client, projectId, `/schedule/revisions/${revisionId}/submit-review`, {}))
+  await open()
+  await expect(page.getByTestId('uat-controls-schedule')).toHaveText('Under review')
+  await expect(tile).toContainText('Imported · XER Import · waiting for activation')
+
+  // Rejected: still staged, and the engine fails the import.
+  await withApi((client) =>
+    post(client, projectId, `/schedule/revisions/${revisionId}/reject`, { reason: 'Logic incomplete: resubmit with the pour sequence.' })
+  )
+  const answer = await engine()
+  expect(answer.summary.scheduleState).toBe('staged')
+  expect(answer.context.currentRevision?.status).toBe('rejected')
+  expect(answer.summary.headline.find((entry) => entry.key === 'schedule_imported')).toMatchObject({
+    value: 'FAIL',
+    tone: 'blocked',
+    raw: false,
+  })
+  const scheduleStep = answer.steps.find((step) => step.key === 'schedule_generation')!
+  expect(scheduleStep.blockers.map((blocker) => blocker.code)).toEqual(['SCHEDULE_REJECTED'])
+  expect(scheduleStep.counts).toEqual({ revisionId, revisionStatus: 'rejected', revisionActivities: 2 })
+
+  await open()
+  for (const shown of [page.getByTestId('setup-guide-strip-schedule_imported'), page.getByTestId('uat-setup-headline-schedule_imported')]) {
+    await expect(shown).toContainText('Schedule importedFAIL')
+    await expect(shown).toHaveAttribute('data-tone', 'blocked')
+  }
+  // The tile agrees with the headline beside it: rejected, to be resubmitted
+  // — not "waiting for activation", and no count of activities.
+  await expect(page.getByTestId('uat-controls-schedule')).toHaveText('Rejected')
+  await expect(tile).toContainText('Imported · XER Import · rejected — needs resubmission')
+  await expect(tile).not.toContainText('waiting for activation')
+  await expect(tile).not.toContainText('0 activities')
+  // Nothing is assessed on a rejected revision either.
+  await expect(page.getByTestId('uat-controls-figure-critical-value')).toHaveText('—')
+  await expect(page.getByTestId('uat-setup-headline-critical_unmapped')).toContainText(WAITING_FOR_ACTIVE_SCHEDULE)
+  await expectNoActiveScheduleChips(page, 'rejected')
+  await expect(stepCard(page, 'schedule_generation')).toContainText('Revision activities: 2')
+  await expect(stepCard(page, 'schedule_generation')).toContainText('Status: rejected')
+  await expectStripIsEngine(page, projectId)
 })
 
 // ── The withheld view ───────────────────────────────────────────────────────

@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+// Node runs the TypeScript module directly (type stripping; it imports types only).
+import {
+  noProgressActivitiesBadge,
+  scheduleTileDetail,
+  stagedScheduleNote,
+} from '../src/features/projects/lib/schedule-tile.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const read = (path) => readFileSync(resolve(root, path), 'utf8')
@@ -130,13 +136,130 @@ assert.ok(
   "value={criticalWaiting ? '—' : criticalActivities.toLocaleString()}",
   "truth={criticalWaiting ? 'none' : 'derived'}",
   "'Waiting for active schedule'",
-  'waiting for activation',
 ].forEach((copy) => {
   assert.ok(strip.includes(copy), `controls strip follows the schedule state: ${copy}`)
 })
 assert.ok(
   !strip.includes('value={criticalActivities.toLocaleString()}'),
   'the critical figure is never shown unconditionally: no count while no schedule is active'
+)
+// The Schedule tile's line is the engine's state and verdict, read by one
+// pure module — run here, branch by branch, so a broken condition fails this
+// static check and not only the browser walk (e2e 56). The strip hands the
+// line over whole: it keeps no wording and no condition of its own.
+const scheduleTileSource = strip.slice(strip.indexOf("label='Schedule'"), strip.indexOf("testId='uat-controls-schedule-tile'"))
+assert.ok(scheduleTileSource.length > 0, 'the controls strip has a Schedule tile')
+assert.match(
+  scheduleTileSource,
+  /detail=\{scheduleTileDetail\(readiness\)\}/,
+  'the Schedule tile shows scheduleTileDetail(readiness), whole'
+)
+const uncommented = (source) => source.replace(/\/\/.*$/gm, '')
+assert.ok(
+  !/waiting for activation/.test(uncommented(strip)) && !/scheduleState|`/.test(uncommented(scheduleTileSource)),
+  'the controls strip words no schedule line and keeps no schedule-state condition of its own in the tile'
+)
+assert.match(
+  strip,
+  /methods\.total === 0\s*\?\s*noProgressActivitiesBadge\(readiness\)/,
+  'the Progress method tile asks the same module what to say when nothing is active'
+)
+{
+  const issue = (code) => ({ code, message: code, severity: 'blocking' })
+  const reading = ({
+    state,
+    revision = null,
+    blockers = [],
+    counts = {},
+    imported,
+    alreadyLocked = false,
+  }) => ({
+    summary: {
+      scheduleState: state,
+      headline: imported === undefined ? undefined : [{ key: 'schedule_imported', label: 'Schedule imported', value: imported ? 'PASS' : 'FAIL', tone: imported ? 'info' : 'blocked', raw: imported }],
+    },
+    steps: [{ key: 'schedule_generation', blockers: blockers.map(issue), warnings: [], counts }],
+    context: { currentRevision: revision },
+    gates: { baseline: { alreadyLocked } },
+  })
+  const rev = (status, extra = {}) => ({ id: 'r1', label: 'XER Import', status, isActive: false, approvedAt: null, baselinedAt: null, ...extra })
+
+  // No schedule.
+  assert.equal(scheduleTileDetail(reading({ state: 'none', blockers: ['NO_SCHEDULE'], imported: false })), 'Generate or import a schedule')
+  // Staged and passed by the engine — a draft, under review, approved: waiting for activation.
+  for (const status of ['draft', 'under_review', 'approved']) {
+    const staged = reading({ state: 'staged', revision: rev(status), counts: { revisionActivities: 2 }, imported: true })
+    assert.equal(scheduleTileDetail(staged), 'Imported · XER Import · waiting for activation', `staged ${status}`)
+    assert.equal(stagedScheduleNote(staged), 'waiting for activation', `staged ${status}`)
+  }
+  assert.equal(
+    scheduleTileDetail(reading({ state: 'staged', revision: rev('draft', { label: null }), imported: true })),
+    'Imported · waiting for activation',
+    'a revision without a label'
+  )
+  // Staged and failed by the engine: never "waiting for activation".
+  const rejected = reading({ state: 'staged', revision: rev('rejected'), blockers: ['SCHEDULE_REJECTED'], counts: { revisionActivities: 2 }, imported: false })
+  assert.equal(scheduleTileDetail(rejected), 'Imported · XER Import · rejected — needs resubmission', 'a rejected staged revision')
+  assert.equal(
+    scheduleTileDetail(reading({ state: 'staged', revision: rev('rejected') })),
+    'Imported · XER Import · rejected — needs resubmission',
+    'a rejected revision is read off its status too, when the step lists no blocker'
+  )
+  const empty = reading({ state: 'staged', revision: rev('draft'), blockers: ['NO_ACTIVITIES'], counts: { revisionActivities: 0 }, imported: false })
+  assert.equal(scheduleTileDetail(empty), 'Imported · XER Import · no activities in the revision', 'an empty staged revision')
+  assert.equal(
+    scheduleTileDetail(reading({ state: 'staged', revision: rev('rejected'), blockers: ['NO_ACTIVITIES', 'SCHEDULE_REJECTED'], imported: false })),
+    'Imported · XER Import · no activities in the revision',
+    'rejected and empty: the status already says rejected; the line says there is nothing in it'
+  )
+  assert.equal(
+    scheduleTileDetail(reading({ state: 'staged', revision: rev('draft'), blockers: ['SOMETHING_NEW'], imported: false })),
+    'Imported · XER Import · not ready — see Setup Readiness',
+    'a blocker this module does not know is not read as waiting'
+  )
+  assert.equal(
+    scheduleTileDetail(reading({ state: 'staged', revision: rev('draft'), imported: false })),
+    'Imported · XER Import · not ready — see Setup Readiness',
+    'the headline failing the import is not read as waiting'
+  )
+  for (const failing of [rejected, empty]) {
+    assert.ok(!scheduleTileDetail(failing).includes('waiting for activation'), 'a failed staged revision is never waiting for activation')
+    assert.ok(!/\d/.test(scheduleTileDetail(failing)), 'and the tile counts nothing on it')
+  }
+  // Active: the schedule in force is counted, as before.
+  assert.equal(
+    scheduleTileDetail(reading({ state: 'active', revision: rev('approved', { isActive: true }), counts: { activeActivities: 1234 }, imported: true })),
+    `${(1234).toLocaleString()} activities · XER Import`
+  )
+  const baselinedAt = '2026-03-04T10:00:00.000Z'
+  assert.equal(
+    scheduleTileDetail(
+      reading({ state: 'active', revision: rev('baselined', { isActive: true, baselinedAt }), counts: { activeActivities: 2 }, imported: true, alreadyLocked: true })
+    ),
+    `2 activities · XER Import · locked ${new Date(baselinedAt).toLocaleDateString()}`
+  )
+  // Activities entered with no revision are a schedule too.
+  assert.equal(
+    scheduleTileDetail(reading({ state: 'active', counts: { activeActivities: 3 }, imported: true })),
+    'No revision — import or generate one to review and baseline'
+  )
+  // An answer that does not say the state (an older API) reads as it did.
+  assert.equal(
+    scheduleTileDetail(reading({ state: undefined, revision: rev('draft'), counts: { activeActivities: 0 } })),
+    '0 activities · XER Import'
+  )
+  // The Progress method tile beside it.
+  assert.equal(noProgressActivitiesBadge(reading({ state: 'staged', revision: rev('draft') })), 'Waiting for active schedule')
+  assert.equal(noProgressActivitiesBadge(reading({ state: 'none' })), 'No activities')
+  assert.equal(noProgressActivitiesBadge(reading({ state: 'active' })), 'No activities')
+}
+// The step cards print a step's counts as chips; the engine leaves the
+// active schedule's counts out while none is active and names a staged
+// revision's activities as the revision's. The wizard labels that count and
+// still decides nothing from the schedule state itself.
+assert.ok(
+  wizard.includes("revisionActivities: 'Revision activities'"),
+  "the setup wizard labels a staged revision's own activities"
 )
 ;[
   [guideStrip, 'setup guide strip'],

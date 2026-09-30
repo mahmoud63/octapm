@@ -1114,6 +1114,86 @@ describe("project setup readiness service", () => {
       expect(mapped.summary.criticalUnmappedActivities).toBe(0);
     });
 
+    // The Setup Readiness card prints a step's counts as chips under the
+    // headline. "Activities: 0 · Progress acts: 0 · Critical: 0" beside
+    // "Schedule imported PASS (waiting for activation)" counts a schedule
+    // that is not there: a step states the active schedule's counts only
+    // once one is active.
+    const ACTIVE_SCHEDULE_COUNTS = [
+      "activeActivities",
+      "progressActivities",
+      "criticalActivities",
+      "milestones",
+      "activitiesWithoutWbs",
+      "activitiesWithUnmappedCalendar",
+      "assignedProgressActivities",
+      "progressMethodCount",
+      "quantityMethodsWithoutUnit",
+    ];
+    const countsOf = (readiness, key) => readiness.steps.find((step) => step.key === key).counts;
+    const SCHEDULE_STEPS = ["schedule_generation", "engineer_assignment", "progress_method_configuration", "progress_readiness"];
+
+    it("no step counts the active schedule while none is active; a staged revision's activities are named as the revision's", async () => {
+      const cases = [
+        ["none", {}, undefined],
+        ["staged draft", { latest: stagedRevision({ status: "draft" }) }, 3],
+        ["staged approved", { latest: stagedRevision() }, 3],
+        ["staged rejected", { latest: stagedRevision({ status: "rejected" }) }, 3],
+        ["staged empty", { latest: stagedRevision({ activityCount: 0 }) }, 0],
+      ];
+      for (const [label, lookups, revisionActivities] of cases) {
+        revisions(lookups);
+        for (const canReadBoq of [true, false]) {
+          const readiness = await check(canReadBoq);
+          const tag = `${label} / ${canReadBoq ? "reader" : "member"}`;
+          for (const key of SCHEDULE_STEPS) {
+            const counts = countsOf(readiness, key);
+            expect([tag, key, ACTIVE_SCHEDULE_COUNTS.filter((name) => name in counts)]).toEqual([tag, key, []]);
+          }
+          // What the revision holds is the schedule's own, every caller's.
+          expect([tag, countsOf(readiness, "schedule_generation").revisionActivities]).toEqual([tag, revisionActivities]);
+          expect([tag, countsOf(readiness, "schedule_generation").revisionStatus]).toEqual([
+            tag,
+            lookups.latest ? lookups.latest.status : null,
+          ]);
+          // The lock is not the active schedule's: it stays.
+          expect([tag, countsOf(readiness, "progress_readiness")]).toEqual([tag, { baselineLocked: false }]);
+        }
+      }
+    });
+
+    it("an active schedule: the steps count it as before, for every caller, and name no staged revision", async () => {
+      revisions({ active: activeRevision, latest: activeRevision });
+      mockPrisma.activity.findMany.mockResolvedValue([
+        criticalActivity("activity-1"),
+        criticalActivity("activity-2", { isCritical: false }),
+        criticalActivity("activity-3", { isMilestone: true }),
+      ]);
+      for (const canReadBoq of [true, false]) {
+        const readiness = await check(canReadBoq);
+        expect(countsOf(readiness, "schedule_generation")).toMatchObject({
+          revisionStatus: "approved",
+          activeActivities: 3,
+          progressActivities: 2,
+          criticalActivities: 1,
+          milestones: 1,
+        });
+        expect(countsOf(readiness, "schedule_generation")).not.toHaveProperty("revisionActivities");
+        expect(countsOf(readiness, "engineer_assignment")).toEqual({ assignedProgressActivities: 0, progressActivities: 2 });
+        expect(countsOf(readiness, "progress_method_configuration")).toEqual({
+          progressMethodCount: 0,
+          progressActivities: 2,
+          quantityMethodsWithoutUnit: 0,
+        });
+        expect(countsOf(readiness, "progress_readiness")).toEqual({
+          baselineLocked: false,
+          progressActivities: 2,
+          progressMethodCount: 0,
+          assignedProgressActivities: 0,
+        });
+      }
+    });
+
     it("the gates do not read the schedule state: the staged and empty projects keep their blockers", async () => {
       revisions({});
       const none = await check(true);

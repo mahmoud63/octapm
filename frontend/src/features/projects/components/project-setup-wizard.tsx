@@ -61,6 +61,10 @@ const statusMeta = {
 const countLabels: Record<string, string> = {
   boqItems: 'BOQ',
   totalBoqAmount: 'BOQ value',
+  // A staged revision's own activities (R5-4): the engine sends this in
+  // place of the active schedule's counts while none is active, so a card
+  // never reads "Activities: 0" beside an import that reads complete.
+  revisionActivities: 'Revision activities',
   activeActivities: 'Activities',
   progressActivities: 'Progress acts',
   criticalActivities: 'Critical',
