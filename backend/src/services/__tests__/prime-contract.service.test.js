@@ -426,7 +426,7 @@ describe("advance payments", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockPrisma.primeContract.findFirst.mockResolvedValue(
-      contract({ advanceAmount: 100_000, advancePaidAmount: 0 })
+      contract({ advanceAmount: 100_000, advancePaidAmount: 0, originalValueSource: "project_value" })
     );
     mockPrisma.primeContractAdvance.count.mockResolvedValue(0);
     mockPrisma.primeContractAdvance.findFirst.mockResolvedValue(null);
@@ -450,6 +450,21 @@ describe("advance payments", () => {
       })
     );
     expect(result.advancePaidAmount).toBe(100_000);
+  });
+
+  it("waits for an established contract value, before the amount is read and without writing", async () => {
+    for (const originalValueSource of ["boq_fallback", "unestablished", null]) {
+      mockPrisma.primeContract.findFirst.mockResolvedValue(
+        contract({ advanceAmount: 100_000, advancePaidAmount: 0, originalValueSource })
+      );
+      for (const amount of [1, 150_000, -5]) {
+        await expect(
+          service.recordAdvancePayment({ orgId: "org-1", projectId: "project-1", userId: "user-1", payload: { amount } })
+        ).rejects.toMatchObject({ status: 409, code: "CONTRACT_VALUE_NOT_ESTABLISHED" });
+      }
+    }
+    expect(mockPrisma.primeContractAdvance.create).not.toHaveBeenCalled();
+    expect(mockPrisma.primeContract.update).not.toHaveBeenCalled();
   });
 
   it("refuses more than the advance agreed in the contract", async () => {
@@ -505,7 +520,7 @@ describe("advance payments", () => {
 describe("Phase 21D — integrity (release challenge, ninth pass)", () => {
   it("CX21-495: a receipt is decided on the contract as held — a receipt that landed since the read counts against the agreed advance, and the aggregate carries both", async () => {
     mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", orgId: "org-1", name: "P" });
-    mockPrisma.primeContract.findFirst.mockResolvedValue(contract({ advanceAmount: 100_000, advancePaidAmount: 0 }));
+    mockPrisma.primeContract.findFirst.mockResolvedValue(contract({ advanceAmount: 100_000, advancePaidAmount: 0, originalValueSource: "contract_entry" }));
     mockPrisma.primeContractAdvance.findFirst.mockResolvedValue(null);
     mockPrisma.primeContractAdvance.create.mockClear();
     mockPrisma.primeContract.update.mockClear();

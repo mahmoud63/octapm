@@ -67,6 +67,52 @@ const valueSourceOf = (contract) =>
   (contract && contract.originalValueSource) || VALUE_SOURCES.UNESTABLISHED;
 const valueEstablished = (contract) => ESTABLISHED_VALUE_SOURCES.includes(valueSourceOf(contract));
 
+/**
+ * The retention/advance provenance prerequisite (owner decision, 2026-09-29).
+ *
+ * A BOQ fallback, or a value whose source cannot be shown, is the bill's
+ * figure, not yet the contract's. Drafting and review carry on with it; a
+ * financial action that relies on the contract amount does not — certifying
+ * an IPC (which locks retention against the cap, a rate of the revised value)
+ * and recording an advance receipt (checked against the agreed advance, a
+ * rate of the original value). Those wait until the value is established
+ * through the one existing road: a contract manager enters it, or one who
+ * may read the BOQ confirms it (updateContract).
+ *
+ * The refusal is one response, decided on the value's source alone and raised
+ * before any amount is looked at, so asking again reveals nothing about the
+ * withheld figure and writes nothing.
+ *
+ * A project whose contract row does not exist yet is judged by what
+ * ensureContract would record for it — the project's own value is
+ * established, the BOQ total is a fallback — without creating the row: a
+ * refusal leaves no record behind, and nobody can step round the rule by not
+ * having opened the contract.
+ */
+const CONTRACT_VALUE_NOT_ESTABLISHED_MESSAGE =
+  "Establish the contract value first (Contract terms: enter it, or confirm it if you may read the BOQ)";
+
+const assertContractValueEstablished = async ({ orgId, projectId, tx = prisma }) => {
+  const contract = await tx.primeContract.findFirst({
+    where: { projectId, project: { orgId } },
+    select: { originalValueSource: true },
+  });
+  let established;
+  if (contract) {
+    established = valueEstablished(contract);
+  } else {
+    const project = await tx.project.findFirst({
+      where: { id: projectId, orgId },
+      select: { contractValue: true },
+    });
+    // Mirrors ensureContract: a non-zero project value is project_value.
+    established = Boolean(num(project?.contractValue));
+  }
+  if (!established) {
+    throw new HttpError(409, "CONTRACT_VALUE_NOT_ESTABLISHED", CONTRACT_VALUE_NOT_ESTABLISHED_MESSAGE);
+  }
+};
+
 const CONTRACT_TYPES = ["lump_sum", "remeasured", "cost_plus", "gmp"];
 const CONTRACT_STATUSES = ["draft", "active", "closed"];
 const ADVANCE_KINDS = ["payment", "recovery"];
@@ -462,6 +508,10 @@ const nextAdvanceReference = async (tx, { projectId, prefix }) =>
 
 /** The client pays the advance. */
 const recordAdvancePayment = async ({ orgId, projectId, userId, payload = {}, canReadBoq = false }) => {
+  // Checked against the agreed advance, a rate of the original value: that
+  // value must be the contract's before a receipt is taken against it. First,
+  // before the amount is read, and before ensureContract could write a row.
+  await assertContractValueEstablished({ orgId, projectId });
   const contract = await ensureContract({ orgId, projectId, userId });
   const amount = num(payload.amount);
   if (amount <= 0) {
@@ -482,6 +532,8 @@ const recordAdvancePayment = async ({ orgId, projectId, userId, payload = {}, ca
     if (agreed > 0 && paid > agreed + MONEY_EPSILON) {
       // The agreed advance is a rate of the original value: while that value
       // is withheld from the caller (utils/boq-figures), so is the figure.
+      // The prerequisite above already refuses an unestablished value; this
+      // stays as the second line should that ever change.
       const agreedWithheld = !canReadBoq && !valueEstablished(contract) && Number(contract.advanceRate) > 0;
       throw new HttpError(
         409,
@@ -898,6 +950,7 @@ module.exports = {
   VALUE_SOURCES,
   advanceOutstanding,
   applyAdvanceRecovery,
+  assertContractValueEstablished,
   buildStatement,
   certificateFinancials,
   contractValueSource,

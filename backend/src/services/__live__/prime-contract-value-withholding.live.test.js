@@ -305,16 +305,18 @@ liveDescribe("The client contract's original value reaches a member without BOQ 
         { parts: ["oldSummary", "newSummary"], keys: ["originalValue"], reason: EVENT_REASON },
       ]);
 
-      // A receipt over the advance agreed (10% of the fallback) is refused
-      // without stating the agreed figure (the PM records receipts,
-      // ipc:create advance.record); the BOQ reader is told it.
+      // A receipt against the advance agreed (10% of the fallback) waits for
+      // an established value (PC-7a, owner decision 2026-09-29): refused
+      // before the amount is looked at, with the same answer for the PM
+      // (who records receipts, ipc:create advance.record) and the BOQ reader,
+      // and never the agreed figure.
       const over = await api.post(at("FALLBACK", "/prime-contract/advances"), { amount: 999999 }, headers);
       expect([role, over.status, over.body.error?.code]).toEqual(
-        role === "pm_noboq" ? [role, 409, "ADVANCE_OVER_AGREED"] : [role, 403, "FORBIDDEN"],
+        role === "pm_noboq" ? [role, 409, "CONTRACT_VALUE_NOT_ESTABLISHED"] : [role, 403, "FORBIDDEN"],
       );
       expect([role, over.text.includes("3010.71")]).toEqual([role, false]);
       const readerOver = await api.post(at("FALLBACK", "/prime-contract/advances"), { amount: 999999 }, auth());
-      expect([readerOver.status, readerOver.body.error?.message.includes("3010.71")]).toEqual([409, true]);
+      expect([readerOver.status, readerOver.body.error?.code, readerOver.text.includes("3010.71")]).toEqual([409, "CONTRACT_VALUE_NOT_ESTABLISHED", false]);
 
       // Never zero, never anywhere: the reads, the history, the home page.
       const home = await api.get(HOME, headers);

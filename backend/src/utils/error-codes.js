@@ -241,6 +241,14 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "commercial",
     message: "The original value is already established; there is nothing to confirm",
   },
+  // PC-7a (owner decision 2026-09-29): IPC certification and advance receipts
+  // rely on the contract amount, so they wait for an established value.
+  CONTRACT_VALUE_NOT_ESTABLISHED: {
+    status: 409,
+    category: "commercial",
+    message:
+      "Establish the contract value first (Contract terms: enter it, or confirm it if you may read the BOQ)",
+  },
   EOT_WORKFLOW_ACTION_REQUIRED: {
     status: 400,
     category: "commercial",

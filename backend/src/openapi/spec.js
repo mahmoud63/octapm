@@ -880,6 +880,7 @@ const components = {
         "CONTRACT_VALUE_ALREADY_ESTABLISHED",
         "CONTRACT_VALUE_CONFIRM_CONFLICT",
         "CONTRACT_VALUE_CONFIRM_FORBIDDEN",
+        "CONTRACT_VALUE_NOT_ESTABLISHED",
         "COST_RECORD_NOT_FOUND",
         "CPM_DEPENDENCY_CYCLE",
         "DAILY_REPORT_LINK_INVALID",
@@ -9142,7 +9143,7 @@ add(
         occurredAt: { type: "string", format: "date-time", nullable: true },
         note: { type: "string", nullable: true },
       }),
-      "The advance received. Refused if it takes the total past the agreed advance (409 ADVANCE_OVER_AGREED; the message states the agreed figure only to a caller who may receive it). The answer is the contract, withheld as GET /prime-contract withholds it.",
+      "The advance received. Refused first, before the amount is looked at, while the contract's original value is not established — a boq_fallback or unestablished source (409 CONTRACT_VALUE_NOT_ESTABLISHED, one response whatever the stored figure, nothing written; enter or confirm it through PATCH /prime-contract). Refused if it takes the total past the agreed advance (409 ADVANCE_OVER_AGREED; the message states the agreed figure only to a caller who may receive it). The answer is the contract, withheld as GET /prime-contract withholds it.",
     ),
     status: 201,
   }),
@@ -9268,7 +9269,7 @@ add(
     "certify",
     "period.certify",
     ref("IpcCertifyRequest"),
-    "A period that claims more than approved progress earned, or more than the approved allocation or its quantity, needs a PM override: without an overrideReason it is refused with 400 IPC_PM_OVERRIDE_REASON_REQUIRED, and by anyone but a PM with 403 IPC_PM_OVERRIDE_REQUIRED. Outside production error.details on those refusals is the certification review, worked from the BOQ rows and their allocations (currentClaimedAmount, earnedAmount, approvedLimitAmount, overEarnedAmount, overApprovedQuantity, overrideLineCount …) — for a caller who may read the BOQ (boq:read); anyone else is given `{ boqWithheld: { keys: [\"certificationReview\"], reason } }` in its place, and the same code and message.",
+    "Refused with 409 CONTRACT_VALUE_NOT_ESTABLISHED while the client contract's original value is not established (a boq_fallback or unestablished source, or no contract yet and no project contract value): certification applies the retention cap, a rate of the revised value, so it waits until the value is entered or confirmed through PATCH /prime-contract. The refusal comes before the certification review, is the same whatever the stored figure, and changes nothing. A period that claims more than approved progress earned, or more than the approved allocation or its quantity, needs a PM override: without an overrideReason it is refused with 400 IPC_PM_OVERRIDE_REASON_REQUIRED, and by anyone but a PM with 403 IPC_PM_OVERRIDE_REQUIRED. Outside production error.details on those refusals is the certification review, worked from the BOQ rows and their allocations (currentClaimedAmount, earnedAmount, approvedLimitAmount, overEarnedAmount, overApprovedQuantity, overrideLineCount …) — for a caller who may read the BOQ (boq:read); anyone else is given `{ boqWithheld: { keys: [\"certificationReview\"], reason } }` in its place, and the same code and message.",
   ],
 ].forEach(([suffix, operationId, summary, action, transition, bodySchema, description]) => {
   add(
