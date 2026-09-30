@@ -12,17 +12,33 @@ assert.ok(exists('src/routes/_authenticated/projects/$projectId/$module/$child.t
 assert.ok(exists('src/routes/_authenticated/projects/$projectId/index.tsx'), 'project index route exists')
 assert.ok(!exists('src/routes/_authenticated/projects/$projectId/boq.tsx'), 'standalone BOQ page route removed; BOQ is a workspace module')
 
-const layout = read('src/routes/_authenticated/projects/$projectId.tsx')
-assert.match(layout, /beforeLoad/, 'project layout redirects legacy links')
-assert.match(layout, /moduleFromSlug\(search\.module\)/, 'legacy ?module= is mapped to a slug')
-assert.match(layout, /to: '\/projects\/\$projectId\/\$module\/\$child'/, 'legacy links redirect to module/child routes')
+// The project lives under its workspace (ENT-4): `/o/{workspace}/projects/:id/…`.
+const workspaceRoutes = 'src/routes/_authenticated/o/$orgSlug/projects/$projectId'
+assert.ok(exists(`${workspaceRoutes}/$module/index.tsx`), 'workspace module route exists')
+assert.ok(exists(`${workspaceRoutes}/$module/$child.tsx`), 'workspace module child route exists')
+assert.ok(exists(`${workspaceRoutes}/index.tsx`), 'workspace project index route exists')
+
+// The legacy layout only hands the visit, search and all, to the workspace
+// that owns the project; the workspace layout maps the old `?module=&child=`.
+const legacyLayout = read('src/routes/_authenticated/projects/$projectId.tsx')
+assert.match(legacyLayout, /beforeLoad: \(\{ params, location, context \}\) =>\s*legacyProjectRedirect\(\{\s*projectId: params\.projectId,\s*location,/, 'project layout redirects legacy links')
+assert.match(legacyLayout, /module: typeof search\.module === 'string' \? search\.module : undefined,\s*child: typeof search\.child === 'string' \? search\.child : undefined,/, 'the legacy layout keeps ?module=&child= for the workspace route')
+assert.doesNotMatch(legacyLayout, /component:/, 'the legacy layout renders nothing of its own')
+assert.match(read('src/lib/workspace/legacy.ts'), /to: `\/o\/\$orgSlug\$\{location\.pathname === '\/' \? '' : location\.pathname\}`[\s\S]*?search: location\.search as Record<string, unknown>,/, 'the workspace redirect carries the path and the search')
+const layout = read(`${workspaceRoutes}.tsx`)
+assert.match(layout, /beforeLoad: \(\{ params, search, location \}\) => \{\s*const module = moduleFromSlug\(search\.module\)/, 'legacy ?module= is mapped to a slug')
+assert.match(layout, /to: '\/o\/\$orgSlug\/projects\/\$projectId\/\$module\/\$child',[\s\S]*?module: slugForModule\(module\),\s*child,/, 'legacy links redirect to module/child routes')
 assert.match(layout, /component: Outlet/, 'layout renders the child route')
 
-const index = read('src/routes/_authenticated/projects/$projectId/index.tsx')
-assert.match(index, /redirect\(/, '/projects/:id opens the default module')
+// `/o/{workspace}/projects/:id` lands on the Overview (workspace switching
+// doc §7), no longer a redirect to the default module.
+const index = read(`${workspaceRoutes}/index.tsx`)
+assert.match(index, /createFileRoute\('\/_authenticated\/o\/\$orgSlug\/projects\/\$projectId\/'\)\(\{\s*component: ProjectOverviewPage,/, '/projects/:id opens the Overview')
+assert.doesNotMatch(read('src/routes/_authenticated/projects/$projectId/index.tsx'), /component:/, 'the legacy project index renders nothing of its own')
 
 const routeTree = read('src/routeTree.gen.ts')
 assert.match(routeTree, /'\/projects\/\$projectId\/\$module\/\$child'/, 'route tree registers module/child routes')
+assert.match(routeTree, /'\/o\/\$orgSlug\/projects\/\$projectId\/\$module\/\$child'/, 'route tree registers the workspace module/child routes')
 assert.ok(!routeTree.includes("'/projects/$projectId/boq'"), 'route tree no longer has the standalone BOQ route')
 
 // ── Module map ──────────────────────────────────────────────────────────
@@ -35,7 +51,17 @@ const modules = read('src/features/projects/lib/project-modules.ts')
 const detail = read('src/features/projects/components/project-detail.tsx')
 assert.match(detail, /moduleFromSlug\(moduleSlug\) \?\? DEFAULT_MODULE/, 'active module comes from the URL')
 assert.ok(!/useState<ModuleKey>/.test(detail), 'no local active-module state')
-assert.ok(!/useEffect\(/.test(detail), 'no effects synchronising navigation state')
+// One effect exists since a60bf81 (Phase 22B): a URL naming a module or tab the
+// policy hides is REPLACED by the one offered, so the address bar says what is
+// shown. It writes the URL only — never local navigation state — so the URL
+// stays the one source of the active module.
+const effects = detail.split(/useEffect\(\(\) => \{/).slice(1).map((rest) => rest.slice(0, rest.indexOf('}, [')))
+assert.equal((detail.match(/useEffect\(/g) || []).length, 1, 'no effects synchronising navigation state beyond the policy correction')
+assert.equal(effects.length, 1, 'the one effect is a plain effect body')
+assert.match(effects[0], /^\s*if \(permissionsSettling \|\| wbsSettling \|\| !menuItems\.length\) return/, 'the correction waits for the policy before it moves the URL')
+assert.ok(!/\bset[A-Z]\w*\(/.test(effects[0]), 'the correction sets no local state')
+assert.equal((effects[0].match(/navigate\(\{/g) || []).length, 2, 'the correction only navigates')
+assert.equal((effects[0].match(/replace: true,/g) || []).length, 2, 'the correction replaces the URL rather than adding history')
 assert.match(detail, /to: '\/projects\/\$projectId\/\$module\/\$child'/, 'menu navigates to module/child URLs')
 assert.match(detail, /<Suspense fallback=\{<ModuleLoading \/>\}>/, 'modules render inside Suspense')
 const lazyCount = (detail.match(/lazy\(\(\) =>/g) || []).length

@@ -78,7 +78,7 @@ assert.match(dashboard, /<DailyLogPanel[\s\S]*?initialDate=\{initialDate\}/, 'de
 assert.match(attachments, /daily_log: 'progress'/, 'record type module')
 assert.match(permissions, /export const useProjectPartyAccess/, 'party access hook')
 assert.deepEqual(policy.modules.progress.transitions['daily_log.approve'], ['pm'], 'PM approves the day')
-assert.deepEqual(policy.modules.progress.transitions['daily_log.entry_review'], ['pm', 'planning_eng', 'site_engineer'], 'site team reviews collaborator entries')
+assert.deepEqual(policy.modules.progress.transitions['daily_log.entry_review'], ['pm', 'planning_eng', 'site_engineer', 'quality_engineer'], 'site team reviews collaborator entries')
 for (const template of ['contractor', 'subcontractor']) {
   assert.ok(policy.partyPermissions[template].modules.progress.transitions.includes('daily_log.submit'), `${template} party can log entries`)
 }

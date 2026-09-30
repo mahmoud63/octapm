@@ -129,7 +129,8 @@ assert.match(service, /PUNCH_FINAL_APPROVER_ONLY/, 'final approver enforced serv
 assert.match(service, /projectParty: \{ projectId, status: "active", companyId: \{ in: ids \} \}/, 'company members resolved through project parties')
 const policy = JSON.parse(read('../shared/permissions.json'))
 assert.ok(policy.modules.punch, 'punch module in the policy')
-assert.deepEqual(policy.modules.punch.transitions['punch.close'], ['pm'], 'only PMs close by base policy')
+// The quality engineer joined the closers in aceaef7 (approval stays with quality).
+assert.deepEqual(policy.modules.punch.transitions['punch.close'], ['pm', 'quality_engineer'], 'only PMs and quality engineers close by base policy')
 assert.ok(policy.partyPermissions.subcontractor.modules.punch.transitions.includes('punch.ready_for_review'), 'subcontractors can submit for review')
 assert.ok(!policy.partyPermissions.subcontractor.modules.punch.transitions.includes('punch.close'), 'subcontractors cannot close')
 const migration = read('../backend/prisma/migrations/20260906060000_add_punch_list/migration.sql')

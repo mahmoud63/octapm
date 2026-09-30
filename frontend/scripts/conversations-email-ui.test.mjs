@@ -65,7 +65,8 @@ assert.match(route, /createFileRoute\('\/_authenticated\/messages\/'\)/, 'route'
 assert.match(sidebar, /title: 'Messages',\s*url: '\/messages'/, 'sidebar entry')
 assert.match(permissionsTs, /\| 'conversation'/, 'conversation module in the union')
 assert.match(permissionsTs, /\| 'email'/, 'email module in the union')
-assert.match(notificationsHook, /'message',\n\]/, 'message category listed')
+// \r?: a checkout with core.autocrlf=true has CRLF line endings.
+assert.match(notificationsHook, /'message',\r?\n\]/, 'message category listed')
 assert.match(notificationsForm, /category: 'message'/, 'message category in settings')
 
 for (const name of ['useProjectEmails', 'useProjectEmail', 'useEmailSettings', 'useUpdateEmailSettings', 'useRotateEmailAddress', 'useEmailAction', 'useDeleteEmail']) {

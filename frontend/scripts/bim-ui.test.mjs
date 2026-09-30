@@ -66,7 +66,7 @@ assert.match(modules, /bim: \['bim'\],/, 'module permission')
 assert.match(permissionsTs, /\| 'bim'/, 'permission module union')
 
 assert.equal(permissions.modules.bim.label, 'BIM')
-assert.deepEqual(permissions.modules.bim.transitions['bim.link'], ['pm', 'planning_eng', 'qs', 'site_engineer'])
+assert.deepEqual(permissions.modules.bim.transitions['bim.link'], ['pm', 'planning_eng', 'qs', 'site_engineer', 'quality_engineer'])
 assert.deepEqual(permissions.modules.bim.actions.delete, ['pm'])
 assert.deepEqual(permissions.partyPermissions.contractor.modules.bim, { actions: ['read', 'update', 'export'], transitions: ['bim.link'] })
 assert.deepEqual(permissions.partyPermissions.subcontractor.modules.bim, { actions: ['read'], transitions: [] })
