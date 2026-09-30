@@ -249,6 +249,16 @@ const ERROR_CODE_CATALOG = Object.freeze({
     message:
       "Establish the contract value first (Contract terms: enter it, or confirm it if you may read the BOQ)",
   },
+  // PC-7a (owner decision 2026-09-29): a contract-terms change — an entered or
+  // confirmed contract value above all — and its contract.manage audit record
+  // are written together or not at all. A deliberate 5xx: in production the
+  // body carries this message.
+  CONTRACT_AUDIT_UNAVAILABLE: {
+    status: 503,
+    category: "commercial",
+    message:
+      "The contract terms were not saved because their audit record could not be written; try again",
+  },
   EOT_WORKFLOW_ACTION_REQUIRED: {
     status: 400,
     category: "commercial",

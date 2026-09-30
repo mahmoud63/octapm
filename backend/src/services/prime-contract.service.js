@@ -63,6 +63,10 @@ const ESTABLISHED_VALUE_SOURCES = Object.freeze([
   VALUE_SOURCES.CONTRACT_ENTRY,
 ]);
 
+/** Refusal when the contract.manage audit record cannot be written (updateContract). */
+const CONTRACT_AUDIT_UNAVAILABLE_MESSAGE =
+  "The contract terms were not saved because their audit record could not be written; try again";
+
 const valueSourceOf = (contract) =>
   (contract && contract.originalValueSource) || VALUE_SOURCES.UNESTABLISHED;
 const valueEstablished = (contract) => ESTABLISHED_VALUE_SOURCES.includes(valueSourceOf(contract));
@@ -330,7 +334,9 @@ const EDITABLE = [
  *   confirm.
  *
  * Either is recorded by the existing contract.manage audit event — its
- * actor and time, the source before and after, and which it was.
+ * actor and time, the source before and after, and which it was. The event is
+ * written inside the update's transaction: if it cannot be written, nothing
+ * is saved and the request answers 503 CONTRACT_AUDIT_UNAVAILABLE.
  */
 const updateContract = async ({ orgId, projectId, userId, payload = {}, canConfirmFallback = false }) => {
   const contract = await ensureContract({ orgId, projectId, userId });
@@ -438,39 +444,54 @@ const updateContract = async ({ orgId, projectId, userId, payload = {}, canConfi
     // before this module existed has never seen them, and saving the terms is
     // exactly the moment somebody would notice the total was wrong.
     await recomputeChangeValues(tx, { orgId, projectId });
-    return tx.primeContract.findUnique({
+    const saved = await tx.primeContract.findUnique({
       where: { id: contract.id },
       include: contractInclude,
     });
-  });
 
-  await auditService.recordEvent({
-    orgId,
-    projectId,
-    entityType: auditService.ENTITY_TYPES.PROJECT,
-    entityId: projectId,
-    action: auditService.ACTIONS.UPDATED,
-    actorId: userId,
-    summary: {
-      transition: "contract.manage",
-      ref: updated.ref,
-      ...(valueConfirmation ? { originalValueConfirmation: valueConfirmation } : {}),
-    },
-    oldSummary: {
-      originalValue: num(contract.originalValue),
-      originalValueSource: valueSourceOf(contract),
-      retentionRate: contract.retentionRate,
-      advanceRate: contract.advanceRate,
-      taxRate: contract.taxRate,
-    },
-    newSummary: {
-      originalValue: num(updated.originalValue),
-      originalValueSource: valueSourceOf(updated),
-      retentionRate: updated.retentionRate,
-      advanceRate: updated.advanceRate,
-      taxRate: updated.taxRate,
-    },
-  }).catch(() => null);
+    // The contract.manage event is the evidence of who entered or confirmed
+    // the contract value, and when (PC-7a, owner decision 2026-09-29). It is
+    // written on the same transaction client, so the change and its audit
+    // record commit together or not at all: a confirmation can never stand
+    // without the record that it was made. A failed audit write fails the
+    // request and rolls the change back; it is never swallowed.
+    try {
+      await auditService.recordEvent({
+        tx,
+        orgId,
+        projectId,
+        entityType: auditService.ENTITY_TYPES.PROJECT,
+        entityId: projectId,
+        action: auditService.ACTIONS.UPDATED,
+        actorId: userId,
+        summary: {
+          transition: "contract.manage",
+          ref: saved.ref,
+          ...(valueConfirmation ? { originalValueConfirmation: valueConfirmation } : {}),
+        },
+        oldSummary: {
+          originalValue: num(contract.originalValue),
+          originalValueSource: valueSourceOf(contract),
+          retentionRate: contract.retentionRate,
+          advanceRate: contract.advanceRate,
+          taxRate: contract.taxRate,
+        },
+        newSummary: {
+          originalValue: num(saved.originalValue),
+          originalValueSource: valueSourceOf(saved),
+          retentionRate: saved.retentionRate,
+          advanceRate: saved.advanceRate,
+          taxRate: saved.taxRate,
+        },
+      });
+    } catch (error) {
+      // The client is told only that nothing was saved; the cause is for the
+      // server log.
+      console.error("[prime-contract-audit]", error?.code || error?.name, error?.message);
+      throw new HttpError(503, "CONTRACT_AUDIT_UNAVAILABLE", CONTRACT_AUDIT_UNAVAILABLE_MESSAGE);
+    }
+    return saved;
+  });
 
   return serializeContract(updated);
 };

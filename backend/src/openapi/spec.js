@@ -877,6 +877,8 @@ const components = {
         "COMPANY_REQUIRED",
         "CONFIG_ERROR",
         "CONFLICT",
+        // PC-7a: a contract-terms change is refused when its audit record cannot be written.
+        "CONTRACT_AUDIT_UNAVAILABLE",
         "CONTRACT_VALUE_ALREADY_ESTABLISHED",
         "CONTRACT_VALUE_CONFIRM_CONFLICT",
         "CONTRACT_VALUE_CONFIRM_FORBIDDEN",
@@ -9076,7 +9078,7 @@ add(
             "true confirms the stored original value as it stands (a boq_fallback or unestablished value) as the contract's: originalValueSource becomes contract_entry and the contract.manage audit event records who and when (summary.originalValueConfirmation = confirmed). Needs boq:read on the project as well (403 CONTRACT_VALUE_CONFIRM_FORBIDDEN), cannot be sent with originalValue (400 CONTRACT_VALUE_CONFIRM_CONFLICT), and an established value has nothing to confirm (409 CONTRACT_VALUE_ALREADY_ESTABLISHED).",
         },
       }),
-      "Contract fields to change. The advance amount follows the advance rate unless it is given explicitly. An originalValue different from the stored one is an entry (originalValueSource becomes contract_entry; summary.originalValueConfirmation = entered); the stored value sent back, or a save without originalValue, never changes the source. originalValueSource cannot be sent (400 VALIDATION_ERROR). The answer is the contract, withheld as GET withholds it.",
+      "Contract fields to change. The advance amount follows the advance rate unless it is given explicitly. An originalValue different from the stored one is an entry (originalValueSource becomes contract_entry; summary.originalValueConfirmation = entered); the stored value sent back, or a save without originalValue, never changes the source. originalValueSource cannot be sent (400 VALIDATION_ERROR). The change and its contract.manage audit event are written in one transaction: if the audit record cannot be written nothing is saved and the answer is 503 CONTRACT_AUDIT_UNAVAILABLE (retry). The answer is the contract, withheld as GET withholds it.",
       false,
     ),
   }),

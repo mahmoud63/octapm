@@ -326,6 +326,33 @@ describe("where the original value came from (owner decisions 1-3)", () => {
       expect(audit.recordEvent.mock.calls.at(-1)[0].summary.originalValueConfirmation).toBe("confirmed");
     }
   });
+
+  // The rollback itself is proven against Postgres in
+  // __live__/contract-confirmation-audit.live.test.js; here, the shape.
+  it("writes the audit event on the update's transaction client and fails the update when it cannot", async () => {
+    const audit = require("../audit.service");
+    const txSeen = [];
+    const original = mockPrisma.$transaction;
+    mockPrisma.$transaction = (fn) => {
+      const tx = { ...mockPrisma, marker: "tx" };
+      txSeen.push(tx);
+      return fn(tx);
+    };
+    try {
+      await run(stored(), { confirmOriginalValue: true }, { canConfirmFallback: true });
+      expect(audit.recordEvent.mock.calls.at(-1)[0].tx).toBe(txSeen.at(-1));
+
+      audit.recordEvent.mockRejectedValueOnce(Object.assign(new Error("insert failed"), { code: "P2002" }));
+      const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+      await expect(run(stored(), { confirmOriginalValue: true }, { canConfirmFallback: true })).rejects.toMatchObject({
+        status: 503,
+        code: "CONTRACT_AUDIT_UNAVAILABLE",
+      });
+      spy.mockRestore();
+    } finally {
+      mockPrisma.$transaction = original;
+    }
+  });
 });
 
 describe("receivables", () => {
