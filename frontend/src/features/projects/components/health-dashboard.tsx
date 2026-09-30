@@ -128,7 +128,9 @@ const METRIC_LABELS: Record<string, string> = {
   criticalActivities: 'Critical activities',
   approvedChangeOrders: 'Approved change orders',
   pendingChangeOrders: 'Pending change orders',
-  approvedScheduleImpactDays: 'Approved delay',
+  // A recorded impact, never a granted extension of time (owner decision
+  // R5-1): named for what it is, with its hint below.
+  approvedScheduleImpactDays: 'Approved change-order schedule impact',
   overduePOs: 'Overdue purchase orders',
   atRiskItems: 'At-risk items',
   majorNCRs: 'Major NCRs',
@@ -141,6 +143,23 @@ const METRIC_LABELS: Record<string, string> = {
   overdueRfis: 'Overdue RFIs',
   pendingSubmittals: 'Pending submittals',
   overdueSubmittals: 'Overdue submittals',
+}
+
+/**
+ * What a figure is, said under it. The approved change-order schedule impact
+ * is the sum of the approved change orders' schedule-impact days as entered
+ * on them (routes/health.js): a recorded impact, not an extension of time
+ * the client granted, and not the forecast's projected slip (R5-1).
+ */
+const METRIC_HINTS: Record<string, string> = {
+  approvedScheduleImpactDays:
+    "The sum of the approved change orders' schedule-impact days, as entered on them — not a granted extension of time, and not the projected slip.",
+}
+
+/** The unit said with the figure, where the plain unit would read as a fact. */
+const METRIC_UNITS: Record<string, (value: number) => string> = {
+  approvedScheduleImpactDays: (value) =>
+    `${value === 1 ? 'day' : 'days'} (as entered)`,
 }
 
 const MONEY_KEYS = new Set([
@@ -199,6 +218,7 @@ function formatMetricValue(
       return currency ? `${currency} ${amount}` : amount
     }
     if (RATIO_KEYS.has(key)) return numeric.toFixed(2)
+    if (METRIC_UNITS[key]) return `${numeric.toLocaleString()} ${METRIC_UNITS[key](numeric)}`
     if (/days$/i.test(key)) return `${numeric.toLocaleString()} ${numeric === 1 ? 'day' : 'days'}`
     return numeric.toLocaleString()
   }
@@ -232,6 +252,8 @@ type Metric = {
   withheld?: boolean
   /** Why the figure is a dash, said beside it. */
   reason?: string
+  /** What the figure is (METRIC_HINTS), said under it. */
+  hint?: string
 }
 
 /** How many activities have official actual cost through the cutoff. */
@@ -268,7 +290,8 @@ function readableMetrics(
       continue
     }
     const formatted = formatMetricValue(key, value, currency)
-    if (formatted) shown.push({ key, label: labelForMetric(key), value: formatted })
+    if (formatted)
+      shown.push({ key, label: labelForMetric(key), value: formatted, hint: METRIC_HINTS[key] })
   }
   const withheld = (WITHHELD_WHEN_ABSENT[dimensionKey] ?? [])
     .filter((key) => !(key in detail))
@@ -354,12 +377,13 @@ function DimensionCard({
         <dl className='mt-3 space-y-1'>
           {metrics.map((metric) => (
             // Both sides must be able to shrink: a long value with shrink-0
-            // pushed the whole page sideways on a phone.
+            // pushed the whole page sideways on a phone. The label column
+            // gives way first (minmax(0,1fr)); a hint takes the row below.
             <div
               key={metric.key}
-              className='flex min-w-0 items-baseline justify-between gap-2 text-xs'
+              className='grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-2 text-xs'
               data-testid={`uat-health-metric-${dimensionKey}-${metric.key}`}
-              title={metric.withheld ? WITHHELD_REASON : metric.reason}
+              title={metric.withheld ? WITHHELD_REASON : (metric.reason ?? metric.hint)}
             >
               <dt className='min-w-0 truncate text-muted-foreground'>{metric.label}</dt>
               <dd className='min-w-0 text-end font-medium tabular-nums text-foreground'>
@@ -370,6 +394,16 @@ function DimensionCard({
                   </span>
                 ) : null}
               </dd>
+              {metric.hint ? (
+                // What the figure is, under it: a recorded impact is not a
+                // granted extension of time, and must not read as one.
+                <dd
+                  className='col-span-2 text-[11px] leading-snug text-muted-foreground'
+                  data-testid={`uat-health-metric-hint-${dimensionKey}-${metric.key}`}
+                >
+                  {metric.hint}
+                </dd>
+              ) : null}
             </div>
           ))}
         </dl>

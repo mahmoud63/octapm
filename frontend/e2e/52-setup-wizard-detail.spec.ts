@@ -518,6 +518,13 @@ const BOQ_KEYS = [
   // ... and the BOQ row that created an activity (GET /schedule carried it
   // off the activity's row): a per-activity link to the bill.
   'mintedByBoqItemId',
+  // ... and the controls detail drawer's own section (owner decision E1):
+  // the activity's mapped quantity, its allocation EV and its allocation
+  // rows — so the sweep, not only the exact shape asserted on the drawer's
+  // answer, refuses a figure left beside the withheld dash on any answer.
+  'mappedQuantity',
+  'earnedValue',
+  'allocations',
 ]
 // The budgets built from the bill, and the forecast's money built from them:
 // withheld from the member who reads neither the BOQ nor the cost module.
@@ -1117,15 +1124,69 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       ).toEqual([])
       await noBrokenFigure('cost/phase')
     }
-    // The activity's detail (opened last: its materials panel reads more
-    // than the pages listed above): its approved BOQ value and weight read a
-    // dash and why, never a figure.
+    // The activity's detail (opened last: its panels read more than the
+    // pages listed above). Since PC-5 the row's Activity ID cell carries the
+    // way into the controls detail drawer — the one the Gantt, the BOQ grid
+    // and Mapping open — and a click on that cell lands on it. The drawer's
+    // BOQ allocations section (the mapped quantity, the allocation budget
+    // and EV, and every allocation's row, code, quantity and amount) is
+    // withheld whole by the server (boq-figures withheldActivityDetail) from
+    // both members, cost read or not (owner decision E1): a dash and the
+    // server's reason, never a figure, never a row, never "no allocation
+    // yet" (a fact it was not given). Its answer is swept like every other.
     await page.goto(`${base}/activities`)
     const detailRow = page.locator('tr', { hasText: 'Pour foundations' })
     await expect(detailRow).toBeVisible({ timeout: 30_000 })
+    const detailSeen = answers.length
+    const isDetail = (url: string) => /\/activities\/[^/]+\/detail(\?|$)/.test(url)
+    const detailAnswer = page.waitForResponse((r) => isDetail(r.url()) && r.request().method() === 'GET', { timeout: 30_000 })
     await detailRow.locator('td').first().click()
+    const drawer = page.getByTestId('activity-detail-drawer')
+    await expect(drawer).toBeVisible({ timeout: 30_000 })
+    expect((await detailAnswer).status(), `${member.name}: the activity detail`).toBe(200)
+    await expect(drawer.getByTestId('activity-detail-title')).toHaveText('A100 · Pour foundations', { timeout: 30_000 })
+    const mapping = drawer.getByTestId('activity-detail-mapping')
+    await expect(mapping.getByTestId('activity-detail-mapping-withheld')).toHaveText(`— ${MAPPING_DETAILS_WITHHELD}`)
+    await expect(mapping.getByTestId('activity-detail-mapping-withheld')).toHaveAttribute('data-withheld-module', 'boq')
+    for (const figure of ['activity-detail-mapped-qty', 'activity-detail-budget', 'activity-detail-generated-budget', 'activity-detail-ev']) {
+      await expect(drawer.getByTestId(figure), `${member.name}: ${figure} drawn for a member without BOQ read`).toHaveCount(0)
+    }
+    await expect(mapping.locator('table')).toHaveCount(0)
+    await expect(mapping).not.toContainText('No BOQ row is allocated')
+    // Nothing of the row anywhere in the drawer: not its value, its code and
+    // description, its quantity, its rate — nor the generator's figures.
+    const drawerText = (await drawer.innerText()).replace(/\s+/g, ' ')
+    for (const secret of ['21,337', '21337', '1.1 ·', 'Concrete in foundations', '100 m3', '213.37', '69,999', '69999.99', ...member.secrets]) {
+      expect(drawerText, `${member.name}: the drawer read "${secret}"`).not.toContain(secret)
+    }
+    expect(drawerText, `${member.name}: a drawer figure read as NaN`).not.toMatch(/NaN/)
+    // The drawer's answer, swept as every other answer is (no withheld key,
+    // no secret), and the section it carries says so itself.
+    await page.waitForLoadState('networkidle')
+    await apiSettled()
+    await Promise.all(pending)
+    const detailAnswers = answers.slice(detailSeen).filter((answer) => isDetail(answer.url))
+    expect(detailAnswers.length, `${member.name}: the activity detail was answered`).toBeGreaterThan(0)
+    expect(
+      detailAnswers.filter((answer) => answer.paths.length || answer.secrets.length),
+      `${member.name}: the activity detail answer carried a withheld figure`
+    ).toEqual([])
+    const detailBody = (await (await detailAnswer).json()) as { data: { sections: Record<string, unknown> } }
+    expect(detailBody.data.sections.mapping, `${member.name}: the mapping section`).toEqual({
+      allowed: false,
+      module: 'boq',
+      reason: MAPPING_DETAILS_WITHHELD,
+    })
+    await page.keyboard.press('Escape')
+    await expect(drawer).toBeHidden()
+
+    // The row itself (any other cell) still opens the register's own
+    // activity sheet, with its materials panel: its approved BOQ value and
+    // weight read a dash and why, never a figure.
+    await detailRow.locator('td').nth(1).click()
     await expect(page.getByTestId('uat-activity-detail-boq-value-withheld')).toHaveText(`— ${MAPPING_DETAILS_WITHHELD}`, { timeout: 30_000 })
     await expect(page.getByTestId('uat-activity-detail-boq-weight-withheld')).toHaveText(`— ${MAPPING_DETAILS_WITHHELD}`)
+    await expect(page.getByTestId('activity-detail-drawer')).toHaveCount(0)
     await page.keyboard.press('Escape')
     expect(errors, `${member.name}: page errors`).toEqual([])
     await context.close()

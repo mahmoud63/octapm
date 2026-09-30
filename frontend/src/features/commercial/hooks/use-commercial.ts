@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { REPORTS_OWN_ERROR } from '@/lib/mutation-meta'
 import { apiClient } from '@/services/api/client'
 
 export interface TraceActivity {
@@ -623,6 +624,8 @@ export const useCertifyIpcPeriod = (projectId: string) => {
       qc.invalidateQueries({ queryKey: ipcKey(projectId) })
       qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
     },
+    // The IPC workbook toasts the refusal itself, with the way to Contract terms.
+    meta: REPORTS_OWN_ERROR,
   })
 }
 

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import ReactDOM from 'react-dom/client'
 import { AxiosError } from 'axios'
 import {
+  MutationCache,
   QueryCache,
   QueryClient,
   QueryClientProvider,
@@ -11,6 +12,8 @@ import { toast } from 'sonner'
 import { registerSW } from 'virtual:pwa-register'
 import { useAuthStore } from '@/stores/auth-store'
 import { handleServerError } from '@/lib/handle-server-error'
+// Types meta.reportsOwnError on every mutation (the handler below reads it).
+import '@/lib/mutation-meta'
 import {
   lockOutbox,
   onOutboxSynced,
@@ -44,18 +47,25 @@ const queryClient = new QueryClient({
       refetchOnWindowFocus: import.meta.env.PROD,
       staleTime: 10 * 1000, // 10s
     },
-    mutations: {
-      onError: (error) => {
-        handleServerError(error)
-
-        if (error instanceof AxiosError) {
-          if (error.response?.status === 304) {
-            toast.error('Content not modified!')
-          }
-        }
-      },
-    },
   },
+  // Every failed mutation is toasted once, in the server's words — unless
+  // the mutation handles its failure itself: one with an onError of its own
+  // (which, as the default-option this replaces, stands in for this
+  // handler), or one whose caller catches mutateAsync and toasts the same
+  // sentence (meta.reportsOwnError, lib/mutation-meta.ts). Before, the
+  // budget line dialog and the IPC workbook showed each refusal twice.
+  mutationCache: new MutationCache({
+    onError: (error, _variables, _context, mutation) => {
+      if (mutation.meta?.reportsOwnError || mutation.options.onError) return
+      handleServerError(error)
+
+      if (error instanceof AxiosError) {
+        if (error.response?.status === 304) {
+          toast.error('Content not modified!')
+        }
+      }
+    },
+  }),
   queryCache: new QueryCache({
     onError: (error) => {
       if (error instanceof AxiosError) {

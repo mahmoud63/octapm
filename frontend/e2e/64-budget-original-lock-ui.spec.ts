@@ -297,9 +297,14 @@ test('the budget line dialog keeps a re-activated original, shows a locked origi
   expect(refusedBody.error.details?.revisionPath).toBe(`/budget/lines/${writable.id}/revisions`)
   expect(refusedBody.error.message).not.toContain('/budget/lines/')
 
-  // (The dialog's own toast; the app-wide mutation default may repeat it.)
-  const refusedToast = toast(page, 'The original budget of BL-200 / material is locked at 50,000.00').first()
+  // The dialog's own toast, and ONE only: the app-wide mutation handler no
+  // longer repeats the sentence (the line mutations report their own error,
+  // lib/mutation-meta.ts).
+  const refusedToasts = toast(page, 'The original budget of BL-200 / material is locked at 50,000.00')
+  await expect(refusedToasts).toHaveCount(1)
+  const refusedToast = refusedToasts.first()
   await expect(refusedToast).toBeVisible()
+  expect(await refusedToasts.count(), 'toasts carrying the refusal').toBe(1)
   await expect(refusedToast).toContainText('condition 2: a budget revision stands on it')
   await expect(refusedToast).toContainText('Record a changed amount as a budget revision on this line')
   await expect(refusedToast).toContainText(refusedBody.error.message)

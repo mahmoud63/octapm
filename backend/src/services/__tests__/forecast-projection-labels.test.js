@@ -49,6 +49,36 @@ describe("R5-1: the forecast is labelled a projection, never an extension of tim
     expect(source.match(/\{RECORDED_IMPACT_LEGEND\}/g)).toHaveLength(2);
   });
 
+  it("the health card names the approved change-order schedule impact for what it is — never \"Approved delay\"", () => {
+    // routes/health.js sums the approved change orders' schedule-impact days
+    // (the order's own days and its activity links' approved days) into
+    // approvedScheduleImpactDays. The health card labelled that sum "Approved
+    // delay", which read as a granted extension of time (R5-1, residual).
+    const file = "frontend/src/features/projects/components/health-dashboard.tsx";
+    const source = fs.readFileSync(path.join(ROOT, file), "utf8");
+    expect(source).not.toMatch(/approved delay/i);
+    expect(source).toContain("approvedScheduleImpactDays: 'Approved change-order schedule impact'");
+    // The unit says the days are as entered on the orders, singular and plural.
+    expect(source).toMatch(/approvedScheduleImpactDays: \(value\) =>\s*`\$\{value === 1 \? 'day' : 'days'\} \(as entered\)`/);
+    // The hint, and what it must say.
+    const hint = source.match(/approvedScheduleImpactDays:\s*"([^"]+)",\s*\}/)?.[1] || "";
+    expect(hint).toContain("sum of the approved change orders' schedule-impact days, as entered on them");
+    expect(hint).toContain("not a granted extension of time");
+    expect(hint).toContain("not the projected slip");
+    // ... rendered under the figure and as the row's tooltip.
+    expect(source).toContain("hint: METRIC_HINTS[key]");
+    expect(source).toContain("data-testid={`uat-health-metric-hint-${dimensionKey}-${metric.key}`}");
+    expect(source).toContain("{metric.hint}");
+    expect(source).toContain("metric.reason ?? metric.hint");
+    // The card's other wording never grants: a line that names an extension
+    // of time, EOT or a grant only ever denies it.
+    const granting = source
+      .split(/\r?\n/)
+      .filter((line) => NOT_A_FORECAST.test(line))
+      .filter((line) => !/\b(not|never)\b/i.test(line));
+    expect(granting).toEqual([]);
+  });
+
   it("the narrative and the model's text call the finish projected", () => {
     const forecast = {
       asOf: "2026-09-30T00:00:00.000Z",

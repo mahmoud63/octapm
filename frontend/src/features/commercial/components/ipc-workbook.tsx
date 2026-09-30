@@ -120,6 +120,17 @@ export function IpcWorkbook({
   const [retentionReason, setRetentionReason] = useState('')
   const [certificationComment, setCertificationComment] = useState('')
   const [overrideReason, setOverrideReason] = useState('')
+  // The last CONTRACT_VALUE_NOT_ESTABLISHED refusal, kept on the workbook
+  // for the period it refused — a toast is gone in five seconds, the sentence
+  // and the way to Contract terms stay until the period changes or is
+  // certified. The period read does not say whether the value is
+  // established (only the contract read does, and the workbook does not
+  // load it), so nothing is known before the server has said it. It never
+  // carries an amount: the server's sentence has none.
+  const [contractValueRefusal, setContractValueRefusal] = useState<{
+    period: string
+    message: string
+  } | null>(null)
   const dashboardPeriod =
     periods.find((period) => period.id === initialRecordId)?.period ||
     periods.find((period) => period.status === initialStatus)?.period ||
@@ -281,19 +292,26 @@ export function IpcWorkbook({
                   })
                   setCertificationComment('')
                   setOverrideReason('')
+                  setContractValueRefusal(null)
                   toast.success('IPC certified')
                 } catch (error) {
+                  // The one toast for this refusal: the mutation reports
+                  // its own error (meta), so the app-wide handler is silent.
                   if (
                     errorCodeFrom(error) === 'CONTRACT_VALUE_NOT_ESTABLISHED'
                   ) {
-                    toast.error(getServerErrorMessage(error), {
+                    const message = getServerErrorMessage(error)
+                    setContractValueRefusal({ period: activePeriod, message })
+                    toast.error(message, {
                       action: {
                         label: 'Open Contract terms',
                         onClick: openContractTerms,
                       },
                     })
                   } else {
-                    toast.error('Failed to certify IPC')
+                    toast.error(
+                      getServerErrorMessage(error, 'Failed to certify IPC')
+                    )
                   }
                 }
               }}
@@ -304,6 +322,34 @@ export function IpcWorkbook({
           )}
         </div>
       </div>
+
+      {contractValueRefusal && contractValueRefusal.period === activePeriod && (
+        // The refusal, kept in view: the server's sentence (no amount in
+        // it, for a BOQ reader or not) and the way to Contract terms.
+        // Certify stays offered — the server decides on each attempt, and
+        // the value may be established by someone else meanwhile.
+        <div
+          role='status'
+          className='flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200'
+          data-testid='uat-ipc-contract-value-notice'
+        >
+          <span className='inline-flex items-start gap-2'>
+            <AlertTriangle className='mt-0.5 size-4 shrink-0' aria-hidden />
+            <span>
+              Certification of {contractValueRefusal.period} was refused:{' '}
+              {contractValueRefusal.message}
+            </span>
+          </span>
+          <Button
+            size='sm'
+            variant='outline'
+            onClick={openContractTerms}
+            data-testid='uat-ipc-open-contract-terms'
+          >
+            Open Contract terms
+          </Button>
+        </div>
+      )}
 
       {detail && (
         <AuditHistoryPanel
