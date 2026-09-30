@@ -156,6 +156,36 @@ remainingCommitment = committed − certifiedAgainstCommitments
 projectedFinalCost  = actual + remainingCommitment + uncommittedForecast
 ```
 
+#### 1.6.1 Clarification — a cost record's default forecast (PC-7a 3d, owner 2026-09-29)
+
+A cost record (one per activity) stores a forecast. When its writer gives
+none — the record is created, or its budget is written, without a forecast —
+the stored default is:
+
+```
+CostRecord.forecast (default) = max(budget, actual)          // never < 0, never < actual
+```
+
+This is the estimate at completion the cost summary already gave a record
+without a forecast (`cost.service estimateAtCompletion`), so the stored
+default and the summary now state one rule; `figure-truth`
+`COST_RECORD_FORECAST_DEFAULT_BASIS` = `greater_of_budget_and_actual`, and the
+summary labels it `projection:typed_or_greater_of_budget_and_actual`. It is a
+projection: it never feeds Original, Revised, Committed or Actual.
+
+It replaces `budget + 1.1 × (actual − budget)`, which was −0.1 × budget on a
+record with no actual yet — the CostRecord money check refused the write, and
+every cost record created without a forecast on an activity with an approved
+allocation answered 500 and quoted the Prisma call — and which fell below
+actual whenever actual was under budget. The one other change: with actual
+above budget the default is now actual (the old rule extrapolated the overrun
+by 10%); a forecast typed on the record still stands as typed.
+
+Nothing stored moves: only records written after the change take the new
+default. A figure the service would write below 0 is refused with
+`400 COST_RECORD_MONEY_INVALID` naming the field, never the database's 500.
+Proof: `backend/src/services/__live__/pc-7a-cost-record-forecast.live.test.js`.
+
 ### 1.7 Cash Flow
 
 Unchanged. A **full rebuild** from payment rows:

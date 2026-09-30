@@ -55,8 +55,14 @@ const budgetLineTruth = (typed) => ({
 
 // A cost record's stored forecast when its writer gives none (cost.service
 // resolveForecast). Named here so the label and the rule are read together.
-const COST_RECORD_FORECAST_DEFAULT_BASIS = "budget_plus_1.1x_actual_minus_budget";
-const COST_RECORD_FORECAST_DEFAULT_RULE = "budget + 1.1 × (actual − budget)";
+// PC-7a 3d (owner, 2026-09-29): it is the cost summary's own estimate at
+// completion for a record without a forecast — the larger of its budget and
+// its actual. The former default, budget + 1.1 × (actual − budget), was −10%
+// of the budget on a record with no actual yet (a 500 on every cost record
+// created without a forecast on an allocated activity) and fell below actual
+// whenever actual was under budget.
+const COST_RECORD_FORECAST_DEFAULT_BASIS = "greater_of_budget_and_actual";
+const COST_RECORD_FORECAST_DEFAULT_RULE = "the larger of the record's budget and its actual (never negative, never below actual)";
 
 // The earned-value report's figures (earned-value.service). The EAC's
 // basis is the report's own eacBasis key (utils/eac-basis).

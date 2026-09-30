@@ -269,6 +269,14 @@ const ERROR_CODE_CATALOG = Object.freeze({
     message:
       "The original budget of this line is locked; record the change as a budget revision, which flows into the revised budget",
   },
+  // PC-7a 3d (owner, 2026-09-29): a cost record figure the service would
+  // write below 0 (or not an amount) is refused as a business error, never
+  // the database's CostRecord money check as a 500.
+  COST_RECORD_MONEY_INVALID: {
+    status: 400,
+    category: "cost",
+    message: "Every cost record figure must be an amount of 0 or more",
+  },
   EOT_WORKFLOW_ACTION_REQUIRED: {
     status: 400,
     category: "commercial",

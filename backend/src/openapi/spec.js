@@ -885,6 +885,8 @@ const components = {
         "CONTRACT_VALUE_CONFIRM_CONFLICT",
         "CONTRACT_VALUE_CONFIRM_FORBIDDEN",
         "CONTRACT_VALUE_NOT_ESTABLISHED",
+        // PC-7a 3d: a cost record figure below 0 is a business error, not the database's refusal.
+        "COST_RECORD_MONEY_INVALID",
         "COST_RECORD_NOT_FOUND",
         "CPM_DEPENDENCY_CYCLE",
         "DAILY_REPORT_LINK_INVALID",
@@ -11828,6 +11830,9 @@ const costRecordListParams = [
 // Owner decision E1 (2026-09-28), as utils/boq-figures applies it to the Cost module.
 const COST_RECORD_BUDGETS =
   "Each record's budget is its activity's approved BOQ allocation, and generatedBudget the budget first written on the record: both are present only for a caller who may read the BOQ — reading the cost module does not override this (owner decision E1, 2026-09-28). The cost ledger's own figures on each record (the cost categories, committed, actual, actualThroughDate, forecast) are every cost reader's.";
+// PC-7a 3d (owner, 2026-09-29): the forecast a cost record is written with when its writer gives none.
+const COST_RECORD_FORECAST_DEFAULT_NOTE =
+  "When no forecast is given and the record is created, or its budget is written, the forecast stored is the larger of the record's budget and its actual (a projection — the cost summary's own estimate at completion for a record without a forecast; never below 0, never below actual). A figure the service would write below 0 is refused with 400 COST_RECORD_MONEY_INVALID naming the field; nothing is written.";
 
 [
   {
@@ -11844,7 +11849,7 @@ const COST_RECORD_BUDGETS =
     method: "get",
     path: "/projects/{projectId}/cost/summary",
     summary: "Get project cost summary.",
-    description: `${COST_RECORD_BUDGETS} The summary's figures built from those budgets — they add up the approved allocations of the activities that have a cost record, per category and in total, and a record with no forecast counts its budget in the forecast — are present only for a caller who may read the BOQ: byPhase[].budget, forecast, variance and variancePct; totals.budget and totals.forecast; eac.toComplete, optimistic, mostLikely and pessimistic; budget.allocatedToActivities. Anyone else receives each byPhase row's phase, committed and actual, totals.committed and totals.actual, eac.basis and eac.actual, and the budget register's original, approved changes, revisions and revised budget, with activityBudgetsWithheld true and activityBudgetsReason "Mapping details unavailable to you". Moving an approved allocation between activities changes nothing such a caller receives (owner decision E1). The project's own totals — EV, PV, AC, SPI, CPI, EAC — are on the EV report and the forecast. PC-7a three truths (labels only, the same words for every project and caller): budget.label is "Budget" (the budget register; derived) and truth says what each figure is — truth.budget (derived, with otherBudgets naming "Budget at completion (EV basis)" on the EV report and "Contract value + approved changes" on the budget revisions waterfall), truth.allocatedToActivities (derived), truth.totals (budget, committed, actual derived; forecast "projection:estimate_at_completion"), truth.records.forecast (a record's stored forecast: typed, or when none is given the default budget + 1.1 × (actual − budget) — a projection) and truth.eac (a projection). A label is present even where the figure it describes is withheld.`,
+    description: `${COST_RECORD_BUDGETS} The summary's figures built from those budgets — they add up the approved allocations of the activities that have a cost record, per category and in total, and a record with no forecast counts its budget in the forecast — are present only for a caller who may read the BOQ: byPhase[].budget, forecast, variance and variancePct; totals.budget and totals.forecast; eac.toComplete, optimistic, mostLikely and pessimistic; budget.allocatedToActivities. Anyone else receives each byPhase row's phase, committed and actual, totals.committed and totals.actual, eac.basis and eac.actual, and the budget register's original, approved changes, revisions and revised budget, with activityBudgetsWithheld true and activityBudgetsReason "Mapping details unavailable to you". Moving an approved allocation between activities changes nothing such a caller receives (owner decision E1). The project's own totals — EV, PV, AC, SPI, CPI, EAC — are on the EV report and the forecast. PC-7a three truths (labels only, the same words for every project and caller): budget.label is "Budget" (the budget register; derived) and truth says what each figure is — truth.budget (derived, with otherBudgets naming "Budget at completion (EV basis)" on the EV report and "Contract value + approved changes" on the budget revisions waterfall), truth.allocatedToActivities (derived), truth.totals (budget, committed, actual derived; forecast "projection:estimate_at_completion"), truth.records.forecast (a record's stored forecast: typed, or when none is given the default the larger of the record's budget and its actual — a projection, "projection:typed_or_greater_of_budget_and_actual"; PC-7a 3d replaced budget + 1.1 × (actual − budget), which was below 0 before any actual) and truth.eac (a projection). A label is present even where the figure it describes is withheld.`,
     operationId: "getCostSummary",
     permissions: modulePermission("cost", "read"),
   },
@@ -11919,7 +11924,7 @@ const COST_RECORD_BUDGETS =
     method: "post",
     path: "/projects/{projectId}/cost/activity/{activityId}",
     summary: "Create or update a cost record for an activity.",
-    description: `A record made here is written with its activity's approved BOQ allocation as its budget when none is given. ${COST_RECORD_BUDGETS} The answer is the record as written, without budget and generatedBudget for a caller who may not read the BOQ.`,
+    description: `A record made here is written with its activity's approved BOQ allocation as its budget when none is given. ${COST_RECORD_BUDGETS} ${COST_RECORD_FORECAST_DEFAULT_NOTE} The answer is the record as written, without budget and generatedBudget for a caller who may not read the BOQ.`,
     operationId: "upsertActivityCostRecord",
     parameters: [...projectParams, activityIdParam],
     permissions: modulePermission("cost", "create", "activity_cost.upsert"),
@@ -11930,7 +11935,7 @@ const COST_RECORD_BUDGETS =
     method: "patch",
     path: "/projects/{projectId}/cost/{id}",
     summary: "Update an activity cost record.",
-    description: `${COST_RECORD_BUDGETS} The answer is the record as written, without budget and generatedBudget for a caller who may not read the BOQ.`,
+    description: `${COST_RECORD_BUDGETS} ${COST_RECORD_FORECAST_DEFAULT_NOTE} The answer is the record as written, without budget and generatedBudget for a caller who may not read the BOQ.`,
     operationId: "updateCostRecord",
     parameters: projectRecordParams,
     permissions: modulePermission("cost", "update", "activity_cost.update"),

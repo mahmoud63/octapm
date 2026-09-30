@@ -297,8 +297,8 @@ liveDescribe("PC-7a: the Original Budget cannot be rewritten once changes, posti
     expect(cost.truth.budget).toMatchObject({ truth: "derived", label: "Budget" });
     expect(cost.truth.budget.otherBudgets.map((row) => row.label)).toEqual(["Budget at completion (EV basis)", "Contract value + approved changes"]);
     expect(cost.truth.totals).toMatchObject({ budget: "derived", committed: "derived", actual: "derived", forecast: "projection:estimate_at_completion" });
-    expect(cost.truth.records.forecast).toBe("projection:typed_or_budget_plus_1.1x_actual_minus_budget");
-    expect(cost.truth.records.derivedFrom.forecast).toContain("budget + 1.1 × (actual − budget)");
+    expect(cost.truth.records.forecast).toBe("projection:typed_or_greater_of_budget_and_actual"); // PC-7a 3d
+    expect(cost.truth.records.derivedFrom.forecast).toContain("the larger of the record's budget and its actual");
     expect(cost.truth.eac.truth).toBe("projection:estimate_at_completion");
 
     // EV report, live and locked: the EAC is a projection whose rule is

@@ -355,12 +355,45 @@ const canonicalBudget = async ({ orgId, projectId }) => {
 // the default below is a projection, labelled on the cost summary
 // (truth.records.forecast: COST_RECORD_FORECAST_DEFAULT_RULE) — it is never
 // a source figure and never feeds a certified one.
+//
+// PC-7a 3d (owner, 2026-09-29): the default is the larger of budget and
+// actual — the same estimate at completion the cost summary already gives a
+// record without a forecast (estimateAtCompletion), so the stored default and
+// the summary state one rule. The former budget + 1.1 × (actual − budget)
+// was −0.1 × budget with no actual yet: the CostRecord money check refused
+// the write and every cost record created without a forecast on an allocated
+// activity answered 500.
 const resolveForecast = ({ budget, actual, payloadForecast }) => {
   if (payloadForecast !== undefined && payloadForecast !== null) {
     return Number(payloadForecast) || 0;
   }
 
-  return addMoney(budget, multiplyMoney(subtractMoney(actual, budget), 1.1));
+  return Math.max(0, toMoneyNumber(budget), toMoneyNumber(actual));
+};
+
+const COST_RECORD_MONEY_FIELDS = ['labour', 'material', 'equipment', 'subcontract', 'indirect', 'overhead', 'contingency', 'budget', 'committed', 'actual', 'forecast'];
+
+/**
+ * The figures about to be written obey the CostRecord money check (each a
+ * finite amount of 0 or more). The route validators refuse a negative figure
+ * a caller sends; this catches one the service would compute, or a caller
+ * that is not a route, as a business error naming the field — never the
+ * database's refusal, which answered 500 and quoted the Prisma call
+ * (PC-7a 3d).
+ */
+const assertCostRecordMoney = (data) => {
+  for (const field of COST_RECORD_MONEY_FIELDS) {
+    if (data[field] === undefined || data[field] === null) continue;
+    let value = Number.NaN;
+    try {
+      value = toMoneyNumber(data[field]);
+    } catch {
+      // not an amount at all — refused below like a negative one
+    }
+    if (!Number.isFinite(value) || value < 0) {
+      throw new HttpError(400, 'COST_RECORD_MONEY_INVALID', `${field} must be an amount of 0 or more`);
+    }
+  }
 };
 
 const runInTransaction = (fn) =>
@@ -490,17 +523,22 @@ const upsertCostRecord = async ({
     if (existing) {
       // A row found under the lock keeps the committed a commitment gave it
       // (Phase 21D, CX21-482) and every figure the caller did not mention.
+      assertCostRecordMoney(data);
       record = await tx.costRecord.update({ where: { id: existing.id }, data });
     } else {
       const budget = data.budget ?? approvedBudget;
+      const created = {
+        committed: 0,
+        ...data,
+        budget,
+        forecast: data.forecast ?? resolveForecast({ budget, actual: 0 }),
+      };
+      assertCostRecordMoney(created);
       record = await tx.costRecord.create({
         data: {
           projectId,
           activityId,
-          committed: 0,
-          ...data,
-          budget,
-          forecast: data.forecast ?? resolveForecast({ budget, actual: 0 }),
+          ...created,
         },
       });
     }
@@ -561,6 +599,7 @@ const updateCostRecord = async ({
     await assertCommittedIsTheCommitments({ tx, payload, existing, projectId, activityId: existing.activityId });
 
     const data = suppliedCostFields({ payload, existing });
+    assertCostRecordMoney(data);
     const record = await tx.costRecord.update({ where: { id: costRecordId }, data });
 
     await auditService.recordEvent({
