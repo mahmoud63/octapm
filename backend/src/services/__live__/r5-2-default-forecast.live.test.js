@@ -7,7 +7,10 @@
  * — 0 and "0" included — is stored as given ('entered') and never overwritten
  * by an unrelated edit, a ledger posting or a commitment recompute; a default
  * is re-derived only by a write that changes the budget; a row whose source was
- * not recorded (NULL, older than the column) is treated as entered; the server
+ * not recorded (NULL, older than the column) is treated as entered and the
+ * projected final cost counts it by the rule that predates the column (the
+ * stored figure when above 0 and not below actual, else max(budget, actual),
+ * owner decision D3 — proven on the summary's totals, not only the row); the server
  * alone sets forecastSource; every read labels the basis honestly; and the
  * earned-value EAC (revised budget ÷ CPI, D2) and the Overview's forecast at
  * completion never read a cost record's forecast.
@@ -230,7 +233,8 @@ liveDescribe("R5-2: the default cost forecast — initial only when missing, lab
     expect([again.forecast, again.forecastSource]).toEqual([3_000, "default"]);
   });
 
-  it("a legacy row whose source was not recorded (NULL) is treated as entered: a budget edit leaves it, and it is labelled as not recorded", async () => {
+  it("a legacy row whose source was not recorded (NULL) is treated as entered: a budget edit leaves it, it is labelled as not recorded, and the projected final cost counts it by the old rule (stored when > 0 and not below actual, else max(budget, actual))", async () => {
+    const before = await get(at("/cost/summary"));
     await send(at(`/cost/activity/${built.activities.legacy}`), {});
     const made = await stored("legacy");
     // As a row written before the column existed would be (LiveTest org only).
@@ -239,6 +243,37 @@ liveDescribe("R5-2: the default cost forecast — initial only when missing, lab
     expect([edited.status, edited.body?.data?.forecast, edited.body?.data?.forecastSource, edited.body?.data?.forecastBasis]).toEqual([200, 7_777, null, BASIS.notRecorded]);
     const row = await stored("legacy");
     expect([row.budget.toString(), Number(row.forecast), row.forecastSource]).toEqual(["20000", 7_777, null]);
+
+    // Owner decision D3, live: the summary counts the NULL-source row exactly
+    // as it did before the column — its stored 7,777 (above 0, not below its
+    // actual of 0), not the default rule's max(budget, actual) = 10,000. Every
+    // row written before the column is one of these, so this is the rule that
+    // keeps every existing project's figure where it is.
+    const phaseOf = (summary) => summary.byPhase.reduce((sum, entry) => sum + entry.forecast, 0);
+    const movedBy = (summary) => ({ forecast: summary.totals.forecast - before.totals.forecast, byPhase: phaseOf(summary) - phaseOf(before), mostLikely: summary.eac.mostLikely - before.eac.mostLikely });
+    const withStored = await get(at("/cost/summary"));
+    expect(movedBy(withStored)).toEqual({ forecast: 7_777, byPhase: 7_777, mostLikely: 7_777 });
+    expect(withStored.forecastSources.notRecorded).toBe(before.forecastSources.notRecorded + 1);
+    const summarised = withStored.records.find((record) => record.activityId === built.activities.legacy);
+    // The summary's budget is the activity's approved allocation, not the row's own 20,000.
+    expect([summarised.budget, summarised.forecast, summarised.forecastSource, summarised.forecastBasis]).toEqual([ALLOCATED, 7_777, null, BASIS.notRecorded]);
+
+    // Stored 0 with no source: max(budget, actual) — the allocation — as it always was.
+    await prisma.costRecord.update({ where: { id: made.id }, data: { forecast: 0, forecastSource: null } });
+    expect(movedBy(await get(at("/cost/summary"))).forecast).toBe(ALLOCATED);
+
+    // Stored below what the record has cost: max(budget, actual) again, not the stored figure.
+    await issue("legacy", 60); // AC 600
+    await prisma.costRecord.update({ where: { id: made.id }, data: { forecast: 500, forecastSource: null } });
+    const spentRow = await stored("legacy");
+    expect([Number(spentRow.actual), ...Object.values(figures(spentRow))]).toEqual([600, 500, null]);
+    const belowActual = await get(at("/cost/summary"));
+    expect({ forecast: belowActual.totals.forecast - before.totals.forecast, actual: belowActual.totals.actual - before.totals.actual }).toEqual({ forecast: ALLOCATED, actual: 600 });
+
+    // Back to the stored 7,777 (above its actual of 600): counted as stored. The later reads rely on it.
+    await prisma.costRecord.update({ where: { id: made.id }, data: { forecast: 7_777, forecastSource: null } });
+    expect(movedBy(await get(at("/cost/summary"))).forecast).toBe(7_777);
+    expect(figures(await stored("legacy"))).toEqual({ forecast: 7_777, forecastSource: null });
   });
 
   it("every read labels the basis: the register, the summary's mix (not the default rule for every record) and the activity detail", async () => {

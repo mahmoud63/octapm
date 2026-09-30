@@ -341,6 +341,7 @@ sha256-identical):
 | the creators' default: ledger first posting, commitment-created record, post-import seed (`POST /import/seed-linked-modules`) — marked `default`, from the approved allocation | the same suite |
 | schedule activation marks its records `default` | `pc-4-merge-gate-r5.live.test.js` (XER import → approve → activate) |
 | the projected final cost counts an entered 0 as 0 | the same r5-2 suite (`/cost/summary` totals, phases, scenarios) |
+| the projected final cost counts a NULL-source row by the pre-R5-2 rule (stored when above 0 and not below actual, otherwise `max(budget, actual)`) — the rule that keeps every existing project's figure where it is | the same suite: `/cost/summary` totals, phases and scenarios move by the stored 7,777; by the allocation for a stored 0; by the allocation for a stored 500 under an actual of 600 |
 | `GET /forecast` does not report a default as the cost forecast | the same suite |
 | no default forecast, and no order of it, for a member without BOQ read: register rows, `sortBy=forecast` (both directions, pages), report preview (cell, sort, filter, aggregate, group) and xlsx export | the same suite |
 | `null` money fields write nothing; an array is refused | the same suite |
