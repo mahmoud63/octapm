@@ -154,7 +154,17 @@ export interface ProjectForecast {
   } | null
   summary: { scheduleLevel: ForecastLevel; costLevel: ForecastLevel } | null
   dataQuality: string[]
+  // The same notes, in the same order, with a stable kind (PC-7a);
+  // dataQualityItems[i].message === dataQuality[i]. Optional for an older API.
+  dataQualityItems?: ForecastDataQualityItem[]
   activities: ForecastActivity[]
+}
+
+export type ForecastDataQualityItem = {
+  kind: string
+  severity: 'info' | 'warning'
+  subject: string
+  message: string
 }
 
 // The basis and its words are shared with the EV tab (lib/eac-basis).
