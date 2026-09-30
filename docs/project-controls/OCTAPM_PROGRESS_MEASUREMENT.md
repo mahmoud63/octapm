@@ -59,14 +59,26 @@ Foreign-key behaviour as built (each proven on a throwaway database by
 
 Constraints: Σ approved quantity per (item, activity) ≤ allocation quantity, else an **overrun exception** (change doc §1) — a warning, not a block, because over-installation is real information; certification remains capped separately (`ipc.service.js:183-237`). Unit is the item's `unitCode`; an entry in another unit is refused unless a UoM conversion exists in the org master.
 
+**Corrections are never negative entries.** `quantity >= 0` is a CHECK constraint on both tables
+(`QuantityProgressEntry_quantity_nonnegative`, `DailyLogQuantity_quantity_nonnegative`): a correction is a
+rejection plus a new entry. Installed is Σ approved entries, so a negative row would let an "approval" lower an
+official figure with no rejection trail; the rejection path (`rejectedBy/At/Reason`) is the only way an entered
+quantity stops counting. The `status` and `source` vocabularies above are CHECKs too
+(`QuantityProgressEntry_status_check`, `QuantityProgressEntry_source_check`), as `ProgressSubmission` and
+`ActivityBoqAllocation` carry theirs; `DailyLogQuantity.status` is deliberately unconstrained, like its six
+siblings (`daily-log.service` drives it).
+
 ## 4. Daily-report contribution (§81) [D]
 
 `DailyLog` gains a section table `DailyLogQuantity` (same columns, status semantics, `partyId` column, composite tenant key and indexes as the six `DailyLog*` sections — the ENT-3 versions of them already carry `dailyLog / org / project` relations — and **with** relations to what it names): `dailyLogId, projectId, orgId, partyId?, activityId, boqItemId, allocationId?, locationId?, quantity Decimal(18,3), unitCode, notes, status, createdBy, submittedAt, reviewedBy/At, rejectionReason, clientRequestId, sortOrder`. As built, the row carries `allocationId?` too (the approved allocation the site picked the item from, a hint that SET NULLs if the mapping row goes) and names its text column `notes` like its six siblings, so the section registry's generic handling applies. Its `status` is the section row's own review state, never progress. ON DELETE: `dailyLog / org / project` CASCADE like the siblings; `activityId / boqItemId` RESTRICT (a signed site record on the log's PDF is not emptied by a hard delete); `allocationId / locationId` SET NULL. Submitting the daily log creates matching `QuantityProgressEntry` rows with `source='daily_log'`, `status='submitted'`, linked by `dailyLogQuantityId`; editing the daily log before approval updates them; approval is done on the Progress screen (or in bulk from the daily log by an approver). The legacy `DailyReport → ProgressSubmission(pct)` path stays for `percent`-method activities.
 
-**PC-6 migration note.** `backend/prisma/migrations/20261005050000_quantity_progress/migration.sql` is exactly the
-`prisma migrate diff` from the schema at `07c64c1` to the PC-6 schema: two `CREATE TABLE` (`QuantityProgressEntry`,
-`DailyLogQuantity`), fifteen `CREATE INDEX` (two of them unique, the `(projectId, clientRequestId)` replay keys) and
-sixteen `ADD CONSTRAINT` foreign keys — 33 statements, all on the two new tables. It adds no column, index,
+**PC-6 migration note.** `backend/prisma/migrations/20261005050000_quantity_progress/migration.sql` is the
+`prisma migrate diff` from the schema at `07c64c1` to the PC-6 schema, kept byte-identical: two `CREATE TABLE`
+(`QuantityProgressEntry`, `DailyLogQuantity`), fifteen `CREATE INDEX` (two of them unique, the
+`(projectId, clientRequestId)` replay keys) and sixteen `ADD CONSTRAINT` foreign keys — 33 statements — followed,
+under a marked comment, by four hand-written `ADD CONSTRAINT … CHECK` statements (§3: the two `quantity >= 0`, the
+`status` and `source` vocabularies; Prisma's datamodel cannot express them, exactly as migrations `20260608170000`
+and `20260609170000` wrote their kin) — 37 statements, all on the two new tables. It adds no column, index,
 constraint, enum or default to any existing table: nothing "installed" lands on `BoqItem`, `Activity`,
 `ActivityBoqAllocation`, `ActivityProgress`, `ProgressSubmission`, `IpcItem` or `StockTransaction`, so the five
 quantities stay separate and EV's inputs are untouched. The orchestrator applies it through
@@ -75,8 +87,9 @@ quantities stay separate and EV's inputs are untouched. The orchestrator applies
 `ActivityBoqAllocation` (planned quantity's source) — `node scripts/db/verify-additive-migration.js --migration
 20261005050000_quantity_progress --table DailyLog --table DailyLogNote --table ProgressSubmission --table
 ActivityProgress --table ActivityBoqAllocation --rows 3` gave exit 0 and `0 difference(s)` on a throwaway database,
-and `node scripts/db/prove-quantity-progress-constraints.js` proved the tenant key, the replay key and every ON
-DELETE above (45 checks). After the migration is applied and the Prisma client regenerated:
+and `node scripts/db/prove-quantity-progress-constraints.js` proved the tenant key, the replay key, the four CHECKs
+(a negative quantity, a bad status and a bad source refused with 23514; every listed value admitted; exactly these
+four declared) and every ON DELETE above (55 checks; dropping one CHECK from the SQL fails it). After the migration is applied and the Prisma client regenerated:
 `scripts/enterprise/validate-composite-fks.js` covers both tables (it reads project + org tables from the database
 and lists the two in its org-side set; until then it reports them as pending) and the
 `tenant-constraint-teeth.live.test.js` PC-6 case runs its raw-SQL assertions (until then it reports itself as not yet

@@ -24,8 +24,10 @@
 -- Additive only: no existing column, index, constraint, enum or default is
 -- touched, so no existing row or figure can change. Reversible by dropping
 -- the two tables. Generated with `prisma migrate diff` from the schema at
--- 07c64c1 to this one and kept verbatim below; proven on a throwaway
--- database by scripts/db/verify-additive-migration.js and
+-- 07c64c1 to this one and kept verbatim below (33 statements), followed by
+-- four hand-written CHECK constraints under the marked line at the end
+-- (Prisma's datamodel cannot express them); proven on a throwaway database
+-- by scripts/db/verify-additive-migration.js and
 -- scripts/db/prove-quantity-progress-constraints.js.
 
 -- CreateTable
@@ -180,3 +182,33 @@ ALTER TABLE "DailyLogQuantity" ADD CONSTRAINT "DailyLogQuantity_allocationId_fke
 -- AddForeignKey
 ALTER TABLE "DailyLogQuantity" ADD CONSTRAINT "DailyLogQuantity_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- HAND-WRITTEN below this line (not part of the `prisma migrate diff` output
+-- above, which is kept byte-identical). CHECK constraints in the style of the
+-- two tables' closest kin — ProgressSubmission_status_check (20260609170000)
+-- and ActivityBoqAllocation_quantity_nonnegative / _status_check /
+-- _source_check (20260608170000) — so a bad row is refused by PostgreSQL, not
+-- only by code. Still additive: they bind the two new tables only.
+--
+--   quantity >= 0 on both tables: a correction is a rejection plus a new
+--     entry, never a negative entry. Installed is Σ approved entries, so a
+--     negative row would let an "approval" silently lower an official figure
+--     with no rejection trail; the rejection path (rejectedBy/At/Reason) is
+--     the only way an entered quantity stops counting.
+--   status / source on QuantityProgressEntry: the vocabularies §3 declares.
+--   DailyLogQuantity.status is deliberately NOT constrained: none of its six
+--     sibling section tables constrain theirs, and daily-log.service drives it.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- AddCheckConstraint
+ALTER TABLE "QuantityProgressEntry" ADD CONSTRAINT "QuantityProgressEntry_quantity_nonnegative" CHECK ("quantity" >= 0);
+
+-- AddCheckConstraint
+ALTER TABLE "QuantityProgressEntry" ADD CONSTRAINT "QuantityProgressEntry_status_check" CHECK ("status" IN ('draft', 'submitted', 'approved', 'rejected'));
+
+-- AddCheckConstraint
+ALTER TABLE "QuantityProgressEntry" ADD CONSTRAINT "QuantityProgressEntry_source_check" CHECK ("source" IN ('submission', 'daily_log', 'manual', 'import'));
+
+-- AddCheckConstraint
+ALTER TABLE "DailyLogQuantity" ADD CONSTRAINT "DailyLogQuantity_quantity_nonnegative" CHECK ("quantity" >= 0);

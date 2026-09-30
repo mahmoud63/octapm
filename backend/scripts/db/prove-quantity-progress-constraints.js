@@ -16,10 +16,16 @@
  *      not its project's, and the same row with the project's organisation goes in;
  *   2. @@unique(projectId, clientRequestId) refuses a replayed clientRequestId in the same project and
  *      admits the same id in another project (and any number of NULL ids);
- *   3. the chosen ON DELETE behaviours, declared (pg_constraint.confdeltype) and, where a parent can be
+ *   3. the hand-written CHECK constraints (the tail of the migration, after the migrate-diff body):
+ *      a negative quantity is refused on both tables (23514) while 0 and a positive quantity go in — a
+ *      correction is a rejection plus a new entry, never a negative entry; on QuantityProgressEntry a
+ *      status outside draft | submitted | approved | rejected and a source outside submission |
+ *      daily_log | manual | import are refused while every listed value goes in; and exactly these
+ *      four CHECKs are declared (DailyLogQuantity.status deliberately carries none, like its siblings);
+ *   4. the chosen ON DELETE behaviours, declared (pg_constraint.confdeltype) and, where a parent can be
  *      deleted in a throwaway, exercised (RESTRICT raises 23001, NO ACTION 23503): allocation / location / submission SET NULL, daily log
  *      CASCADE on the section row and SET NULL on the entry, activity and BOQ item RESTRICT;
- *   4. nothing "installed" was added to BoqItem, Activity, ActivityBoqAllocation, ActivityProgress,
+ *   5. nothing "installed" was added to BoqItem, Activity, ActivityBoqAllocation, ActivityProgress,
  *      ProgressSubmission, IpcItem or StockTransaction — the migration adds two tables and no column.
  * Exit 2 = an assertion failed; 1 = an error.
  */
@@ -167,7 +173,41 @@ const refused = async (promise, constraint) => {
       check(!nullA.refused && !nullB.refused, `${table}: rows without a clientRequestId do not collide`);
     }
 
-    // ── 3. ON DELETE, declared ───────────────────────────────────────────────
+    // ── 3. CHECK constraints (the hand-written tail of the migration) ───────
+    // A correction is a rejection plus a new entry, never a negative entry: installed is Σ approved
+    // entries, so a negative row would lower an official figure with no rejection trail.
+    for (const [table, make] of [["QuantityProgressEntry", entry], ["DailyLogQuantity", section]]) {
+      const negative = await refused(insert(table, make({ quantity: "-0.001" })));
+      check(negative.refused && negative.code === "23514" && negative.constraint === `${table}_quantity_nonnegative`, `${table}: a negative quantity is refused by ${negative.constraint || "(nothing)"}`);
+      const zero = await refused(insert(table, make({ quantity: "0.000" })));
+      const positive = await refused(insert(table, make({ quantity: "12.500" })));
+      check(!zero.refused && !positive.refused, `${table}: quantity 0 and a positive quantity go in${zero.refused ? ` — ${zero.message}` : ""}${positive.refused ? ` — ${positive.message}` : ""}`);
+    }
+    const vocab = {
+      status: { allowed: ["draft", "submitted", "approved", "rejected"], bad: "pending" },
+      source: { allowed: ["submission", "daily_log", "manual", "import"], bad: "mobile" },
+    };
+    for (const [column, { allowed, bad }] of Object.entries(vocab)) {
+      const refusedBad = await refused(insert("QuantityProgressEntry", entry({ [column]: bad })));
+      check(refusedBad.refused && refusedBad.code === "23514" && refusedBad.constraint === `QuantityProgressEntry_${column}_check`, `QuantityProgressEntry: ${column} '${bad}' is refused by ${refusedBad.constraint || "(nothing)"}`);
+      const admitted = [];
+      for (const value of allowed) {
+        const r = await refused(insert("QuantityProgressEntry", entry({ [column]: value })));
+        if (!r.refused) admitted.push(value);
+      }
+      check(admitted.length === allowed.length, `QuantityProgressEntry: every ${column} in {${allowed.join(", ")}} goes in (${admitted.length}/${allowed.length})`);
+    }
+    // DailyLogQuantity.status is deliberately unconstrained (none of its six siblings constrain theirs;
+    // daily-log.service drives it), so the declared set is exactly these four and no more.
+    const declaredChecks = {};
+    for (const table of ["QuantityProgressEntry", "DailyLogQuantity"]) {
+      declaredChecks[table] = (await db.query(
+        `select c.conname from pg_constraint c where c.contype = 'c' and c.conrelid = format('%I', $1::text)::regclass order by c.conname`, [table])).rows.map((r) => r.conname);
+    }
+    check(JSON.stringify(declaredChecks.QuantityProgressEntry) === JSON.stringify(["QuantityProgressEntry_quantity_nonnegative", "QuantityProgressEntry_source_check", "QuantityProgressEntry_status_check"]), `QuantityProgressEntry declares exactly its three CHECKs (${declaredChecks.QuantityProgressEntry.join(", ") || "none"})`);
+    check(JSON.stringify(declaredChecks.DailyLogQuantity) === JSON.stringify(["DailyLogQuantity_quantity_nonnegative"]), `DailyLogQuantity declares exactly quantity_nonnegative and no status CHECK (${declaredChecks.DailyLogQuantity.join(", ") || "none"})`);
+
+    // ── 4. ON DELETE, declared ───────────────────────────────────────────────
     const expected = {
       QuantityProgressEntry: { orgId: "c", "projectId,orgId": "c", activityId: "r", boqItemId: "r", allocationId: "n", locationId: "n", submissionId: "n", dailyLogId: "n", dailyLogQuantityId: "n" },
       DailyLogQuantity: { dailyLogId: "c", orgId: "c", "projectId,orgId": "c", activityId: "r", boqItemId: "r", allocationId: "n", locationId: "n" },
@@ -185,7 +225,7 @@ const refused = async (promise, constraint) => {
       check(declared.length === Object.keys(keys).length, `${table}: exactly ${Object.keys(keys).length} foreign keys declared (${declared.length})`);
     }
 
-    // ── 3. ON DELETE, exercised ──────────────────────────────────────────────
+    // ── 4. ON DELETE, exercised ──────────────────────────────────────────────
     const sectionRow = await insert("DailyLogQuantity", section({ allocationId: allocation.id, locationId: location.id, clientRequestId: `dl-${crypto.randomUUID().slice(0, 8)}` }));
     const linked = await insert("QuantityProgressEntry", entry({
       allocationId: allocation.id, locationId: location.id, submissionId: submission.id, dailyLogId: dailyLog.id, dailyLogQuantityId: sectionRow.id,
@@ -217,7 +257,7 @@ const refused = async (promise, constraint) => {
     check(sectionsLeft === 0, "deleting the daily log cascades to its quantity section rows");
     check(now && now.dailyLogId === null && now.dailyLogQuantityId === null && now.status === "approved" && now.source === "daily_log", "…and only nulls the approved entry's dailyLogId / dailyLogQuantityId (source + date keep the provenance)");
 
-    // ── 4. no column on the five-truth tables ────────────────────────────────
+    // ── 5. no column on the five-truth tables ────────────────────────────────
     const sql = fs.readFileSync(path.join(migrationsDir, MIGRATION, "migration.sql"), "utf8");
     const statements = sql.split("\n").filter((l) => /^(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE)\b/i.test(l));
     const foreign = statements.filter((l) => !/^(CREATE TABLE "(QuantityProgressEntry|DailyLogQuantity)"|CREATE (UNIQUE )?INDEX "\w+" ON "(QuantityProgressEntry|DailyLogQuantity)"|ALTER TABLE "(QuantityProgressEntry|DailyLogQuantity)" ADD CONSTRAINT)/.test(l));
