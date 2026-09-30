@@ -140,6 +140,20 @@ export function IpcWorkbook({
     0,
     totals.totalRet - totals.retentionReleased
   )
+  // Retention, net payable and balance of a period not yet certified, where
+  // the server withheld them with the contract value (the cap is a rate of
+  // it): shown as "—" with the server's reason, never a zero.
+  const figure = (key: 'totalRet' | 'netPayable' | 'balanceDue') => {
+    const withheld = detail?.valueWithheld?.keys.includes(key) ? detail.valueWithheld : null
+    return withheld ? (
+      <span className='inline-flex flex-col' data-testid='ipc-total-withheld'>
+        <span>—</span>
+        <span className='text-[11px] font-normal text-muted-foreground'>{withheld.reason}</span>
+      </span>
+    ) : (
+      fmtUSD(totals[key])
+    )
+  }
   const certificationReview = detail?.certificationReview
   const requiresOverride = Boolean(certificationReview?.requiresPmOverride)
   const hasReviewWarning = Boolean(
@@ -625,13 +639,13 @@ export function IpcWorkbook({
         <div className='rounded-lg border p-3'>
           <p className='text-xs text-muted-foreground'>Retention Held</p>
           <p className='text-xl font-bold text-amber-600'>
-            {fmtUSD(totals.totalRet)}
+            {figure('totalRet')}
           </p>
         </div>
         <div className='rounded-lg border p-3'>
           <p className='text-xs text-muted-foreground'>Net Payable</p>
           <p className='text-xl font-bold text-green-600'>
-            {fmtUSD(totals.netPayable)}
+            {figure('netPayable')}
           </p>
         </div>
         <div className='rounded-lg border p-3'>
@@ -647,7 +661,7 @@ export function IpcWorkbook({
         <div className='rounded-lg border p-3'>
           <p className='text-xs text-muted-foreground'>Balance Due</p>
           <p className='text-xl font-bold text-rose-600'>
-            {fmtUSD(totals.balanceDue)}
+            {figure('balanceDue')}
           </p>
         </div>
       </div>
@@ -834,10 +848,10 @@ export function IpcWorkbook({
                 <td className='p-2' />
                 <td className='p-2' />
                 <td className='p-2 text-right text-xs font-semibold'>
-                  {fmtUSD(totals.totalRet)}
+                  {figure('totalRet')}
                 </td>
                 <td className='p-2 text-right text-xs font-semibold'>
-                  {fmtUSD(totals.netPayable)}
+                  {figure('netPayable')}
                 </td>
               </tr>
             </tfoot>

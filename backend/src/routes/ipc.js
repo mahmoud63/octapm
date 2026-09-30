@@ -7,15 +7,28 @@ const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const { moneyBody } = require("../utils/money");
 const ipcService = require("../services/ipc.service");
+const primeContractService = require("../services/prime-contract.service");
 const { boqFigureAccess, withheldError, withheldIpcCertificate, withheldIpcItem } = require("../utils/boq-figures");
 
 // A certificate's lines are the BOQ's rows and their allocations: a member
 // who may not read the BOQ is given every certificate without them, and the
-// answer to editing a line without the line (utils/boq-figures).
-const withheldCertificateIn = (result, req) => {
+// answer to editing a line without the line (utils/boq-figures). While the
+// contract's value is withheld from that member and a retention cap is set,
+// a certificate not yet certified is also given without its cap-limited
+// totals, which restate the value: the contract's terms decide it, read once
+// per request and only for such a member.
+const certificateView = async (req) => {
   const access = boqFigureAccess(req);
-  if (access.boq || !result || typeof result !== "object" || !result.certificate) return result;
-  return { ...result, certificate: withheldIpcCertificate(result.certificate, access) };
+  const contractTerms = access.boq
+    ? null
+    : await primeContractService.contractValueTerms({ orgId: req.user.orgId, projectId: req.params.projectId });
+  return (certificate) => withheldIpcCertificate(certificate, access, { contractTerms });
+};
+
+const withheldCertificateIn = async (result, req) => {
+  if (boqFigureAccess(req).boq || !result || typeof result !== "object" || !result.certificate) return result;
+  const view = await certificateView(req);
+  return { ...result, certificate: view(result.certificate) };
 };
 
 const router = express.Router({ mergeParams: true });
@@ -29,8 +42,8 @@ router.get(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
     });
-    const access = boqFigureAccess(req);
-    return sendSuccess(res, result.map((row) => withheldIpcCertificate(row, access)));
+    const view = await certificateView(req);
+    return sendSuccess(res, result.map(view));
   }),
 );
 
@@ -48,7 +61,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
     });
-    return sendSuccess(res, withheldIpcCertificate(result, boqFigureAccess(req)), 201);
+    return sendSuccess(res, (await certificateView(req))(result), 201);
   }),
 );
 
@@ -62,7 +75,7 @@ router.get(
       projectId: req.params.projectId,
       period: req.params.period,
     });
-    return sendSuccess(res, withheldIpcCertificate(result, boqFigureAccess(req)));
+    return sendSuccess(res, (await certificateView(req))(result));
   }),
 );
 
@@ -125,7 +138,7 @@ router.patch(
       payload: req.body,
       userId: req.user.id,
     });
-    return sendSuccess(res, withheldIpcCertificate(result, boqFigureAccess(req)));
+    return sendSuccess(res, (await certificateView(req))(result));
   }),
 );
 
@@ -143,7 +156,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
     });
-    return sendSuccess(res, withheldIpcCertificate(result, boqFigureAccess(req)));
+    return sendSuccess(res, (await certificateView(req))(result));
   }),
 );
 
@@ -176,7 +189,7 @@ router.post(
       comment: req.body?.comment || null,
       overrideReason: req.body?.overrideReason || null,
     });
-    return sendSuccess(res, withheldIpcCertificate(result, boqFigureAccess(req)));
+    return sendSuccess(res, (await certificateView(req))(result));
   }),
 );
 
@@ -240,7 +253,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
     });
-    return sendSuccess(res, withheldCertificateIn(result, req), 201);
+    return sendSuccess(res, await withheldCertificateIn(result, req), 201);
   }),
 );
 
@@ -272,7 +285,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
     });
-    return sendSuccess(res, withheldCertificateIn(result, req), 201);
+    return sendSuccess(res, await withheldCertificateIn(result, req), 201);
   }),
 );
 

@@ -488,6 +488,23 @@ const contractValueSource = async ({ orgId, projectId }) => {
   return contract ? valueSourceOf(contract) : null;
 };
 
+/**
+ * The contract terms a reader of the payment certificates needs to know
+ * whether their cap-limited totals restate a withheld contract value
+ * (utils/boq-figures retentionCapWithheld): where the original value came
+ * from and the retention cap rate. Null when the project has no contract row
+ * — its certificates were worked without a cap. Never creates the row.
+ */
+const contractValueTerms = async ({ orgId, projectId }) => {
+  const contract = await prisma.primeContract.findFirst({
+    where: { projectId, project: { orgId } },
+    select: { originalValueSource: true, retentionCapRate: true },
+  });
+  return contract
+    ? { originalValueSource: valueSourceOf(contract), retentionCapRate: contract.retentionCapRate }
+    : null;
+};
+
 // ─── the advance ───────────────────────────────────────────────────────────
 
 const advanceOutstanding = (contract) =>
@@ -954,6 +971,7 @@ module.exports = {
   buildStatement,
   certificateFinancials,
   contractValueSource,
+  contractValueTerms,
   ensureContract,
   listAdvances,
   receivables,

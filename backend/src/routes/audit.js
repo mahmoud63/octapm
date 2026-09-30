@@ -52,13 +52,21 @@ router.get(
       order: req.query.order || 'asc',
     });
     const access = boqFigureAccess(req);
-    const contractValueSource = access.boq
+    // The contract's source (for its contract.manage events) and its retention
+    // cap rate (for the certificates' cap-limited totals): utils/boq-figures.
+    const contractTerms = access.boq
       ? null
-      : await primeContractService.contractValueSource({
+      : await primeContractService.contractValueTerms({
           orgId: req.user.orgId,
           projectId: req.params.projectId,
         });
-    return sendSuccess(res, withheldAuditHistory(result, access, { contractValueSource }));
+    return sendSuccess(
+      res,
+      withheldAuditHistory(result, access, {
+        contractValueSource: contractTerms ? contractTerms.originalValueSource : null,
+        contractTerms,
+      }),
+    );
   }),
 );
 

@@ -215,6 +215,12 @@ export interface IpcCertificate {
   certificationOverrideAt?: string | null
   createdAt: string
   updatedAt: string
+  /**
+   * On a certificate not yet certified, while the contract value is withheld
+   * from this member and a retention cap is set: the cap-limited totals
+   * (retention, net payable, tax, balance) are absent and this says why.
+   */
+  valueWithheld?: { keys: string[]; source: string; reason: string }
 }
 
 export interface IpcCertificationReview {
