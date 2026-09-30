@@ -518,6 +518,13 @@ const BOQ_KEYS = [
   // ... and the BOQ row that created an activity (GET /schedule carried it
   // off the activity's row): a per-activity link to the bill.
   'mintedByBoqItemId',
+  // ... and the controls detail drawer's own section (owner decision E1):
+  // the activity's mapped quantity, its allocation EV and its allocation
+  // rows — so the sweep, not only the exact shape asserted on the drawer's
+  // answer, refuses a figure left beside the withheld dash on any answer.
+  'mappedQuantity',
+  'earnedValue',
+  'allocations',
 ]
 // The budgets built from the bill, and the forecast's money built from them:
 // withheld from the member who reads neither the BOQ nor the cost module.
