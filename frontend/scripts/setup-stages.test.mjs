@@ -150,6 +150,23 @@ assert.equal(worstStatus([]), 'complete')
   assert.equal(stages[currentStageIndex(stages)].key, 'mapping')
 }
 
+// An advisory step that is merely not started never becomes the current
+// stage: a hand-entered bill has no revision, so boq_approval stays 'pending'
+// with no warning, and the flow moves on to the first gated unfinished step.
+{
+  const steps = fullSteps().map((entry) => {
+    if (entry.key === 'boq_upload') return { ...entry, status: 'complete' }
+    if (entry.key === 'boq_approval') return { ...entry, status: 'pending', requiredFor: [], warnings: [] }
+    if (entry.key === 'schedule_generation') {
+      return { ...entry, status: 'pending', requiredFor: ['baseline', 'progress', 'reporting'] }
+    }
+    return entry
+  })
+  const stages = buildSetupStages(readinessOf(steps))
+  assert.equal(stages.find((stage) => stage.key === 'boq').status, 'pending')
+  assert.equal(stages[currentStageIndex(stages)].key, 'schedule')
+}
+
 // Gate ready but not locked: Continue past the baseline is a warning (the
 // progress gate is warn mode) — never stricter than the engine.
 {
