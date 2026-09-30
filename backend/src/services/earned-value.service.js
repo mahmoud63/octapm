@@ -126,7 +126,12 @@ const resolveCutoff = (value, zone) => {
  * The bound a CALENDAR-DATE field is selected against (D1 date-only rule,
  * 2026-09-27). plannedDate (cost loadings), actualThroughDate (cost records,
  * fed by the ledger's incurredOn) and incurredOn are dates, not instants: a
- * date input stores them at 00:00 UTC of the date. Such a row counts toward
+ * date input stores them at 00:00 UTC of the date, and a TIMED cost (a
+ * material issue's occurredAt, a pay application approved without a period
+ * end) is stored by the ledger's writer as the date that instant falls on in
+ * the project's reporting zone (cost-ledger economicDateOf, PC-7a 3c) — so a
+ * 23:30 local issue carries the same date as a 23:30 local progress approval
+ * and both count toward that date's cutoff. Such a row counts toward
  * a period when its calendar date — the UTC calendar date of the stored
  * value — is on or before the period's cutoff date, and a row dated the day
  * after never counts, in any zone. Compared as instants against the end of

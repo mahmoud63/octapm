@@ -318,6 +318,9 @@ router.post(
     body("boqItemId").optional({ nullable: true }).isUUID(),
     body("locationRefId").optional({ nullable: true }).isUUID(),
     body("commitmentId").optional({ nullable: true }).isUUID(),
+    // When the stock left (a device syncing later sends it); defaults to now.
+    // The cost is dated on the project's reporting day of this instant.
+    body("occurredAt").optional({ nullable: true }).isISO8601(),
     validate,
   ],
   asyncHandler(async (req, res) =>

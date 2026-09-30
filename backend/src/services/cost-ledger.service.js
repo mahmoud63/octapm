@@ -1,6 +1,7 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { addMoney, toMoneyNumber } = require("../utils/money");
+const { localDateOf, resolveReportingTimeZone } = require("../utils/reporting-cutoff");
 
 /**
  * The cost ledger (OCTA-FIN-LEDGER-059).
@@ -73,6 +74,34 @@ const DEFAULT_COST_TYPE = Object.freeze({
 });
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+/**
+ * The economic date a posting is stored with (PC-7a 3c, owner decision
+ * 2026-09-28).
+ *
+ * `incurredOn` is a CALENDAR DATE: official AC, the budget register and
+ * reconciliation all read it by the UTC calendar date of the stored value,
+ * which is exactly what a date input stores (00:00 UTC of the date typed).
+ * Some costs are not dated but TIMED — a material issue happens at a moment
+ * (StockTransaction.occurredAt), a pay application certified without a period
+ * end at its approval. Stored as that raw instant, 23:30 in Chicago on the
+ * 9th would land on the 10th (04:30 UTC) and fall out of the period whose PV
+ * and EV it belongs with. So the writer says which it has: `incurredOn` for a
+ * date, `incurredAt` for an instant. An instant is turned into the calendar
+ * date it falls on in the project's reporting zone — Project.timezone, else
+ * Organisation.defaultTimezone, else UTC, the same resolution PV/EV/AC use
+ * (utils/reporting-cutoff) — and stored as that date. Nothing is inferred
+ * from a stored time of day. The instant itself stays on its source record.
+ */
+const economicDateOf = ({ incurredOn, incurredAt, project }) => {
+  if (incurredAt === undefined || incurredAt === null) return new Date(incurredOn);
+  const instant = new Date(incurredAt);
+  if (Number.isNaN(instant.getTime())) {
+    throw new HttpError(400, "INVALID_DATE", "The time the cost was incurred is not a valid date-time");
+  }
+  const { timeZone } = resolveReportingTimeZone({ project, organisation: project?.org || null });
+  return new Date(`${localDateOf(instant, timeZone)}T00:00:00.000Z`);
+};
 const num = (value) => toMoneyNumber(value, 0);
 
 /**
@@ -191,6 +220,8 @@ const post = async ({
   quantity = null,
   unitCost = null,
   incurredOn,
+  // An instant instead of a date — see economicDateOf. Pass one or the other.
+  incurredAt = null,
   postedBy = null,
   note = null,
   batchId = null,
@@ -201,10 +232,16 @@ const post = async ({
   // The project must be the organisation's. Every caller scopes its own
   // records; this is the last line, so that no caller can post one tenant's
   // cost onto another's project whatever it was handed (Phase 21D, CX21-420).
+  // Read with its reporting zone, which a timed posting is dated in.
+  let owner = null;
   if (tx.project?.findFirst) {
-    const owner = await tx.project.findFirst({ where: { id: projectId, orgId }, select: { id: true } });
+    owner = await tx.project.findFirst({
+      where: { id: projectId, orgId },
+      select: { id: true, timezone: true, org: { select: { defaultTimezone: true } } },
+    });
     if (owner === null) throw new HttpError(403, "COST_LEDGER_PROJECT_FOREIGN", "That project is not this organisation's");
   }
+  const economicDate = economicDateOf({ incurredOn, incurredAt, project: owner });
   const value = round2(num(amount));
   if (!value) return { entry: null, posted: false, reason: "zero" };
 
@@ -261,7 +298,7 @@ const post = async ({
         amount: value,
         quantity,
         unitCost,
-        incurredOn: new Date(incurredOn),
+        incurredOn: economicDate,
         postedBy,
         note,
         batchId,

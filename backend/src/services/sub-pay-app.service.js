@@ -671,7 +671,12 @@ const overClaimError = (row) => {
  * reversal and none of the corrected cost.
  */
 const postCertifiedCost = async ({ tx, orgId, projectId, payApp, actor }) => {
-  const incurredOn = payApp.periodEnd || payApp.approvedAt || new Date();
+  // The period end is a date typed in (a calendar date, kept as entered);
+  // without one the cost is incurred at the approval, an instant the ledger
+  // dates in the project's reporting zone (PC-7a 3c).
+  const economicDate = payApp.periodEnd
+    ? { incurredOn: payApp.periodEnd }
+    : { incurredAt: payApp.approvedAt || new Date() };
   const revision = Number(payApp.certificationRevision) || 0;
   let posted = 0;
   let amount = 0;
@@ -692,7 +697,7 @@ const postCertifiedCost = async ({ tx, orgId, projectId, payApp, actor }) => {
       costCodeId: line.sovLine?.costCodeId || null,
       budgetLineId: line.sovLine?.budgetLineId || null,
       commitmentId: payApp.commitmentId,
-      incurredOn,
+      ...economicDate,
       postedBy: actor?.id || null,
       note: `${payApp.ref} ${payApp.periodLabel}${revision ? ` (revision ${revision})` : ""}`,
     });

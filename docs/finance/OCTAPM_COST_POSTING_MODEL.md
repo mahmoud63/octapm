@@ -113,6 +113,33 @@ Official earned-value AC keeps its existing rule, unchanged:
 AC = Σ latest CostRecord.actual by activity where actualThroughDate ≤ cutoffDate
 ```
 
+#### 1.5.1 Clarification — the date a timed cost is incurred on (PC-7a 3c, owner decision 2026-09-28)
+
+`CostLedgerEntry.incurredOn` — and from it `CostRecord.actualThroughDate` — is a
+**calendar date**: the UTC calendar date of the stored value, stored at 00:00
+UTC, and compared with a reporting period by that date (PC-4's date-only rule).
+The formula above is unchanged; what changed is how a writer arrives at the
+date.
+
+- **Date-only records** keep the date typed: a direct cost's `costDate`, a
+  timesheet's or equipment report's day, a pay application's `periodEnd`, a
+  cost record's `actualThroughDate`, a cost loading's `plannedDate`.
+- **Timed records** happen at an instant: a material issue
+  (`StockTransaction.occurredAt`) and a subcontractor pay application
+  certified without a `periodEnd` (its approval). The writer passes the
+  instant as `incurredAt` to `cost-ledger.post`, which dates it on the
+  calendar date the instant falls on in the project's reporting zone —
+  `Project.timezone`, else `Organisation.defaultTimezone`, else UTC, the same
+  resolution the EV cutoff uses (`backend/src/utils/reporting-cutoff.js`) —
+  and stores that date. The instant stays on the source record.
+
+The distinction is carried by the writer, never guessed from a stored time of
+day. So a material issue at 23:30 local on the cutoff date counts in that
+period's AC, exactly as a progress approval at 23:30 counts in its EV, and an
+issue at 00:30 local the next day counts in neither. Ledger entries written
+before this rule keep their stored value (no history is rewritten); a locked
+period's `EvPeriodSnapshot` is never recomputed.
+
 ### 1.6 Forecast to Complete / Projected Final Cost
 
 Existing rule, unchanged:
