@@ -23,6 +23,8 @@
  * - a subcontractor's person (party-scoped) gets no commitment, punch or
  *   lookahead rows from either detail, and no linked RFI or submittal its
  *   register would not list to them (party routing; RFI drafts);
+ * - a list's total counts what a member without BOQ read is refused over
+ *   every row, not over the first page (more than 50 change orders);
  * - the activity's EV is the allocation summary's, on amounts where a second
  *   formula over the total would round differently;
  * - another organisation's ids answer exactly as a random id does (404).
@@ -360,6 +362,74 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     }
     const item = await api.get(at(`/boq/items/${rows.A.id}/detail`), as(members.costNoBoq));
     expect(item.status).toBe(403);
+  });
+
+  it("beyond the first page, no total tells a member without BOQ read of a change order reached only through an allocation", async () => {
+    // Its own row, activity and approved allocation: 51 orders name W
+    // directly (the newest), 2 more reach it only through the allocation and
+    // are the oldest, so both sit beyond the 50-row page.
+    const row = await api.post(at("/boq/items"), { code: "P5.W", description: "PC5SECRET wall", quantity: 10, unit: "m2", rate: 3 }, auth());
+    expect([row.status, row.body?.error]).toEqual([201, undefined]);
+    const created = await api.post(
+      at("/activities"),
+      { engineerIds: [live.user.id], name: "Pour W", activityCode: "P5W", duration: 5, startDate: "2026-02-02", endDate: "2026-02-06" },
+      auth(),
+    );
+    expect([created.status, created.body?.error]).toEqual([201, undefined]);
+    const w = created.body.data;
+    const allocation = await api.post(at("/activity-boq-allocations"), { boqItemId: row.body.data.item.id, activityId: w.id, quantity: 10 }, auth());
+    expect([allocation.status, allocation.body?.error]).toEqual([201, undefined]);
+    for (const step of ["submit", "approve"]) {
+      const moved = await api.post(at(`/activity-boq-allocations/${allocation.body.data.id}/${step}`), {}, auth());
+      expect([step, moved.status, moved.body?.error]).toEqual([step, 200, undefined]);
+    }
+    const tag = Date.now();
+    await prisma.changeOrder.createMany({
+      data: Array.from({ length: 51 }, (_, index) => ({
+        projectId: project.id,
+        activityId: w.id,
+        ref: `CO-PC5-W${index}-${tag}`,
+        description: "LiveTest PC-5 direct order",
+        value: 1,
+        status: "pending",
+        createdAt: new Date(Date.UTC(2026, 2, 1, 0, index)),
+      })),
+    });
+    const hidden = [];
+    for (const day of [1, 2]) {
+      hidden.push(
+        await prisma.changeOrder.create({
+          data: {
+            projectId: project.id,
+            ref: `CO-PC5-WALLOC${day}-${tag}`,
+            description: "LiveTest PC-5 order through the allocation only",
+            value: 1,
+            status: "pending",
+            createdAt: new Date(Date.UTC(2026, 0, day)),
+            allocationLinks: { create: [{ projectId: project.id, allocationId: allocation.body.data.id, boqItemId: row.body.data.item.id, quantity: 1, amount: 3 }] },
+          },
+        }),
+      );
+    }
+
+    const owner = await api.get(at(`/activities/${w.id}/detail`), auth());
+    expect([owner.status, owner.body?.error]).toEqual([200, undefined]);
+    expect([owner.body.data.sections.changes.changeOrders.items.length, owner.body.data.sections.changes.changeOrders.total]).toEqual([50, 53]);
+    const approvals = await prisma.approvalWorkflowEvent.count({ where: { recordType: "activity_boq_allocation", recordId: allocation.body.data.id } });
+    expect(approvals).toBeGreaterThan(0);
+
+    const answer = await api.get(at(`/activities/${w.id}/detail`), as(members.costNoBoq));
+    expect([answer.status, answer.body?.error]).toEqual([200, undefined]);
+    const { changeOrders } = answer.body.data.sections.changes;
+    // 51 reach W directly: the page is full and the total counts them only.
+    expect([changeOrders.items.length, changeOrders.total]).toEqual([50, 51]);
+    const { history } = answer.body.data.sections;
+    expect(history.total).toBe(owner.body.data.sections.history.total - approvals - hidden.length);
+    expect(history.events.length).toBe(Math.min(50, history.total));
+    expect(history.events.some((event) => event.kind === "allocation_approval")).toBe(false);
+    for (const order of hidden) {
+      expect([order.id, answer.text.includes(order.id), answer.text.includes(order.ref)]).toEqual([order.id, false, false]);
+    }
   });
 
   it("a BOQ reader who may not read the schedule sees a linked activity's name and none of its schedule", async () => {

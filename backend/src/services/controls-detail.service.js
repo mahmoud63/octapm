@@ -30,6 +30,7 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { addMoney, toMoneyNumber } = require("../utils/money");
 const { recordWorkspacePath } = require("../utils/record-links");
+const { DETAIL_ALL_ROWS } = require("../utils/boq-figures");
 const allocationService = require("./activity-boq-allocation.service");
 const boqService = require("./boq.service");
 const activityService = require("./activity.service");
@@ -62,7 +63,9 @@ const toNumber = (value) => {
   return Number.isFinite(number) ? number : 0;
 };
 const iso = (value) => (value ? new Date(value).toISOString() : null);
-const capped = (rows, total, viewAll) => ({ items: rows.slice(0, LIST_CAP), total, viewAll });
+// Every row stays on the list under DETAIL_ALL_ROWS (never serialised), so
+// what boq-figures withholds is counted over the full set, not the page.
+const capped = (rows, total, viewAll) => ({ items: rows.slice(0, LIST_CAP), total, viewAll, [DETAIL_ALL_ROWS]: rows });
 const activityCodeOf = (activity) => activity?.activityCode || activity?.p6ActivityId || null;
 // An IPC line opens the certificate it sits on (the IPC workbook selects a
 // certificate, not a line); a line on no certificate yet opens the register.
@@ -949,6 +952,7 @@ const getActivityDetail = async ({
       note: "Activities have no audit trail of their own yet: progress-submission, allocation-approval, change-order and schedule-revision history",
       events: events.slice(0, LIST_CAP),
       total: events.length,
+      [DETAIL_ALL_ROWS]: events,
     };
   } else {
     sections.history = denied("audit");

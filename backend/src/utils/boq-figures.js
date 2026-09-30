@@ -1094,6 +1094,19 @@ const CHANGE_ORDERS_BY_ALLOCATION_WITHHELD =
 const ACTIVITY_HISTORY_BOQ_WITHHELD =
   "BOQ allocation approvals and change orders reached through them are available only to members who may read the BOQ";
 
+// A capped list on the detail views (the first 50 rows, a total, a viewAll
+// link) carries every row it was cut from under this key. What is withheld is
+// decided over every row, so neither the page nor its total says anything of
+// a withheld row beyond the first page. JSON never writes a symbol key (nor
+// does normalizeMoneyTree copy one): the full set is never sent to anyone.
+const DETAIL_ALL_ROWS = Symbol("controls-detail.allRows");
+const allRowsOf = (list, pageKey) => (Array.isArray(list[DETAIL_ALL_ROWS]) ? list[DETAIL_ALL_ROWS] : list[pageKey]);
+// The list as sent, without the full set it was cut from.
+const pageOf = (list) => {
+  const { [DETAIL_ALL_ROWS]: _allRows, ...page } = list;
+  return page;
+};
+
 const withheldBoqItemDetail = (detail, access = FULL_ACCESS) => {
   if (access.boq || !detail || typeof detail !== "object") return detail;
   return { kind: detail.kind, id: detail.id, withheld: true, reason: MAPPING_DETAILS_WITHHELD };
@@ -1111,7 +1124,7 @@ const withheldActivityDetail = (detail, access = FULL_ACCESS) => {
   const orders = sections.changes && sections.changes.changeOrders;
   if (orders && Array.isArray(orders.items)) {
     const kept = [];
-    for (const order of orders.items) {
+    for (const order of allRowsOf(orders, "items")) {
       const matchedBy = Array.isArray(order.matchedBy) ? order.matchedBy : [];
       if (matchedBy.length && matchedBy.every((how) => how === "allocation_link")) {
         droppedOrderIds.add(order.id);
@@ -1125,8 +1138,9 @@ const withheldActivityDetail = (detail, access = FULL_ACCESS) => {
     sections.changes = {
       ...sections.changes,
       changeOrders: {
-        ...orders,
-        items: kept,
+        ...pageOf(orders),
+        // The page refills from beyond the cap as the full set allows.
+        items: kept.slice(0, orders.items.length),
         total: Math.max(0, (orders.total || 0) - droppedOrderIds.size),
         boqWithheld: { reason: CHANGE_ORDERS_BY_ALLOCATION_WITHHELD },
       },
@@ -1141,13 +1155,14 @@ const withheldActivityDetail = (detail, access = FULL_ACCESS) => {
   }
 
   if (sections.history && Array.isArray(sections.history.events)) {
-    const events = sections.history.events.filter(
+    const allEvents = allRowsOf(sections.history, "events");
+    const events = allEvents.filter(
       (event) => event.kind !== "allocation_approval" && !(event.kind === "change_order_link" && droppedOrderIds.has(event.recordId)),
     );
-    const removed = sections.history.events.length - events.length;
+    const removed = allEvents.length - events.length;
     sections.history = {
-      ...sections.history,
-      events,
+      ...pageOf(sections.history),
+      events: events.slice(0, sections.history.events.length),
       total: Math.max(0, (sections.history.total || 0) - removed),
       boqWithheld: { reason: ACTIVITY_HISTORY_BOQ_WITHHELD },
     };
@@ -1203,6 +1218,7 @@ module.exports = {
   withheldWorkspaceDashboard,
   withoutBoqFigures,
   // PC-5 detail views
+  DETAIL_ALL_ROWS,
   withheldActivityDetail,
   withheldBoqItemDetail,
   CHANGE_ORDERS_BY_ALLOCATION_WITHHELD,
