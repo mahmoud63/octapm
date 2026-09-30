@@ -37,6 +37,10 @@ const mockPrisma = {
     create: jest.fn(),
     update: jest.fn(),
   },
+  // The approved allocation a created record's default forecast is worked from (R5-2).
+  activityBoqAllocation: {
+    findMany: jest.fn(async () => []),
+  },
 };
 
 jest.mock('../../config/db', () => ({ prisma: mockPrisma }));
@@ -380,7 +384,9 @@ describe('daily report service', () => {
     );
   });
 
-  it('posts approved equipment usage to activity history and cost', async () => {
+  // A submitted report with four hours of a daily-rate crane, and the
+  // activity's cost record as `costRecord` gives it (null: there is none yet).
+  const arrangeEquipmentReport = ({ costRecord } = {}) => {
     const reportDate = new Date('2026-01-03T00:00:00.000Z');
     const reviewedAt = new Date('2026-01-04T00:00:00.000Z');
     mockPrisma.dailyReport.findFirst.mockResolvedValueOnce({
@@ -442,24 +448,34 @@ describe('daily report service', () => {
         rate: 800,
       },
     ]);
-    mockPrisma.costRecord.findFirst.mockResolvedValue({
-      id: 'cost-1',
-      projectId: 'project-1',
-      activityId: 'activity-1',
-      labour: 0,
-      material: 0,
-      equipment: 100,
-      subcontract: 0,
-      indirect: 0,
-      overhead: 0,
-      contingency: 0,
-      budget: 1000,
-      committed: 0,
-      actual: 250,
-      actualThroughDate: new Date('2026-01-02T00:00:00.000Z'),
-      forecast: 1000,
-      updatedAt: reportDate,
-    });
+    mockPrisma.costRecord.findFirst.mockResolvedValue(
+      costRecord !== undefined
+        ? costRecord
+        : {
+          id: 'cost-1',
+          projectId: 'project-1',
+          activityId: 'activity-1',
+          labour: 0,
+          material: 0,
+          equipment: 100,
+          subcontract: 0,
+          indirect: 0,
+          overhead: 0,
+          contingency: 0,
+          budget: 1000,
+          committed: 0,
+          actual: 250,
+          actualThroughDate: new Date('2026-01-02T00:00:00.000Z'),
+          forecast: 1000,
+          updatedAt: reportDate,
+        },
+    );
+
+    return { reportDate, reviewedAt };
+  };
+
+  it('posts approved equipment usage to activity history and cost', async () => {
+    const { reportDate, reviewedAt } = arrangeEquipmentReport();
 
     const report = await dailyReportService.approveDailyReport({
       orgId: 'org-1',
@@ -503,6 +519,12 @@ describe('daily report service', () => {
       expect.objectContaining({ sourceType: "equipment", amount: 400, activityId: "activity-1", projectId: "project-1" }),
     );
     expect(mockPrisma.costRecord.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actual: expect.anything() }) }));
+    // R5-2: an equipment posting never writes the record's forecast or its source
+    // (it used to raise the forecast to max(forecast, budget, actual)).
+    for (const [call] of mockPrisma.costRecord.update.mock.calls) {
+      expect(Object.keys(call.data)).not.toEqual(expect.arrayContaining(["forecast"]));
+      expect(Object.keys(call.data)).not.toEqual(expect.arrayContaining(["forecastSource"]));
+    }
     expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -517,6 +539,36 @@ describe('daily report service', () => {
         }),
       }),
     );
+  });
+
+  // The same approval where the activity has no cost record yet and the
+  // ledger (mocked here) made none.
+  it("R5-2: an equipment posting that has to create the record marks its forecast 'default' — the larger of the activity's approved allocation and actual 0", async () => {
+    arrangeEquipmentReport({ costRecord: null });
+    mockPrisma.costRecord.create.mockImplementation(async ({ data }) => ({ id: 'cost-new', ...data }));
+    mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([
+      { activityId: 'activity-1', quantity: 1, amount: 2500, weight: 0 },
+    ]);
+
+    await dailyReportService.approveDailyReport({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      reportId: 'report-1',
+      userId: 'pm-1',
+      userRole: 'pm',
+    });
+
+    expect(mockPrisma.costRecord.update).not.toHaveBeenCalled();
+    expect(mockPrisma.costRecord.create).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.costRecord.create.mock.calls[0][0].data).toMatchObject({
+      projectId: 'project-1',
+      activityId: 'activity-1',
+      equipment: 400,
+      budget: 0,
+      actual: 0,
+      forecast: 2500,
+      forecastSource: 'default',
+    });
   });
 });
 

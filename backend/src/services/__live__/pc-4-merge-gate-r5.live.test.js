@@ -180,6 +180,18 @@ liveDescribe("PC-4 merge gate round 5: the schedule lifecycle names the next ste
     // Activated (and the bill mapped to it, D5), the refusal is gone and the
     // baseline locks its two activities.
     await built.post(`/schedule/revisions/${revisionId}/activate`, { mappings: [] });
+    // Owner decision R5-2: activation is the largest creator of cost records —
+    // one per activity, with no forecast supplied. Each carries the initial
+    // default, max(0, its staged budget, actual 0), and is MARKED 'default'.
+    // Unmarked, the row would read as an entered forecast: never re-derived,
+    // and sent to a member who may not read the BOQ.
+    const activated = await prisma.costRecord.findMany({ where: { projectId: built.project.id }, select: { id: true, budget: true, actual: true, forecast: true, forecastSource: true } });
+    expect(activated).toHaveLength(2);
+    for (const record of activated) {
+      expect([record.id, record.forecastSource, Number(record.forecast)]).toEqual([record.id, "default", Math.max(0, Number(record.budget), Number(record.actual))]);
+    }
+    const register = await built.get("/cost?limit=100");
+    expect(register.rows.map((row) => [row.forecastSource, row.forecastBasis.startsWith("Default forecast:")])).toEqual([["default", true], ["default", true]]);
     await built.mapBill(item);
     const after = await built.setup();
     expect(everyMessage(after)).not.toContain(REVISION_NOT_ACTIVATED_MESSAGE);

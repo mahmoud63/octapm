@@ -2,6 +2,7 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { addMoney, toMoneyNumber } = require("../utils/money");
 const { localDateOf, resolveReportingTimeZone } = require("../utils/reporting-cutoff");
+const { defaultForecastOnCreate } = require("./cost-record-default.service");
 
 /**
  * The cost ledger (OCTA-FIN-LEDGER-059).
@@ -173,6 +174,10 @@ const applyToProjections = async ({ tx, entry }) => {
       const [held] = tx.$queryRaw ? await tx.$queryRaw`SELECT "actualThroughDate" FROM "CostRecord" WHERE id = ${record.id} FOR NO KEY UPDATE` : [];
       const current = held ? held.actualThroughDate : record.actualThroughDate;
       const advance = !current || new Date(current) < incurredOn;
+      // A posting moves actual and its through-date only. It never writes the
+      // record's forecast or forecastSource (owner decision R5-2): an entered
+      // forecast stands, and a default is re-derived only by a write that
+      // changes the budget — not by actual cost arriving.
       await tx.costRecord.update({
         where: { id: record.id },
         data: {
@@ -181,12 +186,19 @@ const applyToProjections = async ({ tx, entry }) => {
         },
       });
     } else {
+      // The posting creates the record, with no forecast supplied: it gets
+      // the initial default, marked 'default' (R5-2) — the larger of the
+      // activity's approved allocation and this actual, the same input the
+      // cost API's creator uses. Worked from a budget of 0 it was just this
+      // posting's amount: "Default 500" beside a Budget of 10,000, which the
+      // projected final cost then counted as the activity's forecast.
       await tx.costRecord.create({
         data: {
           projectId: entry.projectId,
           activityId: entry.activityId,
           actual: amount,
           actualThroughDate: incurredOn,
+          ...(await defaultForecastOnCreate({ tx, projectId: entry.projectId, activityId: entry.activityId, actual: amount })),
         },
       });
     }

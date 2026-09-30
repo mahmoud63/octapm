@@ -12,6 +12,8 @@ const mockPrisma = {
   boqItem: { findMany: jest.fn(async ({ where }) => (where.id?.in || []).map((id) => ({ id }))) },
   activity: { findMany: jest.fn(async ({ where }) => (where.id?.in || []).map((id) => ({ id }))) },
   costRecord: { findMany: jest.fn(async () => []), update: jest.fn(async () => ({})), create: jest.fn(async () => ({})) },
+  // The approved allocation a created record's default forecast is worked from (R5-2).
+  activityBoqAllocation: { findMany: jest.fn(async ({ where }) => (where.activityId?.in || []).filter((id) => id === "act-2").map((activityId) => ({ activityId, quantity: 1, amount: 9000, weight: 0 }))) },
   commitment: { aggregate: jest.fn(async () => ({ _max: { number: 2 } })), create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(async () => []), update: jest.fn() },
   commitmentSovLine: { findMany: jest.fn(async () => []), deleteMany: jest.fn(async () => ({ count: 0 })), create: jest.fn(async ({ data }) => ({ id: "line", ...data })) },
   commitmentChangeOrder: { aggregate: jest.fn(async () => ({ _max: { number: 0 } })), create: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
@@ -111,7 +113,9 @@ describe("commitments", () => {
     expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith({ where: { id: "bl-x" }, data: { committedFromCommitments: 7000 } });
     expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith({ where: { id: "bl-mat" }, data: { committedFromCommitments: 0 } });
     expect(mockPrisma.costRecord.update).toHaveBeenCalledWith({ where: { id: "cr-1" }, data: { committed: 5000 } });
-    expect(mockPrisma.costRecord.create).toHaveBeenCalledWith({ data: { projectId: "project-1", activityId: "act-2", committed: 7000 } });
+    // R5-2: created with no forecast supplied → the initial default, marked
+    // default: the activity's approved allocation (9,000), not a budget of 0
+    expect(mockPrisma.costRecord.create).toHaveBeenCalledWith({ data: { projectId: "project-1", activityId: "act-2", committed: 7000, forecast: 9000, forecastSource: "default" } });
     expect(mockNotifications.createNotifications).toHaveBeenCalledWith(expect.objectContaining({ event: "commitment.executed", recipientUserIds: expect.arrayContaining(["sub-user"]) }));
   });
 

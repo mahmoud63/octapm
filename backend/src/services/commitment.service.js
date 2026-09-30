@@ -9,6 +9,7 @@ const notificationService = require("./notification.service");
 const { isPartyScopedAccess } = require("./company-party.service");
 const fileStorageService = require("./file-storage.service");
 const { nextNumber: nextCounterNumber } = require("../utils/reference-number");
+const { defaultForecastOnCreate } = require("./cost-record-default.service");
 
 /**
  * Commitments (OCTA-FIN-COMMIT-020): subcontracts and purchase-order
@@ -468,6 +469,8 @@ const recomputeCommitted = async ({ tx = prisma, orgId, projectId }) => {
         // edit decides on the row under that lock, and a recompute that wrote
         // between its read and its write was written over (Phase 21D, CX21-511).
         if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${activityId}`}))`;
+        // committed only: a recompute never writes the record's forecast or
+        // forecastSource (owner decision R5-2).
         await tx.costRecord.update({ where: { id: recordId }, data: { committed: round2(amount) } });
       } else if (tx.costRecord?.create) {
         // The pair is held before the row is created, and looked for again
@@ -475,7 +478,10 @@ const recomputeCommitted = async ({ tx = prisma, orgId, projectId }) => {
         if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${activityId}`}))`;
         const again = tx.costRecord.findFirst ? await tx.costRecord.findFirst({ where: { projectId, activityId }, select: { id: true } }) : null;
         if (again) await tx.costRecord.update({ where: { id: again.id }, data: { committed: round2(amount) } });
-        else await tx.costRecord.create({ data: { projectId, activityId, committed: round2(amount) } });
+        // Created with no forecast supplied: the initial default, marked
+        // 'default' (R5-2) — the activity's approved allocation (actual 0), as
+        // the cost API's creator reads it, not a budget of 0.
+        else await tx.costRecord.create({ data: { projectId, activityId, committed: round2(amount), ...(await defaultForecastOnCreate({ tx, projectId, activityId, actual: 0 })) } });
       }
     }
     for (const row of records) {

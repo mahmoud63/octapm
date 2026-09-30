@@ -156,39 +156,166 @@ remainingCommitment = committed − certifiedAgainstCommitments
 projectedFinalCost  = actual + remainingCommitment + uncommittedForecast
 ```
 
-#### 1.6.1 Clarification — a cost record's default forecast (PC-7a 3d, owner 2026-09-29)
+#### 1.6.1 A cost record's forecast: entered, or the initial default (owner decision R5-2, 2026-09-30)
 
-A cost record (one per activity) stores a forecast. When its writer gives
-none — the record is created, or its budget is written, without a forecast —
-the stored default is:
+A cost record (one per activity) stores a forecast and, since R5-2, where it
+came from — `CostRecord.forecastSource` (TEXT, nullable; migration
+`20261005047000_cost_record_forecast_source`, additive, no backfill). The
+server alone sets it; a client that sends `forecastSource` is refused with
+`400 VALIDATION_ERROR` (as `PrimeContract.originalValueSource` is).
 
-```
-CostRecord.forecast (default) = max(budget, actual)          // never < 0, never < actual
-                                (cost.service resolveForecast: Math.max(0, budget, actual))
-```
+| forecastSource | what the stored forecast is | label on every read (`forecastBasis`) |
+|---|---|---|
+| `entered` | a caller supplied it | "Entered forecast" |
+| `default` | none was supplied when the record was made: the server wrote the initial default | "Default forecast: the larger of the budget and the actual cost as they stood when it was set; it does not follow them afterwards (no forecast was entered)" |
+| NULL | the row predates the column: the source was not recorded. **Treated as entered** | "Stored forecast (its source was not recorded)" |
 
-Authority: the owner's own example in the PC-7a wave text, "forecast =
-max(budget, actual)". The `0` only keeps the figure an amount the
-CostRecord money check accepts; budget and actual are never below 0.
+The rules (one place: `backend/src/utils/cost-forecast.js`; every creator of a
+cost record uses it):
 
-This is the estimate at completion the cost summary already gave a record
-without a forecast (`cost.service estimateAtCompletion`), so the stored
-default and the summary now state one rule; `figure-truth`
-`COST_RECORD_FORECAST_DEFAULT_BASIS` = `greater_of_budget_and_actual`, and the
-summary labels it `projection:typed_or_greater_of_budget_and_actual`. It is a
-projection: it never feeds Original, Revised, Committed or Actual.
+1. **A supplied forecast is a forecast.** A write whose payload carries a
+   forecast (`!== undefined && !== null` — `0` and `"0"` count) stores it as
+   given and sets `entered`. It is never treated as missing because it is
+   falsy. A supplied value that is not an amount of 0 or more (a word, `""`,
+   a negative, more than two decimals, an array such as `[7]`, an object) is
+   refused with 400 — at the route
+   (`VALIDATION_ERROR`), and in the service for any other caller
+   (`COST_RECORD_MONEY_INVALID`); the former `Number(x) || 0` would have
+   stored 0.
+2. **The initial default, only when the forecast is genuinely missing.**
+   Creating a record without a forecast stores
 
-It replaces `budget + 1.1 × (actual − budget)`, which was −0.1 × budget on a
-record with no actual yet — the CostRecord money check refused the write, and
-every cost record created without a forecast on an activity with an approved
-allocation answered 500 and quoted the Prisma call — and which fell below
-actual whenever actual was under budget. The one other change: with actual
-above budget the default is now actual (the old rule extrapolated the overrun
-by 10%); a forecast typed on the record still stands as typed.
+   ```
+   CostRecord.forecast (default) = max(0, budget, actual)     // never < 0, never < actual
+   ```
 
-Where the two defaults differ (a record written without a forecast):
+   and sets `default`. Authority: the owner's example in the PC-7a wave text,
+   "forecast = max(budget, actual)" (PC-7a 3d), confirmed by R5-2 as the
+   *initial* default. This holds for every creator, and **every creator reads
+   the same budget: the activity's approved allocation** — the figure each
+   read shows as the record's Budget (`cost-record-default.service.js`):
+   `POST /cost/activity/{id}` (the budget given, otherwise the approved
+   allocation; actual 0), the cost ledger's first posting on an activity
+   (approved allocation, actual = the posting), a commitment recompute that
+   finds no record (approved allocation, actual 0), an equipment posting that
+   finds none (the same), and the post-import seed (the same — an activity
+   just imported has no allocation yet, so 0). Schedule activation uses the
+   staged budget it writes on the record. Before the R5-2 review the ledger,
+   commitment and seed creators worked the default from a budget of 0: a first
+   posting of 500 on an activity allocated 10,000 stored "Default 500" beside
+   a Budget of 10,000, and the projected final cost counted 500 for the
+   activity until the next posting. Only the forecast changed: those creators
+   still store a record budget of 0, as they always did.
 
-| budget | actual | old default `budget + 1.1 × (actual − budget)` | new default `max(0, budget, actual)` |
+   The default is a **stored** figure. It says so in its label — "as they
+   stood when it was set; it does not follow them afterwards": an allocation
+   approved after the record was made (the usual order after a schedule
+   import) leaves the default where it was until a forecast is entered or the
+   record's budget is written.
+3. **An edit that supplies no forecast never changes an entered forecast**, nor
+   one whose source is NULL. A budget edit, a category edit, committed, the
+   actual-through date: none moves it.
+4. **A default follows only its own input.** When the stored forecast is
+   `default` and *this* write changes the record's budget, it is re-derived —
+   `max(0, new budget, current actual)` — and stays `default`. An echo of the
+   same budget, and every other edit, leaves forecast and source alone.
+5. **Postings never write the forecast.** A cost-ledger posting (and the
+   reconciliation's rebuild) moves `actual` and `actualThroughDate` only; a
+   commitment recompute moves `committed` only; an equipment posting moves the
+   equipment category. None changes `forecast` or `forecastSource`. (Before
+   R5-2 the equipment posting raised the forecast to
+   `max(forecast, budget, actual)`, over an entered forecast too, and any
+   budget write re-derived the forecast over an entered one.)
+
+**Separate from the EAC.** The default is the cost module's own projection. It
+never feeds Original, Revised, Committed or Actual, and the earned-value EAC
+(revised budget ÷ CPI, owner decision D2) and the Overview's "Forecast at
+completion" never read `CostRecord.forecast` — proven live: both are identical
+before and after a default forecast moves. The cost summary's
+`totals.forecast` and its scenarios (`eac`) are Σ each record's estimate at
+completion and are labelled **"Projected final cost (cost records)"**, never
+"EAC" (`truth.totals.labels.forecast`, `truth.eac.label`; the keys
+`eac` / `estimate_at_completion` are unchanged). What one record counts for
+(`utils/cost-forecast.js` `projectedFinalCost`):
+
+| forecastSource | the record counts |
+|---|---|
+| `entered` | the entered forecast — **0 included** — and never below its actual: `max(forecast, actual)` |
+| `default` | not counted as a forecast: `max(budget, actual)` as they are **now** — the record's budget being its activity's approved allocation |
+| NULL | as before R5-2: the stored forecast when above 0 and not below actual, otherwise `max(budget, actual)` |
+
+An entered 0 was replaced by the record's budget in the total, the phase rows
+and the scenario cards while the row itself read "$0, Entered forecast" — a
+supplied value treated as missing because it is falsy, which R5-2 forbids. A
+default is the placeholder the server wrote because nobody forecast the
+activity; the projection does not rest on it. Counted as stored, it froze the
+projection where the default was set: a record whose allocation moved
+afterwards went on counting the old one (the PC-4 allocation-move differential
+caught exactly this), and a record the ledger created counted its first
+posting. The stored default stays on the record, labelled; the total counts
+what "no forecast" always counted. The rule is keyed on the source, and every
+row written before the column has a NULL source, so **no existing project's
+figure moves**.
+The By Phase table names this column "Projected final cost (cost records)";
+"Forecast" on By Activity is the record's stored forecast.
+
+`GET /forecast` (the schedule and cost forecast, its top risks and its
+explanation) reads a cost record's forecast as "the cost forecast" only when
+somebody made one — entered, or NULL-source. A default adds nothing to the
+activity's projected cost (it is the larger of budget and actual, both already
+in it), never sets the basis to `forecast` and raises no "Cost forecast …
+above the budget".
+
+**Honest labels.** Every read of a cost record — `GET /cost` rows,
+`/cost/summary` records, the answer to a write, the activity detail's forecast
+figure (PC-5), the audit summaries, the report builder's `forecastSource`
+column — carries `forecastSource` and the basis text above. The summary no
+longer presents every record's forecast as the default rule:
+`truth.records.forecast` is `projection:entered_or_default_per_record` and
+`forecastSources` counts `{ entered, default, notRecorded, total }`. On the
+web a default forecast carries a small "Default" marker with the basis on
+hover (cost register, activity detail drawer).
+
+**BOQ access.** A default forecast is built from the record's budget — its
+activity's approved allocation when the record was made — so it goes the way
+of the budget (`utils/boq-figures`): for a member who may not read the BOQ the
+server omits the figure (`forecastWithheld`, `forecastWithheldReason`; a
+withheld figure on the activity detail; `null` in a report row; stripped from
+an audit summary that names its source) and the screen shows "—" with the
+reason. An entered forecast is the cost module's own and stays, and so does a
+NULL-source one, as before.
+
+A withheld figure is not sorted by either. `GET /cost?sortBy=forecast` ordered
+the rows in the database by the stored forecast for every caller, so a default
+row's place among the entered forecasts bounded it, and a cost controller
+without BOQ access — who may type a forecast on another record — bisected it to
+the cent in 26 requests. For a caller who may not read the BOQ the rows whose
+forecast they receive are now ordered by it and the default rows follow, in
+the order of their ids, whatever the direction (`utils/boq-figures`
+`costRecordsByVisibleForecast`, as the report builder orders its withheld
+null); the answer says so (`sortWithheld`), and the screen shows that reason.
+A BOQ reader's order is the database's, as before.
+
+Editing on the web: the Forecast field holds the text typed. An emptied field
+sends nothing (it used to be sent as 0 and stored as an entered 0); a member
+who may update cost but not read the BOQ gets an empty field for a withheld
+default and can replace it with a forecast of their own. A money field sent as
+`null` is not supplied — `{ "budget": null }` writes nothing, where it wrote a
+budget of 0 and dragged a default down with it.
+
+**Nothing stored moves.** No migration beyond the nullable column, no
+backfill: every existing row keeps its forecast and has `forecastSource` NULL
+(treated as entered, labelled "not recorded"). Verified on the certified
+project `0ce999f2`: its cost records hash identical before and after, and the
+financial snapshot and reconciliation show delta 0.00.
+
+History — PC-7a 3d (2026-09-29) replaced the first default,
+`budget + 1.1 × (actual − budget)`, which was −0.1 × budget on a record with no
+actual yet (the CostRecord money check refused the write and every record
+created without a forecast on an allocated activity answered 500) and fell
+below actual whenever actual was under budget:
+
+| budget | actual | first default `budget + 1.1 × (actual − budget)` | default `max(0, budget, actual)` |
 |---:|---:|---:|---:|
 | 10,000 | 0 | −1,000 — refused by the money check, answered 500 | 10,000 |
 | 10,000 | 4,000 | 3,400 — below actual | 10,000 |
@@ -197,17 +324,42 @@ Where the two defaults differ (a record written without a forecast):
 | 0 | 5,000 | 5,500 | 5,000 |
 | 0 | 0 | 0 | 0 (same) |
 
-They agree only when actual equals budget. In practice records are created
-with actual 0 (`POST /cost/activity/{id}` without a forecast), which is the
-first row: every such record on an activity with an approved allocation
-failed before the change.
+PC-7a 3d still re-derived that default on *every* budget write and had no way
+to tell an entered forecast from a default; R5-2 records the source and
+narrows the re-derivation to default records. A figure the service would write
+below 0 is refused with `400 COST_RECORD_MONEY_INVALID` naming the field,
+never the database's 500.
 
-Nothing stored moves: only records written after the change take the new
-default. There is no migration or backfill; an existing record's stored
-forecast is read as it is (verified on the certified project `0ce999f2`:
-its cost records and budget lines hashed identical before and after). A figure the service would write below 0 is refused with
-`400 COST_RECORD_MONEY_INVALID` naming the field, never the database's 500.
-Proof: `backend/src/services/__live__/pc-7a-cost-record-forecast.live.test.js`.
+Proof, each rule live against a real API and the real Postgres and each
+mutation-proven (the fix undone, the test failing, the file restored
+sha256-identical):
+
+| rule | live proof |
+|---|---|
+| create / edit rules 1–4, the server-only source, the labels, the EAC's independence | `r5-2-default-forecast.live.test.js` |
+| ledger posting, **executed commitment** and **approved equipment posting** never write forecast or source (rule 5) | the same suite: a material issue, a commitment submitted → approved → executed, a daily report with equipment hours submitted → approved |
+| the creators' default: ledger first posting, commitment-created record, post-import seed (`POST /import/seed-linked-modules`) — marked `default`, from the approved allocation | the same suite |
+| schedule activation marks its records `default` | `pc-4-merge-gate-r5.live.test.js` (XER import → approve → activate) |
+| the projected final cost counts an entered 0 as 0 | the same r5-2 suite (`/cost/summary` totals, phases, scenarios) |
+| the projected final cost counts a NULL-source row by the pre-R5-2 rule (stored when above 0 and not below actual, otherwise `max(budget, actual)`) — the rule that keeps every existing project's figure where it is | the same suite: `/cost/summary` totals, phases and scenarios move by the stored 7,777; by the allocation for a stored 0; by the allocation for a stored 500 under an actual of 600 |
+| `GET /forecast` does not report a default as the cost forecast | the same suite |
+| no default forecast, and no order of it, for a member without BOQ read: register rows, `sortBy=forecast` (both directions, pages), report preview (cell, sort, filter, aggregate, group) and xlsx export | the same suite |
+| `null` money fields write nothing; an array is refused | the same suite |
+
+`backend/src/utils/__tests__/cost-forecast.test.js` holds the pure rules, the
+creators' unit tests hold each caller (ledger, commitment, equipment, seed,
+activation), `frontend/e2e/66-cost-default-forecast.spec.ts` the screen (the
+marker, the basis, the withheld dash, an emptied Forecast field, the By Phase
+column's name, the sort's reason and the member without BOQ access replacing a
+default), and `pc-7a-cost-record-forecast.live.test.js` the 3d defect.
+
+Known limits: a row whose source is NULL may in fact hold a pre-R5-2 default
+built from its allocation, and it stays visible to a cost reader without BOQ
+access, as it was before the column existed; an audit event written before
+R5-2 carries no source, so its forecast is not stripped either; a default does
+not follow an allocation approved after it was set (it says so; see rule 2);
+and there is no "reset to default" action — once a forecast is entered, only
+another entered forecast replaces it.
 
 ### 1.7 Cash Flow
 

@@ -48,6 +48,14 @@ const fmtUSD = (value: number) =>
 
 const toNum = (value: string) => Number(value) || 0
 
+// The forecast field's draft is the text as typed (owner decision R5-2): an
+// empty field is "no forecast typed" and is not sent — `Number('') || 0` sent
+// 0, which the server rightly stores as an ENTERED forecast of 0, turning a
+// default into "Entered $0" with no way back. 0 is sent only when 0 is typed.
+const FORECAST_NOT_SENT =
+  'Cost record updated. The forecast was left as it was: an empty forecast is not sent (type 0 to forecast nothing)'
+const FORECAST_INVALID = 'Forecast must be an amount of 0 or more'
+
 // The server's reason beside a record budget it withholds (owner decision E1).
 const MAPPING_DETAILS_WITHHELD = 'Mapping details unavailable to you'
 
@@ -109,6 +117,15 @@ export function CostDashboard({
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<Partial<CostRecord>>({})
+  // undefined: the forecast field was not touched in this edit.
+  const [forecastDraft, setForecastDraft] = useState<string | undefined>(
+    undefined
+  )
+  const stopEditing = () => {
+    setEditingId(null)
+    setDraft({})
+    setForecastDraft(undefined)
+  }
   const [burnRateDate, setBurnRateDate] = useState('')
   const [burnRateAmount, setBurnRateAmount] = useState('')
   const [costSearch, setCostSearch] = useState('')
@@ -148,6 +165,9 @@ export function CostDashboard({
   const totals = useMemo(() => summary?.totals, [summary?.totals])
   const eac = useMemo(() => summary?.eac, [summary?.eac])
   const budget = useMemo(() => summary?.budget, [summary?.budget])
+  // How many record forecasts were entered, are the default, or were not
+  // recorded (owner decision R5-2).
+  const forecastSources = summary?.forecastSources
   // Source / derived / projection per figure, as the server labels it (PC-7a).
   const truth = summary?.truth
   // What the summary adds up from the records' budgets (each activity's
@@ -280,35 +300,55 @@ export function CostDashboard({
               hint='Posted to the cost ledger to date'
             />
             <CostFigure
-              label='Forecast (EAC)'
+              label={
+                truth?.totals?.labels?.forecast ??
+                FINANCIAL_TERMS.costRecordsFinalCost.label
+              }
               truth={truth?.totals?.forecast}
               value={summaryFigure(eac?.mostLikely ?? totals?.forecast ?? 0)}
               hint={
                 activityBudgetsWithheld
                   ? withheldReason
-                  : 'Estimate at completion on activity cost records — never below actual cost'
+                  : FINANCIAL_TERMS.costRecordsFinalCost.hint
               }
               testId='uat-cost-forecast-eac'
             />
           </div>
+          {/* The records' forecasts are not one rule (owner decision R5-2):
+              how many were entered, are the initial default, or were not
+              recorded — a default is never presented as entered. */}
+          {forecastSources && forecastSources.total > 0 && (
+            <p
+              className='text-xs text-muted-foreground'
+              data-testid='cost-forecast-sources'
+              title={truth?.records?.derivedFrom?.forecast}
+            >
+              Record forecasts: {forecastSources.entered} entered ·{' '}
+              {forecastSources.default} default (
+              {truth?.records?.basis?.default ??
+                FINANCIAL_TERMS.defaultForecastMarker.hint}
+              ) · {forecastSources.notRecorded} source not recorded
+            </p>
+          )}
 
-          {/* Estimate at completion: actual to date + cost to complete. The
-              scenarios vary only the cost to complete, so they order
-              optimistic ≤ most likely ≤ pessimistic and none sits below
-              what has already been spent. */}
+          {/* The cost records' projected final cost: actual to date + cost to
+              complete. The scenarios vary only the cost to complete, so they
+              order optimistic ≤ most likely ≤ pessimistic and none sits below
+              what has already been spent. Not the earned-value EAC (revised
+              budget ÷ CPI), which the Forecast tab and the Overview state. */}
           <div
             className='grid grid-cols-1 gap-3 sm:grid-cols-3'
             data-testid='cost-eac-scenarios'
           >
             <ScenarioCard
               tone='good'
-              label='Optimistic EAC'
+              label='Optimistic projected final cost'
               sub={activityBudgetsWithheld ? withheldReason : 'cost to complete −10%'}
               value={summaryFigure(eac?.optimistic ?? 0)}
             />
             <ScenarioCard
               tone='neutral'
-              label='Most likely EAC'
+              label='Most likely projected final cost'
               sub={
                 activityBudgetsWithheld
                   ? withheldReason
@@ -318,7 +358,7 @@ export function CostDashboard({
             />
             <ScenarioCard
               tone='risk'
-              label='Pessimistic EAC'
+              label='Pessimistic projected final cost'
               sub={activityBudgetsWithheld ? withheldReason : 'cost to complete +15%'}
               value={summaryFigure(eac?.pessimistic ?? 0)}
             />
@@ -361,7 +401,10 @@ export function CostDashboard({
                 setCostSortBy(value as CostRecordListQuery['sortBy'])
               }}
             >
-              <SelectTrigger className='w-full md:w-36'>
+              <SelectTrigger
+                className='w-full md:w-36'
+                data-testid='cost-sort-by'
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -382,7 +425,10 @@ export function CostDashboard({
                 setCostSortDir(value as CostRecordListQuery['sortDir'])
               }}
             >
-              <SelectTrigger className='w-full md:w-28'>
+              <SelectTrigger
+                className='w-full md:w-28'
+                data-testid='cost-sort-dir'
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -391,6 +437,17 @@ export function CostDashboard({
               </SelectContent>
             </Select>
           </div>
+          {/* Sorted by Forecast, a member who may not read the BOQ is not
+              given the default forecasts, nor their order (R5-2): those rows
+              follow the others, and the server says so. */}
+          {costPage?.sortWithheld && (
+            <p
+              className='mb-2 text-xs text-muted-foreground'
+              data-testid='cost-sort-withheld'
+            >
+              {costPage.sortWithheld.reason}
+            </p>
+          )}
           <div className='overflow-x-auto rounded-md border'>
             <table className='w-full text-sm whitespace-nowrap'>
               <thead className='border-b bg-muted/50'>
@@ -413,7 +470,12 @@ export function CostDashboard({
                   </th>
                   <th className='p-2 text-right font-medium'>Actual</th>
                   <th className='p-2 text-right font-medium'>Actual Through</th>
-                  <th className='p-2 text-right font-medium'>Forecast</th>
+                  <th
+                    className='p-2 text-right font-medium'
+                    title={FINANCIAL_TERMS.recordForecast.hint}
+                  >
+                    {FINANCIAL_TERMS.recordForecast.label}
+                  </th>
                   <th className='p-2 text-right font-medium'>Variance</th>
                   {canUpdateCost && (
                     <th className='p-2 text-right font-medium'>Actions</th>
@@ -442,9 +504,19 @@ export function CostDashboard({
                   // and no variance built from a budget this member was not
                   // given, never one read against 0.
                   const budgetWithheld = row.budget === undefined
+                  // A DEFAULT forecast is built from that budget (owner
+                  // decision R5-2): the server omits it for the same member
+                  // and says why. Shown as a dash and the reason, never 0.
+                  const forecastWithheld =
+                    row.forecastWithheld === true || row.forecast === undefined
+                  const forecastIsDefault = row.forecastSource === 'default'
+                  const typedForecast =
+                    isEditing && forecastDraft?.trim()
+                      ? Number(forecastDraft)
+                      : undefined
                   const variance =
                     (Number(current.budget) || 0) -
-                    (Number(current.forecast) || 0)
+                    (Number(typedForecast ?? current.forecast) || 0)
 
                   return (
                     <tr key={row.id} className='border-b hover:bg-muted/25'>
@@ -467,6 +539,47 @@ export function CostDashboard({
                               >
                                 — {MAPPING_DETAILS_WITHHELD}
                               </span>
+                            ) : field === 'forecast' && isEditing ? (
+                              // Editing: the field holds what is typed. A
+                              // withheld default is not shown — the field
+                              // opens empty with the server's reason — and
+                              // entering a forecast does not need the hidden
+                              // one. An empty field sends nothing.
+                              <Input
+                                type='number'
+                                min={0}
+                                step={MONEY_INPUT_STEP}
+                                className='h-8 w-24 text-right text-xs'
+                                data-testid='cost-record-forecast-input'
+                                placeholder={
+                                  forecastWithheld ? 'Enter' : undefined
+                                }
+                                title={
+                                  forecastWithheld
+                                    ? (row.forecastWithheldReason ??
+                                      MAPPING_DETAILS_WITHHELD)
+                                    : row.forecastBasis
+                                }
+                                value={
+                                  forecastDraft ??
+                                  (forecastWithheld
+                                    ? ''
+                                    : String(row.forecast ?? 0))
+                                }
+                                onChange={(e) =>
+                                  setForecastDraft(e.target.value)
+                                }
+                              />
+                            ) : field === 'forecast' && forecastWithheld ? (
+                              <span
+                                className='text-xs text-muted-foreground'
+                                data-testid='cost-record-forecast-withheld'
+                                title={row.forecastBasis}
+                              >
+                                —{' '}
+                                {row.forecastWithheldReason ??
+                                  MAPPING_DETAILS_WITHHELD}
+                              </span>
                             ) : isEditing &&
                             field !== 'actual' &&
                             !(field === 'committed' && row.committedDerived) ? (
@@ -482,6 +595,33 @@ export function CostDashboard({
                                   }))
                                 }
                               />
+                            ) : field === 'forecast' ? (
+                              // The forecast says where it came from (R5-2):
+                              // a default carries its marker and its basis;
+                              // an entered or not-recorded one its basis on
+                              // hover. A default is never shown as entered.
+                              <span
+                                className='inline-flex items-center justify-end gap-1 text-xs'
+                                title={row.forecastBasis}
+                                data-testid='cost-record-forecast'
+                                data-forecast-source={
+                                  row.forecastSource ?? 'not_recorded'
+                                }
+                              >
+                                {forecastIsDefault && (
+                                  <span
+                                    className='rounded border border-dashed border-amber-300 px-1 text-[10px] leading-4 font-medium text-amber-700'
+                                    title={
+                                      row.forecastBasis ??
+                                      FINANCIAL_TERMS.defaultForecastMarker.hint
+                                    }
+                                    data-testid='cost-record-forecast-default'
+                                  >
+                                    {FINANCIAL_TERMS.defaultForecastMarker.label}
+                                  </span>
+                                )}
+                                {fmtUSD(Number(row.forecast || 0))}
+                              </span>
                             ) : (
                               <span className='text-xs'>
                                 {fmtUSD(Number(row[field] || 0))}
@@ -535,10 +675,7 @@ export function CostDashboard({
                               <Button
                                 size='sm'
                                 variant='outline'
-                                onClick={() => {
-                                  setEditingId(null)
-                                  setDraft({})
-                                }}
+                                onClick={stopEditing}
                               >
                                 Cancel
                               </Button>
@@ -550,34 +687,70 @@ export function CostDashboard({
                                     toast.error(MONEY_PRECISION_MESSAGE)
                                     return
                                   }
+                                  // The forecast: sent only when one was
+                                  // typed; an emptied field sends nothing.
+                                  const forecastText = forecastDraft?.trim()
+                                  const forecastTyped =
+                                    forecastText !== undefined &&
+                                    forecastText !== ''
+                                  const forecastEmptied =
+                                    forecastDraft !== undefined &&
+                                    !forecastTyped
+                                  if (forecastTyped) {
+                                    const typed = Number(forecastText)
+                                    if (!Number.isFinite(typed) || typed < 0) {
+                                      toast.error(FORECAST_INVALID)
+                                      return
+                                    }
+                                    if (!hasMoneyPrecision(typed)) {
+                                      toast.error(MONEY_PRECISION_MESSAGE)
+                                      return
+                                    }
+                                  }
 
                                   try {
                                     const moneyPayload = Object.fromEntries(
                                       editableFields
                                         .filter(
-                                          (field) => draft[field] !== undefined
+                                          (field) =>
+                                            field !== 'forecast' &&
+                                            draft[field] !== undefined
                                         )
                                         .map((field) => [
                                           field,
                                           toMoneyNumber(draft[field]),
                                         ])
                                     )
-                                    await updateCostRecord.mutateAsync({
-                                      costRecordId: row.id,
-                                      payload: {
-                                        ...moneyPayload,
-                                        ...(draft.actualThroughDate !==
-                                        undefined
-                                          ? {
-                                              actualThroughDate:
-                                                draft.actualThroughDate,
-                                            }
-                                          : {}),
-                                      },
-                                    })
-                                    toast.success('Cost record updated')
-                                    setEditingId(null)
-                                    setDraft({})
+                                    const payload = {
+                                      ...moneyPayload,
+                                      ...(forecastTyped
+                                        ? {
+                                            forecast: toMoneyNumber(
+                                              Number(forecastText)
+                                            ),
+                                          }
+                                        : {}),
+                                      ...(draft.actualThroughDate !== undefined
+                                        ? {
+                                            actualThroughDate:
+                                              draft.actualThroughDate,
+                                          }
+                                        : {}),
+                                    }
+                                    // Nothing typed but an emptied forecast:
+                                    // nothing to write.
+                                    if (Object.keys(payload).length > 0) {
+                                      await updateCostRecord.mutateAsync({
+                                        costRecordId: row.id,
+                                        payload,
+                                      })
+                                    }
+                                    if (forecastEmptied) {
+                                      toast.info(FORECAST_NOT_SENT)
+                                    } else {
+                                      toast.success('Cost record updated')
+                                    }
+                                    stopEditing()
                                   } catch {
                                     toast.error('Failed to update cost record')
                                   }
@@ -593,6 +766,7 @@ export function CostDashboard({
                               onClick={() => {
                                 setEditingId(row.id)
                                 setDraft({})
+                                setForecastDraft(undefined)
                               }}
                             >
                               Edit
@@ -652,7 +826,17 @@ export function CostDashboard({
                     {FINANCIAL_TERMS.executedCommitments.label}
                   </th>
                   <th className='p-2 text-right font-medium'>Actual</th>
-                  <th className='p-2 text-right font-medium'>Forecast</th>
+                  {/* Not the records' stored forecasts (By Activity): the
+                      summary's projected final cost per phase, under its
+                      own name. */}
+                  <th
+                    className='p-2 text-right font-medium'
+                    title={FINANCIAL_TERMS.costRecordsFinalCost.hint}
+                    data-testid='cost-phase-projected-header'
+                  >
+                    {truth?.totals?.labels?.forecast ??
+                      FINANCIAL_TERMS.costRecordsFinalCost.label}
+                  </th>
                   <th className='p-2 text-right font-medium'>Variance $</th>
                   <th className='p-2 text-right font-medium'>Variance %</th>
                 </tr>

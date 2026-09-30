@@ -111,4 +111,24 @@ describe("cost ledger — one projection row per activity", () => {
     const records = await mockPrisma.costRecord.findMany({ where: { activityId: "act-9" } });
     expect(records).toHaveLength(1);
   });
+
+  // Owner decision R5-2: the record a first posting creates has no forecast
+  // supplied, so it gets the initial default — marked as one — worked from the
+  // activity's approved allocation, as the cost API's creator works it. From a
+  // budget of 0 it was just the posting's own amount.
+  it("R5-2: the record a first posting creates carries the default forecast — the larger of the activity's approved allocation and the posting — marked 'default'", async () => {
+    ledger.seedAllocation({ projectId: "p1", activityId: "act-below", amount: 10000 });
+    ledger.seedAllocation({ projectId: "p1", activityId: "act-above", amount: 6000 });
+    ledger.seedAllocation({ projectId: "p1", activityId: "act-above", amount: 4000 });
+    await service.post(posting({ sourceLineId: "below", activityId: "act-below", amount: 500 }));
+    await service.post(posting({ sourceLineId: "above", activityId: "act-above", amount: 12000 }));
+    await service.post(posting({ sourceLineId: "none", activityId: "act-none", amount: 700 }));
+    const stored = async (activityId) => (await mockPrisma.costRecord.findMany({ where: { activityId } })).map((row) => ({ actual: row.actual, forecast: row.forecast, forecastSource: row.forecastSource, budget: row.budget }));
+    expect(await stored("act-below")).toEqual([{ actual: 500, forecast: 10000, forecastSource: "default", budget: undefined }]);
+    expect(await stored("act-above")).toEqual([{ actual: 12000, forecast: 12000, forecastSource: "default", budget: undefined }]);
+    expect(await stored("act-none")).toEqual([{ actual: 700, forecast: 700, forecastSource: "default", budget: undefined }]);
+    // A later posting finds the record: it moves actual only.
+    await service.post(posting({ sourceLineId: "below-2", activityId: "act-below", amount: 300 }));
+    expect(await stored("act-below")).toEqual([{ actual: 800, forecast: 10000, forecastSource: "default", budget: undefined }]);
+  });
 });

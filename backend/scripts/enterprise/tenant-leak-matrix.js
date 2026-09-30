@@ -116,7 +116,7 @@ const seedVictim = async (a) => {
   seeds.boqItem = await ensure("boqItem", { id: id("boqItem") }, { id: id("boqItem"), projectId: project.id, revisionId: seeds.boqRevision.id, code: "1.1", description: "Leak matrix item", qty: 1, unit: "m3", rate: 1, amount: 1 });
   seeds.scheduleRevision = await ensure("scheduleRevision", { id: id("scheduleRevision") }, { id: id("scheduleRevision"), projectId: project.id });
   seeds.activity = await ensure("activity", { id: id("activity") }, { id: id("activity"), projectId: project.id, name: "Leak matrix activity" });
-  seeds.costRecord = await ensure("costRecord", { id: id("costRecord") }, { id: id("costRecord"), projectId: project.id, activityId: seeds.activity.id });
+  seeds.costRecord = await ensure("costRecord", { id: id("costRecord") }, { id: id("costRecord"), projectId: project.id, activityId: seeds.activity.id, forecast: 0, forecastSource: "default" }); // R5-2: no forecast supplied → the default max(0, 0, 0)
   seeds.changeOrder = await ensure("changeOrder", { id: id("changeOrder") }, { id: id("changeOrder"), projectId: project.id, ref: "VO-001", description: "Leak matrix change" });
   seeds.rfi = await ensure("rfi", { id: id("rfi") }, { id: id("rfi"), projectId: project.id, ref: "RFI-001", subject: "Leak matrix RFI" });
   seeds.ncr = await ensure("ncrRecord", { id: id("ncr") }, { id: id("ncr"), projectId: project.id, ref: "NCR-001", severity: "minor" });

@@ -497,7 +497,11 @@ const SOURCES = Object.freeze({
       col("budget", "Budget", "money"),
       col("committed", "Executed commitments", "money"),
       col("actual", "Actual cost", "money"),
-      col("forecast", "Forecast (EAC)", "money"),
+      // The record's stored forecast — not the EAC (revised budget ÷ CPI, D2).
+      // Where it came from is its own column (R5-2): entered, default, or
+      // empty when the source was not recorded.
+      col("forecast", "Stored forecast", "money"),
+      col("forecastSource", "Forecast source", "enum", { enum: ["entered", "default"] }),
       col("labour", "Labour", "money"),
       col("material", "Material", "money"),
       col("equipment", "Equipment", "money"),

@@ -186,7 +186,7 @@ const loadContext = async ({ orgId, projectId, asOf }) => {
   const since = new Date(asOf.getTime() - HISTORY_DAYS * DAY);
   const [history, costs, workflowLinks, weatherLinks, rfis, submittals, longLead, changeOrderLinks, rfiOrders, changeEventOrders] = await Promise.all([
     safeMany("activityProgress", { where: { activity: { projectId, isActive: true }, status: "approved", updatedAt: { gte: since } }, select: { activityId: true, pctComplete: true, approvedAt: true, updatedAt: true }, orderBy: { updatedAt: "asc" }, take: 5000 }),
-    safeMany("costRecord", { where: { projectId }, select: { activityId: true, budget: true, committed: true, actual: true, forecast: true } }),
+    safeMany("costRecord", { where: { projectId }, select: { activityId: true, budget: true, committed: true, actual: true, forecast: true, forecastSource: true } }),
     safeMany("workflowActivityLink", { where: { projectId, scheduleImpactDays: { gt: 0 } }, select: { activityId: true, recordType: true, recordId: true, scheduleImpactDays: true, relationType: true } }),
     safeMany("weatherDelayActivityLink", { where: { projectId, delayDays: { gt: 0 } }, select: { activityId: true, delayDays: true, isCritical: true, weatherDelayId: true } }),
     safeMany("rfi", { where: { projectId, activityId: { not: null }, status: { in: ["open", "answered"] } }, select: { id: true, ref: true, subject: true, activityId: true, responseRequiredBy: true, dueDate: true, status: true } }),
@@ -339,7 +339,14 @@ const forecastActivity = (activity, ctx, asOf) => {
   const budget = num(activity.budget) || num(cost?.budget);
   const actual = num(cost?.actual);
   const committed = num(cost?.committed);
-  const forecastValue = num(cost?.forecast);
+  // A cost forecast is one somebody made (entered, or older than the source
+  // column — treated as entered). A DEFAULT is the placeholder the server wrote
+  // because nobody did (owner decision R5-2): it is the larger of budget and
+  // actual, both already in the projection below, so it adds nothing to it and
+  // is never reported as "the cost forecast" — a record the ledger's first
+  // posting created read "Cost forecast 12000 above the budget" with the basis
+  // "forecast" on an activity nobody had forecast.
+  const forecastValue = cost?.forecastSource === "default" ? 0 : num(cost?.forecast);
   let projectedCost = null;
   let costBasis = null;
   if (budget > 0) {

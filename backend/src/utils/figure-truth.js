@@ -53,16 +53,28 @@ const budgetLineTruth = (typed) => ({
   },
 });
 
-// A cost record's stored forecast when its writer gives none (cost.service
-// resolveForecast). Named here so the label and the rule are read together.
+// A cost record's stored forecast when its writer gives none (utils/cost-forecast
+// defaultForecast). Named here so the label and the rule are read together.
 // PC-7a 3d (owner, 2026-09-29): it is the cost summary's own estimate at
 // completion for a record without a forecast — the larger of its budget and
 // its actual. The former default, budget + 1.1 × (actual − budget), was −10%
 // of the budget on a record with no actual yet (a 500 on every cost record
 // created without a forecast on an allocated activity) and fell below actual
 // whenever actual was under budget.
+//
+// R5-2 (owner, 2026-09-30): that rule is only the INITIAL default for a
+// genuinely missing forecast. Each record now says whether its forecast was
+// entered, is that default, or was not recorded (CostRecord.forecastSource;
+// utils/cost-forecast), so the cost summary no longer presents every
+// record's forecast as the default rule: its records' forecast is labelled
+// per record (COST_RECORD_FORECAST_BASIS_PER_RECORD) and the mix is counted.
 const COST_RECORD_FORECAST_DEFAULT_BASIS = "greater_of_budget_and_actual";
 const COST_RECORD_FORECAST_DEFAULT_RULE = "the larger of the record's budget and its actual (never negative, never below actual)";
+const COST_RECORD_FORECAST_BASIS_PER_RECORD = "entered_or_default_per_record";
+// The cost summary's Σ of the records' estimates at completion and its
+// scenarios: the cost module's own projection, never called the EAC — the
+// EAC is the earned-value report's revised budget ÷ CPI (owner decision D2).
+const COST_RECORD_PROJECTED_FINAL_COST_LABEL = "Projected final cost (cost records)";
 
 // The earned-value report's figures (earned-value.service). The EAC's
 // basis is the report's own eacBasis key (utils/eac-basis).
@@ -118,6 +130,8 @@ module.exports = {
   budgetLineTruth,
   COST_RECORD_FORECAST_DEFAULT_BASIS,
   COST_RECORD_FORECAST_DEFAULT_RULE,
+  COST_RECORD_FORECAST_BASIS_PER_RECORD,
+  COST_RECORD_PROJECTED_FINAL_COST_LABEL,
   EV_REPORT_TRUTH,
   EV_HISTORY_TRUTH,
 };

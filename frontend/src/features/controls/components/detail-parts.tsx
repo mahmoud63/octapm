@@ -74,6 +74,13 @@ export function FigureRow({
         Not available yet ({figure.wave})
       </span>
     )
+  } else if (figure.withheld) {
+    // The server withheld the figure: a dash — its reason is the basis below.
+    body = (
+      <span className='text-muted-foreground' data-withheld='true'>
+        —
+      </span>
+    )
   } else {
     const text =
       format === 'money'
@@ -83,6 +90,18 @@ export function FigureRow({
           : `${formatQuantity(figure.value)}${suffix ? ` ${suffix}` : ''}`
     body = (
       <span className='inline-flex items-center gap-1.5'>
+        {/* A default forecast says so (owner decision R5-2): never read as
+            an entered one. Its basis is on hover and in the line below. */}
+        {figure.forecastSource === 'default' && (
+          <Badge
+            variant='outline'
+            className='border-dashed border-amber-500/50 px-1 py-0 text-[10px] font-medium text-amber-700 dark:text-amber-300'
+            title={figure.basis}
+            data-forecast-source='default'
+          >
+            Default
+          </Badge>
+        )}
         <span className='font-medium tabular-nums' data-value={figure.value ?? ''}>
           {text}
         </span>

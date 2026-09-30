@@ -371,7 +371,8 @@ liveDescribe("PC-7a: the Original Budget cannot be rewritten once changes, posti
     expect(cost.truth.budget).toMatchObject({ truth: "derived", label: "Budget" });
     expect(cost.truth.budget.otherBudgets.map((row) => row.label)).toEqual(["Budget at completion (EV basis)", "Contract value + approved changes"]);
     expect(cost.truth.totals).toMatchObject({ budget: "derived", committed: "derived", actual: "derived", forecast: "projection:estimate_at_completion" });
-    expect(cost.truth.records.forecast).toBe("projection:typed_or_greater_of_budget_and_actual"); // PC-7a 3d
+    // R5-2 (2026-09-30): each record says its own basis; the summary counts the mix (forecastSources).
+    expect(cost.truth.records.forecast).toBe("projection:entered_or_default_per_record");
     expect(cost.truth.records.derivedFrom.forecast).toContain("the larger of the record's budget and its actual");
     expect(cost.truth.eac.truth).toBe("projection:estimate_at_completion");
 

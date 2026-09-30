@@ -83,9 +83,22 @@ export const FINANCIAL_TERMS = {
     label: 'Actual cost',
     hint: 'Posted to the cost ledger to date',
   },
-  forecastEac: {
-    label: 'Forecast (EAC)',
-    hint: 'Estimate at completion on activity cost records — never below actual cost',
+  // The cost records' own projection (owner decision R5-2): never called the
+  // EAC — the EAC is the earned-value report's revised budget ÷ CPI (D2),
+  // which reads no cost record's forecast.
+  costRecordsFinalCost: {
+    label: 'Projected final cost (cost records)',
+    hint: "Σ each activity cost record's projected final cost: an entered forecast counts as entered (0 included) and never below actual cost; a default is not counted as a forecast — the larger of budget and actual counts; an unrecorded one counts when above 0 and not below actual, otherwise the larger of budget and actual — not the earned-value EAC (revised budget ÷ CPI)",
+  },
+  // A cost record's stored forecast, by where it came from (R5-2). The server
+  // sends the basis text; these are the column's name and the marker's.
+  recordForecast: {
+    label: 'Forecast',
+    hint: 'The forecast stored on the cost record: entered, or the initial default when none was entered',
+  },
+  defaultForecastMarker: {
+    label: 'Default',
+    hint: 'Default forecast: the larger of the budget and the actual cost as they stood when it was set; it does not follow them afterwards (no forecast was entered)',
   },
   lineForecast: {
     label: 'Forecast (budget lines)',

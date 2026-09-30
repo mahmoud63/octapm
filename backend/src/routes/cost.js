@@ -16,6 +16,14 @@ const {
   withheldCostSummary,
 } = require('../utils/boq-figures');
 
+// Where a record's forecast came from is the server's to say (owner decision
+// R5-2): a client that sends forecastSource is refused, as PrimeContract's
+// originalValueSource is.
+const forecastSourceIsTheServers = body('forecastSource')
+  .not()
+  .exists()
+  .withMessage('forecastSource is set by the server and cannot be sent');
+
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 
@@ -46,14 +54,18 @@ router.get(
     validate,
   ],
   asyncHandler(async (req, res) => {
+    const access = boqFigureAccess(req);
     const result = await costService.getCostRecords({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       query: req.query,
+      // The order on sortBy=forecast is a read of the forecasts too: a caller
+      // who is not given the default ones is not given their order (R5-2).
+      boqAccess: access,
     });
     // A record's budget is its activity's approved BOQ allocation: withheld
     // from a caller who may not read the BOQ (owner decision E1).
-    return sendSuccess(res, withheldCostRecords(result, boqFigureAccess(req)));
+    return sendSuccess(res, withheldCostRecords(result, access));
   }),
 );
 
@@ -124,6 +136,7 @@ router.post(
     moneyBody('actual'),
     body('actualThroughDate').optional({ nullable: true }).isISO8601(),
     moneyBody('forecast'),
+    forecastSourceIsTheServers,
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -160,6 +173,7 @@ router.patch(
     moneyBody('actual'),
     body('actualThroughDate').optional({ nullable: true }).isISO8601(),
     moneyBody('forecast'),
+    forecastSourceIsTheServers,
     validate,
   ],
   asyncHandler(async (req, res) => {
