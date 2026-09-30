@@ -52,6 +52,8 @@ const denied = (module, reason = "You do not have permission to read this sectio
   reason,
 });
 const PARTY_SCOPED_REASON = "Your access is limited to your company's records: open the module to see them";
+const SCHEDULE_WITHHELD_REASON =
+  "The activity's dates, critical status, float and progress are available only to members who may read the schedule";
 
 const toNumber = (value) => {
   const number = Number(value);
@@ -60,6 +62,9 @@ const toNumber = (value) => {
 const iso = (value) => (value ? new Date(value).toISOString() : null);
 const capped = (rows, total, viewAll) => ({ items: rows.slice(0, LIST_CAP), total, viewAll });
 const activityCodeOf = (activity) => activity?.activityCode || activity?.p6ActivityId || null;
+// An IPC line opens the certificate it sits on (the IPC workbook selects a
+// certificate, not a line); a line on no certificate yet opens the register.
+const ipcLineHref = (link, entry) => (entry.ipcCertificateId ? link("ipc_certificate", entry.ipcCertificateId) : link("ipc"));
 
 // Another organisation's project answers as a missing one does.
 const loadContext = async ({ orgId, projectId }) => {
@@ -140,8 +145,8 @@ const originalQuantityOf = async ({ projectId, item, lock }) => {
 
 // PC-4's per-record readiness issues. Each issue lists at most ITEM_CAP
 // records: a row absent from a capped list is "not itemised", never clean.
-const readinessFlagsFor = async ({ orgId, projectId, itemId }) => {
-  const readiness = await readinessService.getSetupReadiness({ orgId, projectId, canReadBoq: true, canReadSchedule: true });
+const readinessFlagsFor = async ({ orgId, projectId, itemId, canReadSchedule }) => {
+  const readiness = await readinessService.getSetupReadiness({ orgId, projectId, canReadBoq: true, canReadSchedule });
   const flags = [];
   const notItemised = [];
   for (const step of readiness.steps || []) {
@@ -186,17 +191,26 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
   const summaryItem = (allocationList.summary.items || []).find((entry) => entry.boqItemId === itemId) || null;
   const allocations = allocationList.allocations;
   const activityIds = [...new Set(allocations.map((entry) => entry.activityId))];
+  // This view is admitted on boq:read alone. A linked activity's schedule —
+  // its dates, critical flag, float, progress — belongs to the schedule
+  // module: a member who may not read the schedule is refused GET
+  // /activities, so here the activity is what an allocation listing already
+  // shows a BOQ reader (id, code, name) and a { allowed: false } marker, and
+  // the schedule is not even read.
+  const canReadSchedule = can("schedule");
   const [activities, progress, original] = await Promise.all([
     activityIds.length
       ? prisma.activity.findMany({
           where: { id: { in: activityIds }, projectId },
-          select: {
-            id: true, name: true, activityCode: true, p6ActivityId: true, startDate: true, endDate: true,
-            isCritical: true, totalFloat: true, isActive: true,
-          },
+          select: canReadSchedule
+            ? {
+                id: true, name: true, activityCode: true, p6ActivityId: true, startDate: true, endDate: true,
+                isCritical: true, totalFloat: true, isActive: true,
+              }
+            : { id: true, name: true, activityCode: true, p6ActivityId: true },
         })
       : [],
-    latestApprovedProgress(activityIds),
+    canReadSchedule ? latestApprovedProgress(activityIds) : new Map(),
     originalQuantityOf({ projectId, item, lock }),
   ]);
   const activityById = new Map(activities.map((entry) => [entry.id, entry]));
@@ -219,7 +233,15 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
           "Allocation quantity + Σ approved change-order allocation-link quantity (ipc.service getApprovedVariationAllowance, the IPC certification cap)",
           [{ type: "activity_boq_allocation", id: allocation.id }, { type: "change_order_allocation_link", filter: "changeOrder.status = approved" }],
         ),
-        activity: activity
+        activity: activity && !canReadSchedule
+          ? {
+              id: activity.id,
+              code: activityCodeOf(activity),
+              name: activity.name,
+              href: null,
+              schedule: denied("schedule", SCHEDULE_WITHHELD_REASON),
+            }
+          : activity
           ? {
               id: activity.id,
               code: activityCodeOf(activity),
@@ -300,7 +322,7 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
     const ipcItems = await prisma.ipcItem.findMany({
       where: { projectId, boqItemId: itemId },
       orderBy: [{ createdAt: "desc" }],
-      select: { id: true, ipcPeriod: true, qty: true, currentCert: true, status: true, certDate: true },
+      select: { id: true, ipcPeriod: true, qty: true, currentCert: true, status: true, certDate: true, ipcCertificateId: true },
     });
     const certified = ipcItems.filter((entry) => CERTIFIED_IPC_STATUSES.includes(entry.status));
     sections.certification = {
@@ -324,7 +346,7 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
           qty: toNumber(entry.qty),
           currentCert: toMoneyNumber(entry.currentCert),
           certDate: iso(entry.certDate),
-          href: link("ipc_item", entry.id),
+          href: ipcLineHref(link, entry),
         })),
         ipcItems.length,
         link("ipc"),
@@ -432,7 +454,7 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
     sections.procurement = denied("procurement");
   }
 
-  sections.readiness = await readinessFlagsFor({ orgId, projectId, itemId });
+  sections.readiness = await readinessFlagsFor({ orgId, projectId, itemId, canReadSchedule });
 
   if (can("audit")) {
     const history = await auditService.listEvents({ orgId, projectId, entityType: "boq_item", entityId: itemId, limit: LIST_CAP, order: "desc" });
@@ -555,7 +577,10 @@ const getActivityDetail = async ({ orgId, projectId, activityId, can, partyScope
       getApprovedVariationAllowance({ tx: prisma, projectId, allocationId: allocation.id, boqItemId: allocation.boqItemId }),
     ),
   );
-  const earned = latest ? toMoneyNumber(approved.amount) * (toNumber(latest.pctComplete) / 100) : 0;
+  // EV is the allocation summary's own figure, scoped to this activity: Σ per
+  // approved allocation of multiplyMoney(amount, clamp(pct, 0, 100) / 100) —
+  // not a second formula over the activity's total.
+  const activitySummary = await allocationService.buildAllocationSummary({ projectId, activityIds: [activityId] });
   sections.mapping = {
     allowed: true,
     mappedQuantity: fig(approved.quantity, "derived", "Σ approved, active allocation quantity for this activity (getApprovedActivityAllocationTotals)", [
@@ -568,9 +593,9 @@ const getActivityDetail = async ({ orgId, projectId, activityId, can, partyScope
       { type: "activity", id: activityId, field: "budget" },
     ]),
     earnedValue: fig(
-      toMoneyNumber(earned),
+      activitySummary.earnedValue,
       "derived",
-      "Derived — as of now, not the official reporting-cutoff EV: approved allocation amount × latest approved progress (allocation-summary basis)",
+      "Derived — as of now, not the official reporting-cutoff EV: Σ approved allocation amount × latest approved progress, per allocation (allocation summary scoped to this activity)",
       [{ type: "activity_boq_allocation" }, { type: "activity_progress", filter: "status = approved, latest" }],
     ),
     allocations: capped(
@@ -668,7 +693,7 @@ const getActivityDetail = async ({ orgId, projectId, activityId, can, partyScope
   if (can("ipc")) {
     const ipcItems = await prisma.ipcItem.findMany({
       where: { projectId, allocation: { activityId }, status: { in: CERTIFIED_IPC_STATUSES } },
-      select: { id: true, ipcPeriod: true, qty: true, currentCert: true, status: true, boqItemId: true },
+      select: { id: true, ipcPeriod: true, qty: true, currentCert: true, status: true, boqItemId: true, ipcCertificateId: true },
       orderBy: { createdAt: "desc" },
     });
     sections.certification = {
@@ -681,7 +706,7 @@ const getActivityDetail = async ({ orgId, projectId, activityId, can, partyScope
       ),
       lines: capped(
         ipcItems.map((entry) => ({
-          id: entry.id, period: entry.ipcPeriod, status: entry.status, qty: toNumber(entry.qty), currentCert: toMoneyNumber(entry.currentCert), boqItemId: entry.boqItemId, href: link("ipc_item", entry.id),
+          id: entry.id, period: entry.ipcPeriod, status: entry.status, qty: toNumber(entry.qty), currentCert: toMoneyNumber(entry.currentCert), boqItemId: entry.boqItemId, href: ipcLineHref(link, entry),
         })),
         ipcItems.length,
         link("ipc"),

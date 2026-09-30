@@ -1081,7 +1081,18 @@ const withheldAllocationLinks = (record, access = FULL_ACCESS) => {
 // an allocation link (its presence says the activity is mapped), and the BOQ
 // row a change order's or a PO line's link points at. Omitted, never zeroed:
 // the section is { allowed: false, module: "boq", reason }.
-const DETAIL_BOQ_LINK_KEYS = ["allocationId", "boqItemId", "boqItemHref"];
+//
+// A change order's allocation links on this view are filtered to THIS
+// activity's allocations, so a link's existence, its count, its quantity and
+// its amount are per-activity mapping facts: every kept order loses them
+// whole, however else it reaches the activity (an order with activityId = X
+// and a link to X's allocation is still listed, without the link). The
+// marker is put on every order and on the list, whether or not anything was
+// removed, and carries no count — its presence says nothing about a mapping.
+const CHANGE_ORDERS_BY_ALLOCATION_WITHHELD =
+  "Change orders reached through BOQ allocations are available only to members who may read the BOQ";
+const ACTIVITY_HISTORY_BOQ_WITHHELD =
+  "BOQ allocation approvals and change orders reached through them are available only to members who may read the BOQ";
 
 const withheldBoqItemDetail = (detail, access = FULL_ACCESS) => {
   if (access.boq || !detail || typeof detail !== "object") return detail;
@@ -1107,16 +1118,18 @@ const withheldActivityDetail = (detail, access = FULL_ACCESS) => {
         continue;
       }
       kept.push({
-        ...withoutKeys(order, ["matchedBy"]),
-        allocationLinks: mapList(order.allocationLinks, (link) => {
-          const keys = DETAIL_BOQ_LINK_KEYS.filter((key) => has(link, key));
-          return keys.length ? { ...withoutKeys(link, keys), boqWithheld: { keys, reason: ALLOCATION_LINK_WITHHELD } } : link;
-        }),
+        ...withoutKeys(order, ["matchedBy", "allocationLinks"]),
+        boqWithheld: { keys: ["allocationLinks"], reason: ALLOCATION_LINK_WITHHELD },
       });
     }
     sections.changes = {
       ...sections.changes,
-      changeOrders: { ...orders, items: kept, total: Math.max(0, (orders.total || 0) - droppedOrderIds.size) },
+      changeOrders: {
+        ...orders,
+        items: kept,
+        total: Math.max(0, (orders.total || 0) - droppedOrderIds.size),
+        boqWithheld: { reason: CHANGE_ORDERS_BY_ALLOCATION_WITHHELD },
+      },
     };
   }
 
@@ -1132,7 +1145,12 @@ const withheldActivityDetail = (detail, access = FULL_ACCESS) => {
       (event) => event.kind !== "allocation_approval" && !(event.kind === "change_order_link" && droppedOrderIds.has(event.recordId)),
     );
     const removed = sections.history.events.length - events.length;
-    sections.history = { ...sections.history, events, total: Math.max(0, (sections.history.total || 0) - removed) };
+    sections.history = {
+      ...sections.history,
+      events,
+      total: Math.max(0, (sections.history.total || 0) - removed),
+      boqWithheld: { reason: ACTIVITY_HISTORY_BOQ_WITHHELD },
+    };
   }
   return { ...detail, sections };
 };
@@ -1187,4 +1205,6 @@ module.exports = {
   // PC-5 detail views
   withheldActivityDetail,
   withheldBoqItemDetail,
+  CHANGE_ORDERS_BY_ALLOCATION_WITHHELD,
+  ACTIVITY_HISTORY_BOQ_WITHHELD,
 };

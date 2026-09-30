@@ -14,7 +14,16 @@
  *   carries its truth and basis;
  * - a site engineer gets no cost or IPC section ({ allowed: false });
  * - a cost controller whose template refuses the BOQ gets the activity's
- *   cost but none of the bill's figures (E1), and is refused the BOQ detail;
+ *   cost but none of the bill's figures (E1) — a change order that reaches
+ *   the activity directly AND through an allocation link is listed without
+ *   the link, and the lists say what they withheld — and is refused the BOQ
+ *   detail;
+ * - a BOQ reader whose template refuses the schedule sees a linked activity's
+ *   name on the BOQ detail and none of its dates, float, criticality or progress;
+ * - a subcontractor's person (party-scoped) gets no commitment, punch or
+ *   lookahead rows from either detail;
+ * - the activity's EV is the allocation summary's, on amounts where a second
+ *   formula over the total would round differently;
  * - another organisation's ids answer exactly as a random id does (404).
  *
  * Everything lives in throwaway "LiveTest <uuid>" organisations, dropped
@@ -26,6 +35,9 @@ const crypto = require("crypto");
 const { prisma } = require("../../config/db");
 const { createLiveOrg, createLiveUser, dropLiveOrg, liveDescribe, mintAccessToken } = require("../../__live__/helpers");
 const allocationService = require("../activity-boq-allocation.service");
+const commitmentService = require("../commitment.service");
+const progressService = require("../progress.service");
+const { toMoneyNumber } = require("../../utils/money");
 const { getApprovedVariationAllowance } = require("../ipc.service");
 const { startApi } = require("./auth-live-kit");
 
@@ -53,6 +65,7 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
   const acts = {};
   const allocations = {};
   const members = {};
+  const orders = {};
   const auth = () => ({ authorization: `Bearer ${live.token}` });
   const as = (user) => ({ authorization: `Bearer ${mintAccessToken(user)}` });
   const at = (route, projectId = project.id) => `/api/v1/projects/${projectId}${route}`;
@@ -69,7 +82,7 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
       data: { orgId: other.org.id, name: "LiveTest PC-5 other", startDate: new Date("2026-01-05"), endDate: new Date("2026-12-18") },
     });
 
-    const addMember = async (key, role, { noBoq = false } = {}) => {
+    const addMember = async (key, role, { noBoq = false, noSchedule = false } = {}) => {
       const member = await createLiveUser(prisma, {
         orgId: live.org.id,
         name: `LiveTest ${key}`,
@@ -77,9 +90,10 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
         role,
       });
       await prisma.projectAssignment.create({ data: { projectId: project.id, userId: member.id, role, orgId: live.org.id } });
-      if (noBoq) {
+      if (noBoq || noSchedule) {
+        const module = noBoq ? "boq" : "schedule";
         const template = await prisma.permissionTemplate.create({
-          data: { orgId: live.org.id, name: `LiveTest ${key}, no BOQ ${tag}`, baseRole: role, tools: { create: [{ module: "boq", level: "none" }] } },
+          data: { orgId: live.org.id, name: `LiveTest ${key}, no ${module} ${tag}`, baseRole: role, tools: { create: [{ module, level: "none" }] } },
         });
         await prisma.projectUserPermission.create({ data: { orgId: live.org.id, projectId: project.id, userId: member.id, templateId: template.id } });
       }
@@ -87,17 +101,36 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     };
     await addMember("site", "site_engineer");
     await addMember("costNoBoq", "cost_controller", { noBoq: true });
+    await addMember("qsNoSchedule", "qs", { noSchedule: true });
+    // A subcontractor's person: no project assignment, an active member of
+    // the project's subcontractor party — party-scoped access.
+    const sub = await createLiveUser(prisma, {
+      orgId: live.org.id,
+      name: "LiveTest sub",
+      email: `live-pc5-sub-${tag}@octapm-live.test`,
+      role: "site_engineer",
+    });
+    const company = await prisma.company.create({ data: { orgId: live.org.id, name: `LiveTest PC-5 Sub Co ${tag}` } });
+    const party = await prisma.projectParty.create({ data: { projectId: project.id, companyId: company.id, role: "subcontractor" } });
+    await prisma.projectPartyMember.create({ data: { projectPartyId: party.id, userId: sub.id } });
+    members.sub = sub;
 
     // Two priced rows and two activities, through the API.
     for (const [key, body] of Object.entries({
       A: { code: "P5.1", description: "PC5SECRET concrete to slabs", quantity: 100, unit: "m3", rate: 10 },
       B: { code: "P5.2", description: "PC5SECRET formwork", quantity: 50, unit: "m2", rate: 20 },
+      // Three rows of 0.05 on activity Z: at 50% each allocation earns
+      // multiplyMoney(0.05, 0.5) — the summary's rule — which a formula over
+      // Z's total (0.15 × 0.5) rounds differently.
+      C1: { code: "P5.C1", description: "PC5SECRET sealant 1", quantity: 1, unit: "nr", rate: 0.05 },
+      C2: { code: "P5.C2", description: "PC5SECRET sealant 2", quantity: 1, unit: "nr", rate: 0.05 },
+      C3: { code: "P5.C3", description: "PC5SECRET sealant 3", quantity: 1, unit: "nr", rate: 0.05 },
     })) {
       const created = await api.post(at("/boq/items"), body, auth());
       expect([key, created.status, created.body?.error]).toEqual([key, 201, undefined]);
       rows[key] = created.body.data.item;
     }
-    for (const [key, code] of [["X", "P5X"], ["Y", "P5Y"]]) {
+    for (const [key, code] of [["X", "P5X"], ["Y", "P5Y"], ["Z", "P5Z"]]) {
       const created = await api.post(
         at("/activities"),
         { engineerIds: [live.user.id], name: `Pour ${key}`, activityCode: code, duration: 5, startDate: "2026-02-02", endDate: "2026-02-06" },
@@ -111,6 +144,9 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
       ["AX", rows.A.id, acts.X.id, 60],
       ["AY", rows.A.id, acts.Y.id, 40],
       ["BX", rows.B.id, acts.X.id, 50],
+      ["C1Z", rows.C1.id, acts.Z.id, 1],
+      ["C2Z", rows.C2.id, acts.Z.id, 1],
+      ["C3Z", rows.C3.id, acts.Z.id, 1],
     ]) {
       const created = await api.post(at("/activity-boq-allocations"), { boqItemId, activityId, quantity }, auth());
       expect([key, created.status, created.body?.error]).toEqual([key, 201, undefined]);
@@ -126,6 +162,10 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     await prisma.activityProgress.create({
       data: { activityId: acts.X.id, pctComplete: 50, status: "approved", source: "manual", approvedBy: live.user.id, approvedAt: new Date("2026-02-04T12:00:00.000Z") },
     });
+    await prisma.activityProgress.create({
+      data: { activityId: acts.Z.id, pctComplete: 50, status: "approved", source: "manual", approvedBy: live.user.id, approvedAt: new Date("2026-02-04T12:00:00.000Z") },
+    });
+    await prisma.activityDependency.create({ data: { projectId: project.id, predecessorId: acts.X.id, successorId: acts.Y.id, relationshipType: "FS", lagDays: 2 } });
     await prisma.commitment.create({
       data: {
         orgId: live.org.id,
@@ -142,6 +182,8 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
         },
       },
     });
+    // The certified writer of CostRecord.committed, as an executed commitment's own transition calls it.
+    await commitmentService.recomputeCommitted({ orgId: live.org.id, projectId: project.id });
     await prisma.ipcItem.create({
       data: { projectId: project.id, boqItemId: rows.A.id, allocationId: allocations.AX, ipcPeriod: "P01", qty: 30, rate: 10, currentCert: 300, cumulativeCert: 300, status: "certified" },
     });
@@ -155,6 +197,20 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
         approvedAt: new Date("2026-02-05T12:00:00.000Z"),
         allocationLinks: { create: [{ projectId: project.id, allocationId: allocations.AX, boqItemId: rows.A.id, quantity: 5, amount: 50 }] },
       },
+    });
+    // Reaches X twice: directly (activityId) and through an allocation link to AX.
+    orders.dual = await prisma.changeOrder.create({
+      data: {
+        projectId: project.id,
+        activityId: acts.X.id,
+        ref: `CO-PC5-DUAL-${tag}`,
+        description: "LiveTest PC-5 dual-matched order",
+        value: 70,
+        status: "approved",
+        approvedAt: new Date("2026-02-06T12:00:00.000Z"),
+        allocationLinks: { create: [{ projectId: project.id, allocationId: allocations.AX, boqItemId: rows.A.id, quantity: 7, amount: 70 }] },
+      },
+      include: { allocationLinks: { select: { id: true } } },
     });
     await prisma.ncrRecord.create({ data: { projectId: project.id, activityId: acts.X.id, ref: `NCR-PC5-${tag}`, severity: "minor", description: "Honeycombing" } });
   }, 180_000);
@@ -182,7 +238,7 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     expect(detail.header).toMatchObject({ id: rows.A.id, code: "P5.1", unit: "m3" });
     expect(detail.sections.quantities.current).toMatchObject({ value: 100, truth: "source" });
     expect(detail.sections.quantities.original).toMatchObject({ value: 100, truth: "source" });
-    expect(variation.quantity).toBe(5);
+    expect(variation.quantity).toBe(12);
     expect(detail.sections.quantities.authorised).toMatchObject({ value: 100 + variation.quantity, truth: "derived" });
     expect(detail.sections.quantities.mapped.value).toBe(item.approvedAllocatedQuantity);
     expect(detail.sections.quantities.installed).toMatchObject({ value: null, notAvailable: true, wave: "PC-6" });
@@ -194,7 +250,7 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     expect(detail.sections.certification.certifiedAmount.value).toBe(item.certifiedValue);
     expect(detail.sections.commitments.committed.value).toBe(900);
     expect(detail.sections.commitments.committed.basis).toMatch(/excludes variations/);
-    expect(detail.sections.changes.changeOrders.total).toBe(1);
+    expect(detail.sections.changes.changeOrders.total).toBe(2);
 
     // The linked activities, each linked back with its schedule and progress.
     const linked = detail.sections.mapping.allocations.items;
@@ -203,6 +259,8 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     const perAllocation = await getApprovedVariationAllowance({ tx: prisma, projectId: project.id, allocationId: allocations.AX, boqItemId: rows.A.id });
     expect(ax.authorisedQuantity.value).toBe(60 + perAllocation.quantity);
     expect(ax.activity.pctComplete.value).toBe(50);
+    const xRow = await prisma.activity.findUnique({ where: { id: acts.X.id }, select: { startDate: true, endDate: true, isCritical: true } });
+    expect(ax.activity).toMatchObject({ startDate: xRow.startDate.toISOString(), endDate: xRow.endDate.toISOString(), isCritical: Boolean(xRow.isCritical) });
     expect(ax.activity.href).toBe(`/o/${live.org.slug || live.org.id}/projects/${project.id}/activities?recordId=${acts.X.id}&source=activity`);
 
     for (const { path, figure } of figuresOf(detail.sections)) {
@@ -218,6 +276,8 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     const totals = (await allocationService.getApprovedActivityAllocationTotals({ projectId: project.id, activityIds: [acts.X.id] })).get(acts.X.id);
     const activityRow = await prisma.activity.findUnique({ where: { id: acts.X.id }, select: { budget: true } });
     const costRecord = await prisma.costRecord.findFirst({ where: { projectId: project.id, activityId: acts.X.id } });
+    const owner = await allocationService.buildAllocationSummary({ projectId: project.id, activityIds: [acts.X.id] });
+    const method = await progressService.getProgressMethod({ orgId: live.org.id, projectId: project.id, activityId: acts.X.id });
 
     expect(detail.header).toMatchObject({ id: acts.X.id, code: "P5X", name: "Pour X" });
     expect(detail.sections.mapping.mappedQuantity).toMatchObject({ value: 110, truth: "derived" });
@@ -230,15 +290,35 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     expect(ax.authorisedQuantity.value).toBe(60 + perAllocation.quantity);
     expect(ax.boqItem.href).toBe(`/o/${live.org.slug || live.org.id}/projects/${project.id}/boq?recordId=${rows.A.id}&source=boq_item`);
     expect(detail.sections.progress.pctComplete).toMatchObject({ value: 50, truth: "source" });
-    expect(detail.sections.cost.committed.value).toBe(costRecord ? Number(costRecord.committed) : 0);
-    expect(detail.sections.cost.actual.value).toBe(costRecord ? Number(costRecord.actual) : 0);
+    // recomputeCommitted wrote X's record: the SOV line on X (540).
+    expect(costRecord).not.toBeNull();
+    expect(toMoneyNumber(costRecord.committed)).toBe(540);
+    expect(detail.sections.cost.committed.value).toBe(540);
+    expect(detail.sections.cost.actual.value).toBe(toMoneyNumber(costRecord.actual));
+    expect(detail.sections.mapping.earnedValue.value).toBe(owner.earnedValue);
+    expect(detail.sections.progress.method).toEqual(method);
+    expect(detail.sections.constraints.successors.map((entry) => [entry.activity.id, entry.relationshipType, entry.lagDays])).toEqual([[acts.Y.id, "FS", 2]]);
+    expect(detail.sections.documents).toMatchObject({ allowed: true, attachments: { items: [] }, photos: { items: [] } });
     expect(detail.sections.certification.certifiedAmount.value).toBe(300);
-    expect(detail.sections.changes.changeOrders.total).toBe(1);
+    expect(detail.sections.changes.changeOrders.total).toBe(2);
+    const dual = detail.sections.changes.changeOrders.items.find((entry) => entry.id === orders.dual.id);
+    expect(dual.allocationLinks).toEqual([expect.objectContaining({ id: orders.dual.allocationLinks[0].id, quantity: 7, amount: 70 })]);
     expect(detail.sections.quality.ncrs.items).toHaveLength(1);
     expect(detail.sections.history.events.some((event) => event.kind === "allocation_approval")).toBe(true);
     for (const { path, figure } of figuresOf(detail.sections)) {
       if (!figure.notAvailable) expect([path, TRUTHS.has(figure.truth), typeof figure.basis]).toEqual([path, true, "string"]);
     }
+  });
+
+  it("the activity's EV is the allocation summary's, per allocation, where a formula over the total rounds differently", async () => {
+    const answer = await api.get(at(`/activities/${acts.Z.id}/detail`), auth());
+    expect([answer.status, answer.body?.error]).toEqual([200, undefined]);
+    const owner = await allocationService.buildAllocationSummary({ projectId: project.id, activityIds: [acts.Z.id] });
+    const totals = (await allocationService.getApprovedActivityAllocationTotals({ projectId: project.id, activityIds: [acts.Z.id] })).get(acts.Z.id);
+    // The case discriminates: a formula over the total does not equal the owner.
+    const overTotal = toMoneyNumber(toMoneyNumber(totals.amount) * 0.5);
+    expect(owner.earnedValue).not.toBe(overTotal);
+    expect(answer.body.data.sections.mapping.earnedValue).toMatchObject({ value: owner.earnedValue, truth: "derived" });
   });
 
   it("a site engineer gets no cost or IPC section", async () => {
@@ -261,14 +341,57 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     expect(sections.mapping).toEqual({ allowed: false, module: "boq", reason: expect.any(String) });
     expect(sections.certification).toEqual({ allowed: false, module: "boq", reason: expect.any(String) });
     expect(sections.cost.allowed).toBe(true);
-    // The change order reached the activity only through an allocation link.
-    expect(sections.changes.changeOrders).toMatchObject({ items: [], total: 0 });
+    // The order reaching X only through an allocation link is gone; the
+    // dual-matched one stays, without its link; both lists say what they withheld.
+    expect(sections.changes.changeOrders.total).toBe(1);
+    expect(sections.changes.changeOrders.boqWithheld).toEqual({ reason: expect.any(String) });
+    expect(sections.changes.changeOrders.items).toEqual([
+      expect.objectContaining({ id: orders.dual.id, boqWithheld: { keys: ["allocationLinks"], reason: expect.any(String) } }),
+    ]);
+    expect(Object.prototype.hasOwnProperty.call(sections.changes.changeOrders.items[0], "allocationLinks")).toBe(false);
+    expect(sections.history.boqWithheld).toEqual({ reason: expect.any(String) });
     expect(sections.history.events.some((event) => event.kind === "allocation_approval")).toBe(false);
-    for (const secret of [rows.A.id, rows.B.id, allocations.AX, allocations.BX, "P5.1", "P5.2", "PC5SECRET", "mappedQuantity", "generatedBudget"]) {
+    const dualLink = orders.dual.allocationLinks[0].id;
+    for (const secret of [rows.A.id, rows.B.id, allocations.AX, allocations.BX, dualLink, "P5.1", "P5.2", "PC5SECRET", "mappedQuantity", "generatedBudget", '"quantity":7', '"amount":70']) {
       expect([secret, activity.text.includes(secret)]).toEqual([secret, false]);
     }
     const item = await api.get(at(`/boq/items/${rows.A.id}/detail`), as(members.costNoBoq));
     expect(item.status).toBe(403);
+  });
+
+  it("a BOQ reader who may not read the schedule sees a linked activity's name and none of its schedule", async () => {
+    const activity = await api.get(at(`/activities/${acts.X.id}/detail`), as(members.qsNoSchedule));
+    expect(activity.status).toBe(403);
+    const item = await api.get(at(`/boq/items/${rows.A.id}/detail`), as(members.qsNoSchedule));
+    expect([item.status, item.body?.error]).toEqual([200, undefined]);
+    const linked = item.body.data.sections.mapping.allocations.items.map((entry) => entry.activity);
+    expect(linked.map((entry) => entry.id).sort()).toEqual([acts.X.id, acts.Y.id].sort());
+    for (const entry of linked) {
+      expect(entry).toEqual({
+        id: entry.id,
+        code: expect.any(String),
+        name: expect.any(String),
+        href: null,
+        schedule: { allowed: false, module: "schedule", reason: expect.any(String) },
+      });
+    }
+    const mapping = JSON.stringify(item.body.data.sections.mapping);
+    const xRow = await prisma.activity.findUnique({ where: { id: acts.X.id }, select: { startDate: true } });
+    for (const secret of ["startDate", "endDate", "isCritical", "totalFloat", "pctComplete", "progressSource", xRow.startDate.toISOString()]) {
+      expect([secret, mapping.includes(secret)]).toEqual([secret, false]);
+    }
+  });
+
+  it("a subcontractor's person gets no commitment, punch or lookahead rows from either detail", async () => {
+    const item = await api.get(at(`/boq/items/${rows.A.id}/detail`), as(members.sub));
+    const activity = await api.get(at(`/activities/${acts.X.id}/detail`), as(members.sub));
+    expect([item.status, activity.status]).toEqual([200, 200]);
+    const partyRefusal = { allowed: false, module: expect.any(String), reason: expect.stringMatching(/limited to your company's records/) };
+    expect(item.body.data.sections.commitments).toEqual({ ...partyRefusal, module: "commitment" });
+    expect(activity.body.data.sections.quality.punchItems).toEqual({ ...partyRefusal, module: "punch" });
+    expect(activity.body.data.sections.constraints.lookahead).toEqual({ ...partyRefusal, module: "lookahead" });
+    expect(item.text.includes("SC-PC5-")).toBe(false);
+    expect(activity.text.includes("SC-PC5-")).toBe(false);
   });
 
   it("another organisation's ids answer exactly as a random id does", async () => {
