@@ -74,10 +74,50 @@ STOP before final CERT.
 - **PC-7b** provides reviewed exceptions and a Change Event handoff — never automatic Change Orders and never
   automatic budget or schedule changes. It includes R5-5.
 
+## Questions raised by the follow-up reviews (awaiting the owner; nothing changed)
+
+- **R5-1, the certified project's 45 days.** The trace (OCTAPM_FORECAST_CHANGE_IMPACTS_CENSUS.md §5) shows
+  the figure is not supportable as evidence of delay: VO-10…VO-20 are one client instruction recorded six
+  times by the Phase-21 certification harness (stage 8, before its re-run guard existed); the engine adds an
+  impact to the activity's own finish without moving successors (45 = 60 − 15); working days are added as
+  calendar days; there is no overlap or "already in the schedule" handling. Two of the duplicates (VO-18,
+  VO-20) each posted 125,000 of approved budget change that the certified snapshot expects and reconciles, so
+  correcting the duplicates would move certified figures. Proposals P1–P4 in §5.6 are proposals only.
+- **R5-2, what a default-source cost record displays.** The projection counts the live `max(budget, actual)`
+  for a default row, while the row shows the default stored when it was set; after a schedule import every
+  seeded row reads "Default forecast $0" beside a real Budget. Options: (a) read a default row as the live
+  default (the stored figure becomes a placeholder), or (b) keep the frozen stored default with its labelled
+  divergence. No stored amount of an existing project changes either way (all 271 existing rows are
+  NULL-source).
+- **R5-2, legacy rows.** A NULL-source forecast may be a pre-R5-2 default built from the allocation and stays
+  visible to a member without BOQ read, because its source is unknowable and backfilling is forbidden.
+  Recommended: the documented limit stands.
+- **One toast per refused mutation.** Fixed for the three mutations named (budget line create/update, IPC
+  certify); up to 310 other catch-and-toast callers still show a refusal twice. Follow-up, or invert the
+  default so the global toast applies only to mutations that opt in?
+- **Activity delete.** `DELETE /activities/:id` now refuses (409 `ACTIVITY_IN_USE`) an activity kept by a cost
+  record, progress record or daily report — every activity of an activated revision. Should an approved BOQ
+  allocation or a change-order link also keep an activity?
+- **Two surfaces for one activity row.** The Activity ID cell opens the PC-5 controls drawer; any other cell
+  still opens the older activity sheet. Both are proven to withhold BOQ data; whether to keep both is a UX
+  choice.
+- **Contract terms notice timing.** The IPC workbook's lasting notice appears after the first refused
+  Certify, because the period read exposes nothing about the contract value's source and the contract read
+  creates the contract row as a side effect. A pre-emptive notice needs a read-only "is the value
+  established" flag on the period read (no amount) — say if wanted.
+
 ## Carried pre-release tasks
 
 - Comment and conversation services: failure handling inside a caller's transaction (they still swallow an
   error marked `transactionAborted`).
+- Notification service: its own `compactJson` has no Decimal branch (0 affected rows today); one-line
+  hardening. Webhook redelivery of the 1,239 old-shape outbound payloads still sends them verbatim.
+- Other web surfaces may still format date-only values through `new Date(value).toLocaleDateString()`
+  (only the Forecast panel was fixed); the Schedule page footer prints raw ISO instants.
+- `deploy.yml` triggers on push to main directly, not on a successful Quality Gates run, so the new
+  source-check job does not gate a deploy; `validate-deployment-readiness.mjs` fails at the base
+  (`APP_SECRETS_ARN`); the backend-tests CI job names a Postgres URL but declares no service container.
+  All pre-existing; none changed (deployment settings are out of scope).
 - Advance-receipt auditing (advance receipts are not audited; predates Round 5).
 - The remaining documented coverage gaps: legacy `?module=` links without a Playwright proof; the staged
   revision's checks shown by link rather than inline; the cost module's missing per-record deep link; no
