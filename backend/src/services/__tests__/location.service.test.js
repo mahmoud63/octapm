@@ -16,6 +16,8 @@ jest.mock("../../events/bus", () => ({
   buildRecordEvent: jest.fn((event) => event),
   recordOutboundEvent: jest.fn().mockResolvedValue(null),
   publish: jest.fn(),
+  // audit.service announces a recorded event once its transaction commits.
+  publishRecorded: jest.fn(),
 }));
 
 const locationService = require("../location.service");
@@ -146,7 +148,7 @@ describe("location service", () => {
         }),
       }),
     );
-    expect(bus.publish).toHaveBeenCalled();
+    expect(bus.publishRecorded).toHaveBeenCalled();
   });
 
   it("rejects duplicate sibling names and invalid kinds", async () => {
