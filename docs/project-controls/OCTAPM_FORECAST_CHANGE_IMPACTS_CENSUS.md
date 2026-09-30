@@ -352,6 +352,23 @@ counted twice — is pinned by
 `backend/src/services/__live__/r5-1-forecast-change-impacts.live.test.js`,
 each convention marked there as a documented limitation.
 
+**The 45 days are a reading at an instant.** A forecast is built as of an
+instant; `GET /forecast` always reads as of now. Every figure in this
+section was read while Blockwork (and, in the regression case, every
+activity) was still ahead of its planned start, so its projected finish was
+its planned finish. Once an unstarted activity's planned start passes with
+no approved progress, the engine's late-start rule moves it by the time lost
+(and, past its planned finish, the overdue rule), whatever the change
+orders say. On the regression case's geometry the project slip is still 45
+on 2027-01-06 (Foundation concrete has moved to 2027-02-10 by late start;
+Blockwork still drives), but by 2027-03-20 it is more than 45 and
+Foundation concrete is the driver. The regression case therefore takes its
+figures from `forecast.service.buildForecast` at a fixed instant
+(2026-09-30T12:00Z) and asserts those two later readings too; it keeps the
+route for what no instant changes (shape, recorded impact days, planned
+dates, wording, and that nothing is written). The route has no `asOf`
+parameter and none was added.
+
 ## 6. How to reproduce
 
 From `backend`, under the cross-wave database lock (it builds two forecasts

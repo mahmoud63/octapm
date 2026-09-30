@@ -40,12 +40,31 @@
  * forecast (activity, baseline and contract dates, orders, amounts), and it is
  * called a projection, never an extension of time.
  *
+ * THE INSTANT. A forecast is read as of an instant, and GET /forecast always
+ * reads it as of now. The fixture's dates are fixed in 2027, so every figure
+ * below is taken from forecast.service.buildForecast at AS_OF — before any
+ * activity's planned start, as the certified project's Blockwork was when its
+ * 45 days were read (census §5.2) — and does not depend on the day the suite
+ * runs. Read later, the same records give other figures (the late-start and
+ * overdue rules move activities that have not started); such readings are
+ * asserted so the dependence is on the record. The HTTP route is kept for
+ * what no instant changes: the shape, the recorded impact days, the planned
+ * dates, the wording, and that nothing is written.
+ *
  *   npm run test:live -- src/services/__live__/r5-1-forecast-change-impacts.live.test.js
  */
 const { prisma } = require("../../config/db");
 const { createLiveOrg, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
 const { startApi } = require("./auth-live-kit");
-const { forecastBlock } = require("../forecast.service");
+const { buildForecast, deterministicNarrative, forecastBlock } = require("../forecast.service");
+
+// The instant every figure is read at: before the fixture's first planned
+// start (2027-01-04), so no pace, late-start or overdue rule applies.
+const AS_OF = new Date("2026-09-30T12:00:00.000Z");
+// Later readings of the same records — what GET /forecast will answer then.
+const LATE_START = new Date("2027-01-06T12:00:00.000Z"); // F two and a half days past its start
+const MID_MARCH = new Date("2027-03-20T12:00:00.000Z"); // F overdue, X past its start
+const AFTER_THE_PLAN = new Date("2027-08-01T12:00:00.000Z"); // every activity overdue
 
 const PROOF = { fileName: "LiveTest proof.pdf", fileUrl: "https://example.test/proof.pdf" };
 const DUPLICATE = "LiveTest Client instruction: upgrade blockwork to fair-faced, grid A-F";
@@ -75,11 +94,16 @@ liveDescribe("R5-1: the certified project's 45-day forecast, pinned on its own g
   };
   const order = async (description, activityId, days, extra = {}) =>
     send(at("/change-orders"), { description, category: "variation", value: 500, scheduleImpactSummary: `${days} working days on the activity`, costImpactSummary: "priced", activityLinks: [{ activityId, relationType: "impacted", scheduleImpactDays: days, ...extra }], attachmentRefs: [PROOF] });
+  // GET /forecast: the forecast as of NOW. Only what no instant changes is
+  // asserted on it.
   const forecast = async () => {
     const response = await api.get(at("/forecast"), auth());
     expect([response.status, response.body?.error]).toEqual([200, undefined]);
     return response.body.data;
   };
+  // The same forecast, built in this process at a fixed instant.
+  const forecastAt = (asOf = AS_OF) => buildForecast({ orgId: live.org.id, projectId: built.project.id, asOf });
+  const keysOf = (value) => Object.keys(value || {}).sort();
 
   // Every row the forecast could conceivably touch, read straight from the
   // database: the schedule (dates, float, baseline fields), the project and
@@ -198,8 +222,8 @@ liveDescribe("R5-1: the certified project's 45-day forecast, pinned on its own g
   });
 
   it("gives Blockwork 60 impact days and the project 45 days of projected slip, on the engine's documented conventions", async () => {
-    const data = await forecast();
-    expect(data.available).toBe(true);
+    const data = await forecastAt(AS_OF);
+    expect([data.available, data.asOf]).toEqual([true, "2026-09-30T12:00:00.000Z"]);
     const row = (key) => data.activities.find((activity) => activity.id === built.activities[key]);
 
     // LIMITATION 1 — additive: six approved orders of 10 days on X count 60.
@@ -231,6 +255,43 @@ liveDescribe("R5-1: the certified project's 45-day forecast, pinned on its own g
     expect(data.summary.scheduleLevel).toBe("high");
   });
 
+  it("is read as of an instant: the route answers the same forecast as of now, and a later reading moves activities that have not started", async () => {
+    const pinned = await forecastAt(AS_OF);
+    const now = await forecast();
+    const ids = ["F", "G", "X", "P", "M"].map((key) => built.activities[key]);
+    const facts = (data) => ids.map((id) => data.activities.find((activity) => activity.id === id)).map((activity) => [activity.name, activity.plannedFinish, activity.impactDays, activity.float, activity.isCritical]);
+
+    // The route's answer has the pinned forecast's shape, and the figures no
+    // instant changes: the planned dates and the recorded impact days.
+    expect(now.available).toBe(true);
+    expect(keysOf(now)).toEqual(keysOf(pinned));
+    expect(keysOf(now.schedule)).toEqual(keysOf(pinned.schedule));
+    expect(keysOf(now.activities[0])).toEqual(keysOf(pinned.activities[0]));
+    expect(now.activities.map((activity) => activity.id).sort()).toEqual([...ids].sort());
+    expect(now.schedule.plannedFinish).toBe("2027-04-08");
+    expect(facts(now)).toEqual(facts(pinned));
+    expect(facts(pinned)).toEqual([
+      ["Foundation concrete", "2027-02-08", 3, 0, true],
+      ["Frame", "2027-03-13", 0, 0, true],
+      ["Blockwork walls", "2027-03-24", 60, 0, true],
+      ["Finishes", "2027-04-08", 0, 0, true],
+      ["Practical completion", "2027-04-08", 0, 0, true],
+    ]);
+
+    // Two and a half days after F's planned start with nothing recorded, the
+    // late-start rule moves F by the time lost; X still drives the 45 days.
+    const lateStart = await forecastAt(LATE_START);
+    const f = lateStart.activities.find((activity) => activity.id === built.activities.F);
+    expect([f.basis, f.plannedFinish, f.projectedFinish, f.impactDays]).toEqual(["late_start", "2027-02-08", "2027-02-10", 3]);
+    expect([lateStart.schedule.projectedFinish, lateStart.schedule.slipDays, lateStart.schedule.criticalDriver.name]).toEqual(["2027-05-23", 45, "Blockwork walls"]);
+    // By mid-March F is overdue and X itself is late: the slip is no longer
+    // 45 and the driver is no longer Blockwork. The 45 days are a reading at
+    // an instant, not a property of the records.
+    const midMarch = await forecastAt(MID_MARCH);
+    expect(midMarch.schedule.slipDays).toBeGreaterThan(45);
+    expect(midMarch.schedule.criticalDriver.name).toBe("Foundation concrete");
+  });
+
   it("writes nothing: no activity, baseline or contract date, order, link or amount changes", async () => {
     const before = await rows();
     await forecast();
@@ -246,33 +307,49 @@ liveDescribe("R5-1: the certified project's 45-day forecast, pinned on its own g
   });
 
   it("calls it a projection, never an extension of time", async () => {
-    const data = await forecast();
-    const keys = [];
-    const strings = [];
-    const walk = (value) => {
-      if (Array.isArray(value)) value.forEach(walk);
-      else if (value && typeof value === "object") {
-        for (const [key, inner] of Object.entries(value)) {
-          keys.push(key);
-          walk(inner);
-        }
-      } else if (typeof value === "string") strings.push(value);
-    };
-    walk(data);
-    expect(keys.filter((key) => /eot|extension|granted/i.test(key))).toEqual([]);
-    expect(strings.filter((text) => NOT_A_FORECAST.test(text))).toEqual([]);
-    expect(Object.keys(data.schedule)).toEqual(expect.arrayContaining(["projectedFinish", "activityBasedFinish", "plannedFinish", "slipDays"]));
+    // The wording holds at every reading: the route's (as of now), the
+    // pinned one, and the later ones where other rules and reasons apply.
+    const pinned = await forecastAt(AS_OF);
+    const readings = [["now", await forecast()], ["pinned", pinned]];
+    for (const asOf of [LATE_START, MID_MARCH, AFTER_THE_PLAN]) readings.push([asOf.toISOString(), await forecastAt(asOf)]);
+    const bases = new Set();
+    for (const [label, data] of readings) {
+      const keys = [];
+      const strings = [];
+      const walk = (value) => {
+        if (Array.isArray(value)) value.forEach(walk);
+        else if (value && typeof value === "object") {
+          for (const [key, inner] of Object.entries(value)) {
+            keys.push(key);
+            walk(inner);
+          }
+        } else if (typeof value === "string") strings.push(value);
+      };
+      walk(data);
+      walk({ block: forecastBlock(data, "LiveTest R5-1 forecast trace"), narrative: deterministicNarrative(data) });
+      expect([label, keys.filter((key) => /eot|extension|granted/i.test(key))]).toEqual([label, []]);
+      expect([label, strings.filter((text) => NOT_A_FORECAST.test(text))]).toEqual([label, []]);
+      expect(Object.keys(data.schedule)).toEqual(expect.arrayContaining(["projectedFinish", "activityBasedFinish", "plannedFinish", "slipDays"]));
+      for (const activity of data.activities) bases.add(activity.basis);
+    }
+    // The later readings did exercise the other projection rules.
+    expect([...bases].sort()).toEqual(expect.arrayContaining(["late_start", "overdue", "planned"]));
 
-    // The text the model is given, and the narrative the reader gets.
-    const block = forecastBlock(data, "LiveTest R5-1 forecast trace");
+    // The text the model is given and the narrative the reader gets, at the
+    // pinned instant.
+    const block = forecastBlock(pinned, "LiveTest R5-1 forecast trace");
+    expect(block).toContain("As of: 2026-09-30");
     expect(block).toContain("Schedule: planned finish 2027-04-08, projected 2027-05-23 (45 days late, basis activities)");
     expect(block).toContain("Main driver: Blockwork walls (60 days).");
-    expect(block).not.toMatch(NOT_A_FORECAST);
+    expect(deterministicNarrative(pinned).headline).toMatch(/^The project is projected to finish 45 days late/);
+    // The route's narrative, as of now: X's recorded impact keeps the project
+    // late on any day, by a number of days that depends on the day — so the
+    // number is not asserted here.
     const explained = await api.post(at("/forecast/explain"), {}, auth());
     expect(explained.status).toBe(200);
     const { narrative, degraded } = explained.body.data;
     expect(degraded).toBe(true);
-    expect(narrative.headline).toMatch(/^The project is projected to finish 45 days late/);
+    expect(narrative.headline).toMatch(/^The project is projected to finish \d+ days late/);
     expect(JSON.stringify(narrative)).not.toMatch(NOT_A_FORECAST);
   });
 });
