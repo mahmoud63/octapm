@@ -52,7 +52,15 @@ its slip, its risk level and the critical driver). It feeds nothing else.
 |---|---|---|---|---|---|---|
 | `0ce999f2` OCTA PHASE21 GREENFIELD (certified) | 7 / 63 | 6 → 63 | 2027-04-08 → **2027-05-23** | 0 → **45** | medium → **high** | yes |
 | `4735659e` Marina Bay Residences (showcase) | 1 / 5 | 0 → 5 | 2027-08-05 → 2027-08-05 | 0 → 0 | medium → medium | no |
-| `225d9477` Riverside Tower (E2E) | 2 / 6 | 0 → 6 | 2030-02-15 → 2030-02-15 | 1142 → 1142 | high → high | no |
+| `225d9477` Riverside Tower (E2E) — `655bb5ad` at the Round-6 re-run (see the note below) | 2 / 6 | 0 → 6 | 2030-02-15 → 2030-02-15 | 1142 → 1142 | high → high | no |
+
+**The E2E project's id.** The E2E organisation is deleted and seeded again by its
+specs, so "Riverside Tower (E2E)" has a new id after every reset: it was
+`225d9477` at the Round-5 run and is `655bb5ad` at the Round-6 re-run (§6), with
+the same figures. Wherever this document says `225d9477`, the command of §6
+prints the row under the id the project has on the day — find it by its name
+and organisation, not by its id. The certified project (`0ce999f2`), the
+showcase (`4735659e`) and the archived fixture (`95c188f3`) keep their ids.
 
 - `0ce999f2`: six approved orders (VO-10, 12, 14, 16, 18, 20) each give
   "Blockwork walls" 10 days, and VO-22 gives "Foundation concrete" 3. Before,
@@ -65,7 +73,7 @@ its slip, its risk level and the critical driver). It feeds nothing else.
 - `4735659e`: the 5-day approved impact lands on an activity that does not
   drive the finish (the schedule's "low" risk count goes from 1 to 2); the
   finish does not move.
-- `225d9477`: the 6-day impact lands on an activity of a project already
+- `225d9477` (`655bb5ad` at the Round-6 re-run): the 6-day impact lands on an activity of a project already
   1,142 days late, driven by "Unitised facade installation"; the finish does
   not move. Its `cost.topRisks[2].impactDays` reads 0 → 6 (see 3.3).
 
@@ -78,7 +86,7 @@ its slip, its risk level and the critical driver). It feeds nothing else.
 | **move** (projected finish, slip or level) | **71** |
 | — 70 "GREENFIELD REGRESSION …" certification copies | +3 days each, low → medium |
 | — `0ce999f2` | +45 days, medium → high |
-| with links that do not move | 4 (`4735659e`, `5c492505` Marina Bay first build, `225d9477`, `95c188f3` archived Riverside fixture) |
+| with links that do not move | 4 (`4735659e`, `5c492505` Marina Bay first build, `225d9477` — `655bb5ad` at the Round-6 re-run —, `95c188f3` archived Riverside fixture) |
 | without such links | 356 — every summary identical before and after |
 | no schedule (forecast not available, the same reason before and after) | 111 |
 | forecast errored before or after | 0 |
@@ -96,7 +104,8 @@ moves (the E2E specs read projected dates from the project they create).
   `earnedValueCutoff`) are identical in all 431.
 - The cost block differs in two projects only in `cost.topRisks[].impactDays`
   — a schedule field of the activity rows the cost view lists, not money:
-  `95c188f3` 0 → 564, `225d9477` 0 → 6.
+  `95c188f3` 0 → 564, `225d9477` 0 → 6 (the Round-6 re-run prints this project
+  as `655bb5ad`: "cost block not identical | 2 (95c188f3, 655bb5ad)").
 
 ## 4. The forecast is not an input to any financial record
 
@@ -495,5 +504,5 @@ confirmed, with two corrections:
 | `0ce999f2` | OCTA PHASE21 GREENFIELD 20260910093852 | 7 / 63 | 6 → 63 | 2027-04-08 → 2027-05-23 | 0 → 45 | medium → high | yes |
 | `4735659e` | Marina Bay Residences | 1 / 5 | 0 → 5 | 2027-08-05 → 2027-08-05 | 0 → 0 | medium → medium | no |
 | `5c492505` | Marina Bay Residences (first build, superseded) | 1 / 5 | 0 → 5 | 2027-08-05 → 2027-08-05 | 0 → 0 | medium → medium | no |
-| `225d9477` | Riverside Tower | 2 / 6 | 0 → 6 | 2030-02-15 → 2030-02-15 | 1142 → 1142 | high → high | no |
+| `225d9477` (Round 5); `655bb5ad` (Round-6 re-run, after the E2E organisation was rebuilt) | Riverside Tower | 2 / 6 | 0 → 6 | 2030-02-15 → 2030-02-15 | 1142 → 1142 | high → high | no |
 | `95c188f3` | Riverside Tower (original test fixture, archived Phase 22B) | 94 / 564 | 0 → 564 | 2030-02-15 → 2030-02-15 | 1176 → 1176 | high → high | no |
