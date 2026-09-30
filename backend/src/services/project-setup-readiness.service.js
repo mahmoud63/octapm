@@ -372,6 +372,10 @@ const MAPPING_ISSUE_MESSAGES = Object.freeze({
 // mismatched BOQ rows and allocations.
 const MAPPING_COUNT_KEYS = ["itemsWithoutMappingRule", "suggestionsPending", "unitMismatchCount", "locationMismatchCount"];
 const MAPPING_DETAILS_WITHHELD = "Mapping details unavailable to you";
+// What the headline says of a figure read off the active schedule while no
+// schedule is active (owner decision R5-4): never a count, never a zero.
+const WAITING_FOR_ACTIVE_SCHEDULE = "Waiting for active schedule";
+const NO_SCHEDULE_YET = "No schedule yet";
 
 const withoutMappingCounts = (values) =>
   values && typeof values === "object"
@@ -862,6 +866,20 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       toNumber(currentRevision.activityCount) > 0 &&
       Object.prototype.hasOwnProperty.call(STAGED_WAITING_MESSAGES, revisionStatus),
   );
+
+  // Which of three states the schedule is in (owner decision R5-4), from
+  // the facts the checks below already read — the same ones NO_SCHEDULE and
+  // SCHEDULE_NOT_ACTIVE are raised on:
+  //   none   — no schedule revision and no active activity;
+  //   staged — a revision exists (imported or generated) and none of its
+  //            activities is active yet: the import is done, the schedule
+  //            is not in force;
+  //   active — active activities exist: the schedule the mapping, the
+  //            critical path and progress are assessed on.
+  // Not BOQ-derived: every caller of the check is told it.
+  const scheduleState =
+    activeActivityCount > 0 ? "active" : currentRevision ? "staged" : "none";
+  const activeScheduleAssessed = scheduleState === "active";
 
   // ── Structure (setup doc §2 b): what the rows and activities are filed
   // under. All of it is soft (§91): missing structure changes no figure.
@@ -2206,13 +2224,27 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       boqImported ? "done" : "blocked",
       boqImported,
     ),
-    headlineItem(
-      "schedule_imported",
-      "Schedule imported",
-      scheduleImported ? "PASS" : "FAIL",
-      scheduleImported ? "done" : "blocked",
-      scheduleImported,
-    ),
+    // The three schedule states (R5-4). No revision: there is nothing to
+    // pass or fail yet. A staged revision: the import is complete — said so
+    // — and what it waits for is its activation, so the tone is not "done".
+    // An active schedule reads as it always has.
+    scheduleState === "none"
+      ? headlineItem("schedule_imported", "Schedule", NO_SCHEDULE_YET, "blocked", false)
+      : scheduleState === "staged" && scheduleImported
+        ? headlineItem(
+            "schedule_imported",
+            "Schedule imported",
+            "PASS (waiting for activation)",
+            "info",
+            true,
+          )
+        : headlineItem(
+            "schedule_imported",
+            "Schedule imported",
+            scheduleImported ? "PASS" : "FAIL",
+            scheduleImported ? "done" : "blocked",
+            scheduleImported,
+          ),
     // The mapping share is the bill's (decision C): a member who may not
     // read the BOQ is told the details are withheld — no figure, and no
     // tone that would say whether the bill is fully covered.
@@ -2251,19 +2283,33 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
     // the mapping (owner decision, 2026-09-28): a member who may not read
     // the BOQ is told the details are withheld — no count, and no tone that
     // would say whether there are any. The critical path itself is theirs.
-    canReadBoq
-      ? headlineItem(
-          "critical_unmapped",
-          "Critical unmapped activities",
-          String(criticalUnmappedActivities.length),
-          criticalUnmappedActivities.length > 0 ? "review" : "done",
-          criticalUnmappedActivities.length,
-        )
-      : {
-          ...headlineItem("critical_unmapped", "Critical unmapped activities", "—", "neutral", null),
-          withheld: true,
-          reason: MAPPING_DETAILS_WITHHELD,
-        },
+    // With no active schedule nothing has been assessed (R5-4): the entry
+    // waits — no count, no zero, no "done" — and says so to every caller,
+    // since whether a schedule is active is not read off the bill.
+    !activeScheduleAssessed
+      ? {
+          ...headlineItem(
+            "critical_unmapped",
+            "Critical unmapped activities",
+            WAITING_FOR_ACTIVE_SCHEDULE,
+            "neutral",
+            null,
+          ),
+          waiting: true,
+        }
+      : canReadBoq
+        ? headlineItem(
+            "critical_unmapped",
+            "Critical unmapped activities",
+            String(criticalUnmappedActivities.length),
+            criticalUnmappedActivities.length > 0 ? "review" : "done",
+            criticalUnmappedActivities.length,
+          )
+        : {
+            ...headlineItem("critical_unmapped", "Critical unmapped activities", "—", "neutral", null),
+            withheld: true,
+            reason: MAPPING_DETAILS_WITHHELD,
+          },
     headlineItem(
       "baseline",
       "Baseline",
@@ -2300,11 +2346,16 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       readyForProgress: progressBlockerDetails.length === 0,
       readyForReporting: reportingBlockerDetails.length === 0,
       headline,
+      // none | staged | active (R5-4): what the schedule entries above say.
+      scheduleState,
       // The same count, for those who may read the BOQ; anyone else is told
-      // it is withheld and why (never a 0 they could read as a fact).
-      ...(canReadBoq
-        ? { criticalUnmappedActivities: criticalUnmappedActivities.length }
-        : { criticalUnmappedWithheld: true, criticalUnmappedReason: MAPPING_DETAILS_WITHHELD }),
+      // it is withheld and why (never a 0 they could read as a fact). With
+      // no active schedule there is no count for anyone: it is waiting.
+      ...(!activeScheduleAssessed
+        ? { criticalUnmappedWaiting: true, criticalUnmappedReason: WAITING_FOR_ACTIVE_SCHEDULE }
+        : canReadBoq
+          ? { criticalUnmappedActivities: criticalUnmappedActivities.length }
+          : { criticalUnmappedWithheld: true, criticalUnmappedReason: MAPPING_DETAILS_WITHHELD }),
       nextAction: toAction(nextStep),
       advisoryAction: toAction(advisoryStep),
     },

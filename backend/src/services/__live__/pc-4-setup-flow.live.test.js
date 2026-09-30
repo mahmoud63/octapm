@@ -542,12 +542,14 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       // §33: the status line reads the same figures the steps derive.
       expect(done.summary.headline.map((entry) => [entry.key, entry.value])).toEqual([
         ["boq_imported", "PASS"],
-        ["schedule_imported", "FAIL"],
+        // This project has a bill and no schedule at all (R5-4): said as
+        // that, and nothing is counted on a schedule that is not there.
+        ["schedule_imported", "No schedule yet"],
         ["mapping", "0%"],
         // Equal value open in each unit: the rows keep the bill's order.
         ["unmapped_quantity", "10 m3 · 20 m2"],
         ["unmapped_boq", "2,000 USD"],
-        ["critical_unmapped", "0"],
+        ["critical_unmapped", "Waiting for active schedule"],
         ["baseline", "NOT APPROVED"],
         ["cost_loading", "INCOMPLETE"],
       ]);

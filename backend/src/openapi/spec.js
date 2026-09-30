@@ -2339,14 +2339,23 @@ const components = {
           description:
             "unmapped_quantity and unmapped_boq are given only to a caller who may read the BOQ; unmapped_quantity lists the open quantity by unit (never added across units), the three units leaving most value open first.",
         },
-        label: { type: "string" },
-        value: { type: "string", description: "As shown: PASS / FAIL, a percentage, a money figure, a count, or a state." },
+        label: { type: "string", description: "As shown. schedule_imported reads \"Schedule\" while there is no schedule (summary.scheduleState none) and \"Schedule imported\" otherwise." },
+        value: {
+          type: "string",
+          description:
+            "As shown: PASS / FAIL, a percentage, a money figure, a count, or a state. schedule_imported follows summary.scheduleState: none → \"No schedule yet\" (tone blocked, raw false); staged with no schedule blocker → \"PASS (waiting for activation)\" (tone info, raw true — the import is complete before activation); active → PASS / FAIL as the schedule step's blockers say. critical_unmapped is a count only when scheduleState is active; otherwise \"Waiting for active schedule\" (tone neutral, raw null, waiting true) — never 0 and never the done tone.",
+        },
         tone: { type: "string", enum: ["done", "review", "blocked", "info", "neutral"] },
         raw: { description: "The figure behind the text, when there is one." },
+        waiting: {
+          type: "boolean",
+          description:
+            "Present and true on the critical_unmapped entry while no schedule is active (summary.scheduleState none or staged): nothing has been assessed, so there is no count. Given to every caller — whether a schedule is active is not BOQ-derived — and never together with withheld.",
+        },
         withheld: {
           type: "boolean",
           description:
-            "Present and true on the mapping and critical_unmapped entries for a caller who may not read the BOQ: value is \"—\", tone neutral, raw null, and reason says the mapping details are unavailable to them.",
+            "Present and true on the mapping entry, and on the critical_unmapped entry once a schedule is active, for a caller who may not read the BOQ: value is \"—\", tone neutral, raw null, and reason says the mapping details are unavailable to them.",
         },
         reason: { type: "string" },
       },
@@ -2375,7 +2384,7 @@ const components = {
         summary: {
           ...ref("GenericObject"),
           description:
-            "Step counts, the three ready flags, nextAction (chosen from the ten original steps only, as before PC-4), advisoryAction (the first of the two advisory steps, structure_setup and boq_approval, still asking for something, or null), and `headline` — the §33 status line (BOQ imported, schedule imported, mapping %, unmapped BOQ quantity by unit, unmapped BOQ value, critical unmapped activities, baseline, cost loading), each entry a ProjectSetupHeadlineEntry. criticalUnmappedActivities (critical activities with no approved BOQ allocation, read off the mapping) is present only for a caller who may read the BOQ; anyone else gets criticalUnmappedWithheld true and criticalUnmappedReason \"Mapping details unavailable to you\" instead, and the critical_unmapped headline entry withheld. The critical activities themselves (steps[schedule_generation].counts.criticalActivities) are every caller's.",
+            "Step counts, the three ready flags, nextAction (chosen from the ten original steps only, as before PC-4), advisoryAction (the first of the two advisory steps, structure_setup and boq_approval, still asking for something, or null), and `headline` — the §33 status line (BOQ imported, schedule imported, mapping %, unmapped BOQ quantity by unit, unmapped BOQ value, critical unmapped activities, baseline, cost loading), each entry a ProjectSetupHeadlineEntry. scheduleState says which schedule the line speaks of: \"none\" (no schedule revision and no active activity), \"staged\" (a revision was imported or generated and none of its activities is active yet) or \"active\" (active activities exist); it is given to every caller. criticalUnmappedActivities (critical activities with no approved BOQ allocation, read off the mapping) is present only when scheduleState is active and only for a caller who may read the BOQ; with an active schedule anyone else gets criticalUnmappedWithheld true and criticalUnmappedReason \"Mapping details unavailable to you\" instead, and the critical_unmapped headline entry withheld. While scheduleState is none or staged nothing has been assessed: every caller gets criticalUnmappedWaiting true and criticalUnmappedReason \"Waiting for active schedule\", no count and no withheld flag. The critical activities themselves (steps[schedule_generation].counts.criticalActivities) are every caller's.",
         },
         gates: {
           ...ref("GenericObject"),
