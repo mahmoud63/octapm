@@ -72,7 +72,10 @@ router.post(
 // the approved allocations' sum — stays; a cost reader who may not read the
 // BOQ loses the bill's open value and the bill's figures in the readiness
 // gate, on the report, on a locked period's report and on the gate a lock is
-// refused with. Output only: the stored snapshot keeps its basis.
+// refused with. Output only: the stored snapshot keeps its basis. The lock
+// answers with the locked period's report and the locked-period history, as
+// GET /reports/ev?periodId= then gives it (earned-value.service
+// withLockedEvHistory), withheld the same way.
 router.post(
   "/periods/:periodId/lock",
   requirePermission("cost", "approve", {

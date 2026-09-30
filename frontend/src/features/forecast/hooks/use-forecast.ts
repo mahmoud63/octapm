@@ -138,7 +138,9 @@ export interface ProjectForecast {
     activityCostReason?: string
     /**
      * Source / derived / projection per figure, and from what (PC-7a).
-     * Labels only; the same for every reader, present where figures are withheld.
+     * Labels only; the same for every reader who receives the figures.
+     * Absent when the cost block is withheld (withheld: true): no label for
+     * a figure the reader does not receive.
      */
     truth?: {
       budget: string

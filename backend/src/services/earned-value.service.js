@@ -1149,24 +1149,38 @@ const listLockedEvHistory = async ({ orgId, projectId, through = null }, tx = pr
 };
 
 /**
- * The EV report as GET /reports/ev answers it: the official report
- * (buildOfficialEvReport, unchanged) with the locked-period history through
- * its cutoff beside the formula S-curve. Other readers of the report (the
- * lock, the health card, the forecast, the workspace home) do not carry it.
+ * An official EV report with the locked-period history through its cutoff
+ * beside the formula S-curve: the report's own keys first, untouched, then
+ * history, historyNote and historyTruth. The one way the history is added,
+ * so every answer that carries it carries the same thing.
  */
-const buildEvReportWithHistory = async ({ orgId, projectId, periodId = null, cutoffDate = null }) => {
-  const report = await buildOfficialEvReport({ orgId, projectId, periodId, cutoffDate });
-  const history = await listLockedEvHistory({
-    orgId,
-    projectId,
-    through: report?.reporting?.cutoffDate || null,
-  });
+const withLockedEvHistory = async (report, { orgId, projectId }, tx = prisma) => {
+  const history = await listLockedEvHistory(
+    {
+      orgId,
+      projectId,
+      through: report?.reporting?.cutoffDate || null,
+    },
+    tx,
+  );
   return {
     ...report,
     history,
     historyNote: EV_HISTORY_NOTE,
     historyTruth: EV_HISTORY_TRUTH,
   };
+};
+
+/**
+ * The EV report as GET /reports/ev answers it: the official report
+ * (buildOfficialEvReport, unchanged) with the locked-period history
+ * (withLockedEvHistory). A period lock answers with the same thing for the
+ * period it locked (lockReportingPeriod). Other readers of the report (the
+ * health card, the forecast, the workspace home) do not carry it.
+ */
+const buildEvReportWithHistory = async ({ orgId, projectId, periodId = null, cutoffDate = null }) => {
+  const report = await buildOfficialEvReport({ orgId, projectId, periodId, cutoffDate });
+  return withLockedEvHistory(report, { orgId, projectId });
 };
 
 const createReportingPeriod = async ({ orgId, projectId, userId, payload }) => {
@@ -1687,8 +1701,12 @@ const lockReportingPeriod = async ({
       );
     }
 
+    // The answer is the period's report as GET /reports/ev?periodId= gives
+    // it: the stored snapshot's report with the locked-period history
+    // (withLockedEvHistory), read in this transaction so it includes the
+    // point this lock makes.
     if (period.status === LOCKED_PERIOD && period.evSnapshot) {
-      return snapshotToReport({ snapshot: period.evSnapshot, period });
+      return withLockedEvHistory(snapshotToReport({ snapshot: period.evSnapshot, period }), { orgId, projectId }, tx);
     }
 
     const { gate: readinessGate, override: readinessOverride } =
@@ -1817,10 +1835,14 @@ const lockReportingPeriod = async ({
       });
     }
 
-    return snapshotToReport({
-      snapshot,
-      period: { ...lockedPeriod, evSnapshot: snapshot },
-    });
+    return withLockedEvHistory(
+      snapshotToReport({
+        snapshot,
+        period: { ...lockedPeriod, evSnapshot: snapshot },
+      }),
+      { orgId, projectId },
+      tx,
+    );
   });
 
 module.exports = {
@@ -1831,6 +1853,7 @@ module.exports = {
   computeBudgetRevisionDelta,
   buildOfficialEvReport,
   buildEvReportWithHistory,
+  withLockedEvHistory,
   listLockedEvHistory,
   EV_HISTORY_NOTE,
   pickDefaultReportingPeriod,

@@ -16,7 +16,8 @@ const mockPrisma = {
   },
   costRecord: { findMany: jest.fn() },
   budgetRevision: { findMany: jest.fn() },
-  evPeriodSnapshot: { upsert: jest.fn() },
+  // findMany: the lock answers with the locked-period history (none here).
+  evPeriodSnapshot: { upsert: jest.fn(), findMany: jest.fn(async () => []) },
 };
 
 const mockBuildAllocationSummary = jest.fn();

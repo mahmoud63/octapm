@@ -441,6 +441,28 @@ const withheldMappedForecast = (forecast) => {
   return result;
 };
 
+// A three-truths block (utils/figure-truth) without the labels of the
+// figures withheld from this caller: a label says what a figure is and from
+// what, so whoever is not given the figure is not given its label either —
+// at the top level, in labels and in derivedFrom. When no figure's label is
+// left, there is no truth block at all (undefined).
+const TRUTH_DESCRIPTION_KEYS = ["labels", "derivedFrom"];
+const truthWithout = (truth, keys) => {
+  if (!truth || typeof truth !== "object" || Array.isArray(truth)) return truth;
+  const withheld = new Set(keys);
+  const result = {};
+  for (const [key, value] of Object.entries(truth)) {
+    if (withheld.has(key)) continue;
+    if (TRUTH_DESCRIPTION_KEYS.includes(key) && value && typeof value === "object" && !Array.isArray(value)) {
+      const kept = Object.fromEntries(Object.entries(value).filter(([figure]) => !withheld.has(figure)));
+      if (Object.keys(kept).length) result[key] = kept;
+      continue;
+    }
+    result[key] = value;
+  }
+  return Object.keys(result).some((key) => !TRUTH_DESCRIPTION_KEYS.includes(key)) ? result : undefined;
+};
+
 /** GET /forecast (and the forecast inside its explanation) as this caller may receive it. */
 const withheldForecast = (forecast, access = FULL_ACCESS) => {
   // A BOQ reader receives the forecast exactly as built.
@@ -453,8 +475,12 @@ const withheldForecast = (forecast, access = FULL_ACCESS) => {
     result.schedule = { ...forecast.schedule, topRisks: mapList(forecast.schedule.topRisks, withheldForecastActivity) };
   }
   if (forecast.cost && typeof forecast.cost === "object") {
+    // The cost block is withheld: no label for a figure it does not carry
+    // (every figure cost.truth describes is withheld, so it goes whole).
+    const truth = truthWithout(forecast.cost.truth, FORECAST_COST_KEYS);
     result.cost = {
-      ...withoutKeys(forecast.cost, [...FORECAST_COST_KEYS, ...FORECAST_MAPPING_COST_KEYS]),
+      ...withoutKeys(forecast.cost, [...FORECAST_COST_KEYS, ...FORECAST_MAPPING_COST_KEYS, "truth"]),
+      ...(truth ? { truth } : {}),
       ...(has(forecast.cost, "counts") ? { counts: withoutKeys(forecast.cost.counts, ["atRisk"]) } : {}),
       budgetLines: mapList(forecast.cost.budgetLines, (line) => withoutKeys(line, FORECAST_LINE_KEYS)),
       withheld: true,

@@ -181,6 +181,34 @@ const unstampedDashboard = (text) =>
     .replace(/"cutoffDate":"[^"]*"/g, '"cutoffDate":"-"')
     .replace(/"sourceUpdatedAt":"[^"]*"/g, '"sourceUpdatedAt":"-"');
 
+// PC-7a item 3: GET /reports/ev, and the answer to a period lock, are the
+// official report (buildOfficialEvReport) with the locked periods' measured
+// history after it (earned-value.service withLockedEvHistory): exactly these
+// three keys, last. Taken off again, what is left must be the official
+// report byte for byte — the history adds, it moves nothing.
+const HISTORY_KEYS = ["history", "historyNote", "historyTruth"];
+// Every key a history point may carry (EarnedValueHistoryPoint): the locked
+// period's project totals and when and where it was cut — nothing else.
+const HISTORY_POINT_KEYS = [
+  "periodId", "code", "label", "cutoffDate", "cutoffLocalDate", "timeZone", "timeZoneSource", "timeZoneNote",
+  "totalBudget", "pv", "ev", "ac", "eac", "spi", "cpi", "formulaVersion", "lockedAt", "snapshotId",
+];
+const withoutHistory = (report) => {
+  const copy = clone(report);
+  drop(copy, HISTORY_KEYS);
+  return copy;
+};
+// A response's text with the history taken off its data, and the proof that
+// the history is exactly the three keys, last. Re-serialising a parsed
+// answer gives back its bytes (the API writes JSON.stringify, key order kept).
+const withoutHistoryText = (label, text) => {
+  const envelope = JSON.parse(text);
+  expect([label, Object.keys(envelope.data).slice(-HISTORY_KEYS.length)]).toEqual([label, HISTORY_KEYS]);
+  expect([label, Array.isArray(envelope.data.history)]).toEqual([label, true]);
+  drop(envelope.data, HISTORY_KEYS);
+  return JSON.stringify(envelope);
+};
+
 liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figure to a member who may not read the BOQ", () => {
   let live;
   let api;
@@ -451,17 +479,21 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     lookaheads: { route: at("/lookaheads"), kind: "sweep" },
     lookaheadConstraints: { route: at("/lookaheads/constraints"), kind: "sweep" },
     periods: { route: at("/reports/periods"), kind: "sweep", cost: true },
+    // The route answers buildEvReportWithHistory; without its history it is
+    // buildOfficialEvReport, byte for byte (official).
     ev: {
       route: at("/reports/ev"),
       kind: "ev",
       cost: true,
-      service: () => evService.buildOfficialEvReport(ids()),
+      service: () => evService.buildEvReportWithHistory(ids()),
+      official: () => evService.buildOfficialEvReport(ids()),
     },
     lockedEv: {
       route: at(`/reports/ev?periodId=${lockedPeriod.id}`),
       kind: "ev",
       cost: true,
-      service: () => evService.buildOfficialEvReport({ ...ids(), periodId: lockedPeriod.id }),
+      service: () => evService.buildEvReportWithHistory({ ...ids(), periodId: lockedPeriod.id }),
+      official: () => evService.buildOfficialEvReport({ ...ids(), periodId: lockedPeriod.id }),
     },
     resources: { route: at("/schedule/resources"), kind: "sweep" },
     risks: { route: at("/risks"), kind: "sweep" },
@@ -556,7 +588,9 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     (copy.activities || []).forEach(activityCost);
     (copy.schedule?.topRisks || []).forEach(activityCost);
     if (copy.cost) {
-      drop(copy.cost, [...FORECAST_COST_KEYS, "eacBasis", "topRisks"]);
+      // ... and the three-truths labels (cost.truth) of that money: a label
+      // for a figure the reader is not given is not given either (PC-7a).
+      drop(copy.cost, [...FORECAST_COST_KEYS, "eacBasis", "topRisks", "truth"]);
       drop(copy.cost.counts, ["atRisk"]);
       (copy.cost.budgetLines || []).forEach((line) => drop(line, FORECAST_LINE_KEYS));
       Object.assign(copy.cost, { withheld: true, reason: FORECAST_COST_WITHHELD });
@@ -666,13 +700,20 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
   };
 
   it("a BOQ reader receives exactly the service's answer — the figures, byte for byte", async () => {
-    for (const [name, { route, kind, service }] of Object.entries(reads())) {
+    for (const [name, { route, kind, service, official }] of Object.entries(reads())) {
       if (!service) continue;
       const stampless = kind === "workspace" ? unstampedDashboard : unstamped;
       const response = await api.get(route, auth());
       expect([name, response.status, response.body?.error]).toEqual([name, 200, undefined]);
       const expected = JSON.stringify({ success: true, data: normalizeMoneyTree(await service()) });
       expect([name, stampless(response.text)]).toEqual([name, stampless(expected)]);
+      if (official) {
+        // The EV report: without its history, the official report byte for byte.
+        const officialText = JSON.stringify({ success: true, data: normalizeMoneyTree(await official()) });
+        expect([name, stampless(withoutHistoryText(name, response.text))]).toEqual([name, stampless(officialText)]);
+        // ... and the history is there: the period locked in setup.
+        expect([name, response.body.data.history.map((point) => point.periodId)]).toEqual([name, [lockedPeriod.id]]);
+      }
     }
     // ... and the figures are there to be withheld: the sweep below looks
     // where they are.
@@ -755,6 +796,35 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
           expect([viewer, name, mine]).toEqual([viewer, name, readsCost ? forecastWithoutMapping(theirs) : forecastWithoutMoney(theirs)]);
         } else if (kind === "ev") {
           expect([viewer, name, mine]).toEqual([viewer, name, evWithoutBill(theirs)]);
+          // The same reader's answer is buildEvReportWithHistory's, withheld;
+          // its official part is buildOfficialEvReport's, withheld the same
+          // way — the history moves nothing in it.
+          expect([viewer, name, withoutHistory(mine)]).toEqual([
+            viewer,
+            name,
+            evWithoutBill(parsed(JSON.stringify(normalizeMoneyTree(await read.official())))),
+          ]);
+          // The history gives this reader nothing the official report
+          // withholds from them: each point carries only the keys of a
+          // history point, and each figure is the one this same reader
+          // receives from that locked period's own report.
+          expect([viewer, name, mine.history.length > 0]).toEqual([viewer, name, true]);
+          for (const point of mine.history) {
+            expect([viewer, name, Object.keys(point).filter((key) => !HISTORY_POINT_KEYS.includes(key))]).toEqual([viewer, name, []]);
+            const periodReport = await api.get(at(`/reports/ev?periodId=${point.periodId}`), viewerAuth);
+            expect([viewer, name, periodReport.status]).toEqual([viewer, name, 200]);
+            const own = periodReport.body.data;
+            expect([viewer, name, point.periodId, point.totalBudget, point.pv, point.ev, point.ac, point.eac]).toEqual([
+              viewer, name, point.periodId, own.totalBudget, own.pv, own.ev, own.ac, own.eac,
+            ]);
+            for (const ratio of ["spi", "cpi"]) {
+              expect([viewer, name, ratio, point[ratio] === null, own[ratio] === null]).toEqual([viewer, name, ratio, own[ratio] === null, point[ratio] === null]);
+              if (point[ratio] !== null) expect(Math.abs(Number(point[ratio]) - Number(own[ratio]))).toBeLessThan(0.005);
+            }
+            expect([viewer, name, point.snapshotId, point.cutoffDate, point.lockedAt, point.formulaVersion]).toEqual([
+              viewer, name, own.reporting.snapshotId, own.reporting.cutoffDate, own.reporting.lockedAt, own.reporting.formulaVersion,
+            ]);
+          }
         } else if (kind === "wbs") {
           const outlineNode = (node) => ({
             ...Object.fromEntries(Object.entries(node).filter(([key]) => WBS_OUTLINE_KEYS.includes(key))),
@@ -850,6 +920,14 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
         readsCost
           ? [viewer, true, false, false, undefined, undefined, true, MAPPING_WITHHELD]
           : [viewer, false, false, false, true, FORECAST_COST_WITHHELD, undefined, undefined],
+      );
+      // The three-truths labels of the cost block (PC-7a): a cost reader's
+      // are the BOQ reader's; a reader of neither, given none of the figures
+      // they label, is given no label either.
+      const readerTruth = (await api.get(reads().forecast.route, auth())).body.data.cost.truth;
+      expect(Object.keys(readerTruth || {}).length > 0).toBe(true);
+      expect([viewer, "truth" in forecast.cost, forecast.cost.truth]).toEqual(
+        readsCost ? [viewer, true, readerTruth] : [viewer, false, undefined],
       );
       for (const activity of [...forecast.activities, ...forecast.schedule.topRisks]) {
         expect([viewer, Object.keys(activity.cost).sort(), activity.cost.reason]).toEqual([
@@ -973,6 +1051,21 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     const full = await api.get(at(`/reports/ev?periodId=${openPeriod.id}`), auth());
     expect(full.body.data.unallocatedBoqAmount).toBe(30273.9);
     expect(parsed(locked.text).data).toEqual(evWithoutBill(parsed(full.text).data));
+    // That report is buildEvReportWithHistory's, byte for byte, and without
+    // its history buildOfficialEvReport's (PC-7a item 3) ...
+    const withHistory = await evService.buildEvReportWithHistory({ ...ids(), periodId: openPeriod.id });
+    expect(unstamped(full.text)).toBe(unstamped(JSON.stringify({ success: true, data: normalizeMoneyTree(withHistory) })));
+    const official = await evService.buildOfficialEvReport({ ...ids(), periodId: openPeriod.id });
+    expect(unstamped(withoutHistoryText("GET after the lock", full.text))).toBe(
+      unstamped(JSON.stringify({ success: true, data: normalizeMoneyTree(official) })),
+    );
+    // ... so the lock's answer is the same builder's too (withheld, so the
+    // breakdown's marker follows the history): its history ends with the
+    // point this lock made, and its official part is the official report
+    // without the bill.
+    expect(HISTORY_KEYS.filter((key) => !(key in locked.body.data))).toEqual([]);
+    expect(locked.body.data.history.map((point) => point.periodId)).toEqual([lockedPeriod.id, openPeriod.id]);
+    expect(withoutHistory(parsed(locked.text).data)).toEqual(evWithoutBill(parsed(JSON.stringify(normalizeMoneyTree(official)))));
     // ... and the snapshot it stored is the whole one (output only).
     const snapshot = await prisma.evPeriodSnapshot.findFirst({ where: { reportingPeriodId: openPeriod.id } });
     expect(snapshot.basisJson.unallocatedBoqAmount).toBe(30273.9);
