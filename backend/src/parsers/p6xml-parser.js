@@ -102,10 +102,17 @@ async function parseP6Xml(content) {
   const activities = activityNodes.map((a) => {
     const p6ActivityId = pick(a, ['Id', 'ActivityId', 'ObjectId']);
     const sourceActivityId = pick(a, ['ObjectId', 'Id', 'ActivityObjectId']);
-    const pct = Number.parseFloat(
-      pick(a, ['PhysicalPercentComplete', 'PercentComplete']) ||
-        String(mapP6Status(pick(a, ['Status']))),
-    );
+    // A schedule needs a number (the status's, then 0, when the file carries
+    // no percentage); a progress import needs to know whether the file
+    // stated one at all — a status is not a percentage.
+    const pctText = pick(a, ['PhysicalPercentComplete', 'PercentComplete']);
+    const statedPct = Number.parseFloat(pctText);
+    const physCompleteStated = Number.isFinite(statedPct);
+    const pct = physCompleteStated
+      ? statedPct
+      : pctText
+        ? 0
+        : mapP6Status(pick(a, ['Status']));
 
     return {
       sourceActivityId,
@@ -119,7 +126,8 @@ async function parseP6Xml(content) {
       remainingDurationHours: Number.parseFloat(
         pick(a, ['RemainingDuration']) || '0',
       ),
-      physComplete: Number.isFinite(pct) ? pct : 0,
+      physComplete: pct,
+      physCompleteStated,
       earlyStart: pick(a, ['EarlyStartDate', 'PlannedStartDate']),
       earlyFinish: pick(a, ['EarlyFinishDate', 'PlannedFinishDate']),
       lateStart: pick(a, ['LateStartDate']),

@@ -830,6 +830,7 @@ module.exports = {
   SUBMISSION_STATUSES,
   calculateProgressPercent,
   normalizeMethod,
+  hasEvidence,
   serializeMethodConfig,
   serializeSubmission,
   getProgressMethod,

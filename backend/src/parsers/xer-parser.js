@@ -122,7 +122,10 @@ function extractActivities(tables) {
       null;
     const sourceTaskId = String(t.task_id || '').trim() || null;
     const physComplete = Number.parseFloat(t.phys_complete_pct);
-    const pct = Number.isFinite(physComplete) ? physComplete : 0;
+    // A schedule needs a number (0 when the file carries none); a progress
+    // import needs to know whether the file stated one at all.
+    const physCompleteStated = Number.isFinite(physComplete);
+    const pct = physCompleteStated ? physComplete : 0;
 
     return {
       sourceTaskId,
@@ -136,6 +139,7 @@ function extractActivities(tables) {
       originalDuration: hoursToDays(t.target_drtn_hr_cnt),
       remainingDuration: hoursToDays(t.remain_drtn_hr_cnt),
       physComplete: pct,
+      physCompleteStated,
       earlyStartDate: parseMaybeDate(t.early_start_date),
       earlyFinishDate: parseMaybeDate(t.early_end_date),
       lateStartDate: parseMaybeDate(t.late_start_date),
