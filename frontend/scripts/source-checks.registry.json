@@ -53,6 +53,7 @@
     "primavera-gantt-ui.test.mjs",
     "procurement-risk-ui.test.mjs",
     "progress-assignment-ui.test.mjs",
+    "progress-import-outcome.test.mjs",
     "project-access-ui.test.mjs",
     "project-manager-approval-ui.test.mjs",
     "project-routes-ui.test.mjs",
