@@ -188,6 +188,7 @@ Target column codes: **CFK** = composite FK `(projectId, orgId) → Project(id, 
 | SubmittalStep (6918), SubmittalStepAssignment (6940) | P/parent | submittal | — / `[stepId, userId]` | — | inherit |
 | DailyLog (6965) | P+O | both | `[projectId, date]` | — | CFK |
 | DailyLogManpower (7003), DailyLogEquipment (7037), DailyLogDelivery (7071), DailyLogVisitor (7105), DailyLogDelay (7135), DailyLogNote (7168) | P+O columns, no relation | dailyLogId only | `[projectId, clientRequestId]` | — | **REL + CFK** (+ DailyLogQuantity new, PC-5) |
+| DailyLogQuantity, QuantityProgressEntry (PC-6, migration 20261005050000, unapplied) | P+O | both, with relations | `[projectId, clientRequestId]` | — | CFK from birth: `(projectId, orgId) → Project(id, orgId)` CASCADE, `orgId → Organisation` CASCADE; activity / boqItem RESTRICT, the rest SET NULL — OCTAPM_PROGRESS_MEASUREMENT.md §3-§4 |
 | ReportDefinition (7198) | O?P | orgId; projectId nullable (= every project the viewer can see) | — | — | CFK (MATCH SIMPLE); viewer scope re-evaluated per membership |
 | GanttLayout (7238) | P+O | both | `[projectId, createdBy, name]` | — | CFK |
 | ReportSchedule (7260), ReportRun (7290) | O/parent | orgId + reportId | — | — | keep |
