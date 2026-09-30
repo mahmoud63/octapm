@@ -164,7 +164,12 @@ the stored default is:
 
 ```
 CostRecord.forecast (default) = max(budget, actual)          // never < 0, never < actual
+                                (cost.service resolveForecast: Math.max(0, budget, actual))
 ```
+
+Authority: the owner's own example in the PC-7a wave text, "forecast =
+max(budget, actual)". The `0` only keeps the figure an amount the
+CostRecord money check accepts; budget and actual are never below 0.
 
 This is the estimate at completion the cost summary already gave a record
 without a forecast (`cost.service estimateAtCompletion`), so the stored
@@ -181,8 +186,26 @@ actual whenever actual was under budget. The one other change: with actual
 above budget the default is now actual (the old rule extrapolated the overrun
 by 10%); a forecast typed on the record still stands as typed.
 
+Where the two defaults differ (a record written without a forecast):
+
+| budget | actual | old default `budget + 1.1 × (actual − budget)` | new default `max(0, budget, actual)` |
+|---:|---:|---:|---:|
+| 10,000 | 0 | −1,000 — refused by the money check, answered 500 | 10,000 |
+| 10,000 | 4,000 | 3,400 — below actual | 10,000 |
+| 10,000 | 10,000 | 10,000 | 10,000 (same) |
+| 10,000 | 12,000 | 12,200 — overrun extrapolated by 10% | 12,000 |
+| 0 | 5,000 | 5,500 | 5,000 |
+| 0 | 0 | 0 | 0 (same) |
+
+They agree only when actual equals budget. In practice records are created
+with actual 0 (`POST /cost/activity/{id}` without a forecast), which is the
+first row: every such record on an activity with an approved allocation
+failed before the change.
+
 Nothing stored moves: only records written after the change take the new
-default. A figure the service would write below 0 is refused with
+default. There is no migration or backfill; an existing record's stored
+forecast is read as it is (verified on the certified project `0ce999f2`:
+its cost records and budget lines hashed identical before and after). A figure the service would write below 0 is refused with
 `400 COST_RECORD_MONEY_INVALID` naming the field, never the database's 500.
 Proof: `backend/src/services/__live__/pc-7a-cost-record-forecast.live.test.js`.
 
