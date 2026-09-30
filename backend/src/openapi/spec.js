@@ -8510,7 +8510,9 @@ add(
   "delete",
   operation({
     tag: "Activities",
-    summary: "Delete an activity.",
+    summary: "Delete an activity that no record keeps.",
+    description:
+      "Deletes an activity with no cost record, progress record or daily report (the activity-linked data model keeps those on their activity). Otherwise 409 ACTIVITY_IN_USE with details { activityId, activityCode, partOfActiveSchedule, keptBy: { costRecords, progress, dailyReports } } — an activated revision writes a cost record per activity, so an activity of the active schedule leaves the programme through a schedule revision, never through this endpoint.",
     operationId: "deleteActivity",
     parameters: projectRecordParams,
     permissions: modulePermission("schedule", "delete"),

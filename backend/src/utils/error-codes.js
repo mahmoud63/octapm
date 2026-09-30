@@ -758,6 +758,14 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "not_found",
     message: "Activity not found",
   },
+  // DELETE /activities/:id: a cost record, progress record or daily report
+  // keeps the activity (the activity-linked data model); details carry the
+  // counts. An activity of the active schedule leaves through a revision.
+  ACTIVITY_IN_USE: {
+    status: 409,
+    category: "conflict",
+    message: "This activity has records linked to it and cannot be deleted; take it out of the programme through a schedule revision instead",
+  },
   // ENT-6 personal workspaces and conversion
   PERSONAL_WORKSPACE_CONVERT_REQUIRED: {
     status: 409,
