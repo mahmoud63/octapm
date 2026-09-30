@@ -20,6 +20,8 @@
  *   detail;
  * - a BOQ reader whose template refuses the schedule sees a linked activity's
  *   name on the BOQ detail and none of its dates, float, criticality or progress;
+ * - a member who may read the schedule but not progress is refused an
+ *   activity's approved % complete and its source on both details alike;
  * - a subcontractor's person (party-scoped) gets no commitment, punch or
  *   lookahead rows from either detail, and no linked RFI or submittal its
  *   register would not list to them (party routing; RFI drafts);
@@ -109,6 +111,8 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     await addMember("site", "site_engineer");
     await addMember("costNoBoq", "cost_controller", { noBoq: true });
     await addMember("qsNoSchedule", "qs", { noSchedule: true });
+    // Reads the BOQ and the schedule, not progress.
+    await addMember("procurement", "procurement");
     // A subcontractor's person: no project assignment, an active member of
     // the project's subcontractor party — party-scoped access.
     const sub = await createLiveUser(prisma, {
@@ -514,6 +518,32 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     for (const secret of ["startDate", "endDate", "isCritical", "totalFloat", "pctComplete", "progressSource", xRow.startDate.toISOString()]) {
       expect([secret, mapping.includes(secret)]).toEqual([secret, false]);
     }
+  });
+
+  it("a member who may read the schedule but not progress is refused an activity's progress on both details alike", async () => {
+    const activity = await api.get(at(`/activities/${acts.X.id}/detail`), as(members.procurement));
+    expect([activity.status, activity.body?.error]).toEqual([200, undefined]);
+    const refused = activity.body.data.sections.progress;
+    expect(refused).toEqual({ allowed: false, module: "progress", reason: expect.any(String) });
+    const item = await api.get(at(`/boq/items/${rows.A.id}/detail`), as(members.procurement));
+    expect([item.status, item.body?.error]).toEqual([200, undefined]);
+    const linked = item.body.data.sections.mapping.allocations.items.map((entry) => entry.activity);
+    expect(linked.map((entry) => entry.id).sort()).toEqual([acts.X.id, acts.Y.id].sort());
+    for (const entry of linked) {
+      // The schedule is theirs; the approved % complete and its source are not.
+      expect(entry.startDate).toEqual(expect.any(String));
+      expect(entry.progress).toEqual(refused);
+      expect([entry.id, "pctComplete" in entry, "progressSource" in entry]).toEqual([entry.id, false, false]);
+    }
+    // A progress reader gets the figure on both.
+    const owner = await api.get(at(`/boq/items/${rows.A.id}/detail`), auth());
+    const ownerX = owner.body.data.sections.mapping.allocations.items.find((entry) => entry.activity.id === acts.X.id).activity;
+    const ownerActivity = await api.get(at(`/activities/${acts.X.id}/detail`), auth());
+    expect([ownerX.pctComplete.value, ownerX.progressSource, "progress" in ownerX]).toEqual([
+      ownerActivity.body.data.sections.progress.pctComplete.value,
+      ownerActivity.body.data.sections.progress.progressSource,
+      false,
+    ]);
   });
 
   it("a subcontractor's person gets no commitment, punch or lookahead rows from either detail", async () => {

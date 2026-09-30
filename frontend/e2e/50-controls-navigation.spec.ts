@@ -32,7 +32,9 @@ import {
  *
  * A cost controller whose template refuses the BOQ opens the same activity:
  * the change order that reaches it through an allocation is not listed, and
- * the drawer says so ("—" with the server's reason), never "none".
+ * the drawer says so ("—" with the server's reason), never "none". A
+ * procurement member, who reads the schedule but not progress, is refused
+ * the approved % complete on the BOQ drawer exactly as on the activity's.
  *
  * Built in a throwaway "LiveTest <uuid>" organisation through the API; the
  * approved progress, the approved change order with an allocation link, the
@@ -67,12 +69,13 @@ const storeFixtures = (
   allocationId: string,
   boqItemId: string,
   noBoqUserId: string,
+  procurementUserId: string,
 ) => {
   const script = `
 require('./src/utils/data-script-guard').exitUnlessDataScriptAllowed('e2e:controls-navigation');
 const { prisma } = require('./src/config/db');
 const commitmentService = require('./src/services/commitment.service');
-const [orgId, projectId, activityId, allocationId, boqItemId, noBoqUserId] = process.argv.slice(1);
+const [orgId, projectId, activityId, allocationId, boqItemId, noBoqUserId, procurementUserId] = process.argv.slice(1);
 (async () => {
   const org = await prisma.organisation.findUnique({ where: { id: orgId }, select: { name: true } });
   if (!org || !/^LiveTest [0-9a-f-]{36}$/.test(org.name)) throw new Error('refusing: not a LiveTest organisation');
@@ -81,7 +84,8 @@ const [orgId, projectId, activityId, allocationId, boqItemId, noBoqUserId] = pro
   const activity = await prisma.activity.findFirst({ where: { id: activityId, projectId }, select: { id: true } });
   const allocation = await prisma.activityBoqAllocation.findFirst({ where: { id: allocationId, projectId, boqItemId }, select: { id: true } });
   const member = await prisma.user.findFirst({ where: { id: noBoqUserId, orgId }, select: { id: true } });
-  if (!activity || !allocation || !member) throw new Error('refusing: the activity, allocation or member is not in that project');
+  const buyer = await prisma.user.findFirst({ where: { id: procurementUserId, orgId }, select: { id: true } });
+  if (!activity || !allocation || !member || !buyer) throw new Error('refusing: the activity, allocation or member is not in that project');
   await prisma.activityProgress.create({
     data: { activityId, pctComplete: 40, status: 'approved', source: 'manual', approvedAt: new Date() },
   });
@@ -117,6 +121,8 @@ const [orgId, projectId, activityId, allocationId, boqItemId, noBoqUserId] = pro
   });
   await prisma.projectAssignment.create({ data: { projectId, userId: noBoqUserId, role: 'cost_controller', orgId } });
   await prisma.projectUserPermission.create({ data: { orgId, projectId, userId: noBoqUserId, templateId: template.id } });
+  // A procurement member: reads the BOQ and the schedule, not progress.
+  await prisma.projectAssignment.create({ data: { projectId, userId: procurementUserId, role: 'procurement', orgId } });
   process.stdout.write(JSON.stringify({
     changeOrderId: order.id, ipcCertificateId: certificate.id, commitmentId: commitment.id, commitmentRef: commitment.ref,
     ncrId: ncr.id, orderId: po.id, orderRef: po.ref,
@@ -125,7 +131,7 @@ const [orgId, projectId, activityId, allocationId, boqItemId, noBoqUserId] = pro
   .catch((error) => { process.stderr.write(String(error && error.message)); process.exitCode = 1; })
   .finally(() => prisma.$disconnect());
 `
-  const result = spawnSync(process.execPath, ['-e', script, orgId, projectId, activityId, allocationId, boqItemId, noBoqUserId], {
+  const result = spawnSync(process.execPath, ['-e', script, orgId, projectId, activityId, allocationId, boqItemId, noBoqUserId, procurementUserId], {
     cwd: backendDir,
     env: process.env,
     encoding: 'utf8',
@@ -178,8 +184,10 @@ const build = async (client: APIRequestContext) => {
   }
   const noBoqEmail = `pc5-cost-noboq-${Date.now()}@octapm-live.test`
   const noBoqUserId = await addMember(client, org, { name: 'Cost without BOQ', email: noBoqEmail, role: 'cost_controller' })
-  const fixtures = storeFixtures(org.orgId, projectId, acts.X, allocations.AX, rows.A, noBoqUserId)
-  return { projectId, rows, acts, allocations, noBoqEmail, ...fixtures }
+  const procurementEmail = `pc5-procurement-${Date.now()}@octapm-live.test`
+  const procurementUserId = await addMember(client, org, { name: 'Procurement', email: procurementEmail, role: 'procurement' })
+  const fixtures = storeFixtures(org.orgId, projectId, acts.X, allocations.AX, rows.A, noBoqUserId, procurementUserId)
+  return { projectId, rows, acts, allocations, noBoqEmail, procurementEmail, ...fixtures }
 }
 
 const projectPath = (projectId: string, rest: string) => `/o/${org!.segment}/projects/${projectId}/${rest}`
@@ -374,4 +382,21 @@ test('a BOQ item leads to its activities and back, an activity to its BOQ rows a
   await expect(other.getByTestId(`activity-detail-change-order-${changeOrderId}`)).toHaveCount(0)
   await expect(other.getByTestId('activity-detail-history-boq-withheld')).toBeVisible()
   await context.close()
+
+  // ── A procurement member (schedule, no progress): refused on both drawers alike ─
+  const buyerContext = await browser.newContext()
+  const buyer = await buyerContext.newPage()
+  await signInForm(buyer, built.procurementEmail)
+  await buyer.waitForURL((url) => !url.pathname.startsWith('/sign-in'), { timeout: 45_000 })
+  await buyer.goto(projectPath(projectId, `boq?recordId=${rows.A}&source=boq_item`))
+  const buyerDrawer = await expectOpen(buyer, 'boq_item', rows.A)
+  const refusal = '— You do not have permission to read this section'
+  await expect(buyer.getByTestId(`boq-detail-activity-progress-withheld-${acts.X}`)).toHaveText(refusal)
+  await expect(buyerDrawer).not.toContainText('40%')
+  await expect(buyerDrawer).not.toContainText('No approved progress')
+  await buyerDrawer.getByTestId(`boq-detail-activity-${acts.X}`).click()
+  await expectOpen(buyer, 'activity', acts.X)
+  await expect(buyer.getByTestId('activity-detail-progress')).toContainText(refusal)
+  await expect(buyer.getByTestId('activity-detail-pct')).toHaveCount(0)
+  await buyerContext.close()
 })

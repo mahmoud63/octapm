@@ -193,6 +193,17 @@ function BoqDetailBody({
                         <span className='text-xs text-muted-foreground' title={row.activity.schedule.reason}>
                           —
                         </span>
+                      ) : row.activity?.progress ? (
+                        // The progress module refuses this member, as the
+                        // activity drawer's Progress section does.
+                        <span
+                          className='text-xs text-muted-foreground'
+                          title={row.activity.progress.reason}
+                          data-testid={`boq-detail-activity-progress-withheld-${row.activity.id}`}
+                          data-withheld-module='progress'
+                        >
+                          — {row.activity.progress.reason}
+                        </span>
                       ) : row.activity?.pctComplete ? (
                         <span title={row.activity.pctComplete.basis}>
                           {formatQuantity(row.activity.pctComplete.value)}%

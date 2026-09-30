@@ -357,6 +357,9 @@ export const BoqItemDetailSchema = z.object({
               name: z.string(),
               // Sent only to a schedule reader; anyone else gets id, code and
               // name, href null and `schedule: { allowed: false, ... }`.
+              // pctComplete and progressSource go to a progress reader only;
+              // a schedule reader who may not read progress gets
+              // `progress: { allowed: false, module: 'progress', ... }`.
               startDate: z.string().nullable().optional(),
               endDate: z.string().nullable().optional(),
               isCritical: z.boolean().optional(),
@@ -366,6 +369,7 @@ export const BoqItemDetailSchema = z.object({
               progressSource: z.string().nullable().optional(),
               href: z.string().nullable().optional(),
               schedule: ControlsSectionDeniedSchema.optional(),
+              progress: ControlsSectionDeniedSchema.optional(),
             })
             .nullable(),
         })

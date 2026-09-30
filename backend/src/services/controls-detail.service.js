@@ -200,8 +200,12 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
   // module: a member who may not read the schedule is refused GET
   // /activities, so here the activity is what an allocation listing already
   // shows a BOQ reader (id, code, name) and a { allowed: false } marker, and
-  // the schedule is not even read.
+  // the schedule is not even read. Its approved % complete and the source of
+  // it belong to the progress module, as on the activity detail: a schedule
+  // reader who may not read progress gets { allowed: false, module:
+  // "progress" } in their place, and progress is not read.
   const canReadSchedule = can("schedule");
+  const canReadProgress = canReadSchedule && can("progress");
   // The IPC certification cap's approved-variation rule, for the row and for
   // each listed allocation, in one query (ipc.service getApprovedVariationAllowances).
   const listedAllocations = allocations.slice(0, LIST_CAP);
@@ -222,7 +226,7 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
             : { id: true, name: true, activityCode: true, p6ActivityId: true },
         })
       : [],
-    canReadSchedule ? latestApprovedProgress(activityIds) : new Map(),
+    canReadProgress ? latestApprovedProgress(activityIds) : new Map(),
     originalQuantityOf({ projectId, item, lock }),
   ]);
   const activityById = new Map(activities.map((entry) => [entry.id, entry]));
@@ -260,10 +264,14 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
             isCritical: Boolean(activity.isCritical),
             totalFloat: activity.totalFloat ?? null,
             isActive: activity.isActive,
-            pctComplete: latest
-              ? fig(toNumber(latest.pctComplete), "source", "Latest approved ActivityProgress (most recently updated)", [{ type: "activity_progress" }])
-              : null,
-            progressSource: latest?.source ?? null,
+            ...(canReadProgress
+              ? {
+                  pctComplete: latest
+                    ? fig(toNumber(latest.pctComplete), "source", "Latest approved ActivityProgress (most recently updated)", [{ type: "activity_progress" }])
+                    : null,
+                  progressSource: latest?.source ?? null,
+                }
+              : { progress: denied("progress") }),
             href: link("activity", activity.id),
           }
         : null,
