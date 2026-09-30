@@ -53,6 +53,7 @@ export function FigureRow({
   format = 'quantity',
   currency = '',
   suffix = '',
+  hint,
   testId,
 }: {
   label: string
@@ -60,6 +61,8 @@ export function FigureRow({
   format?: 'quantity' | 'money' | 'percent'
   currency?: string
   suffix?: string
+  /** The label's one-line meaning (FINANCIAL_TERMS hint), on hover. */
+  hint?: string
   testId?: string
 }) {
   let body: ReactNode
@@ -90,7 +93,7 @@ export function FigureRow({
   return (
     <div className='flex items-start justify-between gap-3 py-1 text-sm' data-testid={testId}>
       <div className='min-w-0'>
-        <p className='text-muted-foreground'>{label}</p>
+        <p className='text-muted-foreground' title={hint}>{label}</p>
         {figure && (
           <p className='text-[11px] leading-snug text-muted-foreground/80'>{figure.basis}</p>
         )}

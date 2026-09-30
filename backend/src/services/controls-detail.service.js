@@ -388,12 +388,17 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
       where: { projectId, boqItemId: itemId, commitment: { projectId, status: { in: commitmentService.POSTING_STATUSES } } },
       select: { id: true, amount: true, qty: true, commitment: { select: { id: true, number: true, title: true, status: true } } },
     });
+    // A base-only figure (owner decision R5-3): the item's share of the
+    // executed contracts, before any approved commitment change order. It is
+    // not the committed cost — recomputeCommitted's total on the cost record
+    // and the budget register includes approved variations — so it carries
+    // its own name and never the plain "committed".
     sections.commitments = {
       allowed: true,
-      committed: fig(
+      baseCommitmentValue: fig(
         lines.reduce((sum, entry) => addMoney(sum, entry.amount), 0),
         "derived",
-        "Σ CommitmentSovLine.amount naming this item on executed/closed commitments — excludes variations (CCO lines carry no BOQ item)",
+        "Base commitment value (excluding approved variations): Σ CommitmentSovLine.amount naming this item on executed/closed commitments — approved commitment change orders are not included (their lines carry no BOQ item), so this is not the committed cost",
         [{ type: "commitment_sov_line", filter: "boqItemId, commitment.status in (executed, closed)" }],
       ),
       lines: capped(

@@ -413,7 +413,9 @@ export const BoqItemDetailSchema = z.object({
       ControlsSectionDeniedSchema,
       z.object({
         allowed: z.literal(true),
-        committed: ControlsFigureSchema,
+        // Base commitment value (excluding approved variations), R5-3 — not
+        // the committed cost, which includes approved commitment change orders.
+        baseCommitmentValue: ControlsFigureSchema,
         lines: controlsCappedList(looseRow),
       }),
     ]),
