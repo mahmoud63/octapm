@@ -1700,6 +1700,30 @@ const withheldAllocatedItems = (result, access = FULL_ACCESS) => {
   return { ...result, items, boqWithheld: { keys: [...keys], reason: ALLOCATED_ITEM_WITHHELD } };
 };
 
+// ─── The legacy daily report (/daily-reports) ─────────────────────────────
+//
+// A daily report carries the progress submissions linked to it, serialised
+// whole by the progress service — the typed quantity, the planned quantity
+// (Σ approved allocations) and its unit included. Every answer of the
+// /daily-reports routes (list, get, create, update, submit, approve, reject,
+// review) is admitted on a progress permission, so its reader may be unable
+// to read the BOQ: each linked submission goes the way of
+// GET /activities/{id}/progress-submissions (withheldProgressSubmission) —
+// its percentage, method, status and provenance stay, the quantities are
+// omitted (never zeroed) and named in `boqWithheld`. The report's own lines
+// (manpower, materials delivered, equipment, issues, photos) are site
+// records, not figures of the bill, and stay.
+
+/** One daily report as this caller may receive it. */
+const withheldDailyReport = (report, access = FULL_ACCESS) => {
+  if (access.boq || !report || typeof report !== "object" || !Array.isArray(report.progressSubmissions)) return report;
+  return { ...report, progressSubmissions: report.progressSubmissions.map((row) => withheldProgressSubmission(row, access)) };
+};
+
+/** A list of daily reports (GET /daily-reports) as this caller may receive it. */
+const withheldDailyReports = (reports, access = FULL_ACCESS) =>
+  access.boq || !Array.isArray(reports) ? reports : reports.map((report) => withheldDailyReport(report, access));
+
 // ─── PC-6: the quantity views ─────────────────────────────────────────────
 //
 // Installed, certified, paid, received, issued and committed quantities per
@@ -1778,6 +1802,8 @@ module.exports = {
   ALLOCATED_ITEM_BOQ_KEYS,
   withheldDailyLogQuantity,
   withheldDailyLog,
+  withheldDailyReport,
+  withheldDailyReports,
   withheldAllocatedItems,
   withheldQuantityEntry,
   withheldQuantityEntries,

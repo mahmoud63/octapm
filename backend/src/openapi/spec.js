@@ -10777,6 +10777,13 @@ add(
   }),
 );
 
+// Every /daily-reports answer (list, get, create, update, submit, approve,
+// reject, review) carries the report's linked progress submissions; for a
+// member who may not read the BOQ each goes the way of
+// GET /activities/{id}/progress-submissions (utils/boq-figures.js).
+const DAILY_REPORT_BOQ_WITHHELD_NOTE =
+  "Every daily-report answer (list, get, create, update, submit, approve, reject, review) carries the report's linked progressSubmissions. For a member without boq:read on the project each submission omits quantityComplete, quantityPlanned (Σ approved allocations), quantityUnit and the quantity basis — never zeroed — and names them in boqWithheld { keys, reason }; its percentage, method, status and source stay, as on GET /activities/{activityId}/progress-submissions.";
+
 [
   ["daily-reports", "Daily Reports", "DailyReportRequest", "reportId"],
   ["site-diaries", "Site Diaries", "SiteDiaryRequest", "diaryId"],
@@ -10787,6 +10794,7 @@ add(
     operation({
       tag,
       summary: `List ${tag.toLowerCase()}.`,
+      description: base === "daily-reports" ? DAILY_REPORT_BOQ_WITHHELD_NOTE : undefined,
       operationId: `list${tag.replace(/\s/g, "")}`,
       parameters: [
         ...projectParams,
@@ -10823,6 +10831,7 @@ add(
     operation({
       tag,
       summary: `Get one ${tag.toLowerCase().slice(0, -1)}.`,
+      description: base === "daily-reports" ? DAILY_REPORT_BOQ_WITHHELD_NOTE : undefined,
       operationId: `get${tag.replace(/\s/g, "").slice(0, -1)}`,
       parameters: [
         ...projectParams,

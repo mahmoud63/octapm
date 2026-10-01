@@ -378,6 +378,18 @@ and lists the two in its org-side set; until then it reports them as pending) an
 applicable). The financial snapshot and reconciliation delta must read 0.00 — the migration writes no row.
 
 Mobile: the daily log form gets a "Quantities installed" section using the existing activity + location pickers; offline via the outbox with `clientRequestId` (already the pattern for the six sections). **As integrated (2026-10-01):** the item picker reads the server's own list — `GET /activities/{id}/allocated-items` (§4.1), admitted on reading progress — not the allocation register (`/activity-boq-allocations`, gated on reading the BOQ), which had left a site engineer without BOQ read unable to record at all, against the owner's decision. Such a member picks by the item's description and unit (no code, no allocation, no allocated quantity — none is invented; the server resolves the single approved allocation), records, and reads their own row back with a dash and the server's reason for the quantity. The form no longer offers zero (the server refuses it, §3.1). `mobile/e2e/pc6-daily-log-quantities.spec.ts` runs without a skip gate: the withheld picker and the recorded row; offline capture → outbox → a lost reply → the retry and one more replay → one row; the day submitted from the phone → one pending entry per row in the register (`source daily_log`, `submitted`), nothing official; the activity screen's count and its six figure lines against the server's `/quantities` answer for both members.
+**The legacy daily report under the BOQ-access rule (integration fix, 2026-10-01).** Every `/daily-reports` answer —
+list, get, create, update, submit, approve, reject and review — carries the progress submissions linked to the report,
+serialised whole by the progress service, and was handed out unwithheld: a member without `boq:read` received the
+typed `quantityComplete`, the `quantityPlanned` (Σ approved allocations — a figure of the bill) and the `quantityUnit`
+that `GET /activities/{id}/progress-submissions` withholds from them. Every answer now goes through
+`withheldDailyReport` / `withheldDailyReports` in `utils/boq-figures.js`, which map each linked submission through
+`withheldProgressSubmission`: the percentage, method, status, source and provenance stay; the quantities and the
+quantity basis are omitted (never zeroed) and named in `boqWithheld`. The report's own lines (manpower, materials
+delivered, equipment, issues, photos) are site records and stay. The daily report has no PDF or export and raises no
+notification of its own. Proven live: `pc-6-daily-report-withholding` (a site engineer and a PM, each on a `boq: none`
+template, on every route; each answer swept for every quantity key, the unit code and every seeded figure; the BOQ
+reader is given them all).
 
 ### 4.1 The quantities section, as shipped (PC-6 core, 2026-10-01) [C]
 
