@@ -271,13 +271,16 @@ export type UpdateBoqActivityInput = z.infer<
 // PC-6: the official installed figure the server states beside an activity's
 // installed figure when its latest approved progress carries a legacy typed
 // quantity as its floor — Σ approved entries is then below the official
-// figure, and the installed figure's basis says why. Absent otherwise, and
-// withheld with the figure itself.
+// figure, and the installed figure's basis says why — or (2026-10-01) when
+// that latest progress is a typed figure with no entry minted behind it
+// (installedBasis 'client'). Absent otherwise, and withheld with the figure
+// itself.
 export const OfficialInstalledSchema = z
   .object({
     value: z.number().nullable().optional(),
     unitCode: z.string().nullable().optional(),
     basis: z.string().nullable().optional(),
+    installedBasis: z.string().nullable().optional(),
   })
   .passthrough()
 export type OfficialInstalled = z.infer<typeof OfficialInstalledSchema>

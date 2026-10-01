@@ -147,7 +147,7 @@ export interface QuantityFigure {
    * carries a legacy typed quantity as its floor (the basis says why the
    * entries add up to less). Never sent with a withheld figure.
    */
-  officialInstalled?: { value: number | null; unitCode?: string | null; basis?: string | null } | null
+  officialInstalled?: { value: number | null; unitCode?: string | null; basis?: string | null; installedBasis?: string | null } | null
 }
 
 export type QuantityFigureKey = 'received' | 'issued' | 'installed' | 'certified' | 'paid' | 'committed'

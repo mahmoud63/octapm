@@ -279,7 +279,7 @@ describe("quantity views (PC-6)", () => {
       expect(view.figures.installed).toMatchObject({ value: 35, unitCode: "m3", unitMatch: true, truth: "derived" });
       expect(view.figures.installed.byItem).toEqual(plain.figures.installed.byItem);
       expect(view.progress.pctComplete.value).toBe(75);
-      expect(view.figures.installed.officialInstalled).toEqual({ ...OFFICIAL, truth: "source", derivedFrom: [{ type: "activity_progress", id: "ap-floor" }], approvedAt: "2026-10-01T10:00:00.000Z" });
+      expect(view.figures.installed.officialInstalled).toEqual({ ...OFFICIAL, installedBasis: "legacy_typed_floor", truth: "source", derivedFrom: [{ type: "activity_progress", id: "ap-floor" }], approvedAt: "2026-10-01T10:00:00.000Z" });
       expect(view.figures.installed.basis).toBe(`${service.BASIS.installed}. ${service.LEGACY_FLOOR_INSTALLED_NOTE}`);
       expect(view.figures.installed.basis).toMatch(/below the official installed figure .* because earlier progress was typed, not entered/);
       expect(service.OFFICIAL_INSTALLED_BASIS).toBe(OFFICIAL.basis);
@@ -287,8 +287,10 @@ describe("quantity views (PC-6)", () => {
       const { installed: flooredInstalled, ...flooredRest } = view.figures;
       const { installed: plainInstalled, ...plainRest } = plain.figures;
       expect(flooredRest).toEqual(plainRest);
-      expect(view.comparisons).toEqual(plain.comparisons);
       expect(view.items).toEqual(plain.items);
+      // The comparison takes the higher of Σ approved entries (35) and the official figure (75), and says which.
+      expect(plain.comparisons.certifiedOverInstalled).toMatchObject({ flag: true, certified: 40, installed: 35, installedFigure: "approved_entries", basis: expect.stringContaining("here Σ approved entries") });
+      expect(view.comparisons.certifiedOverInstalled).toMatchObject({ flag: false, certified: 40, installed: 75, installedFigure: "official_installed", unitCode: "m3", basis: expect.stringContaining("here the official installed figure (officialInstalled)") });
 
       const detailFigure = await service.installedForActivity({ orgId: ORG, projectId: PROJECT, activityId: ACT, method: "quantity", core: coreWith(ENTRIES) });
       expect(detailFigure).toMatchObject({ value: 35, unitCode: "m3", officialInstalled: OFFICIAL });
@@ -310,10 +312,12 @@ describe("quantity views (PC-6)", () => {
 
     it("says nothing where there is no floor, no difference to explain, or no figure to stand beside", async () => {
       const figure = { value: 35, unitCode: "m3", basis: "B", truth: "derived" };
-      // No official row; a row approved from entries; a typed row (no floor note); another method.
+      // No official row; a row approved from entries (its submission bundled entered ones); another method.
+      // (A typed row with no floor note is a typed official figure: see the next block.)
+      const fromEntries = { ...floored, notes: null, submission: { id: "s-bundle", quantityEntries: [{ id: "e-1", source: "manual" }, { id: "e-2", source: "daily_log" }] } };
       expect(service.withOfficialInstalled(figure, null)).toBe(figure);
-      expect(service.withOfficialInstalled(figure, { ...floored, notes: null })).toBe(figure);
-      expect(service.withOfficialInstalled(figure, { ...floored, notes: "poured the north bay" })).toBe(figure);
+      expect(service.withOfficialInstalled(figure, fromEntries)).toBe(figure);
+      expect(service.withOfficialInstalled(figure, { ...fromEntries, notes: "poured the north bay" })).toBe(figure);
       expect(service.withOfficialInstalled(figure, { ...floored, progressMethod: "percent" })).toBe(figure);
       expect(service.withOfficialInstalled(figure, { ...floored, quantityComplete: null })).toBe(figure);
       // Σ approved entries is not below the official figure: nothing to explain.
@@ -337,6 +341,31 @@ describe("quantity views (PC-6)", () => {
       expect(noProgress.figures.installed).toMatchObject({ value: 35 });
       expect(noProgress.figures.installed.officialInstalled).toBeUndefined();
       expect(noProgress.figures.installed.basis).toBe(service.BASIS.installed);
+    });
+
+    it("names a typed official figure above the entries (installedBasis client — typed, no entry minted behind the difference) with its own basis sentence; equal or below says nothing; a minted typed figure is the entries' own", async () => {
+      // Typed 60, nothing minted (no submission, or one whose mint was skipped); Σ approved entries 35.
+      const typed = { id: "ap-typed", activityId: ACT, status: "approved", pctComplete: 60, progressMethod: "quantity", source: "mobile", quantityComplete: 60, quantityPlanned: 100, quantityUnit: "m3", notes: null, approvedAt: new Date("2026-10-01T11:00:00Z") };
+      const TYPED = { value: 60, unitCode: "m3", basis: "official figure of the latest approved progress, typed rather than entered", installedBasis: "client" };
+      expect(service.OFFICIAL_TYPED_BASIS).toBe(TYPED.basis);
+      expect(service.officialInstalledOf(typed)).toEqual({ ...TYPED, truth: "source", derivedFrom: [{ type: "activity_progress", id: "ap-typed" }], approvedAt: "2026-10-01T11:00:00.000Z" });
+      expect(service.officialInstalledOf({ ...typed, submission: { id: "s-typed", quantityEntries: [] } })).toMatchObject(TYPED);
+      rows.progress[0] = typed;
+      const view = await service.getActivityQuantities({ orgId: ORG, projectId: PROJECT, activityId: ACT, can: allow, core: coreWith(ENTRIES) });
+      expect(view.figures.installed).toMatchObject({ value: 35, unitCode: "m3", officialInstalled: TYPED });
+      expect(view.figures.installed.basis).toBe(`${service.BASIS.installed}. ${service.TYPED_INSTALLED_NOTE}`);
+      expect(view.figures.installed.basis).toMatch(/typed rather than entered: no entry stands behind the difference/);
+      expect(view.figures.installed.basis).not.toContain(service.LEGACY_FLOOR_INSTALLED_NOTE);
+      expect(view.comparisons.certifiedOverInstalled).toMatchObject({ flag: false, certified: 40, installed: 60, installedFigure: "official_installed" });
+      const detailFigure = await service.installedForActivity({ orgId: ORG, projectId: PROJECT, activityId: ACT, method: "quantity", core: coreWith(ENTRIES) });
+      expect(detailFigure).toMatchObject({ value: 35, officialInstalled: TYPED });
+      // Not above the entries (a typed 30 under Σ 35, or a figure whose mint brought the entries up to it): nothing to explain, the entries compared.
+      const figure = { value: 35, unitCode: "m3", basis: "B", truth: "derived" };
+      expect(service.withOfficialInstalled(figure, { ...typed, quantityComplete: 30 })).toBe(figure);
+      expect(service.withOfficialInstalled(figure, { ...typed, quantityComplete: 35 })).toBe(figure);
+      expect(service.comparisonsOf({ installed: { ...figure, officialInstalled: { ...TYPED, value: 30 } }, certified: { value: 32, unitCode: "m3" } }).certifiedOverInstalled).toMatchObject({ flag: false, installed: 35, installedFigure: "approved_entries" });
+      // In another unit the official figure is stated beside, never compared.
+      expect(service.comparisonsOf({ installed: { ...figure, officialInstalled: { ...TYPED, unitCode: "t" } }, certified: { value: 40, unitCode: "m3" } }).certifiedOverInstalled).toMatchObject({ flag: true, installed: 35, installedFigure: "approved_entries" });
     });
 
     it("is withheld with the figure from a member who may not read the BOQ — the view, the detail's figure and the register", async () => {

@@ -108,6 +108,14 @@
  * with warnings [{ code: 'QUANTITY_BELOW_OFFICIAL', officialInstalled, typed }],
  * withheld from a PM on a boq:none template like the figures (code kept).
  *
+ * The official figure above the entries, not only a floor (part 5): the zero
+ * pour's latest official row is a typed 40 with no entry minted behind it
+ * (installedBasis client) and Σ approved entries is 0 — the quantity view,
+ * the register and the activity detail state the official figure beside the
+ * entries with its own sentence (typed rather than entered), the
+ * certified-over-installed comparison is made against the higher of the two
+ * and says which, and a member without boq:read is given none of it.
+ *
  *   DATABASE_CONNECTION_LIMIT=4 npm run test:live -- src/services/__live__/pc-6-method-authority.live.test.js
  */
 const { prisma } = require("../../config/db");
@@ -751,5 +759,58 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     const above = await submit(zeroPour.id, { quantityComplete: 45 }, live.token);
     ok(above, 200);
     expect(above.body.data.submission).not.toHaveProperty("warnings");
+  });
+  it("the official figure above the entries, not only a floor: a typed official figure with no entry behind it (installedBasis client) is stated beside Σ approved entries with its own sentence on the view, the register and the detail; the comparison takes the higher; nothing moves; a member without boq:read is given none of it", async () => {
+    const TYPED = { value: 40, unitCode: "m3", basis: "official figure of the latest approved progress, typed rather than entered", installedBasis: "client" };
+    const WHY = /Σ approved entries is below the official installed figure \(officialInstalled\) because the latest approved progress was typed rather than entered: no entry stands behind the difference/;
+    const frozen = async () =>
+      JSON.stringify({
+        progress: await prisma.activityProgress.findMany({ where: { activity: { projectId: project.id } }, orderBy: { updatedAt: "asc" } }),
+        entries: await prisma.quantityProgressEntry.findMany({ where: { projectId: project.id }, orderBy: { createdAt: "asc" } }),
+      });
+    const before = await frozen();
+    const evBefore = await evReport();
+    const official = (await progressRows(zeroPour.id)).at(-1);
+    expect(official).toMatchObject({ pctComplete: 20, quantityComplete: 40, quantityUnit: "m3" });
+    expect(await prisma.quantityProgressEntry.count({ where: { activityId: zeroPour.id, status: "approved" } })).toBe(0);
+
+    const view = await api.get(at(`/activities/${zeroPour.id}/quantities`), bearer(live.token));
+    ok(view);
+    expect(view.body.data.progress.pctComplete.value).toBe(20);
+    expect(view.body.data.figures.installed).toMatchObject({ value: 0, officialInstalled: { ...TYPED, truth: "source", derivedFrom: [{ type: "activity_progress", id: official.id }], approvedAt: official.approvedAt.toISOString() } });
+    expect(view.body.data.figures.installed.basis).toMatch(WHY);
+    expect(view.body.data.figures.installed.basis).not.toMatch(/legacy typed quantity as its floor/);
+    expect(view.body.data.comparisons.certifiedOverInstalled).toMatchObject({ installed: 40, installedFigure: "official_installed", basis: expect.stringContaining("here the official installed figure (officialInstalled)") });
+
+    const single = await activityPayload(zeroPour.id);
+    expect(single).toMatchObject({ pctComplete: 20, progressSource: { installedBasis: "client", legacyFloor: false }, installedQuantity: { officialInstalled: TYPED } });
+    expect(single.installedQuantity.basis).toMatch(WHY);
+    const detail = await api.get(at(`/activities/${zeroPour.id}/detail`), bearer(live.token));
+    ok(detail);
+    expect(detail.body.data.sections.progress.installedQuantity).toMatchObject({ value: 0, officialInstalled: TYPED });
+    expect(detail.body.data.sections.progress.installedQuantity.basis).toMatch(WHY);
+
+    // A typed figure that minted its entry (the kerb: 20 typed, 20 minted, then 5 bundled) is the entries' own: nothing is said.
+    const kerbView = await api.get(at(`/activities/${kerb.id}/quantities`), bearer(live.token));
+    ok(kerbView);
+    expect(kerbView.body.data.figures.installed.officialInstalled).toBeUndefined();
+    expect(kerbView.body.data.comparisons.certifiedOverInstalled.installedFigure).toBe("approved_entries");
+
+    // The member who may not read the BOQ: the percentage stays; the figures, the official figure and the sentence do not.
+    const hiddenView = await api.get(at(`/activities/${zeroPour.id}/quantities`), bearer(auditor.token));
+    ok(hiddenView);
+    expect(hiddenView.body.data.figures.installed).toMatchObject({ value: null, withheld: true });
+    expect(JSON.stringify(hiddenView.body.data)).not.toMatch(/officialInstalled|typed rather than entered|official_installed/);
+    const hiddenSingle = await api.get(at(`/activities/${zeroPour.id}`), bearer(auditor.token));
+    ok(hiddenSingle);
+    expect(hiddenSingle.body.data.pctComplete).toBe(20);
+    expect(Object.keys(hiddenSingle.body.data.installedQuantity)).toEqual(["withheld"]);
+    const hiddenDetail = await api.get(at(`/activities/${zeroPour.id}/detail`), bearer(auditor.token));
+    ok(hiddenDetail);
+    expect(JSON.stringify(hiddenDetail.body.data)).not.toMatch(/officialInstalled|typed rather than entered/);
+
+    // Reading moved nothing.
+    expect(await frozen()).toBe(before);
+    expect(await evReport()).toBe(evBefore);
   });
 });

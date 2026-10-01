@@ -41,16 +41,19 @@ export function quantityFigureLine(figure: QuantityFigure | null | undefined, wi
 /**
  * The official installed figure the server states beside the installed one:
  * where the latest approved progress carries a legacy typed quantity as its
- * floor, the approved entries add up to less than the official figure. Both
- * are the server's; the app prints the official one as it came, with the
- * reason — it adds nothing up, and prints nothing when the server sent none.
+ * floor — or is itself a typed figure with no entry behind it (installedBasis
+ * 'client') — the approved entries add up to less than the official figure.
+ * Both are the server's; the app prints the official one as it came, with the
+ * reason its installedBasis names — it adds nothing up, and prints nothing
+ * when the server sent none.
  */
 export function officialInstalledLine(figure: QuantityFigure | null | undefined): string | null {
   const official = figure?.officialInstalled
   const value = official?.value == null ? NaN : Number(official.value)
   if (!official || !Number.isFinite(value)) return null
   const unit = official.unitCode ? ` ${official.unitCode}` : ''
-  return `Official installed: ${value}${unit}${official.basis ? ` — ${official.basis}` : ''}. The approved entries add up to less because earlier progress was typed, not entered.`
+  const reason = official.installedBasis === 'client' ? 'the latest approved progress was typed rather than entered' : 'earlier progress was typed, not entered'
+  return `Official installed: ${value}${unit}${official.basis ? ` — ${official.basis}` : ''}. The approved entries add up to less because ${reason}.`
 }
 
 function Fact({ label, value }: { label: string; value: string | null | undefined }) {

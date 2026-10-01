@@ -162,6 +162,10 @@ describe('progress source and quantities on an activity', () => {
     const OFFICIAL_BASIS = 'official figure of the latest approved progress, carrying a legacy typed quantity as its floor'
     const floored: QuantityFigure = { value: 15, truth: 'derived', basis: 'approved_entries', unitCode: 'm3', officialInstalled: { value: 75, unitCode: 'm3', basis: OFFICIAL_BASIS } }
     expect(officialInstalledLine(floored)).toBe(`Official installed: 75 m3 — ${OFFICIAL_BASIS}. The approved entries add up to less because earlier progress was typed, not entered.`)
+    // A typed official figure with no entry behind it (installedBasis client) says it was typed, not a legacy floor.
+    const TYPED_BASIS = 'official figure of the latest approved progress, typed rather than entered'
+    expect(officialInstalledLine({ ...floored, officialInstalled: { value: 40, unitCode: 'm3', basis: TYPED_BASIS, installedBasis: 'client' } })).toBe(`Official installed: 40 m3 — ${TYPED_BASIS}. The approved entries add up to less because the latest approved progress was typed rather than entered.`)
+    expect(officialInstalledLine({ ...floored, officialInstalled: { value: 75, unitCode: 'm3', basis: OFFICIAL_BASIS, installedBasis: 'legacy_typed_floor' } })).toContain('because earlier progress was typed, not entered.')
     // The installed figure itself is what it was.
     expect(quantityFigureLine(floored, null).value).toBe('15 m3')
     // No floor stated, a withheld figure, no figure: nothing is printed.

@@ -686,9 +686,25 @@ and the EV report byte-identical), by unit (`quantity-views.service.test.js`, on
 figures drawn in the drawer and on the Progress tab) and on the mobile screen (`activity-quantities.test.tsx`);
 mutation-proven (the note dropped → unit and live fail; the register's figure not withheld → unit and live fail; the
 web not drawing the figure it was sent → the source check and the browser case fail).
-Not covered, reported to the owner: an official row typed with **no** floor and no minted entry (a typed figure on
-an activity with several allocated items, or one not above the official figure) also stands above Σ approved
-entries; its PROGRESS SOURCE says `installedBasis: client`, and the installed view says nothing about it yet.
+**The official figure above the entries, not only a floor** (integration fix, 2026-10-01, closing the gap reported
+above). An official row typed with no floor and no entry minted behind the difference — legacy typed progress from
+before PC-6, or a typed figure whose mint was skipped (several allocated items, another unit, a figure approved below
+the official one) — stands above Σ approved entries too; its PROGRESS SOURCE says `installedBasis: client`.
+`officialInstalledOf` now states it as well, with its own basis ("official figure of the latest approved progress,
+typed rather than entered") and `installedBasis: 'client'` (the floor's carries `'legacy_typed_floor'`), and the
+installed basis gains "Σ approved entries is below the official installed figure (officialInstalled) because the
+latest approved progress was typed rather than entered: no entry stands behind the difference" — same three reads,
+same withholding, nothing moved. To tell a typed figure from one derived from entries the views read the official
+row's submission entries (the register already did): a row approved from entered entries says nothing; a typed
+figure whose mint brought the entries up to it says nothing (no difference). `comparisons.certifiedOverInstalled`
+now compares the certified figure with the **higher** of Σ approved entries and the official installed figure (in
+one unit; another unit is never compared) and says which — `installedFigure: 'approved_entries' |
+'official_installed'`, and the basis ("… — here the official installed figure (officialInstalled) …"). Per-item
+comparisons are unchanged (the official figure is the activity's). The web note and the mobile line pick their
+reason from `installedBasis`. Proven live (`pc-6-method-authority`: the zero pour's typed 40 over Σ 0 on the view,
+the register and the detail with the comparison against 40; the kerb says nothing; the boq:none cost controller
+gets none of it; rows, entries and EV byte-identical), by unit (`quantity-views.service.test.js`), the source check
+and the mobile screen test; mutation-proven.
 Proof of the views: `backend/src/services/__live__/pc-6-quantity-views.live.test.js` (LiveTest org; the
 seeded entries, the two certificates — one a quarter paid —, the receipt/issue/return, rebar in kg against tonnes,
 the draft commitment, the percent-method activity, the member without BOQ read, tenant 404s) and

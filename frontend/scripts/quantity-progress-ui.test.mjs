@@ -439,6 +439,28 @@ match(
   /<OfficialInstalledNote\s+official=\{figure\?\.officialInstalled\}/,
   "the drawer's progress section draws it under the installed quantity"
 )
+// A typed official figure above the entries (installedBasis 'client',
+// 2026-10-01) is explained as typed, never as a legacy floor.
+match(
+  officialInstalled,
+  /official\.installedBasis === 'client'\s*\?\s*OFFICIAL_REASON_TYPED\s*:\s*OFFICIAL_REASON_LEGACY_FLOOR/,
+  "the note's reason follows the server's installedBasis"
+)
+match(
+  officialInstalled,
+  /'the latest approved progress was typed rather than entered'/,
+  'a typed official figure says it was typed rather than entered'
+)
+match(
+  officialInstalled,
+  /up to less because \{reason\}\./,
+  'the reason drawn is the one chosen, not a fixed sentence'
+)
+match(
+  boqSchema,
+  /OfficialInstalledSchema = z[\s\S]{0,300}installedBasis: z\.string\(\)\.nullable\(\)\.optional\(\)/,
+  "the official figure's installedBasis is read"
+)
 
 // ── The two drawers embed the block; the approved percentage stays ──
 match(

@@ -77,8 +77,27 @@ const LEGACY_FLOOR_BASIS = "legacy_typed_floor";
 const OFFICIAL_INSTALLED_BASIS = "official figure of the latest approved progress, carrying a legacy typed quantity as its floor";
 const LEGACY_FLOOR_INSTALLED_NOTE =
   "Σ approved entries is below the official installed figure (officialInstalled) because earlier progress was typed, not entered: the latest approved progress carries that legacy typed quantity as its floor";
-// What officialInstalledOf reads of an approved ActivityProgress row.
-const OFFICIAL_PROGRESS_SELECT = Object.freeze({ id: true, notes: true, progressMethod: true, quantityComplete: true, quantityUnit: true, approvedAt: true });
+// A typed official figure with nothing minted behind the difference (part 5,
+// 2026-10-01): the latest approved progress states a typed quantity
+// (installedBasis 'client') that stands above Σ approved entries — legacy
+// typed progress from before PC-6, or a typed figure whose mint was skipped
+// (several allocated items, another unit).
+const CLIENT_BASIS = "client";
+const OFFICIAL_TYPED_BASIS = "official figure of the latest approved progress, typed rather than entered";
+const TYPED_INSTALLED_NOTE =
+  "Σ approved entries is below the official installed figure (officialInstalled) because the latest approved progress was typed rather than entered: no entry stands behind the difference";
+// What officialInstalledOf reads of an approved ActivityProgress row — its
+// submission's entries included, so PROGRESS SOURCE can tell a typed figure
+// (installedBasis 'client') from one derived from entries.
+const OFFICIAL_PROGRESS_SELECT = Object.freeze({
+  id: true,
+  notes: true,
+  progressMethod: true,
+  quantityComplete: true,
+  quantityUnit: true,
+  approvedAt: true,
+  submission: { select: { id: true, quantityEntries: { select: { id: true, source: true } } } },
+});
 
 const TRUTH = Object.freeze({
   installed: "derived",
@@ -427,8 +446,25 @@ const committedFigure = ({ lines, units, itemUnit }) => ({
   commitments: new Set(lines.map((line) => line.commitmentId)).size,
 });
 
+// The installed figure a comparison is made against (part 5, 2026-10-01): the
+// higher of Σ approved entries and the official installed figure stated
+// beside it (withOfficialInstalled — a legacy floor or a typed figure above
+// the entries), in one unit. A figure with no officialInstalled is Σ
+// approved entries, as before.
+const INSTALLED_COMPARED_ENTRIES = "approved_entries";
+const INSTALLED_COMPARED_OFFICIAL = "official_installed";
+const installedComparedOf = (installed) => {
+  const entries = { value: installed.value, unitCode: installed.unitCode, figure: INSTALLED_COMPARED_ENTRIES };
+  const official = installed.officialInstalled;
+  if (!official || typeof official.value !== "number" || typeof installed.value !== "number") return entries;
+  const sameUnit = !installed.unitCode || !official.unitCode || uomService.unitKey(installed.unitCode) === uomService.unitKey(official.unitCode);
+  if (!sameUnit || official.value <= installed.value) return entries;
+  return { value: official.value, unitCode: official.unitCode || installed.unitCode, figure: INSTALLED_COMPARED_OFFICIAL };
+};
+
 // certified > installed, as a raw comparison only (the overrun exception is PC-7b).
-const comparisonsOf = ({ installed, certified }) => {
+const comparisonsOf = ({ installed: installedFigure, certified }) => {
+  const installed = installedComparedOf(installedFigure);
   const comparable =
     installed.value != null && certified.value != null && Boolean(installed.unitCode) && installed.unitCode === certified.unitCode;
   return {
@@ -436,14 +472,18 @@ const comparisonsOf = ({ installed, certified }) => {
       flag: comparable ? certified.value > installed.value : null,
       certified: certified.value,
       installed: installed.value,
+      installedFigure: installed.figure,
       unitCode: comparable ? installed.unitCode : null,
-      basis: "Raw comparison of the certified figure against the installed figure, in one unit; a reviewed over-certification exception is PC-7b",
+      basis:
+        installed.figure === INSTALLED_COMPARED_OFFICIAL
+          ? "Raw comparison of the certified figure against the higher of Σ approved entries and the official installed figure — here the official installed figure (officialInstalled), which stands above the entries — in one unit; a reviewed over-certification exception is PC-7b"
+          : "Raw comparison of the certified figure against the higher of Σ approved entries and the official installed figure — here Σ approved entries — in one unit; a reviewed over-certification exception is PC-7b",
       ...(comparable
         ? {}
         : {
             reason:
               installed.value == null
-                ? installed.notAvailable?.reason || "installed is not available"
+                ? installedFigure.notAvailable?.reason || "installed is not available"
                 : certified.value == null
                   ? certified.notAvailable?.reason || "certified is not available"
                   : "the two figures are not in one unit",
@@ -544,12 +584,16 @@ const quantityBlocks = async ({
  */
 const officialInstalledOf = (progress) => {
   if (!progress || progress.quantityComplete == null) return null;
-  if (progressService.serializeProgressSource(progress)?.installedBasis !== LEGACY_FLOOR_BASIS) return null;
+  const installedBasis = progressService.serializeProgressSource(progress)?.installedBasis;
+  // A legacy floor, or a typed figure (part 5): a figure derived from entries
+  // is Σ approved entries itself and has nothing to add.
+  if (installedBasis !== LEGACY_FLOOR_BASIS && installedBasis !== CLIENT_BASIS) return null;
   const unit = progress.quantityUnit == null ? "" : String(progress.quantityUnit).trim();
   return {
     value: round3(progress.quantityComplete),
     unitCode: unit || null,
-    basis: OFFICIAL_INSTALLED_BASIS,
+    basis: installedBasis === LEGACY_FLOOR_BASIS ? OFFICIAL_INSTALLED_BASIS : OFFICIAL_TYPED_BASIS,
+    installedBasis,
     truth: "source",
     derivedFrom: [{ type: "activity_progress", id: progress.id }],
     approvedAt: iso(progress.approvedAt),
@@ -589,7 +633,8 @@ const withOfficialInstalled = (installed, latestProgress) => {
   const sum = entriesSumOf(installed);
   const oneUnit = sum && (!sum.unitCode || !official.unitCode || uomService.unitKey(sum.unitCode) === uomService.unitKey(official.unitCode));
   if (oneUnit && sum.value >= official.value) return installed;
-  return { ...installed, basis: `${installed.basis}. ${LEGACY_FLOOR_INSTALLED_NOTE}`, officialInstalled: official };
+  const note = official.installedBasis === LEGACY_FLOOR_BASIS ? LEGACY_FLOOR_INSTALLED_NOTE : TYPED_INSTALLED_NOTE;
+  return { ...installed, basis: `${installed.basis}. ${note}`, officialInstalled: official };
 };
 
 // The latest official progress row of an activity, as the one writer orders them.
@@ -854,6 +899,9 @@ module.exports = {
   SUBCONTRACT_CERTIFIED_REASON,
   LEGACY_FLOOR_INSTALLED_NOTE,
   OFFICIAL_INSTALLED_BASIS,
+  OFFICIAL_TYPED_BASIS,
+  TYPED_INSTALLED_NOTE,
+  comparisonsOf,
   officialInstalledOf,
   withOfficialInstalled,
   QUANTITY_KEYS,
