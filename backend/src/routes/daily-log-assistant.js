@@ -8,6 +8,9 @@ const { requirePermission, getEffectiveRole } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const service = require("../services/daily-log-assistant.service");
 const dailyLog = require("../services/daily-log.service");
+// PC-6: the applied draft answers with the day's log, which carries the
+// quantities section — withheld like every other log answer (routes/daily-logs).
+const { boqFigureAccess, withheldDailyLog } = require("../utils/boq-figures");
 
 /**
  * Daily report auto-draft (OCTA-AI-DAILY-030). Mounted inside the daily-log
@@ -88,7 +91,10 @@ router.post(
     body("overwriteCaptions").optional().isBoolean().toBoolean(),
     validate,
   ],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.applyDraft({ ...scope(req), date: req.params.date, payload: req.body, actor: actor(req), viewer: viewer(req) }))),
+  asyncHandler(async (req, res) => {
+    const result = await service.applyDraft({ ...scope(req), date: req.params.date, payload: req.body, actor: actor(req), viewer: viewer(req) });
+    return sendSuccess(res, { ...result, log: withheldDailyLog(result.log, boqFigureAccess(req)) });
+  }),
 );
 
 module.exports = router;

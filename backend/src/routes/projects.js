@@ -367,6 +367,12 @@ router.use(
   nestedProjectAccess,
   require("./daily-logs"),
 );
+// PC-6: installed quantities' pending layer (quantity progress entries).
+router.use(
+  "/:projectId/quantity-progress",
+  nestedProjectAccess,
+  require("./quantity-progress"),
+);
 router.use(
   "/:projectId/workflows",
   nestedProjectAccess,

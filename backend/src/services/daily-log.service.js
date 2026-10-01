@@ -10,13 +10,31 @@ const { createPdf } = require("../utils/pdf-writer");
  * Project daily log (OCTA-FLD-DAILY-022).
  *
  * One log per project per day with typed sections (manpower, equipment,
- * deliveries, visitors, delays, notes). Staff entries are approved as they are
- * written; entries from party users (contractor / subcontractor collaborators)
- * are submitted and reviewed by the site team. Weather is filled from the feed
- * by project coordinates — breaches of the project's thresholds raise a
- * suggested weather delay — or typed in. The day can be copied forward,
- * submitted, approved, rendered to PDF and distributed by email.
+ * deliveries, visitors, delays, notes, quantities). Staff entries are approved
+ * as they are written; entries from party users (contractor / subcontractor
+ * collaborators) are submitted and reviewed by the site team. Weather is
+ * filled from the feed by project coordinates — breaches of the project's
+ * thresholds raise a suggested weather delay — or typed in. The day can be
+ * copied forward, submitted, approved, rendered to PDF and distributed by
+ * email.
+ *
+ * The quantities section (PC-6, OCTAPM_PROGRESS_MEASUREMENT.md §4): a row
+ * says how much of a BOQ item the activity has an approved allocation of was
+ * installed that day. A row's own status is the section's review state, like
+ * its six siblings, and NEVER progress: submitting the log mints one
+ * QuantityProgressEntry per row (source daily_log, status submitted), and
+ * only the progress approval writer (progress.service — a quantity-method
+ * submission that bundles the entries, approved by the progress approvers)
+ * makes an installed quantity official. Approving the log approves the log
+ * and its rows' review state; it does not approve an entry. Editing a row
+ * before its entry is approved updates the entry; removing a row removes a
+ * still-pending entry and leaves an approved or rejected one as the trail
+ * (its link to the row is nulled by the database).
  */
+
+// Lazily: quantity-progress.service requires progress.service, whose own
+// graph reaches back here through the routes.
+const quantityProgress = () => require("./quantity-progress.service");
 
 const LOG_STATUS = Object.freeze({ OPEN: "open", SUBMITTED: "submitted", APPROVED: "approved" });
 const LOG_STATUSES = Object.values(LOG_STATUS);
@@ -211,8 +229,33 @@ const SECTIONS = Object.freeze({
       };
     },
   },
+  // PC-6 §4: installed quantity of an allocated BOQ item on an activity. No
+  // copyFields — a quantity installed yesterday is not installed again today.
+  // The item, the allocation and the unit are checked against the bill in
+  // assertRefs (they need the database); here the shape and the sign.
+  quantities: {
+    model: "dailyLogQuantity",
+    label: "Quantities",
+    fields: ["activityId", "boqItemId", "allocationId", "locationId", "quantity", "unitCode", "notes"],
+    normalize: (payload, existing) => {
+      const quantity = quantityProgress().quantityDecimal(pick(payload, existing, "quantity"), "quantity");
+      if (quantity === null) throw new HttpError(400, "DAILY_LOG_FIELD_REQUIRED", "quantity is required", { field: "quantity" });
+      if (quantity.isNegative()) throw new HttpError(400, "QUANTITY_NEGATIVE", "A quantity entry is never negative; a correction is a rejection plus a new entry", { field: "quantity" });
+      const unit = payload.unitCode !== undefined ? payload.unitCode : payload.unit !== undefined ? payload.unit : existing ? existing.unitCode : null;
+      return {
+        activityId: required(pick(payload, existing, "activityId"), "activityId"),
+        boqItemId: required(pick(payload, existing, "boqItemId"), "boqItemId"),
+        allocationId: trimOrNull(pick(payload, existing, "allocationId")),
+        locationId: trimOrNull(pick(payload, existing, "locationId")),
+        quantity,
+        unitCode: trimOrNull(unit),
+        notes: trimOrNull(pick(payload, existing, "notes")),
+      };
+    },
+  },
 });
 const SECTION_KEYS = Object.keys(SECTIONS);
+const QUANTITIES = "quantities";
 
 const sectionConfig = (section) => {
   const config = SECTIONS[section];
@@ -378,28 +421,63 @@ const loadLog = ({ tx = prisma, projectId, date, viewer }) =>
   tx.dailyLog.findUnique({ where: { projectId_date: { projectId, date } }, include: sectionsInclude(viewer) });
 
 const lookups = async ({ tx = prisma, projectId, log }) => {
-  const ids = { parties: new Set(), activities: new Set(), locations: new Set(), equipment: new Set() };
+  const ids = { parties: new Set(), activities: new Set(), locations: new Set(), equipment: new Set(), boqItems: new Set() };
   for (const key of SECTION_KEYS) {
     for (const row of log?.[key] || []) {
       if (row.partyId) ids.parties.add(row.partyId);
       if (row.activityId) ids.activities.add(row.activityId);
       if (row.locationId) ids.locations.add(row.locationId);
       if (row.equipmentId) ids.equipment.add(row.equipmentId);
+      if (row.boqItemId) ids.boqItems.add(row.boqItemId);
     }
   }
-  const [parties, activities, locations, equipment] = await Promise.all([
+  const quantityRowIds = (log?.[QUANTITIES] || []).map((row) => row.id);
+  const [parties, activities, locations, equipment, boqItems, entries] = await Promise.all([
     ids.parties.size ? tx.projectParty.findMany({ where: { id: { in: [...ids.parties] } }, include: { company: { select: { id: true, name: true } } } }) : [],
-    ids.activities.size ? tx.activity.findMany({ where: { id: { in: [...ids.activities] }, projectId }, select: { id: true, name: true, p6ActivityId: true, wbsCode: true } }) : [],
+    ids.activities.size ? tx.activity.findMany({ where: { id: { in: [...ids.activities] }, projectId }, select: { id: true, name: true, activityCode: true, p6ActivityId: true, wbsCode: true } }) : [],
     ids.locations.size ? tx.location.findMany({ where: { id: { in: [...ids.locations] }, projectId }, select: { id: true, name: true, code: true } }) : [],
     ids.equipment.size ? tx.equipment.findMany({ where: { id: { in: [...ids.equipment] }, projectId }, select: { id: true, name: true, rateType: true } }) : [],
+    ids.boqItems.size ? tx.boqItem.findMany({ where: { id: { in: [...ids.boqItems] }, projectId }, select: { id: true, code: true, ref: true, description: true, unit: true, unitCode: true } }) : [],
+    quantityRowIds.length ? quantityProgress().entriesForDailyLogRows({ tx, rowIds: quantityRowIds }) : [],
   ]);
+  // One entry per row: the pending or settled one it minted (the latest when a
+  // trail of several exists).
+  const entryByRow = new Map();
+  for (const entry of entries) entryByRow.set(entry.dailyLogQuantityId, entry);
   return {
     parties: new Map(parties.map((party) => [party.id, { id: party.id, role: party.role, companyId: party.companyId, companyName: party.company?.name || null }])),
-    activities: new Map(activities.map((activity) => [activity.id, { id: activity.id, name: activity.name, code: activity.p6ActivityId || activity.wbsCode || null }])),
+    activities: new Map(activities.map((activity) => [activity.id, { id: activity.id, name: activity.name, code: activity.activityCode || activity.p6ActivityId || activity.wbsCode || null }])),
     locations: new Map(locations.map((location) => [location.id, { id: location.id, name: location.name, code: location.code }])),
     equipment: new Map(equipment.map((item) => [item.id, { id: item.id, name: item.name, rateType: item.rateType }])),
+    boqItems: new Map(boqItems.map((item) => [item.id, { id: item.id, code: item.code || item.ref || null, description: item.description, unit: item.unit, unitCode: item.unitCode }])),
+    entries: entryByRow,
   };
 };
+
+/**
+ * The progress figure a quantities row minted, as the row carries it: its
+ * state and its PROGRESS SOURCE provenance — never a quantity of its own (the
+ * row's is the row's). `official` is true only once the progress approval
+ * writer approved it.
+ */
+const serializeRowEntry = (entry) =>
+  entry
+    ? {
+        id: entry.id,
+        status: entry.status,
+        official: entry.status === "approved",
+        source: entry.source,
+        submissionId: entry.submissionId || null,
+        submissionStatus: entry.submission?.status || null,
+        recordedBy: entry.createdBy || null,
+        recordedAt: toIso(entry.createdAt),
+        approvedBy: entry.approvedBy || null,
+        approvedAt: toIso(entry.approvedAt),
+        rejectedBy: entry.rejectedBy || null,
+        rejectedAt: toIso(entry.rejectedAt),
+        rejectionReason: entry.rejectionReason || null,
+      }
+    : null;
 
 const serializeEntry = (section, row, maps) => {
   const config = SECTIONS[section];
@@ -429,17 +507,37 @@ const serializeEntry = (section, row, maps) => {
   if (row.equipmentId) base.equipment = maps.equipment.get(row.equipmentId) || null;
   if (section === "manpower") base.manHours = Math.round(row.workers * row.hours * 100) / 100;
   if (section === "delays") base.suggested = row.source === DELAY_SOURCE.WEATHER_FEED && row.status === ENTRY_STATUS.DRAFT;
+  if (section === QUANTITIES) {
+    base.quantity = quantityProgress().quantityNumber(row.quantity);
+    base.boqItem = maps.boqItems.get(row.boqItemId) || null;
+    base.progressEntry = serializeRowEntry(maps.entries.get(row.id) || null);
+  }
   return base;
 };
 
 const counted = (row) => row.status !== ENTRY_STATUS.REJECTED && row.status !== ENTRY_STATUS.DRAFT;
 
+/** The section's quantity per unit — never summed across units (owner rule). */
+const quantityTotals = (rows) => {
+  const byUnit = new Map();
+  for (const row of rows) {
+    const line = byUnit.get(row.unitCode) || { unitCode: row.unitCode, quantity: quantityProgress().quantityDecimal(0), rows: 0 };
+    line.quantity = line.quantity.plus(quantityProgress().quantityDecimal(row.quantity) ?? 0);
+    line.rows += 1;
+    byUnit.set(row.unitCode, line);
+  }
+  return [...byUnit.values()].map((line) => ({ unitCode: line.unitCode, quantity: quantityProgress().quantityNumber(line.quantity), rows: line.rows }));
+};
+
 const totalsFor = (log) => {
   const manpower = (log?.manpower || []).filter(counted);
   const equipment = (log?.equipment || []).filter(counted);
   const delays = (log?.delays || []).filter(counted);
+  const quantities = (log?.[QUANTITIES] || []).filter(counted);
   const all = SECTION_KEYS.flatMap((key) => log?.[key] || []);
   return {
+    quantityRows: quantities.length,
+    quantities: quantityTotals(quantities),
     workers: manpower.reduce((sum, row) => sum + (row.workers || 0), 0),
     manHours: Math.round(manpower.reduce((sum, row) => sum + (row.workers || 0) * (row.hours || 0), 0) * 100) / 100,
     companies: new Set(manpower.map((row) => row.companyId || row.companyName || row.partyId).filter(Boolean)).size,
@@ -620,6 +718,27 @@ const updateLog = async ({ orgId, projectId, date, payload = {}, actor = null, v
   return serializeLog({ projectId, date: day, log });
 };
 
+// ─── PC-6 §4: the pending layer follows the day ────────────────────────────
+
+/**
+ * Mints a submitted entry for every quantities row that counts and retires
+ * the free pending entry of every row that does not (quantity-progress
+ * .service mintDailyLogEntries). Called wherever the day closes or a
+ * closed day changes: submit, approve, and — on a day already submitted —
+ * a row added, edited back into counting, or re-approved by the site team.
+ * Never on an open day: an open day's rows are site records only.
+ */
+const mintQuantities = async ({ tx, orgId, projectId, log, rows, actor }) =>
+  quantityProgress().mintDailyLogEntries({ tx, orgId, projectId, log, rows: rows.filter(counted), retiredRows: rows.filter((row) => !counted(row)), actor });
+
+const mintedSummary = (minted) => ({ minted: minted.minted.length, synced: minted.synced.length, kept: minted.kept.length, retired: (minted.retired || []).length });
+
+/** On a submitted day a counted row has a pending entry at once; on an open day nothing is minted. */
+const mintOnSubmittedDay = async ({ tx, orgId, projectId, log, row, actor }) => {
+  if (log.status !== LOG_STATUS.SUBMITTED || !counted(row)) return null;
+  return mintQuantities({ tx, orgId, projectId, log, rows: [row], actor });
+};
+
 const submitLog = async ({ orgId, projectId, date, actor, viewer = null }) => {
   const day = toDateOnly(date);
   const project = await ensureProject({ orgId, projectId });
@@ -630,7 +749,22 @@ const submitLog = async ({ orgId, projectId, date, actor, viewer = null }) => {
     if (totalsFor(row).entries === 0) throw new HttpError(400, "DAILY_LOG_EMPTY", "Add at least one entry before submitting");
     const now = new Date();
     const updated = await tx.dailyLog.update({ where: { id: row.id }, data: { status: LOG_STATUS.SUBMITTED, submittedAt: now, submittedBy: actor?.id || null } });
-    await logAudit({ tx, orgId, projectId, log: updated, action: auditService.ACTIONS.STATUS_CHANGED, actorId: actor?.id, oldStatus: row.status, newStatus: LOG_STATUS.SUBMITTED, summary: { transition: "daily_log.submit" } });
+    // PC-6 §4: every quantities row that counts (not draft, not rejected by the
+    // site team) becomes a SUBMITTED quantity progress entry — pending, never
+    // official: the progress approval writer decides, not this log. A row
+    // that stopped counting since has its free pending entry retired.
+    const minted = await mintQuantities({ tx, orgId, projectId, log: updated, rows: row[QUANTITIES] || [], actor });
+    await logAudit({
+      tx,
+      orgId,
+      projectId,
+      log: updated,
+      action: auditService.ACTIONS.STATUS_CHANGED,
+      actorId: actor?.id,
+      oldStatus: row.status,
+      newStatus: LOG_STATUS.SUBMITTED,
+      summary: { transition: "daily_log.submit", quantityEntries: mintedSummary(minted) },
+    });
     return loadLog({ tx, projectId, date: day, viewer });
   });
   await notify({
@@ -658,11 +792,20 @@ const approveLog = async ({ orgId, projectId, date, actor, viewer = null }) => {
     if (!row) throw new HttpError(404, "DAILY_LOG_NOT_FOUND", "Nothing has been logged for this day yet");
     if (row.status === LOG_STATUS.APPROVED) return { log: row, submittedBy: null };
     const now = new Date();
+    // PC-6 §4: approving closes the day, so every quantities row that counts
+    // has its pending entry now — a row recorded after the day was submitted
+    // would otherwise sit in an approved log (which refuses a resubmit) and
+    // never reach the approvers. Minting is all this does to the pending
+    // layer: the entries are NOT approved here (they stay submitted). Only
+    // the progress approval writer (progress.service) approves an entry.
+    const minted = await mintQuantities({ tx, orgId, projectId, log: row, rows: row[QUANTITIES] || [], actor });
+    // Each section row's own review state — for the quantities section too,
+    // which is the row's site-record state and nothing more.
     for (const key of SECTION_KEYS) {
       await tx[SECTIONS[key].model].updateMany({ where: { dailyLogId: row.id, status: ENTRY_STATUS.SUBMITTED }, data: { status: ENTRY_STATUS.APPROVED, reviewedBy: actor?.id || null, reviewedAt: now } });
     }
     const updated = await tx.dailyLog.update({ where: { id: row.id }, data: { status: LOG_STATUS.APPROVED, approvedAt: now, approvedBy: actor?.id || null } });
-    await logAudit({ tx, orgId, projectId, log: updated, action: auditService.ACTIONS.APPROVED, actorId: actor?.id, oldStatus: row.status, newStatus: LOG_STATUS.APPROVED, summary: { transition: "daily_log.approve", entriesApproved: totalsFor(row).awaitingReview } });
+    await logAudit({ tx, orgId, projectId, log: updated, action: auditService.ACTIONS.APPROVED, actorId: actor?.id, oldStatus: row.status, newStatus: LOG_STATUS.APPROVED, summary: { transition: "daily_log.approve", entriesApproved: totalsFor(row).awaitingReview, quantityEntries: mintedSummary(minted) } });
     return { log: await loadLog({ tx, projectId, date: day, viewer }), submittedBy: row.submittedBy };
   });
   if (submittedBy && submittedBy !== actor?.id) {
@@ -728,7 +871,7 @@ const enrichPayload = async ({ tx, orgId, projectId, section, payload, party }) 
   return next;
 };
 
-const assertRefs = async ({ tx, projectId, data }) => {
+const assertRefs = async ({ tx, orgId, projectId, section, data, actor = null }) => {
   if (data.activityId) {
     const activity = await tx.activity.findFirst({ where: { id: data.activityId, projectId }, select: { id: true } });
     if (!activity) throw new HttpError(400, "DAILY_LOG_ACTIVITY_NOT_FOUND", "Activity not found on this project");
@@ -736,6 +879,18 @@ const assertRefs = async ({ tx, projectId, data }) => {
   if (data.locationId) {
     const location = await tx.location.findFirst({ where: { id: data.locationId, projectId }, select: { id: true } });
     if (!location) throw new HttpError(400, "DAILY_LOG_LOCATION_NOT_FOUND", "Location not found on this project");
+  }
+  if (section === QUANTITIES) {
+    // PC-6 §4: the row names an item the activity has an approved allocation
+    // of, in that item's unit (or an alias); the allocation is resolved. The
+    // person recording it is under the same rule as a progress submission —
+    // a site engineer records on the activities assigned to them — applied
+    // here, when the row is recorded, since the log is submitted as a whole
+    // by one person for every author's rows.
+    await require("./progress.service").assertProgressSubmitAllowed({ projectId, activityIds: [data.activityId], userId: actor?.id || null, userRole: actor?.role || null, tx });
+    const resolved = await quantityProgress().resolveDailyLogQuantity({ tx, orgId, projectId, activityId: data.activityId, boqItemId: data.boqItemId, allocationId: data.allocationId, unit: data.unitCode });
+    data.allocationId = resolved.allocationId;
+    data.unitCode = resolved.unitCode;
   }
 };
 
@@ -753,7 +908,7 @@ const addEntry = async ({ orgId, projectId, date, section, payload = {}, actor =
     assertEditable(row, viewer);
     const party = await resolveParty({ tx, projectId, viewer, payload });
     const data = config.normalize(await enrichPayload({ tx, orgId, projectId, section, payload, party }), null, { day });
-    await assertRefs({ tx, projectId, data });
+    await assertRefs({ tx, orgId, projectId, section, data, actor });
     const now = new Date();
     const status = party.scoped ? ENTRY_STATUS.SUBMITTED : payload.status === ENTRY_STATUS.DRAFT ? ENTRY_STATUS.DRAFT : ENTRY_STATUS.APPROVED;
     const sortOrder = await tx[config.model].count({ where: { dailyLogId: row.id } });
@@ -771,7 +926,10 @@ const addEntry = async ({ orgId, projectId, date, section, payload = {}, actor =
         sortOrder,
       },
     });
-    await logAudit({ tx, orgId, projectId, log: row, action: auditService.ACTIONS.CREATED, actorId: actor?.id, summary: { transition: "daily_log.entry_add", section, entryId: entry.id, status, partyId: party.partyId } });
+    // PC-6 §4: a row taken by a day already submitted is pending at once (an
+    // open day's row stays a site record until the day is submitted).
+    const minted = section === QUANTITIES ? await mintOnSubmittedDay({ tx, orgId, projectId, log: row, row: entry, actor }) : null;
+    await logAudit({ tx, orgId, projectId, log: row, action: auditService.ACTIONS.CREATED, actorId: actor?.id, summary: { transition: "daily_log.entry_add", section, entryId: entry.id, status, partyId: party.partyId, ...(minted ? { quantityEntries: mintedSummary(minted) } : {}) } });
     return { entryId: entry.id, replayed: false, scoped: party.scoped, log: await loadLog({ tx, projectId, date: day, viewer }) };
   });
   if (outcome.scoped) {
@@ -811,8 +969,15 @@ const updateEntry = async ({ orgId, projectId, date, section, entryId, payload =
     assertEditable(row, viewer);
     if (!canTouchEntry({ entry, viewer })) throw new HttpError(403, "DAILY_LOG_ENTRY_FORBIDDEN", "You can only change your own company's entries");
     const party = { partyId: entry.partyId, companyId: entry.companyId ?? null, companyName: entry.companyName ?? null, scoped: isPartyViewer(viewer) };
+    // PC-6 §4: a quantities row whose entry is approved or rejected progress
+    // is locked (the correction is a new row); one bundled into a pending
+    // submission is held; a free pending entry follows the row's edit.
+    const pendingEntry = section === QUANTITIES ? await quantityProgress().dailyLogRowEntryGate({ tx, rowId: entry.id }) : null;
     const data = config.normalize(await enrichPayload({ tx, orgId, projectId, section, payload, party }), entry, { day });
-    await assertRefs({ tx, projectId, data });
+    if (section === QUANTITIES && (data.activityId !== entry.activityId || data.boqItemId !== entry.boqItemId) && pendingEntry) {
+      throw new HttpError(400, "QUANTITY_ENTRY_IMMUTABLE_FIELD", "A submitted quantity's activity and BOQ item are not changed; remove the row and record another", { field: data.activityId !== entry.activityId ? "activityId" : "boqItemId" });
+    }
+    await assertRefs({ tx, orgId, projectId, section, data, actor });
     const resubmit = party.scoped || entry.status === ENTRY_STATUS.REJECTED;
     const updated = await tx[config.model].update({
       where: { id: entry.id },
@@ -821,7 +986,10 @@ const updateEntry = async ({ orgId, projectId, date, section, entryId, payload =
         ...(resubmit ? { status: party.scoped ? ENTRY_STATUS.SUBMITTED : ENTRY_STATUS.APPROVED, submittedAt: new Date(), reviewedBy: null, reviewedAt: null, rejectionReason: null } : {}),
       },
     });
-    await logAudit({ tx, orgId, projectId, log: row, action: auditService.ACTIONS.UPDATED, actorId: actor?.id, summary: { transition: "daily_log.entry_update", section, entryId: updated.id, status: updated.status } });
+    if (pendingEntry) await quantityProgress().syncDailyLogRowEntry({ tx, orgId, projectId, row: updated, log: row, entry: pendingEntry, actorId: actor?.id || null });
+    // A row without an entry on a submitted day (one the site team had rejected and this edit resubmits) is pending again at once.
+    const minted = section === QUANTITIES && !pendingEntry ? await mintOnSubmittedDay({ tx, orgId, projectId, log: row, row: updated, actor }) : null;
+    await logAudit({ tx, orgId, projectId, log: row, action: auditService.ACTIONS.UPDATED, actorId: actor?.id, summary: { transition: "daily_log.entry_update", section, entryId: updated.id, status: updated.status, ...(pendingEntry ? { quantityEntryId: pendingEntry.id } : {}), ...(minted ? { quantityEntries: mintedSummary(minted) } : {}) } });
     return loadLog({ tx, projectId, date: day, viewer });
   });
   return serializeLog({ projectId, date: day, log });
@@ -835,8 +1003,12 @@ const deleteEntry = async ({ orgId, projectId, date, section, entryId, actor = n
     const { row, entry } = await findEntry({ tx, config, projectId, day, entryId });
     assertEditable(row, viewer);
     if (!canTouchEntry({ entry, viewer })) throw new HttpError(403, "DAILY_LOG_ENTRY_FORBIDDEN", "You can only remove your own company's entries");
+    // PC-6 §4: a still-pending entry goes with its row (no pending ghost); an
+    // entry bundled into a pending submission holds the row; an approved or
+    // rejected entry stays as the trail, its link to the row nulled.
+    const removedEntry = section === QUANTITIES ? await quantityProgress().deleteDailyLogRowEntry({ tx, orgId, projectId, row: entry, actorId: actor?.id || null }) : null;
     await tx[config.model].delete({ where: { id: entry.id } });
-    await logAudit({ tx, orgId, projectId, log: row, action: auditService.ACTIONS.DELETED, actorId: actor?.id, summary: { transition: "daily_log.entry_delete", section, entryId: entry.id } });
+    await logAudit({ tx, orgId, projectId, log: row, action: auditService.ACTIONS.DELETED, actorId: actor?.id, summary: { transition: "daily_log.entry_delete", section, entryId: entry.id, ...(removedEntry ? { quantityEntryId: removedEntry.id } : {}) } });
     return loadLog({ tx, projectId, date: day, viewer });
   });
   return serializeLog({ projectId, date: day, log });
@@ -853,13 +1025,24 @@ const reviewEntry = async ({ orgId, projectId, date, section, entryId, decision,
     const { row, entry: existing } = await findEntry({ tx, config, projectId, day, entryId });
     if (row.status === LOG_STATUS.APPROVED) throw new HttpError(409, "DAILY_LOG_APPROVED", "This day is approved. Reopen it to change anything.");
     const now = new Date();
+    // PC-6 §4: a quantities row the site team rejects stops counting, so the
+    // free pending entry it minted goes with the decision (never left for a
+    // date bundle to pick up); an entry already approved progress locks the
+    // row, one bundled into a pending submission holds it. Approving a row
+    // leaves its entry alone — the row's review state is never progress.
+    const rejectedEntry =
+      section === QUANTITIES && decision === "reject"
+        ? await quantityProgress().rejectDailyLogRowEntry({ tx, orgId, projectId, row: existing, actorId: actor?.id || null, reason: trimmedReason })
+        : null;
     const updated = await tx[config.model].update({
       where: { id: existing.id },
       data: decision === "approve"
         ? { status: ENTRY_STATUS.APPROVED, reviewedBy: actor?.id || null, reviewedAt: now, rejectionReason: null }
         : { status: ENTRY_STATUS.REJECTED, reviewedBy: actor?.id || null, reviewedAt: now, rejectionReason: trimmedReason },
     });
-    await logAudit({ tx, orgId, projectId, log: row, action: decision === "approve" ? auditService.ACTIONS.APPROVED : auditService.ACTIONS.REJECTED, actorId: actor?.id, reason: trimmedReason, summary: { transition: `daily_log.entry_${decision}`, section, entryId: updated.id, source: existing.source || null } });
+    // A row approved back on a submitted day counts again: pending at once.
+    const minted = section === QUANTITIES && decision === "approve" ? await mintOnSubmittedDay({ tx, orgId, projectId, log: row, row: updated, actor }) : null;
+    await logAudit({ tx, orgId, projectId, log: row, action: decision === "approve" ? auditService.ACTIONS.APPROVED : auditService.ACTIONS.REJECTED, actorId: actor?.id, reason: trimmedReason, summary: { transition: `daily_log.entry_${decision}`, section, entryId: updated.id, source: existing.source || null, ...(rejectedEntry ? { quantityEntryId: rejectedEntry.id } : {}), ...(minted ? { quantityEntries: mintedSummary(minted) } : {}) } });
     return { log: await loadLog({ tx, projectId, date: day, viewer }), entry: updated };
   });
   if (entry.createdBy && entry.createdBy !== actor?.id && entry.partyId) {
@@ -1030,9 +1213,19 @@ const statusNote = (entry) => {
   return "";
 };
 
+/** The section's quantity per unit, never one figure across units. */
+const quantityTotalsText = (totals) => ((totals?.quantities || []).length ? ` · installed ${totals.quantities.map((line) => `${num(line.quantity, 3)} ${line.unitCode}`).join(", ")}` : "");
+
 const num = (value, digits = 1) => (value === null || value === undefined ? "" : String(Math.round(Number(value) * 10 ** digits) / 10 ** digits));
 
-const renderPdf = async ({ orgId, projectId, date, viewer = null }) => {
+/** The quantities row's progress state beside its site-record state. */
+const progressNote = (row) => (!row.progressEntry ? "not yet submitted" : row.progressEntry.official ? "official" : row.progressEntry.status === "rejected" ? "progress rejected" : "pending progress");
+const quantityNote = (row) => [statusNote(row), progressNote(row)].filter(Boolean).join(" · ");
+
+/** The BOQ item as a quantities row names it: code + description for a BOQ reader, description alone otherwise. */
+const itemCell = (row, boqAccess) => (row.boqItem ? `${boqAccess?.boq !== false && row.boqItem.code ? `${row.boqItem.code} ` : ""}${row.boqItem.description || ""}`.trim() : "");
+
+const renderPdf = async ({ orgId, projectId, date, viewer = null, boqAccess = null }) => {
   const day = toDateOnly(date);
   const project = await ensureProject({ orgId, projectId });
   const log = await serializeLog({ projectId, date: day, log: await loadLog({ projectId, date: day, viewer }) });
@@ -1045,7 +1238,7 @@ const renderPdf = async ({ orgId, projectId, date, viewer = null }) => {
     ["Weather", log.weather?.summary || (log.weather ? weatherFeed.summarize(log.weather) : "not recorded")],
     ["Weather source", log.weatherSource === WEATHER_SOURCE.FEED ? `feed (${log.weather?.source || "feed"})` : log.weatherSource || "—"],
     ["Alerts", (log.weather?.alerts || []).map((alert) => alert.message).join("; ") || "none"],
-    ["Totals", `${log.totals.workers} workers · ${num(log.totals.manHours)} man-hours · ${log.totals.equipmentCount} plant (${num(log.totals.equipmentHours)} h) · ${log.totals.deliveries} deliveries · ${log.totals.visitors} visitors · ${num(log.totals.hoursLost)} h lost`],
+    ["Totals", `${log.totals.workers} workers · ${num(log.totals.manHours)} man-hours · ${log.totals.equipmentCount} plant (${num(log.totals.equipmentHours)} h) · ${log.totals.deliveries} deliveries · ${log.totals.visitors} visitors · ${num(log.totals.hoursLost)} h lost${quantityTotalsText(log.totals)}`],
     ["Distributed", log.distributedAt ? `${new Date(log.distributedAt).toISOString().slice(0, 16).replace("T", " ")} UTC` : "not yet"],
   ]);
   if (log.summary) {
@@ -1100,6 +1293,12 @@ const renderPdf = async ({ orgId, projectId, date, viewer = null }) => {
     { key: cell, label: "Activity", width: 0.22 },
     { key: statusNote, label: "", width: 0.12 },
   ]);
+  sectionTable("Quantities installed", log.sections.quantities, [
+    { key: (row) => itemCell(row, boqAccess), label: "BOQ item", width: 0.34 },
+    { key: (row) => `${num(row.quantity, 3)} ${row.unitCode || ""}`.trim(), label: "Qty", width: 0.14, align: "right" },
+    { key: cell, label: "Activity", width: 0.26 },
+    { key: quantityNote, label: "", width: 0.26 },
+  ]);
   pdf.heading(`Notes (${log.sections.notes.length})`, { level: 2 });
   if (!log.sections.notes.length) pdf.paragraph("None recorded.", { color: "0.4 0.4 0.4" });
   for (const note of log.sections.notes) {
@@ -1113,7 +1312,7 @@ const renderPdf = async ({ orgId, projectId, date, viewer = null }) => {
 const renderText = ({ project, log }) => {
   const lines = [`Daily log — ${project.name} — ${log.date}`, `Status: ${log.status}`, `Weather: ${log.weather?.summary || "not recorded"}`];
   if ((log.weather?.alerts || []).length) lines.push(`Weather alerts: ${log.weather.alerts.map((alert) => alert.message).join("; ")}`);
-  lines.push(`Totals: ${log.totals.workers} workers, ${num(log.totals.manHours)} man-hours, ${log.totals.equipmentCount} plant, ${log.totals.deliveries} deliveries, ${log.totals.visitors} visitors, ${num(log.totals.hoursLost)} h lost`);
+  lines.push(`Totals: ${log.totals.workers} workers, ${num(log.totals.manHours)} man-hours, ${log.totals.equipmentCount} plant, ${log.totals.deliveries} deliveries, ${log.totals.visitors} visitors, ${num(log.totals.hoursLost)} h lost${quantityTotalsText(log.totals)}`);
   if (log.summary) lines.push("", "Summary:", log.summary);
   const block = (title, rows, line) => {
     if (!rows.length) return;
@@ -1125,6 +1324,9 @@ const renderText = ({ project, log }) => {
   block("Deliveries", log.sections.deliveries, (row) => `${row.supplierName ? `${row.supplierName}: ` : ""}${row.description}${row.quantity !== null ? ` (${num(row.quantity, 2)} ${row.unit || ""})` : ""}`);
   block("Visitors", log.sections.visitors, (row) => `${row.name}${row.company ? ` (${row.company})` : ""}${row.purpose ? ` — ${row.purpose}` : ""}`);
   block("Delays", log.sections.delays, (row) => `${row.type}: ${row.description} · ${num(row.hoursLost)} h`);
+  // The digest goes to the distribution list and to external addresses: the
+  // item's description and unit, never its code or the bill's figures.
+  block("Quantities installed", log.sections.quantities, (row) => `${itemCell(row, { boq: false })} · ${num(row.quantity, 3)} ${row.unitCode || ""}${row.activity ? ` — ${row.activity.name}` : ""} · ${progressNote(row)}`);
   block("Notes", log.sections.notes, (row) => `[${row.kind}] ${row.text}`);
   return lines.join("\n");
 };
@@ -1336,6 +1538,7 @@ module.exports = {
   LOG_STATUS,
   LOG_STATUSES,
   NOTE_KINDS,
+  QUANTITIES,
   SECTION_KEYS,
   SECTIONS,
   WEATHER_SOURCE,

@@ -241,7 +241,12 @@ const SPEC_BOQ_WITHHELD = "BOQ coverage is worked from the BOQ's rows, available
 /** An activity as this caller may receive it. */
 const withheldActivity = (activity, access = FULL_ACCESS) => {
   if (access.boq || !activity || typeof activity !== "object") return activity;
-  return withoutKeys(activity, [...ACTIVITY_BOQ_KEYS, ...ACTIVITY_BUDGET_KEYS]);
+  const copy = withoutKeys(activity, [...ACTIVITY_BOQ_KEYS, ...ACTIVITY_BUDGET_KEYS]);
+  // PC-6 (core): the pending submission's quantity figures go the same way.
+  if (copy.pendingProgress && typeof copy.pendingProgress === "object") {
+    return { ...copy, pendingProgress: withheldProgressSubmission(copy.pendingProgress, access) };
+  }
+  return copy;
 };
 
 /**
@@ -1439,7 +1444,140 @@ const withheldActivityDetail = (detail, access = FULL_ACCESS) => {
   return { ...detail, sections };
 };
 
+// ─── PC-6 (core): quantity progress entries ───────────────────────────────
+//
+// An entry records how much of a BOQ item was installed on an activity on a
+// day (quantity-progress.service). The routes under /quantity-progress are
+// admitted on progress:read / progress:submit, so their reader may be unable
+// to read the BOQ — and a per-item quantity is BOQ-derived (binding rule,
+// PC-6): such a member is told that an entry exists for the activity, its
+// status, its date, who recorded it and where it came from (PROGRESS SOURCE
+// provenance is progress data), and is given no quantity, no unit, no item
+// (id or row) and no allocation. Omitted, never zeroed; `boqWithheld` names
+// the keys and why. A BOQ reader's entry is the same object, untouched.
+//
+// The warnings a write answers with (over-allocation, no approved
+// allocation) compare the entry to the allocation in quantities: for such a
+// member they keep their code and activity only.
+const QUANTITY_ENTRY_WITHHELD =
+  "The quantity, unit, BOQ item and allocation of a quantity entry are available only to members who may read the BOQ";
+const QUANTITY_ENTRY_BOQ_KEYS = ["quantity", "unitCode", "boqItemId", "boqItem", "allocationId"];
+const QUANTITY_WARNING_BOQ_KEYS = ["boqItemId", "allocationQuantity", "approvedQuantity", "entryQuantity", "wouldBe", "message"];
+
+const withheldQuantityEntry = (entry, access = FULL_ACCESS) => {
+  if (access.boq || !entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+  const keys = QUANTITY_ENTRY_BOQ_KEYS.filter((key) => has(entry, key));
+  return { ...withoutKeys(entry, keys), boqWithheld: { keys, reason: QUANTITY_ENTRY_WITHHELD } };
+};
+
+const withheldQuantityWarning = (warning) => {
+  if (!warning || typeof warning !== "object") return warning;
+  const keys = QUANTITY_WARNING_BOQ_KEYS.filter((key) => has(warning, key));
+  return { ...withoutKeys(warning, keys), boqWithheld: { keys, reason: QUANTITY_ENTRY_WITHHELD } };
+};
+
+// A progress submission's quantity figures (quantityComplete — installed, Σ
+// the entries it bundles plus the approved ones; quantityPlanned — Σ the
+// approved allocations when nothing is typed; the transient `quantity`
+// block that says so) are worked from the bill's rows and the mapping, so
+// they go to BOQ readers only. The submission's percentage, status, method,
+// source, evidence and PROGRESS SOURCE provenance are progress data and stay.
+const PROGRESS_SUBMISSION_BOQ_KEYS = ["quantityComplete", "quantityPlanned", "quantityUnit", "quantity"];
+const PROGRESS_SUBMISSION_WITHHELD =
+  "The quantity figures of a progress submission are available only to members who may read the BOQ";
+
+/** A progress submission (pending, approved or rejected) as this caller may receive it. */
+const withheldProgressSubmission = (submission, access = FULL_ACCESS) => {
+  if (access.boq || !submission || typeof submission !== "object" || Array.isArray(submission)) return submission;
+  const keys = PROGRESS_SUBMISSION_BOQ_KEYS.filter((key) => has(submission, key));
+  if (!keys.length) return submission;
+  return { ...withoutKeys(submission, keys), boqWithheld: { keys, reason: PROGRESS_SUBMISSION_WITHHELD } };
+};
+
+const withheldProgressSubmissions = (submissions, access = FULL_ACCESS) =>
+  access.boq || !Array.isArray(submissions) ? submissions : submissions.map((row) => withheldProgressSubmission(row, access));
+
+/** A list of entries (GET /quantity-progress) as this caller may receive it. */
+const withheldQuantityEntries = (entries, access = FULL_ACCESS) =>
+  access.boq || !Array.isArray(entries) ? entries : entries.map((entry) => withheldQuantityEntry(entry, access));
+
+/**
+ * The answer to writing entries ({ entries, warnings, … }) or to editing one
+ * ({ entry, warnings }) as this caller may receive it.
+ */
+const withheldQuantityEntryResult = (result, access = FULL_ACCESS) => {
+  if (access.boq || !result || typeof result !== "object" || Array.isArray(result)) return result;
+  const copy = { ...result };
+  if (Array.isArray(copy.entries)) copy.entries = withheldQuantityEntries(copy.entries, access);
+  if (copy.entry && typeof copy.entry === "object") copy.entry = withheldQuantityEntry(copy.entry, access);
+  if (Array.isArray(copy.warnings)) copy.warnings = copy.warnings.map(withheldQuantityWarning);
+  return copy;
+};
+
+// The daily log's quantities section (PC-6 §4) names a BOQ item per row. A
+// reader of the log who may not read the BOQ (the daily log is admitted on
+// progress:read) keeps the row as the site recorded it — the item's
+// description and unit, the quantity typed on site, the activity, the
+// location, the notes, the row's review state and the state and PROGRESS
+// SOURCE provenance of the progress entry it minted (none of which is a
+// figure of the bill) — and loses the item's code and the allocation it was
+// picked from, which are the bill's rows and the mapping (owner decision,
+// PC-6 core item 3: "at least description + unit"). The per-unit totals of
+// the section are the log's own tally of what was typed, like its man-hours,
+// and stay. An activity's allocated items (the site's picker) go the same
+// way: id, description and unit for everyone who may read progress; the
+// code, the allocation and the allocated quantity for BOQ readers.
+const DAILY_LOG_QUANTITY_WITHHELD = "The BOQ item's code and allocation of a daily-log quantity are available only to members who may read the BOQ";
+const DAILY_LOG_QUANTITY_BOQ_KEYS = ["allocationId"];
+const ALLOCATED_ITEM_WITHHELD = "The code, allocation and allocated quantity of an activity's BOQ items are available only to members who may read the BOQ";
+const ALLOCATED_ITEM_BOQ_KEYS = ["code", "allocationId", "allocationIds", "allocatedQuantity"];
+
+const withheldDailyLogQuantity = (row, access = FULL_ACCESS) => {
+  if (access.boq || !row || typeof row !== "object" || Array.isArray(row)) return row;
+  const keys = DAILY_LOG_QUANTITY_BOQ_KEYS.filter((key) => has(row, key));
+  const copy = withoutKeys(row, keys);
+  if (copy.boqItem && typeof copy.boqItem === "object" && has(copy.boqItem, "code")) {
+    copy.boqItem = withoutKeys(copy.boqItem, ["code"]);
+    keys.push("boqItem.code");
+  }
+  return { ...copy, boqWithheld: { keys, reason: DAILY_LOG_QUANTITY_WITHHELD } };
+};
+
+/** A daily log (one day, every section) as this caller may receive it. */
+const withheldDailyLog = (log, access = FULL_ACCESS) => {
+  if (access.boq || !log || typeof log !== "object" || !Array.isArray(log.sections?.quantities)) return log;
+  return { ...log, sections: { ...log.sections, quantities: log.sections.quantities.map((row) => withheldDailyLogQuantity(row, access)) } };
+};
+
+/** GET /activities/{id}/allocated-items as this caller may receive it. */
+const withheldAllocatedItems = (result, access = FULL_ACCESS) => {
+  if (access.boq || !result || typeof result !== "object" || !Array.isArray(result.items)) return result;
+  const keys = new Set();
+  const items = result.items.map((item) => {
+    const present = ALLOCATED_ITEM_BOQ_KEYS.filter((key) => has(item, key));
+    present.forEach((key) => keys.add(key));
+    return withoutKeys(item, present);
+  });
+  return { ...result, items, boqWithheld: { keys: [...keys], reason: ALLOCATED_ITEM_WITHHELD } };
+};
+
 module.exports = {
+  // PC-6 (core): quantity progress entries.
+  QUANTITY_ENTRY_BOQ_KEYS,
+  QUANTITY_ENTRY_WITHHELD,
+  DAILY_LOG_QUANTITY_WITHHELD,
+  ALLOCATED_ITEM_WITHHELD,
+  ALLOCATED_ITEM_BOQ_KEYS,
+  withheldDailyLogQuantity,
+  withheldDailyLog,
+  withheldAllocatedItems,
+  withheldQuantityEntry,
+  withheldQuantityEntries,
+  withheldQuantityEntryResult,
+  PROGRESS_SUBMISSION_BOQ_KEYS,
+  PROGRESS_SUBMISSION_WITHHELD,
+  withheldProgressSubmission,
+  withheldProgressSubmissions,
   ALLOCATION_LINK_BOQ_KEYS,
   ALLOCATION_LINK_WITHHELD,
   withheldAllocationLinks,

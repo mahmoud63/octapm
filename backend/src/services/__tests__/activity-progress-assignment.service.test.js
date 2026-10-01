@@ -11,6 +11,7 @@ const mockProgressService = {
   createProgressSubmission: jest.fn(),
   serializeMethodConfig: jest.fn((row) => row || null),
   serializeSubmission: jest.fn((row) => row || null),
+  serializeProgressSource: jest.fn((row) => (row ? { source: row.source } : null)),
 };
 
 jest.mock('../../config/db', () => ({ prisma: mockPrisma }));

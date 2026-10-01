@@ -24,7 +24,7 @@ The five methods stay. What changes is **where quantity comes from** for the `qu
 | inspection | passed 100 / failed 0 | none | unchanged; ITP hold points as today |
 | manual | typed pct with reason | none | unchanged |
 
-A method change on an activity with approved progress is refused (existing rule) — the frozen `pctComplete` history is source data.
+A method change on an activity with approved progress is refused — the frozen `pctComplete` history is source data. As built (§3.2): 409 `PROGRESS_METHOD_LOCKED`, except a row naming the method the activity is already measured by, which readiness needs.
 
 ## 3. Quantity progress and the authority rule (§79) [D]
 
@@ -68,6 +68,136 @@ quantity stops counting. The `status` and `source` vocabularies above are CHECKs
 `ActivityBoqAllocation` carry theirs; `DailyLogQuantity.status` is deliberately unconstrained, like its six
 siblings (`daily-log.service` drives it).
 
+### 3.1 The entries service, as shipped (PC-6 core, 2026-09-30) [C]
+
+`backend/src/services/quantity-progress.service.js` and `routes/quantity-progress.js` (mounted at
+`/projects/:projectId/quantity-progress`; OpenAPI tag Progress, operationIds `listQuantityProgressEntries`,
+`createQuantityProgressEntries`, `getQuantityProgressEntry`, `updateQuantityProgressEntry`,
+`deleteQuantityProgressEntry`, `submitQuantityProgressEntry`) are the pending layer of installed quantity:
+
+- **Create** (`POST`, progress `submission.submit`): one entry or `{ entries: [...] }` (≤ 200), each `activityId,
+  boqItemId, quantity, date` plus `unit`/`unitCode`, `allocationId`, `locationId`, `note`, `clientRequestId`,
+  `status` (`draft`, the default, or `submitted`) and `source` (`manual` or `import`; `daily_log` and
+  `submission` are the daily-log service's and the submission bundler's own). The site-engineer assignment rule is
+  `progress.service assertProgressSubmitAllowed` — the same call the submission makes. 201 when anything was
+  recorded, 200 when every entry was a replay.
+- **The unit rule**: an entry is stored under the item's `unitCode` (or, for an item nobody's master recognises,
+  its typed `unit`). A typed unit must resolve, through `uom.service loadUnitIndex / normaliseWith` (the
+  organisation's `UnitOfMeasure` codes and `aliasesJson`), to that code; anything else is 400
+  `QUANTITY_UNIT_MISMATCH` with `{ unit, unitCode, itemUnit, itemUnitCode }`. No conversion table exists, so none is
+  applied — "refused unless a UoM conversion exists" above reads, as built, "refused unless it is an alias".
+- **Replay**: `clientRequestId` is unique per project (`@@unique([projectId, clientRequestId])`). The service answers
+  a seen key with the entry it made (`replayed: true`); a race that reaches the index is a P2002 answered by running
+  once more, which finds the winner's row. A batch's top-level key is suffixed `:<index>` per entry.
+- **Quantities are Decimal(18,3)**: parsed, summed and compared as `Prisma.Decimal` at three places; `quantity >= 0`
+  is refused in code (400 `QUANTITY_NEGATIVE`) before the CHECK constraint sees it.
+- **Over-allocation is a warning, never a block**: the write answers `warnings[]` with `QUANTITY_OVER_ALLOCATION`
+  (approved installed + this entry > Σ approved, active allocation quantity of the item on the activity — the raw
+  comparison, with the figures) or `QUANTITY_NO_APPROVED_ALLOCATION`. No `ProjectException` row (PC-7b).
+- **Patch / delete** (progress `submission.submit`): a draft or submitted entry's quantity, unit, date, location,
+  allocation or note, by its creator or by anyone holding `submission.approve` (403 `QUANTITY_ENTRY_FORBIDDEN`).
+  An approved or rejected entry is history (409 `QUANTITY_ENTRY_LOCKED`); an entry bundled into a submission that is
+  not rejected is the submission's figure (409 `QUANTITY_ENTRY_BUNDLED`); activity, item and status are never edited
+  (400 `QUANTITY_ENTRY_IMMUTABLE_FIELD`). **Submit** moves draft → submitted, idempotently (409
+  `QUANTITY_ENTRY_NOT_SUBMITTABLE` for approved/rejected). Nothing here approves: no code path in this service
+  writes `status = 'approved'` or an `ActivityProgress` row.
+- **PROGRESS SOURCE provenance** on every entry: `provenance { source, recordedBy, recordedAt, submissionId,
+  dailyLogId, dailyLogQuantityId, official, approvedBy, approvedAt, rejectedBy, rejectedAt }`. Audit events carry
+  `entityType 'quantity_progress_entry'` (created / updated / status_changed / deleted) through
+  `audit.service.recordEvent` inside the write's transaction.
+- **BOQ withholding** (binding rule): every route answer goes through `utils/boq-figures`
+  `withheldQuantityEntry / withheldQuantityEntries / withheldQuantityEntryResult`. A member without `boq:read` is
+  given the entry's id, activity, status, date, provenance and `boqWithheld: { keys, reason }`, never `quantity`,
+  `unitCode`, `boqItemId`, `boqItem` or `allocationId`; a warning keeps its code and activity only.
+- **Read helpers for the other waves** (service-level, each taking `cutoffDate` as a Date instant or a calendar date
+  read as the end of that day in the project's reporting zone, exactly as EV does): `installedByActivity` → Map
+  activityId → `{ installed: [{ boqItemId, unitCode, quantity, entries }], asOf, lastApprovedAt }` (Σ approved
+  entries with `approvedAt ≤ cutoff`, one line per item, never summed across items or units);
+  `installedByBoqItem` → Map boqItemId → `{ quantity, unitCode, entries, lastApprovedAt, asOf }` (an item whose
+  approved entries carry two units answers `quantity: null` with `units[]` and a `notAvailable` reason);
+  `plannedQuantityFor` → `{ planned, unitCode, basis: 'method_config' | 'approved_allocations' | 'none' }` — the
+  typed `ActivityProgressMethod.plannedQuantity` when > 0, else Σ approved, active allocation quantity when every
+  allocation is in one unit, else none with the reason. A client's `quantityPlanned` never comes into it.
+- **Proof**: `backend/src/services/__live__/pc-6-quantity-entries.live.test.js` (15 cases in a LiveTest
+  organisation: create in an alias unit, replay by the service and refusal by the index, batch replay, the refusals,
+  the assignment rule, both warnings, the list filters, patch/delete/submit authority, a cost controller's read-only
+  403s, the other organisation's 404 on every route and in the service, the template-withheld site engineer, the read
+  helpers at a Chicago cutoff, and zero `ActivityProgress` rows with the EV report byte-identical throughout) and
+  `__tests__/quantity-progress.service.test.js`, `utils/__tests__/boq-figures.quantity-entries.test.js`.
+  Mutation-proven: the replay handling, the unit rule, the withholding, the tenant scope and the assignment rule
+  each dropped in turn fail the suite.
+
+### 3.2 Approval bundling in the one writer, as shipped (PC-6 core, 2026-09-30) [C]
+
+`progress.service.js` is still the one writer of `ActivityProgress`; a quantity-method `ProgressSubmission` now
+bundles entries, and approving it is what approves them:
+
+- **Bundling** (`POST /activities/{id}/progress`, also `bulk-progress`): `entryIds[]` names entries, each on this
+  activity (400 `QUANTITY_ENTRY_ACTIVITY_MISMATCH`), draft or submitted (409 `QUANTITY_ENTRY_LOCKED`), held by no
+  open submission (409 `QUANTITY_ENTRY_BUNDLED` — an entry belongs to at most one draft/submitted submission);
+  `bundleSubmittedThrough` (a day) adds every submitted entry of the activity dated on or before it that no open
+  submission holds. Either with nothing free is 400 `QUANTITY_NO_ENTRIES_TO_BUNDLE`; either on a percent,
+  milestone, inspection or manual submission is 400 `QUANTITY_BUNDLE_METHOD_MISMATCH` (those methods are
+  untouched). The entries take the submission's id and, unless the submission is a draft, `status 'submitted'`.
+- **Derived figures, never typed over the mapping.** For every quantity submission: planned = the typed
+  `ActivityProgressMethod.plannedQuantity` (basis `method_config`), else Σ approved, active allocation quantity of
+  the activity (basis `approved_allocations`; `plannedQuantityFor`), else — only then — the client's
+  `quantityPlanned` (basis `client`, the pre-PC-6 shape; without one 400 `PLANNED_QUANTITY_REQUIRED` as before).
+  A client-sent `quantityPlanned` never overrides a typed or allocation-derived figure; the answer's transient
+  `quantity` block says which basis applied and `clientQuantityPlannedIgnored`. With a bundle, installed = Σ the
+  bundled entries + Σ entries already approved on the activity (basis `approved_entries`), in one unit — the
+  planned figure's (400 `QUANTITY_UNIT_MISMATCH` otherwise; nothing is converted or summed across units); without
+  one, the client's typed `quantityComplete` (basis `client`). `pctComplete = installed ÷ planned`, clamped 0..100.
+  The columns `quantityComplete / quantityPlanned / quantityUnit` hold the frozen values.
+- **Approve** (`approveProgressSubmissionWithClient`; gates unchanged — evidence, open ITP hold points, the
+  review authority, D1 `approvedAt`): the figures are read again at this instant (another bundle may have been
+  approved, a planned quantity typed, since the submission was made), the bundled entries are set `approved`
+  (`approvedBy/approvedAt` = the row's) in the same transaction, the submission's frozen columns are updated to
+  what was approved, and exactly ONE new `ActivityProgress` row is written; no earlier approved row is touched
+  (proven byte-identical). A quantity submission typed the old way (no entries) is approved as it stands.
+  **Approvals are serialised per activity** (review fix, 2026-10-01): the writer holds the activity's row
+  (`SELECT … FOR UPDATE`, the pattern `boq.service` uses for an item) and reads the submission again under the
+  hold before deriving, so two bundles approved at once commit one after the other and the later official row
+  carries Σ approved entries — never less than its own source data (proven live: 10 and 20 approved with
+  `Promise.all` on 100 of 160 → the later row 130, EV 81.25; without the hold the later row read 120). The
+  same submission approved twice at once answers idempotently. **When still nothing is typed and nothing is
+  mapped at approval**, the planned figure the submission was put forward with (its frozen `quantityPlanned`,
+  basis `submission`) stands, so a bundle a client planned is approvable (review fix: before it the approval
+  re-derived with an empty payload, answered 400 `PLANNED_QUANTITY_REQUIRED` and left the entries stuck in a
+  submission that was neither approvable nor editable); a typed or mapped figure found at approval still wins.
+  Audit:
+  the submission's `approved` event carries `quantityInstalled, quantityPlanned, plannedBasis, installedBasis,
+  quantityEntries, approvedProgressId`; each entry gets its own `approved` event (`entityType
+  quantity_progress_entry`), all through `audit.service.recordEvent` — the existing record.changed path, no new
+  event constant.
+- **Reject**: the bundled entries are set `rejected` (`rejectedBy/rejectedAt/rejectionReason` = the submission's
+  reason) with their own `rejected` events; nothing official is written; a rejected entry is history (a
+  correction is a new entry).
+- **PROGRESS SOURCE provenance**, additive beside the string fields: every serialised submission carries
+  `quantityEntryIds[]` and `progressSource { source, submissionId, dailyLogId, dailyReportId, importDocumentId,
+  submittedBy, submittedAt, approvedBy, approvedAt, entries }`; the activity payload carries `progressSource` for
+  its official figure beside `approvedProgressSource` (the `ActivityProgress` row plus the submission it came
+  from). `importDocumentId` is carried for the shape and is null: no column links a submission to the import
+  document (the import names itself in `source` and `notes`).
+- **The method lock** (`PUT /activities/{id}/progress-method`): an activity with approved progress keeps the
+  method it is measured by — its configured method, else the method its latest official figure was approved under
+  (aliases normalised), else `percent` — and naming another is 409 `PROGRESS_METHOD_LOCKED` with
+  `{ effectiveMethod, effectiveMethodBasis, requestedMethod, approvedProgressCount }`. A row naming that same
+  method is still written (its planned quantity, unit and flags with it), which is how an activity measured under
+  the default clears `PROGRESS_METHODS_INCOMPLETE` in setup readiness (proven live both ways).
+- **BOQ withholding** (binding rule): a submission's `quantityComplete / quantityPlanned / quantityUnit` and the
+  transient `quantity` block are allocation- and item-derived, so `utils/boq-figures withheldProgressSubmission(s)`
+  omits them for a caller who may not read the BOQ (`boqWithheld`) on every submission answer (submit, approve,
+  reject, the two lists, the activity's `pendingProgress`); the percentage, status, method and provenance stay.
+- **Proof**: `backend/src/services/__live__/pc-6-quantity-approval.live.test.js` (derived figures with the client's
+  ignored; the bundle's refusals; a submit-only person's 403; approve → one row at installed ÷ planned, entries
+  approved in the same transaction, provenance on the submission, the activity and the EV report's row; a second
+  bundle by date leaving the first row byte-identical; reject; two bundles approved at once serialised with the
+  later row at Σ approved entries and the same submission twice at once idempotent; the evidence gate holding a
+  bundle; the typed method-configuration basis; a client-planned bundle on an activity with nothing typed and
+  nothing mapped approved with its frozen figure; the method lock both ways with readiness; the tenant 404) and
+  `__tests__/progress.service.quantity-bundle.test.js`.
+
 ## 4. Daily-report contribution (§81) [D]
 
 `DailyLog` gains a section table `DailyLogQuantity` (same columns, status semantics, `partyId` column, composite tenant key and indexes as the six `DailyLog*` sections — the ENT-3 versions of them already carry `dailyLog / org / project` relations — and **with** relations to what it names): `dailyLogId, projectId, orgId, partyId?, activityId, boqItemId, allocationId?, locationId?, quantity Decimal(18,3), unitCode, notes, status, createdBy, submittedAt, reviewedBy/At, rejectionReason, clientRequestId, sortOrder`. As built, the row carries `allocationId?` too (the approved allocation the site picked the item from, a hint that SET NULLs if the mapping row goes) and names its text column `notes` like its six siblings, so the section registry's generic handling applies. Its `status` is the section row's own review state, never progress. ON DELETE: `dailyLog / org / project` CASCADE like the siblings; `activityId / boqItemId` RESTRICT (a signed site record on the log's PDF is not emptied by a hard delete); `allocationId / locationId` SET NULL. Submitting the daily log creates matching `QuantityProgressEntry` rows with `source='daily_log'`, `status='submitted'`, linked by `dailyLogQuantityId`; editing the daily log before approval updates them; approval is done on the Progress screen (or in bulk from the daily log by an approver). The legacy `DailyReport → ProgressSubmission(pct)` path stays for `percent`-method activities.
@@ -96,6 +226,111 @@ and lists the two in its org-side set; until then it reports them as pending) an
 applicable). The financial snapshot and reconciliation delta must read 0.00 — the migration writes no row.
 
 Mobile: the daily log form gets a "Quantities installed" section using the existing activity + location pickers; offline via the outbox with `clientRequestId` (already the pattern for the six sections).
+
+### 4.1 The quantities section, as shipped (PC-6 core, 2026-10-01) [C]
+
+`daily-log.service.js` carries a seventh section, `quantities` (model `DailyLogQuantity`), registered in the
+same `SECTIONS` table as its six siblings, so every generic path applies to it: add / edit / remove / review by
+row, the party-user scoping and visibility, the row's own `status` (approved at once for staff, submitted for a
+collaborator, reviewed by the site team), `clientRequestId` replay, the PDF, the digest, the manpower-style
+totals. What is specific to it:
+
+- **A row names** `activityId`, `boqItemId`, `quantity` (Decimal(18,3), ≥ 0 — `QUANTITY_NEGATIVE` in code before
+  the CHECK), `unitCode` (`unit` is accepted as a spelling of it), `allocationId?`, `locationId?`, `notes?`,
+  `clientRequestId?`. The item must be one the activity has an **approved, active allocation** of, else 400
+  `DAILY_LOG_QUANTITY_NOT_ALLOCATED`; an `allocationId` named must be one of those (400
+  `QUANTITY_ALLOCATION_MISMATCH`), and when none is named the single approved one is resolved onto the row (null
+  when there are several). The unit is the item's code or an alias the organisation's unit master maps to it
+  (§3.1's rule, `resolveEntryUnit`), else 400 `QUANTITY_UNIT_MISMATCH`; the row is stored under the item's code.
+  No copy-forward (`copyFields` is absent): a quantity installed yesterday is not installed again today.
+- **The recorder's rule.** The person adding or editing a row is under the progress submission's assignment rule
+  (`progress.service.assertProgressSubmitAllowed`: a site engineer on the activities assigned to them, a PM or
+  planning engineer on any) **when the row is recorded**, not when the log is submitted — the log is one record
+  per day submitted as a whole by one person for every author's rows, and the rule must not stop a site engineer
+  submitting a log that carries a colleague's row. The minting therefore passes `assignmentRule: false` and names
+  the row's author as `createdBy` (PROGRESS SOURCE `recordedBy`).
+- **The picker — `GET /projects/{id}/activities/{activityId}/allocated-items`** (progress:read,
+  `quantity-progress.service.allocatedItemsFor`): one line per BOQ item the activity has an approved, active
+  allocation of — `id, code, description, unit, unitCode, allocationId` (the single approved one, else null and
+  `allocationIds`), `allocatedQuantity` (Σ approved allocation quantity). **What a member without boq:read sees
+  (owner decision, this item): `id`, `description`, `unit` and `unitCode` only** — the least that lets a person
+  on site pick the item and name the unit — with `boqWithheld: { keys: [code, allocationId, allocationIds,
+  allocatedQuantity], reason }`. The list's existence tells such a member which items the activity is mapped to;
+  the owner asked for exactly that so a site engineer can record without reading the bill. Nothing of the bill's
+  quantities, values or counts beyond the lines themselves is given.
+- **What a member without boq:read sees of the section** (`utils/boq-figures.withheldDailyLog`, applied by every
+  daily-log route): the row as the site recorded it — the item's **description and unit, the quantity typed, the
+  activity, the location, the notes, the row's review state** and the state and provenance of the entry it
+  minted (`progressEntry`, which carries no quantity) — **minus the item's `code` and the `allocationId`**, named
+  in `boqWithheld`. The section's per-unit totals are the log's own tally of what was typed (like its man-hours)
+  and stay. The PDF export (`progress:export`) omits the code for such a member; the distribution digest, which
+  reaches external addresses, never carries it.
+- **Minting (`POST /daily-logs/{date}/submit`).** Every row that counts (not draft, not rejected by the site team)
+  becomes one `QuantityProgressEntry`: `source 'daily_log'`, `status 'submitted'`, the log's date, `dailyLogId`
+  + `dailyLogQuantityId`, the row's allocation, location, unit, quantity and notes, `createdBy` the row's author,
+  `clientRequestId 'daily_log:<rowId>'` (the replay key, so a resubmission never doubles). A row that already has
+  an entry keeps it: a free pending one is synced to the row (audit `quantity_entry.daily_log_sync`), a bundled,
+  approved or rejected one is left alone. The log's audit event says `{ minted, synced, kept }`. **Nothing here is
+  official**: no `ActivityProgress` row, EV unchanged, the entries wait for §3.2's writer.
+- **The row's status is never progress.** `POST /daily-logs/{date}/approve` moves every section row from
+  submitted to approved — the quantities rows too, as their site-record review state — and **does not approve an
+  entry**: after approving the log every entry is still `submitted`, `approvedBy` null, nothing official (proven
+  live, and mutation-proven: approving entries in `approveLog` fails the suite). `reopen` leaves the entries as
+  they are.
+- **A submitted day's rows are never left unminted** (review fix, 2026-10-01). Staff may add a row to a day
+  already submitted; before the fix it was minted by nothing — `approveLog` minted nothing and an approved day
+  refuses a resubmit (409 `DAILY_LOG_APPROVED`) — so the figure sat in an approved log and never reached the
+  approvers. Now a counted row on a **submitted** day is pending at once (`mintOnSubmittedDay`: on add, on an
+  edit that resubmits a rejected row, on a review `approve`), and `approveLog` mints for every counted row still
+  without an entry before it closes the day (the same `mintDailyLogEntries` call as submit; minting only — it
+  approves nothing; proven live with a row left unminted, mutation-proven: `approveLog` minting nothing fails
+  the suite). An open day's row stays a site record. The same call **retires** the free pending entry of a row
+  that no longer counts (`retiredRows`: draft, or rejected by the site team) — audit
+  `quantity_entry.daily_log_row_retired` — so the log's events say `{ minted, synced, kept, retired }`.
+- **The site team's reject takes the entry with it** (review fix, 2026-10-01; §4.1's rule that a row rejected by
+  the site team does not count). Before it, `/entries/quantities/{id}/review` with `reject` moved the row only
+  and left its minted entry `submitted` and free, so a planner's `bundleSubmittedThrough` picked it up and the
+  writer made a figure the site withdrew official. `reviewEntry` now calls `rejectDailyLogRowEntry` first: the
+  free pending entry is **deleted** with the decision (audit `quantity_entry.daily_log_row_rejected`, the
+  reviewer's reason — deleted, not marked, so a row approved back is minted afresh under its
+  `daily_log:<rowId>` replay key); an entry already **approved progress locks the row** (409
+  `DAILY_LOG_QUANTITY_LOCKED` — the site team cannot reject what the approver made official; the correction is
+  a new row); one **bundled** into a pending submission holds it (409 `QUANTITY_ENTRY_BUNDLED`); one the
+  approver rejected stays as the trail. A review `approve` never touches an entry (and on a submitted day mints
+  one when the row has none). Proven live (reject after submit → the entry is gone, a date bundle finds
+  nothing, EV unchanged; the two refusals) and mutation-proven (the reject leaving the entry, the official lock
+  off, each fail the suite).
+- **Edits and removals before approval** (`dailyLogRowEntryGate`): a row whose entry is **approved or rejected**
+  is locked — 409 `DAILY_LOG_QUANTITY_LOCKED`; the correction is a new row (and a rejected row's resubmission
+  never re-mints: the row is settled). A row whose entry is **bundled into a draft/submitted submission** is held
+  — 409 `QUANTITY_ENTRY_BUNDLED` on edit and on removal. A row with a **free pending** entry: an edit syncs the
+  entry (quantity, unit, allocation, location, notes; the activity and the item are not moved — 400
+  `QUANTITY_ENTRY_IMMUTABLE_FIELD`; remove the row and record another); a removal deletes the entry with it
+  (audit `quantity_entry.daily_log_row_deleted`) — **never a pending ghost** (the reviewer's finding; mutation-proven:
+  leaving the entry behind fails the suite). Removing a row whose entry is approved or rejected is allowed: the
+  site record goes, the official figure stays with `dailyLogQuantityId` nulled by the database (SET NULL),
+  `dailyLogId` and `source` still naming where it came from.
+- **Provenance a client cannot claim.** `createEntries` honours an entry's `submissionId`, `dailyLogId`,
+  `dailyLogQuantityId` and `createdBy` only from this service's own callers (`internal: true`, the minting); a
+  client body carrying them on `POST /quantity-progress` is stored with those links null (closed in this item —
+  before it a client could attach an entry to a pending submission and have it approved with that bundle).
+- **The row payload** adds, beside the six siblings' fields: `boqItemId`, `boqItem { id, code, description, unit,
+  unitCode }`, `allocationId`, `quantity` (number, three places), `unitCode`, `progressEntry { id, status,
+  official, source, submissionId, submissionStatus, recordedBy, recordedAt, approvedBy, approvedAt, rejectedBy,
+  rejectedAt, rejectionReason } | null`. `totals` adds `quantityRows` and `quantities: [{ unitCode, quantity,
+  rows }]` — quantity per unit, never one figure across units.
+- **Live proof** — `src/services/__live__/pc-6-daily-log-quantities.live.test.js` (a real API process, the real
+  local Postgres, a throwaway LiveTest organisation): the picker for both members; the refusals; replay; rows are
+  site records (no entry); submit mints two submitted entries with the row's author as recordedBy and nothing
+  official (EV 0); an edit syncs; approving the log leaves the entries submitted; reopen / add / remove / resubmit
+  with no ghost; the one writer bundles a daily-log entry, writes ONE `ActivityProgress` row at 50 ÷ 100, the log
+  shows the row official, the row is locked, removing it leaves the entry (SET NULL) and the EV row; a rejected
+  bundle locks its row; a second day: the site team's reject after submit takes the entry with it and a date
+  bundle finds nothing, a row approved back or added to the submitted day is pending at once, the day's approval
+  mints a row left unminted and approves nothing, a bundled or official row cannot be rejected by the site team,
+  a stale rejected row's entry is retired on the next submit; the non-BOQ member records against the picker
+  (on a submitted day: pending at once) and reads the log withheld; a client-sent `submissionId` / `dailyLogId`
+  is ignored; the tenant 404; every other activity's EV row byte-identical.
 
 ## 5. Installed / certified / paid (§82) [D]
 

@@ -5,6 +5,7 @@ const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
 const { requirePermission, getEffectiveRole } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
+const { boqFigureAccess, withheldDailyLog } = require("../utils/boq-figures");
 const service = require("../services/daily-log.service");
 
 /** Project daily log (OCTA-FLD-DAILY-022): `/projects/:projectId/daily-logs`. */
@@ -16,6 +17,11 @@ router.use(require("./daily-log-assistant"));
 const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
 const actor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffectiveRole(req) });
 const viewer = (req) => ({ id: req.user.id, projectAccess: req.projectAccess });
+// PC-6: the quantities section names BOQ items, so every log answer goes
+// through utils/boq-figures — a reader who may not read the BOQ gets the
+// row's description, unit and the quantity the site recorded, never the
+// item's code or allocation (withheldDailyLog).
+const send = (req, res, log, status) => sendSuccess(res, withheldDailyLog(log, boqFigureAccess(req)), status);
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const dateParam = param("date").matches(DATE_RE).withMessage("date must be YYYY-MM-DD");
@@ -56,6 +62,12 @@ const entryValidators = [
   body("locationId").optional({ nullable: true }).isUUID(),
   optionalText("notes", 2000),
   body("status").optional().isIn(["draft", "approved"]),
+  // PC-6: the quantities section — the item (allocated to the activity), the
+  // allocation it was picked from, and the unit (the item's or an alias;
+  // `unit` above is accepted as a spelling of it).
+  body("boqItemId").optional({ nullable: true }).isUUID(),
+  body("allocationId").optional({ nullable: true }).isUUID(),
+  optionalText("unitCode", 32),
 ];
 
 // ── settings & reports (static paths before /:date) ──────────────────────
@@ -106,14 +118,14 @@ router.get(
   "/:date",
   requirePermission("progress", "read"),
   [dateParam, validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.getLog({ ...scope(req), date: req.params.date, viewer: viewer(req) }))),
+  asyncHandler(async (req, res) => send(req, res, await service.getLog({ ...scope(req), date: req.params.date, viewer: viewer(req) }))),
 );
 
 router.patch(
   "/:date",
   requirePermission("progress", "update", { transition: "daily_log.update" }),
   [dateParam, optionalText("summary", 8000), body("weather").optional({ nullable: true }).custom((value) => value === null || (typeof value === "object" && !Array.isArray(value))), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.updateLog({ ...scope(req), date: req.params.date, payload: req.body, actor: actor(req), viewer: viewer(req) }))),
+  asyncHandler(async (req, res) => send(req, res, await service.updateLog({ ...scope(req), date: req.params.date, payload: req.body, actor: actor(req), viewer: viewer(req) }))),
 );
 
 router.get(
@@ -121,7 +133,7 @@ router.get(
   requirePermission("progress", "export"),
   [dateParam, validate],
   asyncHandler(async (req, res) => {
-    const { buffer, fileName } = await service.renderPdf({ ...scope(req), date: req.params.date, viewer: viewer(req) });
+    const { buffer, fileName } = await service.renderPdf({ ...scope(req), date: req.params.date, viewer: viewer(req), boqAccess: boqFigureAccess(req) });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     return res.send(buffer);
@@ -132,35 +144,35 @@ router.post(
   "/:date/weather/refresh",
   requirePermission("progress", "update", { transition: "daily_log.update" }),
   [dateParam, validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.refreshWeather({ ...scope(req), date: req.params.date, actor: actor(req), viewer: viewer(req) }))),
+  asyncHandler(async (req, res) => send(req, res, await service.refreshWeather({ ...scope(req), date: req.params.date, actor: actor(req), viewer: viewer(req) }))),
 );
 
 router.post(
   "/:date/copy-previous",
   requirePermission("progress", "submit", { transition: "daily_log.submit" }),
   [dateParam, body("sections").optional().isArray({ max: 6 }), body("sections.*").optional().isIn(service.SECTION_KEYS), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.copyPrevious({ ...scope(req), date: req.params.date, sections: req.body.sections || null, actor: actor(req), viewer: viewer(req) }))),
+  asyncHandler(async (req, res) => send(req, res, await service.copyPrevious({ ...scope(req), date: req.params.date, sections: req.body.sections || null, actor: actor(req), viewer: viewer(req) }))),
 );
 
 router.post(
   "/:date/submit",
   requirePermission("progress", "submit", { transition: "daily_log.submit" }),
   [dateParam, validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.submitLog({ ...scope(req), date: req.params.date, actor: actor(req), viewer: viewer(req) }))),
+  asyncHandler(async (req, res) => send(req, res, await service.submitLog({ ...scope(req), date: req.params.date, actor: actor(req), viewer: viewer(req) }))),
 );
 
 router.post(
   "/:date/approve",
   requirePermission("progress", "approve", { transition: "daily_log.approve" }),
   [dateParam, validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.approveLog({ ...scope(req), date: req.params.date, actor: actor(req), viewer: viewer(req) }))),
+  asyncHandler(async (req, res) => send(req, res, await service.approveLog({ ...scope(req), date: req.params.date, actor: actor(req), viewer: viewer(req) }))),
 );
 
 router.post(
   "/:date/reopen",
   requirePermission("progress", "approve", { transition: "daily_log.approve" }),
   [dateParam, optionalText("reason", 1000), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.reopenLog({ ...scope(req), date: req.params.date, reason: req.body.reason || null, actor: actor(req), viewer: viewer(req) }))),
+  asyncHandler(async (req, res) => send(req, res, await service.reopenLog({ ...scope(req), date: req.params.date, reason: req.body.reason || null, actor: actor(req), viewer: viewer(req) }))),
 );
 
 router.post(
@@ -179,7 +191,7 @@ router.post(
   ],
   asyncHandler(async (req, res) => {
     const to = req.body.roles !== undefined || req.body.userIds !== undefined || req.body.emails !== undefined ? { roles: req.body.roles, userIds: req.body.userIds, emails: req.body.emails } : null;
-    return sendSuccess(res, await service.distribute({ ...scope(req), date: req.params.date, actor: actor(req), to, note: req.body.note || null }));
+    return send(req, res, await service.distribute({ ...scope(req), date: req.params.date, actor: actor(req), to, note: req.body.note || null }));
   }),
 );
 
@@ -190,7 +202,7 @@ router.post(
   requirePermission("progress", "submit", { transition: "daily_log.submit" }),
   [dateParam, sectionParam, ...entryValidators, validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(res, await service.addEntry({ ...scope(req), date: req.params.date, section: req.params.section, payload: req.body, actor: actor(req), viewer: viewer(req) }), 201),
+    send(req, res, await service.addEntry({ ...scope(req), date: req.params.date, section: req.params.section, payload: req.body, actor: actor(req), viewer: viewer(req) }), 201),
   ),
 );
 
@@ -199,7 +211,7 @@ router.patch(
   requirePermission("progress", "submit", { transition: "daily_log.submit" }),
   [dateParam, sectionParam, entryParam, ...entryValidators, validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(res, await service.updateEntry({ ...scope(req), date: req.params.date, section: req.params.section, entryId: req.params.entryId, payload: req.body, actor: actor(req), viewer: viewer(req) })),
+    send(req, res, await service.updateEntry({ ...scope(req), date: req.params.date, section: req.params.section, entryId: req.params.entryId, payload: req.body, actor: actor(req), viewer: viewer(req) })),
   ),
 );
 
@@ -208,7 +220,7 @@ router.delete(
   requirePermission("progress", "submit", { transition: "daily_log.submit" }),
   [dateParam, sectionParam, entryParam, validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(res, await service.deleteEntry({ ...scope(req), date: req.params.date, section: req.params.section, entryId: req.params.entryId, actor: actor(req), viewer: viewer(req) })),
+    send(req, res, await service.deleteEntry({ ...scope(req), date: req.params.date, section: req.params.section, entryId: req.params.entryId, actor: actor(req), viewer: viewer(req) })),
   ),
 );
 
@@ -217,7 +229,7 @@ router.post(
   requirePermission("progress", "approve", { transition: "daily_log.entry_review" }),
   [dateParam, sectionParam, entryParam, body("decision").isIn(["approve", "reject"]), optionalText("reason", 1000), validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(res, await service.reviewEntry({ ...scope(req), date: req.params.date, section: req.params.section, entryId: req.params.entryId, decision: req.body.decision, reason: req.body.reason || null, actor: actor(req), viewer: viewer(req) })),
+    send(req, res, await service.reviewEntry({ ...scope(req), date: req.params.date, section: req.params.section, entryId: req.params.entryId, decision: req.body.decision, reason: req.body.reason || null, actor: actor(req), viewer: viewer(req) })),
   ),
 );
 
@@ -226,7 +238,7 @@ router.post(
   requirePermission("progress", "update", { transition: "daily_log.update" }),
   [dateParam, entryParam, optionalNumber("delayDays", { min: 0, max: 365 }), body("contractual").optional().isBoolean().toBoolean(), optionalText("description", 2000), body("activityIds").optional().isArray({ max: 200 }), body("activityIds.*").optional().isUUID(), validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(res, await service.logWeatherDelay({ ...scope(req), date: req.params.date, entryId: req.params.entryId, payload: req.body, actor: actor(req), viewer: viewer(req) })),
+    send(req, res, await service.logWeatherDelay({ ...scope(req), date: req.params.date, entryId: req.params.entryId, payload: req.body, actor: actor(req), viewer: viewer(req) })),
   ),
 );
 

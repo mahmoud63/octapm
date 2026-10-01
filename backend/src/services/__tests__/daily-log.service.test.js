@@ -24,7 +24,29 @@ const mockPrisma = {
   dailyLogVisitor: table(),
   dailyLogDelay: table(),
   dailyLogNote: table(),
+  // PC-6 §4: the seventh section and what it names.
+  dailyLogQuantity: table(),
+  quantityProgressEntry: table(),
+  boqItem: { findMany: jest.fn(async () => [{ id: "item-1", code: "1.1", ref: null, description: "Concrete in footings", unit: "m3", unitCode: "m3" }]) },
 };
+// The quantity-progress service as the daily log calls it: the Decimal
+// helpers are real arithmetic; the row/entry helpers record their calls.
+const mockQuantityProgress = (() => {
+  const { Decimal } = require("@prisma/client/runtime/library");
+  const quantityDecimal = (value) => (value === null || value === undefined || value === "" ? null : new Decimal(value).toDecimalPlaces(3));
+  return {
+    quantityDecimal,
+    quantityNumber: (value) => (quantityDecimal(value) === null ? null : Number(quantityDecimal(value).toFixed(3))),
+    entriesForDailyLogRows: jest.fn(async () => []),
+    mintDailyLogEntries: jest.fn(async () => ({ minted: [], synced: [], kept: [], retired: [] })),
+    resolveDailyLogQuantity: jest.fn(async ({ boqItemId, allocationId }) => ({ item: { id: boqItemId }, allocationId: allocationId || "alloc-1", unitCode: "m3" })),
+    dailyLogRowEntryGate: jest.fn(async () => null),
+    syncDailyLogRowEntry: jest.fn(async () => null),
+    deleteDailyLogRowEntry: jest.fn(async () => null),
+    rejectDailyLogRowEntry: jest.fn(async () => null),
+  };
+})();
+const mockAssertProgressSubmitAllowed = jest.fn(async () => undefined);
 const mockAudit = { ENTITY_TYPES: { DAILY_LOG: "daily_log", PROJECT: "project" }, ACTIONS: { CREATED: "created", UPDATED: "updated", DELETED: "deleted", STATUS_CHANGED: "status_changed", APPROVED: "approved", REJECTED: "rejected" }, recordEvent: jest.fn(async () => ({})) };
 const mockNotifications = { NOTIFICATION_CATEGORIES: { APPROVAL: "approval", WORKFLOW: "workflow" }, createNotifications: jest.fn(async () => ({ created: 2 })) };
 const mockUpload = jest.fn(async ({ file }) => ({ id: "doc-1", fileName: file.originalname }));
@@ -39,6 +61,8 @@ jest.mock("../file-storage.service", () => ({ uploadProjectDocument: mockUpload 
 jest.mock("../email.service", () => ({ sendEmail: mockSendEmail }));
 jest.mock("../weather.service", () => ({ createWeatherDelay: mockCreateWeatherDelay }));
 jest.mock("../weather-feed.service", () => ({ ...jest.requireActual("../weather-feed.service"), fetchDailyWeather: jest.fn() }));
+jest.mock("../quantity-progress.service", () => mockQuantityProgress);
+jest.mock("../progress.service", () => ({ assertProgressSubmitAllowed: mockAssertProgressSubmitAllowed }));
 
 const weatherFeed = require("../weather-feed.service");
 const service = require("../daily-log.service");
@@ -47,6 +71,7 @@ const DAY = new Date("2026-09-05T00:00:00.000Z");
 const project = (overrides = {}) => ({ id: "project-1", orgId: "org-1", name: "Tower", status: "active", latitude: 24.7, longitude: 46.7, timezone: "Asia/Riyadh", dailyLogSettingsJson: { distributionRoles: ["pm"], distributionEmails: ["client@example.com"], thresholds: { rainMm: 10 } }, ...overrides });
 const manpower = (overrides = {}) => ({ id: "mp-1", dailyLogId: "log-1", partyId: null, companyId: "co-1", companyName: "ACME Concrete", trade: "Steel fixer", workers: 12, hours: 9, activityId: "act-1", locationId: null, notes: null, status: "approved", createdBy: "staff-1", submittedAt: null, reviewedBy: null, reviewedAt: null, rejectionReason: null, clientRequestId: null, sortOrder: 0, createdAt: DAY, updatedAt: DAY, ...overrides });
 const logRow = (overrides = {}) => ({ id: "log-1", orgId: "org-1", projectId: "project-1", date: DAY, status: "open", weatherJson: null, weatherSource: null, weatherFetchedAt: null, summary: null, submittedAt: null, submittedBy: null, approvedAt: null, approvedBy: null, distributedAt: null, distributionJson: null, pdfDocumentId: null, createdAt: DAY, updatedAt: DAY, manpower: [], equipment: [], deliveries: [], visitors: [], delays: [], notes: [], ...overrides });
+const quantityRow = (overrides = {}) => ({ id: "qty-1", dailyLogId: "log-1", partyId: null, activityId: "act-1", boqItemId: "item-1", allocationId: "alloc-1", locationId: null, quantity: "12.500", unitCode: "m3", notes: null, status: "approved", createdBy: "staff-1", submittedAt: null, reviewedBy: null, reviewedAt: null, rejectionReason: null, clientRequestId: null, sortOrder: 0, createdAt: DAY, updatedAt: DAY, ...overrides });
 const staff = { id: "staff-1", projectAccess: { assignmentRole: "site_engineer" } };
 const partyUser = { id: "sub-user", projectAccess: { partyScoped: true, partyAccess: [{ projectPartyId: "party-1", companyId: "co-2", role: "subcontractor" }] } };
 
@@ -206,5 +231,168 @@ describe("daily log", () => {
     await expect(service.updateSettings({ orgId: "org-1", projectId: "project-1", payload: { timezone: "Mars/Olympus" } })).rejects.toMatchObject({ code: "DAILY_LOG_TIMEZONE" });
     await expect(service.updateSettings({ orgId: "org-1", projectId: "project-1", payload: { distributionEmails: ["not-an-email"] } })).rejects.toMatchObject({ code: "DAILY_LOG_DISTRIBUTION_EMAIL" });
     await expect(service.updateSettings({ orgId: "org-1", projectId: "project-1", payload: { autoDistributeAt: "25:00" } })).rejects.toMatchObject({ code: "DAILY_LOG_AUTO_TIME" });
+  });
+
+  // ── PC-6 §4: the quantities section ───────────────────────────────────────
+
+  it("quantities: a row is recorded under the progress assignment rule, against the bill, in the item's unit, and is approved as a site record only", async () => {
+    mockPrisma.dailyLogQuantity.create.mockImplementationOnce(async ({ data }) => quantityRow({ ...data, id: "qty-new" }));
+    mockPrisma.dailyLog.findUnique.mockResolvedValueOnce(logRow()).mockResolvedValueOnce(logRow({ quantities: [quantityRow({ id: "qty-new" })] }));
+    const log = await service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", payload: { activityId: "act-1", boqItemId: "item-1", quantity: 12.5, unit: "cum" }, actor: { id: "staff-1", role: "site_engineer" }, viewer: staff });
+    expect(mockAssertProgressSubmitAllowed).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-1", activityIds: ["act-1"], userId: "staff-1", userRole: "site_engineer" }));
+    expect(mockQuantityProgress.resolveDailyLogQuantity).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", projectId: "project-1", activityId: "act-1", boqItemId: "item-1", unit: "cum" }));
+    const created = mockPrisma.dailyLogQuantity.create.mock.calls[0][0].data;
+    expect(created).toMatchObject({ dailyLogId: "log-1", activityId: "act-1", boqItemId: "item-1", allocationId: "alloc-1", unitCode: "m3", status: "approved" });
+    expect(created.quantity.toFixed(3)).toBe("12.500");
+    // Recording a row mints nothing: no entry exists before the log is submitted.
+    expect(mockPrisma.quantityProgressEntry.create).not.toHaveBeenCalled();
+    expect(mockQuantityProgress.mintDailyLogEntries).not.toHaveBeenCalled();
+    expect(log.sections.quantities[0]).toMatchObject({ quantity: 12.5, unitCode: "m3", boqItem: { id: "item-1", code: "1.1", description: "Concrete in footings" }, activity: { id: "act-1", name: "Slab pour" }, progressEntry: null });
+    expect(log.totals).toMatchObject({ quantityRows: 1, quantities: [{ unitCode: "m3", quantity: 12.5, rows: 1 }], entries: 1 });
+    await expect(service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", payload: { activityId: "act-1", boqItemId: "item-1", quantity: -1 }, actor: { id: "staff-1" }, viewer: staff })).rejects.toMatchObject({ code: "QUANTITY_NEGATIVE" });
+    await expect(service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", payload: { activityId: "act-1", quantity: 1 }, actor: { id: "staff-1" }, viewer: staff })).rejects.toMatchObject({ code: "DAILY_LOG_FIELD_REQUIRED", details: { field: "boqItemId" } });
+  });
+
+  it("quantities: totals are per unit, never one figure across units", () => {
+    const totals = service.totalsFor(logRow({ quantities: [quantityRow({ quantity: "10" }), quantityRow({ id: "qty-2", quantity: "2.5" }), quantityRow({ id: "qty-3", quantity: "7", unitCode: "t", boqItemId: "item-2" }), quantityRow({ id: "qty-4", quantity: "99", status: "rejected" }), quantityRow({ id: "qty-5", quantity: "99", status: "draft" })] }));
+    expect(totals.quantityRows).toBe(3);
+    expect(totals.quantities).toEqual([{ unitCode: "m3", quantity: 12.5, rows: 2 }, { unitCode: "t", quantity: 7, rows: 1 }]);
+    expect(totals.entries).toBe(5);
+  });
+
+  it("quantities: submitting the log mints entries for the rows that count and retires the rest; approving the log mints what the submitted day took since and approves no entry", async () => {
+    const rows = [quantityRow(), quantityRow({ id: "qty-2", status: "submitted", partyId: "party-1" }), quantityRow({ id: "qty-3", status: "draft" }), quantityRow({ id: "qty-4", status: "rejected" })];
+    mockPrisma.dailyLog.findUnique.mockResolvedValue(logRow({ quantities: rows }));
+    await service.submitLog({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", actor: { id: "staff-1", role: "site_engineer" } });
+    expect(mockQuantityProgress.mintDailyLogEntries).toHaveBeenCalledTimes(1);
+    const call = mockQuantityProgress.mintDailyLogEntries.mock.calls[0][0];
+    expect(call).toMatchObject({ orgId: "org-1", projectId: "project-1", log: expect.objectContaining({ id: "log-1", status: "submitted" }), actor: { id: "staff-1", role: "site_engineer" } });
+    expect(call.rows.map((row) => row.id)).toEqual(["qty-1", "qty-2"]);
+    expect(call.retiredRows.map((row) => row.id)).toEqual(["qty-3", "qty-4"]);
+    expect(mockAudit.recordEvent).toHaveBeenCalledWith(expect.objectContaining({ summary: expect.objectContaining({ transition: "daily_log.submit", quantityEntries: { minted: 0, synced: 0, kept: 0, retired: 0 } }) }));
+
+    mockPrisma.dailyLog.findUnique.mockResolvedValue(logRow({ status: "submitted", submittedBy: "staff-1", quantities: rows }));
+    await service.approveLog({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", actor: { id: "pm-1", role: "pm" } });
+    // The row's own review state moves like its six siblings' …
+    expect(mockPrisma.dailyLogQuantity.updateMany).toHaveBeenCalledWith({ where: { dailyLogId: "log-1", status: "submitted" }, data: expect.objectContaining({ status: "approved", reviewedBy: "pm-1" }) });
+    // … the day's closing mints for every counted row (a row taken after the submit is not left behind) …
+    expect(mockQuantityProgress.mintDailyLogEntries).toHaveBeenCalledTimes(2);
+    const closing = mockQuantityProgress.mintDailyLogEntries.mock.calls[1][0];
+    expect(closing.rows.map((row) => row.id)).toEqual(["qty-1", "qty-2"]);
+    expect(closing.retiredRows.map((row) => row.id)).toEqual(["qty-3", "qty-4"]);
+    expect(closing.log).toMatchObject({ id: "log-1" });
+    expect(mockAudit.recordEvent).toHaveBeenLastCalledWith(expect.objectContaining({ summary: expect.objectContaining({ transition: "daily_log.approve", quantityEntries: { minted: 0, synced: 0, kept: 0, retired: 0 } }) }));
+    // … and no quantity progress entry is approved or touched by the log's approval.
+    expect(mockPrisma.quantityProgressEntry.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.quantityProgressEntry.update).not.toHaveBeenCalled();
+    expect(mockPrisma.quantityProgressEntry.create).not.toHaveBeenCalled();
+  });
+
+  it("quantities: on a day already submitted a row added, edited back into counting or approved by the site team is pending at once; on an open day nothing is minted", async () => {
+    // Added to a submitted day.
+    mockPrisma.dailyLogQuantity.create.mockImplementationOnce(async ({ data }) => quantityRow({ ...data, id: "qty-late" }));
+    mockPrisma.dailyLog.findUnique.mockResolvedValueOnce(logRow({ status: "submitted" })).mockResolvedValueOnce(logRow({ status: "submitted", quantities: [quantityRow({ id: "qty-late" })] }));
+    await service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", payload: { activityId: "act-1", boqItemId: "item-1", quantity: 7 }, actor: { id: "pm-1", role: "pm" }, viewer: { id: "pm-1", projectAccess: { assignmentRole: "pm" } } });
+    expect(mockQuantityProgress.mintDailyLogEntries).toHaveBeenCalledTimes(1);
+    expect(mockQuantityProgress.mintDailyLogEntries.mock.calls[0][0].rows.map((row) => row.id)).toEqual(["qty-late"]);
+    expect(mockQuantityProgress.mintDailyLogEntries.mock.calls[0][0].log).toMatchObject({ id: "log-1", status: "submitted" });
+    // A draft row on a submitted day does not count: nothing minted.
+    mockPrisma.dailyLogQuantity.create.mockImplementationOnce(async ({ data }) => quantityRow({ ...data, id: "qty-draft" }));
+    mockPrisma.dailyLog.findUnique.mockResolvedValueOnce(logRow({ status: "submitted" })).mockResolvedValueOnce(logRow({ status: "submitted" }));
+    await service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", payload: { activityId: "act-1", boqItemId: "item-1", quantity: 7, status: "draft" }, actor: { id: "pm-1", role: "pm" }, viewer: { id: "pm-1", projectAccess: { assignmentRole: "pm" } } });
+    expect(mockQuantityProgress.mintDailyLogEntries).toHaveBeenCalledTimes(1);
+    // Added to an open day: a site record only.
+    mockPrisma.dailyLogQuantity.create.mockImplementationOnce(async ({ data }) => quantityRow({ ...data, id: "qty-open" }));
+    mockPrisma.dailyLog.findUnique.mockResolvedValueOnce(logRow()).mockResolvedValueOnce(logRow());
+    await service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", payload: { activityId: "act-1", boqItemId: "item-1", quantity: 7 }, actor: { id: "staff-1", role: "site_engineer" }, viewer: staff });
+    expect(mockQuantityProgress.mintDailyLogEntries).toHaveBeenCalledTimes(1);
+
+    // A rejected row edited on a submitted day is resubmitted and, having no entry, minted.
+    mockPrisma.dailyLog.findUnique.mockResolvedValueOnce(logRow({ status: "submitted" })).mockResolvedValueOnce(logRow({ status: "submitted" }));
+    mockPrisma.dailyLogQuantity.findFirst.mockResolvedValueOnce(quantityRow({ status: "rejected" }));
+    mockPrisma.dailyLogQuantity.update.mockImplementationOnce(async ({ data }) => quantityRow({ ...data }));
+    await service.updateEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", entryId: "qty-1", payload: { quantity: 9 }, actor: { id: "staff-1", role: "site_engineer" }, viewer: staff });
+    expect(mockQuantityProgress.mintDailyLogEntries).toHaveBeenCalledTimes(2);
+    expect(mockQuantityProgress.mintDailyLogEntries.mock.calls[1][0].rows[0]).toMatchObject({ id: "qty-1", status: "approved" });
+
+    // Approved by the site team on a submitted day: minted; the entry is never approved by the review.
+    mockPrisma.dailyLog.findUnique.mockResolvedValueOnce(logRow({ status: "submitted" })).mockResolvedValueOnce(logRow({ status: "submitted" }));
+    mockPrisma.dailyLogQuantity.findFirst.mockResolvedValueOnce(quantityRow({ status: "submitted", partyId: "party-1" }));
+    mockPrisma.dailyLogQuantity.update.mockImplementationOnce(async ({ data }) => quantityRow({ ...data }));
+    await service.reviewEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", entryId: "qty-1", decision: "approve", actor: { id: "staff-1", role: "site_engineer" }, viewer: staff });
+    expect(mockQuantityProgress.mintDailyLogEntries).toHaveBeenCalledTimes(3);
+    expect(mockQuantityProgress.rejectDailyLogRowEntry).not.toHaveBeenCalled();
+    expect(mockPrisma.quantityProgressEntry.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("quantities: the site team's reject takes the row's free pending entry with it, and an official or bundled entry refuses the review", async () => {
+    const pending = { id: "entry-1", status: "submitted", submissionId: null, submission: null };
+    mockQuantityProgress.rejectDailyLogRowEntry.mockResolvedValueOnce(pending);
+    mockPrisma.dailyLog.findUnique.mockResolvedValueOnce(logRow({ status: "submitted" })).mockResolvedValueOnce(logRow({ status: "submitted" }));
+    mockPrisma.dailyLogQuantity.findFirst.mockResolvedValueOnce(quantityRow());
+    mockPrisma.dailyLogQuantity.update.mockImplementationOnce(async ({ data }) => quantityRow({ ...data }));
+    await service.reviewEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", entryId: "qty-1", decision: "reject", reason: "measured twice", actor: { id: "staff-1", role: "site_engineer" }, viewer: staff });
+    expect(mockQuantityProgress.rejectDailyLogRowEntry).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", projectId: "project-1", row: expect.objectContaining({ id: "qty-1" }), actorId: "staff-1", reason: "measured twice" }));
+    expect(mockQuantityProgress.rejectDailyLogRowEntry.mock.invocationCallOrder[0]).toBeLessThan(mockPrisma.dailyLogQuantity.update.mock.invocationCallOrder[0]);
+    expect(mockPrisma.dailyLogQuantity.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "rejected", rejectionReason: "measured twice" }) }));
+    expect(mockAudit.recordEvent).toHaveBeenLastCalledWith(expect.objectContaining({ summary: expect.objectContaining({ transition: "daily_log.entry_reject", section: "quantities", quantityEntryId: "entry-1" }) }));
+    expect(mockQuantityProgress.mintDailyLogEntries).not.toHaveBeenCalled();
+
+    // The refusals pass through and the row is not moved.
+    for (const code of ["DAILY_LOG_QUANTITY_LOCKED", "QUANTITY_ENTRY_BUNDLED"]) {
+      mockQuantityProgress.rejectDailyLogRowEntry.mockRejectedValueOnce(Object.assign(new Error(code), { status: 409, code }));
+      mockPrisma.dailyLog.findUnique.mockResolvedValueOnce(logRow({ status: "submitted" }));
+      mockPrisma.dailyLogQuantity.findFirst.mockResolvedValueOnce(quantityRow());
+      await expect(service.reviewEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", entryId: "qty-1", decision: "reject", reason: "no", actor: { id: "staff-1" }, viewer: staff })).rejects.toMatchObject({ status: 409, code });
+    }
+    expect(mockPrisma.dailyLogQuantity.update).toHaveBeenCalledTimes(1);
+    // The six siblings' review is untouched by the quantities rule.
+    mockPrisma.dailyLog.findUnique.mockResolvedValueOnce(logRow({ status: "submitted" })).mockResolvedValueOnce(logRow({ status: "submitted" }));
+    mockPrisma.dailyLogManpower.findFirst.mockResolvedValueOnce(manpower({ status: "submitted", partyId: "party-1" }));
+    await service.reviewEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "manpower", entryId: "mp-1", decision: "reject", reason: "no", actor: { id: "staff-1" }, viewer: staff });
+    expect(mockQuantityProgress.rejectDailyLogRowEntry).toHaveBeenCalledTimes(3);
+  });
+
+  it("quantities: a row edit before approval follows the entry gate and syncs the pending entry; a row delete removes its pending entry", async () => {
+    const pending = { id: "entry-1", status: "submitted", submissionId: null, submission: null, createdBy: "staff-1", createdAt: DAY, source: "daily_log" };
+    mockQuantityProgress.dailyLogRowEntryGate.mockResolvedValueOnce(pending);
+    mockPrisma.dailyLogQuantity.findFirst.mockResolvedValueOnce(quantityRow());
+    mockPrisma.dailyLogQuantity.update.mockImplementationOnce(async ({ data }) => quantityRow({ ...data }));
+    await service.updateEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", entryId: "qty-1", payload: { quantity: 14 }, actor: { id: "staff-1", role: "site_engineer" }, viewer: staff });
+    expect(mockQuantityProgress.dailyLogRowEntryGate).toHaveBeenCalledWith(expect.objectContaining({ rowId: "qty-1" }));
+    expect(mockQuantityProgress.syncDailyLogRowEntry).toHaveBeenCalledWith(expect.objectContaining({ entry: pending, row: expect.objectContaining({ activityId: "act-1", boqItemId: "item-1" }), actorId: "staff-1" }));
+    expect(mockQuantityProgress.syncDailyLogRowEntry.mock.calls[0][0].row.quantity.toFixed(3)).toBe("14.000");
+
+    // Moving a submitted quantity to another item is a new row, not an edit.
+    mockQuantityProgress.dailyLogRowEntryGate.mockResolvedValueOnce(pending);
+    mockPrisma.dailyLogQuantity.findFirst.mockResolvedValueOnce(quantityRow());
+    await expect(service.updateEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", entryId: "qty-1", payload: { boqItemId: "item-2" }, actor: { id: "staff-1" }, viewer: staff })).rejects.toMatchObject({ code: "QUANTITY_ENTRY_IMMUTABLE_FIELD" });
+
+    // The gate's refusals pass through untouched.
+    mockQuantityProgress.dailyLogRowEntryGate.mockRejectedValueOnce(Object.assign(new Error("locked"), { status: 409, code: "DAILY_LOG_QUANTITY_LOCKED" }));
+    mockPrisma.dailyLogQuantity.findFirst.mockResolvedValueOnce(quantityRow());
+    await expect(service.updateEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", entryId: "qty-1", payload: { quantity: 1 }, actor: { id: "staff-1" }, viewer: staff })).rejects.toMatchObject({ code: "DAILY_LOG_QUANTITY_LOCKED" });
+    expect(mockPrisma.dailyLogQuantity.update).toHaveBeenCalledTimes(1);
+
+    mockQuantityProgress.deleteDailyLogRowEntry.mockResolvedValueOnce(pending);
+    mockPrisma.dailyLogQuantity.findFirst.mockResolvedValueOnce(quantityRow());
+    await service.deleteEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", entryId: "qty-1", actor: { id: "staff-1" }, viewer: staff });
+    expect(mockQuantityProgress.deleteDailyLogRowEntry).toHaveBeenCalledWith(expect.objectContaining({ row: expect.objectContaining({ id: "qty-1" }), actorId: "staff-1" }));
+    expect(mockPrisma.dailyLogQuantity.delete).toHaveBeenCalledWith({ where: { id: "qty-1" } });
+    expect(mockAudit.recordEvent).toHaveBeenLastCalledWith(expect.objectContaining({ summary: expect.objectContaining({ transition: "daily_log.entry_delete", section: "quantities", quantityEntryId: "entry-1" }) }));
+  });
+
+  it("quantities: the section is never copied forward, and the PDF and digest carry it per unit", async () => {
+    expect(service.SECTIONS.quantities.copyFields).toBeUndefined();
+    expect(service.mergeSettings({ copySections: ["quantities", "manpower"] }).copySections).toEqual(["manpower"]);
+    mockQuantityProgress.entriesForDailyLogRows.mockResolvedValueOnce([{ id: "entry-1", dailyLogQuantityId: "qty-1", status: "approved", source: "daily_log", submissionId: "sub-1", submission: { status: "approved" }, createdBy: "staff-1", createdAt: DAY, approvedBy: "pm-1", approvedAt: DAY, rejectedBy: null, rejectedAt: null, rejectionReason: null }]);
+    mockPrisma.dailyLog.findUnique.mockResolvedValue(logRow({ status: "approved", quantities: [quantityRow(), quantityRow({ id: "qty-2", quantity: "3", unitCode: "t", boqItemId: "item-1" })] }));
+    const rendered = await service.renderPdf({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", viewer: staff, boqAccess: { boq: false, budget: false } });
+    expect(rendered.log.sections.quantities[0].progressEntry).toMatchObject({ id: "entry-1", status: "approved", official: true, submissionId: "sub-1", approvedBy: "pm-1", recordedBy: "staff-1" });
+    expect(rendered.log.totals.quantities).toEqual([{ unitCode: "m3", quantity: 12.5, rows: 1 }, { unitCode: "t", quantity: 3, rows: 1 }]);
+    const text = service.renderText({ project: project(), log: rendered.log });
+    expect(text).toContain("installed 12.5 m3, 3 t");
+    expect(text).toContain("Concrete in footings · 12.5 m3 — Slab pour · official");
+    expect(text).not.toContain("1.1 Concrete");
   });
 });
