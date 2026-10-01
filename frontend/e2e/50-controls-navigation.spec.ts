@@ -281,10 +281,18 @@ test('a BOQ item leads to its activities and back, an activity to its BOQ rows a
   await expect(page.getByTestId('boq-detail-qty-current').locator('[data-truth="source"]')).toBeVisible()
   await expect(page.getByTestId('boq-detail-qty-mapped')).toContainText('100')
   await expect(page.getByTestId('boq-detail-qty-authorised')).toContainText('108')
-  // The value slot itself says so — no figure is drawn for it.
-  const installed = page.getByTestId('boq-detail-qty-installed')
-  await expect(installed.locator('[data-not-available="PC-6"]')).toHaveText('Not available yet (PC-6)')
-  await expect(installed.locator('[data-value]')).toHaveCount(0)
+  // PC-6 delivers installed from the quantity views: once that read answers, the drawer draws the six
+  // figures in its own section (the PC-5 placeholder row is gone). Installed = Σ approved quantity entries
+  // naming the item, derived, with its basis — 0 here, because no entry has been approved (a daily log or a
+  // capture never counts until approved). It is a figure, never "not available".
+  const pc6 = page.getByTestId('boq-detail-quantities-pc6')
+  await expect(pc6).toHaveAttribute('data-state', 'ok')
+  await expect(page.getByTestId('boq-detail-qty-installed')).toHaveCount(0)
+  const installed = pc6.locator('[data-figure="installed"]').first()
+  await expect(installed).not.toHaveAttribute('data-absent', 'true')
+  await expect(installed.locator('[data-value]')).toHaveAttribute('data-value', '0')
+  await expect(installed.locator('[data-truth="derived"]')).toBeVisible()
+  await expect(installed).toContainText('approved QuantityProgressEntry')
   const forecast = page.getByTestId('boq-detail-money-forecast')
   await expect(forecast.locator('[data-not-available="PC-7"]')).toHaveText('Not available yet (PC-7)')
   await expect(forecast.locator('[data-value]')).toHaveCount(0)
