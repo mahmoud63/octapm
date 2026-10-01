@@ -132,8 +132,11 @@ export const MODULE_PERMISSIONS: Partial<
   boq: ['boq'],
   bim: ['bim'],
   // Project Controls pages reuse boq read/update (integration doc §2): no
-  // new catalogue module gates them.
-  controls: ['boq'],
+  // new catalogue module gates them. Exceptions (PC-7b) follow their
+  // subject's module — BOQ for quantity kinds, cost for money kinds,
+  // schedule for schedule kinds — so the group is offered to anyone who
+  // holds one of them, and each sub-tab names its own (CHILD_PERMISSIONS).
+  controls: ['boq', 'cost', 'schedule'],
   activities: ['schedule'],
   equipment: ['schedule', 'cost'],
   locations: ['location'],
@@ -187,6 +190,13 @@ export const CHILD_PERMISSIONS: Partial<
   docControl: {
     rfi: ['rfi'],
     submittals: ['submittal'],
+  },
+  // Structure and Mapping stay the BOQ's; Exceptions is offered to a holder
+  // of any subject module, and the server withholds what they may not read.
+  controls: {
+    structure: ['boq'],
+    mapping: ['boq'],
+    exceptions: ['boq', 'cost', 'schedule'],
   },
 }
 

@@ -16,6 +16,7 @@ import {
   Users,
   Wrench,
   Activity,
+  AlertOctagon,
   AlertTriangle,
   CalendarRange,
   Coins,
@@ -74,6 +75,15 @@ export const projectControlsGroup: {
     // integration doc §2): the Commercial module's pages, opened at change
     // events, and offered only when that page is.
     { key: 'changes', title: 'Changes', module: 'commercial', child: 'change-events', icon: FileDiff },
+    // PC-7b: the reviewed exceptions the controls engine derives, and the
+    // handoff from one to a draft change event (change intelligence §6).
+    {
+      key: 'exceptions',
+      title: 'Exceptions',
+      module: 'controls',
+      child: 'exceptions',
+      icon: AlertOctagon,
+    },
     { key: 'resources', title: 'Resources', module: 'schedule', child: 'resources', icon: UsersRound },
     { key: 'risks', title: 'Risks', module: 'schedule', child: 'risks', icon: AlertTriangle },
     {

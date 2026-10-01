@@ -32,7 +32,9 @@ assert.match(page, /never rewritten/, 'the page says the typed unit is kept')
 
 // ── Module map and shell ─────────────────────────────────────────────────
 const modules = read('src/features/projects/lib/project-modules.ts')
-;["controls: 'controls'", "controls: 'structure'", "controls: ['boq']"].forEach(
+// PC-7b: the group is offered to a holder of boq, cost or schedule (for
+// Exceptions); Structure and Mapping stay gated by the BOQ as a sub-tab.
+;["controls: 'controls'", "controls: 'structure'", "structure: ['boq']", "mapping: ['boq']"].forEach(
   (fragment) => assert.ok(modules.includes(fragment), `module map has ${fragment}`)
 )
 

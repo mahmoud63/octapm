@@ -180,6 +180,11 @@ const CaptureHome = lazy(() =>
     default: m.CaptureHome,
   }))
 )
+const ExceptionsPage = lazy(() =>
+  import('@/features/controls/exceptions/exceptions-page').then((m) => ({
+    default: m.ExceptionsPage,
+  }))
+)
 
 type MenuChild = {
   key: string
@@ -582,7 +587,15 @@ export function ProjectDetail({
   // link, rather than a button that does nothing.
   const canSetupNavigate = (target: ProjectSetupTarget) => {
     const module = moduleFromSlug(target.module)
-    return Boolean(module && menuItems.some((item) => item.key === module))
+    const item = module ? menuItems.find((entry) => entry.key === module) : undefined
+    if (!item) return false
+    // A target naming a sub-tab is offered only when that sub-tab is: the
+    // controls group is offered to cost or schedule holders for Exceptions
+    // (PC-7b), but its Mapping and Structure stay the BOQ's.
+    if (module === 'controls' && target.child && item.children) {
+      return item.children.some((child) => child.key === target.child && !child.target)
+    }
+    return true
   }
 
   const handleSetupNavigate = (target: ProjectSetupTarget) => {
@@ -755,9 +768,10 @@ export function ProjectDetail({
         return <EquipmentSection projectId={projectId} />
 
       case 'controls':
-        // Structure (PC-1) and mapping (PC-3); exceptions follow in a later
-        // project-controls wave and pick their child here.
-        return childState.controls === 'mapping' ? (
+        // Structure (PC-1), mapping (PC-3) and exceptions (PC-7b).
+        return childState.controls === 'exceptions' ? (
+          <ExceptionsPage projectId={projectId} />
+        ) : childState.controls === 'mapping' ? (
           <MappingPage
             projectId={projectId}
             selectedAllocationId={
