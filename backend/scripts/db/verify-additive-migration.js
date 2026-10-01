@@ -3,6 +3,7 @@
  * Disposable-database proof for one additive migration (docs/qa/OCTAPM_MIGRATION_PREFLIGHT.md step 4).
  *
  *   node scripts/db/verify-additive-migration.js --migration <folder name> --table <Table> [--table <Table> ...]
+ *     [--rows 3] [--link <Table>.<column>=<ParentTable> ...]
  *
  * It creates a throwaway database `octapm_migtest_<timestamp>` on the cluster named by DATABASE_URL, applies
  * every migration BEFORE the named one, inserts fixture rows with distinctive values into each named table
@@ -13,6 +14,12 @@
  * It never connects to the database named in DATABASE_URL: only to the cluster's `postgres` database (to create
  * and drop the throwaway one) and to the throwaway database itself. Exit 0 = no pre-existing value changed and
  * every added column is nullable or defaulted; 2 = a difference; 1 = an error.
+ *
+ * --link Rfi.changeOrderId=ChangeOrder fills that existing column of every fixture row with the id of a fixture
+ * row of the parent table (which must be listed by an earlier --table), instead of a random id. Use it when the
+ * migration turns an existing bare-string column into a foreign key: the key validates every existing row, so a
+ * random fixture id would be refused for a reason that is not the migration's (the live values are proven by a
+ * census), while a real parent id lets the run show that the value survives the migration unchanged.
  */
 const { execFileSync } = require("child_process");
 const crypto = require("crypto");
@@ -31,6 +38,12 @@ const opt = (name) => args.flatMap((a, i) => (a === `--${name}` ? [args[i + 1]] 
 const [migration] = opt("migration");
 const tables = opt("table");
 const perTable = Number(opt("rows")[0] || 3);
+const links = Object.fromEntries(opt("link").map((spec) => {
+  const m = /^(\w+)\.(\w+)=(\w+)$/.exec(spec || "");
+  if (!m) { console.error(`bad --link ${spec} (expected Table.column=ParentTable)`); process.exit(1); }
+  if (!tables.includes(m[1]) || tables.indexOf(m[3]) < 0 || tables.indexOf(m[3]) > tables.indexOf(m[1])) { console.error(`--link ${spec}: both tables must be listed by --table, the parent first`); process.exit(1); }
+  return [`${m[1]}.${m[2]}`, m[3]];
+}));
 if (!migration || !tables.length) {
   console.error("usage: verify-additive-migration.js --migration <folder> --table <Table> [--table ...] [--rows 3]");
   process.exit(1);
@@ -113,6 +126,7 @@ const fixtureValue = (c, row, col, allowed = {}) => {
     await db.connect();
     const pre = {};
     const colsBefore = {};
+    const fixtureIds = {};
     await db.query("SET session_replication_role = replica");
     for (const table of tables) {
       colsBefore[table] = await columnsOf(db, table);
@@ -121,11 +135,14 @@ const fixtureValue = (c, row, col, allowed = {}) => {
       for (let row = 0; row < perTable; row += 1) {
         const keys = []; const vals = [];
         colsBefore[table].forEach((c, col) => {
-          const v = fixtureValue(c, row, col, allowed);
+          const parent = links[`${table}.${c.column_name}`];
+          const v = parent ? fixtureIds[parent][row % fixtureIds[parent].length] : fixtureValue(c, row, col, allowed);
           if (v !== undefined) { keys.push(`"${c.column_name}"`); vals.push(v); }
         });
-        if (!keys.length) await db.query(`insert into "${table}" default values`);
-        else await db.query(`insert into "${table}" (${keys.join(",")}) values (${vals.map((_, k) => `$${k + 1}`).join(",")})`, vals);
+        const inserted = !keys.length
+          ? await db.query(`insert into "${table}" default values returning *`)
+          : await db.query(`insert into "${table}" (${keys.join(",")}) values (${vals.map((_, k) => `$${k + 1}`).join(",")}) returning *`, vals);
+        (fixtureIds[table] ||= []).push(inserted.rows[0].id);
       }
     }
     await db.query("SET session_replication_role = origin");

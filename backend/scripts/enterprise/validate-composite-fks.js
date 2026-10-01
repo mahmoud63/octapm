@@ -39,8 +39,9 @@ const NEVER = ["BackgroundJob", "OutboundEvent", "AuditEvent", "RecordHistorySna
  * Org-side keys added by this wave: the tables that carried an orgId with no
  * key behind it — ten without a project column, eight relation-less
  * project tables, and ApprovalWorkflowEvent (project key only) — plus the
- * two PC-6 tables born with both keys (migration 20261005050000; a table
- * the database does not have yet is reported as pending, not counted).
+ * two PC-6 tables born with both keys (migration 20261005050000) and the
+ * PC-7b ProjectException (migration 20261005060000). A table the database
+ * does not have yet is reported as pending, not counted.
  */
 const ORG_ONLY = [
   "Signature",
@@ -52,6 +53,7 @@ const ORG_ONLY = [
   "DailyLogNote",
   "DailyLogQuantity",
   "QuantityProgressEntry",
+  "ProjectException",
   "RfiResponse",
   "ApprovalWorkflowEvent",
   "NotificationDeliveryAttempt",
@@ -66,8 +68,8 @@ const ORG_ONLY = [
   "EvaluationCriterion",
 ];
 
-/** Project rows that name an organisation cost code. */
-const COST_CODE_TABLES = ["BudgetLine", "ProjectCostCode", "CommitmentSovLine", "TimeEntry", "ChangeEventLine", "DirectCostLine"];
+/** Project rows that name an organisation cost code (ProjectException: PC-7b, born with the key; pending until applied). */
+const COST_CODE_TABLES = ["BudgetLine", "ProjectCostCode", "CommitmentSovLine", "TimeEntry", "ChangeEventLine", "DirectCostLine", "ProjectException"];
 
 const rows = (sql) => prisma.$queryRaw(sql);
 const count = async (sql) => Number((await rows(sql))[0].count);
@@ -177,7 +179,9 @@ const main = async () => {
     results.push(await checks.organisation(table, context));
   }
   for (const table of COST_CODE_TABLES) {
-    if (wanted(table)) results.push(await checks.costCode(table, context));
+    if (!wanted(table)) continue;
+    if (!present.has(table)) { console.log(`pending ${table}: not in this database yet (its migration is not applied); cost-code key skipped`); continue; }
+    results.push(await checks.costCode(table, context));
   }
   if (wanted("ProjectAssignment")) results.push(await checks.assignmentMembership(null, context));
   if (wanted("ProjectUserPermission")) results.push(await checks.permissionMembership(null, context));

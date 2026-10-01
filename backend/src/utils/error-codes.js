@@ -316,6 +316,16 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "quality",
     message: "NCR closeout status changes must use workflow endpoints",
   },
+  NCR_REF_TAKEN: {
+    status: 409,
+    category: "quality",
+    message: "That NCR reference is already used in this project",
+  },
+  NCR_NUMBERING_FAILED: {
+    status: 500,
+    category: "quality",
+    message: "Could not allocate a free NCR reference",
+  },
   NCR_CLOSEOUT_REQUIRED_FIELDS: {
     status: 400,
     category: "quality",

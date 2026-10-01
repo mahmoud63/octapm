@@ -180,6 +180,7 @@ model Organisation {
   dailyLogNotes                DailyLogNote[]
   dailyLogQuantities           DailyLogQuantity[]
   quantityProgressEntries      QuantityProgressEntry[]
+  projectExceptions            ProjectException[]
   rfiResponses                 RfiResponse[]
   approvalWorkflowEvents       ApprovalWorkflowEvent[]
   notificationDeliveryAttempts NotificationDeliveryAttempt[]
@@ -682,6 +683,7 @@ model Project {
   dailyLogNotes               DailyLogNote[]
   dailyLogQuantities          DailyLogQuantity[]
   quantityProgressEntries     QuantityProgressEntry[]
+  projectExceptions           ProjectException[]
   rfiResponses                RfiResponse[]
   boqItemCodeIntegrityReports BoqItemCodeIntegrityReport[]
 
@@ -1291,6 +1293,7 @@ model MeetingActionItem {
   project  Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   meeting  Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   activity Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  changeEvents ChangeEvent[]
   task     Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
   owner    User?        @relation("MeetingActionOwner", fields: [ownerId], references: [id], onDelete: SetNull)
 
@@ -2184,6 +2187,8 @@ model ChangeOrder {
   projectId             String
   activityId            String?
   budgetLineId          String? // target budget line for the approved value (OCTA-FIN-COSTCODE-019)
+  locationId            String? // PC-7b §126: where the change is (structure link, never a figure)
+  wbsNodeId             String? // PC-7b §126: the WBS node the change belongs to (structure link, never a figure)
   budgetAllocationsJson Json      @default("[]") // explicit split of the approved value across budget lines: [{ budgetLineId, amount }] (Phase 22B)
   ref                   String
   description           String
@@ -2212,15 +2217,21 @@ model ChangeOrder {
   project         Project                     @relation(fields: [projectId], references: [id])
   activity        Activity?                   @relation(fields: [activityId], references: [id], onDelete: SetNull)
   budgetLine      BudgetLine?                 @relation(fields: [budgetLineId], references: [id], onDelete: SetNull)
+  location        Location?                   @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  wbsNode         WbsNode?                    @relation(fields: [wbsNodeId], references: [id], onDelete: SetNull)
   activityLinks   ChangeOrderActivityLink[]
   allocationLinks ChangeOrderAllocationLink[]
   budgetLineChanges BudgetLineChange[]
   commitmentChangeOrders CommitmentChangeOrder[]
   changeEvents    ChangeEvent[]
+  rfis            Rfi[]
 
+  @@unique([projectId, ref]) // PC-7b (20261005060100): 0 duplicate groups on the shared database (record-ref-duplicates.js)
   @@index([projectId])
   @@index([projectId, status, archivedAt])
   @@index([budgetLineId])
+  @@index([locationId])
+  @@index([wbsNodeId])
 }
 
 model ChangeOrderActivityLink {
@@ -2623,6 +2634,7 @@ model Risk {
   ballInCourtUser User?    @relation("RiskBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
   assigneeCompany Company? @relation("RiskAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
+  @@unique([projectId, ref]) // PC-7b (20261005060100): 0 duplicate groups on the shared database (record-ref-duplicates.js)
   @@index([projectId])
   @@index([projectId, status])
   @@index([projectId, status, archivedAt])
@@ -3872,6 +3884,7 @@ model NcrRecord {
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id])
+  changeEvents ChangeEvent[]
   ownerUser       User?    @relation("NcrOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
   reviewerUser    User?    @relation("NcrReviewerUser", fields: [reviewerUserId], references: [id], onDelete: SetNull)
   approverUser    User?    @relation("NcrApproverUser", fields: [approverUserId], references: [id], onDelete: SetNull)
@@ -3879,6 +3892,7 @@ model NcrRecord {
   ballInCourtUser User?    @relation("NcrBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
   assigneeCompany Company? @relation("NcrAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
+  @@unique([projectId, ref]) // PC-7b (20261005060100): 0 duplicate groups on the shared database (record-ref-duplicates.js)
   @@index([projectId])
   @@index([projectId, status, dueDate])
   @@index([ownerUserId])
@@ -4124,7 +4138,7 @@ model Rfi {
   scheduleImpactFlag Boolean   @default(false)
   officialResponseId String?
   revision           Int       @default(0)
-  changeOrderId      String?
+  changeOrderId      String? // → ChangeOrder (PC-7b; was a bare string — scripts/project-controls/change-link-census.js)
   distributedAt      DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
@@ -4133,6 +4147,8 @@ model Rfi {
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
   managerUser User?     @relation("RfiManagerUser", fields: [managerUserId], references: [id], onDelete: SetNull)
   location    Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  changeOrder ChangeOrder? @relation(fields: [changeOrderId], references: [id], onDelete: SetNull)
+  changeEvents ChangeEvent[]
   assignees   RfiAssignee[]
   responses   RfiResponse[]
   ownerParty    ProjectParty? @relation("RfiOwnerParty", fields: [ownerPartyId], references: [id], onDelete: SetNull)
@@ -4164,6 +4180,7 @@ model Rfi {
   @@index([managerUserId])
   @@index([projectId, createdBy])
   @@index([locationId])
+  @@index([changeOrderId])
 }
 
 // People on an RFI beyond the single assignee: `assignee` rows answer it,
@@ -4256,6 +4273,7 @@ model Submittal {
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  changeEvents ChangeEvent[]
   package          SubmittalPackage?          @relation(fields: [packageId], references: [id], onDelete: SetNull)
   workflowTemplate SubmittalWorkflowTemplate? @relation(fields: [workflowTemplateId], references: [id], onDelete: SetNull)
   managerUser      User?                      @relation("SubmittalManagerUser", fields: [managerUserId], references: [id], onDelete: SetNull)
@@ -4919,6 +4937,8 @@ model Location {
   progressSubmissions ProgressSubmission[]
   quantityProgressEntries QuantityProgressEntry[]
   dailyLogQuantities      DailyLogQuantity[]
+  changeOrders            ChangeOrder[]
+  projectExceptions       ProjectException[]
 
   @@unique([projectId, code])
   @@index([orgId])
@@ -4966,6 +4986,8 @@ model WbsNode {
   children WbsNode[]    @relation("WbsNodeChildren")
   activities Activity[]
   boqItems   BoqItem[]
+  changeOrders      ChangeOrder[]
+  projectExceptions ProjectException[]
 
   @@unique([projectId, code])
   @@index([orgId])
@@ -5025,6 +5047,7 @@ model CostCode {
   directCostLines    DirectCostLine[]
   stockTransactions  StockTransaction[]
   boqItems           BoqItem[]
+  projectExceptions  ProjectException[]
 
   @@unique([orgId, code])
   @@unique([id, orgId]) // target for composite tenant foreign keys (M7)
@@ -5803,6 +5826,7 @@ model SheetRevision {
   org      Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
   project  Project         @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   sheet    Sheet?          @relation(fields: [sheetId], references: [id], onDelete: SetNull)
+  changeEvents ChangeEvent[]
   set      DrawingSet?     @relation(fields: [setId], references: [id], onDelete: SetNull)
   document ProjectDocument @relation("SheetRevisionDocument", fields: [documentId], references: [id], onDelete: Cascade)
 
@@ -5859,6 +5883,7 @@ model PunchItem {
   org               Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
   project           Project          @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   activity          Activity?        @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  changeEvents ChangeEvent[]
   location          Location?        @relation(fields: [locationId], references: [id], onDelete: SetNull)
   sheet             Sheet?           @relation(fields: [sheetId], references: [id], onDelete: SetNull)
   assigneeCompany   Company?         @relation("PunchAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
@@ -6516,7 +6541,16 @@ model ChangeEvent {
   type               String    @default("other") // owner_change, design_change, site_condition, error_omission, allowance, value_engineering, other
   origin             String    @default("manual") // manual, rfi, submittal, daily_log, observation, meeting, other
   sourceRecordType   String?
-  sourceRecordId     String?
+  sourceRecordId     String? // kept for any source without a typed column below
+  // PC-7b §126 typed traceability: at most the source(s) the event was raised from; all SetNull.
+  rfiId               String?
+  dailyLogId          String?
+  ncrId               String? // → NcrRecord
+  punchItemId         String? // → PunchItem (punch items and observations)
+  drawingRevisionId   String? // → SheetRevision
+  submittalId         String?
+  meetingActionItemId String?
+  exceptionId         String? // → ProjectException the event was raised from (the handoff, §2)
   status             String    @default("open") // open, pricing, priced, converted, closed, void
   activityId         String?
   locationId         String?
@@ -6539,6 +6573,15 @@ model ChangeEvent {
   activity    Activity?         @relation(fields: [activityId], references: [id], onDelete: SetNull)
   location    Location?         @relation(fields: [locationId], references: [id], onDelete: SetNull)
   changeOrder ChangeOrder?      @relation(fields: [changeOrderId], references: [id], onDelete: SetNull)
+  rfi                Rfi?               @relation(fields: [rfiId], references: [id], onDelete: SetNull)
+  dailyLog           DailyLog?          @relation(fields: [dailyLogId], references: [id], onDelete: SetNull)
+  ncr                NcrRecord?         @relation(fields: [ncrId], references: [id], onDelete: SetNull)
+  punchItem          PunchItem?         @relation(fields: [punchItemId], references: [id], onDelete: SetNull)
+  drawingRevision    SheetRevision?     @relation(fields: [drawingRevisionId], references: [id], onDelete: SetNull)
+  submittal          Submittal?         @relation(fields: [submittalId], references: [id], onDelete: SetNull)
+  meetingActionItem  MeetingActionItem? @relation(fields: [meetingActionItemId], references: [id], onDelete: SetNull)
+  exception          ProjectException?  @relation("ChangeEventSourceException", fields: [exceptionId], references: [id], onDelete: SetNull)
+  linkedExceptions   ProjectException[] @relation("ProjectExceptionChangeEvent")
   lines       ChangeEventLine[]
   rfqs        Rfq[]
 
@@ -6547,6 +6590,14 @@ model ChangeEvent {
   @@index([orgId])
   @@index([projectId, status])
   @@index([projectId, sourceRecordType, sourceRecordId])
+  @@index([rfiId])
+  @@index([dailyLogId])
+  @@index([ncrId])
+  @@index([punchItemId])
+  @@index([drawingRevisionId])
+  @@index([submittalId])
+  @@index([meetingActionItemId])
+  @@index([exceptionId])
 }
 
 model ChangeEventLine {
@@ -6637,6 +6688,80 @@ model Rfq {
   @@index([projectId, status])
   @@index([changeEventId, status])
   @@index([commitmentId])
+}
+
+/**
+ * PC-7b change intelligence (docs/project-controls/OCTAPM_CHANGE_INTELLIGENCE.md §1, §6-§7): one REVIEWED
+ * exception — an overrun or a data-quality gap the engine found by reading figures through the services
+ * that own them. A row is DERIVED and rebuildable: it never feeds a figure anywhere (not CostRecord.forecast,
+ * not BudgetLine.forecast, not EAC), never creates a Change Order and never changes a budget or a schedule.
+ * `measured` and `limit` are the two figures compared, each with the basis string of the owning figure
+ * (`measuredBasis`, `limitBasis`), so an exception always says where its numbers came from. The only way
+ * forward from an exception is a person: review it, snooze it, or raise a Change Event from it
+ * (`changeEventId` here, `ChangeEvent.exceptionId` there — the handoff, §2).
+ *
+ * Tenancy as ENT-3: (projectId, orgId) → Project(id, orgId) and orgId → Organisation, so a cross-tenant row is
+ * refused by PostgreSQL; `orgId` also serves the org-wide "open exceptions" read of the workspace dashboard
+ * (§35 rule 2). costCodeId uses the master key (costCodeId, orgId) → CostCode(id, orgId); its SET NULL nulls
+ * costCodeId only (hand-written column-list form in the migration, as ENT-3 did for ChangeEventLine).
+ *
+ * OPEN-ROW UNIQUENESS — not expressible in Prisma, enforced by the database: migration
+ * 20261005060000_project_exceptions creates the partial unique index
+ *   "ProjectException_open_subject_key" ON ("projectId", "kind", "subjectType", "subjectId",
+ *     COALESCE("secondarySubjectType", ''), COALESCE("secondarySubjectId", '')) WHERE "resolvedAt" IS NULL
+ * so a subject has at most one OPEN row per kind (the engine upserts on it), NULL secondary subjects collide
+ * with each other instead of slipping past the index, and a resolved row never blocks a new open one.
+ *
+ * ON DELETE: org / project Cascade (the tenant owns its rows); wbsNode, location, costCode, changeEvent
+ * SetNull (group keys and the handoff link the row outlives — it is rebuilt on the next engine pass).
+ */
+model ProjectException {
+  id                   String    @id @default(uuid())
+  orgId                String
+  projectId            String
+  kind                 String // §1 overrun kinds and §7 data-quality kinds, e.g. quantity_over_allocation
+  severity             String // info, warning, critical
+  subjectType          String // boq_item, allocation, activity, budget_line, commitment, certificate_item, project …
+  subjectId            String
+  secondarySubjectType String?
+  secondarySubjectId   String?
+  wbsNodeId            String?
+  locationId           String?
+  costCodeId           String?
+  measured             Decimal   @db.Decimal(18, 3)
+  limit                Decimal   @db.Decimal(18, 3)
+  unitCode             String?
+  measuredBasis        String // basis of the measured figure as its owning service states it
+  limitBasis           String // basis of the limit figure as its owning service states it
+  detectedAt           DateTime  @default(now())
+  lastSeenAt           DateTime  @default(now())
+  resolvedAt           DateTime?
+  resolvedReason       String?
+  changeEventId        String?
+  snoozedUntil         DateTime?
+  snoozedBy            String?
+  reviewedAt           DateTime?
+  reviewedBy           String?
+  reviewNote           String?
+  dataJson             Json      @default("{}")
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  org          Organisation  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project       @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+  wbsNode      WbsNode?      @relation(fields: [wbsNodeId], references: [id], onDelete: SetNull)
+  location     Location?     @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  costCode     CostCode?     @relation(fields: [costCodeId, orgId], references: [id, orgId], onDelete: SetNull)
+  changeEvent  ChangeEvent?  @relation("ProjectExceptionChangeEvent", fields: [changeEventId], references: [id], onDelete: SetNull)
+  raisedEvents ChangeEvent[] @relation("ChangeEventSourceException")
+
+  @@index([projectId, kind, resolvedAt])
+  @@index([orgId, resolvedAt])
+  @@index([projectId, subjectType, subjectId])
+  @@index([changeEventId])
+  @@index([wbsNodeId])
+  @@index([locationId])
+  @@index([costCodeId])
 }
 
 // â”€â”€â”€ SSO login tickets (OCTA-SEC-AUTH-040) â”€â”€â”€
@@ -7361,6 +7486,7 @@ model DailyLog {
   notes       DailyLogNote[]
   quantities  DailyLogQuantity[]
   quantityProgressEntries QuantityProgressEntry[]
+  changeEvents ChangeEvent[]
 
   @@unique([projectId, date])
   @@index([orgId])
