@@ -549,6 +549,21 @@ the percentage, method, source, who approved it when and PROGRESS SOURCE stay. T
 progress readers there as on `GET /activities/{id}/progress-method` (reported to the owner). Proven live
 (`pc-6-daily-log-quantities`: a site engineer and a cost controller on a boq:none template, with a pending and an
 approved bundle; a BOQ reader still gets the figures) and mutation-proven (either mapping dropped fails).
+**The history is under the same rule** (verification fix, 2026-10-01). `GET /audit` (audit:read, every role)
+handed a member without boq:read what the ledger withholds: a `quantity_progress_entry` event's `boqItemId`,
+`quantity` and `unitCode` (created, updated, submitted, approved, rejected, the daily log's sync and retire), the
+mint event's `typed` and `officialBefore`, and a `progress_submission` event's `quantityInstalled`,
+`quantityPlanned`, `quantityUnit`, the `legacyFloor { quantity, … }` block of a floored approval and the figures a
+skipped mint compared. `utils/boq-figures withheldAuditHistory` (`withheldQuantityEvent`) leaves those keys out of
+each summary for such a caller — the entry events also lose `allocationId` — answers a skipped mint as
+`mintSkipped: { withheld: true }` and names what was left out in `boqWithheld { keys, reason }`; who, when, the
+transition, status, source, activity, the submission and daily-log links, the percentage, the method, the bases
+(`plannedBasis`, `installedBasis`), the entry count and `approvedProgressId` stay. The stored events are not
+changed; a BOQ reader's history is the same object. Proven live (`pc-6-method-authority`: a cost controller on a
+boq:none template reads every entry and submission event of the suite — the typed mint, both floored approvals,
+the skipped mint — against the PM's whole history) and by unit (`boq-figures.quantity-audit-history.test.js`);
+mutation-proven five ways (entry events not stripped; submission events not stripped; `legacyFloor` kept;
+`mintSkipped` kept; `typed` / `officialBefore` kept).
 Proof of the views: `backend/src/services/__live__/pc-6-quantity-views.live.test.js` (LiveTest org; the
 seeded entries, the two certificates — one a quarter paid —, the receipt/issue/return, rebar in kg against tonnes,
 the draft commitment, the percent-method activity, the member without BOQ read, tenant 404s) and

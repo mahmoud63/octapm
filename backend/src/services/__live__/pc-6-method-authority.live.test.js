@@ -70,6 +70,16 @@
  * is refused leaves no submission of the first; the refusal names the
  * update; a clean batch writes every update.
  *
+ * The history is under the BOQ rule (verification finding: "GET /audit gives
+ * members without boq:read the per-BOQ-item quantities the ledger withholds —
+ * the entry events' boqItemId, quantity and unitCode, the submission events'
+ * quantityInstalled and quantityPlanned, the mint event's typed and
+ * officialBefore, the legacyFloor block of a floored approval"): a cost
+ * controller on a boq:none template reads every entry and submission event
+ * of the suite — the typed mint, the floored approvals, the skipped mint —
+ * with its transition, status, source and provenance and none of those
+ * figures (boqWithheld names what was left out); the PM's history is whole.
+ *
  *   DATABASE_CONNECTION_LIMIT=4 npm run test:live -- src/services/__live__/pc-6-method-authority.live.test.js
  */
 const { prisma } = require("../../config/db");
@@ -89,6 +99,7 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
   let late;
   let screed;
   let site;
+  let auditor;
   const bearer = (token) => ({ authorization: `Bearer ${token}` });
   const at = (route) => `/api/v1/projects/${project.id}${route}`;
   const ok = (answer, status = 200) => expect([answer.status, answer.body?.error]).toEqual([status, undefined]);
@@ -127,6 +138,14 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     site = await createLiveUser(prisma, { orgId: live.org.id, name: "LiveTest site", email: `live-site-ma-${tag}@octapm-live.test`, role: "site_engineer" });
     site.token = mintAccessToken(site);
     await prisma.projectAssignment.create({ data: { projectId: project.id, userId: site.id, role: "site_engineer", orgId: live.org.id } });
+    // Reads the project's history (audit:read) and the cost module, not the BOQ.
+    auditor = await createLiveUser(prisma, { orgId: live.org.id, name: "LiveTest cost, no BOQ", email: `live-audit-ma-${tag}@octapm-live.test`, role: "cost_controller" });
+    auditor.token = mintAccessToken(auditor);
+    await prisma.projectAssignment.create({ data: { projectId: project.id, userId: auditor.id, role: "cost_controller", orgId: live.org.id } });
+    const noBoq = await prisma.permissionTemplate.create({
+      data: { orgId: live.org.id, name: `LiveTest cost controller, no BOQ ${tag}`, baseRole: "cost_controller", tools: { create: [{ module: "boq", level: "none" }] } },
+    });
+    await prisma.projectUserPermission.create({ data: { orgId: live.org.id, projectId: project.id, userId: auditor.id, templateId: noBoq.id } });
 
     const item = await api.post(at("/boq/items"), { code: "1.1", description: "Concrete in strip footings", quantity: 900, unit: "m3", rate: 100 }, bearer(live.token));
     ok(item, 201);
@@ -443,5 +462,62 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     expect(clean.body.data.submissions.map((row) => [row.activityId, row.method, row.pctComplete, row.status])).toEqual([[wall.id, "percent", 12, "submitted"], [wall.id, "manual", 13, "submitted"]]);
     expect(await prisma.progressSubmission.count({ where: { activityId: wall.id } })).toBe(wallBefore + 2);
     expect(await evReport()).toBe(evBefore);
+  });
+
+  it("GET /audit for a member who may not read the BOQ: every quantity-entry and submission event keeps its transition, status and provenance and carries no per-item quantity, item, allocation, typed figure or floor — the typed mint, the floored approvals and the skipped mint included; the PM's history is whole", async () => {
+    const history = async (token, entityType) => {
+      const answer = await api.get(at(`/audit?entityType=${entityType}&limit=100&order=desc`), bearer(token));
+      ok(answer);
+      expect(answer.body.data.nextCursor ?? null).toBeNull();
+      return answer.body.data.events;
+    };
+    const PARTS = ["summary", "oldSummary", "newSummary", "metadata"];
+    const ENTRY_KEYS = ["quantity", "unitCode", "boqItemId", "allocationId", "typed", "officialBefore"];
+    const SUBMISSION_KEYS = ["quantityInstalled", "quantityPlanned", "quantityUnit", "legacyFloor"];
+    const carried = (events, keys) =>
+      events.flatMap((event) => PARTS.flatMap((part) => keys.filter((key) => event[part] && Object.prototype.hasOwnProperty.call(event[part], key)).map((key) => `${event.summary?.transition}:${part}.${key}`)));
+    const byTransition = (events, transition) => events.filter((event) => event.summary?.transition === transition);
+
+    // The PM reads the BOQ: the history is whole — and it does carry the figures (so the scan below has teeth).
+    const fullEntries = await history(live.token, "quantity_progress_entry");
+    const fullSubmissions = await history(live.token, "progress_submission");
+    const [fullMint] = byTransition(fullEntries, "quantity_entry.mint_from_typed_submission");
+    expect(fullMint).toMatchObject({ newStatus: "approved", summary: { boqItemId: concrete.id, quantity: 20, unitCode: "m3", typed: 20, officialBefore: 0 }, newSummary: { boqItemId: concrete.id, quantity: 20 } });
+    expect(fullMint.boqWithheld).toBeUndefined();
+    const fullFloored = fullSubmissions.filter((event) => event.newSummary?.legacyFloor);
+    expect(fullFloored.map((event) => event.newSummary.legacyFloor.quantity).sort((a, b) => a - b)).toEqual([60, 70]);
+    expect(fullSubmissions.filter((event) => event.newSummary?.mintSkipped).map((event) => event.newSummary.mintSkipped)).toEqual([expect.objectContaining({ typed: 50, officialBefore: 60 })]);
+    expect(carried(fullEntries, ENTRY_KEYS).length).toBeGreaterThan(20);
+    expect(carried(fullSubmissions, SUBMISSION_KEYS).length).toBeGreaterThan(20);
+    expect(fullSubmissions.some((event) => event.boqWithheld)).toBe(false);
+
+    // The cost controller on a boq:none template: the same events, none of the figures.
+    const entries = await history(auditor.token, "quantity_progress_entry");
+    const submissions = await history(auditor.token, "progress_submission");
+    expect(entries.map((event) => event.id)).toEqual(fullEntries.map((event) => event.id));
+    expect(submissions.map((event) => event.id)).toEqual(fullSubmissions.map((event) => event.id));
+    expect(carried(entries, ENTRY_KEYS)).toEqual([]);
+    expect(carried(submissions, SUBMISSION_KEYS)).toEqual([]);
+    expect(JSON.stringify([entries, submissions])).not.toContain(concrete.id);
+    for (const event of entries) {
+      expect(event).toMatchObject({ entityType: "quantity_progress_entry", action: expect.any(String), actorId: expect.any(String), summary: { transition: expect.stringMatching(/^quantity_entry\./), activityId: expect.any(String), source: expect.any(String), status: expect.any(String) }, boqWithheld: { keys: expect.arrayContaining(["quantity", "unitCode", "boqItemId"]), reason: expect.stringContaining("may read the BOQ") } });
+    }
+    // The mint: who, when, what happened and for which submission — not how much of which item.
+    const [mint] = byTransition(entries, "quantity_entry.mint_from_typed_submission");
+    expect(mint).toMatchObject({ id: fullMint.id, action: "created", newStatus: "approved", summary: { activityId: kerb.id, source: "submission", status: "approved", submissionId: fullMint.summary.submissionId }, boqWithheld: { keys: expect.arrayContaining(["typed", "officialBefore"]) } });
+    // The floored approvals: the percentage, the method, the bases and the official row stay; the floor's figures do not.
+    const floored = submissions.filter((event) => fullFloored.some((full) => full.id === event.id));
+    expect(floored).toHaveLength(2);
+    for (const event of floored) {
+      expect(event).toMatchObject({ action: "approved", newStatus: "approved", newSummary: { pctComplete: expect.any(Number), method: "quantity", installedBasis: "legacy_typed_floor", plannedBasis: "approved_allocations", quantityEntries: 1, approvedProgressId: expect.any(String) }, summary: { transition: "submission.approve" }, boqWithheld: { keys: expect.arrayContaining(["quantityInstalled", "quantityPlanned", "quantityUnit", "legacyFloor"]), reason: expect.stringContaining("may read the BOQ") } });
+    }
+    // The skipped mint says that it was skipped, not the typed and official figures it compared.
+    const skipped = submissions.filter((event) => event.newSummary && event.newSummary.mintSkipped);
+    expect(skipped.map((event) => event.newSummary.mintSkipped)).toEqual([{ withheld: true }]);
+    expect(skipped[0].boqWithheld.keys).toContain("mintSkipped");
+    // A percent submission's events carry no quantity figure and are the same objects' content for both readers.
+    const percentIds = new Set(fullSubmissions.filter((event) => (event.newSummary || event.summary)?.method === "percent").map((event) => event.id));
+    expect(percentIds.size).toBeGreaterThan(0);
+    for (const event of submissions.filter((row) => percentIds.has(row.id))) expect(event).toEqual(fullSubmissions.find((row) => row.id === event.id));
   });
 });

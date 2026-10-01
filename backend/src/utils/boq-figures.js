@@ -985,6 +985,56 @@ const withheldIpcCertificateEventTotals = (event, terms) => {
   };
 };
 
+// ─── PC-6: installed quantities in the history ─────────────────────────────
+//
+// The events of a quantity entry (quantity-progress.service auditSummary;
+// progress.service settleBundledEntries and mintTypedQuantityEntry; the daily
+// log's sync and retire) record, in their summaries, the entry's BOQ item,
+// quantity and unit — and the mint from a typed submission also the typed
+// figure and the official installed figure before it. A progress
+// submission's events record the installed and planned quantity and their
+// unit, the legacy floor carried at a floored approval ({ quantity, … }) and,
+// where a mint was skipped, the figures it compared. These are the per-item
+// installed quantities the ledger (GET /quantity-progress), the queue, the
+// register and the daily log withhold from a member who may not read the
+// BOQ, so GET /audit withholds them the same way: the event stays — who,
+// when, the transition, the status, the source, the activity, the submission
+// and daily-log links, the percentage, the method, the bases and the count
+// of entries — without those keys, and `boqWithheld` names them. A skipped
+// mint is answered as `{ withheld: true }`: that it was skipped, not why in
+// figures. Omitted, never zeroed; the stored events are not changed.
+const QUANTITY_ENTRY_EVENT = Object.freeze({
+  keys: ["quantity", "unitCode", "boqItemId", "allocationId", "typed", "officialBefore"],
+  marked: [],
+  reason:
+    "The quantity, unit, BOQ item and allocation recorded in a quantity entry's history are available only to members who may read the BOQ",
+});
+const PROGRESS_SUBMISSION_EVENT = Object.freeze({
+  keys: ["quantityInstalled", "quantityPlanned", "quantityUnit", "legacyFloor"],
+  marked: ["mintSkipped"],
+  reason:
+    "The quantity figures recorded in a progress submission's history are available only to members who may read the BOQ",
+});
+
+const withheldQuantityEvent = (event, { keys, marked, reason }) => {
+  if (!event || typeof event !== "object") return event;
+  const withheld = new Set();
+  const copy = { ...event };
+  for (const part of IPC_EVENT_PARTS) {
+    const value = event[part];
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const present = keys.filter((key) => has(value, key));
+    const replaced = marked.filter((key) => value[key] && typeof value[key] === "object");
+    if (!present.length && !replaced.length) continue;
+    const next = { ...withoutKeys(value, present) };
+    for (const key of replaced) next[key] = { withheld: true };
+    copy[part] = next;
+    for (const key of [...present, ...replaced]) withheld.add(key);
+  }
+  if (!withheld.size) return event;
+  return { ...copy, boqWithheld: { keys: [...keys, ...marked].filter((key) => withheld.has(key)), reason } };
+};
+
 /**
  * A project's history (GET /audit, which the schedule's status history
  * reads) as this caller may receive it. Someone who may not read the BOQ is
@@ -1004,6 +1054,9 @@ const withheldIpcCertificateEventTotals = (event, terms) => {
  * (`contractTerms`: prime-contract.service contractValueTerms), are the
  * cap-limited totals recorded for a certificate not yet certified
  * (withheldIpcCertificateEventTotals).
+ * Nor are the per-BOQ-item quantities of installed progress (PC-6;
+ * withheldQuantityEvent above): a quantity entry's and a progress
+ * submission's events stay, without them.
  * Everything else is as built; the stored events are not changed.
  */
 const withheldAuditHistory = (
@@ -1024,6 +1077,8 @@ const withheldAuditHistory = (
         return capWithheld ? withheldIpcCertificateEventTotals(withoutReview, contractTerms) : withoutReview;
       }
       if (!access.budget && type === "schedule_revision") return withSummaries(event, withoutRevisionTotals);
+      if (type === "quantity_progress_entry") return withheldQuantityEvent(event, QUANTITY_ENTRY_EVENT);
+      if (type === "progress_submission") return withheldQuantityEvent(event, PROGRESS_SUBMISSION_EVENT);
       return event;
     });
   return { ...history, events };
