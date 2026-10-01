@@ -69,9 +69,12 @@ export function FigureRow({
   if (!figure) {
     body = <span className='text-muted-foreground'>—</span>
   } else if (figure.notAvailable) {
+    // PC-5 names the wave that brings the figure; PC-6's quantity views name
+    // the reason it is not available. Either way there is no number.
+    const reason = typeof figure.notAvailable === 'object' ? figure.notAvailable.reason : null
     body = (
-      <span className='text-xs text-muted-foreground' data-not-available={figure.wave}>
-        Not available yet ({figure.wave})
+      <span className='text-xs text-muted-foreground' data-not-available={figure.wave ?? 'reason'} title={reason ?? undefined}>
+        {reason ?? `Not available yet (${figure.wave})`}
       </span>
     )
   } else if (figure.withheld) {

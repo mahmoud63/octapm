@@ -273,7 +273,10 @@ export const ControlsFigureSchema = z.object({
   truth: z.enum(['source', 'derived', 'projection']).nullable(),
   basis: z.string(),
   derivedFrom: z.array(z.record(z.string(), z.unknown())).optional(),
-  notAvailable: z.boolean().optional(),
+  // PC-5 marked a figure no service could prove yet with `true` and the wave
+  // that brings it; PC-6's quantity views send `{ reason }` instead. Both read
+  // as "—" with their reason, never as a value.
+  notAvailable: z.union([z.boolean(), z.object({ reason: z.string() }).passthrough()]).optional(),
   wave: z.string().optional(),
   // A cost record's stored forecast (owner decision R5-2): where it came from
   // — entered, the server's initial default, or null when not recorded — and
