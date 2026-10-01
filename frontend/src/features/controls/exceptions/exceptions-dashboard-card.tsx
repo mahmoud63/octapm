@@ -39,7 +39,7 @@ export function OpenExceptionsCard({ data }: { data: WorkspaceOpenExceptions }) 
         <CardTitle className='flex items-center gap-2'>
           <AlertOctagon className='h-4 w-4' /> Open exceptions
           <span className='octa-numeric text-base' data-testid='dashboard-open-exceptions-total'>
-            {data.total == null ? '—' : data.total.toLocaleString()}
+            {data.total == null || (data.withheld && data.total === 0) ? '—' : data.total.toLocaleString()}
           </span>
         </CardTitle>
         <CardDescription>

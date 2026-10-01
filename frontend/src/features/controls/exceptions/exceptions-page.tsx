@@ -115,7 +115,7 @@ function ExceptionRow({
           : ''}
       </p>
       {exception.review?.reviewedAt && (
-        <p className='text-xs' data-testid={`${testId}-review`}>
+        <p className='text-xs' data-testid={`${testId}-reviewed`}>
           Reviewed {formatDate(exception.review.reviewedAt)}
           {exception.review.reviewedBy ? ` by ${exception.review.reviewedBy}` : ''}
           {exception.review.note ? ` — ${exception.review.note}` : ''}

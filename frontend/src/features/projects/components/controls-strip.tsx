@@ -73,7 +73,11 @@ function openExceptionsFigure(offered: boolean, summary: ExceptionsSummary | und
   const critical = summary.bySeverity.critical ?? 0
   const warning = summary.bySeverity.warning ?? 0
   return {
-    value: summary.total == null ? '—' : summary.total.toLocaleString(),
+    // A 0 beside withheld exceptions would read as "none": a dash, and the reason below.
+    value:
+      summary.total == null || (summary.withheld && summary.total === 0)
+        ? '—'
+        : summary.total.toLocaleString(),
     basis: [counts || (summary.withheld ? '' : 'no counts sent'), withheld].filter(Boolean).join(' · '),
     tone: (critical > 0 ? 'blocked' : warning > 0 ? 'review' : 'neutral') as StatusTone,
   }
