@@ -166,9 +166,24 @@ export interface ChangeOrder {
   attachmentRefs?: unknown[]
   activityLinks?: { activityId: string; activity?: Named | null; criticalPathImpactDays?: number | null; costImpact?: number | null }[]
   ballInCourt?: BallInCourt | null
+  /** What the order reaches, as the server composed it (PC-7b / R5-5; absent on an older server). */
+  relatedRecords?: ChangeOrderRelatedRecords
   path?: string
   createdAt: string
   updatedAt?: string
+}
+
+/**
+ * ChangeOrderRelatedRecords (openapi): one row per activity the order reaches
+ * — direct (its activity), activity_link, or via_allocation (only through a BOQ
+ * allocation it links) — and the BOQ items its allocation links name. For a
+ * caller without boq:read the server sends no boqItems and no via_allocation
+ * row, and says so in `boqWithheld` (a reason, never a count).
+ */
+export interface ChangeOrderRelatedRecords {
+  activities: { id: string; code?: string | null; name?: string | null; relation: 'direct' | 'activity_link' | 'via_allocation' | string; impactDays?: number; href?: string | null }[]
+  boqItems?: { id: string; code?: string | null; description?: string | null; unitCode?: string | null; relation: 'allocation_link' | string; href?: string | null }[]
+  boqWithheld?: { keys: string[]; reason: string }
 }
 
 // ── Commitments ──
