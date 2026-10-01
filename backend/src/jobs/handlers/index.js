@@ -49,6 +49,9 @@ const registerAllHandlers = () => {
   registerJobHandler(JOB_TYPES.PHOTO_ANALYZE, (context) =>
     require("../../services/photo-assistant.service").runPhotoAnalyzeJob(context),
   );
+  registerJobHandler(JOB_TYPES.EXCEPTIONS_EVALUATE, (context) =>
+    require("../../services/exception-engine.service").runEvaluationJob(context),
+  );
 };
 
 module.exports = { registerAllHandlers };
