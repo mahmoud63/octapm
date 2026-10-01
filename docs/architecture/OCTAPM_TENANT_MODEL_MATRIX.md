@@ -61,7 +61,7 @@ Target column codes: **CFK** = composite FK `(projectId, orgId) → Project(id, 
 | ReportingPeriod (1828) | P | projectId | `[projectId, code]` | — | inherit |
 | ActivityCostLoading (1854) | P | projectId | — | — | inherit |
 | EvPeriodSnapshot (1887) | P | projectId | reportingPeriodId @unique | — | inherit |
-| ChangeOrder (1919) | P | projectId | — (ref NOT unique) | — | inherit; **+@@unique([projectId, ref])** after dedupe check (PC-7) |
+| ChangeOrder (1919) | P | projectId | `[projectId, ref]` from PC-7b migration 20261005060100 (unapplied; dry run 0 duplicate groups) | — | inherit; +`locationId?` → Location, `wbsNodeId?` → WbsNode SET NULL (PC-7b 20261005060000) |
 | ChangeOrderActivityLink (1963) | P | projectId | `[co, activity, relationType]` | — | inherit |
 | ChangeOrderAllocationLink (1996) | P | projectId | `[co, allocationId]` (nullable) | — | inherit |
 | IpcItem (2020) | P | projectId | none | — | inherit |
@@ -72,7 +72,7 @@ Target column codes: **CFK** = composite FK `(projectId, orgId) → Project(id, 
 | IpcRetentionRelease (2192) | P | projectId | `[projectId, releaseReference]` | — | inherit |
 | PrimeContract (2228) | P+O | both; projectId @unique | `[orgId, ref]` | — | CFK; clientCompanyId MFK deferred |
 | PrimeContractAdvance (2280) | P+O | both | `[projectId, reference]` | — | CFK |
-| Risk (2304) | P | projectId | — (ref NOT unique) | — | inherit |
+| Risk (2304) | P | projectId | `[projectId, ref]` from PC-7b migration 20261005060100 (unapplied; dry run 0 duplicate groups) | — | inherit |
 | RiskActivityLink (2366) | P | projectId | `[risk, activity, relationType]` | — | inherit |
 | LongLeadItem (2389), BurnRateEntry (2427) | P | projectId | — | — | inherit |
 | SubValuation (2447) | P (retired) | projectId | `[projectId, ref]` | — | inherit; 0 rows |
@@ -89,7 +89,7 @@ Target column codes: **CFK** = composite FK `(projectId, orgId) → Project(id, 
 |---|---|---|---|---|---|
 | ProcurementSupplier (2702) | P | projectId | `[projectId, name]` (code NOT unique) | — | inherit; companyId MFK deferred |
 | ProcurementPackage (2738) | P | projectId | `[projectId, packageNumber]` | — | inherit |
-| ProcurementOrder (2781) | P | projectId | — (ref NOT unique) | — | inherit |
+| ProcurementOrder (2781) | P | projectId | — (ref NOT unique; 2 live duplicate groups, 4 rows — owner's stop, OCTAPM_CHANGE_INTELLIGENCE.md "PC-7b migrations") | — | inherit |
 | ProcurementPoLine (2866) | P | projectId | `[orderId, lineNumber]` | — | inherit |
 | DeliveryReceipt (2936) | P | projectId | `[projectId, receiptNumber]` | — | inherit |
 | DeliveryReceiptLine (2970) | P | projectId | — | — | inherit |
@@ -109,9 +109,9 @@ Target column codes: **CFK** = composite FK `(projectId, orgId) → Project(id, 
 | ActivityMaterial (3426), ActivityMaterialUsage (3476) | P | projectId | — | — | inherit |
 | ProcurementLeadTimeAlert (3508) | P | projectId | three `[projectId, x]` | — | inherit |
 | ResourceAllocation (3549) | P | projectId | — | — | inherit |
-| NcrRecord (3570) | P | projectId | — (ref NOT unique) | — | inherit |
+| NcrRecord (3570) | P | projectId | `[projectId, ref]` from PC-7b migration 20261005060100 (unapplied; dry run 0 duplicate groups) | — | inherit |
 | ItpRecord (3620), DefectRecord (3663), SafetyIncident (3709), MaterialTest (3767) | P | projectId | `[projectId, ref]` | — | inherit |
-| Rfi (3813) | P | projectId | `[projectId, ref]` | — | inherit |
+| Rfi (3813) | P | projectId | `[projectId, ref]` | — | inherit; `changeOrderId` becomes FK → ChangeOrder SET NULL (PC-7b 20261005060000; census 10/10 same-project) |
 | RfiAssignee (3899) | P/parent | rfi→project | `[rfiId, userId, role]` | — | inherit |
 | RfiResponse (3917) | P+O, **no FK to either** | bare orgId + bare projectId | — | — | **REL + CFK** |
 | Submittal (3936) | P | projectId | `[projectId, ref]` | — | inherit |
@@ -165,7 +165,7 @@ Target column codes: **CFK** = composite FK `(projectId, orgId) → Project(id, 
 | InboundEmail (5941) | O?P | orgId; projectId nullable | `[orgId, provider, messageId]` | — | CFK (MATCH SIMPLE) |
 | Lookahead (5987), LookaheadItem (6023) | P+O | both | `[projectId, number]`, `[projectId, ref]` / — | — | CFK |
 | Timesheet (6074), TimeEntry (6114) | P+O | both | `[projectId, clientRequestId]` / — | — | CFK; TimeEntry MFK (costCodeId) |
-| ChangeEvent (6153), ChangeEventLine (6197) | P+O | both | `[projectId, number]`, `[projectId, ref]` / — | — | CFK; ChangeEventLine MFK; +typed source FKs (PC-7) |
+| ChangeEvent (6153), ChangeEventLine (6197) | P+O | both | `[projectId, number]`, `[projectId, ref]` / — | — | CFK; ChangeEventLine MFK; +typed source FKs rfi / dailyLog / ncr / punchItem / drawingRevision / submittal / meetingActionItem / exception, SET NULL (PC-7b 20261005060000, unapplied) |
 | Rfq (6233) | P+O | both | `[changeEventId, number]`, `[projectId, ref]` | tokenHash (public portal, by design) | CFK |
 | SsoTicket (6289) | O/user | orgId + userId | — | tokenHash | `+membershipId` |
 | DirectCost (6308), DirectCostLine (6361), DirectCostPayment (6399) | P+O | both | `[projectId, number]`, `[projectId, ref]` / — / — | — | CFK; DirectCostLine MFK |
@@ -188,6 +188,7 @@ Target column codes: **CFK** = composite FK `(projectId, orgId) → Project(id, 
 | SubmittalStep (6918), SubmittalStepAssignment (6940) | P/parent | submittal | — / `[stepId, userId]` | — | inherit |
 | DailyLog (6965) | P+O | both | `[projectId, date]` | — | CFK |
 | DailyLogManpower (7003), DailyLogEquipment (7037), DailyLogDelivery (7071), DailyLogVisitor (7105), DailyLogDelay (7135), DailyLogNote (7168) | P+O columns, no relation | dailyLogId only | `[projectId, clientRequestId]` | — | **REL + CFK** (+ DailyLogQuantity new, PC-5) |
+| ProjectException (PC-7b, migration 20261005060000, unapplied) | P+O | both, with relations | open-row partial unique `(projectId, kind, subjectType, subjectId, COALESCE(secondary…, ''))` WHERE resolvedAt IS NULL (raw SQL) | — | CFK from birth: `(projectId, orgId) → Project(id, orgId)` CASCADE, `orgId → Organisation` CASCADE, MFK `(costCodeId, orgId) → CostCode` SET NULL (costCodeId); wbsNode / location / changeEvent SET NULL — OCTAPM_CHANGE_INTELLIGENCE.md §1 |
 | DailyLogQuantity, QuantityProgressEntry (PC-6, migration 20261005050000, unapplied) | P+O | both, with relations | `[projectId, clientRequestId]` | — | CFK from birth: `(projectId, orgId) → Project(id, orgId)` CASCADE, `orgId → Organisation` CASCADE; activity / boqItem RESTRICT, the rest SET NULL — OCTAPM_PROGRESS_MEASUREMENT.md §3-§4 |
 | ReportDefinition (7198) | O?P | orgId; projectId nullable (= every project the viewer can see) | — | — | CFK (MATCH SIMPLE); viewer scope re-evaluated per membership |
 | GanttLayout (7238) | P+O | both | `[projectId, createdBy, name]` | — | CFK |
@@ -234,7 +235,7 @@ Tally (239): ROOT 1 · identity 1 · O 24 · O?P 18 · O/user 9 · O/parent 20 �
 | Only global unique on a customer identifier: `User.email` | `:161` | keep (identity is global) |
 | `PushSubscription.endpoint @unique` binds a device to one `orgId` | `:4198`; `push.service.js:120-124` | keep unique; drop the org meaning (fan-out per identity) |
 | `PrimeContract @@unique([orgId, ref])` — unique per org, not per project | `:2268` | keep (a contract ref is a company-level reference) |
-| Refs with NO uniqueness: `Activity.activityCode/p6ActivityId/wbsCode`, `ChangeOrder.ref`, `Risk.ref`, `NcrRecord.ref`, `ProcurementOrder.ref`, `ProcurementSupplier.code`, `MaterialMaster.code`, `DrawingRecord.drawingNumber`, `IpcItem` | `:1556-1558, 1925, 2307, 3574, 2788, 2706, 3026, 4021, 2020` | Add `@@unique([projectId, ref])` for ChangeOrder, Risk, NcrRecord, ProcurementOrder after a dedupe dry-run (PC-7 / ENT-3); Activity codes stay non-unique (P6 allows duplicates across revisions) but `WbsNode` gets `[projectId, code]` |
+| Refs with NO uniqueness: `Activity.activityCode/p6ActivityId/wbsCode`, `ChangeOrder.ref`, `Risk.ref`, `NcrRecord.ref`, `ProcurementOrder.ref`, `ProcurementSupplier.code`, `MaterialMaster.code`, `DrawingRecord.drawingNumber`, `IpcItem` | `:1556-1558, 1925, 2307, 3574, 2788, 2706, 3026, 4021, 2020` | Add `@@unique([projectId, ref])` for ChangeOrder, Risk, NcrRecord, ProcurementOrder after a dedupe dry-run (PC-7 / ENT-3) — PC-7b: ChangeOrder, Risk, NcrRecord in 20261005060100 (0 duplicates); ProcurementOrder held back (2 live duplicate groups, owner); Activity codes stay non-unique (P6 allows duplicates across revisions) but `WbsNode` gets `[projectId, code]` |
 | `ActivityBoqAllocation` active-pair uniqueness only in raw SQL | migration 20260608170000 l.44 | keep (Prisma cannot express partial uniques); document in PC-3 |
 | Polymorphic uniques keyed on record uuids, not projectId (`DocumentRevision`, `WorkflowActivityLink`, `Attachment`, `RecordSubscription`, `CustomFieldValue`, `AccountingSync`, `BimElementLink`) | `:4296, 4255, 5299, 6539, 7564, 7712, 5851` | keep — uuids make them safe; CFK guarantees the row's org |
 | `CustomFieldDefinition @@unique([orgId, recordType, key])` — project-level fields share the org namespace | `:7480` | change to `[orgId, projectId, recordType, key]` with `projectId` defaulting to `''` sentinel? **No** — keep as is and document; a project field key collision is a product limitation, not a tenancy bug |
