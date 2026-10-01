@@ -169,6 +169,18 @@ for (const [file, kind, testId] of [
   assert.ok(drawer.includes(`testId='${testId}'`), `${file}: the section is ${testId}`)
 }
 
+// PC-7b integration T: a drawer's links stay inside the open workspace
+// (/o/{segment}/projects/…, spec 50) — never a legacy /projects/… path.
+const drawerSection = all['record-exceptions-section.tsx']
+assert.ok(!/to='\/projects\//.test(drawerSection), 'the drawer section links through ProjectPageLink, never a legacy /projects/ route')
+assert.match(drawerSection, /<ProjectPageLink[\s\S]*?child='exceptions'/, 'the drawer opens the Exceptions screen through ProjectPageLink')
+const rowLinks = all['exception-row-parts.tsx']
+const pageLink = rowLinks.slice(rowLinks.indexOf('export function ProjectPageLink'), rowLinks.indexOf('export function ChangeEventLink'))
+assert.match(pageLink, /if \(orgSlug\) \{\s*return \(\s*<Link\s+to='\/o\/\$orgSlug\/projects\/\$projectId\/\$module\/\$child'/, 'with a workspace open, the workspace route')
+const changeEventLink = rowLinks.slice(rowLinks.indexOf('export function ChangeEventLink'))
+assert.match(changeEventLink, /<ProjectPageLink/, 'the change-event link stays inside the workspace')
+assert.ok(!/to='\/projects\//.test(changeEventLink.slice(0, changeEventLink.indexOf('\n}\n'))), 'the change-event link names no legacy route')
+
 // ── Counts: the Overview strip and the workspace tile ───────────────────
 const strip = read('src/features/projects/components/controls-strip.tsx')
 assert.match(strip, /useExceptionsSummary\(projectId/, 'the strip reads the server summary')

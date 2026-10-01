@@ -1,4 +1,3 @@
-import { Link } from '@tanstack/react-router'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { DetailSection, Empty } from '../components/detail-parts'
 import { flattenExceptionPages, useProjectExceptions } from './api'
@@ -9,7 +8,7 @@ import {
   StatusBadge,
   WithheldNote,
 } from './exception-parts'
-import { ChangeEventLink } from './exception-row-parts'
+import { ChangeEventLink, ProjectPageLink } from './exception-row-parts'
 
 /**
  * The exceptions on one record, in its PC-5 drawer (a BOQ item or an
@@ -90,14 +89,15 @@ export function RecordExceptionsSection({
           {withheld && (
             <WithheldNote withheld={withheld} hasVisible={items.length > 0} testId={`${testId}-withheld`} />
           )}
-          <Link
-            to='/projects/$projectId/$module/$child'
-            params={{ projectId, module: 'controls', child: 'exceptions' }}
+          <ProjectPageLink
+            projectId={projectId}
+            module='controls'
+            child='exceptions'
             className='text-xs text-primary underline-offset-2 hover:underline'
-            data-testid={`${testId}-open-all`}
+            testId={`${testId}-open-all`}
           >
             {more ? 'More on the Exceptions screen' : 'Open Exceptions'}
-          </Link>
+          </ProjectPageLink>
         </>
       )}
     </DetailSection>
