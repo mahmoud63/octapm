@@ -33,6 +33,8 @@ const JOB_TYPES = Object.freeze({
   WEBHOOK_DELIVER: "webhook.deliver",
   ACCOUNTING_SYNC: "accounting.sync",
   ACCOUNTING_POLL: "accounting.poll",
+  // PC-7b: one project's exceptions re-evaluated (exception-engine.service).
+  EXCEPTIONS_EVALUATE: "exceptions.evaluate",
 });
 
 const JOB_STATUSES = Object.freeze({

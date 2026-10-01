@@ -8,6 +8,7 @@ const { createRealtimeAdapter } = require('./realtime/adapter');
 const { attachRealtime } = require('./realtime/socket');
 const { registerAutoSubscriptions } = require('./services/comment.service');
 const { registerWebhookSubscriber } = require('./services/webhook.service');
+const { registerExceptionTriggers } = require('./events/exception-triggers');
 const { startJobWorker, stopJobWorker } = require('./jobs/worker');
 const { installGracefulShutdown, waitForEventBus } = require('./utils/graceful-shutdown');
 
@@ -42,6 +43,9 @@ attachRealtime(io);
 // Record creators and assignees follow their records (comment notifications).
 registerAutoSubscriptions();
 registerWebhookSubscriber();
+// Project exceptions (PC-7b): a relevant event asks for a debounced evaluation
+// job of its project; off with EXCEPTIONS_ENGINE_ENABLED=false.
+registerExceptionTriggers();
 
 const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => {
