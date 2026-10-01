@@ -73,6 +73,21 @@ const sourceLinksOut = (row) =>
     id: row[link.field],
     path: link.field === "exceptionId" ? null : recordWorkspacePath({ projectId: row.projectId, recordType: link.recordType, recordId: row[link.field] }),
   }));
+
+/**
+ * The free-text pair a typed link also writes (`sourceRecordType` /
+ * `sourceRecordId`), so a change event raised through a handoff reads as one
+ * created "from" that record everywhere the pair is already read: the change
+ * event's own "Raised from" line and link, and the forecast's R5-1 trace
+ * (forecast.service conversionMap), which knows an RFI's or submittal's
+ * recorded days are superseded by the order its change event became only
+ * through this pair. One typed link → its pair; none or several → the body's.
+ */
+const sourcePairOf = (typed) => {
+  const present = SOURCE_LINKS.filter((link) => typed[link.field]);
+  if (present.length !== 1) return null;
+  return { sourceRecordType: present[0].recordType, sourceRecordId: typed[present[0].field] };
+};
 const RFQ_STATUS = Object.freeze({ SENT: "sent", VIEWED: "viewed", QUOTED: "quoted", DECLINED: "declined", ACCEPTED: "accepted", REJECTED: "rejected", CANCELLED: "cancelled" });
 const RFQ_OPEN = [RFQ_STATUS.SENT, RFQ_STATUS.VIEWED, RFQ_STATUS.QUOTED];
 const LINK_DAYS = () => Math.max(1, Number(process.env.RFQ_LINK_DAYS || 45));
@@ -343,7 +358,7 @@ const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null,
   await assertLinks({ orgId, projectId, links: typed });
   const created = await prisma.$transaction(async (tx) => {
     const number = await nextNumber(tx, projectId);
-    const row = await tx.changeEvent.create({ data: { ...data, ...typed, orgId, projectId, number, ref: `CE-${String(number).padStart(3, "0")}`, status: STATUS.OPEN, createdBy: actor?.id || null, updatedBy: actor?.id || null } });
+    const row = await tx.changeEvent.create({ data: { ...data, ...(sourcePairOf(typed) || {}), ...typed, orgId, projectId, number, ref: `CE-${String(number).padStart(3, "0")}`, status: STATUS.OPEN, createdBy: actor?.id || null, updatedBy: actor?.id || null } });
     if (lines.length) await tx.changeEventLine.createMany({ data: lines.map(({ id, ...line }) => ({ ...line, orgId, projectId, changeEventId: row.id })) });
     if (typed.exceptionId) {
       const claimed = await tx.projectException.updateMany({
@@ -362,6 +377,133 @@ const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null,
   });
   await auditService.recordEvent({ orgId, projectId, entityType: "change_event", entityId: created.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, summary: { ref: created.ref, title: created.title, type: created.type, origin: created.origin, rom: estimateOf(created).rom, ...(Object.keys(typed).length ? { sourceLinks: typed } : {}) } }).catch(() => null);
   return eventOut(created, { detail: true });
+};
+
+// ─── "Raise change event" from a project record (PC-7b §2, §126) ──────────
+//
+// ONE shared helper for the seven sources: it fills the typed link (and its
+// pair), the origin and the title, and the record's activity / location where
+// it has them; the amount is left at 0 for the QS and there are no lines —
+// the record states no scope to price. The caller must read the record as its
+// own module's routes would let them: the module's read (checked by the
+// route, with change_event:create) and the record's own rule here — an RFI
+// draft only for its creator or manager (rfi-workflow assertDraftVisible), a
+// punch item / observation within a company party's scope (punch.service
+// visibilityWhere), a drawing revision that is not published (pending,
+// superseded, rejected) only for a document-control editor (routes/sheets.js
+// canSeeSuperseded). A record the caller may not read is not said to exist:
+// 404 CHANGE_EVENT_SOURCE_NOT_FOUND, as for another project's.
+const dateOnly = (value) => (value ? new Date(value).toISOString().slice(0, 10) : "");
+const joinTitle = (...parts) => parts.map((part) => (part === null || part === undefined ? "" : String(part).trim())).filter(Boolean).join(" ");
+const RECORD_SOURCES = Object.freeze({
+  rfi: {
+    model: "rfi", link: "rfiId", recordType: "rfi", origin: "rfi", readModule: "rfi", orgScoped: false,
+    select: { id: true, ref: true, subject: true, status: true, createdBy: true, managerUserId: true, activityId: true, locationId: true },
+    title: (row) => joinTitle(row.ref, row.subject),
+    visible: (row, viewer) => {
+      if (!viewer?.id) return row.status !== "draft";
+      try {
+        require("./rfi-workflow.service").assertDraftVisible(row, viewer.id);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  },
+  daily_log: {
+    model: "dailyLog", link: "dailyLogId", recordType: "daily_log", origin: "daily_log", readModule: "progress", orgScoped: true,
+    select: { id: true, date: true },
+    title: (row) => `Daily log ${dateOnly(row.date)}`,
+  },
+  ncr: {
+    model: "ncrRecord", link: "ncrId", recordType: "ncr", origin: "observation", readModule: "ncr", orgScoped: false,
+    select: { id: true, ref: true, description: true, activityId: true },
+    title: (row) => joinTitle(row.ref, row.description),
+  },
+  punch_item: {
+    model: "punchItem", link: "punchItemId", recordType: "punch_item", origin: "observation", readModule: "punch", orgScoped: true,
+    select: { id: true, ref: true, title: true, activityId: true, locationId: true },
+    title: (row) => joinTitle(row.ref, row.title),
+    where: (viewer) => require("./punch.service").visibilityWhere(viewer ? { id: viewer.id, projectAccess: viewer.projectAccess || null } : null) || {},
+  },
+  drawing_revision: {
+    model: "sheetRevision", link: "drawingRevisionId", recordType: "sheet_revision", origin: "other", readModule: "document_control", orgScoped: true,
+    select: { id: true, number: true, title: true, revision: true, status: true, sheet: { select: { locationId: true } } },
+    title: (row) => `Drawing ${joinTitle(row.number, row.title) || "revision"}${row.revision ? ` rev ${row.revision}` : ""}`,
+    visible: (row, viewer) => row.status === "published" || viewer?.documentControlUpdate === true,
+    locationId: (row) => row.sheet?.locationId || null,
+  },
+  submittal: {
+    model: "submittal", link: "submittalId", recordType: "submittal", origin: "submittal", readModule: "submittal", orgScoped: false,
+    select: { id: true, ref: true, title: true, activityId: true },
+    title: (row) => joinTitle(row.ref, row.title),
+  },
+  meeting_action: {
+    model: "meetingActionItem", link: "meetingActionItemId", recordType: "meeting_action", origin: "meeting", readModule: "meeting", orgScoped: true,
+    select: { id: true, title: true, activityId: true },
+    title: (row) => `Meeting action: ${row.title || ""}`,
+  },
+});
+const RECORD_SOURCE_TYPES = Object.freeze(Object.keys(RECORD_SOURCES));
+
+const loadRecordSource = async ({ orgId, projectId, recordType, recordId, viewer = null }) => {
+  const source = RECORD_SOURCES[recordType];
+  if (!source) throw new HttpError(400, "CHANGE_EVENT_SOURCE_INVALID", "A change event is raised from an RFI, daily log, NCR, punch item, drawing revision, submittal or meeting action");
+  await ensureProject({ orgId, projectId });
+  const where = { id: recordId, projectId, ...(source.orgScoped ? { orgId } : {}), ...(source.where ? source.where(viewer) : {}) };
+  const row = await prisma[source.model].findFirst({ where, select: source.select });
+  if (!row || (source.visible && !source.visible(row, viewer))) {
+    throw new HttpError(404, "CHANGE_EVENT_SOURCE_NOT_FOUND", "The record to raise a change event from was not found");
+  }
+  return { source, row };
+};
+
+const recordPrefillOf = ({ source, row }) => ({
+  title: source.title(row).trim().slice(0, 200) || "Change event",
+  type: "other",
+  origin: source.origin,
+  activityId: row.activityId || null,
+  locationId: (source.locationId ? source.locationId(row) : row.locationId) || null,
+  romAmount: 0,
+  scheduleImpactDays: 0,
+  lines: [],
+});
+
+/**
+ * The draft a change event raised from a project record starts from, and the
+ * typed link it will carry. Writes nothing. `viewer` { id, projectAccess,
+ * documentControlUpdate } is the caller, for the record's own read rule.
+ */
+const prefillFromRecord = async ({ orgId, projectId, recordType, recordId, viewer = null }) => {
+  const loaded = await loadRecordSource({ orgId, projectId, recordType, recordId, viewer });
+  return {
+    prefill: recordPrefillOf(loaded),
+    links: { [loaded.source.link]: loaded.row.id },
+    source: { type: loaded.source.recordType, id: loaded.row.id, path: recordWorkspacePath({ projectId, recordType: loaded.source.recordType, recordId: loaded.row.id }) },
+  };
+};
+
+// What a person may set over a prefill when they raise the event: the words,
+// the type, the activity, location and schedule estimate, and the lines (the
+// QS may price them). Origin and the typed source link are the endpoint's.
+const PREFILL_OVERRIDABLE = Object.freeze(["title", "description", "type", "notes", "activityId", "locationId", "scheduleImpactDays", "ownerChange", "romAmount", "lines"]);
+const draftOverPrefill = (prefill, body = {}) => {
+  const merged = { ...prefill };
+  for (const key of PREFILL_OVERRIDABLE) if (body && body[key] !== undefined) merged[key] = body[key];
+  return merged;
+};
+
+/**
+ * POST …/<record>/:recordId/raise-change-event — a person's explicit act:
+ * ONE change event, status open (the draft), with the typed link (and its
+ * pair), the record's origin and the body's fields over the prefill. Nothing
+ * else is written.
+ */
+const raiseFromRecord = async ({ orgId, projectId, recordType, recordId, viewer = null, actor = null, payload = {} }) => {
+  const loaded = await loadRecordSource({ orgId, projectId, recordType, recordId, viewer });
+  const draft = draftOverPrefill(recordPrefillOf(loaded), payload);
+  draft.origin = loaded.source.origin;
+  return createChangeEvent({ orgId, projectId, payload: draft, actor, links: { [loaded.source.link]: loaded.row.id } });
 };
 
 const assertEditable = (row) => {
@@ -661,4 +803,4 @@ const portalDecline = async (token, payload = {}) => {
   return portalOut(row);
 };
 
-module.exports = { STATUS, TYPES, ORIGINS, SOURCE_LINKS, SOURCE_LINK_FIELDS, RFQ_STATUS, estimateOf, normalizeLines, listChangeEvents, getChangeEvent, createChangeEvent, updateChangeEvent, deleteChangeEvent, sendRfqs, remindRfq, cancelRfq, acceptQuote, rejectQuote, convertToChangeOrder, closeChangeEvent, voidChangeEvent, portalContext, portalView, portalSubmitQuote, portalDecline, hashToken };
+module.exports = { STATUS, TYPES, ORIGINS, SOURCE_LINKS, SOURCE_LINK_FIELDS, RECORD_SOURCES, RECORD_SOURCE_TYPES, RFQ_STATUS, prefillFromRecord, raiseFromRecord, draftOverPrefill, estimateOf, normalizeLines, listChangeEvents, getChangeEvent, createChangeEvent, updateChangeEvent, deleteChangeEvent, sendRfqs, remindRfq, cancelRfq, acceptQuote, rejectQuote, convertToChangeOrder, closeChangeEvent, voidChangeEvent, portalContext, portalView, portalSubmitQuote, portalDecline, hashToken };

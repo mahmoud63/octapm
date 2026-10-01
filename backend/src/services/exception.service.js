@@ -589,16 +589,6 @@ const exceptionPrefill = async (row) => {
   };
 };
 
-// What a person may set over a prefill when they raise the event: the words,
-// the type, the activity, location and schedule estimate, and the lines (the
-// QS may price them). Origin and the typed source link are the endpoint's.
-const OVERRIDABLE = Object.freeze(["title", "description", "type", "notes", "activityId", "locationId", "scheduleImpactDays", "ownerChange", "romAmount", "lines"]);
-const withOverrides = (prefill, body = {}) => {
-  const merged = { ...prefill };
-  for (const key of OVERRIDABLE) if (body[key] !== undefined) merged[key] = body[key];
-  return merged;
-};
-
 const getExceptionPrefill = async ({ orgId, projectId, exceptionId, access, may }) => {
   const row = await loadReadable({ orgId, projectId, exceptionId, access });
   requireCreator(may, "raiseChangeEvent");
@@ -619,7 +609,7 @@ const raiseFromException = async ({ orgId, projectId, exceptionId, access, may, 
   requireCreator(may, "raiseChangeEvent");
   const status = statusOf(row);
   if (!["open", "snoozed"].includes(status)) throw notOpen(status);
-  const draft = withOverrides(await exceptionPrefill(row), payload);
+  const draft = changeEventService.draftOverPrefill(await exceptionPrefill(row), payload);
   draft.origin = "exception";
   const changeEvent = await changeEventService.createChangeEvent({ orgId, projectId, payload: draft, actor, links: { exceptionId: row.id } });
   await auditExceptionEvent({ row, actor, action: auditService.ACTIONS.STATUS_CHANGED, oldStatus: status, newStatus: "in_change", summary: { changeEventId: changeEvent.id, changeEventRef: changeEvent.ref, handoff: "raised" } });
@@ -645,82 +635,6 @@ const associateChangeEvent = async ({ orgId, projectId, exceptionId, access, may
   return reread({ orgId, projectId, exceptionId, access, may });
 };
 
-// ─── "Raise change event" from a project record (§2, §126) ────────────────
-//
-// One shared helper for every source: it fills the typed link, the origin
-// and the title (and the source's activity / location where it has them).
-const dateOnly = (value) => (value ? new Date(value).toISOString().slice(0, 10) : "");
-const SOURCES = Object.freeze({
-  rfi: {
-    model: "rfi", link: "rfiId", module: "rfi", origin: "rfi", orgScoped: false,
-    select: { id: true, ref: true, subject: true, activityId: true, locationId: true },
-    title: (row) => `${row.ref} ${row.subject || ""}`,
-  },
-  daily_log: {
-    model: "dailyLog", link: "dailyLogId", module: "progress", origin: "daily_log", orgScoped: true,
-    select: { id: true, date: true },
-    title: (row) => `Daily log ${dateOnly(row.date)}`,
-  },
-  ncr: {
-    model: "ncrRecord", link: "ncrId", module: "ncr", origin: "observation", orgScoped: false,
-    select: { id: true, ref: true, description: true, activityId: true },
-    title: (row) => `${row.ref} ${row.description || ""}`,
-  },
-  punch_item: {
-    model: "punchItem", link: "punchItemId", module: "punch", origin: "observation", orgScoped: true,
-    select: { id: true, ref: true, title: true, activityId: true, locationId: true },
-    title: (row) => `${row.ref} ${row.title || ""}`,
-  },
-  drawing_revision: {
-    model: "sheetRevision", link: "drawingRevisionId", module: "document_control", origin: "other", orgScoped: true,
-    select: { id: true, number: true, title: true, revision: true },
-    title: (row) => `Drawing ${[row.number, row.title].filter(Boolean).join(" ") || "revision"}${row.revision ? ` rev ${row.revision}` : ""}`,
-  },
-  submittal: {
-    model: "submittal", link: "submittalId", module: "submittal", origin: "submittal", orgScoped: false,
-    select: { id: true, ref: true, title: true, activityId: true },
-    title: (row) => `${row.ref} ${row.title || ""}`,
-  },
-  meeting_action: {
-    model: "meetingActionItem", link: "meetingActionItemId", module: "meeting", origin: "meeting", orgScoped: true,
-    select: { id: true, title: true, activityId: true },
-    title: (row) => `Meeting action: ${row.title || ""}`,
-  },
-});
-const SOURCE_TYPES = Object.freeze(Object.keys(SOURCES));
-
-const loadSource = async ({ orgId, projectId, sourceType, sourceId }) => {
-  const source = SOURCES[sourceType];
-  if (!source) throw new HttpError(404, "NOT_FOUND", "Unknown source");
-  const row = await prisma[source.model].findFirst({ where: { id: sourceId, projectId, ...(source.orgScoped ? { orgId } : {}) }, select: source.select });
-  if (!row) throw new HttpError(404, "CHANGE_EVENT_SOURCE_NOT_FOUND", "The record to raise a change event from was not found");
-  return { source, row };
-};
-
-const sourcePrefill = ({ source, row }) => ({
-  title: source.title(row).trim().slice(0, 200) || "Change event",
-  type: "other",
-  origin: source.origin,
-  activityId: row.activityId || null,
-  locationId: row.locationId || null,
-  romAmount: 0,
-  scheduleImpactDays: 0,
-  lines: [],
-});
-
-const getSourcePrefill = async ({ orgId, projectId, sourceType, sourceId }) => {
-  const loaded = await loadSource({ orgId, projectId, sourceType, sourceId });
-  return { prefill: sourcePrefill(loaded), links: { [loaded.source.link]: loaded.row.id } };
-};
-
-/** POST …/<record>/:id/raise-change-event — one DRAFT change event with the typed source link. */
-const raiseFromSource = async ({ orgId, projectId, sourceType, sourceId, actor, payload = {} }) => {
-  const loaded = await loadSource({ orgId, projectId, sourceType, sourceId });
-  const draft = withOverrides(sourcePrefill(loaded), payload);
-  draft.origin = loaded.source.origin;
-  return changeEventService.createChangeEvent({ orgId, projectId, payload: draft, actor, links: { [loaded.source.link]: loaded.row.id } });
-};
-
 // ─── The workspace dashboard's open-exceptions figure ─────────────────────
 
 /**
@@ -738,7 +652,8 @@ const workspaceOpenExceptions = async ({ orgId, userId, role, isCompanyAdmin = f
   const { getProjectAccessWhere } = require("./project-authorization.service");
   const projects = await prisma.project.findMany({
     where: { orgId, archivedAt: null, ...getProjectAccessWhere({ userId, role, isCompanyAdmin, orgId }) },
-    select: { id: true },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
   });
   const projectIds = projects.map((project) => project.id);
   if (!projectIds.length) return empty;
@@ -763,12 +678,18 @@ const workspaceOpenExceptions = async ({ orgId, userId, role, isCompanyAdmin = f
     modules: Object.fromEntries(EXCEPTION_MODULES.map((module) => [module, accesses.every((access) => access && access.modules && access.modules[module] === true)])),
   };
   const marker = exceptionsWithheldMarker(union);
+  // Per project, which kinds are not counted there and why — the caller's
+  // access on that project, never whether it has any exception.
+  const withheldProjects = projects
+    .map((project) => ({ project, marker: exceptionsWithheldMarker(accessById.get(project.id) || null) }))
+    .filter((entry) => entry.marker)
+    .map(({ project, marker: own }) => ({ projectId: project.id, name: project.name, reason: own.reason, modules: own.modules }));
   return {
     ...open,
     inChange,
     snoozed,
     basis,
-    ...(marker ? { withheld: { reason: `On some of your projects: ${marker.reason}`, modules: marker.modules } } : {}),
+    ...(marker ? { withheld: { reason: `On some of your projects: ${marker.reason}`, modules: marker.modules, projects: withheldProjects } } : {}),
   };
 };
 
@@ -839,10 +760,24 @@ const notifyOpenedCritical = async ({ orgId, projectId, exceptionIds = null }) =
   return { notified, exceptions: due.length };
 };
 
+/**
+ * The engine's notify hook (PC-7b contract): `exceptions` are the rows (or
+ * ids) its evaluation of the project just OPENED. Only the open, critical,
+ * unsnoozed ones among them notify, once per opening (see above); an empty
+ * list notifies nothing. The engine calls it after its transaction commits.
+ */
+const notifyOpened = ({ orgId, projectId, exceptions = [] }) =>
+  notifyOpenedCritical({
+    orgId,
+    projectId,
+    exceptionIds: (Array.isArray(exceptions) ? exceptions : [])
+      .map((row) => (typeof row === "string" ? row : row && row.id))
+      .filter(Boolean),
+  });
+
 module.exports = {
   STATUSES,
   SEVERITIES,
-  SOURCE_TYPES,
   DISMISSED_PREFIX,
   KIND_LABELS,
   statusOf,
@@ -854,10 +789,9 @@ module.exports = {
   getExceptionPrefill,
   raiseFromException,
   associateChangeEvent,
-  getSourcePrefill,
-  raiseFromSource,
   workspaceOpenExceptions,
   notifyOpenedCritical,
+  notifyOpened,
   // for tests
   _exceptionPrefill: exceptionPrefill,
   _resetRegistry: () => {

@@ -122,18 +122,15 @@ router.post(
 /**
  * "Raise change event" from a project record (PC-7b §2, §126): mounted
  * beside each record's own routes as `/<module path>/:recordId/…`. The caller
- * must read the record (its module) and create change events. GET returns
- * the prefill; POST creates one DRAFT change event with the typed link.
+ * must read the record — its module's read here, and the record's own rule in
+ * change-event.service (RFI draft, company party, unpublished drawing
+ * revision) — and create change events. GET returns the prefill; POST
+ * creates one DRAFT change event with the typed link. The shared helper is
+ * change-event.service prefillFromRecord / raiseFromRecord.
  */
-const SOURCE_READ_MODULE = Object.freeze({
-  rfi: "rfi",
-  daily_log: "progress",
-  ncr: "ncr",
-  punch_item: "punch",
-  drawing_revision: "document_control",
-  submittal: "submittal",
-  meeting_action: "meeting",
-});
+const SOURCE_READ_MODULE = Object.freeze(
+  Object.fromEntries(changeEventService.RECORD_SOURCE_TYPES.map((type) => [type, changeEventService.RECORD_SOURCES[type].readModule])),
+);
 // Where each source's routes live under /projects/:projectId.
 const SOURCE_MOUNTS = Object.freeze({
   rfi: "rfi",
@@ -144,6 +141,12 @@ const SOURCE_MOUNTS = Object.freeze({
   submittal: "submittals",
   meeting_action: "meetings/action-items",
 });
+/** The caller, for the record's own read rule. */
+const recordViewerFor = (req) => ({
+  id: req.user.id,
+  projectAccess: req.projectAccess || null,
+  documentControlUpdate: hasPermission(req, "document_control", "update"),
+});
 
 /**
  * Adds the two routes per source to the projects router as full paths
@@ -151,21 +154,22 @@ const SOURCE_MOUNTS = Object.freeze({
  * for these paths and never in front of the source module's own routes.
  */
 const registerSourceRaiseRoutes = (projectsRouter, projectAccess) => {
-  for (const [sourceType, mount] of Object.entries(SOURCE_MOUNTS)) {
-    const guards = [requirePermission(SOURCE_READ_MODULE[sourceType], "read"), requirePermission("change_event", "create")];
+  for (const [recordType, mount] of Object.entries(SOURCE_MOUNTS)) {
+    const guards = [requirePermission(SOURCE_READ_MODULE[recordType], "read"), requirePermission("change_event", "create")];
+    const record = (req) => ({ ...scope(req), recordType, recordId: req.params.recordId, viewer: recordViewerFor(req) });
     projectsRouter.get(
       `/:projectId/${mount}/:recordId/change-event-prefill`,
       ...projectAccess,
       ...guards,
       [param("recordId").isUUID(), validate],
-      asyncHandler(async (req, res) => sendSuccess(res, await service.getSourcePrefill({ ...scope(req), sourceType, sourceId: req.params.recordId }))),
+      asyncHandler(async (req, res) => sendSuccess(res, await changeEventService.prefillFromRecord(record(req)))),
     );
     projectsRouter.post(
       `/:projectId/${mount}/:recordId/raise-change-event`,
       ...projectAccess,
       ...guards,
       [param("recordId").isUUID(), ...draftValidators, validate],
-      asyncHandler(async (req, res) => sendSuccess(res, await service.raiseFromSource({ ...scope(req), sourceType, sourceId: req.params.recordId, actor: actorFor(req), payload: draftBody(req) }), 201)),
+      asyncHandler(async (req, res) => sendSuccess(res, await changeEventService.raiseFromRecord({ ...record(req), actor: actorFor(req), payload: draftBody(req) }), 201)),
     );
   }
 };
