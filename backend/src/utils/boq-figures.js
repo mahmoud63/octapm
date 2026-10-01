@@ -1514,10 +1514,63 @@ const withheldQuantityEntryResult = (result, access = FULL_ACCESS) => {
   return copy;
 };
 
+// The daily log's quantities section (PC-6 §4) names a BOQ item per row. A
+// reader of the log who may not read the BOQ (the daily log is admitted on
+// progress:read) keeps the row as the site recorded it — the item's
+// description and unit, the quantity typed on site, the activity, the
+// location, the notes, the row's review state and the state and PROGRESS
+// SOURCE provenance of the progress entry it minted (none of which is a
+// figure of the bill) — and loses the item's code and the allocation it was
+// picked from, which are the bill's rows and the mapping (owner decision,
+// PC-6 core item 3: "at least description + unit"). The per-unit totals of
+// the section are the log's own tally of what was typed, like its man-hours,
+// and stay. An activity's allocated items (the site's picker) go the same
+// way: id, description and unit for everyone who may read progress; the
+// code, the allocation and the allocated quantity for BOQ readers.
+const DAILY_LOG_QUANTITY_WITHHELD = "The BOQ item's code and allocation of a daily-log quantity are available only to members who may read the BOQ";
+const DAILY_LOG_QUANTITY_BOQ_KEYS = ["allocationId"];
+const ALLOCATED_ITEM_WITHHELD = "The code, allocation and allocated quantity of an activity's BOQ items are available only to members who may read the BOQ";
+const ALLOCATED_ITEM_BOQ_KEYS = ["code", "allocationId", "allocationIds", "allocatedQuantity"];
+
+const withheldDailyLogQuantity = (row, access = FULL_ACCESS) => {
+  if (access.boq || !row || typeof row !== "object" || Array.isArray(row)) return row;
+  const keys = DAILY_LOG_QUANTITY_BOQ_KEYS.filter((key) => has(row, key));
+  const copy = withoutKeys(row, keys);
+  if (copy.boqItem && typeof copy.boqItem === "object" && has(copy.boqItem, "code")) {
+    copy.boqItem = withoutKeys(copy.boqItem, ["code"]);
+    keys.push("boqItem.code");
+  }
+  return { ...copy, boqWithheld: { keys, reason: DAILY_LOG_QUANTITY_WITHHELD } };
+};
+
+/** A daily log (one day, every section) as this caller may receive it. */
+const withheldDailyLog = (log, access = FULL_ACCESS) => {
+  if (access.boq || !log || typeof log !== "object" || !Array.isArray(log.sections?.quantities)) return log;
+  return { ...log, sections: { ...log.sections, quantities: log.sections.quantities.map((row) => withheldDailyLogQuantity(row, access)) } };
+};
+
+/** GET /activities/{id}/allocated-items as this caller may receive it. */
+const withheldAllocatedItems = (result, access = FULL_ACCESS) => {
+  if (access.boq || !result || typeof result !== "object" || !Array.isArray(result.items)) return result;
+  const keys = new Set();
+  const items = result.items.map((item) => {
+    const present = ALLOCATED_ITEM_BOQ_KEYS.filter((key) => has(item, key));
+    present.forEach((key) => keys.add(key));
+    return withoutKeys(item, present);
+  });
+  return { ...result, items, boqWithheld: { keys: [...keys], reason: ALLOCATED_ITEM_WITHHELD } };
+};
+
 module.exports = {
   // PC-6 (core): quantity progress entries.
   QUANTITY_ENTRY_BOQ_KEYS,
   QUANTITY_ENTRY_WITHHELD,
+  DAILY_LOG_QUANTITY_WITHHELD,
+  ALLOCATED_ITEM_WITHHELD,
+  ALLOCATED_ITEM_BOQ_KEYS,
+  withheldDailyLogQuantity,
+  withheldDailyLog,
+  withheldAllocatedItems,
   withheldQuantityEntry,
   withheldQuantityEntries,
   withheldQuantityEntryResult,

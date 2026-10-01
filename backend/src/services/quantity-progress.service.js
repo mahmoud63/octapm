@@ -417,6 +417,8 @@ const createEntriesWithClient = async ({
   clientRequestId,
   dailyLogId,
   submissionId,
+  internal = false,
+  assignmentRule = true,
 }) => {
   const project = await ensureProject({ orgId, projectId }, tx);
   const index = await uomService.loadUnitIndex(orgId, tx);
@@ -438,9 +440,11 @@ const createEntriesWithClient = async ({
 
   const fresh = entries.map((entry, i) => ({ entry, i })).filter(({ i }) => !(requestIds[i] && replayById.has(requestIds[i])));
   const activityIds = [...new Set(fresh.map(({ entry }) => trimOrNull(entry.activityId)).filter(Boolean))];
-  if (fresh.length) {
+  if (fresh.length && assignmentRule) {
     // The same rule as a progress submission: a site engineer records on the
-    // activities assigned to them; a PM or planning engineer on any.
+    // activities assigned to them; a PM or planning engineer on any. The daily
+    // log applies it when a row is recorded (daily-log.service), so its
+    // minting passes assignmentRule: false — the rows were each admitted.
     await progressService.assertProgressSubmitAllowed({ projectId, activityIds, userId, userRole, tx });
   }
 
@@ -472,6 +476,21 @@ const createEntriesWithClient = async ({
     const entryStatus = entry.status !== undefined ? normalizeStatus(entry.status) : defaultStatus;
     const entrySource = entry.source !== undefined ? normalizeSource(entry.source, defaultSource) : defaultSource;
 
+    // PROGRESS SOURCE is the server's to state: the record an entry came
+    // through (its submission, daily log and daily-log row) and who recorded
+    // it are taken from an entry only when this service's own callers say so
+    // (`internal`, the daily log's minting) — never from a client's body,
+    // which could otherwise attach an entry to a pending submission and have
+    // it approved with that bundle, or claim a daily log it never came from.
+    const links = internal
+      ? {
+          submissionId: trimOrNull(entry.submissionId) || trimOrNull(submissionId) || null,
+          dailyLogId: trimOrNull(entry.dailyLogId) || trimOrNull(dailyLogId) || null,
+          dailyLogQuantityId: trimOrNull(entry.dailyLogQuantityId) || null,
+          createdBy: trimOrNull(entry.createdBy) || userId || null,
+        }
+      : { submissionId: trimOrNull(submissionId) || null, dailyLogId: trimOrNull(dailyLogId) || null, dailyLogQuantityId: null, createdBy: userId || null };
+
     const row = await tx.quantityProgressEntry.create({
       data: {
         orgId,
@@ -484,13 +503,10 @@ const createEntriesWithClient = async ({
         quantity,
         date,
         source: entrySource,
-        submissionId: trimOrNull(entry.submissionId) || trimOrNull(submissionId) || null,
-        dailyLogId: trimOrNull(entry.dailyLogId) || trimOrNull(dailyLogId) || null,
-        dailyLogQuantityId: trimOrNull(entry.dailyLogQuantityId) || null,
+        ...links,
         status: entryStatus,
         clientRequestId: requestIds[i],
         note: trimOrNull(entry.note),
-        createdBy: userId || null,
       },
       include: ENTRY_INCLUDE,
     });
@@ -537,11 +553,11 @@ const createEntriesWithClient = async ({
  * decides, so two requests racing make one row: the loser's unique violation
  * is answered by running once more, which finds the winner's row.
  */
-const createEntries = async ({ orgId, projectId, userId, userRole = null, entries, source = "manual", status = "draft", clientRequestId = null, dailyLogId = null, submissionId = null, tx = null }) => {
+const createEntries = async ({ orgId, projectId, userId, userRole = null, entries, source = "manual", status = "draft", clientRequestId = null, dailyLogId = null, submissionId = null, tx = null, internal = false, assignmentRule = true }) => {
   if (!Array.isArray(entries) || !entries.length) {
     throw new HttpError(400, "VALIDATION_ERROR", "entries must be a non-empty array");
   }
-  const params = { orgId, projectId, userId, userRole, entries, source, status, clientRequestId, dailyLogId, submissionId };
+  const params = { orgId, projectId, userId, userRole, entries, source, status, clientRequestId, dailyLogId, submissionId, internal, assignmentRule };
   if (tx) return createEntriesWithClient({ ...params, tx });
   try {
     return await prisma.$transaction((client) => createEntriesWithClient({ ...params, tx: client }));
@@ -840,9 +856,263 @@ const plannedQuantityFor = async ({ orgId, projectId, activityId, tx = prisma })
   };
 };
 
+// ─── the activity's allocated items (the site's picker) ────────────────────
+
+/**
+ * The BOQ items an activity has an approved, active allocation of — what a
+ * person on site records installed quantity against. One line per item, in
+ * the item's unit, with the allocation it was picked from (the single
+ * approved one; null and `allocationIds` when there are several) and Σ the
+ * approved allocation quantity. The route withholds the code, the
+ * allocation and the quantity from a member who may not read the BOQ
+ * (utils/boq-figures.withheldAllocatedItems): such a member is given the id,
+ * the description and the unit — the least that lets them pick an item and
+ * name the unit — and nothing of the bill's figures.
+ */
+const allocatedItemsFor = async ({ orgId, projectId, activityId, tx = prisma }) => {
+  await ensureProject({ orgId, projectId }, tx);
+  const activity = await ensureActivity({ projectId, activityId }, tx);
+  const index = await uomService.loadUnitIndex(orgId, tx);
+  const allocations = await tx.activityBoqAllocation.findMany({
+    where: { projectId, activityId, status: ALLOCATION_COUNTED_STATUS, isActive: true, boqItem: { isActive: true } },
+    select: { id: true, boqItemId: true, quantity: true, boqItem: { select: { id: true, code: true, ref: true, description: true, unit: true, unitCode: true, sortOrder: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+  const byItem = new Map();
+  for (const row of allocations) {
+    const line = byItem.get(row.boqItemId) || { item: row.boqItem, allocationIds: [], quantity: new Decimal(0) };
+    line.allocationIds.push(row.id);
+    line.quantity = line.quantity.plus(quantityDecimal(row.quantity) ?? new Decimal(0));
+    byItem.set(row.boqItemId, line);
+  }
+  const items = [...byItem.values()].map(({ item, allocationIds, quantity }) => {
+    const unit = itemUnit(item, index);
+    return {
+      id: item.id,
+      code: item.code || item.ref || null,
+      description: item.description,
+      unit: item.unit,
+      unitCode: unit.code || unit.typed || null,
+      allocationId: allocationIds.length === 1 ? allocationIds[0] : null,
+      allocationIds,
+      allocatedQuantity: quantityNumber(quantity),
+    };
+  });
+  return { activityId: activity.id, activity: { id: activity.id, name: activity.name, code: activity.activityCode || activity.p6ActivityId || activity.wbsCode || null }, items };
+};
+
+// ─── the daily log's quantities section (§4) ──────────────────────────────
+//
+// A row of the daily log's quantities section (DailyLogQuantity) is the site
+// record; the QuantityProgressEntry it mints when the log is submitted is the
+// pending progress figure, and only the progress approval writer makes that
+// official. These helpers keep the two in step and are called by
+// daily-log.service inside its own transactions.
+
+/**
+ * What a quantities row may name: an item the activity has an approved
+ * allocation of (else 400 DAILY_LOG_QUANTITY_NOT_ALLOCATED), the allocation
+ * when one is given (one of those), and a unit that is the item's or an
+ * alias. Returns the resolved allocationId (the single approved one when
+ * none was named) and the unit code the row is stored under.
+ */
+const resolveDailyLogQuantity = async ({ tx = prisma, orgId, projectId, activityId, boqItemId, allocationId = null, unit = null }) => {
+  const item = await ensureBoqItem({ projectId, boqItemId }, tx);
+  const { allocations } = await allocationQuantityFor({ projectId, activityId, boqItemId }, tx);
+  if (!allocations.length) {
+    throw new HttpError(400, "DAILY_LOG_QUANTITY_NOT_ALLOCATED", "The activity has no approved allocation of this BOQ item; pick one of the activity's allocated items", {
+      activityId,
+      boqItemId,
+    });
+  }
+  const wanted = trimOrNull(allocationId);
+  if (wanted && !allocations.some((row) => row.id === wanted)) {
+    throw new HttpError(400, "QUANTITY_ALLOCATION_MISMATCH", "The allocation named does not map this BOQ item to this activity", { allocationId: wanted, activityId, boqItemId });
+  }
+  const index = await uomService.loadUnitIndex(orgId, tx);
+  return {
+    item,
+    allocationId: wanted || (allocations.length === 1 ? allocations[0].id : null),
+    unitCode: resolveEntryUnit({ unit, item, index }),
+  };
+};
+
+const entriesForDailyLogRows = async ({ tx = prisma, rowIds }) =>
+  rowIds.length
+    ? tx.quantityProgressEntry.findMany({ where: { dailyLogQuantityId: { in: rowIds } }, include: ENTRY_INCLUDE, orderBy: { createdAt: "asc" } })
+    : [];
+
+const isOpenlyBundled = (entry) => Boolean(entry.submissionId && entry.submission && entry.submission.status !== "rejected");
+
+/**
+ * Whether the row may be changed or removed, by the state of its entry: an
+ * approved or rejected entry locks the row (409 DAILY_LOG_QUANTITY_LOCKED —
+ * the correction is a new row); an entry bundled into a pending submission
+ * holds it (409 QUANTITY_ENTRY_BUNDLED). Returns the free pending entry, or
+ * null when the row has none yet.
+ */
+const dailyLogRowEntryGate = async ({ tx = prisma, rowId }) => {
+  const entries = await entriesForDailyLogRows({ tx, rowIds: [rowId] });
+  const settled = entries.find((entry) => !EDITABLE_STATUSES.includes(entry.status));
+  if (settled) {
+    throw new HttpError(409, "DAILY_LOG_QUANTITY_LOCKED", `This quantity is ${settled.status} progress; record a correction as a new row`, {
+      dailyLogQuantityId: rowId,
+      entryId: settled.id,
+      entryStatus: settled.status,
+    });
+  }
+  const bundled = entries.find(isOpenlyBundled);
+  if (bundled) {
+    throw new HttpError(409, "QUANTITY_ENTRY_BUNDLED", "This quantity is part of a progress submission awaiting approval; reject the submission first", {
+      dailyLogQuantityId: rowId,
+      entryId: bundled.id,
+      submissionId: bundled.submissionId,
+      submissionStatus: bundled.submission.status,
+    });
+  }
+  return entries[0] || null;
+};
+
+const rowEntryData = (row, log) => ({
+  allocationId: row.allocationId || null,
+  locationId: row.locationId || null,
+  unitCode: row.unitCode,
+  quantity: quantityDecimal(row.quantity),
+  date: parseEntryDate(dateKey(log.date)),
+  note: trimOrNull(row.notes),
+});
+
+/** A free pending entry is made to match its row again (an edit before approval). */
+const syncDailyLogRowEntry = async ({ tx = prisma, orgId, projectId, row, log, entry, actorId }) => {
+  if (!entry) return null;
+  const data = rowEntryData(row, log);
+  const updated = await tx.quantityProgressEntry.update({ where: { id: entry.id }, data, include: ENTRY_INCLUDE });
+  await auditService.recordEvent({
+    tx,
+    orgId,
+    projectId,
+    entityType: ENTITY_TYPE,
+    entityId: updated.id,
+    action: auditService.ACTIONS.UPDATED,
+    actorId,
+    oldStatus: entry.status,
+    newStatus: updated.status,
+    oldSummary: auditSummary(entry),
+    newSummary: auditSummary(updated),
+    summary: { transition: "quantity_entry.daily_log_sync", dailyLogId: log.id, dailyLogQuantityId: row.id, ...auditSummary(updated) },
+  });
+  return updated;
+};
+
+/**
+ * A free pending entry goes with its row (never a pending ghost); an entry
+ * bundled into a pending submission holds the row (409 QUANTITY_ENTRY_BUNDLED);
+ * an approved or rejected one stays as the trail, its link to the row nulled
+ * by the database (SET NULL) when the row goes.
+ */
+const deleteDailyLogRowEntry = async ({ tx = prisma, orgId, projectId, row, actorId }) => {
+  const entries = await entriesForDailyLogRows({ tx, rowIds: [row.id] });
+  const bundled = entries.find((candidate) => EDITABLE_STATUSES.includes(candidate.status) && isOpenlyBundled(candidate));
+  if (bundled) {
+    throw new HttpError(409, "QUANTITY_ENTRY_BUNDLED", "This quantity is part of a progress submission awaiting approval; reject the submission first", {
+      dailyLogQuantityId: row.id,
+      entryId: bundled.id,
+      submissionId: bundled.submissionId,
+      submissionStatus: bundled.submission.status,
+    });
+  }
+  const entry = entries.find((candidate) => EDITABLE_STATUSES.includes(candidate.status));
+  if (!entry) return null;
+  await tx.quantityProgressEntry.delete({ where: { id: entry.id } });
+  await auditService.recordEvent({
+    tx,
+    orgId,
+    projectId,
+    entityType: ENTITY_TYPE,
+    entityId: entry.id,
+    action: auditService.ACTIONS.DELETED,
+    actorId,
+    oldStatus: entry.status,
+    oldSummary: auditSummary(entry),
+    summary: { transition: "quantity_entry.daily_log_row_deleted", dailyLogQuantityId: row.id, ...auditSummary(entry) },
+  });
+  return entry;
+};
+
+/**
+ * Submitting the daily log: one submitted entry (source daily_log) per
+ * quantities row, dated the log's day, recorded by the row's author and
+ * linked by dailyLogId + dailyLogQuantityId. A row that already has an entry
+ * keeps it: a free pending one is synced to the row, a bundled, approved or
+ * rejected one is left alone. Nothing here is official: the entries wait for
+ * the progress approval writer like every other entry.
+ */
+const mintDailyLogEntries = async ({ tx = prisma, orgId, projectId, log, rows, actor }) => {
+  const result = { minted: [], synced: [], kept: [] };
+  if (!rows.length) return result;
+  const existing = await entriesForDailyLogRows({ tx, rowIds: rows.map((row) => row.id) });
+  const byRow = new Map();
+  for (const entry of existing) {
+    if (!byRow.has(entry.dailyLogQuantityId)) byRow.set(entry.dailyLogQuantityId, []);
+    byRow.get(entry.dailyLogQuantityId).push(entry);
+  }
+  const fresh = [];
+  for (const row of rows) {
+    const entries = byRow.get(row.id) || [];
+    const free = entries.find((entry) => EDITABLE_STATUSES.includes(entry.status) && !isOpenlyBundled(entry));
+    if (free) {
+      const synced = await syncDailyLogRowEntry({ tx, orgId, projectId, row, log, entry: free, actorId: actor?.id || null });
+      if (synced.status === "draft") {
+        await tx.quantityProgressEntry.update({ where: { id: synced.id }, data: { status: "submitted" } });
+      }
+      result.synced.push(synced.id);
+    } else if (entries.length) {
+      result.kept.push(...entries.map((entry) => entry.id));
+    } else {
+      fresh.push(row);
+    }
+  }
+  if (fresh.length) {
+    const created = await createEntriesWithClient({
+      tx,
+      orgId,
+      projectId,
+      userId: actor?.id || null,
+      userRole: actor?.role || null,
+      entries: fresh.map((row) => ({
+        activityId: row.activityId,
+        boqItemId: row.boqItemId,
+        ...rowEntryData(row, log),
+        date: dateKey(log.date),
+        dailyLogId: log.id,
+        dailyLogQuantityId: row.id,
+        createdBy: row.createdBy || null,
+        clientRequestId: `daily_log:${row.id}`,
+      })),
+      source: "daily_log",
+      status: "submitted",
+      clientRequestId: null,
+      dailyLogId: log.id,
+      submissionId: null,
+      internal: true,
+      assignmentRule: false,
+    });
+    result.minted.push(...created.entries.map((entry) => entry.id));
+    result.warnings = created.warnings;
+  }
+  return result;
+};
+
 module.exports = {
   ENTITY_TYPE,
   ENTRY_SOURCES,
+  allocatedItemsFor,
+  resolveDailyLogQuantity,
+  entriesForDailyLogRows,
+  dailyLogRowEntryGate,
+  syncDailyLogRowEntry,
+  deleteDailyLogRowEntry,
+  mintDailyLogEntries,
   ENTRY_STATUSES,
   CREATABLE_STATUSES,
   QUANTITY_SCALE,

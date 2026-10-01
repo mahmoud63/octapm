@@ -1025,6 +1025,9 @@ const components = {
         "QUANTITY_NO_ENTRIES_TO_BUNDLE",
         "QUANTITY_BUNDLE_METHOD_MISMATCH",
         "PROGRESS_METHOD_LOCKED",
+        // PC-6 (core): the daily log's quantities section
+        "DAILY_LOG_QUANTITY_NOT_ALLOCATED",
+        "DAILY_LOG_QUANTITY_LOCKED",
         "PO_LINE_NOT_FOUND",
         "PO_LINES_REQUIRED",
         "PROCUREMENT_ACTIVITY_REQUIRED",
@@ -9086,6 +9089,37 @@ add(
   }),
 );
 
+add(
+  "/projects/{projectId}/activities/{id}/allocated-items",
+  "get",
+  operation({
+    tag: "Progress",
+    summary: "The BOQ items an activity has an approved allocation of — the site's picker for recording installed quantity.",
+    description:
+      "One line per BOQ item the activity has an approved, active allocation of, in the item's unit: what a quantity progress entry or a daily-log quantities row is recorded against. For a caller who may not read the BOQ (boq:read) each item keeps its id, description, unit and unitCode — the least that lets a person on site pick the item and name the unit — and loses code, allocationId, allocationIds and allocatedQuantity (omitted, never zeroed; boqWithheld: { keys, reason } says so). A BOQ reader's list carries them all. Another organisation's project is 404 PROJECT_NOT_FOUND; an inactive or foreign activity 404 ACTIVITY_NOT_FOUND.",
+    operationId: "listActivityAllocatedItems",
+    parameters: projectRecordParams,
+    permissions: modulePermission("progress", "read"),
+    responseSchema: objectSchema({
+      activityId: uuid,
+      activity: objectSchema({ id: uuid, name: { type: "string" }, code: { type: "string", nullable: true } }),
+      items: arrayOf(
+        objectSchema({
+          id: uuid,
+          code: { type: "string", nullable: true, description: "BOQ readers only." },
+          description: { type: "string", nullable: true },
+          unit: { type: "string", nullable: true, description: "The item's unit as typed on the bill." },
+          unitCode: { type: "string", nullable: true, description: "The normalised unit code an entry is stored under." },
+          allocationId: { ...nullableUuid, description: "The single approved allocation; null when there are several (allocationIds). BOQ readers only." },
+          allocationIds: arrayOf(uuid),
+          allocatedQuantity: { type: "number", nullable: true, description: "Σ approved allocation quantity of the item on the activity. BOQ readers only." },
+        }),
+      ),
+      boqWithheld: nullableRef("GenericObject"),
+    }),
+  }),
+);
+
 [
   [
     "xer",
@@ -15783,9 +15817,9 @@ const reportPermission = (action, transition = null) => modulePermission("report
 
 // ─── Daily log (OCTA-FLD-DAILY-022) ────────────────────────────────────────
 const dailyLogDateParam = pathParam("date", "Calendar day, YYYY-MM-DD.");
-const dailyLogSectionParam = pathParam("section", "manpower, equipment, deliveries, visitors, delays or notes.");
+const dailyLogSectionParam = pathParam("section", "manpower, equipment, deliveries, visitors, delays, notes or quantities.");
 const dailyLogEntryIdParam = pathParam("entryId", "Entry UUID.");
-const dailyLogSections = ["manpower", "equipment", "deliveries", "visitors", "delays", "notes"];
+const dailyLogSections = ["manpower", "equipment", "deliveries", "visitors", "delays", "notes", "quantities"];
 const dailyLogEntryStatuses = ["draft", "submitted", "approved", "rejected"];
 const dailyLogStatuses = ["open", "submitted", "approved"];
 const dailyLogDateRangeParams = [queryParam("from", "First day (YYYY-MM-DD); defaults to 30 days before `to`.", { type: "string" }), queryParam("to", "Last day (YYYY-MM-DD); defaults to today.", { type: "string" })];
@@ -15852,10 +15886,26 @@ const dailyLogEntrySchema = objectSchema({
   locationId: nullableUuid,
   location: nullableRef("GenericObject"),
   notes: { type: "string", nullable: true },
+  // PC-6 §4 — the quantities section: how much of an allocated BOQ item was
+  // installed on the activity that day. The row's status is its site-record
+  // review state, never progress; progressEntry is the QuantityProgressEntry
+  // the row minted when the log was submitted (null before), with its state
+  // and PROGRESS SOURCE provenance — official only once the progress approval
+  // writer approved it. For a reader who may not read the BOQ, boqItem.code
+  // and allocationId are omitted (boqWithheld says so); the description, the
+  // unit and the quantity the site recorded stay.
+  boqItemId: nullableUuid,
+  boqItem: nullableRef("GenericObject"),
+  allocationId: nullableUuid,
+  unitCode: { type: "string", nullable: true, description: "Quantities: the BOQ item's unit code the row is stored under." },
+  progressEntry: nullableRef("GenericObject"),
+  boqWithheld: nullableRef("GenericObject"),
   createdAt: nullableDateString,
   updatedAt: nullableDateString,
 });
 const dailyLogTotalsSchema = objectSchema({
+  quantityRows: { type: "integer", description: "Quantities rows that count (not draft, not rejected)." },
+  quantities: arrayOf(objectSchema({ unitCode: { type: "string" }, quantity: { type: "number" }, rows: { type: "integer" } })),
   workers: { type: "integer" },
   manHours: { type: "number" },
   companies: { type: "integer" },
@@ -15944,6 +15994,9 @@ const dailyLogEntryInput = objectSchema({
   locationId: nullableUuid,
   notes: { type: "string", nullable: true },
   status: { type: "string", nullable: true, enum: ["draft", "approved", null] },
+  boqItemId: { ...nullableUuid, description: "Quantities: a BOQ item the activity has an approved allocation of (GET /activities/{id}/allocated-items), else 400 DAILY_LOG_QUANTITY_NOT_ALLOCATED." },
+  allocationId: { ...nullableUuid, description: "Quantities: the approved allocation picked; resolved to the single one when omitted." },
+  unitCode: { type: "string", nullable: true, description: "Quantities: the item's unit code or an alias the organisation's unit master maps to it (`unit` is accepted too), else 400 QUANTITY_UNIT_MISMATCH; the item's unit when omitted." },
 });
 const dailyLogPermission = (action, transition = null) => modulePermission("progress", action, transition);
 [
@@ -15956,13 +16009,13 @@ const dailyLogPermission = (action, transition = null) => modulePermission("prog
   { method: "get", path: "/projects/{projectId}/daily-logs/{date}/export.pdf", summary: "The day's log as PDF (same content as the screen).", operationId: "exportDailyLogPdf", parameters: [...projectParams, dailyLogDateParam], permissions: dailyLogPermission("export"), responseSchema: { type: "string", format: "binary" } },
   { method: "post", path: "/projects/{projectId}/daily-logs/{date}/weather/refresh", summary: "Fetch the day's weather from the feed by project coordinates; threshold breaches add a suggested weather delay.", operationId: "refreshDailyLogWeather", parameters: [...projectParams, dailyLogDateParam], permissions: dailyLogPermission("update", "daily_log.update"), responseSchema: dailyLogSchema },
   { method: "post", path: "/projects/{projectId}/daily-logs/{date}/copy-previous", summary: "Copy manpower and/or equipment from the most recent earlier day (last two weeks) into this day; sections that already have entries are skipped.", operationId: "copyPreviousDailyLog", parameters: [...projectParams, dailyLogDateParam], permissions: dailyLogPermission("submit", "daily_log.submit"), requestBody: jsonBody(objectSchema({ sections: arrayOf({ type: "string", enum: ["manpower", "equipment"] }) }), "Sections to copy.", false), responseSchema: dailyLogSchema },
-  { method: "post", path: "/projects/{projectId}/daily-logs/{date}/submit", summary: "Submit the day for approval.", operationId: "submitDailyLog", parameters: [...projectParams, dailyLogDateParam], permissions: dailyLogPermission("submit", "daily_log.submit"), responseSchema: dailyLogSchema },
-  { method: "post", path: "/projects/{projectId}/daily-logs/{date}/approve", summary: "Approve the day; entries still awaiting review are approved with it.", operationId: "approveDailyLog", parameters: [...projectParams, dailyLogDateParam], permissions: dailyLogPermission("approve", "daily_log.approve"), responseSchema: dailyLogSchema },
+  { method: "post", path: "/projects/{projectId}/daily-logs/{date}/submit", summary: "Submit the day for approval. PC-6 §4: every quantities row that counts mints one SUBMITTED quantity progress entry (source daily_log, the log's date, linked by dailyLogId + dailyLogQuantityId; a row with a free pending entry syncs it) — pending, never official: only the progress approval writer approves an entry.", operationId: "submitDailyLog", parameters: [...projectParams, dailyLogDateParam], permissions: dailyLogPermission("submit", "daily_log.submit"), responseSchema: dailyLogSchema },
+  { method: "post", path: "/projects/{projectId}/daily-logs/{date}/approve", summary: "Approve the day; entries still awaiting review are approved with it. This approves the log and its rows' review state only — it does NOT approve a quantity progress entry (PC-6 §4): installed quantity becomes official through POST /activities/{id}/progress and its approve, nothing else.", operationId: "approveDailyLog", parameters: [...projectParams, dailyLogDateParam], permissions: dailyLogPermission("approve", "daily_log.approve"), responseSchema: dailyLogSchema },
   { method: "post", path: "/projects/{projectId}/daily-logs/{date}/reopen", summary: "Reopen a submitted or approved day.", operationId: "reopenDailyLog", parameters: [...projectParams, dailyLogDateParam], permissions: dailyLogPermission("approve", "daily_log.approve"), requestBody: jsonBody(objectSchema({ reason: { type: "string", nullable: true } }), "Reason.", false), responseSchema: dailyLogSchema },
   { method: "post", path: "/projects/{projectId}/daily-logs/{date}/distribute", summary: "Render the PDF, file it on the day and send it: in-app + email to the roles / users, plain-text digest to external addresses. Defaults to the project's distribution list.", operationId: "distributeDailyLog", parameters: [...projectParams, dailyLogDateParam], permissions: dailyLogPermission("submit", "daily_log.distribute"), requestBody: jsonBody(objectSchema({ roles: arrayOf({ type: "string" }), userIds: arrayOf(uuid), emails: arrayOf({ type: "string" }), note: { type: "string", nullable: true } }), "Recipients override.", false), responseSchema: dailyLogSchema },
-  { method: "post", path: "/projects/{projectId}/daily-logs/{date}/entries/{section}", summary: "Add an entry. Staff entries are approved at once; party (collaborator) entries are submitted for review. Accepts `clientRequestId` for offline replay.", operationId: "addDailyLogEntry", parameters: [...projectParams, dailyLogDateParam, dailyLogSectionParam], permissions: dailyLogPermission("submit", "daily_log.submit"), requestBody: jsonBody(dailyLogEntryInput, "Entry; fields depend on the section."), responseSchema: dailyLogSchema, status: 201 },
-  { method: "patch", path: "/projects/{projectId}/daily-logs/{date}/entries/{section}/{entryId}", summary: "Edit an entry (party users: their own company's only; edits resubmit).", operationId: "updateDailyLogEntry", parameters: [...projectParams, dailyLogDateParam, dailyLogSectionParam, dailyLogEntryIdParam], permissions: dailyLogPermission("submit", "daily_log.submit"), requestBody: jsonBody(dailyLogEntryInput, "Fields to change.", false), responseSchema: dailyLogSchema },
-  { method: "delete", path: "/projects/{projectId}/daily-logs/{date}/entries/{section}/{entryId}", summary: "Remove an entry.", operationId: "deleteDailyLogEntry", parameters: [...projectParams, dailyLogDateParam, dailyLogSectionParam, dailyLogEntryIdParam], permissions: dailyLogPermission("submit", "daily_log.submit"), responseSchema: dailyLogSchema },
+  { method: "post", path: "/projects/{projectId}/daily-logs/{date}/entries/{section}", summary: "Add an entry. Staff entries are approved at once; party (collaborator) entries are submitted for review. Accepts `clientRequestId` for offline replay. Quantities (PC-6 §4): activityId, boqItemId, quantity ≥ 0, unitCode?, allocationId?, locationId?, notes? — the person recording is under the progress submission's assignment rule; the row is a site record and becomes a pending quantity progress entry when the log is submitted, never official by itself.", operationId: "addDailyLogEntry", parameters: [...projectParams, dailyLogDateParam, dailyLogSectionParam], permissions: dailyLogPermission("submit", "daily_log.submit"), requestBody: jsonBody(dailyLogEntryInput, "Entry; fields depend on the section."), responseSchema: dailyLogSchema, status: 201 },
+  { method: "patch", path: "/projects/{projectId}/daily-logs/{date}/entries/{section}/{entryId}", summary: "Edit an entry (party users: their own company's only; edits resubmit). A quantities row whose entry is approved or rejected progress is 409 DAILY_LOG_QUANTITY_LOCKED; one bundled into a pending submission 409 QUANTITY_ENTRY_BUNDLED; a free pending entry follows the edit.", operationId: "updateDailyLogEntry", parameters: [...projectParams, dailyLogDateParam, dailyLogSectionParam, dailyLogEntryIdParam], permissions: dailyLogPermission("submit", "daily_log.submit"), requestBody: jsonBody(dailyLogEntryInput, "Fields to change.", false), responseSchema: dailyLogSchema },
+  { method: "delete", path: "/projects/{projectId}/daily-logs/{date}/entries/{section}/{entryId}", summary: "Remove an entry. A quantities row takes its still-pending entry with it (never a pending ghost), is held by one bundled into a pending submission (409 QUANTITY_ENTRY_BUNDLED), and leaves an approved or rejected entry as the trail with its row link nulled.", operationId: "deleteDailyLogEntry", parameters: [...projectParams, dailyLogDateParam, dailyLogSectionParam, dailyLogEntryIdParam], permissions: dailyLogPermission("submit", "daily_log.submit"), responseSchema: dailyLogSchema },
   { method: "post", path: "/projects/{projectId}/daily-logs/{date}/entries/{section}/{entryId}/review", summary: "Accept or return a collaborator's entry (also confirms a weather-feed suggestion).", operationId: "reviewDailyLogEntry", parameters: [...projectParams, dailyLogDateParam, dailyLogSectionParam, dailyLogEntryIdParam], permissions: dailyLogPermission("approve", "daily_log.entry_review"), requestBody: jsonBody(objectSchema({ decision: { type: "string", enum: ["approve", "reject"] }, reason: { type: "string", nullable: true } }, ["decision"]), "Decision."), responseSchema: dailyLogSchema },
   { method: "post", path: "/projects/{projectId}/daily-logs/{date}/entries/delays/{entryId}/weather-delay", summary: "Put a delay on the contractual weather-delay register (days default to hours lost ÷ 8).", operationId: "logDailyLogWeatherDelay", parameters: [...projectParams, dailyLogDateParam, dailyLogEntryIdParam], permissions: dailyLogPermission("update", "daily_log.update"), requestBody: jsonBody(objectSchema({ delayDays: { type: "number", nullable: true }, contractual: { type: "boolean" }, description: { type: "string", nullable: true }, activityIds: arrayOf(uuid) }), "Register details.", false), responseSchema: dailyLogSchema },
 ].forEach((route) => addGenericRoute({ tag: "Site Reporting", ...route }));

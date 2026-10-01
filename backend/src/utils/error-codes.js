@@ -877,6 +877,19 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "conflict",
     message: "An activity with approved progress keeps the method it was measured by; a row naming that same method is still written",
   },
+  // PC-6 (core): the daily log's quantities section — a row names an item the
+  // activity has an approved allocation of, and once its entry is approved or
+  // rejected progress the row is the trail, not a draft.
+  DAILY_LOG_QUANTITY_NOT_ALLOCATED: {
+    status: 400,
+    category: "validation",
+    message: "The activity has no approved allocation of this BOQ item; pick one of the activity's allocated items",
+  },
+  DAILY_LOG_QUANTITY_LOCKED: {
+    status: 409,
+    category: "conflict",
+    message: "This quantity is approved or rejected progress; record a correction as a new row",
+  },
 });
 
 const DEFAULT_CODE_BY_STATUS = Object.freeze({

@@ -292,4 +292,15 @@ describe("createEntries validates before it writes", () => {
     });
     expect(mockPrisma.quantityProgressEntry.create).not.toHaveBeenCalled();
   });
+
+  it("PROGRESS SOURCE links are the server's: a client-sent submissionId, dailyLogId, dailyLogQuantityId or createdBy is ignored; the daily log's own minting (internal) carries them", async () => {
+    mockPrisma.quantityProgressEntry.create.mockImplementation(async ({ data }) => ({ ...data, id: "e-9", createdAt: new Date(), updatedAt: new Date(), activity: null, boqItem: null, location: null, submission: null }));
+    const smuggled = { activityId: "a-1", boqItemId: "item-1", quantity: 5, date: "2026-09-01", submissionId: "sub-pending", dailyLogId: "log-x", dailyLogQuantityId: "row-x", createdBy: "someone-else" };
+    await service.createEntries({ ...base, entries: [smuggled] });
+    expect(mockPrisma.quantityProgressEntry.create.mock.calls[0][0].data).toMatchObject({ submissionId: null, dailyLogId: null, dailyLogQuantityId: null, createdBy: "u-1" });
+
+    mockPrisma.activityAssignment.findMany.mockResolvedValue([]);
+    await service.createEntries({ ...base, userRole: "site_engineer", entries: [smuggled], source: "daily_log", status: "submitted", internal: true, assignmentRule: false });
+    expect(mockPrisma.quantityProgressEntry.create.mock.calls[1][0].data).toMatchObject({ submissionId: "sub-pending", dailyLogId: "log-x", dailyLogQuantityId: "row-x", createdBy: "someone-else", source: "daily_log", status: "submitted" });
+  });
 });

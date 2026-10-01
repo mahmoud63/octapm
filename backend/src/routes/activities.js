@@ -17,9 +17,11 @@ const {
   withheldActivityDetail,
   withheldProgressSubmission,
   withheldProgressSubmissions,
+  withheldAllocatedItems,
 } = require('../utils/boq-figures');
 const controlsDetailService = require('../services/controls-detail.service');
 const progressService = require('../services/progress.service');
+const quantityProgressService = require('../services/quantity-progress.service');
 
 const VALID_CATEGORIES = [
   'civil',
@@ -254,6 +256,25 @@ router.patch(
       payload: req.body,
     });
     return sendSuccess(res, withheldActivity(result, boqFigureAccess(req)));
+  }),
+);
+
+// PC-6 (core): the BOQ items the activity has an approved allocation of —
+// what a person on site records installed quantity against (the daily log's
+// quantities section, a quantity entry). Progress readers get the list; the
+// code, the allocation and the allocated quantity are the bill's and go to
+// BOQ readers only (withheldAllocatedItems).
+router.get(
+  '/:id/allocated-items',
+  requirePermission('progress', 'read'),
+  [param('id').isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    const result = await quantityProgressService.allocatedItemsFor({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      activityId: req.params.id,
+    });
+    return sendSuccess(res, withheldAllocatedItems(result, boqFigureAccess(req)));
   }),
 );
 
