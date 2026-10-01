@@ -109,9 +109,59 @@ Per BOQ item (and per activity, location, WBS group), three quantity columns wit
 
 Rule: installed ≥ certified is expected; certified > installed is an exception (over-certification — already tracked as `overCertificationAmount` on the certificate [C], now also visible in quantity).
 
+### 5.1 As shipped (PC-6 views, 2026-09-30) [C]
+
+`backend/src/services/quantity-views.service.js` is the one read-only composition of the five quantities, and
+`GET /projects/:id/boq/items/:itemId/quantities` (boq:read) and `GET /projects/:id/activities/:activityId/quantities`
+(schedule:read) its two routes; the PC-5 BOQ item detail's `quantities` section (`installed`, `certifiedQuantity`,
+`paid`, `received`, `issued`, `committedQuantity`, `comparisons`) and the activity detail's
+`progress.installedQuantity` are the same block (`controls-detail.service` calls `quantityBlocks` /
+`installedForActivity`; the "Not available yet (PC-6)" placeholders are gone, `forecast` still names PC-7). Every
+figure is
+
+```
+{ value, truth, basis, unitCode, unitMatch, derivedFrom, notAvailable?: { reason } }
+```
+
+— `unitCode` the unit the value is in, `unitMatch` whether that is the BOQ row's unit (`BoqItem.unitCode`, or the
+typed unit resolved against the organisation's unit list; `null` when nothing was counted). Five figures, five
+truths, from five owners, and no sixth that nets two of them:
+
+| Figure | Truth | Read from | Not available when |
+|---|---|---|---|
+| installed | derived | the core track's `quantity-progress.service installedByBoqItem` / `installedByActivity` (Σ **approved** `QuantityProgressEntry`; only approval counts), behind an adapter | the module is absent (`"PC-6 core pending"`); the activity is not measured by quantity (never % × quantity — approved entries on a percent activity notwithstanding) |
+| certified | source | Σ `IpcItem.qty` on the allocation summary's certified basis (`activity-boq-allocation certifiedIpcItemWhere`: status ∈ {certified, paid} on an approved, active allocation — the rows `certifiedValue` sums); `certified.subcontract` is "—" (`SubPayAppLine` has no quantity) | the viewer may not read `ipc` |
+| paid | projection | certified quantity × the certificate's paid share — `IpcCertificate.amountPaid ÷ netPayable`, capped at 1, the payment state `ipc.service syncPaymentState` keeps — pro-rata per certificate (`paid.certificates` lists each); money is paid per certificate, never per line | the viewer may not read `ipc` |
+| received | derived | Σ `StockTransaction` receipts naming the item, in the **inventory item's** unit | the viewer may not read `inventory`; the rows are in more than one unit |
+| issued | derived | Σ issues net of returns (the sign the inventory ledger gives each, `CONSUMPTION_SIGN`), `components { issued, returned }` | as received |
+| committed | derived | Σ `CommitmentSovLine.qty` on `commitment.service POSTING_STATUSES` (executed, closed), **"Committed quantity (excludes variations)"** — approved commitment change orders carry no quantity and no BOQ item (critic's correction of the rule in §6) | the viewer may not read `commitment`; a party-scoped member; mixed units |
+
+Rows in more than one unit are never summed: the figure is not available with `byUnit` (each unit's own sum).
+The activity view scopes each figure to the activity (installed per item from `installedByActivity`, certified and
+paid on the lines of its allocations, stock movements and SOV lines naming it) for every BOQ item of its approved
+allocations (`items[]`) and folds them into one activity-level figure only where every item's figure is in one
+unit (`byItem` always lists each). `comparisons.certifiedOverInstalled` is the rule above as a **raw flag** in one
+unit (`flag`, `certified`, `installed`, `unitCode`; `null` with the reason when either side is not available or the
+units differ) — the reviewed exception and the Change Event are PC-7b; the view writes no `ProjectException`,
+no change order, no budget or schedule change. `cutoffDate` bounds installed (`approvedAt`), certified
+(`certDate`, else the certificate's `certifiedAt`), the stock movements (`occurredAt`) and the activity's approved
+% complete; paid and committed are as of now and say so. One query per source for any number of items.
+
+BOQ access: `utils/boq-figures` (`QUANTITY_FIGURES_WITHHELD`, `withheldBoqItemQuantities`,
+`withheldActivityQuantities`, and the activity detail's `progress.installedQuantity`) withholds every per-item
+quantity — installed, certified, paid, received, issued, committed, the planned quantity and the comparison — from
+a member who may not read the BOQ; cost, IPC, inventory or commitment read does not unlock them. The answer is a
+dash with the reason, never zero; the activity's approved % complete and method are progress data and follow
+progress:read. Proof: `backend/src/services/__live__/pc-6-quantity-views.live.test.js` (LiveTest org; the
+seeded entries, the two certificates — one a quarter paid —, the receipt/issue/return, rebar in kg against tonnes,
+the draft commitment, the percent-method activity, the member without BOQ read, tenant 404s) and
+`pc-6-quantity-views-showcase.differential.live.test.js` (Marina Bay, read-only: every item's and activity's
+figures equal `listCommitments`, the certified basis, `listIpcCertificates` and `listTransactions`; rows identical
+before and after).
+
 ## 6. Committed and forecast quantity (§83-§84) [D]
 
-- **Committed quantity** (derived): Σ `CommitmentSovLine.quantity` for lines naming the BOQ item on executed/closed commitments, plus approved `CommitmentChangeOrder` line changes — the same recognition rule as committed cost (`commitment.service.js:29, 424-483`) [C]. `ProcurementOrder` quantities are shown as "ordered (not committed)" (three-truths §3.3).
+- **Committed quantity** (derived): Σ `CommitmentSovLine.quantity` for lines naming the BOQ item on executed/closed commitments — the same recognition rule as committed cost (`commitment.service.js:29, 424-483`) [C]. Approved `CommitmentChangeOrder` lines are **not** included: their `linesJson` entries carry an amount, a cost code, a budget line and an activity, but no quantity and no BOQ item (critic's correction), so the figure is labelled "Committed quantity (excludes variations)" and is not the committed cost (which includes them). `ProcurementOrder` quantities are shown as "ordered (not committed)" (three-truths §3.3). As shipped: §5.1.
 - **Forecast quantity** (projection): `max(BOQ qty, installed + remaining)` where `remaining = planned − installed` for quantity-method activities, and BOQ qty otherwise; basis label `remaining_from_installed | boq_quantity`. A typed forecast quantity (QS override, with reason) is allowed and labelled `typed`. Never feeds any money figure; EAC stays `revised BAC / CPI` and the other two labelled projections (`earned-value.service.js:146-172`; `cost.service.js:222-282`; `forecast.service.js:312-316`) [C].
 
 ## 7. What is not changed
