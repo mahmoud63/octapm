@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { StyleSheet, View } from 'react-native'
 import { useChangeEvent } from '@/api/commercial-hooks'
+import { changeEventFieldWithheld, changeEventLineWithheld, changeEventOriginLabel } from '@/api/commercial-types'
 import { userMessage } from '@/api/errors'
 import { useProjects } from '@/api/hooks'
 import { Comments } from '@/components/Comments'
@@ -53,7 +54,8 @@ export default function ChangeEventScreen() {
 
   return (
     <Screen contentStyle={styles.content} testID="screen-change-event">
-      <RecordHeader reference={e.ref} title={e.title} status={e.status} meta={[humanise(e.type), `From ${humanise(e.origin)}`, e.activity?.name, e.location?.name, e.ownerChange ? 'Owner-directed' : null].filter((v): v is string => !!v)} testID="change-event-header" />
+      {/* PC-7b: a withheld activity reads "—" with the server's reason where it would be — it never just disappears. */}
+      <RecordHeader reference={e.ref} title={e.title} status={e.status} meta={[humanise(e.type), `From ${changeEventOriginLabel(e.origin)}`, changeEventFieldWithheld(e, 'activityId') ? `Activity — ${e.sourceWithheld?.reason ?? ''}`.trim() : e.activity?.name, e.location?.name, e.ownerChange ? 'Owner-directed' : null].filter((v): v is string => !!v)} testID="change-event-header" />
       <View style={styles.kpis}>
         <KPI label="Rough order of magnitude" value={money(e.totals.rom, currency)} />
         <KPI label="Quoted" value={e.totals.quoted != null ? money(e.totals.quoted, currency) : '—'} />
@@ -79,6 +81,11 @@ export default function ChangeEventScreen() {
               </Text>
               <Button title="Open source" variant="ghost" onPress={() => (sourceRoute ? router.push(sourceRoute as never) : void openOnWeb(webPathForTarget({ projectId, module: 'commercial', recordType: e.sourceRecordType, recordId: e.sourceRecordId })))} />
             </View>
+          ) : e.sourceWithheld ? (
+            // PC-7b: the server withheld the source (and what came from it) from this member — "—" with its reason, never a bare origin.
+            <Text variant="caption" tone="muted" testID="change-event-source-withheld" accessibilityLabel={`Raised from — ${e.sourceWithheld.reason}`}>
+              Raised from — {e.sourceWithheld.reason}
+            </Text>
           ) : null}
           {e.voidReason ? <Fact label="Voided because" value={e.voidReason} /> : null}
         </View>
@@ -98,8 +105,13 @@ export default function ChangeEventScreen() {
               <View style={styles.grow}>
                 <Text>{l.description}</Text>
                 <Text variant="caption" tone="muted">
-                  {[l.activity?.name, l.commitment ? `${l.commitment.ref} ${l.commitment.vendorName ?? ''}`.trim() : null, l.quantity && l.unit ? `${l.quantity} ${l.unit}` : null].filter(Boolean).join(' · ')}
+                  {[l.activity?.name, l.commitment ? `${l.commitment.ref} ${l.commitment.vendorName ?? ''}`.trim() : null, l.quantity != null && l.unit ? `${l.quantity} ${l.unit}` : null].filter(Boolean).join(' · ')}
                 </Text>
+                {changeEventLineWithheld(e, l.id) ? (
+                  <Text variant="caption" tone="muted" testID={`change-event-line-withheld-${l.id}`}>
+                    — {e.sourceWithheld?.reason}
+                  </Text>
+                ) : null}
               </View>
               <Text>{money(l.amount, currency)}</Text>
             </View>

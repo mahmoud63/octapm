@@ -1,7 +1,8 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useMemo, useState } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { Pressable, StyleSheet, View } from 'react-native'
 import { useChangeOrders } from '@/api/commercial-hooks'
+import type { ChangeOrderRelatedRecords } from '@/api/commercial-types'
 import { userMessage } from '@/api/errors'
 import { useProjects } from '@/api/hooks'
 import type { AttachmentRef } from '@/api/quality-types'
@@ -10,7 +11,7 @@ import { History } from '@/components/History'
 import { RecordHeader } from '@/components/RecordHeader'
 import { Screen } from '@/components/Screen'
 import { EvidenceCard, Fact } from '@/components/WorkflowRecordCard'
-import { Badge, Button, Card, ErrorState, KPI, SkeletonList, Text, spacing } from '@/design-system'
+import { Badge, Button, Card, ErrorState, KPI, SkeletonList, Text, spacing, useTheme } from '@/design-system'
 import { openOnWeb, webPathForTarget } from '@/navigation/links'
 import { useProjectStore } from '@/projects/store'
 import { day, humanise, money } from '@/utilities/format'
@@ -68,12 +69,13 @@ export default function ChangeOrderScreen() {
         <View style={styles.stack}>
           <Fact label="Schedule impact" value={o.scheduleImpactSummary} />
           <Fact label="Cost impact" value={o.costImpactSummary} />
-          <Fact label="Activities" value={(o.activityLinks ?? []).map((l) => l.activity?.name).filter(Boolean).join(', ') || o.activity?.name || null} />
+          {o.relatedRecords ? null : <Fact label="Activities" value={(o.activityLinks ?? []).map((l) => l.activity?.name).filter(Boolean).join(', ') || o.activity?.name || null} />}
           <Fact label="Raised by" value={o.raisedBy} />
           <Fact label="Approval comment" value={o.approvalComment ?? null} />
           <Fact label="Rejected because" value={o.rejectedReason} />
         </View>
       </Card>
+      {o.relatedRecords ? <RelatedRecordsCard related={o.relatedRecords} onOpenActivity={(activityId) => router.push(`/activities/${activityId}` as never)} /> : null}
       <EvidenceCard refs={(o.attachmentRefs ?? []) as AttachmentRef[]} onOpenFailed={setOpenFailure} empty="Nothing attached to this change order." testIDPrefix="change-order-evidence" />
       {openFailure ? (
         <Text tone="error" accessibilityRole="alert" testID="change-order-open-failure">
@@ -94,8 +96,69 @@ export default function ChangeOrderScreen() {
   )
 }
 
+const RELATION_LABEL: Record<string, string> = {
+  direct: 'Direct',
+  activity_link: 'Activity link',
+  via_allocation: 'Via a BOQ allocation',
+}
+
+/**
+ * What the order reaches (PC-7b / R5-5), as the server composed it: one row
+ * per activity — direct, through an activity link, or only through a BOQ
+ * allocation (marked) — each opening the activity, and the BOQ items its
+ * allocation links name. For a member who may not read the BOQ the server
+ * leaves out the BOQ items and the allocation-only activities and says so
+ * (`boqWithheld`): that reads "—" with its reason, every activity they may
+ * see stays, and "None" is said only of an order that truly reaches nothing.
+ */
+function RelatedRecordsCard({ related, onOpenActivity }: { related: ChangeOrderRelatedRecords; onOpenActivity: (activityId: string) => void }) {
+  const theme = useTheme()
+  const withheld = related.boqWithheld ?? null
+  const boqItems = withheld ? [] : (related.boqItems ?? [])
+  return (
+    <Card>
+      <View style={styles.stack} testID="change-order-related">
+        <Text variant="label" label tone="muted">
+          Activities it reaches
+        </Text>
+        {related.activities.map((a) => (
+          <Pressable key={a.id} accessibilityRole="button" onPress={() => onOpenActivity(a.id)} style={[styles.line, { borderColor: theme.colors.border }]} testID={`change-order-related-activity-${a.id}`}>
+            <Text>{a.code ? `${a.code} · ${a.name ?? a.id}` : (a.name ?? a.id)}</Text>
+            <Text variant="caption" tone="muted" testID={`change-order-related-activity-${a.id}-relation`}>
+              {[RELATION_LABEL[a.relation] ?? a.relation, a.impactDays != null ? `${a.impactDays} d` : null].filter(Boolean).join(' · ')}
+            </Text>
+          </Pressable>
+        ))}
+        {related.activities.length === 0 && !withheld ? (
+          <Text tone="muted" testID="change-order-related-none">
+            None
+          </Text>
+        ) : null}
+        {withheld ? (
+          <Text variant="caption" tone="muted" testID="change-order-related-withheld">
+            {`— ${withheld.reason}`}
+          </Text>
+        ) : null}
+        {boqItems.length > 0 ? (
+          <View style={styles.stack} testID="change-order-related-boq">
+            <Text variant="label" label tone="muted">
+              BOQ items through its allocations
+            </Text>
+            {boqItems.map((b) => (
+              <Text key={b.id} testID={`change-order-related-boq-${b.id}`}>
+                {[b.code, b.description].filter(Boolean).join(' · ') || b.id}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+      </View>
+    </Card>
+  )
+}
+
 const styles = StyleSheet.create({
   content: { gap: spacing.md },
+  line: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: spacing.xs, gap: 2 },
   kpis: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   stack: { gap: spacing.sm },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },

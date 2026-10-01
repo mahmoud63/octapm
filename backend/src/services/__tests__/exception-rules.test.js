@@ -91,22 +91,67 @@ beforeEach(() => {
 });
 
 describe("the registry", () => {
-  it("loads the nine §1 kinds from the rule files, each with its module and BOQ flag", () => {
+  // Every kind the folder states, by name: [file, module, boqDerived]. The §1
+  // overrun kinds (quantity.js, money.js, schedule.js) and the §7
+  // data-quality kinds (data-quality.js) are rules of the one registry.
+  const OVERRUN_KINDS = Object.freeze({
+    quantity_over_allocation: ["quantity.js", "boq", true],
+    quantity_over_boq: ["quantity.js", "boq", true],
+    certified_over_installed: ["quantity.js", "boq", true],
+    allocation_over_capacity: ["quantity.js", "boq", true],
+    certified_over_earned: ["money.js", "cost", true],
+    committed_over_budget: ["money.js", "cost", false],
+    actual_over_committed: ["money.js", "cost", false],
+    forecast_over_revised: ["money.js", "cost", false],
+    schedule_slip_on_mapped_item: ["schedule.js", "schedule", true],
+  });
+  const DATA_QUALITY_KINDS = Object.freeze({
+    budget_truths_disagree: ["data-quality.js", "cost", false],
+    forecast_without_provenance: ["data-quality.js", "cost", true],
+    activity_budget_mismatch: ["data-quality.js", "cost", true],
+    equipment_cost_unposted: ["data-quality.js", "cost", false],
+    unit_unresolved: ["data-quality.js", "boq", true],
+    unit_mismatch: ["data-quality.js", "boq", true],
+    structure_missing: ["data-quality.js", "boq", true],
+    progress_stale: ["data-quality.js", "progress", false],
+    period_not_locked: ["data-quality.js", "cost", false],
+    ev_basis_divergence: ["data-quality.js", "cost", true],
+    readiness_override_active: ["data-quality.js", "cost", true],
+    orphan_change_link: ["data-quality.js", "change_order", false],
+    change_order_possible_duplicate: ["data-quality.js", "change_order", false],
+  });
+
+  it("loads the §1 overrun kinds and the §7 data-quality kinds by name, each from its file with its module and BOQ flag — and nothing else", () => {
     const meta = registry.kindMeta();
-    expect(Object.keys(meta).sort()).toEqual([
-      "actual_over_committed",
-      "allocation_over_capacity",
-      "certified_over_earned",
-      "certified_over_installed",
-      "committed_over_budget",
-      "forecast_over_revised",
-      "quantity_over_allocation",
-      "quantity_over_boq",
-      "schedule_slip_on_mapped_item",
-    ]);
-    for (const kind of ["quantity_over_allocation", "quantity_over_boq", "certified_over_installed", "allocation_over_capacity", "certified_over_earned"]) expect(meta[kind].boqDerived).toBe(true);
-    for (const kind of ["committed_over_budget", "actual_over_committed", "forecast_over_revised", "schedule_slip_on_mapped_item"]) expect(meta[kind].boqDerived).toBe(false);
-    expect([meta.quantity_over_boq.module, meta.committed_over_budget.module, meta.schedule_slip_on_mapped_item.module, meta.certified_over_earned.module]).toEqual(["boq", "cost", "schedule", "cost"]);
+    const expected = { ...OVERRUN_KINDS, ...DATA_QUALITY_KINDS };
+    expect(Object.keys(meta).sort()).toEqual(Object.keys(expected).sort());
+    const files = Object.fromEntries(registry.getRules().map((rule) => [rule.kind, rule.file]));
+    for (const [kind, [file, module, boqDerived]] of Object.entries(expected)) {
+      expect([kind, files[kind], meta[kind].module, meta[kind].boqDerived]).toEqual([kind, file, module, boqDerived]);
+    }
+    // committed_definition_mixed is gone (PC-7b integration K): its evidence no longer exists.
+    expect(meta).not.toHaveProperty("committed_definition_mixed");
+    // The data-quality file states exactly the §7 kinds (its own list agrees).
+    expect([...require("../exception-rules/data-quality").DATA_QUALITY_KINDS].sort()).toEqual(Object.keys(DATA_QUALITY_KINDS).sort());
+  });
+
+  it("refuses the real rule files when a kind is defined twice across them", () => {
+    const fs = require("fs");
+    const os = require("os");
+    const path = require("path");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rules-real-"));
+    try {
+      const real = path.join(__dirname, "..", "exception-rules");
+      for (const file of ["quantity.js", "money.js", "schedule.js", "data-quality.js"]) {
+        fs.writeFileSync(path.join(dir, file), `module.exports = require(${JSON.stringify(path.join(real, file))});`);
+      }
+      expect(registry.loadRules(dir).length).toBe(Object.keys(OVERRUN_KINDS).length + Object.keys(DATA_QUALITY_KINDS).length);
+      // A second definition of a data-quality kind, beside the real files.
+      fs.writeFileSync(path.join(dir, "zz-duplicate.js"), "module.exports = [{ kind: 'progress_stale', severity: 'info', subjectType: 'activity', module: 'progress', boqDerived: false, evaluate: async () => [] }];");
+      expect(() => registry.loadRules(dir)).toThrow(/exception rule progress_stale is defined in data-quality\.js and zz-duplicate\.js/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("refuses a rule file that is not an array, a malformed rule and a kind defined twice", () => {
@@ -168,7 +213,11 @@ describe("quantity_over_allocation", () => {
 
   it("an activity not measured by quantity, or inactive, is not read; another unit is never compared", async () => {
     prisma.activityProgressMethod.findMany.mockResolvedValue([{ activityId: "act-1", method: "percent" }]);
-    expect(await run("quantity_over_allocation")).toEqual([]);
+    let rows = await run("quantity_over_allocation");
+    expect(rows).toEqual([]);
+    // Not comparable (PC-7b integration G): the allocation is named with the reason, never "no gap".
+    expect(rows.notComparable).toEqual([{ subjectType: "allocation", subjectId: "alloc-1", reason: expect.stringMatching(/not measured by quantity/) }]);
+    expect(Object.keys(rows)).toEqual([]);
     expect(quantityCore.installedByActivity).not.toHaveBeenCalled();
     prisma.activityProgressMethod.findMany.mockResolvedValue([{ activityId: "act-1", method: "quantity" }]);
     prisma.activity.findMany.mockResolvedValue([activityRow({ isActive: false })]);
@@ -176,8 +225,18 @@ describe("quantity_over_allocation", () => {
     prisma.activity.findMany.mockResolvedValue([activityRow()]);
     quantityCore.installedByActivity.mockResolvedValue(installed(900, "t"));
     const ctx = context();
-    expect(await run("quantity_over_allocation", ctx)).toEqual([]);
+    rows = await run("quantity_over_allocation", ctx);
+    expect(rows).toEqual([]);
+    expect(rows.notComparable).toEqual([{ subjectType: "allocation", subjectId: "alloc-1", reason: expect.stringMatching(/not in the allocation's unit/) }]);
     expect(ctx.notes.join(" ")).toMatch(/not in the allocation's unit/);
+  });
+
+  it("two approved allocations of one item on one activity: neither is compared, both are not comparable", async () => {
+    allocationService.listAllocations.mockResolvedValue({ allocations: [allocation(), allocation({ id: "alloc-2" })], summary: { items: [] } });
+    quantityCore.installedByActivity.mockResolvedValue(installed(900));
+    const rows = await run("quantity_over_allocation");
+    expect(rows).toEqual([]);
+    expect(rows.notComparable.map((entry) => [entry.subjectId, /not knowable/.test(entry.reason)])).toEqual([["alloc-1", true], ["alloc-2", true]]);
   });
 });
 
@@ -212,11 +271,18 @@ describe("quantity_over_boq and certified_over_installed (the quantity views' fi
     expect(await run("quantity_over_boq")).toEqual([]);
   });
 
-  it("quantity_over_boq: an installed figure that is not available, or not in the row's unit, is never compared", async () => {
+  it("quantity_over_boq: an installed figure that is not available, or not in the row's unit, is never compared — and is said not comparable", async () => {
     quantityViews.quantityBlocks.mockResolvedValue({ blocks: block({ installedValue: null }) });
-    expect(await run("quantity_over_boq")).toEqual([]);
+    let rows = await run("quantity_over_boq");
+    expect(rows).toEqual([]);
+    expect(rows.notComparable).toEqual([{ subjectType: "boq_item", subjectId: "item-1", reason: expect.stringMatching(/installed is not available/) }]);
     quantityViews.quantityBlocks.mockResolvedValue({ blocks: block({ installed: 500, unitMatch: false }) });
-    expect(await run("quantity_over_boq")).toEqual([]);
+    rows = await run("quantity_over_boq");
+    expect(rows).toEqual([]);
+    expect(rows.notComparable).toEqual([{ subjectType: "boq_item", subjectId: "item-1", reason: expect.stringMatching(/nothing is compared across units/) }]);
+    // Measured and within: comparable, nothing to say.
+    quantityViews.quantityBlocks.mockResolvedValue({ blocks: block({ installed: 50 }) });
+    expect((await run("quantity_over_boq")).notComparable).toEqual([]);
   });
 
   it("certified_over_installed: the views' raw comparison, raised only when every approved allocation of the item is on a quantity-method activity", async () => {
@@ -232,10 +298,14 @@ describe("quantity_over_boq and certified_over_installed (the quantity views' fi
     expect(rows[0].severity).toBeUndefined();
     expect(rule("certified_over_installed").severity).toBe("critical");
     prisma.activityProgressMethod.findMany.mockResolvedValue([{ activityId: "act-1", method: "percent" }]);
-    expect(await run("certified_over_installed")).toEqual([]);
+    const off = await run("certified_over_installed");
+    expect(off).toEqual([]);
+    expect(off.notComparable).toEqual([{ subjectType: "boq_item", subjectId: "item-1", reason: expect.stringMatching(/not every approved allocation/) }]);
     prisma.activityProgressMethod.findMany.mockResolvedValue([{ activityId: "act-1", method: "quantity" }]);
     quantityViews.quantityBlocks.mockResolvedValue({ blocks: block({ installed: 10, certified: 20, flag: false }) });
-    expect(await run("certified_over_installed")).toEqual([]);
+    const within = await run("certified_over_installed");
+    expect(within).toEqual([]);
+    expect(within.notComparable).toEqual([]);
   });
 });
 
@@ -304,7 +374,12 @@ describe("money kinds", () => {
       ["project", PROJECT, "critical", 1250, 1000],
       ["budget_line", "line-1", "warning", 1100, 1000],
     ]);
-    expect(rows[1].measured.basis).toMatch(/typed forecast/);
+    expect(rows[1].measured.basis).toMatch(/entered \(typed\) forecast/);
+    // The register's DEFAULT forecast above revised is committed or actual restated: never a row of its own.
+    budgetService.listBudgetLines.mockResolvedValue({ items: [line({ id: "line-4", forecast: 1600, forecastIsManual: false, committed: 1600 })] });
+    evService.buildOfficialEvReport.mockResolvedValue({ eac: 1000, totalBudget: 1000, cpi: 1 });
+    expect(await run("forecast_over_revised")).toEqual([]);
+    evService.buildOfficialEvReport.mockResolvedValue({ eac: 1250, totalBudget: 1000, cpi: 0.8, spi: 1, eacBasis: "revised_bac_over_cpi", reporting: { cutoffLocalDate: "2026-09-30", isSnapshot: false } });
     evService.buildOfficialEvReport.mockResolvedValue({ eac: 1050, totalBudget: 1000, cpi: 0.95 });
     budgetService.listBudgetLines.mockResolvedValue({ items: [] });
     expect((await run("forecast_over_revised"))[0].severity).toBe("warning");

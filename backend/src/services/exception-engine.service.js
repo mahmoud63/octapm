@@ -17,10 +17,24 @@
  *     the measured figure has not moved past the dismissed one in the adverse
  *     (upward) direction: then nothing is written. A worsening opens a NEW
  *     open row that names the dismissed one (dataJson.reopenedFrom); the
- *     person's dismissal stays as they left it;
+ *     person's dismissal stays as they left it. A rule whose measured figure
+ *     grows by itself (elapsed days) names the EPISODE instead, in
+ *     data.dismissalKey: then the key decides — the same key stays
+ *     dismissed whatever the figure, a new key (a new episode) reopens;
  *   - an open row whose kind was evaluated and whose subject was not found
  *     again is resolved: resolvedAt = now, resolvedReason 'cleared'. A kind
- *     whose rule was skipped (its source absent) or failed keeps its rows.
+ *     whose rule was skipped (its source absent) or failed keeps its rows;
+ *   - a subject whose latest resolved row is a DISMISSAL and that its
+ *     evaluated kind no longer finds (the condition cleared) has the release
+ *     recorded on that row (dataJson.dismissalReleasedAt and
+ *     dismissalReleaseTrigger): the dismissal was of that occurrence, so a
+ *     later recurrence opens a fresh row instead of being suppressed by it;
+ *   - an open row whose subject the rule says it can NO LONGER MEASURE (the
+ *     rule's notComparable list: an activity off the quantity method,
+ *     installed in another unit or not available, mixed allocations) is
+ *     resolved resolvedReason 'not_comparable' with the rule's reason
+ *     (dataJson.notComparable) — never 'cleared': nobody can say the gap
+ *     closed.
  *
  * The engine writes ProjectException rows and nothing else: no change order,
  * no budget, schedule, forecast or EAC figure, no audit event, no domain
@@ -39,9 +53,10 @@ const registry = require("./exception-rules");
 const { QUANTITY_TOLERANCE } = require("./exception-rules/_thresholds");
 
 const RESOLVED_CLEARED = "cleared";
+const RESOLVED_NOT_COMPARABLE = "not_comparable";
 const DISMISSED_PREFIX = "dismissed:";
 // dataJson keys the engine and the dismissal own; a rule's data never uses them.
-const RESERVED_DATA_KEYS = Object.freeze(["dismissal", "reopenedFrom"]);
+const RESERVED_DATA_KEYS = Object.freeze(["dismissal", "reopenedFrom", "dismissalReleasedAt", "dismissalReleaseTrigger", "notComparable"]);
 const TRIGGERS = Object.freeze(["event", "scheduled", "manual", "test"]);
 const DEBOUNCE_MS = 30_000;
 const TRANSACTION_OPTIONS = Object.freeze({ maxWait: 15_000, timeout: 120_000 });
@@ -109,6 +124,7 @@ const normalizeFinding = (rule, raw) => {
   const data = raw.data === undefined || raw.data === null ? {} : raw.data;
   if (typeof data !== "object" || Array.isArray(data)) fail("data must be an object");
   for (const key of RESERVED_DATA_KEYS) if (data[key] !== undefined) fail(`data.${key} is reserved for the engine`);
+  if (data.dismissalKey !== undefined && (typeof data.dismissalKey !== "string" || !data.dismissalKey.trim())) fail("data.dismissalKey, when given, must be a non-empty string naming the episode");
   const groupKeys = raw.groupKeys || {};
   return {
     kind: rule.kind,
@@ -127,6 +143,24 @@ const normalizeFinding = (rule, raw) => {
     limitBasis: String(raw.limit.basis).trim(),
     data: JSON.parse(JSON.stringify(data)),
   };
+};
+
+/**
+ * A rule's "cannot measure this subject now" entry, checked: the subject (and
+ * secondary subject) as a finding names it, and the reason, in words.
+ */
+const normalizeNotComparable = (rule, raw) => {
+  const fail = (message) => {
+    throw new Error(`exception rule ${rule.kind}: notComparable ${message}`);
+  };
+  if (!raw || typeof raw !== "object") fail("entries must be objects");
+  const subjectType = trimOrNull(raw.subjectType) || fail("needs a subjectType");
+  const subjectId = trimOrNull(raw.subjectId) || fail("needs a subjectId");
+  const secondarySubjectType = trimOrNull(raw.secondarySubjectType);
+  const secondarySubjectId = trimOrNull(raw.secondarySubjectId);
+  if (Boolean(secondarySubjectType) !== Boolean(secondarySubjectId)) fail("needs both a secondary type and id, or neither");
+  const reason = trimOrNull(raw.reason) || fail("needs a reason: why the subject cannot be measured now");
+  return { kind: rule.kind, subjectType, subjectId, secondarySubjectType, secondarySubjectId, reason: reason.slice(0, 500) };
 };
 
 // What a refresh compares: everything a rule states about the subject.
@@ -158,6 +192,8 @@ const fingerprintOfRow = (row) =>
   });
 
 const isDismissed = (row) => typeof row?.resolvedReason === "string" && row.resolvedReason.startsWith(DISMISSED_PREFIX);
+/** A dismissal whose condition has since cleared: it no longer holds a recurrence back. */
+const isReleased = (row) => Boolean(row?.dataJson && typeof row.dataJson === "object" && row.dataJson.dismissalReleasedAt);
 
 /** The measured figure a dismissal was made against: its fingerprint, else the frozen row's own. */
 const dismissedMeasured = (row) => {
@@ -167,6 +203,31 @@ const dismissedMeasured = (row) => {
 
 /** A dismissed condition comes back only when its measured figure has moved past the dismissed one, upwards. */
 const worsenedSince = (finding, dismissedRow) => Number(finding.measured) > dismissedMeasured(dismissedRow) + QUANTITY_TOLERANCE;
+
+/**
+ * The episode a finding belongs to, when its rule names one (data.dismissalKey):
+ * a measured figure that grows by itself — days since the latest approved
+ * progress, days since a period's cutoff — cannot say "worse than when it was
+ * dismissed", so the rule names what the person dismissed (that progress, that
+ * period) instead.
+ */
+const dismissalKeyOf = (data) => {
+  const key = data && typeof data === "object" ? data.dismissalKey : undefined;
+  return typeof key === "string" && key.trim() ? key.trim() : null;
+};
+
+/**
+ * Whether a finding reopens a dismissed subject. With an episode key on both
+ * sides: only a NEW key reopens (the same episode stays dismissed whatever the
+ * figure says); otherwise the measured figure must have moved past the
+ * dismissed one (worsenedSince).
+ */
+const reopensDismissal = (finding, dismissedRow) => {
+  const now = dismissalKeyOf(finding.data);
+  const then = dismissalKeyOf(dismissedRow?.dataJson);
+  if (now && then) return now !== then;
+  return worsenedSince(finding, dismissedRow);
+};
 
 /** The status the readers show: dismissed / resolved / in_change / snoozed / open. */
 const statusOf = (row, now = new Date()) => {
@@ -183,11 +244,15 @@ const isSnoozed = (row, now) => Boolean(row?.snoozedUntil && new Date(row.snooze
 /**
  * What the findings mean for the stored rows. `open` is every open row of the
  * project; `latestResolved` maps a subject key to its latest resolved row;
- * `evaluatedKinds` are the kinds whose rules ran to the end.
+ * `evaluatedKinds` are the kinds whose rules ran to the end; `dismissedLatest`
+ * are the dismissed rows that are the latest resolved row of their subject
+ * (readReleasableDismissals) — each one whose subject is not found again by
+ * its evaluated kind, and has no open row, is released.
  */
-const planChanges = ({ findings, open, latestResolved, evaluatedKinds }) => {
+const planChanges = ({ findings, open, latestResolved, evaluatedKinds, dismissedLatest = [], notComparable = [] }) => {
   const openByKey = new Map(open.map((row) => [keyOf(row), row]));
-  const plan = { create: [], refresh: [], touch: [], resolve: [], suppressed: [] };
+  const plan = { create: [], refresh: [], touch: [], resolve: [], suppressed: [], release: [], notComparable: [] };
+  const unmeasurable = new Map(notComparable.map((entry) => [keyOf(entry), entry]));
   const seen = new Set();
   for (const finding of findings) {
     const key = keyOf(finding);
@@ -199,8 +264,8 @@ const planChanges = ({ findings, open, latestResolved, evaluatedKinds }) => {
       continue;
     }
     const previous = latestResolved.get(key) || null;
-    if (previous && isDismissed(previous)) {
-      if (!worsenedSince(finding, previous)) {
+    if (previous && isDismissed(previous) && !isReleased(previous)) {
+      if (!reopensDismissal(finding, previous)) {
         plan.suppressed.push({ dismissed: previous, finding });
         continue;
       }
@@ -210,7 +275,16 @@ const planChanges = ({ findings, open, latestResolved, evaluatedKinds }) => {
     plan.create.push({ finding, reopenedFrom: null });
   }
   for (const row of open) {
-    if (!seen.has(keyOf(row)) && evaluatedKinds.has(row.kind)) plan.resolve.push(row);
+    if (seen.has(keyOf(row)) || !evaluatedKinds.has(row.kind)) continue;
+    // Not found because the rule cannot measure it now: not cleared.
+    const entry = unmeasurable.get(keyOf(row));
+    if (entry) plan.notComparable.push({ row, reason: entry.reason });
+    else plan.resolve.push(row);
+  }
+  for (const row of dismissedLatest) {
+    if (!isDismissed(row) || isReleased(row) || !evaluatedKinds.has(row.kind)) continue;
+    if (seen.has(keyOf(row)) || openByKey.has(keyOf(row)) || unmeasurable.has(keyOf(row))) continue;
+    plan.release.push(row);
   }
   return plan;
 };
@@ -283,6 +357,7 @@ const buildContext = ({ project, cutoff, now }) => {
 /** Runs the rules one after another; a rule that fails or whose source is absent leaves its kind's rows alone. */
 const runRules = async ({ rules, ctx, log }) => {
   const findings = [];
+  const notComparable = [];
   const evaluatedKinds = new Set();
   const skipped = [];
   const errors = [];
@@ -308,14 +383,20 @@ const runRules = async ({ rules, ctx, log }) => {
         keys.add(key);
         ruleFindings.push(finding);
       }
+      // A rule may say which subjects it cannot measure now: raw.notComparable
+      // (an array carried beside its rows), never a finding of its own.
+      const unmeasured = raw.notComparable === undefined ? [] : raw.notComparable;
+      if (!Array.isArray(unmeasured)) throw new Error(`exception rule ${rule.kind}: notComparable must be an array`);
+      const ruleNotComparable = unmeasured.map((entry) => normalizeNotComparable(rule, entry)).filter((entry) => !keys.has(keyOf(entry)));
       findings.push(...ruleFindings);
+      notComparable.push(...ruleNotComparable);
       evaluatedKinds.add(rule.kind);
     } catch (error) {
       errors.push({ kind: rule.kind, message: error?.message || String(error) });
       log(`rule ${rule.kind} failed: ${error?.message || error}`);
     }
   }
-  return { findings, evaluatedKinds, skipped, errors };
+  return { findings, notComparable, evaluatedKinds, skipped, errors };
 };
 
 const readLatestResolved = async ({ client, orgId, projectId, findings, openKeys }) => {
@@ -337,6 +418,26 @@ const readLatestResolved = async ({ client, orgId, projectId, findings, openKeys
     if (!latest.has(key)) latest.set(key, row);
   }
   return latest;
+};
+
+/**
+ * The dismissed rows of the evaluated kinds that are still the latest resolved
+ * row of their subject and not released yet: the candidates for a release.
+ */
+const readReleasableDismissals = async ({ client, orgId, projectId, evaluatedKinds }) => {
+  if (!evaluatedKinds.size) return [];
+  const kinds = [...evaluatedKinds];
+  const dismissed = (
+    await client.projectException.findMany({ where: { orgId, projectId, resolvedAt: { not: null }, kind: { in: kinds }, resolvedReason: { startsWith: DISMISSED_PREFIX } } })
+  ).filter((row) => isDismissed(row) && !isReleased(row));
+  if (!dismissed.length) return [];
+  const resolved = await client.projectException.findMany({
+    where: { orgId, projectId, resolvedAt: { not: null }, kind: { in: [...new Set(dismissed.map((row) => row.kind))] }, subjectId: { in: [...new Set(dismissed.map((row) => row.subjectId))] } },
+    orderBy: [{ resolvedAt: "desc" }, { createdAt: "desc" }],
+  });
+  const latest = new Map();
+  for (const row of resolved) if (!latest.has(keyOf(row))) latest.set(keyOf(row), row);
+  return dismissed.filter((row) => latest.get(keyOf(row))?.id === row.id);
 };
 
 const rowSummary = (row, change, now) => ({
@@ -366,7 +467,7 @@ const findingData = (finding) => ({
   limitBasis: finding.limitBasis,
 });
 
-const applyPlan = async ({ tx, plan, project, now }) => {
+const applyPlan = async ({ tx, plan, project, now, trigger }) => {
   const opened = [];
   const refreshed = [];
   for (const { finding, reopenedFrom } of plan.create) {
@@ -403,6 +504,22 @@ const applyPlan = async ({ tx, plan, project, now }) => {
   if (touchIds.length) {
     await tx.projectException.updateMany({ where: { id: { in: touchIds }, projectId: project.id, resolvedAt: null }, data: { lastSeenAt: now } });
   }
+  for (const row of plan.release) {
+    await tx.projectException.updateMany({
+      where: { id: row.id, projectId: project.id, resolvedAt: { not: null } },
+      data: { dataJson: { ...(row.dataJson && typeof row.dataJson === "object" ? row.dataJson : {}), dismissalReleasedAt: now.toISOString(), dismissalReleaseTrigger: trigger } },
+    });
+  }
+  for (const { row, reason } of plan.notComparable) {
+    await tx.projectException.updateMany({
+      where: { id: row.id, projectId: project.id, resolvedAt: null },
+      data: {
+        resolvedAt: now,
+        resolvedReason: RESOLVED_NOT_COMPARABLE,
+        dataJson: { ...(row.dataJson && typeof row.dataJson === "object" ? row.dataJson : {}), notComparable: { reason, at: now.toISOString(), trigger } },
+      },
+    });
+  }
   const resolveIds = plan.resolve.map((row) => row.id);
   if (resolveIds.length) {
     await tx.projectException.updateMany({
@@ -424,12 +541,13 @@ const evaluateProject = async ({ orgId, projectId, cutoff = null, trigger = "man
   const resolvedCutoff = await resolveCutoff({ cutoff, orgId, projectId });
   const ctx = buildContext({ project, cutoff: resolvedCutoff, now });
   const log = (message) => logger?.log?.(`[exception-engine] ${project.id}: ${message}`);
-  const { findings, evaluatedKinds, skipped, errors } = await runRules({ rules: rules || registry.getRules(), ctx, log });
+  const { findings, notComparable, evaluatedKinds, skipped, errors } = await runRules({ rules: rules || registry.getRules(), ctx, log });
 
   const reconcile = async (client) => {
     const open = await client.projectException.findMany({ where: { orgId, projectId, resolvedAt: null } });
     const latestResolved = await readLatestResolved({ client, orgId, projectId, findings, openKeys: new Set(open.map(keyOf)) });
-    return planChanges({ findings, open, latestResolved, evaluatedKinds });
+    const dismissedLatest = await readReleasableDismissals({ client, orgId, projectId, evaluatedKinds });
+    return planChanges({ findings, open, latestResolved, evaluatedKinds, dismissedLatest, notComparable });
   };
 
   const base = {
@@ -453,12 +571,16 @@ const evaluateProject = async ({ orgId, projectId, cutoff = null, trigger = "man
       resolved: plan.resolve.length,
       unchanged: plan.touch.length,
       suppressed: plan.suppressed.length,
+      released: plan.release.length,
+      notComparable: plan.notComparable.length,
       rows: [
         ...plan.create.map(({ finding, reopenedFrom }) => rowSummary(finding, reopenedFrom ? "reopen" : "open", now)),
         ...plan.refresh.map(({ existing, finding }) => ({ ...rowSummary(finding, "refresh", now), id: existing.id, snoozed: isSnoozed(existing, now) })),
         ...plan.touch.map(({ existing }) => rowSummary(existing, "unchanged", now)),
         ...plan.resolve.map((row) => rowSummary(row, "resolve", now)),
         ...plan.suppressed.map(({ dismissed, finding }) => ({ ...rowSummary(finding, "suppressed", now), id: null, dismissedId: dismissed.id })),
+        ...plan.release.map((row) => rowSummary(row, "release", now)),
+        ...plan.notComparable.map(({ row, reason }) => ({ ...rowSummary(row, "not_comparable", now), reason })),
       ],
     };
   }
@@ -468,7 +590,7 @@ const evaluateProject = async ({ orgId, projectId, cutoff = null, trigger = "man
     // the database, and the lock keeps two evaluations from racing into it.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`project-exceptions:${projectId}`}))`;
     const plan = await reconcile(tx);
-    const applied = await applyPlan({ tx, plan, project, now });
+    const applied = await applyPlan({ tx, plan, project, now, trigger: base.trigger });
     return { plan, applied };
   }, TRANSACTION_OPTIONS);
 
@@ -484,11 +606,15 @@ const evaluateProject = async ({ orgId, projectId, cutoff = null, trigger = "man
     resolved: plan.resolve.length,
     unchanged: plan.touch.length,
     suppressed: plan.suppressed.length,
+    released: plan.release.length,
+    notComparable: plan.notComparable.length,
     rows: [
       ...opened,
       ...applied.refreshed.map(({ row }) => rowSummary(row, "refresh", now)),
       ...plan.touch.map(({ existing }) => rowSummary(existing, "unchanged", now)),
       ...plan.resolve.map((row) => rowSummary(row, "resolve", now)),
+      ...plan.release.map((row) => rowSummary(row, "release", now)),
+      ...plan.notComparable.map(({ row, reason }) => ({ ...rowSummary(row, "not_comparable", now), reason })),
     ],
   };
   if (opened.length || escalated.length) await notifyListeners({ orgId, projectId, trigger: result.trigger, opened, escalated });
@@ -587,7 +713,7 @@ const runEvaluationJob = async ({ job, log = () => {} }) => {
   if (!job?.orgId || !job?.projectId) throw new HttpError(400, "VALIDATION_ERROR", "An exceptions.evaluate job names its organisation and project");
   const payload = job.payload || job.payloadJson || {};
   const result = await evaluateProject({ orgId: job.orgId, projectId: job.projectId, trigger: TRIGGERS.includes(payload.trigger) ? payload.trigger : "event" });
-  log(`opened ${result.opened}, refreshed ${result.refreshed}, resolved ${result.resolved}, unchanged ${result.unchanged}, suppressed ${result.suppressed}`);
+  log(`opened ${result.opened}, refreshed ${result.refreshed}, resolved ${result.resolved}, unchanged ${result.unchanged}, suppressed ${result.suppressed}, released ${result.released}, not comparable ${result.notComparable}`);
   const { rows, ...counts } = result;
   return { ...counts, rows: rows.length };
 };
@@ -597,6 +723,7 @@ module.exports = {
   DISMISSED_PREFIX,
   RESERVED_DATA_KEYS,
   RESOLVED_CLEARED,
+  RESOLVED_NOT_COMPARABLE,
   TRIGGERS,
   engineEnabled,
   enqueueEvaluation,
@@ -604,10 +731,13 @@ module.exports = {
   fingerprintOfFinding,
   fingerprintOfRow,
   isDismissed,
+  isReleased,
+  dismissalKeyOf,
   keyOf,
   normalizeFinding,
   planChanges,
   registerEvaluationListener,
+  reopensDismissal,
   runEvaluationJob,
   setDismissed,
   statusOf,

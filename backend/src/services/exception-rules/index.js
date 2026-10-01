@@ -5,7 +5,7 @@
  * helpers is a rule file: it exports an array of rules
  *
  *   { kind, severity: 'info'|'warning'|'critical', subjectType,
- *     module: 'boq'|'cost'|'schedule'|'progress', boqDerived: boolean,
+ *     module: 'boq'|'cost'|'schedule'|'progress'|'change_order', boqDerived: boolean,
  *     requires?: () => null | reason,          // a source that may be absent
  *     evaluate: async ({ orgId, projectId, cutoff, ctx }) => [row] }
  *
@@ -15,7 +15,18 @@
  *     measured: { value, unitCode?, basis }, limit: { value, unitCode?, basis },
  *     groupKeys?: { wbsNodeId?, locationId?, costCodeId? }, severity?, data? }
  *
- * (`severity` on a row overrides the rule's default for that row). Rules are
+ * (`severity` on a row overrides the rule's default for that row).
+ * `data.dismissalKey` (optional, a string) names the episode a row belongs to,
+ * for a rule whose measured figure grows by itself (elapsed days): a
+ * dismissal then holds while the key is the same and a new key reopens it,
+ * whatever the figure (exception-engine reopensDismissal).
+ *
+ * The answer may also carry `notComparable` (an array, a property of the
+ * returned array): [{ subjectType, subjectId, secondarySubjectType?,
+ * secondarySubjectId?, reason }] — the subjects the rule cannot measure NOW
+ * (an activity off the quantity method, installed in another unit or not
+ * available, mixed allocations). The engine resolves an open row of such a
+ * subject 'not_comparable' with the reason, never 'cleared'. Rules are
  * pure reads; the engine (exception-engine.service) is the only writer, and
  * it writes ProjectException rows only. A file added here — the dq track's
  * data-quality.js — is picked up without touching this one.
@@ -25,7 +36,9 @@ const path = require("path");
 const thresholds = require("./_thresholds");
 
 const SEVERITIES = Object.freeze(["info", "warning", "critical"]);
-const MODULES = Object.freeze(["boq", "cost", "schedule", "progress"]);
+// The permission module a reader needs (PC-7b integration J: change_order for
+// the kinds about change orders and the links naming them).
+const MODULES = Object.freeze(["boq", "cost", "schedule", "progress", "change_order"]);
 
 const ruleFiles = (dir = __dirname) =>
   fs

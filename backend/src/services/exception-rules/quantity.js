@@ -17,6 +17,20 @@ const quantityCore = () => require("../quantity-progress.service");
 const quantityViews = () => require("../quantity-views.service");
 const uomService = () => require("../uom.service");
 
+/**
+ * The rows a rule found, carrying the subjects it could not measure now
+ * (`notComparable`, read by the engine: an open row of such a subject is
+ * resolved 'not_comparable', never 'cleared'). Non-enumerable, so the answer
+ * stays a plain list of rows to every other reader.
+ */
+const withNotComparable = (rows, notComparable) => {
+  Object.defineProperty(rows, "notComparable", { value: notComparable, enumerable: false });
+  return rows;
+};
+const NOT_QUANTITY = "the activity is not measured by quantity (its progress method), so installed is not a quantity it can be compared on";
+const MIXED = "more than one approved allocation maps this item to this activity: which one is exceeded is not knowable";
+const OTHER_UNIT = "installed is not in the allocation's unit (or is recorded in more than one unit): nothing is compared across units";
+
 const sameUnit = (a, b) => {
   if (!a || !b) return !a && !b ? true : false;
   const { unitKey } = uomService();
@@ -57,11 +71,17 @@ const quantityOverAllocation = {
     const [allocations, activities, methods] = await Promise.all([reads.approvedAllocations(ctx), reads.activities(ctx), reads.methods(ctx)]);
     // Installed is a quantity only on an activity measured by quantity (the
     // views' rule: on a percent activity it is "—", never % × quantity).
+    const notComparable = [];
     const measured = allocations.filter((allocation) => {
       const activity = activities.get(allocation.activityId);
-      return activity && activity.isActive && reads.methodOf(methods, allocation.activityId) === "quantity";
+      if (!activity || !activity.isActive) return false;
+      if (reads.methodOf(methods, allocation.activityId) !== "quantity") {
+        notComparable.push({ subjectType: "allocation", subjectId: allocation.id, reason: NOT_QUANTITY });
+        return false;
+      }
+      return true;
     });
-    if (!measured.length) return [];
+    if (!measured.length) return withNotComparable([], notComparable);
     const activityIds = [...new Set(measured.map((allocation) => allocation.activityId))];
     const installedMap = await quantityCore().installedByActivity({ orgId, projectId, activityIds, cutoffDate: cutoff || null });
 
@@ -76,6 +96,7 @@ const quantityOverAllocation = {
     for (const [key, group] of byPair) {
       if (group.length !== 1) {
         ctx.note(`quantity_over_allocation: ${group.length} approved allocations map one item to one activity (${key.replace("\u0000", " / ")}); not compared`);
+        for (const allocation of group) notComparable.push({ subjectType: "allocation", subjectId: allocation.id, reason: MIXED });
         continue;
       }
       const allocation = group[0];
@@ -84,11 +105,12 @@ const quantityOverAllocation = {
       const allocationUnit = allocation.unitCode || allocation.boqItem?.unitCode || null;
       if (lines.length !== 1 || !sameUnit(lines[0].unitCode, allocationUnit)) {
         ctx.note(`quantity_over_allocation: allocation ${allocation.id} — installed is not in the allocation's unit; nothing is compared across units`);
+        notComparable.push({ subjectType: "allocation", subjectId: allocation.id, reason: OTHER_UNIT });
         continue;
       }
       candidates.push({ allocation, installed: lines[0] });
     }
-    if (!candidates.length) return [];
+    if (!candidates.length) return withNotComparable([], notComparable);
     const allowances = await reads.variations(ctx, candidates.map(({ allocation }) => ({ allocationId: allocation.id, boqItemId: allocation.boqItemId })));
     const rows = [];
     candidates.forEach(({ allocation, installed }, index) => {
@@ -120,7 +142,7 @@ const quantityOverAllocation = {
         },
       });
     });
-    return rows;
+    return withNotComparable(rows, notComparable);
   },
 };
 
@@ -137,21 +159,24 @@ const quantityOverBoq = {
     const threshold = THRESHOLDS.quantity_over_boq;
     const [items, blocks] = await Promise.all([reads.boqItems(ctx), reads.quantityBlocks(ctx)]);
     const candidates = [];
+    const notComparable = [];
     for (const item of items) {
       const block = blocks.get(item.id);
       const installed = block?.figures?.installed;
       if (!installed || installed.value == null) {
         if (installed?.notAvailable && (installed.entries || 0) > 0) ctx.note(`quantity_over_boq: item ${item.id} — ${installed.notAvailable.reason}`);
+        notComparable.push({ subjectType: "boq_item", subjectId: item.id, reason: `installed is not available for this row${installed?.notAvailable?.reason ? `: ${installed.notAvailable.reason}` : ""}` });
         continue;
       }
       if (!(installed.value > 0)) continue;
       if (installed.unitMatch === false) {
         ctx.note(`quantity_over_boq: item ${item.id} — installed is in ${installed.unitCode}, the row in ${block.unitCode}; not compared`);
+        notComparable.push({ subjectType: "boq_item", subjectId: item.id, reason: `installed is in ${installed.unitCode || "another unit"}, the row in ${block.unitCode || "its own unit"}: nothing is compared across units` });
         continue;
       }
       candidates.push({ item, block, installed });
     }
-    if (!candidates.length) return [];
+    if (!candidates.length) return withNotComparable([], notComparable);
     const allowances = await reads.variations(ctx, candidates.map(({ item }) => ({ boqItemId: item.id })));
     const rows = [];
     candidates.forEach(({ item, block, installed }, index) => {
@@ -176,7 +201,7 @@ const quantityOverBoq = {
         },
       });
     });
-    return rows;
+    return withNotComparable(rows, notComparable);
   },
 };
 
@@ -198,12 +223,20 @@ const certifiedOverInstalled = {
     const activitiesOfItem = new Map();
     for (const allocation of allocations) activitiesOfItem.set(allocation.boqItemId, [...(activitiesOfItem.get(allocation.boqItemId) || []), allocation.activityId]);
     const rows = [];
+    const notComparable = [];
     for (const item of items) {
       const comparison = blocks.get(item.id)?.comparisons?.certifiedOverInstalled;
-      if (!comparison || comparison.flag !== true) continue;
       const activityIds = activitiesOfItem.get(item.id) || [];
-      if (!activityIds.length || activityIds.some((id) => reads.methodOf(methods, id) !== "quantity")) {
-        ctx.note(`certified_over_installed: item ${item.id} — certified above installed, but not every approved allocation is on a quantity-method activity; not raised`);
+      // Not every approved allocation on a quantity-method activity: installed
+      // is not complete, so the item cannot be measured either way.
+      if (activityIds.length && activityIds.some((id) => reads.methodOf(methods, id) !== "quantity")) {
+        if (comparison?.flag === true) ctx.note(`certified_over_installed: item ${item.id} — certified above installed, but not every approved allocation is on a quantity-method activity; not raised`);
+        notComparable.push({ subjectType: "boq_item", subjectId: item.id, reason: "not every approved allocation of the item is on a quantity-method activity: installed is not complete, so it is not compared with certified" });
+        continue;
+      }
+      if (!comparison || comparison.flag !== true) continue;
+      if (!activityIds.length) {
+        ctx.note(`certified_over_installed: item ${item.id} — certified above installed, but the item has no approved allocation; not raised`);
         continue;
       }
       const value = round3(comparison.certified);
@@ -218,7 +251,7 @@ const certifiedOverInstalled = {
         data: { label: reads.itemLabel(item), installedFigure: comparison.installedFigure || null, exceedance: round3(value - limit) },
       });
     }
-    return rows;
+    return withNotComparable(rows, notComparable);
   },
 };
 

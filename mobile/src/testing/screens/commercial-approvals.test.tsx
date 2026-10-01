@@ -1,10 +1,10 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native'
-import { useLocalSearchParams } from 'expo-router'
+import { useLocalSearchParams, useRouter } from 'expo-router'
 import ChangeOrderScreen from '../../../app/(app)/commercial/change-orders/[id]'
 import CommitmentScreen from '../../../app/(app)/commercial/commitments/[id]'
 import PayAppScreen from '../../../app/(app)/commercial/pay-apps/[id]'
 import PayAppsScreen from '../../../app/(app)/commercial/pay-apps/index'
-import type { PayApp } from '@/api/commercial-types'
+import type { ChangeOrder, PayApp } from '@/api/commercial-types'
 import { network } from '@/api/network'
 import { queryClient } from '@/api/query'
 import type { PermissionMatrix } from '@/api/types'
@@ -58,6 +58,79 @@ describe('change orders and commitments', () => {
     expect(screen.queryByTestId('action-bar')).toBeNull()
     expect(screen.queryByText(/^Approve/)).toBeNull()
     expect(screen.getByTestId('change-order-web')).toBeTruthy()
+  })
+
+  // PC-7b / R5-5: the activities the order reaches, as the server composed them (relatedRecords).
+  const serveOrder = (order: ChangeOrder) => {
+    calls = fakeServer({
+      'GET /auth/me/permissions': () => ({ status: 200, body: envelope(pmCommercial) }),
+      'GET /projects/p1/change-orders': () => ({ status: 200, body: envelope({ orders: [order], summary: { total: 1 } }) }),
+      'GET /projects/p1/comments': () => ({ status: 200, body: envelope({ items: [], pagination: { limit: 100, nextCursor: null } }) }),
+      'GET /projects/p1/audit': () => ({ status: 200, body: envelope({ events: [], nextCursor: null }) }),
+    })
+  }
+  const BOQ_REASON = 'The BOQ items a change order reaches through its allocations, and the activities reached only that way, are available only to members who may read the BOQ'
+  const reaches = (activities: NonNullable<ChangeOrder['relatedRecords']>['activities']) => activities
+
+  it('shows the activities the order reaches — direct, through an activity link and through an allocation, marked — each opening its activity', async () => {
+    serveOrder(changeOrder({
+      relatedRecords: {
+        activities: reaches([
+          { id: 'a1', code: 'A130', name: 'Foundation concrete', relation: 'direct', href: '/projects/p1/schedule/gantt?recordId=a1&source=activity' },
+          { id: 'a2', code: 'A140', name: 'Ground beams', relation: 'activity_link', impactDays: 4, href: null },
+          { id: 'a3', code: null, name: 'Lift pit walls', relation: 'via_allocation', href: null },
+        ]),
+        boqItems: [{ id: 'b1', code: '3.4', description: 'Lift pit concrete', unitCode: 'm3', relation: 'allocation_link', href: null }],
+      },
+    }))
+    ;(useLocalSearchParams as jest.Mock).mockReturnValue({ id: 'co1' })
+    await renderScreen(<ChangeOrderScreen />)
+    expect(await screen.findByTestId('change-order-related-activity-a1')).toBeTruthy()
+    expect(screen.getByText('A130 · Foundation concrete')).toBeTruthy()
+    expect(screen.getByText('A140 · Ground beams')).toBeTruthy()
+    expect(screen.getByText('Lift pit walls')).toBeTruthy()
+    expect(screen.getByTestId('change-order-related-activity-a1-relation').props.children).toBe('Direct')
+    expect(screen.getByTestId('change-order-related-activity-a2-relation').props.children).toBe('Activity link · 4 d')
+    expect(screen.getByTestId('change-order-related-activity-a3-relation').props.children).toBe('Via a BOQ allocation')
+    expect(screen.getByText('3.4 · Lift pit concrete')).toBeTruthy()
+    expect(screen.queryByTestId('change-order-related-withheld')).toBeNull()
+    expect(screen.queryByTestId('change-order-related-none')).toBeNull()
+    await fireEvent.press(screen.getByTestId('change-order-related-activity-a3'))
+    expect(useRouter().push).toHaveBeenCalledWith('/activities/a3')
+  })
+
+  it('for a member without BOQ read: every activity they may see stays, and what was withheld reads "—" with the reason, never "None"', async () => {
+    serveOrder(changeOrder({
+      relatedRecords: {
+        activities: reaches([
+          { id: 'a1', code: 'A130', name: 'Foundation concrete', relation: 'direct', href: null },
+          { id: 'a2', code: 'A140', name: 'Ground beams', relation: 'activity_link', href: null },
+        ]),
+        boqWithheld: { keys: ['boqItems', 'activities.via_allocation'], reason: BOQ_REASON },
+      },
+    }))
+    ;(useLocalSearchParams as jest.Mock).mockReturnValue({ id: 'co1' })
+    await renderScreen(<ChangeOrderScreen />)
+    expect(await screen.findByTestId('change-order-related-activity-a1')).toBeTruthy()
+    expect(screen.getByTestId('change-order-related-activity-a2')).toBeTruthy()
+    const withheld = screen.getByTestId('change-order-related-withheld')
+    expect(withheld.props.children).toBe(`— ${BOQ_REASON}`)
+    expect(screen.queryByTestId('change-order-related-none')).toBeNull()
+    expect(screen.queryByTestId('change-order-related-boq')).toBeNull()
+    expect(screen.queryByText(/Via a BOQ allocation/)).toBeNull()
+  })
+
+  it('an order that reaches nothing says None; one whose only activities were withheld says "—" with the reason', async () => {
+    serveOrder(changeOrder({ activityId: null, activity: null, relatedRecords: { activities: [], boqItems: [] } }))
+    ;(useLocalSearchParams as jest.Mock).mockReturnValue({ id: 'co1' })
+    const first = await renderScreen(<ChangeOrderScreen />)
+    expect(await screen.findByTestId('change-order-related-none')).toBeTruthy()
+    await first.unmount()
+    queryClient.clear()
+    serveOrder(changeOrder({ activityId: null, activity: null, relatedRecords: { activities: [], boqWithheld: { keys: ['boqItems', 'activities.via_allocation'], reason: BOQ_REASON } } }))
+    await renderScreen(<ChangeOrderScreen />)
+    expect(await screen.findByTestId('change-order-related-withheld')).toBeTruthy()
+    expect(screen.queryByTestId('change-order-related-none')).toBeNull()
   })
 
   it('shows a commitment with its money, its schedule of values and its change orders, read only', async () => {

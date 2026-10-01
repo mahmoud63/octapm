@@ -7,7 +7,13 @@ const { authenticate } = require("../middleware/auth");
 const { requirePermission, hasPermission, getEffectiveRole } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const service = require("../services/forecast.service");
-const { boqFigureAccess, withheldForecast } = require("../utils/boq-figures");
+const { boqFigureAccess, exceptionAccess, withheldForecast } = require("../utils/boq-figures");
+
+// What this caller may read: the BOQ and budget figures (boqFigureAccess) and,
+// per module, what the exceptions list reads (exceptionAccess) — so the
+// data-quality notes are exactly the kinds the exceptions list would give
+// this caller, and the ones it would not are named in dataQualityWithheld.
+const forecastAccess = (req) => ({ ...boqFigureAccess(req), ...exceptionAccess(req) });
 
 /** Schedule delay and cost overrun prediction (OCTA-AI-PREDICT-031): `/projects/:projectId/forecast`. */
 const router = express.Router({ mergeParams: true });
@@ -24,7 +30,7 @@ router.get(
   "/",
   requirePermission("schedule", "read"),
   asyncHandler(async (req, res) =>
-    sendSuccess(res, withheldForecast(await service.buildForecast({ orgId: req.user.orgId, projectId: req.params.projectId }), boqFigureAccess(req))),
+    sendSuccess(res, withheldForecast(await service.buildForecast({ orgId: req.user.orgId, projectId: req.params.projectId, access: forecastAccess(req) }), boqFigureAccess(req))),
   ),
 );
 
@@ -35,7 +41,7 @@ router.post(
   "/explain",
   requirePermission("assistant", "read"),
   requirePermission("schedule", "read"),
-  asyncHandler(async (req, res) => sendSuccess(res, await service.explain({ ...actor(req), access: boqFigureAccess(req) }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await service.explain({ ...actor(req), access: forecastAccess(req) }))),
 );
 
 router.post(

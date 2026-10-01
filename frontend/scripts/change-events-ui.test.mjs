@@ -73,4 +73,53 @@ assert.match(recordLinks, /change_event: \{ module: "commercial", child: "change
 assert.match(attachments, /change_event: "change_event"/, 'attachments')
 for (const model of ['ChangeEvent', 'ChangeEventLine', 'Rfq']) assert.match(schema, new RegExp(`^model ${model} \\{`, 'm'), `${model} model`)
 
+// PC-7b integration M: every origin the API stores has a name on the web — an
+// event raised from a project exception ('exception') never reads as unknown.
+const serverOrigins = JSON.parse(service.match(/const ORIGINS = Object\.freeze\((\[[^\]]*\])\)/)[1])
+assert.ok(serverOrigins.includes('exception'), "the API stores the 'exception' origin")
+const originUnion = hooks.match(/export type ChangeEventOrigin =([^]*?)\n(?:export|\n)/)[1]
+const webOrigins = [...originUnion.matchAll(/'([a-z_]+)'/g)].map((match) => match[1])
+assert.deepEqual([...webOrigins].sort(), [...serverOrigins].sort(), "the web ChangeEventOrigin union is the API's ORIGINS")
+const originLabels = hooks.match(/export const CHANGE_EVENT_ORIGIN_LABEL: Record<ChangeEventOrigin, string> = \{([^}]*)\}/)
+assert.ok(originLabels, 'CHANGE_EVENT_ORIGIN_LABEL names every origin')
+for (const origin of serverOrigins) assert.match(originLabels[1], new RegExp(`\\b${origin}: '[^']+'`), `origin ${origin} has a label`)
+assert.match(originLabels[1], /exception: 'Project exception'/, "the 'exception' origin reads as a project exception")
+const raiseDialog = read('src/features/controls/exceptions/raise-change-event-dialog.tsx')
+assert.match(raiseDialog, /Origin \{changeEventOriginLabel\(proposedDraft\.origin\)\}/, 'the raise dialog names the origin by its label')
+
+// PC-7b integration fixer 2: a change event raised from a BOQ-derived
+// exception, for a member without BOQ read. The web type models what the API
+// withheld (sourceWithheld keys + reason); the dialog shows each withheld
+// field as "—" with the reason and never sends one back (the server refuses
+// one sent: 409 CHANGE_EVENT_FIELD_WITHHELD). Proven live by e2e 69.
+assert.match(hooks, /sourceWithheld\?: \{ keys: string\[\]; reason: string \}/, 'the web ChangeEvent models sourceWithheld')
+assert.match(hooks, /export const isChangeEventFieldWithheld\b/, 'one helper reads the withheld keys')
+const lineType = hooks.match(/export interface ChangeEventLine \{([^]*?)\r?\n\}/)[1]
+for (const field of ['quantity', 'unit', 'unitCost', 'activityId', 'costCodeId']) {
+  assert.match(lineType, new RegExp(`\\n  ${field}\\?: `), `the line's ${field} is optional (left out when withheld)`)
+  assert.match(dialog, new RegExp(`if \\(given\\('${field}'\\)\\) line\\.${field} =`), `a withheld ${field} is never sent`)
+  assert.match(dialog, new RegExp(`row\\.withheld\\.includes\\('${field}'\\) \\?\\s*\\(\\s*<WithheldValue`), `a withheld ${field} reads "—" with the reason`)
+}
+assert.match(dialog, /\.\.\.\(headerActivityWithheld\s*\?\s*\{\}/, 'a withheld event activity is never sent')
+assert.match(dialog, /const rowAmount = \(row: LineRow\) =>\s*row\.withheld\.includes\('quantity'\) \|\| row\.withheld\.includes\('unitCost'\)\s*\?\s*Number\(row\.romAmount\)/, 'a withheld line shows its stored amount')
+assert.doesNotMatch(dialog, /\{line\.quantity\} \{line\.unit/, "the RFQ list never prints a withheld quantity as 'undefined'")
+assert.match(service, /new HttpError\(409, "CHANGE_EVENT_FIELD_WITHHELD"/, 'the server refuses a withheld field sent back')
+
+// PC-7b integration fixer 3: a line whose quantity, unit or activity was
+// withheld from the sender is not theirs to send to a vendor — the RFQ dialog
+// does not offer it, nor "all lines" while one exists; the server refuses it.
+assert.match(dialog, /\(\['quantity', 'unit', 'activityId'\] as const\)\.some\(\(field\) =>\s*isChangeEventFieldWithheld\(event, field, lineId\)/, 'the RFQ dialog knows the lines the portal would disclose')
+assert.match(dialog, /disabled=\{lineBlocked\(line\.id\)\}/, 'a withheld line cannot be picked for an RFQ')
+assert.match(dialog, /\(anyBlocked && lineIds\.size === 0\)/, '"all lines" is not sent while a withheld line exists')
+assert.match(service, /new HttpError\(409, "CHANGE_EVENT_LINE_WITHHELD"/, 'the server refuses an RFQ of a withheld line')
+assert.match(service, /const RFQ_DISCLOSED_FIELDS = Object\.freeze\(\["quantity", "unit", "activityId"\]\)/, 'the server and the dialog name the same disclosed fields')
+
+// PC-7b integration fixer 4: the screens say why the source is missing — the
+// register row and the event dialog read "Raised from — <the server's
+// reason>", and a withheld activity reads "—" with the reason; never a bare
+// 'Project exception' origin with no source and no explanation.
+assert.match(panel, /\{event\.sourceWithheld && \([^]*?Raised from — \{event\.sourceWithheld\.reason\}/, 'the register row names the reason')
+assert.match(panel, /isChangeEventFieldWithheld\(event, 'activityId'\) \?[^]*?title=\{event\.sourceWithheld\?\.reason\}/, 'a withheld activity in the register reads "—" with the reason')
+assert.match(dialog, /\{!sourceLink && event\.sourceWithheld && \([^]*?Raised from — \{event\.sourceWithheld\.reason\}/, 'the dialog names the reason where the source would be')
+
 console.log('change-events-ui: ok')

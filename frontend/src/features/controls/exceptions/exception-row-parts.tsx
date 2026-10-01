@@ -1,5 +1,7 @@
+import type { ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { FileDiff } from 'lucide-react'
+import { useAuthStore } from '@/stores/auth-store'
 import { Button } from '@/components/ui/button'
 import { DrawerLink } from '../components/detail-parts'
 import { useControlsDetailOpener } from '../hooks/use-controls-detail'
@@ -47,6 +49,61 @@ export function SubjectLink({
   )
 }
 
+/**
+ * A link to one of the project's pages inside the open workspace —
+ * `/o/{segment}/projects/…`, as every server-built link in a drawer is —
+ * never a legacy `/projects/…` path while a workspace is open (spec 50).
+ * Without a workspace (an identity token) the legacy path, which the route
+ * tree redirects.
+ */
+export function ProjectPageLink({
+  projectId,
+  module,
+  child,
+  search,
+  className,
+  testId,
+  data,
+  children,
+}: {
+  projectId: string
+  module: string
+  child: string
+  search?: { recordId: string; source: string }
+  className?: string
+  testId?: string
+  data?: Record<`data-${string}`, string>
+  children: ReactNode
+}) {
+  const orgSlug = useAuthStore((state) => state.auth.workspace?.segment ?? '')
+  if (orgSlug) {
+    return (
+      <Link
+        to='/o/$orgSlug/projects/$projectId/$module/$child'
+        params={{ orgSlug, projectId, module, child }}
+        search={search}
+        className={className}
+        data-testid={testId}
+        {...data}
+      >
+        {children}
+      </Link>
+    )
+  }
+  return (
+    <Link
+      to='/projects/$projectId/$module/$child'
+      params={{ projectId, module, child }}
+      search={search}
+      className={className}
+      data-testid={testId}
+      {...data}
+    >
+      {children}
+    </Link>
+  )
+}
+
 /** An exception in change: its change event, linked to where it lives. */
 export function ChangeEventLink({
   projectId,
@@ -58,17 +115,18 @@ export function ChangeEventLink({
   testId?: string
 }) {
   return (
-    <Link
-      to='/projects/$projectId/$module/$child'
-      params={{ projectId, module: 'commercial', child: 'change-events' }}
+    <ProjectPageLink
+      projectId={projectId}
+      module='commercial'
+      child='change-events'
       search={{ recordId: changeEvent.id, source: 'change_event' }}
       className='inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline'
-      data-testid={testId}
-      data-change-event-id={changeEvent.id}
+      testId={testId}
+      data={{ 'data-change-event-id': changeEvent.id }}
     >
       <FileDiff className='h-3 w-3' aria-hidden />
       {changeEvent.ref} · {changeEvent.status.replace(/_/g, ' ')}
-    </Link>
+    </ProjectPageLink>
   )
 }
 

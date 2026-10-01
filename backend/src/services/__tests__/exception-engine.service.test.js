@@ -178,6 +178,87 @@ describe("evaluateProject", () => {
     expect(result.rows[0].change).toBe("reopen");
   });
 
+  it("an episode key (data.dismissalKey) decides the dismissal of a figure that grows by itself: the same key stays dismissed however far it grows; a new key reopens", async () => {
+    const staleRule = (rows) => ruleOf("progress_stale", rows, { subjectType: "activity", module: "progress", boqDerived: false });
+    const stale = (days, dismissalKey) => finding({ subjectType: "activity", subjectId: "act-1", measured: { value: days, unitCode: "day", basis: "days basis" }, limit: { value: 14, unitCode: "day", basis: "threshold" }, data: { label: "A1", dismissalKey } });
+    resolvedRows = [
+      stored({ id: "dismissed-stale", kind: "progress_stale", subjectType: "activity", subjectId: "act-1", measured: new Prisma.Decimal("20"), limit: new Prisma.Decimal("14"), unitCode: "day", resolvedAt: new Date("2026-09-30"), resolvedReason: "dismissed:known", dataJson: { label: "A1", dismissalKey: "activity_progress:p1@2026-09-01T00:00:00.000Z" } }),
+    ];
+    // The same episode, 25 days further on: still the person's dismissal.
+    let result = await evaluate([staleRule([stale(45, "activity_progress:p1@2026-09-01T00:00:00.000Z")])]);
+    expect(result).toMatchObject({ opened: 0, suppressed: 1 });
+    expect(prisma.projectException.create).not.toHaveBeenCalled();
+    // Newer approved progress that went stale again: a new episode reopens, even at a LOWER figure.
+    result = await evaluate([staleRule([stale(16, "activity_progress:p2@2026-09-20T00:00:00.000Z")])]);
+    expect(result).toMatchObject({ opened: 1, suppressed: 0 });
+    expect(prisma.projectException.create).toHaveBeenCalledWith({ data: expect.objectContaining({ measured: "16.000", dataJson: expect.objectContaining({ dismissalKey: "activity_progress:p2@2026-09-20T00:00:00.000Z", reopenedFrom: expect.objectContaining({ id: "dismissed-stale" }) }) }) });
+    expect(result.rows[0].change).toBe("reopen");
+    // A dismissal stored before keys existed: the measured rule decides.
+    prisma.projectException.create.mockClear();
+    resolvedRows = [stored({ id: "legacy", kind: "progress_stale", subjectType: "activity", subjectId: "act-1", measured: new Prisma.Decimal("20"), limit: new Prisma.Decimal("14"), resolvedAt: new Date("2026-09-30"), resolvedReason: "dismissed:known", dataJson: { label: "A1" } })];
+    expect((await evaluate([staleRule([stale(20, "activity_progress:p1@x")])])).suppressed).toBe(1);
+    expect((await evaluate([staleRule([stale(21, "activity_progress:p1@x")])])).opened).toBe(1);
+    // A key that is not a non-empty string fails the rule (its rows stand).
+    const bad = await evaluate([staleRule([stale(30, 42)])]);
+    expect(bad.errors.map((error) => error.kind)).toEqual(["progress_stale"]);
+    expect(bad.errors[0].message).toMatch(/dismissalKey/);
+  });
+
+  it("a dismissal whose condition clears is released on its row; a later recurrence then opens a fresh row instead of being suppressed", async () => {
+    const dismissedRow = stored({ id: "dismissed-row", resolvedAt: new Date("2026-09-30"), resolvedReason: "dismissed:accepted", dataJson: { label: "x", dismissedFingerprint: { measured: 110 } } });
+    resolvedRows = [dismissedRow];
+    // The subject is not found by its (evaluated) kind: the release is recorded on the dismissed row.
+    let result = await evaluate([ruleOf("quantity_over_boq", [])]);
+    expect(result).toMatchObject({ opened: 0, resolved: 0, released: 1 });
+    expect(prisma.projectException.updateMany).toHaveBeenCalledWith({
+      where: { id: "dismissed-row", projectId: PROJECT, resolvedAt: { not: null } },
+      data: { dataJson: { label: "x", dismissedFingerprint: { measured: 110 }, dismissalReleasedAt: NOW.toISOString(), dismissalReleaseTrigger: "test" } },
+    });
+    expect(result.rows.map((row) => [row.change, row.id])).toEqual([["release", "dismissed-row"]]);
+    // Not released: the kind failed, or the subject is still found (still suppressed), or the row is not the subject's latest.
+    prisma.projectException.updateMany.mockClear();
+    // (another kind ran to the end beside the failed one, so the evaluation itself is not empty)
+    result = await evaluate([ruleOf("quantity_over_boq", [], { evaluate: jest.fn(async () => { throw new Error("owner down"); }) }), ruleOf("committed_over_budget", [])]);
+    expect(result.released).toBe(0);
+    result = await evaluate([ruleOf("quantity_over_boq", [finding()])]);
+    expect(result).toMatchObject({ released: 0, suppressed: 1 });
+    resolvedRows = [stored({ id: "cleared-later", resolvedAt: new Date("2026-10-01"), resolvedReason: "cleared" }), dismissedRow];
+    expect((await evaluate([ruleOf("quantity_over_boq", [])])).released).toBe(0);
+    expect(prisma.projectException.updateMany).not.toHaveBeenCalled();
+    // Released: the condition comes back as a FRESH row (no reopenedFrom), even at the dismissed figure.
+    resolvedRows = [{ ...dismissedRow, dataJson: { ...dismissedRow.dataJson, dismissalReleasedAt: "2026-10-01T00:00:00.000Z", dismissalReleaseTrigger: "scheduled" } }];
+    result = await evaluate([ruleOf("quantity_over_boq", [finding()])]);
+    expect(result).toMatchObject({ opened: 1, suppressed: 0, released: 0 });
+    expect(prisma.projectException.create).toHaveBeenCalledWith({ data: expect.objectContaining({ dataJson: { label: "1.1 Concrete" } }) });
+    expect(result.rows[0].change).toBe("open");
+    // A rule may not write the engine's release keys.
+    const bad = await evaluate([ruleOf("quantity_over_boq", [finding({ data: { dismissalReleasedAt: "x" } })])]);
+    expect(bad.errors[0].message).toMatch(/reserved/);
+  });
+
+  it("an open row the rule can no longer measure is resolved 'not_comparable' with the rule's reason — never 'cleared'", async () => {
+    openRows = [stored({ id: "measured-before" }), stored({ id: "cleared-one", subjectId: "item-2" })];
+    const rows = Object.defineProperty([], "notComparable", { value: [{ subjectType: "boq_item", subjectId: "item-1", reason: "installed is in t, the row in m3" }], enumerable: false });
+    const result = await evaluate([ruleOf("quantity_over_boq", rows)]);
+    expect(result).toMatchObject({ notComparable: 1, resolved: 1, opened: 0 });
+    expect(prisma.projectException.updateMany).toHaveBeenCalledWith({
+      where: { id: "measured-before", projectId: PROJECT, resolvedAt: null },
+      data: { resolvedAt: NOW, resolvedReason: "not_comparable", dataJson: { label: "1.1 Concrete", notComparable: { reason: "installed is in t, the row in m3", at: NOW.toISOString(), trigger: "test" } } },
+    });
+    expect(prisma.projectException.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["cleared-one"] }, projectId: PROJECT, resolvedAt: null },
+      data: { resolvedAt: NOW, resolvedReason: "cleared" },
+    });
+    expect(result.rows.map((row) => [row.change, row.id, row.reason])).toEqual([["resolve", "cleared-one", undefined], ["not_comparable", "measured-before", "installed is in t, the row in m3"]]);
+    // A subject the rule did find is a finding, whatever the list says; a list entry without a reason fails the rule.
+    prisma.projectException.updateMany.mockClear();
+    const both = Object.defineProperty([finding()], "notComparable", { value: [{ subjectType: "boq_item", subjectId: "item-1", reason: "x" }], enumerable: false });
+    expect(await evaluate([ruleOf("quantity_over_boq", both)])).toMatchObject({ notComparable: 0, unchanged: 1 });
+    const bad = Object.defineProperty([], "notComparable", { value: [{ subjectType: "boq_item", subjectId: "item-1" }], enumerable: false });
+    const failed = await evaluate([ruleOf("quantity_over_boq", bad)]);
+    expect([failed.errors[0]?.message, failed.notComparable, failed.resolved]).toEqual([expect.stringMatching(/needs a reason/), 0, 0]);
+  });
+
   it("a condition that was cleared and comes back opens a new row", async () => {
     resolvedRows = [stored({ id: "cleared-row", resolvedAt: new Date("2026-09-30"), resolvedReason: "cleared" })];
     const result = await evaluate([ruleOf("quantity_over_boq", [finding()])]);

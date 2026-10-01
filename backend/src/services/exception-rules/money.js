@@ -208,11 +208,15 @@ const forecastOverRevised = {
       });
     }
 
-    // Each budget line: its forecast against its revised budget, as the
-    // register states both (a typed forecast, or the register's default).
+    // Each budget line: a forecast someone ENTERED against its revised
+    // budget. The register's default forecast — max(revised, actual,
+    // committed) — is never compared: above revised it is only the committed
+    // or the actual figure restated, and that gap is already
+    // committed_over_budget's (or the ledger's) — one gap, one row.
     const lines = await budgetLines(ctx);
     for (const line of lines) {
-      if (line.status !== "active" || !(Number(line.forecast) > Number(line.revisedBudget) + threshold.tolerance)) continue;
+      if (line.status !== "active" || !line.forecastIsManual) continue;
+      if (!(Number(line.forecast) > Number(line.revisedBudget) + threshold.tolerance)) continue;
       rows.push({
         subjectType: "budget_line",
         subjectId: line.id,
@@ -220,16 +224,14 @@ const forecastOverRevised = {
         measured: {
           value: round2(line.forecast),
           unitCode: ctx.currency,
-          basis: line.forecastIsManual
-            ? "Forecast on the budget register: the line's typed forecast (a projection)"
-            : "Forecast on the budget register: the register's default, max(revised, actual, committed) (budget.service deriveLine — a projection)",
+          basis: "Forecast on the budget register: the line's entered (typed) forecast (a projection; the register's default is never compared — it restates committed or actual)",
         },
         limit: { value: round2(line.revisedBudget), unitCode: ctx.currency, basis: REVISED_BASIS },
         groupKeys: { costCodeId: line.costCodeId || null },
         data: {
           label: lineLabel(line),
           costType: line.costType,
-          forecastIsManual: Boolean(line.forecastIsManual),
+          forecastIsManual: true,
           actual: round2(line.actual),
           committed: round2(line.committed),
           exceedance: round2(Number(line.forecast) - Number(line.revisedBudget)),

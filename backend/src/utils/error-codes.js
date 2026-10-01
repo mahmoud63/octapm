@@ -362,6 +362,16 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "commercial",
     message: "The record to raise a change event from was not found",
   },
+  CHANGE_EVENT_FIELD_WITHHELD: {
+    status: 409,
+    category: "commercial",
+    message: "A field of this change event that was withheld from you cannot be written by you",
+  },
+  CHANGE_EVENT_LINE_WITHHELD: {
+    status: 409,
+    category: "commercial",
+    message: "A change-event line whose figures were withheld from you cannot be sent to a vendor by you",
+  },
   CHANGE_EVENT_BUDGET_LINE_INVALID: {
     status: 400,
     category: "commercial",

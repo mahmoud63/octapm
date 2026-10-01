@@ -1064,7 +1064,14 @@ const withheldAuditHistory = (
   access = FULL_ACCESS,
   { contractValueSource = null, contractTerms = null } = {},
 ) => {
-  if (access.boq || !history || typeof history !== "object" || !Array.isArray(history.events)) return history;
+  if (!history || typeof history !== "object" || !Array.isArray(history.events)) return history;
+  // A BOQ reader keeps every BOQ figure, but an exception's events still go
+  // where the exception goes: its module's read (PC-7b integration J — a BOQ
+  // reader without change_order or cost read is not given those kinds' events).
+  if (access.boq) {
+    if (!access.modules) return history;
+    return { ...history, events: history.events.filter((event) => !(event && (event.recordType || event.entityType) === "project_exception" && withheldExceptionEvent(event, access))) };
+  }
   const capWithheld = retentionCapWithheld(contractTerms, access);
   const events = history.events
     .filter((event) => !(event && BOQ_RECORD_TYPES.has(event.recordType || event.entityType)))
@@ -1081,6 +1088,8 @@ const withheldAuditHistory = (
       if (!access.budget && type === "schedule_revision") return withSummaries(event, withoutRevisionTotals);
       if (type === "quantity_progress_entry") return withheldQuantityEvent(event, QUANTITY_ENTRY_EVENT);
       if (type === "progress_submission") return withheldQuantityEvent(event, PROGRESS_SUBMISSION_EVENT);
+      // PC-7b: a change event raised from a BOQ-derived exception names it no more.
+      if (type === "change_event") return withheldChangeEventAuditEvent(event);
       return event;
     });
   return { ...history, events };
@@ -1534,6 +1543,34 @@ const withheldActivityDetail = (detail, access = FULL_ACCESS) => {
     };
   }
 
+  // PC-7b: a change event reaches the activity only by an activity it took
+  // from a BOQ-derived exception's prefill (matchedBy exception_prefill — the
+  // activity an allocation maps to): not listed, not counted. The marker's
+  // reason is the change event's own neutral one, given whether or not one
+  // was dropped, so its presence says nothing.
+  const changeEvents = sections.changes && sections.changes.changeEvents;
+  if (changeEvents && Array.isArray(changeEvents.items)) {
+    const kept = [];
+    let dropped = 0;
+    for (const event of allRowsOf(changeEvents, "items")) {
+      const matchedBy = Array.isArray(event.matchedBy) ? event.matchedBy : [];
+      if (matchedBy.length && matchedBy.every((how) => how === "exception_prefill")) {
+        dropped += 1;
+        continue;
+      }
+      kept.push(withoutKeys(event, ["matchedBy"]));
+    }
+    sections.changes = {
+      ...sections.changes,
+      changeEvents: {
+        ...pageOf(changeEvents),
+        items: kept.slice(0, changeEvents.items.length),
+        total: Math.max(0, (changeEvents.total || 0) - dropped),
+        boqWithheld: { reason: CHANGE_EVENT_EXCEPTION_WITHHELD },
+      },
+    };
+  }
+
   if (sections.procurement && Array.isArray(sections.procurement.poLines)) {
     sections.procurement = {
       ...sections.procurement,
@@ -1891,20 +1928,21 @@ const EXCEPTION_KIND_POLICY = Object.freeze({
   progress_stale: Object.freeze({ module: "progress", boqDerived: false }),
   period_not_locked: Object.freeze({ module: "cost", boqDerived: false }),
   ev_basis_divergence: Object.freeze({ module: "cost", boqDerived: true }),
-  committed_definition_mixed: Object.freeze({ module: "cost", boqDerived: false }),
   equipment_cost_unposted: Object.freeze({ module: "cost", boqDerived: false }),
-  orphan_change_link: Object.freeze({ module: "cost", boqDerived: false }),
+  // Read under the module of the record they name: change orders (PC-7b
+  // integration J — the links are mixed, change_order is what they share).
+  orphan_change_link: Object.freeze({ module: "change_order", boqDerived: false }),
   // An override of the readiness gate, whose blockers are the bill's.
   readiness_override_active: Object.freeze({ module: "cost", boqDerived: true }),
-  change_order_possible_duplicate: Object.freeze({ module: "cost", boqDerived: false }),
+  change_order_possible_duplicate: Object.freeze({ module: "change_order", boqDerived: false }),
 });
 const EXCEPTION_UNKNOWN_KIND_POLICY = Object.freeze({ module: "cost", boqDerived: true });
-const EXCEPTION_MODULES = Object.freeze(["boq", "cost", "schedule", "progress"]);
+const EXCEPTION_MODULES = Object.freeze(["boq", "cost", "schedule", "progress", "change_order"]);
 // Subjects that are the bill's own records.
 const EXCEPTION_BOQ_SUBJECT_TYPES = Object.freeze(["boq_item", "allocation", "activity_boq_allocation", "certificate_item", "ipc_item"]);
 const EXCEPTIONS_BOQ_WITHHELD =
   "Exceptions on the BOQ's items and allocations, and those measured from the BOQ's quantities or its mapping, are available only to members who may read the BOQ";
-const EXCEPTION_MODULE_NAMES = Object.freeze({ boq: "BOQ", cost: "cost", schedule: "schedule", progress: "progress" });
+const EXCEPTION_MODULE_NAMES = Object.freeze({ boq: "BOQ", cost: "cost", schedule: "schedule", progress: "progress", change_order: "change order" });
 
 /** A kind's module and whether its figures are the bill's (the table, widened by a rule's own statement). */
 const exceptionPolicy = (kind, registry = null) => {
@@ -2012,6 +2050,203 @@ const withheldExceptionCounts = (rows, accessFor, registry = null) => {
   return { total, bySeverity };
 };
 
+/// ─── PC-7b: a change event raised from a BOQ-derived exception ────────────
+//
+// A change event is the commercial module's record: every change-event reader
+// of the project reads it, with or without boq:read. One raised from an
+// exception that exists only because of the BOQ (exceptionPolicy boqDerived,
+// or a subject that is one of the bill's records) must not restate it to a
+// reader who may not read the BOQ: the link to the exception (sourceLinks'
+// project_exception entry, the sourceRecordType / sourceRecordId pair and
+// its path) and every field the raise took from it (its prefill provenance,
+// recorded in the creation audit's metadata.prefillProvenance by
+// change-event.service createChangeEvent) are withheld, with the reason: the
+// event's activity (for an allocation, the activity the allocation maps to),
+// each line's activity and cost code (the BOQ item's), the quantity delta and
+// its unit — and the unit cost beside a withheld quantity (with the line's
+// amount, it would give the quantity back). A field is withheld while it
+// still equals its provenance; one a person later sets by hand to another
+// value is the event's own and is given. An event whose provenance is not on
+// record (raised before it was recorded) fails closed: every such field that
+// is set is withheld. The prefill's words are generic for such an exception
+// (exception.service exceptionPrefill), so nothing else on the event names
+// the kind. The reason is neutral — its presence does not itself say "from
+// the BOQ". A BOQ reader receives the event as built. `withholding` is a Map
+// of the answer's change-event ids that were raised from a BOQ-derived
+// exception → { provenance } (exception.service changeEventWithholding
+// decides it; provenance null = not on record).
+const CHANGE_EVENT_EXCEPTION_WITHHELD =
+  "Part of this change event is withheld from you: the record it was raised from, and what came from that record onto the event, are available only to members with access to that record";
+const CHANGE_EVENT_EXCEPTION_LINE_KEYS = Object.freeze(["quantity", "unit", "unitCost"]);
+const CHANGE_EVENT_EXCEPTION_KEYS = Object.freeze(["sourceLinks.project_exception", "sourceRecordType", "sourceRecordId", "sourcePath"]);
+// The fields a raise takes from the exception, each with the answer keys it withholds.
+const CHANGE_EVENT_PROVENANCE_EVENT_FIELDS = Object.freeze({ activityId: Object.freeze(["activityId", "activity"]) });
+const CHANGE_EVENT_PROVENANCE_LINE_FIELDS = Object.freeze({
+  activityId: Object.freeze(["activityId", "activity"]),
+  costCodeId: Object.freeze(["costCodeId", "costCode"]),
+  quantity: Object.freeze(["quantity"]),
+  unit: Object.freeze(["unit"]),
+  unitCost: Object.freeze(["unitCost"]),
+});
+// A reference that is not set says nothing: it is withheld only when set.
+const PROVENANCE_REFERENCES = new Set(["activityId", "costCodeId"]);
+const provenanceValue = (field, value) => {
+  if (value === undefined || value === null || value === "") return null;
+  if (field === "quantity") return Math.round(Number(value) * 1000) / 1000;
+  if (field === "unitCost") return Math.round(Number(value) * 100) / 100;
+  return String(value);
+};
+const sameProvenance = (field, stored, recorded) => provenanceValue(field, stored) === provenanceValue(field, recorded);
+const provenanceWithholds = (field, stored, recorded, known) => {
+  if (PROVENANCE_REFERENCES.has(field) && provenanceValue(field, stored) === null) return false;
+  if (!known) return true;
+  return Boolean(recorded) && has(recorded, field) && sameProvenance(field, stored, recorded[field]);
+};
+/**
+ * The fields of one change event (a stored row or an answer) withheld from a
+ * reader without boq:read, given its withholding entry ({ provenance }):
+ * { event: [field], lines: Map lineId → [field] }. Used by the answers and by
+ * change-event.service's write guards, so what is not given is never taken.
+ */
+const changeEventWithheldFields = (event, entry) => {
+  const out = { event: [], lines: new Map() };
+  if (!event || typeof event !== "object" || !entry) return out;
+  const provenance = entry.provenance && typeof entry.provenance === "object" ? entry.provenance : null;
+  const known = Boolean(provenance);
+  out.event = Object.keys(CHANGE_EVENT_PROVENANCE_EVENT_FIELDS).filter((field) => has(event, field) && provenanceWithholds(field, event[field], provenance, known));
+  for (const line of Array.isArray(event.lines) ? event.lines : []) {
+    if (!line || typeof line !== "object") continue;
+    const recorded = known && Array.isArray(provenance.lines) ? provenance.lines.find((candidate) => candidate && candidate.id === line.id) || null : null;
+    const fields = Object.keys(CHANGE_EVENT_PROVENANCE_LINE_FIELDS).filter((field) => provenanceWithholds(field, line[field], recorded, known));
+    // The unit cost goes with a withheld quantity: amount ÷ unit cost is the quantity.
+    if (fields.includes("quantity") && !fields.includes("unitCost")) fields.push("unitCost");
+    if (fields.length) out.lines.set(line.id, fields);
+  }
+  return out;
+};
+/**
+ * The provenance a raise records: of the stored event (with its lines) the
+ * fields that came from the prefill — the event's activity, each line's
+ * activity and cost code where they equal the prefill line's, and the
+ * quantity delta and its unit on a line that carries that delta.
+ */
+const changeEventPrefillProvenance = (prefill, created) => {
+  const out = { lines: [] };
+  if (!prefill || !created) return out;
+  if (prefill.activityId && created.activityId === prefill.activityId) out.activityId = created.activityId;
+  const source = Array.isArray(prefill.lines) && prefill.lines.length ? prefill.lines[0] : null;
+  if (!source) return out;
+  // The prefill took a quantity delta (with its unit) only for the quantity kinds.
+  const tookQuantity = provenanceValue("unit", source.unit) !== null || provenanceValue("quantity", source.quantity) !== 1;
+  for (const line of Array.isArray(created.lines) ? created.lines : []) {
+    const entry = { id: line.id };
+    for (const field of ["activityId", "costCodeId"]) {
+      if (provenanceValue(field, source[field]) !== null && sameProvenance(field, line[field], source[field])) entry[field] = provenanceValue(field, line[field]);
+    }
+    if (tookQuantity && sameProvenance("quantity", line.quantity, source.quantity)) {
+      entry.quantity = provenanceValue("quantity", line.quantity);
+      if (sameProvenance("unit", line.unit, source.unit)) entry.unit = provenanceValue("unit", line.unit);
+    }
+    if (Object.keys(entry).length > 1) out.lines.push(entry);
+  }
+  return out;
+};
+const exceptionIdOfChangeEvent = (event) => {
+  if (!event || typeof event !== "object") return null;
+  if (event.exceptionId) return event.exceptionId;
+  const link = Array.isArray(event.sourceLinks) ? event.sourceLinks.find((entry) => entry && entry.type === "project_exception") : null;
+  if (link && link.id) return link.id;
+  return event.sourceRecordType === "project_exception" && event.sourceRecordId ? event.sourceRecordId : null;
+};
+const withheldChangeEvent = (event, access, withholding) => {
+  if (!event || typeof event !== "object" || (access && access.boq === true)) return event;
+  const entry = withholding instanceof Map ? withholding.get(event.id) : null;
+  if (!entry) return event;
+  const fields = changeEventWithheldFields(event, entry);
+  const keys = [...CHANGE_EVENT_EXCEPTION_KEYS];
+  const out = {
+    ...event,
+    sourceLinks: (Array.isArray(event.sourceLinks) ? event.sourceLinks : []).filter((link) => !(link && link.type === "project_exception")),
+    sourceRecordType: event.sourceRecordType === "project_exception" ? null : event.sourceRecordType ?? null,
+    sourceRecordId: event.sourceRecordType === "project_exception" ? null : event.sourceRecordId ?? null,
+    sourcePath: event.sourceRecordType === "project_exception" ? null : event.sourcePath ?? null,
+  };
+  for (const field of fields.event) {
+    for (const key of CHANGE_EVENT_PROVENANCE_EVENT_FIELDS[field]) delete out[key];
+    keys.push(field);
+  }
+  if (Array.isArray(event.lines)) {
+    out.lines = event.lines.map((line) => {
+      const withheld = line && fields.lines.get(line.id);
+      if (!withheld) return line;
+      for (const field of withheld) keys.push(`lines[${line.id}].${field}`);
+      return withoutKeys(line, withheld.flatMap((field) => CHANGE_EVENT_PROVENANCE_LINE_FIELDS[field]));
+    });
+  }
+  out.sourceWithheld = { keys, reason: CHANGE_EVENT_EXCEPTION_WITHHELD };
+  return out;
+};
+/** Every change event in an answer (an event, a list's items, or { changeEvent }), as this caller may receive it. */
+const withheldChangeEventAnswer = (answer, access, withholding) => {
+  if (!answer || typeof answer !== "object" || (access && access.boq === true)) return answer;
+  if (Array.isArray(answer)) return answer.map((entry) => withheldChangeEventAnswer(entry, access, withholding));
+  let out = answer;
+  if (Array.isArray(answer.sourceLinks)) out = withheldChangeEvent(answer, access, withholding);
+  if (Array.isArray(out.items)) out = { ...out, items: out.items.map((entry) => withheldChangeEvent(entry, access, withholding)) };
+  if (out.changeEvent && typeof out.changeEvent === "object") out = { ...out, changeEvent: withheldChangeEvent(out.changeEvent, access, withholding) };
+  return out;
+};
+/** The change events an answer carries — { id, exceptionId, origin } each — to ask which were raised from a BOQ-derived exception. */
+const changeEventRefsOf = (answer) => {
+  const refs = new Map();
+  const add = (value) => {
+    if (value && typeof value === "object" && value.id && Array.isArray(value.sourceLinks)) refs.set(value.id, { id: value.id, exceptionId: exceptionIdOfChangeEvent(value), origin: value.origin || null });
+  };
+  const visit = (value) => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) return value.forEach(visit);
+    add(value);
+    if (Array.isArray(value.items)) value.items.forEach(add);
+    if (value.changeEvent) add(value.changeEvent);
+  };
+  visit(answer);
+  return [...refs.values()];
+};
+/** The change events' exception ids an answer names. */
+const changeEventExceptionIds = (answer) => [...new Set(changeEventRefsOf(answer).map((ref) => ref.exceptionId).filter(Boolean))];
+// A change_event audit event recorded at creation names the typed source
+// links in its summary (sourceLinks { exceptionId, … }), and, for an event
+// raised from a BOQ-derived exception, the prefill's provenance in
+// metadata.prefillProvenance (the mapped activity, the cost code, the
+// quantity). For a reader without boq:read the provenance always goes, and
+// the exception link goes unless the event says its exception was not
+// BOQ-derived (metadata.sourceBoqDerived false; an event without it fails
+// closed).
+const withheldChangeEventAuditEvent = (event) => {
+  if (!event || typeof event !== "object") return event;
+  const metaKey = event.metadata && typeof event.metadata === "object" ? "metadata" : event.metadataJson && typeof event.metadataJson === "object" ? "metadataJson" : null;
+  const meta = (metaKey && event[metaKey]) || {};
+  const keys = [];
+  let out = event;
+  if (metaKey && has(meta, "prefillProvenance")) {
+    const { prefillProvenance: _provenance, ...rest } = meta;
+    out = { ...out, [metaKey]: rest };
+    keys.push("metadata.prefillProvenance");
+  }
+  const strip = (summary) => {
+    if (!summary || typeof summary !== "object" || !summary.sourceLinks || typeof summary.sourceLinks !== "object" || !summary.sourceLinks.exceptionId) return summary;
+    const { exceptionId, ...links } = summary.sourceLinks;
+    return { ...summary, sourceLinks: links };
+  };
+  const touched = meta.sourceBoqDerived !== false && ["summary", "newSummary", "oldSummary"].some((key) => event[key] && event[key].sourceLinks && event[key].sourceLinks.exceptionId);
+  if (touched) {
+    out = { ...out, summary: strip(event.summary), newSummary: strip(event.newSummary), oldSummary: strip(event.oldSummary) };
+    keys.unshift("sourceLinks.exceptionId");
+  }
+  if (!keys.length) return event;
+  return { ...out, boqWithheld: { keys, reason: CHANGE_EVENT_EXCEPTION_WITHHELD } };
+};
+
 // An exception's audit event names its kind and subject; for one the caller
 // may not read (BOQ-derived — or not marked either way — without BOQ read; a
 // money kind without the budget figures) the event goes, as the bill's own
@@ -2020,6 +2255,14 @@ const withheldExceptionEvent = (event, access) => {
   const meta = (event && (event.metadata || event.metadataJson)) || {};
   if (meta.boqDerived !== false && !access.boq) return true;
   if (meta.module === "cost" && !access.budget) return true;
+  // The exception's own module, when the caller's per-module reads are known
+  // (routes/audit passes exceptionAccess's modules): change_order kinds need
+  // change_order:read (PC-7b integration J).
+  if (meta.module && access.modules && access.modules[meta.module] !== true) return true;
+  // An entry that does not say its module (the status history the audit
+  // service writes beside the event carries no metadata) goes unless the
+  // caller reads every exception module: fail closed.
+  if (!meta.module && access.modules && EXCEPTION_MODULES.some((module) => access.modules[module] !== true)) return true;
   return false;
 };
 
@@ -2039,6 +2282,18 @@ module.exports = {
   withheldExceptions,
   withheldExceptionCounts,
   withheldExceptionEvent,
+  // PC-7b: a change event raised from a BOQ-derived exception.
+  CHANGE_EVENT_EXCEPTION_WITHHELD,
+  CHANGE_EVENT_EXCEPTION_LINE_KEYS,
+  CHANGE_EVENT_PROVENANCE_EVENT_FIELDS,
+  CHANGE_EVENT_PROVENANCE_LINE_FIELDS,
+  changeEventExceptionIds,
+  changeEventPrefillProvenance,
+  changeEventRefsOf,
+  changeEventWithheldFields,
+  withheldChangeEvent,
+  withheldChangeEventAnswer,
+  withheldChangeEventAuditEvent,
   // PC-6 (core): quantity progress entries.
   QUANTITY_ENTRY_BOQ_KEYS,
   QUANTITY_ENTRY_WITHHELD,

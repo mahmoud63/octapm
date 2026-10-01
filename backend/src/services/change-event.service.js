@@ -6,6 +6,7 @@ const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const emailService = require("./email.service");
 const { nextNumber: nextCounterNumber } = require("../utils/reference-number");
+const { CHANGE_EVENT_EXCEPTION_WITHHELD, changeEventPrefillProvenance, changeEventWithheldFields } = require("../utils/boq-figures");
 
 /**
  * Change events and RFQs (OCTA-COM-CE-038).
@@ -301,6 +302,9 @@ const assertRefs = async ({ orgId, projectId, data, lines = [] }) => {
   }
 };
 
+// A kept line's reference and text fields a save leaves out keep the stored
+// value; an explicit null clears them.
+const KEPT_WHEN_OMITTED = Object.freeze(["costCodeId", "budgetLineId", "activityId", "commitmentId", "notes"]);
 const normalizeLines = (rows) => {
   const list = Array.isArray(rows) ? rows : [];
   if (list.length > 200) throw new HttpError(400, "CHANGE_EVENT_TOO_MANY_LINES", "A change event takes up to 200 lines");
@@ -310,7 +314,12 @@ const normalizeLines = (rows) => {
     const quantity = toNumber(row.quantity, 1);
     const unitCost = round2(row.unitCost);
     const romAmount = row.romAmount !== undefined && row.romAmount !== null && row.romAmount !== "" ? round2(row.romAmount) : round2(quantity * unitCost);
-    return { id: trimOrNull(row.id), description: description.slice(0, 500), costCodeId: trimOrNull(row.costCodeId), budgetLineId: trimOrNull(row.budgetLineId), activityId: trimOrNull(row.activityId), commitmentId: trimOrNull(row.commitmentId), quantity, unit: trimOrNull(row.unit)?.slice(0, 20) || null, unitCost, romAmount, notes: trimOrNull(row.notes)?.slice(0, 1000) || null, sortOrder: index };
+    // What the body states of the line: a kept line keeps every field it
+    // leaves out (updateChangeEvent) — the web dialog never shows or sends a
+    // line's notes or budget line, so a save must not wipe them.
+    const given = { quantity: row.quantity !== undefined, unit: row.unit !== undefined, unitCost: row.unitCost !== undefined && row.unitCost !== null, romAmount: row.romAmount !== undefined && row.romAmount !== null && row.romAmount !== "" };
+    for (const field of KEPT_WHEN_OMITTED) given[field] = row[field] !== undefined;
+    return { id: trimOrNull(row.id), description: description.slice(0, 500), costCodeId: trimOrNull(row.costCodeId), budgetLineId: trimOrNull(row.budgetLineId), activityId: trimOrNull(row.activityId), commitmentId: trimOrNull(row.commitmentId), quantity, unit: trimOrNull(row.unit)?.slice(0, 20) || null, unitCost, romAmount, notes: trimOrNull(row.notes)?.slice(0, 1000) || null, sortOrder: index, given };
   });
 };
 
@@ -356,17 +365,18 @@ const nextNumber = async (tx, projectId) => {
  * already carried by a live change event (one void or closed may be
  * replaced), else 409 EXCEPTION_IN_CHANGE and nothing is written.
  */
-const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null, links = null }) => {
+const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null, links = null, auditMetadata = null, prefillProvenance = null }) => {
   await ensureProject({ orgId, projectId });
   const data = normalizeEvent(payload);
   const lines = normalizeLines(payload.lines);
   const typed = normalizeLinks(links);
   await assertRefs({ orgId, projectId, data, lines });
   await assertLinks({ orgId, projectId, links: typed });
+  const createdAudit = (row) => ({ orgId, projectId, entityType: "change_event", entityId: row.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, summary: { ref: row.ref, title: row.title, type: row.type, origin: row.origin, rom: estimateOf(row).rom, ...(Object.keys(typed).length ? { sourceLinks: typed } : {}) } });
   const created = await prisma.$transaction(async (tx) => {
     const number = await nextNumber(tx, projectId);
     const row = await tx.changeEvent.create({ data: { ...data, ...(sourcePairOf(typed) || {}), ...typed, orgId, projectId, number, ref: `CE-${String(number).padStart(3, "0")}`, status: STATUS.OPEN, createdBy: actor?.id || null, updatedBy: actor?.id || null } });
-    if (lines.length) await tx.changeEventLine.createMany({ data: lines.map(({ id, ...line }) => ({ ...line, orgId, projectId, changeEventId: row.id })) });
+    if (lines.length) await tx.changeEventLine.createMany({ data: lines.map(({ id, given, ...line }) => ({ ...line, orgId, projectId, changeEventId: row.id })) });
     if (typed.exceptionId) {
       const claimed = await tx.projectException.updateMany({
         where: {
@@ -380,9 +390,17 @@ const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null,
       });
       if (claimed.count !== 1) throw new HttpError(409, "EXCEPTION_IN_CHANGE", "This exception is already carried by a change event, or is no longer open");
     }
-    return loadEvent({ orgId, projectId, changeEventId: row.id, tx });
+    const stored = await loadEvent({ orgId, projectId, changeEventId: row.id, tx });
+    // PC-7b: an event raised from a BOQ-derived exception records, with its
+    // creation and in the same transaction (never best-effort), which of its
+    // fields came from the exception's prefill — what utils/boq-figures
+    // withholds from a reader without boq:read while they stay as taken.
+    if (prefillProvenance) {
+      await auditService.recordEvent({ tx, ...createdAudit(stored), metadata: { ...(auditMetadata || {}), prefillProvenance: changeEventPrefillProvenance(prefillProvenance, stored) } });
+    }
+    return stored;
   });
-  await auditService.recordEvent({ orgId, projectId, entityType: "change_event", entityId: created.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, summary: { ref: created.ref, title: created.title, type: created.type, origin: created.origin, rom: estimateOf(created).rom, ...(Object.keys(typed).length ? { sourceLinks: typed } : {}) } }).catch(() => null);
+  if (!prefillProvenance) await auditService.recordEvent({ ...createdAudit(created), ...(auditMetadata ? { metadata: auditMetadata } : {}) }).catch(() => null);
   return eventOut(created, { detail: true });
 };
 
@@ -517,10 +535,43 @@ const assertEditable = (row) => {
   if ([STATUS.CONVERTED, STATUS.CLOSED, STATUS.VOID].includes(row.status)) throw new HttpError(409, "CHANGE_EVENT_LOCKED", `A ${row.status} change event cannot be edited`);
 };
 
-/** Updates the header and, when `lines` is sent, replaces the lines (quoted amounts are kept by line id). */
-const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}, actor = null }) => {
+/**
+ * PC-7b: what this caller was not given of a change event raised from a
+ * BOQ-derived exception (utils/boq-figures changeEventWithheldFields:
+ * { event: [field], lines: Map lineId → [field] }) — null for a caller who
+ * may read the BOQ, or an event raised from no BOQ-derived exception.
+ */
+const withheldForCaller = async ({ orgId, projectId, event, access }) => {
+  if (!access || access.boq === true) return null;
+  const withholding = await require("./exception.service").changeEventWithholding({ orgId, projectId, events: [event] });
+  const entry = withholding.get(event.id);
+  return entry ? changeEventWithheldFields(event, entry) : null;
+};
+const fieldWithheld = () => new HttpError(409, "CHANGE_EVENT_FIELD_WITHHELD", CHANGE_EVENT_EXCEPTION_WITHHELD);
+// What the vendor portal shows of a line (portalLines): a line any of whose
+// shown fields was withheld from the sender is not theirs to send out.
+const RFQ_DISCLOSED_FIELDS = Object.freeze(["quantity", "unit", "activityId"]);
+
+/**
+ * Updates the header and, when `lines` is sent, replaces the lines (quoted
+ * amounts are kept by line id). A caller who was not given a field (PC-7b:
+ * withheldForCaller) never writes it: sending one — even null — is refused
+ * with 409 CHANGE_EVENT_FIELD_WITHHELD and the reason, nothing written; one
+ * left out keeps the stored value. For every caller, a kept line (sent with
+ * its id) keeps any field the body leaves out — its quantity, unit, unit
+ * cost, cost code, budget line, activity, commitment and notes; null clears.
+ */
+const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}, actor = null, access = null }) => {
   const existing = await loadEvent({ orgId, projectId, changeEventId });
   assertEditable(existing);
+  const withheld = await withheldForCaller({ orgId, projectId, event: existing, access });
+  if (withheld) {
+    if (withheld.event.some((field) => payload[field] !== undefined)) throw fieldWithheld();
+    for (const row of Array.isArray(payload.lines) ? payload.lines : []) {
+      const fields = row && row.id ? withheld.lines.get(String(row.id).trim()) : null;
+      if (fields && fields.some((field) => row[field] !== undefined)) throw fieldWithheld();
+    }
+  }
   const data = normalizeEvent(payload, existing);
   const lines = payload.lines !== undefined ? normalizeLines(payload.lines) : null;
   await assertRefs({ orgId, projectId, data, lines: lines || [] });
@@ -529,10 +580,23 @@ const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}
     if (lines) {
       const keep = uniqueIds(lines.map((line) => line.id));
       await tx.changeEventLine.deleteMany({ where: { changeEventId, id: { notIn: keep.length ? keep : ["__none__"] } } });
-      for (const { id, ...line } of lines) {
+      for (const { id, given, ...line } of lines) {
         const existingLine = id ? existing.lines.find((row) => row.id === id) : null;
-        if (existingLine) await tx.changeEventLine.update({ where: { id }, data: line });
-        else await tx.changeEventLine.create({ data: { ...line, orgId, projectId, changeEventId } });
+        if (existingLine) {
+          // A kept line whose body leaves a field out keeps the stored one —
+          // a reader who was not given it (a change event raised from a
+          // BOQ-derived exception, utils/boq-figures withheldChangeEvent), or
+          // a client that never shows it (the web dialog: notes, budget
+          // line), cannot reset it by saving the line.
+          const kept = { ...line };
+          for (const field of (withheld && withheld.lines.get(id)) || []) kept[field] = field === "unitCost" ? round2(existingLine.unitCost) : field === "quantity" ? toNumber(existingLine.quantity, 1) : existingLine[field] ?? null;
+          if (!given.quantity) kept.quantity = toNumber(existingLine.quantity, 1);
+          if (!given.unit) kept.unit = existingLine.unit || null;
+          if (!given.unitCost) kept.unitCost = round2(existingLine.unitCost);
+          if (!given.romAmount) kept.romAmount = round2(kept.quantity * kept.unitCost);
+          for (const field of KEPT_WHEN_OMITTED) if (!given[field]) kept[field] = existingLine[field] ?? null;
+          await tx.changeEventLine.update({ where: { id }, data: kept });
+        } else await tx.changeEventLine.create({ data: { ...line, orgId, projectId, changeEventId } });
       }
     }
     return loadEvent({ orgId, projectId, changeEventId, tx });
@@ -563,8 +627,15 @@ const rotateToken = async ({ tx = prisma, rfq, dueDate }) => {
   return token;
 };
 
-/** Sends RFQs for a change event: one per recipient (a commitment's vendor or an ad-hoc contact), each with a personal link. */
-const sendRfqs = async ({ orgId, projectId, changeEventId, payload = {}, actor = null }) => {
+/**
+ * Sends RFQs for a change event: one per recipient (a commitment's vendor or
+ * an ad-hoc contact), each with a personal link. PC-7b: a sender without
+ * boq:read may not send a vendor a line whose quantity, unit or activity the
+ * answer withheld from them (taken from a BOQ-derived exception) — the RFQ
+ * that would include one (by lineIds, or "all lines" when none is named) is
+ * refused with 409 CHANGE_EVENT_LINE_WITHHELD and the reason, nothing written.
+ */
+const sendRfqs = async ({ orgId, projectId, changeEventId, payload = {}, actor = null, access = null }) => {
   const project = await ensureProject({ orgId, projectId });
   const event = await loadEvent({ orgId, projectId, changeEventId });
   assertEditable(event);
@@ -573,6 +644,13 @@ const sendRfqs = async ({ orgId, projectId, changeEventId, payload = {}, actor =
   const dueDate = optionalDate(payload.dueDate, "dueDate");
   const instructions = trimOrNull(payload.instructions)?.slice(0, 4000) || null;
   const lineIds = uniqueIds(Array.isArray(payload.lineIds) ? payload.lineIds : []).filter((id) => event.lines.some((line) => line.id === id));
+  const withheld = await withheldForCaller({ orgId, projectId, event, access });
+  if (withheld) {
+    const included = lineIds.length ? lineIds : event.lines.map((line) => line.id);
+    if (included.some((id) => (withheld.lines.get(id) || []).some((field) => RFQ_DISCLOSED_FIELDS.includes(field)))) {
+      throw new HttpError(409, "CHANGE_EVENT_LINE_WITHHELD", `${CHANGE_EVENT_EXCEPTION_WITHHELD}. A line whose figures were withheld from you cannot be sent to a vendor by you: choose only the other lines, or ask a member who may read them to send it`);
+    }
+  }
   const commitmentIds = uniqueIds(recipients.map((recipient) => recipient.commitmentId));
   const commitments = commitmentIds.length ? await prisma.commitment.findMany({ where: { id: { in: commitmentIds }, projectId }, include: { vendorCompany: { select: { id: true, name: true, email: true, contactName: true } }, projectParty: { select: { contactEmail: true, contactName: true } } } }) : [];
   const commitmentById = new Map(commitments.map((row) => [row.id, row]));

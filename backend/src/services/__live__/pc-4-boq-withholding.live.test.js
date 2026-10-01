@@ -70,6 +70,10 @@ const evService = require("../earned-value.service");
 const workspaceDashboardService = require("../workspace-dashboard.service");
 const costService = require("../cost.service");
 const budgetService = require("../budget.service");
+const exceptionService = require("../exception.service");
+const { resolveRequestPrincipal } = require("../membership.service");
+const { requestForProject } = require("../../middleware/project-access");
+const { boqFigureAccess, exceptionAccess } = require("../../utils/boq-figures");
 const { startApi } = require("./auth-live-kit");
 const ExcelJS = require("exceljs");
 
@@ -420,6 +424,30 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
 
   const at = (route) => `/api/v1/projects/${project.id}${route}`;
   const ids = () => ({ orgId: live.org.id, projectId: project.id });
+  // PC-7b: the member as this project's own routes see them (template, role,
+  // party) — what GET /forecast and POST /forecast/explain pass as `access`
+  // (routes/forecast.js: boqFigureAccess + exceptionAccess, item D), and what
+  // the workspace home counts its openExceptions with (routes/projects.js).
+  const principalOf = (user) => resolveRequestPrincipal({ userId: user.id, orgId: live.org.id });
+  const forecastAccessOf = async (user, projectId = project.id) => {
+    const view = await requestForProject({ user: await principalOf(user) }, projectId);
+    return { ...boqFigureAccess(view), ...exceptionAccess(view) };
+  };
+  // The tile the route adds to the service's dashboard (PC-7b), as the route builds it.
+  const openExceptionsOf = async (user) => {
+    const principal = await principalOf(user);
+    return exceptionService.workspaceOpenExceptions({
+      orgId: live.org.id,
+      userId: principal.id,
+      role: principal.role,
+      isCompanyAdmin: principal.isCompanyAdmin,
+      accessFor: async (projectId) => exceptionService.exceptionAccessForView(await requestForProject({ user: principal }, projectId)),
+    });
+  };
+  // The forecast's data-quality marker for this reader (dataQualityWithheld,
+  // item D): decided by their access alone; absent for a reader of every kind.
+  const dataQualityMarkerOf = async (user) => (await forecastService.buildForecast({ ...ids(), access: await forecastAccessOf(user) })).dataQualityWithheld;
+  const withMarker = (forecast, marker) => (marker ? { ...forecast, dataQualityWithheld: marker } : forecast);
 
   // Every request the Overview landing and the Schedule module's tabs make
   // (e2e/52 asserts the browser makes exactly these), with the service call
@@ -442,8 +470,11 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     workspaceDashboard: {
       route: "/api/v1/projects/workspace-dashboard",
       kind: "workspace",
-      service: () =>
-        workspaceDashboardService.getWorkspaceDashboard({ orgId: live.org.id, userId: live.user.id, role: "pm", isCompanyAdmin: true }),
+      // ... and, after it, the open-exceptions tile the route adds (PC-7b).
+      service: async () => ({
+        ...(await workspaceDashboardService.getWorkspaceDashboard({ orgId: live.org.id, userId: live.user.id, role: "pm", isCompanyAdmin: true })),
+        openExceptions: await openExceptionsOf(live.user),
+      }),
     },
     // The Overview: identity, strip, wizard, health card, needs-you panel.
     project: { route: at(""), kind: "sweep" },
@@ -456,7 +487,7 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     forecast: {
       route: at("/forecast"),
       kind: "forecast",
-      service: () => forecastService.buildForecast(ids()),
+      service: async () => forecastService.buildForecast({ ...ids(), access: await forecastAccessOf(live.user) }),
     },
     // The Schedule module: the dashboard, its tabs, and their panels.
     schedule: {
@@ -793,7 +824,9 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
         if (kind === "keys") {
           expect([viewer, name, mine]).toEqual([viewer, name, without(theirs, withheld)]);
         } else if (kind === "forecast") {
-          expect([viewer, name, mine]).toEqual([viewer, name, readsCost ? forecastWithoutMapping(theirs) : forecastWithoutMoney(theirs)]);
+          // ... with this reader's own data-quality marker (PC-7b item D).
+          const marker = await dataQualityMarkerOf(user);
+          expect([viewer, name, mine]).toEqual([viewer, name, withMarker(readsCost ? forecastWithoutMapping(theirs) : forecastWithoutMoney(theirs), marker)]);
         } else if (kind === "ev") {
           expect([viewer, name, mine]).toEqual([viewer, name, evWithoutBill(theirs)]);
           // The same reader's answer is buildEvReportWithHistory's, withheld;
@@ -849,6 +882,9 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
             await workspaceDashboardService.getWorkspaceDashboard({ orgId: live.org.id, userId: user.id, role: user.role, isCompanyAdmin: false }),
           );
           if (!readsCost) own.projectHealth = own.projectHealth.map((row) => without(row, new Set(["bac", "eac", "ev", "pv", "ac"])));
+          // ... and the open-exceptions tile the route adds (PC-7b), counted
+          // with this member's own access on each project.
+          own.openExceptions = await openExceptionsOf(user);
           expect([viewer, name, JSON.parse(unstampedDashboard(limited.text)).data]).toEqual([
             viewer,
             name,
@@ -956,7 +992,7 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     const full = await post(at("/forecast/explain"), {});
     expect([full.status, full.body?.error, full.body.data.degraded]).toEqual([200, undefined, true]);
     // A BOQ reader: the service's answer, byte for byte.
-    const service = await forecastService.explain({ ...ids(), user: { ...live.user, role: "pm" } });
+    const service = await forecastService.explain({ ...ids(), user: { ...live.user, role: "pm" }, access: await forecastAccessOf(live.user) });
     expect(unstamped(full.text)).toBe(unstamped(JSON.stringify({ success: true, data: normalizeMoneyTree(service) })));
     expect(full.body.data.narrative.cost).not.toMatch(/not available/);
     for (const [viewer, { user, readsCost, secrets }] of Object.entries(viewers())) {
@@ -967,11 +1003,13 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       }
       const mine = parsed(explained.text).data;
       const theirs = parsed(full.text).data;
+      // Each reader's forecast carries their own data-quality marker (PC-7b item D).
+      const marker = await dataQualityMarkerOf(user);
       if (readsCost) {
         // The forecast without its per-activity cost (E1); the narrative the
         // BOQ reader's, except that its cost paragraph says which activities
         // are over budget is not available — never "no activity is".
-        expect([viewer, mine.forecast]).toEqual([viewer, forecastWithoutMapping(theirs.forecast)]);
+        expect([viewer, mine.forecast]).toEqual([viewer, withMarker(forecastWithoutMapping(theirs.forecast), marker)]);
         expect([viewer, { ...mine.narrative, cost: undefined }]).toEqual([viewer, { ...theirs.narrative, cost: undefined }]);
         expect([viewer, mine.narrative.cost]).toEqual([
           viewer,
@@ -979,7 +1017,7 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
         ]);
         expect([viewer, mine.degraded, mine.reason, mine.message]).toEqual([viewer, theirs.degraded, theirs.reason, theirs.message]);
       } else {
-        expect(mine.forecast).toEqual(forecastWithoutMoney(theirs.forecast));
+        expect(mine.forecast).toEqual(withMarker(forecastWithoutMoney(theirs.forecast), marker));
         expect(mine.narrative.cost).toBe("The cost figures are not available to you on this project.");
         expect(mine.narrative.headline).not.toMatch(/over budget/);
       }

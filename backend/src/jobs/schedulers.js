@@ -24,7 +24,7 @@ const SCHEDULERS = [
   ["workflow", () => require("./workflow-scheduler"), "startWorkflowScheduler", "stopWorkflowScheduler"],
   // Accounting payment polling (OCTA-INT-API-026).
   ["accounting", () => require("./accounting-scheduler"), "startAccountingScheduler", "stopAccountingScheduler"],
-  // Nightly exception re-evaluation of every active project (PC-7b; EXCEPTIONS_ENGINE_ENABLED).
+  // Nightly exception re-evaluation of every active project (PC-7b; EXCEPTIONS_ENGINE_ENABLED and EXCEPTIONS_SCHEDULER_ENABLED).
   ["exception", () => require("./exception-scheduler"), "startExceptionScheduler", "stopExceptionScheduler"],
 ];
 

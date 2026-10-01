@@ -61,4 +61,24 @@ describe("checkNightly", () => {
   it("does not start when the engine is disabled", () => {
     expect(scheduler.startExceptionScheduler({ env: { EXCEPTIONS_ENGINE_ENABLED: "false" } })).toBeNull();
   });
+
+  it("has its own switch, EXCEPTIONS_SCHEDULER_ENABLED (default true, as its siblings): false starts no tick though the engine is on", () => {
+    const log = jest.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect([scheduler.schedulerEnabled({}), scheduler.schedulerEnabled({ EXCEPTIONS_SCHEDULER_ENABLED: "true" }), scheduler.schedulerEnabled({ EXCEPTIONS_SCHEDULER_ENABLED: " FALSE " })]).toEqual([true, true, false]);
+      expect(scheduler.startExceptionScheduler({ env: { EXCEPTIONS_ENGINE_ENABLED: "true", EXCEPTIONS_SCHEDULER_ENABLED: "false" } })).toBeNull();
+      expect(log).toHaveBeenCalledWith("[exception-scheduler] disabled by EXCEPTIONS_SCHEDULER_ENABLED=false");
+      // Both on (the defaults): the tick's timer starts — and is stopped again.
+      const timer = scheduler.startExceptionScheduler({ env: {} });
+      expect(timer).not.toBeNull();
+      scheduler.stopExceptionScheduler();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("the backend env example documents the three switches", () => {
+    const text = require("fs").readFileSync(require("path").join(__dirname, "..", "..", "..", ".env.example"), "utf8");
+    for (const name of ["EXCEPTIONS_ENGINE_ENABLED", "EXCEPTIONS_SCHEDULER_ENABLED", "EXCEPTIONS_NIGHTLY_HOUR_UTC"]) expect([name, new RegExp(`^# ${name}=`, "m").test(text)]).toEqual([name, true]);
+  });
 });

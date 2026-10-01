@@ -10,10 +10,8 @@
  * engine will call it, and asserted row by row: subject, measured / limit and
  * their basis. Then: no rule writes anything (every row of the organisation
  * compared before and after), a rule asked for a project under another
- * organisation sees nothing, and — once exception-engine.service.js is on the
- * base — the engine itself opens, refreshes and resolves the rows. Until the
- * engine merges, that part is skipped and says why (the orchestrator re-runs
- * this file after the merge).
+ * organisation sees nothing, and the engine itself (merged on the base, PC-7b
+ * integration: nothing here is skipped) opens, refreshes and resolves the rows.
  *
  *   DATABASE_CONNECTION_LIMIT=4 npm run -s test:live -- src/services/__live__/pc-7b-data-quality.live.test.js
  */
@@ -22,18 +20,9 @@ const { prisma } = require("../../config/db");
 const { createLiveOrg, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
 const RULES = require("../exception-rules/data-quality");
 
-// ─── the engine, through a tiny adapter ───────────────────────────────────
-const optional = (path, name) => {
-  try {
-    return require(path);
-  } catch (error) {
-    if (error && error.code === "MODULE_NOT_FOUND" && error.message.includes(name)) return null;
-    throw error;
-  }
-};
-const engine = optional("../exception-engine.service", "exception-engine.service");
-const ENGINE_ABSENT = "[skipped: backend/src/services/exception-engine.service.js is not on this base; the orchestrator re-runs this file after the engine track merges]";
-const engineIt = (name, fn, timeout) => (engine ? it(name, fn, timeout) : it.skip(`${ENGINE_ABSENT} ${name}`, fn, timeout));
+// ─── the engine (merged on the base: every case runs, none is skipped) ────
+const engine = require("../exception-engine.service");
+const engineIt = it;
 
 // ─── every row of the organisation ("writes nothing") ─────────────────────
 const scalarField = (model, name) => model.fields.some((field) => field.name === name && field.kind === "scalar");
@@ -84,13 +73,13 @@ const DAY = 86_400_000;
 const daysAgo = (days) => new Date(NOW.getTime() - days * DAY);
 // What the standalone tests assert, rule by rule, on the gaps project.
 const EXPECTED_GAPS = Object.freeze({
-  budget_truths_disagree: 3, forecast_without_provenance: 2, activity_budget_mismatch: 2, committed_definition_mixed: 1, equipment_cost_unposted: 2,
+  budget_truths_disagree: 3, forecast_without_provenance: 2, activity_budget_mismatch: 2, equipment_cost_unposted: 2,
   unit_unresolved: 1, unit_mismatch: 2, structure_missing: 4,
   progress_stale: 1, period_not_locked: 1, ev_basis_divergence: 1, readiness_override_active: 1,
   orphan_change_link: 4, change_order_possible_duplicate: 1,
 });
 // The kinds that compare two owner figures: each measures the gap between them.
-const GAP_KINDS = Object.freeze(["budget_truths_disagree", "forecast_without_provenance", "activity_budget_mismatch", "committed_definition_mixed", "equipment_cost_unposted", "ev_basis_divergence"]);
+const GAP_KINDS = Object.freeze(["budget_truths_disagree", "forecast_without_provenance", "activity_budget_mismatch", "equipment_cost_unposted", "ev_basis_divergence"]);
 
 liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, read-only, each citing its evidence", () => {
   let live;
@@ -297,7 +286,7 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     expect(RULES.DATA_QUALITY_KINDS).toEqual(kinds);
     for (const rule of RULES) {
       expect(["info", "warning"]).toContain(rule.severity);
-      expect(["boq", "cost", "schedule", "progress"]).toContain(rule.module);
+      expect(["boq", "cost", "schedule", "progress", "change_order"]).toContain(rule.module);
       expect(typeof rule.boqDerived).toBe("boolean");
       expect(typeof rule.evaluate).toBe("function");
       expect(typeof rule.label).toBe("string");
@@ -349,12 +338,12 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     expect(await evaluate("activity_budget_mismatch", clean)).toEqual([]);
   });
 
-  it("committed_definition_mixed: the purchase-order register's `committed` alias beside the register's committed cost", async () => {
-    const [row, ...rest] = await evaluate("committed_definition_mixed", gaps);
-    expect(rest).toEqual([]);
-    expect([row.subjectType, row.subjectId, row.measured.value, row.limit.value, figuresOf(row)]).toEqual(["project", gaps.project.id, 5000, 0.01, { purchaseOrderCommitted: 5000, registerCommitted: 0 }]);
-    expect(row.data.figures.purchaseOrderCommitted.basis).toMatch(/NOT committed cost/);
-    expect(await evaluate("committed_definition_mixed", clean)).toEqual([]);
+  it("committed_definition_mixed is no longer a kind (PC-7b integration K): the gaps project's purchase order beside the register raises nothing", async () => {
+    expect(RULES.find((rule) => rule.kind === "committed_definition_mixed")).toBeUndefined();
+    expect(await prisma.procurementOrder.count({ where: { projectId: gaps.project.id } })).toBe(1);
+    const engine = require("../exception-engine.service");
+    const dry = await engine.evaluateProject({ orgId: live.org.id, projectId: gaps.project.id, cutoff: NOW, trigger: "test", dryRun: true });
+    expect(dry.rows.filter((row) => row.kind === "committed_definition_mixed")).toEqual([]);
   });
 
   it("equipment_cost_unposted: usage cost a daily report carries beyond the ledger's net posting", async () => {
@@ -589,7 +578,7 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     return baseForecast;
   };
   const FULL = { boq: true, budget: true };
-  const forecastFigures = (forecast) => stable({ ...forecast, dataQuality: undefined, dataQualityItems: undefined });
+  const forecastFigures = (forecast) => stable({ ...forecast, dataQuality: undefined, dataQualityItems: undefined, dataQualityWithheld: undefined });
 
   it("forecast.dataQuality lists the open data-quality rows per reader beside its own notes; every figure is byte-identical to the base code's", async () => {
     const { buildForecast } = require("../forecast.service");
@@ -642,6 +631,10 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
       const cost = await buildForecast({ orgId, projectId, asOf: NOW, access: COST });
       expect(figures(cost)).toBe(figures(before));
       expect(cost.dataQualityItems.slice(own.length).map((item) => item.kind)).toEqual(["budget_truths_disagree", "progress_stale"]);
+      // The kinds left out are named (PC-7b integration D): from the access, with no count; the full reader has no marker.
+      expect(full).not.toHaveProperty("dataQualityWithheld");
+      expect(cost.dataQualityWithheld.reason).toMatch(/available only to members who may read the BOQ/);
+      expect(JSON.stringify(cost.dataQualityWithheld)).not.toMatch(/\d/);
       // A schedule reader of neither, and a caller that names no access: the progress kind only.
       for (const access of [NONE, null, undefined]) {
         const plain = await buildForecast({ orgId, projectId, asOf: NOW, ...(access === undefined ? {} : { access }) });
@@ -716,12 +709,8 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     expect([all.status, all.result.scope, all.result.projects, all.result.projectsOutOfScope]).toEqual([0, "all", 6, 0]);
   }, 300_000);
 
-  it("exception-dry-run.js without --rules-only goes through the engine's dryRun (exit 3 while the engine is not on the base)", async () => {
+  it("exception-dry-run.js without --rules-only goes through the engine's dryRun", async () => {
     const { status, output, result } = runDryRun([]);
-    if (!engine) {
-      expect([status, output]).toEqual([3, expect.stringContaining("exception-engine.service.js is not on this base")]);
-      return;
-    }
     expect([status, result.mode, result.sessionReadOnly, result.projects, result.errors]).toEqual([0, "engine_dry_run", "on", 4, []]);
     // A first pass: every data-quality row the gaps project would hold is a new one.
     const counts = Object.fromEntries(result.perProject.map((row) => [row.projectId, row.counts]));
@@ -822,4 +811,71 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
       await prisma.project.update({ where: { id: projectId }, data: { contractValue: 100000 } });
     }
   }, 180_000);
+
+  // ─── PC-7b integration E: dismissal episodes ─────────────────────────────
+
+  engineIt("progress_stale and period_not_locked name their episode: a dismissal holds however many days pass, and a new episode reopens", async () => {
+    const orgId = live.org.id;
+    const projectId = gaps.project.id;
+    const later = (days) => new Date(NOW.getTime() + days * DAY);
+    const openOf = (kind, subjectId) => prisma.projectException.findFirst({ where: { orgId, projectId, kind, subjectId, resolvedAt: null } });
+    await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+    const stale = await openOf("progress_stale", gaps.a1.id);
+    const period = await openOf("period_not_locked", gaps.period1.id);
+    expect([stale.dataJson.dismissalKey, period.dataJson.dismissalKey]).toEqual([`activity_progress:${gaps.p1.id}@${gaps.p1.approvedAt.toISOString()}`, `reporting_period:${gaps.period1.id}`]);
+    const exceptionService = require("../exception.service");
+    const access = { boq: true, modules: { boq: true, cost: true, schedule: true, progress: true } };
+    const may = { changeEventUpdate: true, changeEventCreate: true, moduleUpdate: {} };
+    // Dismissed through the API's own action (dataJson.dismissedFingerprint).
+    for (const row of [stale, period]) await exceptionService.dismissException({ orgId, projectId, exceptionId: row.id, access, may, actor: { id: live.user.id, role: "pm" }, payload: { reason: "LiveTest known" } });
+    // Ten and forty days later the same episodes have grown — they stay dismissed.
+    for (const days of [10, 40]) {
+      const result = await engine.evaluateProject({ orgId, projectId, cutoff: later(days), trigger: "test" });
+      expect([days, await openOf("progress_stale", gaps.a1.id), await openOf("period_not_locked", gaps.period1.id)]).toEqual([days, null, null]);
+      expect(result.rows.filter((row) => row.change === "suppressed" || row.change === "reopen").length).toBe(0);
+    }
+    // A new episode: newer approved progress on A1 that went stale itself.
+    const newer = await prisma.activityProgress.create({ data: { activityId: gaps.a1.id, pctComplete: 45, status: "approved", approvedAt: daysAgo(20), updatedAt: daysAgo(20) } });
+    try {
+      await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+      const reopened = await openOf("progress_stale", gaps.a1.id);
+      expect([Boolean(reopened), reopened && Number(reopened.measured), reopened?.dataJson?.reopenedFrom?.id, reopened?.dataJson?.dismissalKey]).toEqual([true, 20, stale.id, `activity_progress:${newer.id}@${newer.approvedAt.toISOString()}`]);
+      // The period's dismissal still holds.
+      expect(await openOf("period_not_locked", gaps.period1.id)).toBeNull();
+    } finally {
+      await prisma.projectException.deleteMany({ where: { orgId, projectId, kind: "progress_stale", resolvedAt: null } });
+      await prisma.activityProgress.delete({ where: { id: newer.id } });
+    }
+  }, 240_000);
+
+  // ─── PC-7b integration F: a cleared condition releases its dismissal ─────
+
+  engineIt("a dismissal whose condition clears is released on its row (with the trigger), and the condition's return opens a fresh row", async () => {
+    const orgId = live.org.id;
+    const projectId = gaps.project.id;
+    const subject = { orgId, projectId, kind: "orphan_change_link", subjectId: gaps.orphanRevision.id };
+    await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+    const open = await prisma.projectException.findFirst({ where: { ...subject, resolvedAt: null } });
+    if (open) await engine.setDismissed({ orgId, projectId, exceptionId: open.id, actorId: live.user.id, reason: "LiveTest reviewed" });
+    const dismissed = await prisma.projectException.findFirst({ where: { ...subject, resolvedReason: { startsWith: "dismissed:" } }, orderBy: { resolvedAt: "desc" } });
+    expect(dismissed).toBeTruthy();
+    // Still there: suppressed, nothing released.
+    await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+    expect((await prisma.projectException.findUnique({ where: { id: dismissed.id } })).dataJson.dismissalReleasedAt).toBeUndefined();
+    // The link is fixed: the condition clears, and the release is recorded on the dismissed row.
+    await prisma.budgetRevision.update({ where: { id: gaps.orphanRevision.id }, data: { linkedChangeOrder: "VO-1" } });
+    try {
+      const cleared = await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "manual" });
+      expect(cleared.released).toBeGreaterThanOrEqual(1);
+      const released = await prisma.projectException.findUnique({ where: { id: dismissed.id } });
+      expect([released.resolvedReason, typeof released.dataJson.dismissalReleasedAt, released.dataJson.dismissalReleaseTrigger, released.resolvedAt.toISOString()]).toEqual([dismissed.resolvedReason, "string", "manual", dismissed.resolvedAt.toISOString()]);
+      expect(await prisma.projectException.count({ where: { ...subject, resolvedAt: null } })).toBe(0);
+    } finally {
+      await prisma.budgetRevision.update({ where: { id: gaps.orphanRevision.id }, data: { linkedChangeOrder: "VO-404" } });
+    }
+    // It comes back: a FRESH open row, not suppressed and not "reopened from" the old dismissal.
+    await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+    const fresh = await prisma.projectException.findFirst({ where: { ...subject, resolvedAt: null } });
+    expect([Boolean(fresh), fresh?.dataJson?.reopenedFrom]).toEqual([true, undefined]);
+  }, 240_000);
 });

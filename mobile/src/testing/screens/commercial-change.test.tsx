@@ -4,6 +4,7 @@ import ChangeEventScreen from '../../../app/(app)/commercial/change-events/[id]'
 import ChangeEventsScreen from '../../../app/(app)/commercial/change-events/index'
 import NewChangeEventScreen from '../../../app/(app)/commercial/change-events/new'
 import CommercialHomeScreen from '../../../app/(app)/commercial/index'
+import { CHANGE_EVENT_ORIGIN_LABELS, CHANGE_EVENT_ORIGINS, changeEventOriginLabel } from '@/api/commercial-types'
 import { network } from '@/api/network'
 import { queryClient } from '@/api/query'
 import type { PermissionMatrix } from '@/api/types'
@@ -103,5 +104,88 @@ describe('change events', () => {
     // Nothing on this screen accepts a quote, converts, closes or voids.
     expect(screen.queryByTestId('action-bar')).toBeNull()
     expect(calls.every((c) => c.method === 'GET')).toBe(true)
+  })
+
+  it('names every origin the API stores — an event raised from a project exception never reads as unknown (PC-7b)', async () => {
+    expect(CHANGE_EVENT_ORIGINS).toContain('exception')
+    for (const origin of CHANGE_EVENT_ORIGINS) expect(CHANGE_EVENT_ORIGIN_LABELS[origin]).toBeTruthy()
+    expect(changeEventOriginLabel('exception')).toBe('Project exception')
+    expect(changeEventOriginLabel('rfi')).toBe('RFI')
+    // A value this build does not know is still readable, never blank.
+    expect(changeEventOriginLabel('site_walk')).toBe('Site walk')
+    calls = fakeServer({
+      'GET /projects': () => ({ status: 200, body: envelope(page(projects)) }),
+      'GET /auth/me/permissions': () => ({ status: 200, body: envelope(pmCommercial) }),
+      'GET /projects/p1/change-events/ce1': () => ({ status: 200, body: envelope(changeEvent({ origin: 'exception', sourceRecordType: 'project_exception', sourceRecordId: 'ex1', sourcePath: null })) }),
+      'GET /projects/p1/comments': () => ({ status: 200, body: envelope({ items: [], pagination: { limit: 100, nextCursor: null } }) }),
+      'GET /projects/p1/audit': () => ({ status: 200, body: envelope({ events: [], nextCursor: null }) }),
+    })
+    await renderScreen(<ChangeEventScreen />)
+    expect(await screen.findByText(/From Project exception/)).toBeTruthy()
+  })
+
+  it('says, with the server\'s reason, what it withheld of an event raised from a BOQ-derived exception — never a bare origin, never "undefined" (PC-7b)', async () => {
+    const reason = 'Part of this change event is withheld from you: the record it was raised from, and what came from that record onto the event, are available only to members with access to that record'
+    const base = changeEvent()
+    const [first, ...rest] = base.lines ?? []
+    const { activityId: _a, activity: _b, costCodeId: _c, costCode: _d, quantity: _q, unit: _u, unitCost: _uc, ...withheldLine } = first!
+    const { activityId: _ea, activity: _eb, ...withheldEvent } = base
+    calls = fakeServer({
+      'GET /projects': () => ({ status: 200, body: envelope(page(projects)) }),
+      'GET /auth/me/permissions': () => ({ status: 200, body: envelope(siteEngineerCommercial) }),
+      'GET /projects/p1/change-events/ce1': () => ({
+        status: 200,
+        body: envelope({
+          ...withheldEvent,
+          origin: 'exception',
+          sourceRecordType: null,
+          sourceRecordId: null,
+          sourcePath: null,
+          lines: [withheldLine, ...rest],
+          sourceWithheld: { keys: ['sourceLinks.project_exception', 'sourceRecordType', 'sourceRecordId', 'sourcePath', 'activityId', ...['activityId', 'costCodeId', 'quantity', 'unit', 'unitCost'].map((field) => `lines[${first!.id}].${field}`)], reason },
+        }),
+      }),
+      'GET /projects/p1/comments': () => ({ status: 200, body: envelope({ items: [], pagination: { limit: 100, nextCursor: null } }) }),
+      'GET /projects/p1/audit': () => ({ status: 200, body: envelope({ events: [], nextCursor: null }) }),
+    })
+    await renderScreen(<ChangeEventScreen />)
+    expect(await screen.findByText(/From Project exception/)).toBeTruthy()
+    expect(screen.getByTestId('change-event-source-withheld')).toHaveTextContent(`Raised from — ${reason}`)
+    expect(screen.getByTestId(`change-event-line-withheld-${first!.id}`)).toHaveTextContent(`— ${reason}`)
+    for (const line of rest) expect(screen.queryByTestId(`change-event-line-withheld-${line.id}`)).toBeNull()
+    // The event's activity reads "—" with the reason where it would be — it never just disappears (second fixer, item 9).
+    expect(screen.getByTestId('change-event-header')).toHaveTextContent(`Activity — ${reason}`, { exact: false })
+    expect(JSON.stringify(screen.toJSON())).not.toContain('undefined')
+  })
+
+  it('lists an event whose activity was withheld with "Activity —" in its row, never a bare gap; an event given its activity names it (PC-7b)', async () => {
+    const reason = 'Part of this change event is withheld from you: the record it was raised from, and what came from that record onto the event, are available only to members with access to that record'
+    const { activityId: _ea, activity: _eb, ...withheldEvent } = changeEvent()
+    const shown = changeEvent({ id: 'ce2', number: 2, ref: 'CE-002', title: 'Client asked for a second lift pit' })
+    calls = fakeServer({
+      'GET /projects': () => ({ status: 200, body: envelope(page(projects)) }),
+      'GET /auth/me/permissions': () => ({ status: 200, body: envelope(siteEngineerCommercial) }),
+      'GET /projects/p1/change-events': () => ({ status: 200, body: envelope(changeEventList([{ ...withheldEvent, origin: 'exception', sourceRecordType: null, sourceRecordId: null, sourcePath: null, sourceWithheld: { keys: ['sourceRecordType', 'sourceRecordId', 'sourcePath', 'activityId'], reason } }, shown])) }),
+    })
+    await renderScreen(<ChangeEventsScreen />)
+    const row = await screen.findByTestId('change-event-row-ce1')
+    expect(row).toHaveTextContent('Activity —', { exact: false })
+    expect(row.props.accessibilityLabel).toContain('Activity —')
+    expect(row).not.toHaveTextContent('Foundation concrete', { exact: false })
+    expect(screen.getByTestId('change-event-row-ce2')).toHaveTextContent('Foundation concrete', { exact: false })
+    expect(screen.getByTestId('change-event-row-ce2')).not.toHaveTextContent('Activity —', { exact: false })
+    expect(row).not.toHaveTextContent('undefined', { exact: false })
+    expect(row.props.accessibilityLabel).not.toContain('undefined')
+  })
+
+  it('offers no "exception" origin on the manual form — that origin is the handoff\'s, with its typed link', async () => {
+    serve()
+    ;(useLocalSearchParams as jest.Mock).mockReturnValue({ origin: 'exception' })
+    await renderScreen(<NewChangeEventScreen />)
+    await screen.findByTestId('change-event-raise')
+    expect(screen.queryByTestId('change-event-origin-exception')).toBeNull()
+    expect(screen.getByTestId('change-event-origin-rfi')).toBeTruthy()
+    expect(screen.getByText('RFI')).toBeTruthy()
+    expect(screen.getByTestId('change-event-origin-manual').props.accessibilityState?.selected).toBe(true)
   })
 })

@@ -11,8 +11,10 @@
  *   certified_over_earned      a certified IPC whose stored over-certification is 500
  *   committed_over_budget      an executed 1,500 commitment on a 1,000 budget line
  *   actual_over_committed      1,600 on the ledger against that 1,500 commitment
- *   forecast_over_revised      official EAC above revised BAC (CPI < 0.9), and the
- *                              line's forecast (the register's default) above its revised
+ *   forecast_over_revised      official EAC above revised BAC (CPI < 0.9); the line's
+ *                              DEFAULT forecast (1,600 = max(revised, actual, committed))
+ *                              is not compared — it restates committed/actual (PC-7b int H) —
+ *                              until a forecast is entered on the line (last case)
  *   schedule_slip_on_mapped_item  on items with certification pending, three ways:
  *                              D's CPM early finish 10 working days behind its baseline
  *                              (a replanned, not yet due activity); S finished — approved
@@ -42,7 +44,7 @@
  *   npm run test:live -- src/services/__live__/pc-7b-exception-engine.live.test.js
  */
 const { prisma } = require("../../config/db");
-const { createLiveOrg, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
+const { createLiveOrg, createLiveUser, dropLiveOrg, liveDescribe, mintAccessToken } = require("../../__live__/helpers");
 const { startApi } = require("./auth-live-kit");
 
 const engine = require("../exception-engine.service");
@@ -131,7 +133,11 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
   };
 
   const rowsOf = (where = {}) => prisma.projectException.findMany({ where: { projectId: project.id, ...where }, orderBy: [{ kind: "asc" }, { subjectId: "asc" }, { createdAt: "asc" }] });
-  const evaluate = (extra = {}) => engine.evaluateProject({ orgId: live.org.id, projectId: project.id, trigger: "test", logger: { log: () => {} }, ...extra });
+  // The §1 overrun rules (quantity.js, money.js, schedule.js). Since the merge the registry also
+  // loads the §7 data-quality rules (data-quality.js), proven in pc-7b-data-quality.live.test.js;
+  // this suite counts the overrun kinds, so it evaluates those rules only.
+  const OVERRUN_RULES = require("../exception-rules").getRules().filter((rule) => rule.file !== "data-quality.js");
+  const evaluate = (extra = {}) => engine.evaluateProject({ orgId: live.org.id, projectId: project.id, trigger: "test", logger: { log: () => {} }, rules: OVERRUN_RULES, ...extra });
 
   beforeAll(async () => {
     tableColumns = await loadTableColumns();
@@ -256,7 +262,7 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     const before = await footprint(live.org.id, { includeExceptions: true });
     const planned = await evaluate({ dryRun: true });
     expect(planned.errors).toEqual([]);
-    expect(planned).toMatchObject({ dryRun: true, opened: 11, refreshed: 0, resolved: 0, unchanged: 0 });
+    expect(planned).toMatchObject({ dryRun: true, opened: 10, refreshed: 0, resolved: 0, unchanged: 0 });
     expect(await footprint(live.org.id, { includeExceptions: true })).toEqual(before);
     expect(await prisma.projectException.count({ where: { orgId: live.org.id } })).toBe(0);
   });
@@ -273,7 +279,7 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     const result = await evaluate();
     expect(result.errors).toEqual([]);
     expect(result.skipped).toEqual([]);
-    expect(result).toMatchObject({ opened: 11, refreshed: 0, resolved: 0, unchanged: 0, suppressed: 0 });
+    expect(result).toMatchObject({ opened: 10, refreshed: 0, resolved: 0, unchanged: 0, suppressed: 0 });
 
     // Every other table of the organisation, byte-identical; no figure moved (delta 0.00).
     const after = await footprint(live.org.id);
@@ -292,7 +298,6 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
         ["certified_over_earned", "ipc_certificate", ids.certificate, "critical", "500.000", "0.000", "USD"],
         ["certified_over_installed", "boq_item", items.R2.id, "critical", "20.000", "10.000", items.R2.unitCode],
         ["committed_over_budget", "budget_line", ids.line, "critical", "1500.000", "1000.000", "USD"],
-        ["forecast_over_revised", "budget_line", ids.line, "critical", "1600.000", "1000.000", "USD"],
         ["forecast_over_revised", "project", project.id, "critical", Number(ev.eac).toFixed(3), Number(ev.totalBudget).toFixed(3), "USD"],
         ["quantity_over_allocation", "allocation", allocations.A, "critical", "70.000", "60.000", items.R1.unitCode],
         ["quantity_over_boq", "boq_item", items.R1.id, "warning", "110.000", "100.000", items.R1.unitCode],
@@ -311,7 +316,8 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     expect(byKind("committed_over_budget").measuredBasis).toMatch(/budget register/);
     expect(byKind("actual_over_committed").measuredBasis).toMatch(/certifiedAgainstCommitment/);
     expect(byKind("forecast_over_revised", "project").measuredBasis).toMatch(/Official EAC/);
-    expect(byKind("forecast_over_revised", "budget_line").measuredBasis).toMatch(/default/);
+    // One gap, one row: the line's default forecast (1,600 = its actual) is not a second row beside committed_over_budget.
+    expect(byKind("forecast_over_revised", "budget_line")).toBeUndefined();
     const slipOf = (key) => firstRows.find((row) => row.kind === "schedule_slip_on_mapped_item" && row.subjectId === acts[key]);
     for (const key of ["D", "S", "T"]) expect(slipOf(key).measuredBasis).toMatch(/change-order impacts are not read/);
     expect(slipOf("D").measuredBasis).toMatch(/Activity\.earlyFinish − Activity\.baselineFinish/);
@@ -334,10 +340,43 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     expect(slipOf("D").dataJson.boq.pendingItems.map((row) => row.boqItemId)).toEqual([items.R3.id]);
   });
 
+  it("schedule_slip_on_mapped_item is BOQ-derived: a site engineer without boq:read is given none of the engine's slip rows — not listed, 404, not counted, a marker", async () => {
+    const tag = Date.now().toString(36);
+    const site = await createLiveUser(prisma, { orgId: live.org.id, name: "LiveTest site no BOQ", email: `live-pc7bint-i-site-${tag}@octapm-live.test`, role: "site_engineer" });
+    await prisma.projectAssignment.create({ data: { projectId: project.id, userId: site.id, role: "site_engineer", orgId: live.org.id } });
+    const template = await prisma.permissionTemplate.create({ data: { orgId: live.org.id, name: `LiveTest I site ${tag}`, baseRole: "site_engineer", tools: { create: [{ module: "boq", level: "none" }] } } });
+    await prisma.projectUserPermission.create({ data: { orgId: live.org.id, projectId: project.id, userId: site.id, templateId: template.id } });
+    const as = { authorization: `Bearer ${mintAccessToken(site)}` };
+    const slips = firstRows.filter((row) => row.kind === "schedule_slip_on_mapped_item");
+    expect(slips).toHaveLength(3);
+    // The PM reads them.
+    const pmList = await api.get(at("/controls/exceptions?kind=schedule_slip_on_mapped_item"), auth());
+    ok("pm list", pmList);
+    expect(pmList.body.data.data.map((row) => row.id).sort()).toEqual(slips.map((row) => row.id).sort());
+    // The site engineer reads schedule, but not the BOQ: withheld whole, with a marker and no count.
+    const list = await api.get(at("/controls/exceptions?kind=schedule_slip_on_mapped_item"), as);
+    ok("site list", list);
+    expect(list.body.data.data).toEqual([]);
+    expect(list.body.data.withheld.modules).toContain("boq");
+    expect(JSON.stringify(list.body.data.withheld)).not.toMatch(/\d/);
+    for (const row of slips) {
+      const one = await api.get(at(`/controls/exceptions/${row.id}`), as);
+      expect([row.id, one.status, one.body?.error?.code]).toEqual([row.id, 404, "EXCEPTION_NOT_FOUND"]);
+    }
+    const subject = await api.get(at(`/controls/exceptions?subject=activity:${acts.D}&status=all`), as);
+    expect(subject.body.data.data).toEqual([]);
+    const tile = await api.get("/api/v1/projects/workspace-dashboard", as);
+    ok("site tile", tile);
+    expect(tile.body.data.openExceptions.total).toBe(0);
+    expect(tile.body.data.openExceptions.withheld.modules).toContain("boq");
+    await prisma.projectUserPermission.deleteMany({ where: { userId: site.id } });
+    await prisma.projectAssignment.deleteMany({ where: { userId: site.id } });
+  });
+
   it("a second run makes no duplicate and moves lastSeenAt only", async () => {
     const before = await footprint(live.org.id);
     const result = await evaluate();
-    expect(result).toMatchObject({ opened: 0, refreshed: 0, resolved: 0, unchanged: 11, suppressed: 0, errors: [] });
+    expect(result).toMatchObject({ opened: 0, refreshed: 0, resolved: 0, unchanged: 10, suppressed: 0, errors: [] });
     const rows = await rowsOf();
     expect(rows.map((row) => row.id)).toEqual(firstRows.map((row) => row.id));
     const strip = ({ lastSeenAt, updatedAt, ...rest }) => rest;
@@ -347,6 +386,34 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     // The database holds the open-row key: a second open row for a subject is refused.
     const { id, createdAt, updatedAt, ...copy } = rows[0];
     await expect(prisma.projectException.create({ data: copy })).rejects.toMatchObject({ code: "P2002" });
+  });
+
+  it("an item the rule can no longer measure (its activity taken off the quantity method) is resolved 'not_comparable' with the reason — never 'cleared' — and the API says so", async () => {
+    const certRows = () => rowsOf({ kind: "certified_over_installed", subjectId: items.R2.id });
+    const [before] = await certRows();
+    expect(before.resolvedAt).toBeNull();
+    await prisma.activityProgressMethod.update({ where: { activityId: acts.C }, data: { method: "percent" } });
+    try {
+      const result = await evaluate();
+      expect([result.errors, result.notComparable, result.resolved]).toEqual([[], 1, 0]);
+      const [after] = await certRows();
+      expect([after.id, after.resolvedReason, after.resolvedAt !== null]).toEqual([before.id, "not_comparable", true]);
+      expect(after.dataJson.notComparable).toMatchObject({ reason: expect.stringMatching(/not every approved allocation of the item is on a quantity-method activity/), trigger: "test" });
+      // The figures stay as they were last measured.
+      expect([after.measured.toFixed(3), after.limit.toFixed(3)]).toEqual([before.measured.toFixed(3), before.limit.toFixed(3)]);
+      const read = await api.get(at(`/controls/exceptions/${before.id}`), auth());
+      ok("read not comparable", read);
+      expect(read.body.data).toMatchObject({ status: "resolved", resolution: { reason: "not_comparable", detail: expect.stringMatching(/quantity-method activity/) } });
+    } finally {
+      await prisma.activityProgressMethod.update({ where: { activityId: acts.C }, data: { method: "quantity" } });
+    }
+    // Measurable again and still over: a new open row.
+    const again = await evaluate();
+    expect([again.errors, again.opened]).toEqual([[], 1]);
+    const rows = await certRows();
+    expect(rows.map((row) => [row.resolvedReason, row.resolvedAt === null])).toEqual([["not_comparable", false], [null, true]]);
+    const cleared = await api.get(at(`/controls/exceptions/${rows[1].id}`), auth());
+    expect(cleared.body.data.resolution).toBeNull();
   });
 
   it("a change order approved through the API with an allocation link raising the allocation clears the two quantity rows", async () => {
@@ -369,13 +436,13 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     const result = await evaluate();
     expect(result.errors).toEqual([]);
     expect(result.resolved).toBe(2);
-    const cleared = await rowsOf({ resolvedAt: { not: null } });
+    const cleared = await rowsOf({ resolvedAt: { not: null }, resolvedReason: "cleared" });
     expect(cleared.map((row) => [row.kind, row.subjectId, row.resolvedReason])).toEqual([
       ["quantity_over_allocation", allocations.A, "cleared"],
       ["quantity_over_boq", items.R1.id, "cleared"],
     ]);
     const open = await rowsOf({ resolvedAt: null });
-    expect(open).toHaveLength(9);
+    expect(open).toHaveLength(8);
     expect(open.every((row) => !["quantity_over_allocation", "quantity_over_boq"].includes(row.kind))).toBe(true);
   });
 
@@ -405,6 +472,26 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     expect(rows[1]).toMatchObject({ resolvedAt: null, severity: "warning" });
     expect(rows[1].measured.toFixed(3)).toBe("15.000");
     expect(rows[1].dataJson.reopenedFrom).toEqual({ id: slip.id, resolvedReason: "dismissed:recovery plan accepted", dismissedMeasured: "10" });
+  });
+
+  it("a forecast ENTERED on the budget line above its revised budget is a row of its own; removing it clears the row", async () => {
+    const lineRows = () => rowsOf({ kind: "forecast_over_revised", subjectType: "budget_line", subjectId: ids.line });
+    expect(await lineRows()).toEqual([]);
+    ok("enter forecast", await api.request("PATCH", at(`/budget/lines/${ids.line}`), { body: { forecast: 1700 }, headers: auth() }));
+    try {
+      const result = await evaluate();
+      expect([result.errors, result.opened]).toEqual([[], 1]);
+      const [row] = await lineRows();
+      expect([row.measured.toFixed(3), row.limit.toFixed(3), row.severity, row.dataJson.forecastIsManual]).toEqual(["1700.000", "1000.000", "critical", true]);
+      expect(row.measuredBasis).toMatch(/entered \(typed\) forecast/);
+      // committed_over_budget still states the commitment's gap, once.
+      expect((await rowsOf({ kind: "committed_over_budget", resolvedAt: null })).length).toBe(1);
+    } finally {
+      ok("clear forecast", await api.request("PATCH", at(`/budget/lines/${ids.line}`), { body: { forecast: null }, headers: auth() }));
+    }
+    const cleared = await evaluate();
+    expect(cleared.errors).toEqual([]);
+    expect((await lineRows()).map((row) => row.resolvedReason)).toEqual(["cleared"]);
   });
 
   it("tenancy: the second organisation's project cannot be evaluated under the first, and its footprint is byte-identical throughout", async () => {

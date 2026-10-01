@@ -7,7 +7,7 @@
  * — it writes nothing, anywhere — and reads every figure through the service
  * that owns it (the budget register, the earned-value report, the allocation
  * summary, the setup readiness, the quantity views, the cost ledger, the
- * purchase-order register). No rule computes money: a figure is either handed
+ * change-order register). No rule computes money: a figure is either handed
  * over as its owner built it or compared with another one, and every row says
  * where its two figures came from (measured.basis / limit.basis). Nothing here
  * feeds CostRecord.forecast, BudgetLine.forecast or an EAC, and nothing here
@@ -22,7 +22,7 @@
  *     basis }, limit: { value, unitCode?, basis }, groupKeys?, data? }]
  *
  * `module` is the permission module a reader needs (boq, cost, schedule,
- * progress); `boqDerived` withholds the kind WHOLE from a member without
+ * progress, change_order); `boqDerived` withholds the kind WHOLE from a member without
  * boq:read (utils/boq-figures decides; a per-activity figure read off the
  * mapping is BOQ-derived, owner decision E1 — project totals are a cost
  * reader's). A kind that mixes BOQ-derived and other rows is marked
@@ -37,8 +37,7 @@
  *   - a count, a number of days or a group size rises as the gap grows;
  *   - a comparison of two owner figures (budget_truths_disagree,
  *     forecast_without_provenance, activity_budget_mismatch,
- *     committed_definition_mixed, equipment_cost_unposted,
- *     ev_basis_divergence) measures the GAP between them, |a − b|, against
+ *     equipment_cost_unposted, ev_basis_divergence) measures the GAP between them, |a − b|, against
  *     the cent tolerance (`comparison` below). Either figure may be the larger
  *     and either may move, so neither is put in `measured` on its own — a
  *     widening on the side held in `limit` would leave a dismissed row
@@ -283,36 +282,12 @@ const activityBudgets = async ({ orgId, projectId, ctx }) => {
   return rows;
 };
 
-// ─── committed_definition_mixed ───────────────────────────────────────────
-// Evidence: purchase-order.service.js:346-350 — the purchase-order register's
-// summary still answers `committed`, a deprecated alias of orderValue ("Order
-// value — not committed cost"), beside the budget register's committed cost
-// (budget.service.js:134 deriveLine: executed commitments, or the manual
-// figure while nothing is committed). Two figures named "committed" on one
-// project that differ.
-
-const committedDefinitions = async ({ orgId, projectId, ctx }) => {
-  const [orders, register] = await Promise.all([
-    require("../purchase-order.service").listOrders({ orgId, projectId }),
-    budgetRegister(ctx, { orgId, projectId }),
-  ]);
-  if (!orders.items.length || !Object.prototype.hasOwnProperty.call(orders.summary, "committed")) return [];
-  const poCommitted = toMoneyNumber(orders.summary.committed);
-  const registerCommitted = toMoneyNumber(register.summary.totals.committed);
-  if (!differs(poCommitted, registerCommitted)) return [];
-  const { measured, limit, figures, higher } = comparison(
-    ["purchaseOrderCommitted", { value: poCommitted, basis: "Purchase-order summary `committed`: a deprecated alias of orderValue — the value of orders neither planned nor cancelled, NOT committed cost (purchase-order.service listOrders)" }],
-    ["registerCommitted", { value: registerCommitted, basis: "Budget register committed: executed commitments + approved commitment change orders, or the manual figure while nothing is committed (budget.service listBudgetLines summary.totals.committed)" }],
-    { limitBasis: "two figures both named `committed` on one project are expected to agree, or to be read as different figures" },
-  );
-  return [{
-    subjectType: "project",
-    subjectId: projectId,
-    measured,
-    limit,
-    data: { orders: orders.items.length, field: "summary.committed", alias: "orderValue", figures, higher },
-  }];
-};
+// committed_definition_mixed was removed (PC-7b integration K): its evidence —
+// the purchase-order summary's deprecated `committed` alias shown next to the
+// budget register's committed cost — no longer exists: no web or mobile screen
+// reads purchase-order summary.committed (the web shows orderValue as "PO
+// value"; the type keeps the alias for older mobile builds only), so the two
+// figures are never shown side by side. OCTAPM_CHANGE_INTELLIGENCE.md §7.
 
 // ─── equipment_cost_unposted ──────────────────────────────────────────────
 // Evidence: cost-ledger.service.js:32 SOURCE_TYPES lists 'equipment'; its
@@ -538,7 +513,10 @@ const progressStale = async ({ orgId, projectId, cutoff }) => {
       measured: { value: days, unitCode: "day", basis: "Whole days from the activity's latest approved progress (ActivityProgress approvedAt, updatedAt for a legacy row; the earned-value report's own selection, earned-value.service selectApprovedProgressForCutoff) to the cutoff" },
       limit: { value: PROGRESS_STALE_DAYS, unitCode: "day", basis: "Stale after 14 days without approved progress on a begun, incomplete activity (the forecast's stall threshold, forecast.service STALL_DAYS)" },
       groupKeys: groupKeysOf(activity),
-      data: { lastApprovedAt: new Date(since).toISOString(), legacyDate: !latest.approvedAt, pctComplete: pct, progressId: latest.id, label: activityLabel(activity) },
+      // The episode (engine dismissal): the approved progress the days are
+      // counted from. A dismissal holds while it stays the latest; newer
+      // approved progress that goes stale again is a new episode.
+      data: { lastApprovedAt: new Date(since).toISOString(), legacyDate: !latest.approvedAt, pctComplete: pct, progressId: latest.id, label: activityLabel(activity), dismissalKey: `activity_progress:${latest.id}@${new Date(since).toISOString()}` },
     });
   }
   return rows;
@@ -567,7 +545,8 @@ const periodNotLocked = async ({ orgId, projectId, cutoff }) => {
       subjectId: period.id,
       measured: { value: days, unitCode: "day", basis: "Whole days since the period's cutoff instant as the EV reports cut it (earned-value.service listReportingPeriods), with no locked EvPeriodSnapshot" },
       limit: { value: PERIOD_LOCK_GRACE_DAYS, unitCode: "day", basis: "A period is expected to be locked (earned-value.service lockReportingPeriod) within 7 days of its cutoff" },
-      data: { code: period.code, status: period.status, cutoffDate: period.cutoffDate, cutoffLocalDate: period.cutoffLocalDate || null, lockedWithoutSnapshot: period.status === "locked", label: period.label || period.code },
+      // The episode (engine dismissal): the period itself — its days only grow.
+      data: { code: period.code, status: period.status, cutoffDate: period.cutoffDate, cutoffLocalDate: period.cutoffLocalDate || null, lockedWithoutSnapshot: period.status === "locked", label: period.label || period.code, dismissalKey: `reporting_period:${period.id}` },
     });
   }
   return rows;
@@ -820,16 +799,6 @@ const RULES = [
     evaluate: activityBudgets,
   },
   {
-    kind: "committed_definition_mixed",
-    severity: "info",
-    subjectType: "project",
-    module: "cost",
-    boqDerived: false,
-    label: "Committed cost",
-    note: () => "The purchase-order register's `committed` (order value) differs from the budget register's committed cost; they are different figures.",
-    evaluate: committedDefinitions,
-  },
-  {
     kind: "equipment_cost_unposted",
     severity: "warning",
     subjectType: "daily_report",
@@ -917,7 +886,12 @@ const RULES = [
     kind: "orphan_change_link",
     severity: "warning",
     subjectType: "budget_revision",
-    module: "cost",
+    // The module of the record the link names (PC-7b integration J): a budget
+    // revision's and an RFI's link name a change order; a workflow activity
+    // link names a record of any type (RFI, submittal, NCR, …, change order).
+    // One kind, so one module: the links are mixed, and change_order is the
+    // module they share — the record each was meant to reach, or could be.
+    module: "change_order",
     boqDerived: false,
     label: "Change links",
     note: (count) => `${plural(count, "change link")} name${count === 1 ? "s" : ""} a record that is not in this project.`,
@@ -927,7 +901,8 @@ const RULES = [
     kind: "change_order_possible_duplicate",
     severity: "info",
     subjectType: "change_order",
-    module: "cost",
+    // Read under change_order:read — the orders it names are the change-order register's (PC-7b integration J).
+    module: "change_order",
     boqDerived: false,
     label: "Change orders",
     note: (count) => `${plural(count, "approved change order")} repeat${count === 1 ? "s" : ""} an earlier one's description and activity impact; the forecast counts each (review, nothing is changed).`,

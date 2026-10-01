@@ -9,8 +9,12 @@ const { prisma } = require("../config/db");
  * are resolved. The same pattern as report-scheduler runPortfolioTick.
  *
  * It runs at EXCEPTIONS_NIGHTLY_HOUR_UTC (default 7 — 02:00 in Chicago), never
- * at start-up: an API that starts does not evaluate anything. Behind
- * EXCEPTIONS_ENGINE_ENABLED (default true) and, like every scheduler, the
+ * at start-up: an API that starts does not evaluate anything. Behind two
+ * switches: EXCEPTIONS_ENGINE_ENABLED (default true; false stands the whole
+ * engine down — trigger, tick and handler) and its own
+ * EXCEPTIONS_SCHEDULER_ENABLED (default true, like DAILY_LOG_ / REPORT_ /
+ * WORKFLOW_SCHEDULER_ENABLED; false keeps the event trigger and the job
+ * handler but starts no nightly tick) — and, like every scheduler, the
  * scheduler leadership (jobs/schedulers.js).
  */
 
@@ -19,6 +23,9 @@ const DEFAULT_NIGHTLY_HOUR_UTC = 7;
 
 const engine = () => require("../services/exception-engine.service");
 const jobService = () => require("./job.service");
+
+/** EXCEPTIONS_SCHEDULER_ENABLED (default true): the nightly tick's own switch, beside the engine's. */
+const schedulerEnabled = (env = process.env) => String(env.EXCEPTIONS_SCHEDULER_ENABLED ?? "true").trim().toLowerCase() !== "false";
 
 const nightlyHour = (env = process.env) => {
   const hour = Number.parseInt(env.EXCEPTIONS_NIGHTLY_HOUR_UTC ?? "", 10);
@@ -74,6 +81,10 @@ function startExceptionScheduler({ env = process.env } = {}) {
     console.log("[exception-scheduler] disabled by EXCEPTIONS_ENGINE_ENABLED=false");
     return null;
   }
+  if (!schedulerEnabled(env)) {
+    console.log("[exception-scheduler] disabled by EXCEPTIONS_SCHEDULER_ENABLED=false");
+    return null;
+  }
   timer = setInterval(() => checkNightly().catch((error) => console.error("[exception-scheduler]", error)), CHECK_INTERVAL_MS);
   timer.unref?.();
   return timer;
@@ -89,4 +100,4 @@ const resetForTests = () => {
   lastRunDay = null;
 };
 
-module.exports = { DEFAULT_NIGHTLY_HOUR_UTC, checkNightly, nightlyHour, resetForTests, runExceptionTick, startExceptionScheduler, stopExceptionScheduler };
+module.exports = { DEFAULT_NIGHTLY_HOUR_UTC, checkNightly, nightlyHour, resetForTests, runExceptionTick, schedulerEnabled, startExceptionScheduler, stopExceptionScheduler };

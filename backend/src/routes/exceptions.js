@@ -13,7 +13,7 @@ const service = require("../services/exception.service");
  * Project exceptions (PC-7b): `/projects/:projectId/controls/exceptions`.
  *
  * Reading needs no single module: each exception is read through its
- * subject's module (boq, cost, schedule, progress) and a BOQ-derived one only
+ * subject's module (boq, cost, schedule, progress, change_order) and a BOQ-derived one only
  * by a BOQ reader — decided per row in utils/boq-figures, as this project's
  * own routes decide each permission. Review, snooze and dismiss need
  * change_event update or the subject module's update; raising or associating
@@ -85,6 +85,9 @@ router.get(
   ],
   asyncHandler(async (req, res) => sendSuccess(res, await service.listExceptions({ ...scope(req), ...callerFor(req), query: req.query }))),
 );
+
+// Declared before /:exceptionId: the Overview strip's counts (open and in change, per severity).
+router.get("/summary", asyncHandler(async (req, res) => sendSuccess(res, await service.exceptionsSummary({ ...scope(req), access: callerFor(req).access }))));
 
 router.get("/:exceptionId", [exceptionIdParam, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.getException({ ...scope(req), ...callerFor(req), exceptionId: req.params.exceptionId }))));
 

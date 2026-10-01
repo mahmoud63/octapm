@@ -7,7 +7,7 @@ const { requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const auditService = require('../services/audit.service');
 const primeContractService = require('../services/prime-contract.service');
-const { boqFigureAccess, withheldAuditHistory } = require('../utils/boq-figures');
+const { boqFigureAccess, exceptionAccess, withheldAuditHistory } = require('../utils/boq-figures');
 
 const router = express.Router({ mergeParams: true });
 
@@ -51,7 +51,9 @@ router.get(
       limit: req.query.limit || 50,
       order: req.query.order || 'asc',
     });
-    const access = boqFigureAccess(req);
+    // modules: what the exceptions list reads per module, so an exception's
+    // events go where the exception goes (PC-7b, withheldExceptionEvent).
+    const access = { ...boqFigureAccess(req), modules: exceptionAccess(req).modules };
     // The contract's source (for its contract.manage events) and its retention
     // cap rate (for the certificates' cap-limited totals): utils/boq-figures.
     const contractTerms = access.boq

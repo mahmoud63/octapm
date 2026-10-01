@@ -85,6 +85,17 @@ liveDescribe("PC-7b: domain events and the nightly tick ask for debounced evalua
   };
   const kindsOf = async (projectId, where = {}) =>
     (await prisma.projectException.findMany({ where: { projectId, ...where } })).map((row) => [row.kind, row.resolvedReason]).sort();
+  // A job evaluates the WHOLE registry — since the merge the §7 data-quality
+  // rules too (proven in pc-7b-data-quality.live.test.js), which find their
+  // own rows on these bare projects. This suite is about the triggers and the
+  // §1 quantity rows: it states those exactly, and holds every count the job
+  // reports to the rows it actually wrote or resolved.
+  const OVERRUN_KINDS = new Set(require("../exception-rules").getRules().filter((rule) => rule.file !== "data-quality.js").map((rule) => rule.kind));
+  const overrunKindsOf = async (projectId) => (await kindsOf(projectId)).filter(([kind]) => OVERRUN_KINDS.has(kind));
+  const tally = async (projectId) => ({
+    rows: await prisma.projectException.count({ where: { projectId } }),
+    resolved: await prisma.projectException.count({ where: { projectId, resolvedAt: { not: null } } }),
+  });
 
   beforeAll(async () => {
     live = await createLiveOrg(prisma);
@@ -152,9 +163,12 @@ liveDescribe("PC-7b: domain events and the nightly tick ask for debounced evalua
       data: { orgId: live.org.id, projectId: projects.A.id, activityId: allocation.activityId, boqItemId: allocation.boqItemId, allocationId: allocation.id, unitCode: "m3", quantity: 12, date: new Date("2026-09-20T00:00:00.000Z"), source: "manual", status: "approved", approvedBy: live.user.id, approvedAt: new Date(), createdBy: live.user.id, clientRequestId: `trig-${Date.now()}` },
     });
     const result = await engine.runEvaluationJob({ job: { id: job.id, orgId: job.orgId, projectId: job.projectId, payload: job.payloadJson } });
-    expect(result).toMatchObject({ projectId: projects.A.id, orgId: live.org.id, trigger: "event", opened: 2, errors: [] });
+    expect(result).toMatchObject({ projectId: projects.A.id, orgId: live.org.id, trigger: "event", errors: [] });
     const rows = await prisma.projectException.findMany({ where: { orgId: { in: [live.org.id, other.org.id] } } });
-    expect(rows.map((row) => [row.projectId, row.kind]).sort()).toEqual([
+    // Every row written is A's, and the job reports each of them.
+    expect([...new Set(rows.map((row) => row.projectId))]).toEqual([projects.A.id]);
+    expect(result.opened).toBe(rows.length);
+    expect(rows.filter((row) => OVERRUN_KINDS.has(row.kind)).map((row) => [row.projectId, row.kind]).sort()).toEqual([
       [projects.A.id, "quantity_over_allocation"],
       [projects.A.id, "quantity_over_boq"],
     ]);
@@ -184,14 +198,16 @@ liveDescribe("PC-7b: domain events and the nightly tick ask for debounced evalua
     await waitForJobs(projects.PROG.id, 1);
     await sleep(1500);
     const progResult = await runJobOf(projects.PROG.id);
-    expect(progResult).toMatchObject({ projectId: projects.PROG.id, trigger: "event", opened: 2, errors: [] });
-    expect(await kindsOf(projects.PROG.id)).toEqual([["quantity_over_allocation", null], ["quantity_over_boq", null]]);
+    expect(progResult).toMatchObject({ projectId: projects.PROG.id, trigger: "event", errors: [] });
+    expect(progResult.opened).toBe((await tally(projects.PROG.id)).rows);
+    expect(await overrunKindsOf(projects.PROG.id)).toEqual([["quantity_over_allocation", null], ["quantity_over_boq", null]]);
 
     // Change order: the over-installation approved and evaluated without the trigger, then the order approved through the enabled API.
     const co = await overInstallThrough(disabledApi, live, "CO");
     ok("CO progress approve", await disabledApi.post(co.approveRoute, {}, auth));
     const seeded = await engine.evaluateProject({ orgId: live.org.id, projectId: projects.CO.id, trigger: "test", logger: { log: () => {} } });
-    expect([seeded.opened, seeded.errors]).toEqual([2, []]);
+    expect([seeded.opened, seeded.errors]).toEqual([(await tally(projects.CO.id)).rows, []]);
+    expect(await overrunKindsOf(projects.CO.id)).toEqual([["quantity_over_allocation", null], ["quantity_over_boq", null]]);
     const at = (route) => `/api/v1/projects/${projects.CO.id}${route}`;
     const order = await disabledApi.post(at("/change-orders"), {
       description: "LiveTest trigger extension",
@@ -209,9 +225,14 @@ liveDescribe("PC-7b: domain events and the nightly tick ask for debounced evalua
     ok("CO approve", await enabledApi.post(at(`/change-orders/${order.body.data.id}/approve`), { comment: "LiveTest" }, auth));
     await waitForJobs(projects.CO.id, 1);
     await sleep(1500);
+    const coBefore = await tally(projects.CO.id);
     const coResult = await runJobOf(projects.CO.id);
-    expect(coResult).toMatchObject({ projectId: projects.CO.id, trigger: "event", opened: 0, resolved: 2, errors: [] });
-    expect(await kindsOf(projects.CO.id)).toEqual([["quantity_over_allocation", "cleared"], ["quantity_over_boq", "cleared"]]);
+    expect(coResult).toMatchObject({ projectId: projects.CO.id, trigger: "event", errors: [] });
+    const coAfter = await tally(projects.CO.id);
+    // Resolved = cleared + not comparable (both stamp resolvedAt).
+    expect([coResult.opened, coResult.resolved + coResult.notComparable]).toEqual([coAfter.rows - coBefore.rows, coAfter.resolved - coBefore.resolved]);
+    expect(coResult.resolved).toBeGreaterThanOrEqual(2);
+    expect(await overrunKindsOf(projects.CO.id)).toEqual([["quantity_over_allocation", "cleared"], ["quantity_over_boq", "cleared"]]);
     expect(await othersJobCount([live.org.id, other.org.id])).toBe(othersBefore);
   });
 
