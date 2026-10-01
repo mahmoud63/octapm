@@ -283,7 +283,14 @@ describe("money kinds", () => {
 
   it("forecast_over_revised: the official EAC above revised BAC (critical below the CPI alert) and a line forecast above revised", async () => {
     evService.buildOfficialEvReport.mockResolvedValue({ eac: 1250, totalBudget: 1000, cpi: 0.8, spi: 1, eacBasis: "revised_bac_over_cpi", reporting: { cutoffLocalDate: "2026-09-30", isSnapshot: false } });
-    budgetService.listBudgetLines.mockResolvedValue({ items: [line({ forecast: 1100, forecastIsManual: true }), line({ id: "line-2", forecast: 1000 })] });
+    budgetService.listBudgetLines.mockResolvedValue({
+      items: [
+        line({ forecast: 1100, forecastIsManual: true }),
+        line({ id: "line-2", forecast: 1000 }),
+        // An archived line is no longer budgeted: its forecast above its revised raises nothing.
+        line({ id: "line-3", status: "archived", forecast: 1800, forecastIsManual: true }),
+      ],
+    });
     const rows = await run("forecast_over_revised");
     expect(evService.buildOfficialEvReport).toHaveBeenCalledWith({ orgId: ORG, projectId: PROJECT, useLockedSnapshot: true, includeReadiness: false });
     expect(rows.map((row) => [row.subjectType, row.subjectId, row.severity, row.measured.value, row.limit.value])).toEqual([
@@ -356,5 +363,11 @@ describe("schedule_slip_on_mapped_item", () => {
     expect(await run("schedule_slip_on_mapped_item")).toEqual([]);
     prisma.activity.findMany.mockResolvedValue([activityRow({ earlyFinish: 29, baselineFinish: 22, isCritical: true })]);
     expect((await run("schedule_slip_on_mapped_item"))[0].severity).toBe("critical");
+  });
+
+  it("nothing for a retired (inactive) activity, however far its finish has slipped", async () => {
+    allocationService.buildAllocationSummary.mockResolvedValue(summary(0));
+    prisma.activity.findMany.mockResolvedValue([activityRow({ isActive: false, earlyFinish: 60, baselineFinish: 22 })]);
+    expect(await run("schedule_slip_on_mapped_item")).toEqual([]);
   });
 });
