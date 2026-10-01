@@ -179,6 +179,10 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
 
   it("rows are recorded against an allocated item, in its unit or an alias, under the recorder's assignment rule — and are site records: no entry exists", async () => {
     refused(await addRow({ activityId: pour.id, boqItemId: blocks.id, quantity: 5 }), 400, "DAILY_LOG_QUANTITY_NOT_ALLOCATED");
+    // Zero is no work, and no work is no row (integration item 7): the section refuses it as the entries service does.
+    const zero = await addRow({ activityId: pour.id, boqItemId: concrete.id, quantity: 0, unitCode: "m3" });
+    refused(zero, 400, "QUANTITY_INVALID");
+    expect(zero.body.error.message).toBe("A quantity must be greater than zero; record nothing for no work");
     refused(await addRow({ activityId: pour.id, boqItemId: concrete.id, quantity: 5, unit: "t" }), 400, "QUANTITY_UNIT_MISMATCH");
     refused(await addRow({ activityId: pour.id, boqItemId: concrete.id, quantity: -1 }), 400, "VALIDATION_ERROR");
     refused(await addRow({ activityId: pour.id, boqItemId: concrete.id, quantity: 5, allocationId: "00000000-0000-4000-8000-000000000000" }), 400, "QUANTITY_ALLOCATION_MISMATCH");

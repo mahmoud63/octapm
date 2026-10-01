@@ -223,6 +223,12 @@ liveDescribe("PC-6: quantity progress entries are recorded, never official by th
     refused(await api.post(at("/quantity-progress"), { ...base, unit: "m2" }, bearer(live.token)), 400, "QUANTITY_UNIT_MISMATCH");
     refused(await api.post(at("/quantity-progress"), { ...base, unit: "litre" }, bearer(live.token)), 400, "QUANTITY_UNIT_MISMATCH");
     refused(await api.post(at("/quantity-progress"), { ...base, quantity: -1 }, bearer(live.token)), 400, "VALIDATION_ERROR");
+    // Zero is no work, and no work is no entry (integration item 7): refused by the service, on a single entry and in a batch.
+    const zero = await api.post(at("/quantity-progress"), { ...base, quantity: 0 }, bearer(live.token));
+    refused(zero, 400, "QUANTITY_INVALID");
+    expect(zero.body.error.message).toBe("A quantity must be greater than zero; record nothing for no work");
+    refused(await api.post(at("/quantity-progress"), { ...base, quantity: "0.0004" }, bearer(live.token)), 400, "QUANTITY_INVALID");
+    refused(await api.post(at("/quantity-progress"), { entries: [{ ...base, quantity: 3 }, { ...base, quantity: 0 }] }, bearer(live.token)), 400, "QUANTITY_INVALID");
     refused(await api.post(at("/quantity-progress"), { ...base, date: undefined }, bearer(live.token)), 400, "VALIDATION_ERROR");
     refused(await api.post(at("/quantity-progress"), { ...base, activityId: fix.id, boqItemId: rebar.id, unit: "t", allocationId: allocation.id }, bearer(live.token)), 400, "QUANTITY_ALLOCATION_MISMATCH");
     refused(await api.post(at("/quantity-progress"), { ...base, status: "approved" }, bearer(live.token)), 400, "VALIDATION_ERROR");
@@ -277,6 +283,10 @@ liveDescribe("PC-6: quantity progress entries are recorded, never official by th
   it("patch and delete are the creator's or an approver's; an approved entry is history", async () => {
     const [submittedA] = ids.batch;
     // The site engineer edits their own submitted entry.
+    // An edit to zero is refused: remove the entry instead.
+    const beforeZero = JSON.stringify(await prisma.quantityProgressEntry.findUnique({ where: { id: submittedA } }));
+    refused(await api.request("PATCH", at(`/quantity-progress/${submittedA}`), { body: { quantity: 0 }, headers: bearer(members.siteEngineer.token) }), 400, "QUANTITY_INVALID");
+    expect(JSON.stringify(await prisma.quantityProgressEntry.findUnique({ where: { id: submittedA } }))).toBe(beforeZero);
     const mine = await api.request("PATCH", at(`/quantity-progress/${submittedA}`), { body: { quantity: 12, note: "re-measured" }, headers: bearer(members.siteEngineer.token) });
     ok(mine);
     expect(mine.body.data.entry).toMatchObject({ id: submittedA, quantity: 12, note: "re-measured", status: "submitted" });

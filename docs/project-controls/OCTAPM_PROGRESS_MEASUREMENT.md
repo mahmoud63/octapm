@@ -89,8 +89,14 @@ siblings (`daily-log.service` drives it).
 - **Replay**: `clientRequestId` is unique per project (`@@unique([projectId, clientRequestId])`). The service answers
   a seen key with the entry it made (`replayed: true`); a race that reaches the index is a P2002 answered by running
   once more, which finds the winner's row. A batch's top-level key is suffixed `:<index>` per entry.
-- **Quantities are Decimal(18,3)**: parsed, summed and compared as `Prisma.Decimal` at three places; `quantity >= 0`
-  is refused in code (400 `QUANTITY_NEGATIVE`) before the CHECK constraint sees it.
+- **Quantities are Decimal(18,3)**: parsed, summed and compared as `Prisma.Decimal` at three places; a negative
+  quantity is refused in code (400 `QUANTITY_NEGATIVE`) before the CHECK constraint sees it. **A zero quantity is
+  refused too** (integration decision, 2026-10-01, reported to the owner): 400 `QUANTITY_INVALID` — "A quantity must
+  be greater than zero; record nothing for no work" — on create and on edit (`assertPositiveQuantity`, after the
+  three-place scale, so 0.0004 is zero), and in the daily log's quantities section. The CHECK still admits 0 (no
+  migration in this wave): the rule is the service's, and the daily log's own minting carries a row recorded before
+  it. A zero entry would otherwise be approved, counted among the entries behind an official figure and printed as a
+  quantity installed. Proven live in both suites and mutation-proven.
 - **Over-allocation is a warning, never a block**: the write answers `warnings[]` with `QUANTITY_OVER_ALLOCATION`
   (approved installed + this entry > Σ approved, active allocation quantity of the item on the activity — the raw
   comparison, with the figures). No `ProjectException` row (PC-7b). **An unmapped pairing is refused** (integration

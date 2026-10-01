@@ -241,6 +241,8 @@ const SECTIONS = Object.freeze({
       const quantity = quantityProgress().quantityDecimal(pick(payload, existing, "quantity"), "quantity");
       if (quantity === null) throw new HttpError(400, "DAILY_LOG_FIELD_REQUIRED", "quantity is required", { field: "quantity" });
       if (quantity.isNegative()) throw new HttpError(400, "QUANTITY_NEGATIVE", "A quantity entry is never negative; a correction is a rejection plus a new entry", { field: "quantity" });
+      // Zero is no work, and no work is no row (the entries service's rule).
+      quantityProgress().assertPositiveQuantity(quantity);
       const unit = payload.unitCode !== undefined ? payload.unitCode : payload.unit !== undefined ? payload.unit : existing ? existing.unitCode : null;
       return {
         activityId: required(pick(payload, existing, "activityId"), "activityId"),

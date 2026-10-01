@@ -37,6 +37,10 @@ const mockQuantityProgress = (() => {
   return {
     quantityDecimal,
     quantityNumber: (value) => (quantityDecimal(value) === null ? null : Number(quantityDecimal(value).toFixed(3))),
+    // The entries service's own rule, as the section applies it.
+    assertPositiveQuantity: (quantity) => {
+      if (quantity && quantity.isZero()) throw Object.assign(new Error("A quantity must be greater than zero; record nothing for no work"), { status: 400, code: "QUANTITY_INVALID", details: { field: "quantity" } });
+    },
     entriesForDailyLogRows: jest.fn(async () => []),
     mintDailyLogEntries: jest.fn(async () => ({ minted: [], synced: [], kept: [], retired: [] })),
     resolveDailyLogQuantity: jest.fn(async ({ boqItemId, allocationId }) => ({ item: { id: boqItemId }, allocationId: allocationId || "alloc-1", unitCode: "m3" })),
@@ -250,6 +254,8 @@ describe("daily log", () => {
     expect(log.sections.quantities[0]).toMatchObject({ quantity: 12.5, unitCode: "m3", boqItem: { id: "item-1", code: "1.1", description: "Concrete in footings" }, activity: { id: "act-1", name: "Slab pour" }, progressEntry: null });
     expect(log.totals).toMatchObject({ quantityRows: 1, quantities: [{ unitCode: "m3", quantity: 12.5, rows: 1 }], entries: 1 });
     await expect(service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", payload: { activityId: "act-1", boqItemId: "item-1", quantity: -1 }, actor: { id: "staff-1" }, viewer: staff })).rejects.toMatchObject({ code: "QUANTITY_NEGATIVE" });
+    // Zero is no work, and no work is no row (integration item 7).
+    await expect(service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", payload: { activityId: "act-1", boqItemId: "item-1", quantity: 0 }, actor: { id: "staff-1" }, viewer: staff })).rejects.toMatchObject({ status: 400, code: "QUANTITY_INVALID" });
     await expect(service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "quantities", payload: { activityId: "act-1", quantity: 1 }, actor: { id: "staff-1" }, viewer: staff })).rejects.toMatchObject({ code: "DAILY_LOG_FIELD_REQUIRED", details: { field: "boqItemId" } });
   });
 

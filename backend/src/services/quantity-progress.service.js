@@ -89,6 +89,18 @@ const quantityDecimal = (value, field = "quantity") => {
 const sumQuantities = (values) =>
   values.reduce((total, value) => total.plus(quantityDecimal(value) ?? new Decimal(0)), new Decimal(0)).toDecimalPlaces(QUANTITY_SCALE);
 
+/**
+ * A quantity entry states work done: zero is no work, and no work is no
+ * entry (integration item 7 — the CHECK admits quantity = 0, and a zero
+ * entry would be approved, counted as an entry behind an official figure and
+ * listed on the PDF as a quantity installed). Refused on create and on edit,
+ * here and in the daily log's quantities section, after the negative rule.
+ */
+const ZERO_QUANTITY_MESSAGE = "A quantity must be greater than zero; record nothing for no work";
+const assertPositiveQuantity = (quantity, field = "quantity") => {
+  if (quantity && quantity.isZero()) throw new HttpError(400, "QUANTITY_INVALID", ZERO_QUANTITY_MESSAGE, { field });
+};
+
 /** The JSON form of a quantity: a number at three places (never used for arithmetic). */
 const quantityNumber = (value) => {
   const decimal = quantityDecimal(value);
@@ -477,6 +489,9 @@ const createEntriesWithClient = async ({
     if (quantity.isNegative()) {
       throw new HttpError(400, "QUANTITY_NEGATIVE", "A quantity entry is never negative; a correction is a rejection plus a new entry", { field: `entries[${i}].quantity` });
     }
+    // The daily log's minting (`internal`) carries rows the section admitted
+    // (it refuses zero itself); a row recorded before this rule still mints.
+    if (!internal) assertPositiveQuantity(quantity, `entries[${i}].quantity`);
     // The direct route records against an item the activity is mapped to —
     // an approved, active allocation — exactly as the daily log's quantities
     // section does (DAILY_LOG_QUANTITY_NOT_ALLOCATED); a figure on an
@@ -648,6 +663,7 @@ const updateEntry = async ({ orgId, projectId, entryId, userId, canApprove = fal
       const quantity = quantityDecimal(payload.quantity);
       if (quantity === null) throw new HttpError(400, "QUANTITY_INVALID", "quantity must be a number", { field: "quantity" });
       if (quantity.isNegative()) throw new HttpError(400, "QUANTITY_NEGATIVE", "A quantity entry is never negative; a correction is a rejection plus a new entry", { field: "quantity" });
+      assertPositiveQuantity(quantity);
       data.quantity = quantity;
     }
     if (payload.unitCode !== undefined || payload.unit !== undefined) {
@@ -1171,6 +1187,8 @@ module.exports = {
   CREATABLE_STATUSES,
   QUANTITY_SCALE,
   quantityDecimal,
+  assertPositiveQuantity,
+  ZERO_QUANTITY_MESSAGE,
   quantityNumber,
   sumQuantities,
   parseEntryDate,
