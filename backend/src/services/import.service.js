@@ -620,9 +620,10 @@ const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
  * rewritten — a later approval is a new row, exactly as the writer does.
  *
  * The file's figure is a percentage, so the submission names the `percent`
- * method as a manual percentage entry would; on an activity measured another
- * way the writer records the method the submission names (it does not
- * refuse), and the row is flagged `methodMismatch` for the reviewer.
+ * method as a manual percentage entry would; on an activity configured to be
+ * measured another way the writer refuses it (409 PROGRESS_METHOD_MISMATCH —
+ * the submission's method is the activity's, never the client's), and the
+ * row is 'refused' with that reason, previewed the same by the dry run.
  *
  * Only a figure that moves something is written. A row whose figure is
  * already the activity's current official figure — the latest approved
@@ -721,6 +722,23 @@ async function importProgress({
     const olderPending = activity.progressSubmissions
       .filter((row) => row.status === 'submitted' && normalizePct(row.pctComplete) !== pctComplete)
       .map((row) => ({ submissionId: row.id, pctComplete: normalizePct(row.pctComplete) }));
+    // The writer's own rule (progress.service resolveSubmissionMethod): the
+    // file's figure is a percentage, and an activity configured to be
+    // measured another way refuses a percent submission — 409
+    // PROGRESS_METHOD_MISMATCH, never a coerced row the approver would
+    // approve with nothing behind it. Asked here so the row is reported
+    // (and the dry run previews it) rather than failing in the loop.
+    let methodRefusal = null;
+    try {
+      progressService.resolveSubmissionMethod({
+        activityId: activity.id,
+        payload: { method: 'percent' },
+        configRow: activity.progressMethod,
+      });
+    } catch (error) {
+      methodRefusal = refusalOf(error);
+      if (!methodRefusal) throw error;
+    }
     const row = {
       activityId: activity.id,
       p6ActivityId: key,
@@ -728,7 +746,6 @@ async function importProgress({
       pctComplete,
       officialPctComplete: official ? officialPct : null,
       activityMethod,
-      methodMismatch: activityMethod !== 'percent',
       submissionId: null,
       progressId: null,
       waitingStatus: null,
@@ -750,6 +767,12 @@ async function importProgress({
           ? `Already the official figure (${pctComplete}%); nothing written`
           : `No approved progress yet, so the activity already stands at ${pctComplete}%; nothing written`,
       };
+    } else if (methodRefusal) {
+      // A figure that would be written on an activity measured another way:
+      // refused by the writer's rule, reported, and previewed the same.
+      row.status = 'refused';
+      row.reason = methodRefusal;
+      row.expected = { status: 'refuse', reason: methodRefusal };
     } else if (waiting && canApprove && waiting.status === 'submitted') {
       // The same figure, already in the queue, under this person's own
       // authority: approve that submission rather than make a second one.

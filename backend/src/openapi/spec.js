@@ -1025,6 +1025,8 @@ const components = {
         "QUANTITY_NO_ENTRIES_TO_BUNDLE",
         "QUANTITY_BUNDLE_METHOD_MISMATCH",
         "PROGRESS_METHOD_LOCKED",
+        // PC-6 (integration): the submission's method is the activity's
+        "PROGRESS_METHOD_MISMATCH",
         // PC-6 (core): the daily log's quantities section
         "DAILY_LOG_QUANTITY_NOT_ALLOCATED",
         "DAILY_LOG_QUANTITY_LOCKED",
@@ -2781,12 +2783,11 @@ const components = {
         pctComplete: { type: "number", minimum: 0, maximum: 100, nullable: true, description: "The percentage the file carries; null for a skipped row (the file names the activity without stating one)." },
         officialPctComplete: { type: "number", nullable: true, description: "The activity's latest approved percentage before this import, null when none." },
         activityMethod: { type: "string", enum: ["percent", "quantity", "weighted_milestone", "inspection", "manual"] },
-        methodMismatch: { type: "boolean", description: "True when the activity is measured by a method other than percent; the submission still names percent, as the writer records the method a submission names." },
         status: {
           type: "string",
           enum: ["submit", "approve", "hold", "refuse", "submitted", "draft", "approved", "pending", "unchanged", "already_pending", "skipped", "refused"],
           description:
-            "Dry run, read from the writer's own rules for this person: submit or approve (what this person's authority would do), hold (a gate would hold the row — kept as a draft for a submit-only person, left pending for an approver; see reason), refuse (the writer's assignment rule would refuse it; see reason), unchanged, already_pending, skipped. Import: submitted (awaiting approval), draft (kept as a draft because the activity requires evidence — not in the approval queue until evidence is attached), approved (official, through the approval writer), pending (the importer may approve but a gate refused — see reason), unchanged (the figure is already the activity's current official figure — the latest approved percentage, or 0 for an activity with no approved progress — so nothing is written; a full-programme export's 0% rows for unstarted activities never reach the approval queue), already_pending (an import submission at this figure is already open and this person may not approve it, or it waits as a draft for evidence — waitingStatus says where it waits), skipped (the file names the activity without a percentage; nothing written — see reason), refused (the writer refused the submission — see reason).",
+            "Dry run, read from the writer's own rules for this person: submit or approve (what this person's authority would do), hold (a gate would hold the row — kept as a draft for a submit-only person, left pending for an approver; see reason), refuse (the writer's assignment rule would refuse it; see reason), unchanged, already_pending, skipped. Import: submitted (awaiting approval), draft (kept as a draft because the activity requires evidence — not in the approval queue until evidence is attached), approved (official, through the approval writer), pending (the importer may approve but a gate refused — see reason), unchanged (the figure is already the activity's current official figure — the latest approved percentage, or 0 for an activity with no approved progress — so nothing is written; a full-programme export's 0% rows for unstarted activities never reach the approval queue), already_pending (an import submission at this figure is already open and this person may not approve it, or it waits as a draft for evidence — waitingStatus says where it waits), skipped (the file names the activity without a percentage; nothing written — see reason), refused (the writer refused the submission — see reason; a percentage on an activity configured to be measured by another method is refused with PROGRESS_METHOD_MISMATCH — the submission's method is the activity's, never the file's — and the dry run previews it as refuse).",
         },
         submissionId: nullableUuid,
         progressId: { ...nullableUuid, description: "The ActivityProgress row an approval created." },
@@ -5262,7 +5263,11 @@ const components = {
       actualStart: dateString,
       actualFinish: dateString,
       progressMethod: { $ref: "#/components/schemas/ProgressMethodName" },
-      method: { $ref: "#/components/schemas/ProgressMethodName" },
+      method: {
+        allOf: [{ $ref: "#/components/schemas/ProgressMethodName" }],
+        description:
+          "The submission's method is the activity's effective method: its configured progress method row when one exists (a client naming another is 409 PROGRESS_METHOD_MISMATCH with { effectiveMethod, effectiveMethodBasis, requestedMethod } — never coerced), else the method named here (default percent). Applies to the bulk route, the daily report's linked progress and the progress import alike.",
+      },
       status: { type: "string", enum: ["draft", "submitted"] },
       source: {
         type: "string",

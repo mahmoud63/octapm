@@ -41,7 +41,6 @@ export type ProgressImportRow = {
   pctComplete: number | null
   officialPctComplete: number | null
   activityMethod: string
-  methodMismatch: boolean
   status: ProgressImportRowStatus
   submissionId: string | null
   progressId: string | null

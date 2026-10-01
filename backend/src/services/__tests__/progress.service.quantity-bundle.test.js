@@ -104,6 +104,27 @@ describe("PC-6 quantity bundles in the one writer", () => {
     await expect(create({ method: "quantity", quantityComplete: 30 })).rejects.toMatchObject({ code: "PLANNED_QUANTITY_REQUIRED" });
   });
 
+  it("the submission's method is the activity's: a client naming another method on a configured activity is 409 PROGRESS_METHOD_MISMATCH, never coerced; the configured method applies when none is named; without a row the client's method stands", async () => {
+    // Configured quantity: a percent submission is refused, naming both methods.
+    await expect(create({ method: "percent", pctComplete: 90 })).rejects.toMatchObject({
+      status: 409,
+      code: "PROGRESS_METHOD_MISMATCH",
+      details: { activityId: "activity-1", effectiveMethod: "quantity", effectiveMethodBasis: "method_config", requestedMethod: "percent" },
+    });
+    await expect(create({ progressMethod: "milestone", pctComplete: 90 })).rejects.toMatchObject({ code: "PROGRESS_METHOD_MISMATCH", details: { requestedMethod: "weighted_milestone" } });
+    expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
+    // No method named: the activity's applies (quantity → derived).
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([entry("e-1", 16)]).mockResolvedValueOnce([]);
+    expect(await create({ entryIds: ["e-1"], pctComplete: 90 })).toMatchObject({ method: "quantity", pctComplete: 10, quantityComplete: 16 });
+    // An alias of the configured method is that method.
+    mockPrisma.activityProgressMethod.findFirst.mockResolvedValue({ method: "percent", plannedQuantity: null, quantityUnit: null, evidenceRequired: false });
+    expect(await create({ method: "physical_percent", pctComplete: 40 })).toMatchObject({ method: "percent", pctComplete: 40 });
+    // Without a configured row the client's method is accepted as before.
+    mockPrisma.activityProgressMethod.findFirst.mockResolvedValue(null);
+    expect(await create({ method: "percent", pctComplete: 90 })).toMatchObject({ method: "percent", pctComplete: 90 });
+    expect(await create({ pctComplete: 20 })).toMatchObject({ method: "percent", pctComplete: 20 });
+  });
+
   it("refuses an entry of another activity, an approved one, one held by an open submission, a foreign unit, and a bundle on a percent submission", async () => {
     mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([entry("e-1", 1, { activityId: "activity-9" })]);
     await expect(create({ method: "quantity", entryIds: ["e-1"] })).rejects.toMatchObject({ status: 400, code: "QUANTITY_ENTRY_ACTIVITY_MISMATCH" });

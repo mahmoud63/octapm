@@ -672,6 +672,32 @@ const deriveQuantityFigures = async ({ orgId, projectId, activityId, payload, bu
   return figures;
 };
 
+/**
+ * The method a submission is measured by is the activity's, never the
+ * client's (PC-6 integration, owner rule: respect the activity's progress
+ * method). With a configured ActivityProgressMethod row the submission takes
+ * that method; a client naming another is refused — 409
+ * PROGRESS_METHOD_MISMATCH naming both — never silently coerced, so a
+ * percentage typed against a quantity-measured activity cannot bypass the
+ * derivation and reach the approver as a figure with no entries behind it.
+ * Without a configured row the client's method is accepted as before (the
+ * default is percent).
+ */
+const resolveSubmissionMethod = ({ activityId, payload, configRow }) => {
+  const requested = payload.method ?? payload.progressMethod ?? null;
+  if (!configRow) return normalizeMethod(requested || 'percent');
+  const effectiveMethod = normalizeMethod(configRow.method);
+  if (requested === null || requested === undefined || String(requested).trim() === '') return effectiveMethod;
+  const requestedMethod = normalizeMethod(requested);
+  if (requestedMethod === effectiveMethod) return effectiveMethod;
+  throw new HttpError(
+    409,
+    'PROGRESS_METHOD_MISMATCH',
+    `This activity is measured by ${effectiveMethod}; a ${requestedMethod} submission is not recorded against it. The submission's method is the activity's — record ${effectiveMethod === 'quantity' ? 'quantity entries and bundle them' : `${effectiveMethod} progress`} instead`,
+    { activityId, effectiveMethod, effectiveMethodBasis: 'method_config', requestedMethod },
+  );
+};
+
 const buildSubmissionData = async ({
   orgId = null,
   projectId,
@@ -682,8 +708,9 @@ const buildSubmissionData = async ({
   fallbackPhotos = null,
   tx = prisma,
 }) => {
-  const methodConfig = await resolveMethodConfig({ projectId, activityId }, tx);
-  const method = normalizeMethod(payload.method || payload.progressMethod || methodConfig.method);
+  const configRow = await getMethodConfigRow({ projectId, activityId }, tx);
+  const methodConfig = configRow || (await resolveMethodConfig({ projectId, activityId }, tx));
+  const method = resolveSubmissionMethod({ activityId, payload, configRow });
   const status = payload.status || 'submitted';
   if (!SUBMISSION_STATUSES.includes(status)) {
     throw new HttpError(
@@ -1310,6 +1337,7 @@ module.exports = {
   serializeProgressSource,
   buildProgressSource,
   effectiveMethodFor,
+  resolveSubmissionMethod,
   getProgressMethod,
   upsertProgressMethod,
   createProgressSubmission,
