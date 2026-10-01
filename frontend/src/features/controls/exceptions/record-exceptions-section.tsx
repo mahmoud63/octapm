@@ -1,8 +1,8 @@
 import { Link } from '@tanstack/react-router'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { DetailSection, Empty } from '../components/detail-parts'
-import { useProjectExceptions } from './api'
-import { kindLabel } from './exception-format'
+import { flattenExceptionPages, useProjectExceptions } from './api'
+import { exceptionKindText } from './exception-format'
 import {
   MeasuredVsLimit,
   SeverityChip,
@@ -30,11 +30,20 @@ export function RecordExceptionsSection({
   recordId: string
   testId: string
 }) {
-  const { data, isLoading, error } = useProjectExceptions(projectId, { recordType, recordId })
+  // The API's subject filter: this record as subject or secondary subject,
+  // and its allocations. Unresolved only (the API's default), and the
+  // section keeps out a resolved or dismissed row whatever it is sent.
+  const query = useProjectExceptions(projectId, {
+    subjectType: recordType,
+    subjectId: recordId,
+  })
+  const { isLoading, error } = query
+  const data = flattenExceptionPages(query.data)
   const items = (data?.items ?? []).filter(
     (exception) => exception.status !== 'resolved' && exception.status !== 'dismissed'
   )
   const withheld = data?.state === 'ok' ? data.withheld : null
+  const more = data?.state === 'ok' && Boolean(data.nextCursor)
   return (
     <DetailSection title='Exceptions' testId={testId}>
       {isLoading ? (
@@ -61,7 +70,7 @@ export function RecordExceptionsSection({
                 >
                   <div className='flex flex-wrap items-center gap-2 text-sm'>
                     <SeverityChip severity={exception.severity} />
-                    <span className='font-medium'>{kindLabel(exception.kind)}</span>
+                    <span className='font-medium'>{exceptionKindText(exception)}</span>
                     <StatusBadge status={exception.status} />
                     {exception.changeEvent && (
                       <ChangeEventLink
@@ -87,7 +96,7 @@ export function RecordExceptionsSection({
             className='text-xs text-primary underline-offset-2 hover:underline'
             data-testid={`${testId}-open-all`}
           >
-            Open Exceptions
+            {more ? 'More on the Exceptions screen' : 'Open Exceptions'}
           </Link>
         </>
       )}

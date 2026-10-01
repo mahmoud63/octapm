@@ -1,4 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+} from '@tanstack/react-query'
 import { AxiosError } from 'axios'
 import { apiClient } from '@/services/api/client'
 
@@ -13,8 +19,9 @@ import { apiClient } from '@/services/api/client'
  * sent: no arithmetic on `measured` / `limit`, no action the server did not
  * grant, no empty count when some were withheld.
  *
- * Every address the screens use is here, so a route the API names
- * differently is changed in one place.
+ * The contract is the API's (routes/exceptions.js, exception.service.js
+ * serialize, change-event.service prefillFromRecord / raiseFromRecord):
+ * every address the screens use is here, so it changes in one place.
  */
 
 export type ExceptionSeverity = 'info' | 'warning' | 'critical'
@@ -46,42 +53,78 @@ export type ExceptionActions = {
   associateChangeEvent: boolean
 }
 
+type GroupNode = { id: string; code: string | null; name: string | null } | null
+
 export type ProjectException = {
   id: string
+  projectId?: string
   kind: string
+  /** The server's words for the kind. */
+  kindLabel?: string | null
   severity: ExceptionSeverity
   status: ExceptionStatus
+  module?: string
   subject: ExceptionSubject
   secondarySubject?: ExceptionSubject | null
-  /** Structure the subject sits in (WBS, location, cost code), as the server labels it. */
-  group?: Record<string, unknown> | null
+  /** Structure the subject sits in (WBS, location, cost code), as the server names it. */
+  group?: {
+    wbsNodeId?: string | null
+    wbsNode?: GroupNode
+    locationId?: string | null
+    location?: GroupNode
+    costCodeId?: string | null
+    costCode?: GroupNode
+  } | null
   measured: ExceptionFigure
   limit: ExceptionFigure
   detectedAt: string | null
   lastSeenAt: string | null
+  resolvedAt?: string | null
+  /** Who reviewed it: the name is the server's; the id is never drawn. */
   review?: {
     reviewedAt: string | null
     reviewedBy: string | null
+    reviewedByName: string | null
     note: string | null
   } | null
-  changeEvent?: { id: string; ref: string; status: string } | null
-  /** Optional detail a server may add: when a snooze ends, why a row was dismissed. */
-  snoozedUntil?: string | null
-  dismissal?: { reason: string | null; at?: string | null; by?: string | null } | null
+  snooze?: {
+    until: string | null
+    by: string | null
+    byName: string | null
+    reason: string | null
+  } | null
+  dismissal?: {
+    at: string | null
+    reason: string | null
+    by: string | null
+    byName: string | null
+  } | null
+  changeEvent?: {
+    id: string
+    ref: string
+    status: string
+    title?: string | null
+    path?: string | null
+  } | null
   actions: ExceptionActions
 }
 
 /** The server's marker for exceptions it withheld from this caller: a reason, never a count. */
-export type ExceptionsWithheld = { reason: string }
+export type ExceptionsWithheld = { reason: string; modules?: string[] }
 
 /**
- * A list as the server answered it. `not-on-server` is a 404 from the
- * exceptions route itself (a server without PC-7b): said as that, never as
- * an empty list.
+ * A list as the server answered it. `not-on-server` is the API's own
+ * "route not found" (a server without PC-7b): said as that, never as an
+ * empty list. `nextCursor` is set while the server has more pages.
  */
 export type ExceptionList =
-  | { state: 'ok'; items: ProjectException[]; withheld: ExceptionsWithheld | null }
-  | { state: 'not-on-server'; items: []; withheld: null }
+  | {
+      state: 'ok'
+      items: ProjectException[]
+      withheld: ExceptionsWithheld | null
+      nextCursor: string | null
+    }
+  | { state: 'not-on-server'; items: []; withheld: null; nextCursor: null }
 
 export type SeverityCounts = Partial<Record<ExceptionSeverity, number>>
 
@@ -99,22 +142,56 @@ export type ExceptionListQuery = {
   status?: string
   severity?: string
   kind?: string
-  /** Exceptions touching one record (subject, secondary subject, or the record's allocations). */
-  recordType?: string
-  recordId?: string
+  /**
+   * Exceptions on one record: the API's subject filter, which also takes the
+   * secondary subject and — for a BOQ item or an activity — its allocations.
+   */
+  subjectType?: string
+  subjectId?: string
 }
 
+/** Where a change event can be raised from, and the typed link it carries (change intelligence §5). */
+export type ChangeEventSourceType =
+  | 'exception'
+  | 'rfi'
+  | 'daily_log'
+  | 'ncr'
+  | 'punch_item'
+  | 'drawing_revision'
+  | 'submittal'
+  | 'meeting_action'
+
+export type ChangeEventSource = { type: ChangeEventSourceType; id: string }
+
+/** Where each source's routes live under /projects/:projectId (the API's SOURCE_MOUNTS). */
+export const CHANGE_EVENT_SOURCE_MOUNTS: Record<ChangeEventSourceType, string> = {
+  exception: 'controls/exceptions',
+  rfi: 'rfi',
+  daily_log: 'daily-logs',
+  ncr: 'ncr',
+  punch_item: 'punch',
+  drawing_revision: 'drawings/sheets/revisions',
+  submittal: 'submittals',
+  meeting_action: 'meetings/action-items',
+}
+
+const exceptionsBase = (projectId: string) => `/projects/${projectId}/controls/exceptions`
+
 export const EXCEPTION_ROUTES = {
-  list: (projectId: string) => `/projects/${projectId}/exceptions`,
-  summary: (projectId: string) => `/projects/${projectId}/exceptions/summary`,
+  list: (projectId: string) => exceptionsBase(projectId),
+  /** Open counts per severity for one project (to be declared by the API before /:exceptionId). */
+  summary: (projectId: string) => `${exceptionsBase(projectId)}/summary`,
   action: (
     projectId: string,
     exceptionId: string,
     action: 'review' | 'snooze' | 'dismiss' | 'associate-change-event'
-  ) => `/projects/${projectId}/exceptions/${exceptionId}/${action}`,
-  /** The server's change-event prefill for a source record (an exception, an RFI, a daily log …). */
-  changeEventPrefill: (projectId: string) =>
-    `/projects/${projectId}/change-events/prefill`,
+  ) => `${exceptionsBase(projectId)}/${exceptionId}/${action}`,
+  /** The server's change-event prefill for a source (an exception, an RFI, a daily log …). */
+  changeEventPrefill: (projectId: string, source: ChangeEventSource) =>
+    `/projects/${projectId}/${CHANGE_EVENT_SOURCE_MOUNTS[source.type]}/${source.id}/change-event-prefill`,
+  /** The handoff: ONE draft change event with the typed link to its source. */
+  raiseChangeEvent: (projectId: string, source: ChangeEventSource) =>
+    `/projects/${projectId}/${CHANGE_EVENT_SOURCE_MOUNTS[source.type]}/${source.id}/raise-change-event`,
 }
 
 export const exceptionKeys = {
@@ -125,89 +202,145 @@ export const exceptionKeys = {
     ['project-exceptions', projectId, 'summary'] as const,
 }
 
-const isNotFound = (error: unknown) =>
-  error instanceof AxiosError && error.response?.status === 404
-
-const asWithheld = (value: unknown): ExceptionsWithheld | null => {
-  if (!value || typeof value !== 'object') return null
-  const reason = (value as { reason?: unknown }).reason
-  return { reason: typeof reason === 'string' && reason ? reason : 'Withheld' }
+type ErrorBody = {
+  error?: { code?: string; message?: string; details?: Array<{ field?: string; location?: string }> }
 }
 
 /**
- * The list envelope: `{ success, data: [...], withheld? }`, or the same
- * pair nested in `data` (`{ data: { data | items, withheld? } }`). Both are
- * read; nothing else is inferred.
+ * The API's own "route not found" (error-handler notFoundHandler) — a server
+ * without the route. Any other 404 (a project the caller cannot open, an
+ * exception they may not read) is an error and is said as one.
  */
-export const readExceptionList = (body: unknown): ExceptionList => {
-  const outer = (body ?? {}) as Record<string, unknown>
-  const inner = outer.data as unknown
-  if (Array.isArray(inner)) {
-    return {
-      state: 'ok',
-      items: inner as ProjectException[],
-      withheld: asWithheld(outer.withheld),
-    }
-  }
-  const nested = (inner ?? {}) as Record<string, unknown>
-  const items = Array.isArray(nested.data)
-    ? nested.data
-    : Array.isArray(nested.items)
-      ? nested.items
-      : []
+export const isRouteMissing = (error: unknown) => {
+  if (!(error instanceof AxiosError) || error.response?.status !== 404) return false
+  const body = (error.response.data ?? {}) as ErrorBody
+  return body.error?.code === 'NOT_FOUND' && /^Route not found/.test(body.error.message ?? '')
+}
+
+/**
+ * The summary address on an API whose exceptions router has no summary
+ * route yet: `/summary` is read as an exception id and refused on that
+ * parameter. Said as "not on this server", never as a count.
+ */
+const isSummaryMissing = (error: unknown) => {
+  if (isRouteMissing(error)) return true
+  if (!(error instanceof AxiosError) || error.response?.status !== 400) return false
+  const body = (error.response.data ?? {}) as ErrorBody
+  return (
+    body.error?.code === 'VALIDATION_ERROR' &&
+    (body.error.details ?? []).some(
+      (detail) => detail.field === 'exceptionId' && detail.location === 'params'
+    )
+  )
+}
+
+const asWithheld = (value: unknown): ExceptionsWithheld | null => {
+  if (!value || typeof value !== 'object') return null
+  const marker = value as { reason?: unknown; modules?: unknown }
   return {
-    state: 'ok',
-    items: items as ProjectException[],
-    withheld: asWithheld(nested.withheld ?? outer.withheld),
+    reason: typeof marker.reason === 'string' && marker.reason ? marker.reason : 'Withheld',
+    ...(Array.isArray(marker.modules)
+      ? { modules: marker.modules.filter((entry): entry is string => typeof entry === 'string') }
+      : {}),
   }
 }
 
-/** `{ open: { total, bySeverity }, withheld? }` or the counts at the top level. */
-export const readExceptionsSummary = (body: unknown): ExceptionsSummary => {
-  const outer = (body ?? {}) as Record<string, unknown>
-  const data = (outer.data ?? {}) as Record<string, unknown>
-  const open = (data.open ?? data) as Record<string, unknown>
-  const counts = (open.bySeverity ?? {}) as Record<string, unknown>
-  const bySeverity: SeverityCounts = {}
-  for (const severity of ['critical', 'warning', 'info'] as const) {
-    if (typeof counts[severity] === 'number') bySeverity[severity] = counts[severity] as number
+type ListPage = Extract<ExceptionList, { state: 'ok' }>
+type MissingList = Extract<ExceptionList, { state: 'not-on-server' }>
+type PageOrMissing = ListPage | MissingList
+
+/** One page: `{ success, data: { data: [...], pagination: { limit, nextCursor }, withheld? } }`. */
+export const readExceptionPage = (body: unknown): ListPage => {
+  const answer = (((body ?? {}) as { data?: unknown }).data ?? {}) as {
+    data?: unknown
+    pagination?: { nextCursor?: unknown }
+    withheld?: unknown
   }
+  const nextCursor = answer.pagination?.nextCursor
   return {
     state: 'ok',
-    total: typeof open.total === 'number' ? open.total : null,
-    bySeverity,
-    withheld: asWithheld(data.withheld ?? open.withheld ?? outer.withheld),
+    items: Array.isArray(answer.data) ? (answer.data as ProjectException[]) : [],
+    withheld: asWithheld(answer.withheld),
+    nextCursor: typeof nextCursor === 'string' && nextCursor ? nextCursor : null,
   }
 }
 
+/** The pages read so far, as one list: the last page says whether more remain. */
+export const flattenExceptionPages = (
+  data: InfiniteData<PageOrMissing, unknown> | undefined
+): ExceptionList | undefined => {
+  if (!data?.pages.length) return undefined
+  const [first] = data.pages
+  if (first.state === 'not-on-server') return first
+  const pages = data.pages.filter((page): page is ListPage => page.state === 'ok')
+  return {
+    state: 'ok',
+    items: pages.flatMap((page) => page.items),
+    withheld: pages.find((page) => page.withheld)?.withheld ?? null,
+    nextCursor: pages[pages.length - 1].nextCursor,
+  }
+}
+
+export const EXCEPTION_PAGE_SIZE = 50
+
+/**
+ * The caller's exceptions, a page at a time (the API's cursor pages); read
+ * the pages as one list with flattenExceptionPages(query.data).
+ */
 export const useProjectExceptions = (
   projectId: string,
   query: ExceptionListQuery = {},
   { enabled = true }: { enabled?: boolean } = {}
 ) =>
-  useQuery<ExceptionList>({
+  useInfiniteQuery({
     queryKey: exceptionKeys.list(projectId, query),
-    queryFn: async () => {
+    initialPageParam: null as string | null,
+    queryFn: async ({ pageParam }): Promise<PageOrMissing> => {
       try {
         const response = await apiClient.get(EXCEPTION_ROUTES.list(projectId), {
           params: {
             status: query.status || undefined,
             severity: query.severity || undefined,
             kind: query.kind || undefined,
-            recordType: query.recordType || undefined,
-            recordId: query.recordId || undefined,
+            subjectType: query.subjectType || undefined,
+            subjectId: query.subjectId || undefined,
+            limit: EXCEPTION_PAGE_SIZE,
+            cursor: pageParam || undefined,
           },
         })
-        return readExceptionList(response.data)
+        return readExceptionPage(response.data)
       } catch (error) {
-        if (isNotFound(error)) return { state: 'not-on-server', items: [], withheld: null }
+        if (isRouteMissing(error)) {
+          return { state: 'not-on-server', items: [], withheld: null, nextCursor: null }
+        }
         throw error
       }
     },
+    getNextPageParam: (last) => (last.state === 'ok' ? last.nextCursor : null),
     enabled: Boolean(projectId) && enabled,
     retry: false,
     placeholderData: (previous) => previous,
   })
+
+/**
+ * The project's open counts: `{ total, bySeverity, withheld? }` (the shape
+ * of the workspace dashboard's openExceptions, for one project). The counts
+ * are the server's; nothing here adds them up.
+ */
+export const readExceptionsSummary = (body: unknown): ExceptionsSummary => {
+  const data = (((body ?? {}) as { data?: unknown }).data ?? {}) as Record<string, unknown>
+  const counts = (data.bySeverity ?? {}) as Record<string, unknown>
+  const bySeverity: SeverityCounts = {}
+  for (const severity of ['critical', 'warning', 'info'] as const) {
+    if (typeof counts[severity] === 'number') bySeverity[severity] = counts[severity] as number
+  }
+  return {
+    state: 'ok',
+    total: typeof data.total === 'number' ? data.total : null,
+    bySeverity,
+    withheld: asWithheld(data.withheld),
+  }
+}
 
 export const useExceptionsSummary = (
   projectId: string,
@@ -220,7 +353,7 @@ export const useExceptionsSummary = (
         const response = await apiClient.get(EXCEPTION_ROUTES.summary(projectId))
         return readExceptionsSummary(response.data)
       } catch (error) {
-        if (isNotFound(error)) {
+        if (isSummaryMissing(error)) {
           return { state: 'not-on-server', total: null, bySeverity: {}, withheld: null }
         }
         throw error
@@ -230,9 +363,13 @@ export const useExceptionsSummary = (
     retry: false,
   })
 
+/** The bodies the API's validators take (routes/exceptions.js). */
+export const EXCEPTION_REASON_MAX = 500
+export const EXCEPTION_NOTE_MAX = 2000
+
 export type ExceptionActionInput =
-  | { action: 'review'; exceptionId: string; body: { note: string | null } }
-  | { action: 'snooze'; exceptionId: string; body: { until: string; note: string | null } }
+  | { action: 'review'; exceptionId: string; body: { note: string } }
+  | { action: 'snooze'; exceptionId: string; body: { until: string; reason: string } }
   | { action: 'dismiss'; exceptionId: string; body: { reason: string } }
   | {
       action: 'associate-change-event'
@@ -265,44 +402,37 @@ export const useExceptionAction = (projectId: string) => {
   })
 }
 
-/** Where a change event can be raised from, and the typed link it carries (change intelligence §5). */
-export type ChangeEventSourceType =
-  | 'exception'
-  | 'rfi'
-  | 'daily_log'
-  | 'ncr'
-  | 'punch_item'
-  | 'drawing_revision'
-  | 'submittal'
-  | 'meeting_action_item'
-
-export type ChangeEventSource = { type: ChangeEventSourceType; id: string }
-
 /**
- * The server's prefill: the create payload it proposes (origin, activity,
- * location, the typed source link, lines with their quantity) and how it
- * names the source. The amount is never in it — pricing is the QS's.
+ * The server's prefill: `{ prefill, links, source? }` — the draft it
+ * proposes (title, type, description, origin, activity, location, lines with
+ * their quantity; amounts 0, left to the QS) and the typed link the raise
+ * endpoint will set. The web never sends the link: the endpoint owns it.
  */
+export type ChangeEventDraft = {
+  title?: string
+  description?: string | null
+  type?: string
+  origin?: string
+  activityId?: string | null
+  locationId?: string | null
+  lines?: Array<Record<string, unknown>>
+} & Record<string, unknown>
+
 export type ChangeEventPrefill = {
-  payload: Record<string, unknown> & {
-    title?: string
-    description?: string | null
-    type?: string
-    origin?: string
-    lines?: Array<Record<string, unknown>>
-  }
-  source: { type: string; id: string; label: string | null } | null
-  notes: string[]
+  prefill: ChangeEventDraft
+  links: Record<string, string>
+  source: { type: string; id: string; path?: string | null } | null
 }
 
-export const readChangeEventPrefill = (body: unknown): ChangeEventPrefill => {
-  const data = ((body ?? {}) as { data?: unknown }).data as Record<string, unknown> | undefined
-  const payload = (data?.payload ?? data ?? {}) as ChangeEventPrefill['payload']
-  const source = (data?.source ?? null) as ChangeEventPrefill['source']
-  const notes = Array.isArray(data?.notes)
-    ? (data!.notes as unknown[]).filter((note): note is string => typeof note === 'string')
-    : []
-  return { payload, source, notes }
+/** Reads `data.prefill`; an answer without one is no prefill (the dialog says so). */
+export const readChangeEventPrefill = (body: unknown): ChangeEventPrefill | null => {
+  const data = (((body ?? {}) as { data?: unknown }).data ?? null) as Record<string, unknown> | null
+  if (!data || !data.prefill || typeof data.prefill !== 'object') return null
+  return {
+    prefill: data.prefill as ChangeEventDraft,
+    links: (data.links && typeof data.links === 'object' ? data.links : {}) as Record<string, string>,
+    source: (data.source ?? null) as ChangeEventPrefill['source'],
+  }
 }
 
 export const prefillKey = (projectId: string, source: ChangeEventSource | null) =>
@@ -312,13 +442,11 @@ export const useChangeEventPrefill = (
   projectId: string,
   source: ChangeEventSource | null
 ) =>
-  useQuery<ChangeEventPrefill>({
+  useQuery<ChangeEventPrefill | null>({
     queryKey: prefillKey(projectId, source),
     queryFn: () =>
       apiClient
-        .get(EXCEPTION_ROUTES.changeEventPrefill(projectId), {
-          params: { sourceType: source!.type, sourceId: source!.id },
-        })
+        .get(EXCEPTION_ROUTES.changeEventPrefill(projectId, source!))
         .then((response) => readChangeEventPrefill(response.data)),
     enabled: Boolean(projectId && source),
     retry: false,
@@ -326,7 +454,7 @@ export const useChangeEventPrefill = (
     gcTime: 0,
   })
 
-/** Money fields a prefill must never carry into the create: the amount is left to the QS. */
+/** Money fields a prefill must never carry into the raise: the amount is left to the QS. */
 export const AMOUNT_FIELDS = ['romAmount', 'unitCost', 'amount', 'quotedAmount'] as const
 
 export const withoutAmounts = <T extends Record<string, unknown>>(record: T): T => {
@@ -335,16 +463,32 @@ export const withoutAmounts = <T extends Record<string, unknown>>(record: T): T 
   return copy as T
 }
 
-export const useCreateChangeEventFromPrefill = (projectId: string) => {
+export type RaisedChangeEvent = { id: string; ref: string; status: string; path?: string | null }
+
+/** What a person may set over the prefill when raising: the words, the type, the lines (no amount). */
+export type RaiseChangeEventBody = {
+  title: string
+  type: string
+  description: string | null
+  lines: Array<Record<string, unknown>>
+}
+
+/**
+ * The handoff (change intelligence §2): POST the source's raise endpoint,
+ * which creates ONE draft change event with the typed link — for an
+ * exception it also claims the exception, which then reads "in change".
+ * An exception answers `{ exception, changeEvent }`, a record the event.
+ */
+export const useRaiseChangeEvent = (projectId: string) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (payload: Record<string, unknown>) =>
+    mutationFn: ({ source, body }: { source: ChangeEventSource; body: RaiseChangeEventBody }) =>
       apiClient
-        .post(`/projects/${projectId}/change-events`, payload)
-        .then(
-          (response) =>
-            response.data.data as { id: string; ref: string; status: string; path?: string }
-        ),
+        .post(EXCEPTION_ROUTES.raiseChangeEvent(projectId, source), body)
+        .then((response) => {
+          const data = (response.data?.data ?? {}) as { changeEvent?: RaisedChangeEvent } & RaisedChangeEvent
+          return data.changeEvent ?? data
+        }),
     onSuccess: () => {
       invalidateExceptions(qc, projectId)
       qc.invalidateQueries({ queryKey: ['change-events', projectId] })

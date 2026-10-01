@@ -7,32 +7,39 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import type { ExceptionsWithheld, SeverityCounts } from './api'
+import type { SeverityCounts } from './api'
 import { SeverityCountChips, WithheldNote } from './exception-parts'
 
 /**
  * The workspace dashboard's "open exceptions" tile (PC-7b, change
- * intelligence §6; §35 rule 2: an org-wide read). Counts per severity are
- * the server's — over the projects and kinds this person may read — and a
- * project's exceptions the server withheld are said with its reason, never
- * counted as 0. Each project opens its Exceptions page.
+ * intelligence §6; §35 rule 2: an org-wide read), drawn from the workspace
+ * dashboard's `openExceptions` as the API sends it: `total` and
+ * `bySeverity` (open = not in a live change event, not snoozed), `inChange`,
+ * `snoozed`, `basis`, and — when some kinds are not counted on some
+ * projects — `withheld { reason, modules, projects: [{ projectId, name,
+ * reason }] }`, which names those projects and why, never with a count.
+ * Every number is the server's; none is added up here.
  */
 
 export type WorkspaceOpenExceptions = {
   total?: number | null
   bySeverity?: SeverityCounts
-  withheld?: ExceptionsWithheld | null
-  projects?: Array<{
-    projectId: string
-    projectName?: string | null
-    total?: number | null
-    bySeverity?: SeverityCounts
-    withheld?: ExceptionsWithheld | null
-  }>
+  inChange?: number | null
+  snoozed?: number | null
+  basis?: string | null
+  withheld?: {
+    reason: string
+    modules?: string[]
+    projects?: Array<{ projectId: string; name?: string | null; reason: string; modules?: string[] }>
+  } | null
 }
 
 export function OpenExceptionsCard({ data }: { data: WorkspaceOpenExceptions }) {
-  const projects = data.projects ?? []
+  const withheldProjects = data.withheld?.projects ?? []
+  const others = [
+    typeof data.inChange === 'number' ? `${data.inChange.toLocaleString()} in change` : null,
+    typeof data.snoozed === 'number' ? `${data.snoozed.toLocaleString()} snoozed` : null,
+  ].filter(Boolean)
   return (
     <Card data-testid='dashboard-open-exceptions'>
       <CardHeader>
@@ -49,12 +56,22 @@ export function OpenExceptionsCard({ data }: { data: WorkspaceOpenExceptions }) 
       </CardHeader>
       <CardContent className='space-y-3'>
         <SeverityCountChips counts={data.bySeverity ?? {}} testId='dashboard-open-exceptions-severity' />
+        {others.length > 0 && (
+          <p className='text-xs text-muted-foreground' data-testid='dashboard-open-exceptions-others'>
+            {others.join(' · ')}
+          </p>
+        )}
+        {data.basis && (
+          <p className='text-[11px] text-muted-foreground' data-testid='dashboard-open-exceptions-basis'>
+            {data.basis}
+          </p>
+        )}
         {data.withheld && (
           <WithheldNote withheld={data.withheld} hasVisible testId='dashboard-open-exceptions-withheld' />
         )}
-        {projects.length > 0 && (
+        {withheldProjects.length > 0 && (
           <ul className='space-y-1 text-sm'>
-            {projects.map((project) => (
+            {withheldProjects.map((project) => (
               <li
                 key={project.projectId}
                 className='flex flex-wrap items-center justify-between gap-2'
@@ -65,15 +82,11 @@ export function OpenExceptionsCard({ data }: { data: WorkspaceOpenExceptions }) 
                   params={{ projectId: project.projectId, module: 'controls', child: 'exceptions' }}
                   className='min-w-0 truncate text-primary underline-offset-2 hover:underline'
                 >
-                  {project.projectName ?? 'Project'}
+                  {project.name ?? 'Project'}
                 </Link>
-                {project.withheld ? (
-                  <span className='text-xs text-muted-foreground' title={project.withheld.reason} data-withheld='true'>
-                    — {project.withheld.reason}
-                  </span>
-                ) : (
-                  <SeverityCountChips counts={project.bySeverity ?? {}} />
-                )}
+                <span className='text-xs text-muted-foreground' title={project.reason} data-withheld='true'>
+                  — {project.reason}
+                </span>
               </li>
             ))}
           </ul>

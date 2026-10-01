@@ -66,7 +66,8 @@ function openExceptionsFigure(offered: boolean, summary: ExceptionsSummary | und
   if (!offered) return { value: '—', basis: 'exceptions not offered', tone: 'neutral' as StatusTone }
   if (!summary) return { value: '—', basis: 'reading exceptions', tone: 'neutral' as StatusTone }
   if (summary.state === 'not-on-server') {
-    return { value: '—', basis: 'exceptions are not on this server yet', tone: 'neutral' as StatusTone }
+    // No project summary on this API yet: a dash, never a count made here.
+    return { value: '—', basis: 'the exceptions summary is not on this server yet', tone: 'neutral' as StatusTone }
   }
   const counts = severityCountsText(summary.bySeverity)
   const withheld = summary.withheld ? `some withheld: ${summary.withheld.reason}` : ''

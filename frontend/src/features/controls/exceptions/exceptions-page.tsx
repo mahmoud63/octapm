@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AlertOctagon } from 'lucide-react'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
+import { Button } from '@/components/ui/button'
 import {
   Select,
   SelectContent,
@@ -11,7 +12,11 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { ControlsDetailHost } from '../components/controls-detail-drawers'
 import { formatDate } from '../lib/detail-format'
-import { useProjectExceptions, type ProjectException } from './api'
+import {
+  flattenExceptionPages,
+  useProjectExceptions,
+  type ProjectException,
+} from './api'
 import {
   ExceptionActionDialog,
   type ExceptionDialogMode,
@@ -21,8 +26,9 @@ import {
   SEVERITY_ORDER,
   STATUS_LABEL,
   detectedText,
+  exceptionKindText,
   groupLabels,
-  kindLabel,
+  personText,
 } from './exception-format'
 import {
   MeasuredVsLimit,
@@ -75,7 +81,7 @@ function ExceptionRow({
           <div className='flex flex-wrap items-center gap-2'>
             <SeverityChip severity={exception.severity} />
             <span className='font-medium' data-testid={`${testId}-kind`}>
-              {kindLabel(exception.kind)}
+              {exceptionKindText(exception)}
             </span>
             <StatusBadge status={exception.status} />
             {exception.changeEvent && (
@@ -108,22 +114,25 @@ function ExceptionRow({
         />
       </div>
       <MeasuredVsLimit exception={exception} testId={`${testId}-figures`} />
-      <p className='text-[11px] text-muted-foreground'>
-        {detectedText(exception)}
-        {exception.status === 'snoozed' && exception.snoozedUntil
-          ? ` · snoozed until ${formatDate(exception.snoozedUntil)}`
-          : ''}
-      </p>
+      <p className='text-[11px] text-muted-foreground'>{detectedText(exception)}</p>
+      {/* Every action attributed to the person the server names — never an id. */}
       {exception.review?.reviewedAt && (
         <p className='text-xs' data-testid={`${testId}-reviewed`}>
-          Reviewed {formatDate(exception.review.reviewedAt)}
-          {exception.review.reviewedBy ? ` by ${exception.review.reviewedBy}` : ''}
+          Reviewed {formatDate(exception.review.reviewedAt)} by{' '}
+          {personText(exception.review.reviewedByName)}
           {exception.review.note ? ` — ${exception.review.note}` : ''}
         </p>
       )}
-      {exception.dismissal?.reason && (
+      {exception.snooze?.until && (
+        <p className='text-xs text-muted-foreground' data-testid={`${testId}-snoozed`}>
+          Snoozed until {formatDate(exception.snooze.until)} by {personText(exception.snooze.byName)}
+          {exception.snooze.reason ? ` — ${exception.snooze.reason}` : ''}
+        </p>
+      )}
+      {exception.dismissal && (
         <p className='text-xs text-muted-foreground' data-testid={`${testId}-dismissal`}>
-          Dismissed — {exception.dismissal.reason}
+          Dismissed {formatDate(exception.dismissal.at)} by {personText(exception.dismissal.byName)}
+          {exception.dismissal.reason ? ` — ${exception.dismissal.reason}` : ''}
         </p>
       )}
     </li>
@@ -133,15 +142,19 @@ function ExceptionRow({
 function ExceptionsList({ projectId }: { projectId: string }) {
   const [status, setStatus] = useState(ALL)
   const [severity, setSeverity] = useState(ALL)
-  const { data, isLoading, error } = useProjectExceptions(projectId, {
+  const query = useProjectExceptions(projectId, {
     status: status === ALL ? undefined : status,
     severity: severity === ALL ? undefined : severity,
   })
+  const { isLoading, error, hasNextPage, fetchNextPage, isFetchingNextPage } = query
+  const data = flattenExceptionPages(query.data)
   const [dialog, setDialog] = useState<{ exception: ProjectException; mode: ExceptionDialogMode } | null>(null)
   const [raising, setRaising] = useState<ProjectException | null>(null)
 
   const items = data?.items ?? []
   const withheld = data?.state === 'ok' ? data.withheld : null
+  // The server pages the list: while it has more, the count says so.
+  const more = data?.state === 'ok' && Boolean(data.nextCursor)
 
   return (
     <div className='space-y-3' data-testid='exceptions-page'>
@@ -198,9 +211,9 @@ function ExceptionsList({ projectId }: { projectId: string }) {
         </p>
       ) : (
         <>
-          <p className='text-xs text-muted-foreground' data-testid='exceptions-count'>
+          <p className='text-xs text-muted-foreground' data-testid='exceptions-count' data-more={more ? 'true' : 'false'}>
             {items.length
-              ? `${items.length.toLocaleString()} shown`
+              ? `${items.length.toLocaleString()} shown${more ? ', more available' : ''}`
               : withheld
                 ? 'None you may see'
                 : 'No exceptions match'}
@@ -220,6 +233,17 @@ function ExceptionsList({ projectId }: { projectId: string }) {
                 />
               ))}
             </ul>
+          )}
+          {hasNextPage && (
+            <Button
+              size='sm'
+              variant='outline'
+              disabled={isFetchingNextPage}
+              onClick={() => fetchNextPage()}
+              data-testid='exceptions-load-more'
+            >
+              {isFetchingNextPage ? 'Loading…' : 'Load more'}
+            </Button>
           )}
         </>
       )}

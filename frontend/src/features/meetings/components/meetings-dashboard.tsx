@@ -1283,7 +1283,7 @@ export function MeetingsDashboard({
                             {/* PC-7b: a draft change event prefilled from this action (typed link). */}
                             <RaiseChangeEventButton
                               projectId={projectId}
-                              source={{ type: 'meeting_action_item', id: item.id }}
+                              source={{ type: 'meeting_action', id: item.id }}
                               testId={`uat-meeting-action-raise-change-event-${item.id}`}
                             />
                           </div>

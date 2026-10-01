@@ -40,6 +40,13 @@ export const EXCEPTION_KIND_LABEL: Record<string, string> = {
 export const kindLabel = (kind: string) =>
   EXCEPTION_KIND_LABEL[kind] ?? kind.replace(/_/g, ' ')
 
+/** The server's words for an exception's kind, or ours when it sent none. */
+export const exceptionKindText = (exception: Pick<ProjectException, 'kind' | 'kindLabel'>) =>
+  exception.kindLabel || kindLabel(exception.kind)
+
+/** A person the server named; never an id — a dash when it sent no name. */
+export const personText = (name: string | null | undefined) => name || '—'
+
 export const SEVERITY_ORDER: ExceptionSeverity[] = ['critical', 'warning', 'info']
 
 export const SEVERITY_LABEL: Record<ExceptionSeverity, string> = {
@@ -65,16 +72,17 @@ export const severityCountsText = (counts: SeverityCounts) =>
 export const detectedText = (exception: ProjectException) =>
   `detected ${formatDate(exception.detectedAt)} · last seen ${formatDate(exception.lastSeenAt)}`
 
-/** Group keys the server labelled (WBS, location, cost code); ids without a label are not drawn. */
+/** The structure the server named (WBS, location, cost code); an id it did not name is not drawn. */
 export const groupLabels = (group: ProjectException['group']) => {
   if (!group || typeof group !== 'object') return [] as string[]
   const labels: string[] = []
-  for (const [key, value] of Object.entries(group)) {
-    if (value && typeof value === 'object' && typeof (value as { label?: unknown }).label === 'string') {
-      labels.push((value as { label: string }).label)
-    } else if (typeof value === 'string' && !key.endsWith('Id')) {
-      labels.push(value)
-    }
+  for (const [prefix, node] of [
+    ['WBS', group.wbsNode],
+    ['Location', group.location],
+    ['Cost code', group.costCode],
+  ] as const) {
+    const words = [node?.code, node?.name].filter(Boolean).join(' ')
+    if (words) labels.push(`${prefix} ${words}`)
   }
   return labels
 }

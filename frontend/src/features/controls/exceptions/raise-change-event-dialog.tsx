@@ -30,7 +30,7 @@ import {
 import { formatQuantity } from '../lib/detail-format'
 import {
   useChangeEventPrefill,
-  useCreateChangeEventFromPrefill,
+  useRaiseChangeEvent,
   withoutAmounts,
   type ChangeEventPrefill,
   type ChangeEventSource,
@@ -40,12 +40,14 @@ import {
  * Raise change event (change intelligence §2): the change-event create form,
  * opened PREFILLED from the server's prefill for the source — an exception,
  * an RFI, a daily log, an NCR, a punch item, a drawing revision, a
- * submittal or a meeting action. The server proposes the origin, the
- * activity and location, the typed source link and the lines with their
- * quantity; the person may change the wording and the type. The amount is
- * blank and stays blank — pricing is the QS's, on the event. Saving creates
- * a DRAFT change event by this person's explicit action; nothing here
- * creates a change order or moves a budget or a schedule.
+ * submittal or a meeting action (GET <source>/:id/change-event-prefill).
+ * The server proposes the origin, the activity and location and the lines
+ * with their quantity; the person may change the wording and the type. The
+ * amount is blank and stays blank — pricing is the QS's, on the event.
+ * Saving POSTs the source's raise endpoint, which creates ONE DRAFT change
+ * event with the typed link to the source (the web never sends the link)
+ * by this person's explicit action; nothing here creates a change order or
+ * moves a budget or a schedule.
  */
 
 const SOURCE_LABEL: Record<ChangeEventSource['type'], string> = {
@@ -56,7 +58,7 @@ const SOURCE_LABEL: Record<ChangeEventSource['type'], string> = {
   punch_item: 'Punch item',
   drawing_revision: 'Drawing revision',
   submittal: 'Submittal',
-  meeting_action_item: 'Meeting action',
+  meeting_action: 'Meeting action',
 }
 
 type LineDraft = { key: string; base: Record<string, unknown>; description: string }
@@ -80,7 +82,7 @@ export function RaiseChangeEventDialog({
     projectId,
     open ? source : null
   )
-  const create = useCreateChangeEventFromPrefill(projectId)
+  const raise = useRaiseChangeEvent(projectId)
   const navigate = useNavigate()
   const [title, setTitle] = useState('')
   const [type, setType] = useState<ChangeEventType>('other')
@@ -92,7 +94,7 @@ export function RaiseChangeEventDialog({
   const [seen, setSeen] = useState<ChangeEventPrefill | null>(null)
   if (prefill && prefill !== seen) {
     setSeen(prefill)
-    const proposed = prefill.payload
+    const proposed = prefill.prefill
     setTitle(text(proposed.title))
     setType(
       proposed.type && proposed.type in CHANGE_EVENT_TYPE_LABEL
@@ -109,22 +111,26 @@ export function RaiseChangeEventDialog({
     )
   }
 
-  const payload = prefill?.payload ?? {}
-  const sourceLabel =
-    prefill?.source?.label ?? (source ? SOURCE_LABEL[source.type] : '')
+  const proposedDraft = prefill?.prefill ?? {}
+  const sourceLabel = source ? SOURCE_LABEL[source.type] : ''
 
   const save = async () => {
-    if (!prefill) return
+    if (!prefill || !source) return
     try {
-      const created = await create.mutateAsync({
-        ...withoutAmounts(prefill.payload),
-        title: title.trim(),
-        type,
-        description: description.trim() || null,
-        lines: lines.map((line) => ({
-          ...line.base,
-          description: line.description.trim() || text(line.base.description),
-        })),
+      // Only what a person may set over the prefill: the words, the type and
+      // the lines — every amount stripped. Origin, activity, location and the
+      // typed link stay the endpoint's.
+      const created = await raise.mutateAsync({
+        source,
+        body: {
+          title: title.trim(),
+          type,
+          description: description.trim() || null,
+          lines: lines.map((line) => ({
+            ...withoutAmounts(line.base),
+            description: line.description.trim() || text(line.base.description),
+          })),
+        },
       })
       onOpenChange(false)
       onCreated?.(created)
@@ -177,12 +183,11 @@ export function RaiseChangeEventDialog({
               {source && (
                 <Badge variant='outline' data-testid='raise-change-event-source'>
                   From {SOURCE_LABEL[source.type]}
-                  {prefill.source?.label ? ` · ${prefill.source.label}` : ''}
                 </Badge>
               )}
-              {typeof payload.origin === 'string' && (
+              {typeof proposedDraft.origin === 'string' && (
                 <Badge variant='outline' data-testid='raise-change-event-origin'>
-                  Origin {payload.origin.replace(/_/g, ' ')}
+                  Origin {proposedDraft.origin.replace(/_/g, ' ')}
                 </Badge>
               )}
               <Badge variant='secondary'>Draft</Badge>
@@ -270,13 +275,6 @@ export function RaiseChangeEventDialog({
                 </p>
               )}
             </div>
-            {prefill.notes.length > 0 && (
-              <ul className='list-disc pl-5 text-xs text-muted-foreground' data-testid='raise-change-event-notes'>
-                {prefill.notes.map((note) => (
-                  <li key={note}>{note}</li>
-                ))}
-              </ul>
-            )}
           </div>
         )}
 
@@ -285,11 +283,11 @@ export function RaiseChangeEventDialog({
             Cancel
           </Button>
           <Button
-            disabled={!prefill || !title.trim() || create.isPending}
+            disabled={!prefill || !title.trim() || raise.isPending}
             onClick={save}
             data-testid='raise-change-event-save'
           >
-            {create.isPending && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
+            {raise.isPending && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
             Create draft change event
           </Button>
         </DialogFooter>

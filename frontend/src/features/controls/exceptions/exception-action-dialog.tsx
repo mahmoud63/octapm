@@ -22,12 +22,18 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useChangeEvents } from '@/features/change-events/hooks/use-change-events'
-import { useExceptionAction, type ProjectException } from './api'
-import { kindLabel } from './exception-format'
+import {
+  EXCEPTION_NOTE_MAX,
+  EXCEPTION_REASON_MAX,
+  useExceptionAction,
+  type ProjectException,
+} from './api'
+import { exceptionKindText } from './exception-format'
 
 /**
  * The review actions on one exception: review with a note, snooze until a
- * date, dismiss with a reason, associate an existing change event. Each is
+ * date with a reason, dismiss with a reason, associate an existing change
+ * event — each body exactly as the API's validators take it. Each is
  * offered only where the server's `actions` said this caller may (the
  * screen checks before opening this); the server decides again on POST.
  * None of them changes a figure — they record a person's review.
@@ -42,11 +48,12 @@ const TITLE: Record<ExceptionDialogMode, string> = {
   associate: 'Associate a change event',
 }
 
-const tomorrow = () => {
+const dayFromNow = (days: number) => {
   const date = new Date()
-  date.setDate(date.getDate() + 7)
+  date.setDate(date.getDate() + days)
   return date.toISOString().slice(0, 10)
 }
+const inAWeek = () => dayFromNow(7)
 
 function AssociatePicker({
   projectId,
@@ -105,32 +112,32 @@ export function ExceptionActionDialog({
 }) {
   const action = useExceptionAction(projectId)
   const [note, setNote] = useState('')
-  const [until, setUntil] = useState(tomorrow())
+  const [until, setUntil] = useState(inAWeek())
   const [changeEventId, setChangeEventId] = useState('')
   // The host remounts this dialog per exception and action (its `key`), so
   // each opening starts empty.
   const open = Boolean(exception && mode)
 
+  // The API's validators: a review needs its note, a snooze its date and
+  // reason, a dismissal its reason — the button stays off until they are given.
   const ready =
-    mode === 'dismiss'
-      ? note.trim().length > 0
-      : mode === 'snooze'
-        ? Boolean(until)
-        : mode === 'associate'
-          ? Boolean(changeEventId)
-          : true
+    mode === 'snooze'
+      ? Boolean(until) && note.trim().length > 0
+      : mode === 'associate'
+        ? Boolean(changeEventId)
+        : note.trim().length > 0
 
   const submit = async () => {
     if (!exception || !mode) return
     try {
       if (mode === 'review') {
-        await action.mutateAsync({ action: 'review', exceptionId: exception.id, body: { note: note.trim() || null } })
+        await action.mutateAsync({ action: 'review', exceptionId: exception.id, body: { note: note.trim() } })
         toast.success('Exception reviewed')
       } else if (mode === 'snooze') {
         await action.mutateAsync({
           action: 'snooze',
           exceptionId: exception.id,
-          body: { until, note: note.trim() || null },
+          body: { until, reason: note.trim() },
         })
         toast.success(`Exception snoozed until ${new Date(until).toLocaleDateString()}`)
       } else if (mode === 'dismiss') {
@@ -156,7 +163,7 @@ export function ExceptionActionDialog({
         <DialogHeader>
           <DialogTitle>{mode ? TITLE[mode] : ''}</DialogTitle>
           <DialogDescription>
-            {exception ? `${kindLabel(exception.kind)} · ${exception.subject.label ?? exception.subject.type}` : ''}
+            {exception ? `${exceptionKindText(exception)} · ${exception.subject.label ?? exception.subject.type}` : ''}
           </DialogDescription>
         </DialogHeader>
         <div className='space-y-3'>
@@ -166,6 +173,7 @@ export function ExceptionActionDialog({
               <Input
                 id='exception-snooze-until'
                 type='date'
+                min={dayFromNow(1)}
                 value={until}
                 onChange={(event) => setUntil(event.target.value)}
                 data-testid='exception-snooze-until'
@@ -177,13 +185,13 @@ export function ExceptionActionDialog({
           ) : (
             <div className='space-y-1'>
               <Label htmlFor='exception-note'>
-                {mode === 'dismiss' ? 'Reason (required)' : 'Note'}
+                {mode === 'review' ? 'Note (required)' : 'Reason (required)'}
               </Label>
               <Textarea
                 id='exception-note'
                 rows={3}
                 value={note}
-                maxLength={2000}
+                maxLength={mode === 'review' ? EXCEPTION_NOTE_MAX : EXCEPTION_REASON_MAX}
                 onChange={(event) => setNote(event.target.value)}
                 data-testid='exception-note'
               />
