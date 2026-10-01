@@ -62,6 +62,9 @@ const { prisma } = require("../../config/db");
 const { createLiveOrg, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
 const { startApi } = require("./auth-live-kit");
 const { buildForecast, deterministicNarrative, forecastBlock } = require("../forecast.service");
+const { resolveRequestPrincipal } = require("../membership.service");
+const { requestForProject } = require("../../middleware/project-access");
+const { boqFigureAccess, exceptionAccess } = require("../../utils/boq-figures");
 
 // The instant every figure is read at: before the fixture's first planned
 // start (2027-01-04), so no pace, late-start or overdue rule applies.
@@ -162,8 +165,15 @@ liveDescribe("R5-1: the certified project's 45-day forecast, pinned on its own g
     expect([response.status, response.body?.error]).toEqual([200, undefined]);
     return response.body.data;
   };
-  // The same forecast, built in this process at a fixed instant.
-  const forecastAt = (asOf = AS_OF) => buildForecast({ orgId: live.org.id, projectId: built.project.id, asOf });
+  // The same forecast, built in this process at a fixed instant — for the
+  // same reader: GET /forecast passes the caller's access (PC-7b integration
+  // D: boqFigureAccess + exceptionAccess, routes/forecast.js), which decides
+  // the data-quality notes and their dataQualityWithheld marker; no figure
+  // depends on it.
+  const forecastAt = async (asOf = AS_OF) => {
+    const view = await requestForProject({ user: await resolveRequestPrincipal({ userId: live.user.id, orgId: live.org.id }) }, built.project.id);
+    return buildForecast({ orgId: live.org.id, projectId: built.project.id, asOf, access: { ...boqFigureAccess(view), ...exceptionAccess(view) } });
+  };
   const keysOf = (value) => Object.keys(value || {}).sort();
 
   // Every row of this organisation, once nothing is still being written: two
