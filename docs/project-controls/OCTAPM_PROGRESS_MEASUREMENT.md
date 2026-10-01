@@ -236,6 +236,20 @@ bundles entries, and approving it is what approves them:
   Proven live (`pc-6-method-authority.live.test.js`: every path refused, footprint and EV byte-identical; no method
   named → the activity's, derived; the unconfigured wall takes the client's) and mutation-proven (coercing silently
   and accepting the client's method each fail the suite).
+- **The rule holds in the one writer too** (verification fix, 2026-10-01). Asked only when a submission is made, the
+  rule could be passed by ordering: a percent submission put forward while the activity was unconfigured stayed
+  approvable after the planner configured it as quantity (the method lock below reads approved progress only), the
+  approver made a 90% row with zero entries official, and the first bundle afterwards derived from its entries — the
+  official figure regressed 90% → 10% by the act of deriving. `approveProgressSubmissionWithClient` now asks again
+  (`assertSubmissionMethodStands`): a submission whose method is not the activity's **configured** method is 409
+  `PROGRESS_METHOD_MISMATCH` with `{ activityId, effectiveMethod, effectiveMethodBasis, requestedMethod,
+  submissionId }`, nothing written; the approver rejects it and the site records it the activity's way. This also
+  covers any submission already pending on a configured activity when the rule shipped. Without a configured row
+  nothing is asked. Configuring a method while a submission of another method waits is still allowed (decision for
+  the owner: the refusal is at the approval, where the figure would become official, not at the configuration).
+  Proven live (`pc-6-method-authority`: the late pour — footprint and EV byte-identical on the refusal, then
+  rejected, entries bundled, the only official row the derived 10%) and mutation-proven (the check removed → the
+  90% row is approved).
 - **The method lock** (`PUT /activities/{id}/progress-method`): an activity with approved progress keeps the
   method it is measured by — its configured method, else the method its latest official figure was approved under
   (aliases normalised), else `percent` — and naming another is 409 `PROGRESS_METHOD_LOCKED` with

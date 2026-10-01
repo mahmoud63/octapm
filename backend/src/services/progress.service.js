@@ -824,6 +824,38 @@ const resolveSubmissionMethod = ({ activityId, payload, configRow }) => {
   );
 };
 
+/**
+ * The same rule in the one writer (verification finding: the bypass by
+ * ordering). The rule above is asked when a submission is made; a percent
+ * submission put forward while the activity was unconfigured — or one
+ * already pending when the rule shipped — would otherwise stay approvable
+ * after the planner configures the activity as quantity (the method lock
+ * reads approved progress only), and the approver would make a percentage
+ * with no entries behind it official; the first bundle afterwards would
+ * then derive from its entries and the official figure would regress. So
+ * approval asks again: a submission whose method is not the activity's
+ * configured method is 409 PROGRESS_METHOD_MISMATCH, naming both and the
+ * submission. The approver rejects it and the site records it the
+ * activity's way. Without a configured row nothing is asked, as before.
+ */
+const assertSubmissionMethodStands = ({ submission, configRow }) => {
+  if (!configRow) return;
+  const effectiveMethod = normalizeMethod(configRow.method);
+  let submittedMethod;
+  try {
+    submittedMethod = normalizeMethod(submission.method);
+  } catch {
+    submittedMethod = String(submission.method || '').trim() || null;
+  }
+  if (submittedMethod === effectiveMethod) return;
+  throw new HttpError(
+    409,
+    'PROGRESS_METHOD_MISMATCH',
+    `This activity is measured by ${effectiveMethod}; a ${submittedMethod} submission is not approved against it. Reject it and record ${effectiveMethod === 'quantity' ? 'quantity entries and bundle them' : `${effectiveMethod} progress`} instead`,
+    { activityId: submission.activityId, effectiveMethod, effectiveMethodBasis: 'method_config', requestedMethod: submittedMethod, submissionId: submission.id },
+  );
+};
+
 const buildSubmissionData = async ({
   orgId = null,
   projectId,
@@ -1282,10 +1314,13 @@ const approveProgressSubmissionWithClient = async ({
     );
   }
 
-  const methodConfig = await resolveMethodConfig(
+  // The method rule, asked again where a figure becomes official.
+  const configRow = await getMethodConfigRow({ projectId, activityId: submission.activityId }, tx);
+  assertSubmissionMethodStands({ submission, configRow });
+  const methodConfig = configRow || (await resolveMethodConfig(
     { projectId, activityId: submission.activityId },
     tx,
-  );
+  ));
   if (methodConfig.evidenceRequired && !hasEvidence(submission.evidenceJson)) {
     throw new HttpError(
       400,

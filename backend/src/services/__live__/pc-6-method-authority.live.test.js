@@ -40,6 +40,17 @@
  *   (the approved row stands as approved) and is the floor of the next
  *   bundle.
  *
+ * The rule holds in the one writer too (verification finding: "the method
+ * bypass still works by ordering — a percent submission put forward while
+ * the activity is unconfigured stays approvable after the planner
+ * configures it as quantity; the approver approves a 90% row with zero
+ * entries, and the first bundle afterwards regresses it 90% → 10%"):
+ * - the late pour: a percent submission is pending, the planner configures
+ *   quantity (allowed: nothing is approved yet), and the approval is 409
+ *   PROGRESS_METHOD_MISMATCH naming both methods and the submission; nothing
+ *   official, EV byte-identical; rejected, the site records entries and the
+ *   only official row is the derived one.
+ *
  *   DATABASE_CONNECTION_LIMIT=4 npm run test:live -- src/services/__live__/pc-6-method-authority.live.test.js
  */
 const { prisma } = require("../../config/db");
@@ -56,6 +67,7 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
   let slab;
   let slab2;
   let kerb;
+  let late;
   let site;
   const bearer = (token) => ({ authorization: `Bearer ${token}` });
   const at = (route) => `/api/v1/projects/${project.id}${route}`;
@@ -79,7 +91,7 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
   const footprint = async () =>
     JSON.stringify({
       submissions: await prisma.progressSubmission.findMany({ where: { projectId: project.id }, orderBy: { createdAt: "asc" } }),
-      progress: await prisma.activityProgress.findMany({ where: { activityId: { in: [pour.id, wall.id, slab.id, slab2.id, kerb.id] } }, orderBy: { updatedAt: "asc" } }),
+      progress: await prisma.activityProgress.findMany({ where: { activity: { projectId: project.id } }, orderBy: { updatedAt: "asc" } }),
       reports: await prisma.dailyReport.count({ where: { projectId: project.id } }),
       entries: await prisma.quantityProgressEntry.findMany({ where: { projectId: project.id }, orderBy: { createdAt: "asc" } }),
     });
@@ -109,11 +121,12 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     slab = await activity({ name: "Ground slab (legacy)", activityCode: "A130", duration: 4, startDate: "2026-02-23", endDate: "2026-02-26", engineerIds: [live.user.id, site.id] });
     slab2 = await activity({ name: "Roof slab (legacy, typed below)", activityCode: "A140", duration: 4, startDate: "2026-03-02", endDate: "2026-03-05", engineerIds: [live.user.id, site.id] });
     kerb = await activity({ name: "Kerbs (typed)", activityCode: "A150", duration: 2, startDate: "2026-03-09", endDate: "2026-03-10", engineerIds: [live.user.id, site.id] });
-    for (const [row, quantity] of [[pour, 100], [slab, 100], [slab2, 100], [kerb, 50]]) {
+    late = await activity({ name: "Late pour (configured after a percent submission)", activityCode: "A160", duration: 3, startDate: "2026-03-16", endDate: "2026-03-18", engineerIds: [live.user.id, site.id] });
+    for (const [row, quantity, configured = true] of [[pour, 100], [slab, 100], [slab2, 100], [kerb, 50], [late, 100, false]]) {
       const allocation = await api.post(at("/activity-boq-allocations"), { boqItemId: concrete.id, activityId: row.id, quantity }, bearer(live.token));
       ok(allocation, 201);
       for (const step of ["submit", "approve"]) ok(await api.post(at(`/activity-boq-allocations/${allocation.body.data.id}/${step}`), {}, bearer(live.token)));
-      ok(await api.request("PUT", at(`/activities/${row.id}/progress-method`), { body: { method: "quantity", quantityUnit: "m3" }, headers: bearer(live.token) }));
+      if (configured) ok(await api.request("PUT", at(`/activities/${row.id}/progress-method`), { body: { method: "quantity", quantityUnit: "m3" }, headers: bearer(live.token) }));
     }
     // The pre-PC-6 state, exactly as the database holds it: an approved row
     // typed the legacy way — a quantityComplete, no submission, no entry.
@@ -306,5 +319,34 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     const bundle = await submit(slab2.id, { entryIds: [ids.r1] }, site.token);
     ok(bundle, 200);
     expect(bundle.body.data.submission).toMatchObject({ pctComplete: 60, quantityComplete: 60, quantity: { approvedBefore: 0, installedBasis: "legacy_typed_floor", legacyFloor: { quantity: 50 } } });
+  });
+
+  it("the one writer holds the method rule: a percent submission pending from before the activity was configured quantity is 409 PROGRESS_METHOD_MISMATCH at approval — nothing official, EV byte-identical; rejected, the site records entries", async () => {
+    expect(await prisma.activityProgressMethod.findFirst({ where: { activityId: late.id } })).toBeNull();
+    const stale = await submit(late.id, { method: "percent", pctComplete: 90 }, site.token);
+    ok(stale, 200);
+    expect(stale.body.data.submission).toMatchObject({ method: "percent", pctComplete: 90, status: "submitted" });
+    const staleId = stale.body.data.submission.id;
+    // The planner configures quantity while it waits: allowed, the method lock reads approved progress only.
+    ok(await api.request("PUT", at(`/activities/${late.id}/progress-method`), { body: { method: "quantity", quantityUnit: "m3" }, headers: bearer(live.token) }));
+    const evBefore = await evReport();
+    const before = await footprint();
+    const refusal = await approve(late.id, staleId);
+    refused(refusal, 409, "PROGRESS_METHOD_MISMATCH");
+    expect(refusal.body.error.details).toEqual({ activityId: late.id, effectiveMethod: "quantity", effectiveMethodBasis: "method_config", requestedMethod: "percent", submissionId: staleId });
+    expect(refusal.body.error.message).toMatch(/measured by quantity; a percent submission is not approved against it/);
+    expect(await footprint()).toBe(before);
+    expect(await evReport()).toBe(evBefore);
+    expect(await progressRows(late.id)).toHaveLength(0);
+    expect(await prisma.progressSubmission.findUnique({ where: { id: staleId } })).toMatchObject({ status: "submitted", reviewedBy: null });
+    // The way out: the approver rejects it and the site records what was installed.
+    ok(await api.post(at(`/activities/${late.id}/progress-submissions/${staleId}/reject`), { reason: "The activity is measured by quantity; record entries" }, bearer(live.token)));
+    ids.l1 = (await entry({ activityId: late.id, boqItemId: concrete.id, quantity: 10, date: "2026-03-16", clientRequestId: "ma-l1" })).id;
+    const bundle = await submit(late.id, { entryIds: [ids.l1] }, site.token);
+    ok(bundle, 200);
+    ok(await approve(late.id, bundle.body.data.submission.id));
+    const rows = await progressRows(late.id);
+    expect(rows.map((row) => [Number(row.pctComplete), row.progressMethod, row.quantityComplete === null ? null : Number(row.quantityComplete)])).toEqual([[10, "quantity", 10]]);
+    expect((await activityPayload(late.id)).pctComplete).toBe(10);
   });
 });

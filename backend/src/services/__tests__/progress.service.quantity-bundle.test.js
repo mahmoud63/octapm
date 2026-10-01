@@ -186,6 +186,27 @@ describe("PC-6 quantity bundles in the one writer", () => {
     expect(mockPrisma.progressSubmission.findFirst.mock.invocationCallOrder[1]).toBeGreaterThan(mockPrisma.$queryRaw.mock.invocationCallOrder[0]);
   });
 
+  it("the writer asks the method rule again: a percent submission on an activity configured quantity is 409 PROGRESS_METHOD_MISMATCH at approval and nothing is written; without a configured row it is approved as before", async () => {
+    const stale = { ...submitted([]), method: "percent", pctComplete: 90, quantityComplete: null, quantityPlanned: null, quantityUnit: null };
+    mockPrisma.progressSubmission.findFirst.mockResolvedValue(stale);
+    await expect(progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" })).rejects.toMatchObject({
+      status: 409,
+      code: "PROGRESS_METHOD_MISMATCH",
+      details: { activityId: "activity-1", effectiveMethod: "quantity", effectiveMethodBasis: "method_config", requestedMethod: "percent", submissionId: "sub-1" },
+    });
+    expect(mockPrisma.progressSubmission.update).not.toHaveBeenCalled();
+    expect(mockPrisma.activityProgress.create).not.toHaveBeenCalled();
+    expect(mockAuditService.recordEvent).not.toHaveBeenCalled();
+    // An alias stored on the configuration is the same method: no refusal.
+    mockPrisma.activityProgressMethod.findFirst.mockResolvedValue({ method: "physical_percent", evidenceRequired: false });
+    mockPrisma.progressSubmission.update.mockImplementation(({ data }) => Promise.resolve({ ...stale, ...data }));
+    mockPrisma.activityProgress.create.mockResolvedValue({ id: "progress-1" });
+    await expect(progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" })).resolves.toMatchObject({ status: "approved", method: "percent", pctComplete: 90 });
+    // No configured row: nothing is asked.
+    mockPrisma.activityProgressMethod.findFirst.mockResolvedValue(null);
+    await expect(progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" })).resolves.toMatchObject({ status: "approved", method: "percent" });
+    expect(mockPrisma.activityProgress.create).toHaveBeenCalledTimes(2);
+  });
   it("a submission approved twice at once answers idempotently: the second reads 'approved' under the hold and writes nothing", async () => {
     mockPrisma.progressSubmission.findFirst.mockResolvedValueOnce(submitted([])).mockResolvedValueOnce({ ...submitted([]), status: "approved" });
     const answer = await progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" });
