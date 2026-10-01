@@ -309,6 +309,120 @@ const equipmentUnposted = async ({ orgId, projectId }) => {
   return rows;
 };
 
+// ─── structure and units: the setup readiness's own checks ────────────────
+// Evidence: project-setup-readiness.service.js getSetupReadiness — the PC-4
+// structure step (structureWarnings :1187 NO_WBS / NO_LOCATIONS /
+// NO_PROJECT_COST_CODES / UOM_UNRESOLVED, structureAdvisories :1281
+// BOQ_ITEMS_WITHOUT_WBS / ACTIVITIES_WITHOUT_WBS / BOQ_ITEMS_WITHOUT_COST_CODE),
+// the BOQ step (boqAdvisories :1307 BOQ_UNIT_UNRESOLVED) and the allocation
+// step (allocationAdvisories :1490 UNIT_MISMATCH_COUNT: a quantity-measured
+// activity whose progress unit is not its allocated BOQ row's). The rules do
+// not recompute any of it: each check the owner raises becomes one row, its
+// count (the owner's uncapped `count`) the measured figure, its named records
+// (the owner's capped list) the row's data. Read with the owner's full view
+// (canReadBoq) — the BOQ-derived kinds are withheld whole by the reader's
+// access, never by the engine.
+
+const readiness = (ctx, { orgId, projectId }) =>
+  memo(ctx, "readiness", () => require("../project-setup-readiness.service").getSetupReadiness({ orgId, projectId }));
+
+/** code → the issue as the readiness raised it (blockers, warnings and advisories of every step). */
+const readinessIssues = async (ctx, scope) => {
+  const answer = await readiness(ctx, scope);
+  const issues = new Map();
+  for (const step of answer.steps || []) {
+    for (const list of [step.blockers, step.warnings, step.advisories]) {
+      for (const issue of list || []) if (issue?.code && !issues.has(issue.code)) issues.set(issue.code, { ...issue, stepKey: step.key });
+    }
+  }
+  return issues;
+};
+
+const READINESS_BASIS = "Setup readiness check (project-setup-readiness.service getSetupReadiness)";
+const issueItems = (issue) => (issue.items || []).map((item) => ({ type: item.type, id: item.id, code: item.code ?? null, label: item.label ?? null, missing: item.missing ?? null }));
+
+/** One row per raised check: measured = what the check counts (1 for "none exists"), limit 0. */
+const readinessRows = (issues, checks, { projectId }) =>
+  checks
+    .filter(({ code }) => issues.has(code))
+    .map(({ code, absence, counts }) => {
+      const issue = issues.get(code);
+      return {
+        subjectType: "project",
+        subjectId: projectId,
+        secondarySubjectType: "readiness_check",
+        secondarySubjectId: code,
+        measured: { value: absence ? 1 : Number(issue.count) || 0, basis: `${READINESS_BASIS} ${code}: ${absence ? "1 = none exists" : counts}` },
+        limit: { value: 0, basis: absence ? `${code}: at least one is expected (0 = present)` : `${code}: none expected` },
+        data: { check: code, step: issue.stepKey, message: issue.message, severity: issue.severity, itemCount: Number(issue.count) || 0, items: issueItems(issue) },
+      };
+    });
+
+// structure_missing — items/activities without WBS, location or cost code.
+const STRUCTURE_CHECKS = Object.freeze([
+  { code: "NO_WBS", absence: true },
+  { code: "NO_LOCATIONS", absence: true },
+  { code: "NO_PROJECT_COST_CODES", absence: true },
+  { code: "BOQ_ITEMS_WITHOUT_WBS", counts: "BOQ rows not filed under an active WBS node" },
+  { code: "ACTIVITIES_WITHOUT_WBS", counts: "active activities not filed under an active WBS node" },
+  { code: "BOQ_ITEMS_WITHOUT_COST_CODE", counts: "BOQ rows without a cost code" },
+]);
+const structureMissing = async ({ orgId, projectId, ctx }) => readinessRows(await readinessIssues(ctx, { orgId, projectId }), STRUCTURE_CHECKS, { projectId });
+
+// unit_unresolved — BOQ units not in the organisation's unit list.
+const unitUnresolved = async ({ orgId, projectId, ctx }) => {
+  const issues = await readinessIssues(ctx, { orgId, projectId });
+  const rows = readinessRows(issues, [{ code: "BOQ_UNIT_UNRESOLVED", counts: "BOQ rows whose unit spelling the organisation's unit list does not resolve" }], { projectId });
+  const spellings = issues.get("UOM_UNRESOLVED");
+  for (const row of rows) {
+    row.data.units = spellings ? issueItems(spellings).map((item) => ({ unit: item.code, label: item.label })) : [];
+    row.data.unitCount = spellings ? Number(spellings.count) || 0 : 0;
+  }
+  return rows;
+};
+
+// unit_mismatch — allocation ↔ progress method (the readiness check above)
+// and BOQ row ↔ the quantities recorded against it in another unit: the
+// quantity views (quantity-views.service.js quantityBlocks; each figure's
+// unitMatch, perUnitFigure :212) say when the approved quantity entries
+// (installed) or the commitment SOV lines (committed) are in a unit other
+// than the row's. Received / issued are inventory units, never converted to
+// the BOQ unit by design (quantity-views BASIS), and are not compared.
+const UNIT_COMPARED_FIGURES = Object.freeze(["installed", "committed"]);
+const figureMismatches = (key, figure) => {
+  if (!figure) return [];
+  if (figure.unitMatch === false) return [{ figure: key, unitCode: figure.unitCode }];
+  if (Array.isArray(figure.byUnit)) return figure.byUnit.filter((entry) => entry.unitMatch === false).map((entry) => ({ figure: key, unitCode: entry.unitCode }));
+  return [];
+};
+
+const unitMismatch = async ({ orgId, projectId, cutoff, ctx }) => {
+  const issues = await readinessIssues(ctx, { orgId, projectId });
+  const rows = readinessRows(issues, [{ code: "UNIT_MISMATCH_COUNT", counts: "approved/pending allocations whose quantity-measured activity uses another unit than the BOQ row" }], { projectId });
+  const items = await prisma.boqItem.findMany({
+    where: { projectId, project: { orgId }, isActive: true },
+    select: { id: true, code: true, ref: true, description: true, unit: true, unitCode: true, wbsNodeId: true, locationId: true, costCodeId: true },
+    orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+  });
+  if (!items.length) return rows;
+  const { blocks } = await require("../quantity-views.service").quantityBlocks({ orgId, projectId, items, cutoffDate: instantOf(cutoff) });
+  for (const item of items) {
+    const block = blocks.get(item.id);
+    if (!block) continue;
+    const columns = UNIT_COMPARED_FIGURES.flatMap((key) => figureMismatches(key, block.figures[key]));
+    if (!columns.length) continue;
+    rows.push({
+      subjectType: "boq_item",
+      subjectId: item.id,
+      measured: { value: columns.length, unitCode: block.unitCode || null, basis: "Quantity columns recorded against the BOQ row in another unit: approved quantity entries (installed) and commitment SOV lines (committed) whose unitMatch is false (quantity-views.service quantityBlocks)" },
+      limit: { value: 0, unitCode: block.unitCode || null, basis: "Every quantity in the BOQ row's own unit (BoqItem.unitCode, or its spelling resolved through the organisation's unit list)" },
+      groupKeys: groupKeysOf(item),
+      data: { columns, itemUnit: block.unitCode || null, label: [item.code || item.ref, item.description].filter(Boolean).join(" ") || null },
+    });
+  }
+  return rows;
+};
+
 // ─── the rules ────────────────────────────────────────────────────────────
 
 const RULES = [
@@ -364,6 +478,38 @@ const RULES = [
     label: "Equipment cost",
     note: (count) => `${plural(count, "daily report")} carr${count === 1 ? "ies" : "y"} equipment usage cost that the cost ledger has not posted.`,
     evaluate: equipmentUnposted,
+  },
+  {
+    kind: "unit_unresolved",
+    severity: "warning",
+    subjectType: "project",
+    module: "boq",
+    boqDerived: true,
+    label: "Units",
+    note: () => "BOQ rows carry unit spellings the organisation's unit list does not recognise.",
+    evaluate: unitUnresolved,
+  },
+  {
+    kind: "unit_mismatch",
+    severity: "info",
+    subjectType: "boq_item",
+    module: "boq",
+    boqDerived: true,
+    label: "Units",
+    note: (count) => `${plural(count, "unit mismatch", "unit mismatches")} between BOQ rows, their allocations' progress methods and the quantities recorded against them.`,
+    evaluate: unitMismatch,
+  },
+  {
+    kind: "structure_missing",
+    severity: "info",
+    subjectType: "project",
+    module: "boq",
+    // BOQ rows not filed (a BOQ-derived count) sit beside activities and the
+    // structure's own absence in this kind: withheld whole.
+    boqDerived: true,
+    label: "Structure",
+    note: (count) => `${plural(count, "structure check")} open: records not filed under a WBS node or cost code, or no WBS, locations or project cost codes yet.`,
+    evaluate: structureMissing,
   },
 ];
 

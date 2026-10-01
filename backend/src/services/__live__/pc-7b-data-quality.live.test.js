@@ -105,13 +105,29 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     await prisma.projectCostCode.create({ data: { orgId, projectId: project.id, costCodeId: costCode.id } });
     target.line = await prisma.budgetLine.create({ data: { orgId, projectId: project.id, costCodeId: costCode.id, costType: "material", originalBudget: gap ? 80000 : 50000 } });
 
+    // Structure: both projects have a WBS node; only the clean one has a
+    // location and files its rows and activities under the node and a cost code.
+    target.wbs = await prisma.wbsNode.create({ data: { orgId, projectId: project.id, code: "DQ", name: "LiveTest scope", path: "DQ" } });
+    if (!gap) target.location = await prisma.location.create({ data: { orgId, projectId: project.id, name: "LiveTest level 1", code: "L1", path: "L1" } });
+    const filed = gap ? {} : { wbsNodeId: target.wbs.id };
+
     const activity = (code, extra = {}) =>
-      prisma.activity.create({ data: { projectId: project.id, name: `LiveTest ${code}`, activityCode: code, duration: 10, startDate: new Date("2026-02-02"), endDate: new Date("2026-02-13"), ...extra } });
+      prisma.activity.create({ data: { projectId: project.id, name: `LiveTest ${code}`, activityCode: code, duration: 10, startDate: new Date("2026-02-02"), endDate: new Date("2026-02-13"), ...filed, ...extra } });
     target.a1 = await activity("DQ-A1", { budget: gap ? 0 : 50000 });
     target.a2 = await activity("DQ-A2", { budget: gap ? 7000 : 0 });
     target.a3 = await activity("DQ-A3", { budget: 0 });
 
-    target.item = await prisma.boqItem.create({ data: { projectId: project.id, code: "DQ.1", description: "LiveTest concrete", unit: "m3", qty: 10, rate: 5000, amount: 50000 } });
+    const itemFiling = gap ? {} : { wbsNodeId: target.wbs.id, costCodeId: costCode.id };
+    target.item = await prisma.boqItem.create({ data: { projectId: project.id, code: "DQ.1", description: "LiveTest concrete", unit: "m3", qty: 10, rate: 5000, amount: 50000, ...itemFiling } });
+    // A second, unpriced row: a unit nobody recognises on the gaps project.
+    target.item2 = await prisma.boqItem.create({ data: { projectId: project.id, code: "DQ.2", description: "LiveTest sundries", unit: gap ? "cubbits" : "m2", qty: 1, rate: 0, amount: 0, ...itemFiling } });
+    // Units: on the gaps project A1 is measured in m2 against its m3 row, and
+    // an executed commitment's SOV line names the row in tonnes.
+    if (gap) {
+      await prisma.activityProgressMethod.create({ data: { projectId: project.id, activityId: target.a1.id, method: "quantity", quantityUnit: "m2", plannedQuantity: 10 } });
+      const commitment = await prisma.commitment.create({ data: { orgId, projectId: project.id, number: 1, ref: `SC-${tag}`, title: "LiveTest subcontract", status: "executed" } });
+      await prisma.commitmentSovLine.create({ data: { orgId, projectId: project.id, commitmentId: commitment.id, lineNumber: 1, description: "LiveTest concrete", boqItemId: target.item.id, unit: "t", qty: 5, rate: 100, amount: 500 } });
+    }
     target.allocation = await prisma.activityBoqAllocation.create({
       data: { projectId: project.id, boqItemId: target.item.id, activityId: target.a1.id, quantity: 10, amount: 50000, weight: 100, status: "approved", approvedAt: daysAgo(30) },
     });
@@ -238,6 +254,42 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     expect([rows.get(`daily_report:${gaps.dr1.id}`).measured.value, rows.get(`daily_report:${gaps.dr1.id}`).limit.value]).toEqual([400, 0]);
     expect([rows.get(`daily_report:${gaps.dr3.id}`).measured.value, rows.get(`daily_report:${gaps.dr3.id}`).limit.value]).toEqual([500, 0]);
     expect(await evaluate("equipment_cost_unposted", clean)).toEqual([]);
+  });
+
+  // ─── structure and units ─────────────────────────────────────────────────
+
+  it("structure_missing: one row per structure check the setup readiness raises, its uncapped count measured", async () => {
+    const rows = bySubject(await evaluate("structure_missing", gaps));
+    const pid = gaps.project.id;
+    expect([...rows.keys()].sort()).toEqual(["ACTIVITIES_WITHOUT_WBS", "BOQ_ITEMS_WITHOUT_COST_CODE", "BOQ_ITEMS_WITHOUT_WBS", "NO_LOCATIONS"].map((code) => `project:${pid}:${code}`));
+    expect(rows.get(`project:${pid}:ACTIVITIES_WITHOUT_WBS`).measured.value).toBe(3);
+    expect(rows.get(`project:${pid}:BOQ_ITEMS_WITHOUT_WBS`).measured.value).toBe(2);
+    expect(rows.get(`project:${pid}:BOQ_ITEMS_WITHOUT_COST_CODE`).data.items.map((item) => item.id).sort()).toEqual([gaps.item.id, gaps.item2.id].sort());
+    const none = rows.get(`project:${pid}:NO_LOCATIONS`);
+    expect([none.measured.value, none.limit.value, none.secondarySubjectType]).toEqual([1, 0, "readiness_check"]);
+    expect(none.measured.basis).toMatch(/project-setup-readiness\.service getSetupReadiness/);
+    expect(await evaluate("structure_missing", clean)).toEqual([]);
+  });
+
+  it("unit_unresolved: the BOQ rows whose unit the organisation's list does not resolve, with the spellings", async () => {
+    const [row, ...rest] = await evaluate("unit_unresolved", gaps);
+    expect(rest).toEqual([]);
+    expect([row.secondarySubjectId, row.measured.value, row.limit.value]).toEqual(["BOQ_UNIT_UNRESOLVED", 1, 0]);
+    expect(row.data.units.map((unit) => unit.unit)).toEqual(["cubbits"]);
+    expect(row.data.items.map((item) => item.id)).toEqual([gaps.item2.id]);
+    expect(await evaluate("unit_unresolved", clean)).toEqual([]);
+  });
+
+  it("unit_mismatch: an allocation measured in another unit (readiness) and a BOQ row's SOV quantity in another unit (quantity views)", async () => {
+    const rows = bySubject(await evaluate("unit_mismatch", gaps));
+    const pid = gaps.project.id;
+    expect([...rows.keys()].sort()).toEqual([`boq_item:${gaps.item.id}`, `project:${pid}:UNIT_MISMATCH_COUNT`].sort());
+    const allocation = rows.get(`project:${pid}:UNIT_MISMATCH_COUNT`);
+    expect([allocation.measured.value, allocation.data.items.map((item) => item.id)]).toEqual([1, [gaps.allocation.id]]);
+    const item = rows.get(`boq_item:${gaps.item.id}`);
+    expect([item.measured.value, item.measured.unitCode, item.data.columns]).toEqual([1, "m3", [{ figure: "committed", unitCode: "t" }]]);
+    expect(item.measured.basis).toMatch(/quantity-views\.service quantityBlocks/);
+    expect(await evaluate("unit_mismatch", clean)).toEqual([]);
   });
 
   // ─── tenancy and read-only ───────────────────────────────────────────────
