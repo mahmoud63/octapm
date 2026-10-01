@@ -34,8 +34,21 @@ const fmtUSD = (value: number) =>
   '$' + Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
 
 const traceSummary = (order: ChangeOrderRecord) => {
-  const activityCount =
+  // The activities the order names on its own record (its activity field or
+  // its activity links) — the proof approval readiness asks for.
+  const linkedActivityCount =
     order.activityLinks?.length || (order.activityId || order.activity ? 1 : 0)
+  // The activities the order reaches, as the server composed them (R5-5):
+  // direct, through activity links and through its BOQ allocations, one per
+  // activity. The register counts these, so an order reaching an activity
+  // only through an allocation never reads "0 act" beside that activity.
+  const related = order.relatedRecords
+  const activityCount = related
+    ? related.activities.length
+    : linkedActivityCount
+  // For a member who may not read the BOQ the allocation-derived activities
+  // are withheld: the count is then only what they may see, never "none".
+  const activitiesWithheldReason = related?.boqWithheld?.reason ?? null
   const allocationCount = order.allocationLinks?.length || 0
   const evidenceCount =
     (order.correspondenceLinks?.length || 0) +
@@ -53,6 +66,8 @@ const traceSummary = (order: ChangeOrderRecord) => {
     ) || 0
   return {
     activityCount,
+    linkedActivityCount,
+    activitiesWithheldReason,
     allocationCount,
     evidenceCount,
     historyCount,
@@ -64,10 +79,45 @@ const traceSummary = (order: ChangeOrderRecord) => {
 const approvalReady = (order: ChangeOrderRecord) => {
   const trace = traceSummary(order)
   return (
-    trace.activityCount > 0 &&
+    trace.linkedActivityCount > 0 &&
     trace.evidenceCount > 0 &&
     Boolean(order.scheduleImpactSummary?.trim()) &&
     Boolean(order.costImpactSummary?.trim())
+  )
+}
+
+/**
+ * The number of activities a change order reaches, as the register's Trace
+ * line and the approval panel print it. Allocation-derived activities withheld
+ * from a member who may not read the BOQ are marked ("1 + withheld", or "—"
+ * when nothing visible remains) with the server's reason, so the count never
+ * reads as "reaches none" when the order does.
+ */
+function ActivityCount({
+  order,
+  label,
+  testId,
+}: {
+  order: ChangeOrderRecord
+  label: string
+  testId: string
+}) {
+  const { activityCount, activitiesWithheldReason } = traceSummary(order)
+  if (!activitiesWithheldReason) {
+    return (
+      <span data-testid={testId}>
+        {activityCount} {label}
+      </span>
+    )
+  }
+  return (
+    <span
+      data-testid={testId}
+      data-withheld='true'
+      title={activitiesWithheldReason}
+    >
+      {activityCount > 0 ? `${activityCount} + withheld` : '—'} {label}
+    </span>
   )
 }
 
@@ -463,7 +513,12 @@ export function ChangeOrderRegister({
                       </p>
                     </div>
                     <p className='text-xs text-muted-foreground'>
-                      {trace.activityCount} activities | {trace.allocationCount}{' '}
+                      <ActivityCount
+                        order={order}
+                        label='activities'
+                        testId={`co-approval-activity-count-${order.id}`}
+                      />{' '}
+                      | {trace.allocationCount}{' '}
                       allocations | {trace.evidenceCount} docs | CP{' '}
                       {trace.criticalPathImpactDays}d
                     </p>
@@ -794,7 +849,12 @@ export function ChangeOrderRegister({
                         </span>
                       ))}
                       <span className='text-muted-foreground'>
-                        {traceSummary(order).activityCount} act |{' '}
+                        <ActivityCount
+                          order={order}
+                          label='act'
+                          testId={`co-trace-activity-count-${order.id}`}
+                        />{' '}
+                        |{' '}
                         {traceSummary(order).allocationCount} alloc |{' '}
                         {traceSummary(order).evidenceCount} docs |{' '}
                         {traceSummary(order).historyCount} events

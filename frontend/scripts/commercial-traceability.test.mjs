@@ -43,9 +43,21 @@ const assertions = [
       'RecordLink',
       'via allocation',
       'boqWithheld',
+      // The Trace line and the approval panel count what the server says the
+      // order reaches, withheld activities marked — never "0 act" beside one.
+      '? related.activities.length',
+      'activitiesWithheldReason',
+      '<ActivityCount',
+      'co-trace-activity-count-',
+      'co-approval-activity-count-',
     ],
-    // Never "No activity" when the server says the order reaches one indirectly.
-    forbidden: ["'No activity'"],
+    // Never "No activity" when the server says the order reaches one indirectly,
+    // nor a count of the order's own activity fields printed in its place.
+    forbidden: [
+      "'No activity'",
+      '{traceSummary(order).activityCount} act',
+      '{trace.activityCount} activities',
+    ],
   },
   {
     file: 'src/features/commercial/components/ipc-workbook.tsx',
