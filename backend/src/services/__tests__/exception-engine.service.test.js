@@ -293,7 +293,7 @@ describe("runEvaluationJob", () => {
     expect(prisma.project.findFirst).not.toHaveBeenCalled();
     process.env.EXCEPTIONS_ENGINE_ENABLED = "true";
     prisma.project.findFirst.mockResolvedValue(null);
-    await expect(engine.runEvaluationJob({ job: { orgId: ORG, projectId: PROJECT, payload: { trigger: "nightly" } } })).rejects.toMatchObject({ status: 404 });
+    await expect(engine.runEvaluationJob({ job: { orgId: ORG, projectId: PROJECT, payload: { trigger: "scheduled" } } })).rejects.toMatchObject({ status: 404 });
     expect(prisma.project.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: PROJECT, orgId: ORG } }));
     await expect(engine.runEvaluationJob({ job: { orgId: ORG } })).rejects.toMatchObject({ status: 400 });
   });

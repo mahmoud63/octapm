@@ -49,7 +49,7 @@ async function runExceptionTick({ now = new Date(), orgIds = null } = {}) {
       skipped += 1;
       continue;
     }
-    await enqueueJob({ orgId, projectId, type: JOB_TYPES.EXCEPTIONS_EVALUATE, payload: { trigger: "nightly", at: now.toISOString() }, maxAttempts: 2 });
+    await enqueueJob({ orgId, projectId, type: JOB_TYPES.EXCEPTIONS_EVALUATE, payload: { trigger: "scheduled", at: now.toISOString() }, maxAttempts: 2 });
     queued += 1;
   }
   return { orgs: new Set(projects.map((project) => project.orgId)).size, projects: projects.length, queued, skipped };

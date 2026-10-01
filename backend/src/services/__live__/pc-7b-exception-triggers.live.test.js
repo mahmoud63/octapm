@@ -11,7 +11,12 @@
  *     An API started with EXCEPTIONS_ENGINE_ENABLED=false queues nothing.
  *   - The job handler evaluates the job's own project and writes that
  *     project's rows only.
- *   - Trigger 2: the nightly tick, limited to the two LiveTest organisations,
+ *   - A progress approval and a change-order approval, each the ONLY call made
+ *     through the enabled API on a project built through the disabled one, ask
+ *     for exactly one job for that project (their bursts of record.changed /
+ *     approval.decided events debounced); the progress job opens the two
+ *     quantity rows, the change-order job clears them ('cleared').
+ *   - Trigger 2: the scheduled tick, limited to the two LiveTest organisations,
  *     skips a project whose evaluation is queued and otherwise queues one per
  *     active project; no other organisation's job count moves.
  *
@@ -62,13 +67,29 @@ liveDescribe("PC-7b: domain events and the nightly tick ask for debounced evalua
     const allocation = await api.post(at("/activity-boq-allocations"), { boqItemId: item.body.data.item.id, activityId: activity.body.data.id, quantity: 10 }, auth);
     ok(`${key} allocation`, allocation, 201);
     for (const step of ["submit", "approve"]) ok(`${key} ${step}`, await api.post(at(`/activity-boq-allocations/${allocation.body.data.id}/${step}`), {}, auth));
-    return { itemId: item.body.data.item.id, activityId: activity.body.data.id };
+    return { itemId: item.body.data.item.id, activityId: activity.body.data.id, allocationId: allocation.body.data.id };
   };
+
+  // Mapped through `api`, the activity measured by quantity, and 12 m3 recorded
+  // against the 10 m3 allocation in a progress submission NOT yet approved.
+  const overInstallThrough = async (api, who, key) => {
+    const auth = { authorization: `Bearer ${who.token}` };
+    const at = (route) => `/api/v1/projects/${projects[key].id}${route}`;
+    const mapped = await mapThrough(api, who, key);
+    ok(`${key} method`, await api.request("PUT", at(`/activities/${mapped.activityId}/progress-method`), { body: { method: "quantity" }, headers: auth }));
+    const entry = await api.post(at("/quantity-progress"), { status: "submitted", activityId: mapped.activityId, boqItemId: mapped.itemId, quantity: 12, date: "2026-09-20", clientRequestId: `trig-${key}-${Date.now()}` }, auth);
+    ok(`${key} entry`, entry, 201);
+    const submission = await api.post(at(`/activities/${mapped.activityId}/progress`), { method: "quantity", entryIds: [entry.body.data.entry.id] }, auth);
+    ok(`${key} submission`, submission);
+    return { ...mapped, approveRoute: at(`/activities/${mapped.activityId}/progress-submissions/${submission.body.data.submission.id}/approve`) };
+  };
+  const kindsOf = async (projectId, where = {}) =>
+    (await prisma.projectException.findMany({ where: { projectId, ...where } })).map((row) => [row.kind, row.resolvedReason]).sort();
 
   beforeAll(async () => {
     live = await createLiveOrg(prisma);
     other = await createLiveOrg(prisma);
-    for (const [key, org] of [["A", live], ["B", other], ["OFF", live]]) {
+    for (const [key, org] of [["A", live], ["B", other], ["OFF", live], ["PROG", live], ["CO", live]]) {
       projects[key] = await prisma.project.create({ data: { orgId: org.org.id, currency: "USD", name: `LiveTest PC-7b triggers ${key}`, startDate: new Date("2026-01-05") } });
     }
     // Scheduler and worker stay off (the kit's defaults); only the subscriber differs.
@@ -145,17 +166,67 @@ liveDescribe("PC-7b: domain events and the nightly tick ask for debounced evalua
     expect(await engine.runEvaluationJob({ job })).toEqual({ skipped: "EXCEPTIONS_ENGINE_ENABLED=false" });
   });
 
-  it("the nightly tick, limited to the LiveTest organisations: queued projects skipped, one job per other active project, nobody else touched", async () => {
+  it("a progress approval and a change-order approval through the enabled API each ask for exactly one job; the jobs open, then clear, the quantity rows", async () => {
+    process.env.EXCEPTIONS_ENGINE_ENABLED = "true";
+    const auth = { authorization: `Bearer ${live.token}` };
+    const runJobOf = async (projectId) => {
+      const jobs = await jobsOf(projectId);
+      expect(jobs).toHaveLength(1);
+      const [job] = jobs;
+      expect([job.orgId, job.projectId, job.status, job.payloadJson.trigger]).toEqual([live.org.id, projectId, "queued", "event"]);
+      return engine.runEvaluationJob({ job: { id: job.id, orgId: job.orgId, projectId: job.projectId, payload: job.payloadJson } });
+    };
+
+    // Progress: everything built through the disabled API, only the approval through the enabled one.
+    const prog = await overInstallThrough(disabledApi, live, "PROG");
+    expect(await jobsOf(projects.PROG.id)).toEqual([]);
+    ok("PROG approve", await enabledApi.post(prog.approveRoute, {}, auth));
+    await waitForJobs(projects.PROG.id, 1);
+    await sleep(1500);
+    const progResult = await runJobOf(projects.PROG.id);
+    expect(progResult).toMatchObject({ projectId: projects.PROG.id, trigger: "event", opened: 2, errors: [] });
+    expect(await kindsOf(projects.PROG.id)).toEqual([["quantity_over_allocation", null], ["quantity_over_boq", null]]);
+
+    // Change order: the over-installation approved and evaluated without the trigger, then the order approved through the enabled API.
+    const co = await overInstallThrough(disabledApi, live, "CO");
+    ok("CO progress approve", await disabledApi.post(co.approveRoute, {}, auth));
+    const seeded = await engine.evaluateProject({ orgId: live.org.id, projectId: projects.CO.id, trigger: "test", logger: { log: () => {} } });
+    expect([seeded.opened, seeded.errors]).toEqual([2, []]);
+    const at = (route) => `/api/v1/projects/${projects.CO.id}${route}`;
+    const order = await disabledApi.post(at("/change-orders"), {
+      description: "LiveTest trigger extension",
+      category: "variation",
+      value: 500,
+      scheduleImpactSummary: "LiveTest none",
+      costImpactSummary: "LiveTest priced",
+      allocationLinks: [{ allocationId: co.allocationId, quantity: 5, amount: 500 }],
+      activityLinks: [{ activityId: co.activityId, relationType: "affected", scheduleImpactDays: 0 }],
+      attachmentRefs: [{ fileName: "LiveTest proof.pdf", fileUrl: "https://example.test/proof.pdf" }],
+    }, auth);
+    ok("CO create", order, 201);
+    ok("CO submit", await disabledApi.post(at(`/change-orders/${order.body.data.id}/submit`), {}, auth));
+    expect(await jobsOf(projects.CO.id)).toEqual([]);
+    ok("CO approve", await enabledApi.post(at(`/change-orders/${order.body.data.id}/approve`), { comment: "LiveTest" }, auth));
+    await waitForJobs(projects.CO.id, 1);
+    await sleep(1500);
+    const coResult = await runJobOf(projects.CO.id);
+    expect(coResult).toMatchObject({ projectId: projects.CO.id, trigger: "event", opened: 0, resolved: 2, errors: [] });
+    expect(await kindsOf(projects.CO.id)).toEqual([["quantity_over_allocation", "cleared"], ["quantity_over_boq", "cleared"]]);
+    expect(await othersJobCount([live.org.id, other.org.id])).toBe(othersBefore);
+  });
+
+  it("the scheduled tick, limited to the LiveTest organisations: queued projects skipped, one job per other active project, nobody else touched", async () => {
     const orgIds = [live.org.id, other.org.id];
     let result = await runExceptionTick({ orgIds });
-    expect(result).toEqual({ orgs: 2, projects: 3, queued: 1, skipped: 2 });
+    // A, B, PROG and CO still have their event jobs queued; OFF has none.
+    expect(result).toEqual({ orgs: 2, projects: 5, queued: 1, skipped: 4 });
     const offJobs = await jobsOf(projects.OFF.id);
-    expect(offJobs.map((job) => [job.orgId, job.status, job.payloadJson.trigger])).toEqual([[live.org.id, "queued", "nightly"]]);
+    expect(offJobs.map((job) => [job.orgId, job.status, job.payloadJson.trigger])).toEqual([[live.org.id, "queued", "scheduled"]]);
     // Once a project's jobs have run, the tick queues it again; still one per project.
     await prisma.backgroundJob.updateMany({ where: { orgId: { in: orgIds }, type: TYPE }, data: { status: "succeeded" } });
     result = await runExceptionTick({ orgIds });
-    expect(result).toEqual({ orgs: 2, projects: 3, queued: 3, skipped: 0 });
-    for (const key of ["A", "B", "OFF"]) expect((await jobsOf(projects[key].id)).filter((job) => job.status === "queued")).toHaveLength(1);
+    expect(result).toEqual({ orgs: 2, projects: 5, queued: 5, skipped: 0 });
+    for (const key of ["A", "B", "OFF", "PROG", "CO"])expect((await jobsOf(projects[key].id)).filter((job) => job.status === "queued")).toHaveLength(1);
     expect(await othersJobCount(orgIds)).toBe(othersBefore);
   });
 });

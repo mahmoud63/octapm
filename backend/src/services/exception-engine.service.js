@@ -42,7 +42,7 @@ const RESOLVED_CLEARED = "cleared";
 const DISMISSED_PREFIX = "dismissed:";
 // dataJson keys the engine and the dismissal own; a rule's data never uses them.
 const RESERVED_DATA_KEYS = Object.freeze(["dismissal", "reopenedFrom"]);
-const TRIGGERS = Object.freeze(["event", "nightly", "manual", "test"]);
+const TRIGGERS = Object.freeze(["event", "scheduled", "manual", "test"]);
 const DEBOUNCE_MS = 30_000;
 const TRANSACTION_OPTIONS = Object.freeze({ maxWait: 15_000, timeout: 120_000 });
 

@@ -35,8 +35,8 @@ describe("runExceptionTick", () => {
     expect(prisma.project.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { status: "active", archivedAt: null } }));
     expect(prisma.backgroundJob.findFirst).toHaveBeenCalledWith({ where: { orgId: "org-a", projectId: "p-2", type: "exceptions.evaluate", status: { in: ["queued", "running"] } }, select: { id: true } });
     expect(jobService.enqueueJob.mock.calls.map(([job]) => [job.orgId, job.projectId, job.type, job.payload.trigger])).toEqual([
-      ["org-a", "p-1", "exceptions.evaluate", "nightly"],
-      ["org-b", "p-3", "exceptions.evaluate", "nightly"],
+      ["org-a", "p-1", "exceptions.evaluate", "scheduled"],
+      ["org-b", "p-3", "exceptions.evaluate", "scheduled"],
     ]);
   });
 
