@@ -1,6 +1,6 @@
 jest.mock("../../middleware/rbac", () => ({ hasPermission: jest.fn() }));
 
-const { QUANTITY_ENTRY_BOQ_KEYS, QUANTITY_ENTRY_WITHHELD, withheldQuantityEntries, withheldQuantityEntry, withheldQuantityEntryResult, withheldProgressSubmission, withheldProgressSubmissions, withheldActivity, withheldDailyLog, withheldDailyLogQuantity, withheldAllocatedItems, DAILY_LOG_QUANTITY_WITHHELD, ALLOCATED_ITEM_WITHHELD } = require("../boq-figures");
+const { QUANTITY_ENTRY_BOQ_KEYS, QUANTITY_ENTRY_WITHHELD, withheldQuantityEntries, withheldQuantityEntry, withheldQuantityEntryResult, withheldProgressSubmission, withheldProgressSubmissions, withheldActivity, withheldDailyLog, withheldDailyLogQuantity, withheldAllocatedItems, DAILY_LOG_QUANTITY_WITHHELD, DAILY_LOG_TOTALS_WITHHELD, ALLOCATED_ITEM_WITHHELD } = require("../boq-figures");
 
 // An entry as quantity-progress.service builds it.
 const entry = (id) => ({
@@ -138,23 +138,25 @@ describe("the daily log's quantities section", () => {
   });
   const log = () => ({ id: "log-1", date: "2026-09-05", status: "submitted", sections: { manpower: [{ id: "mp-1" }], quantities: [row()] }, totals: { quantities: [{ unitCode: "m3", quantity: 12.5, rows: 1 }], entries: 2 } });
 
-  it("a reader who may not read the BOQ keeps the description, unit, quantity, activity and the entry's state; loses the item's code and the allocation", () => {
+  it("a reader who may not read the BOQ keeps the item's description and unit name, the activity, the notes and the entry's state; loses the quantity, its unit code, the item's id and code and the allocation — the ledger's rule", () => {
     const withheld = withheldDailyLogQuantity(row(), COST);
-    expect(withheld).toMatchObject({ id: "q-1", quantity: 12.5, unitCode: "m3", boqItemId: "item-1", boqItem: { id: "item-1", description: "Concrete in footings", unit: "m3", unitCode: "m3" }, activity: { name: "Pour" }, notes: "bay 3", progressEntry: { id: "e-1", status: "submitted", official: false } });
-    expect(withheld).not.toHaveProperty("allocationId");
-    expect(withheld.boqItem).not.toHaveProperty("code");
-    expect(withheld.boqWithheld).toEqual({ keys: ["allocationId", "boqItem.code"], reason: DAILY_LOG_QUANTITY_WITHHELD });
+    expect(withheld).toMatchObject({ id: "q-1", boqItem: { description: "Concrete in footings", unit: "m3", unitCode: "m3" }, activity: { name: "Pour" }, notes: "bay 3", progressEntry: { id: "e-1", status: "submitted", official: false } });
+    for (const key of ["quantity", "unitCode", "boqItemId", "allocationId"]) expect(withheld).not.toHaveProperty(key);
+    for (const key of ["id", "code"]) expect(withheld.boqItem).not.toHaveProperty(key);
+    expect(withheld.boqWithheld).toEqual({ keys: ["quantity", "unitCode", "boqItemId", "allocationId", "boqItem.id", "boqItem.code"], reason: DAILY_LOG_QUANTITY_WITHHELD });
+    expect(JSON.stringify(withheld)).not.toContain("12.5");
     expect(withheldDailyLogQuantity(row(), BOQ)).toEqual(row());
   });
 
-  it("withheldDailyLog maps the quantities section only and leaves the other sections and the per-unit totals", () => {
+  it("withheldDailyLog maps the quantities section and withholds the per-unit totals (never zeroed), leaving the other sections and the row count", () => {
     const answer = withheldDailyLog(log(), COST);
     expect(answer.sections.manpower).toEqual([{ id: "mp-1" }]);
-    expect(answer.sections.quantities[0].boqWithheld.keys).toEqual(["allocationId", "boqItem.code"]);
-    expect(answer.totals).toEqual(log().totals);
+    expect(answer.sections.quantities[0].boqWithheld.keys).toEqual(["quantity", "unitCode", "boqItemId", "allocationId", "boqItem.id", "boqItem.code"]);
+    expect(answer.totals).toEqual({ entries: 2, boqWithheld: { keys: ["quantities"], reason: DAILY_LOG_TOTALS_WITHHELD } });
+    expect(JSON.stringify(answer)).not.toContain("12.5");
     expect(withheldDailyLog(log(), BOQ)).toEqual(log());
-    const empty = { id: null, exists: false, sections: { quantities: [] }, totals: {} };
-    expect(withheldDailyLog(empty, COST)).toEqual({ ...empty, sections: { quantities: [] } });
+    const empty = { id: null, exists: false, sections: { quantities: [] }, totals: { quantityRows: 0, quantities: [] } };
+    expect(withheldDailyLog(empty, COST)).toEqual({ ...empty, sections: { quantities: [] }, totals: { quantityRows: 0, boqWithheld: { keys: ["quantities"], reason: DAILY_LOG_TOTALS_WITHHELD } } });
     expect(withheldDailyLog(null, COST)).toBeNull();
   });
 

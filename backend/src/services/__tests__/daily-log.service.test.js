@@ -382,7 +382,7 @@ describe("daily log", () => {
     expect(mockAudit.recordEvent).toHaveBeenLastCalledWith(expect.objectContaining({ summary: expect.objectContaining({ transition: "daily_log.entry_delete", section: "quantities", quantityEntryId: "entry-1" }) }));
   });
 
-  it("quantities: the section is never copied forward, and the PDF and digest carry it per unit", async () => {
+  it("quantities: the section is never copied forward; the digest — and the PDF for a reader who may not read the BOQ — carry no per-item quantity, no code and no per-unit total (integration item 4)", async () => {
     expect(service.SECTIONS.quantities.copyFields).toBeUndefined();
     expect(service.mergeSettings({ copySections: ["quantities", "manpower"] }).copySections).toEqual(["manpower"]);
     mockQuantityProgress.entriesForDailyLogRows.mockResolvedValueOnce([{ id: "entry-1", dailyLogQuantityId: "qty-1", status: "approved", source: "daily_log", submissionId: "sub-1", submission: { status: "approved" }, createdBy: "staff-1", createdAt: DAY, approvedBy: "pm-1", approvedAt: DAY, rejectedBy: null, rejectedAt: null, rejectionReason: null }]);
@@ -391,8 +391,18 @@ describe("daily log", () => {
     expect(rendered.log.sections.quantities[0].progressEntry).toMatchObject({ id: "entry-1", status: "approved", official: true, submissionId: "sub-1", approvedBy: "pm-1", recordedBy: "staff-1" });
     expect(rendered.log.totals.quantities).toEqual([{ unitCode: "m3", quantity: 12.5, rows: 1 }, { unitCode: "t", quantity: 3, rows: 1 }]);
     const text = service.renderText({ project: project(), log: rendered.log });
-    expect(text).toContain("installed 12.5 m3, 3 t");
-    expect(text).toContain("Concrete in footings · 12.5 m3 — Slab pour · official");
+    expect(text).not.toContain("installed 12.5 m3");
+    expect(text).toContain("Concrete in footings · — — Slab pour · official");
+    expect(text).toContain("Quantities per BOQ item are shown to members who may read the BOQ.");
     expect(text).not.toContain("1.1 Concrete");
+    expect(text).not.toMatch(/12\.5|\b3 t\b/);
+    // The PDF rendered for that reader carries the same: no figure of the section.
+    const pdfText = rendered.buffer.toString("latin1");
+    expect(pdfText).not.toContain("12.5");
+    expect(pdfText).not.toContain("1.1 Concrete");
+    // A BOQ reader's PDF keeps the figures and the code.
+    mockQuantityProgress.entriesForDailyLogRows.mockResolvedValueOnce([]);
+    const full = await service.renderPdf({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", viewer: staff, boqAccess: { boq: true, budget: true } });
+    expect(full.buffer.toString("latin1")).toContain("12.5");
   });
 });

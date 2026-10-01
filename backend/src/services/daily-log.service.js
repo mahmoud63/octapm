@@ -1213,8 +1213,21 @@ const statusNote = (entry) => {
   return "";
 };
 
-/** The section's quantity per unit, never one figure across units. */
-const quantityTotalsText = (totals) => ((totals?.quantities || []).length ? ` · installed ${totals.quantities.map((line) => `${num(line.quantity, 3)} ${line.unitCode}`).join(", ")}` : "");
+// What a reader who may not read the BOQ gets of a quantities row: the
+// ledger's rule (utils/boq-figures withheldDailyLogQuantity) — a dash, never
+// a figure. The distributed PDF and digest are rendered this way for every
+// recipient (the most restricted reader's view): the stored document is one
+// file for the project and the digest reaches external addresses.
+const RESTRICTED_BOQ_ACCESS = Object.freeze({ boq: false, budget: false });
+const mayReadBoq = (boqAccess) => boqAccess?.boq !== false;
+const QUANTITY_WITHHELD_NOTE = "Quantities per BOQ item are shown to members who may read the BOQ.";
+
+/** The section's quantity per unit, never one figure across units; nothing for a reader who may not read the BOQ. */
+const quantityTotalsText = (totals, boqAccess = null) =>
+  mayReadBoq(boqAccess) && (totals?.quantities || []).length ? ` · installed ${totals.quantities.map((line) => `${num(line.quantity, 3)} ${line.unitCode}`).join(", ")}` : "";
+
+/** The quantity cell: the figure in its unit for a BOQ reader, a dash for anyone else. */
+const quantityCell = (row, boqAccess) => (mayReadBoq(boqAccess) ? `${num(row.quantity, 3)} ${row.unitCode || ""}`.trim() : "—");
 
 const num = (value, digits = 1) => (value === null || value === undefined ? "" : String(Math.round(Number(value) * 10 ** digits) / 10 ** digits));
 
@@ -1225,7 +1238,7 @@ const quantityNote = (row) => [statusNote(row), progressNote(row)].filter(Boolea
 /** The BOQ item as a quantities row names it: code + description for a BOQ reader, description alone otherwise. */
 const itemCell = (row, boqAccess) => (row.boqItem ? `${boqAccess?.boq !== false && row.boqItem.code ? `${row.boqItem.code} ` : ""}${row.boqItem.description || ""}`.trim() : "");
 
-const renderPdf = async ({ orgId, projectId, date, viewer = null, boqAccess = null }) => {
+const renderPdf = async ({ orgId, projectId, date, viewer = null, boqAccess = RESTRICTED_BOQ_ACCESS }) => {
   const day = toDateOnly(date);
   const project = await ensureProject({ orgId, projectId });
   const log = await serializeLog({ projectId, date: day, log: await loadLog({ projectId, date: day, viewer }) });
@@ -1238,7 +1251,7 @@ const renderPdf = async ({ orgId, projectId, date, viewer = null, boqAccess = nu
     ["Weather", log.weather?.summary || (log.weather ? weatherFeed.summarize(log.weather) : "not recorded")],
     ["Weather source", log.weatherSource === WEATHER_SOURCE.FEED ? `feed (${log.weather?.source || "feed"})` : log.weatherSource || "—"],
     ["Alerts", (log.weather?.alerts || []).map((alert) => alert.message).join("; ") || "none"],
-    ["Totals", `${log.totals.workers} workers · ${num(log.totals.manHours)} man-hours · ${log.totals.equipmentCount} plant (${num(log.totals.equipmentHours)} h) · ${log.totals.deliveries} deliveries · ${log.totals.visitors} visitors · ${num(log.totals.hoursLost)} h lost${quantityTotalsText(log.totals)}`],
+    ["Totals", `${log.totals.workers} workers · ${num(log.totals.manHours)} man-hours · ${log.totals.equipmentCount} plant (${num(log.totals.equipmentHours)} h) · ${log.totals.deliveries} deliveries · ${log.totals.visitors} visitors · ${num(log.totals.hoursLost)} h lost${quantityTotalsText(log.totals, boqAccess)}`],
     ["Distributed", log.distributedAt ? `${new Date(log.distributedAt).toISOString().slice(0, 16).replace("T", " ")} UTC` : "not yet"],
   ]);
   if (log.summary) {
@@ -1295,10 +1308,11 @@ const renderPdf = async ({ orgId, projectId, date, viewer = null, boqAccess = nu
   ]);
   sectionTable("Quantities installed", log.sections.quantities, [
     { key: (row) => itemCell(row, boqAccess), label: "BOQ item", width: 0.34 },
-    { key: (row) => `${num(row.quantity, 3)} ${row.unitCode || ""}`.trim(), label: "Qty", width: 0.14, align: "right" },
+    { key: (row) => quantityCell(row, boqAccess), label: "Qty", width: 0.14, align: "right" },
     { key: cell, label: "Activity", width: 0.26 },
     { key: quantityNote, label: "", width: 0.26 },
   ]);
+  if (!mayReadBoq(boqAccess) && log.sections.quantities.length) pdf.paragraph(QUANTITY_WITHHELD_NOTE, { color: "0.4 0.4 0.4" });
   pdf.heading(`Notes (${log.sections.notes.length})`, { level: 2 });
   if (!log.sections.notes.length) pdf.paragraph("None recorded.", { color: "0.4 0.4 0.4" });
   for (const note of log.sections.notes) {
@@ -1312,7 +1326,7 @@ const renderPdf = async ({ orgId, projectId, date, viewer = null, boqAccess = nu
 const renderText = ({ project, log }) => {
   const lines = [`Daily log — ${project.name} — ${log.date}`, `Status: ${log.status}`, `Weather: ${log.weather?.summary || "not recorded"}`];
   if ((log.weather?.alerts || []).length) lines.push(`Weather alerts: ${log.weather.alerts.map((alert) => alert.message).join("; ")}`);
-  lines.push(`Totals: ${log.totals.workers} workers, ${num(log.totals.manHours)} man-hours, ${log.totals.equipmentCount} plant, ${log.totals.deliveries} deliveries, ${log.totals.visitors} visitors, ${num(log.totals.hoursLost)} h lost${quantityTotalsText(log.totals)}`);
+  lines.push(`Totals: ${log.totals.workers} workers, ${num(log.totals.manHours)} man-hours, ${log.totals.equipmentCount} plant, ${log.totals.deliveries} deliveries, ${log.totals.visitors} visitors, ${num(log.totals.hoursLost)} h lost${quantityTotalsText(log.totals, RESTRICTED_BOQ_ACCESS)}`);
   if (log.summary) lines.push("", "Summary:", log.summary);
   const block = (title, rows, line) => {
     if (!rows.length) return;
@@ -1325,8 +1339,9 @@ const renderText = ({ project, log }) => {
   block("Visitors", log.sections.visitors, (row) => `${row.name}${row.company ? ` (${row.company})` : ""}${row.purpose ? ` — ${row.purpose}` : ""}`);
   block("Delays", log.sections.delays, (row) => `${row.type}: ${row.description} · ${num(row.hoursLost)} h`);
   // The digest goes to the distribution list and to external addresses: the
-  // item's description and unit, never its code or the bill's figures.
-  block("Quantities installed", log.sections.quantities, (row) => `${itemCell(row, { boq: false })} · ${num(row.quantity, 3)} ${row.unitCode || ""}${row.activity ? ` — ${row.activity.name}` : ""} · ${progressNote(row)}`);
+  // item's description, never its code, its quantity or the bill's figures.
+  block("Quantities installed", log.sections.quantities, (row) => `${itemCell(row, RESTRICTED_BOQ_ACCESS)} · ${quantityCell(row, RESTRICTED_BOQ_ACCESS)}${row.activity ? ` — ${row.activity.name}` : ""} · ${progressNote(row)}`);
+  if (log.sections.quantities.length) lines.push(`  (${QUANTITY_WITHHELD_NOTE})`);
   block("Notes", log.sections.notes, (row) => `[${row.kind}] ${row.text}`);
   return lines.join("\n");
 };
@@ -1340,7 +1355,9 @@ const distribute = async ({ orgId, projectId, date, actor = null, to = null, not
   const existing = await prisma.dailyLog.findUnique({ where: { projectId_date: { projectId, date: day } } });
   if (!existing) throw new HttpError(404, "DAILY_LOG_NOT_FOUND", "Nothing has been logged for this day yet");
 
-  const rendered = await renderPdf({ orgId, projectId, date: day, viewer: null });
+  // One stored document for the project, rendered as the most restricted
+  // reader would see it: no BOQ item code, no per-item quantity.
+  const rendered = await renderPdf({ orgId, projectId, date: day, viewer: null, boqAccess: RESTRICTED_BOQ_ACCESS });
   if (rendered.log.totals.entries === 0 && !rendered.log.weather && !rendered.log.summary) {
     throw new HttpError(400, "DAILY_LOG_EMPTY", "There is nothing to send for this day yet");
   }

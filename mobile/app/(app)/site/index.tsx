@@ -65,7 +65,9 @@ export function describeEntry(section: DailyLogSection, e: DailyLogEntry): strin
       const item = e.boqItem?.description ?? (e.boqWithheld ? '—' : 'Item')
       // A Decimal(18,3) may arrive as "25.000": read as a number, shown without the padding.
       const qty = e.quantity == null ? NaN : Number(e.quantity)
-      const quantity = Number.isFinite(qty) ? `${qty} ${e.unitCode ?? e.unit ?? ''}`.trim() : '—'
+      // The quantity itself is withheld with the item's figures (the ledger's rule): a dash and the reason, never a zero.
+      const withheld = e.boqWithheld?.keys?.includes('quantity') ? e.boqWithheld : null
+      const quantity = withheld ? `— (${withheld.reason})` : Number.isFinite(qty) ? `${qty} ${e.unitCode ?? e.unit ?? ''}`.trim() : '—'
       return `${quantity} · ${item} — ${quantityStanding(e)}`
     }
   }

@@ -69,6 +69,10 @@ describe('quantities installed on the daily log', () => {
     expect(describeEntry('quantities', quantityEntry({ quantity: '25.000' as unknown as number }))).toBe('25 m3 · Concrete C30 to raft — awaiting approval · source daily log')
     // A withheld item is a dash, not a name and not a figure.
     expect(describeEntry('quantities', quantityEntry({ boqItem: null, boqWithheld: { reason: 'You do not have permission to read this section' } }))).toBe('120 m3 · — — awaiting approval · source daily log')
+    // The server withholds the quantity itself from a reader without the BOQ (the ledger's rule): a dash with the reason, the description kept, never a zero.
+    const withheld = quantityEntry({ quantity: undefined, unitCode: undefined, boqItem: { description: 'Concrete C30 to raft', unit: 'm3' }, boqWithheld: { keys: ['quantity', 'unitCode', 'boqItemId', 'allocationId', 'boqItem.id', 'boqItem.code'], reason: 'BOQ figures withheld' } })
+    expect(describeEntry('quantities', withheld)).toBe('— (BOQ figures withheld) · Concrete C30 to raft — awaiting approval · source daily log')
+    expect(describeEntry('quantities', withheld)).not.toMatch(/^0\b|\b120\b/)
   })
 
   it('records a quantity against an allocated item from the server’s list, with the item’s unit and a replay key', async () => {

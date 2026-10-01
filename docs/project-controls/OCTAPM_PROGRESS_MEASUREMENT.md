@@ -310,12 +310,22 @@ totals. What is specific to it:
   the owner asked for exactly that so a site engineer can record without reading the bill. Nothing of the bill's
   quantities, values or counts beyond the lines themselves is given.
 - **What a member without boq:read sees of the section** (`utils/boq-figures.withheldDailyLog`, applied by every
-  daily-log route): the row as the site recorded it — the item's **description and unit, the quantity typed, the
-  activity, the location, the notes, the row's review state** and the state and provenance of the entry it
-  minted (`progressEntry`, which carries no quantity) — **minus the item's `code` and the `allocationId`**, named
-  in `boqWithheld`. The section's per-unit totals are the log's own tally of what was typed (like its man-hours)
-  and stay. The PDF export (`progress:export`) omits the code for such a member; the distribution digest, which
-  reaches external addresses, never carries it.
+  daily-log route and, for the list of days, `withheldDailyLogList`): **the quantity ledger's rule** (integration
+  fix, 2026-10-01 — decision taken and reported to the owner; before it the same installed-quantity-per-BOQ-item
+  figure the ledger withheld on `GET /quantity-progress` was handed to the same member on `GET /daily-logs/{date}`,
+  on every write answer, on the PDF and in the per-unit totals). The row keeps the item's **description and unit
+  name** (so the member can see what they recorded), the activity, the location, the notes, the row's review state
+  and the state and provenance of the entry it minted (`progressEntry`, which carries no quantity); it loses
+  `quantity`, `unitCode`, `boqItemId`, `allocationId`, `boqItem.id` and `boqItem.code`, named in `boqWithheld
+  { keys, reason }`. The section's per-unit `totals.quantities` are per-item quantities summed and are withheld the
+  same way (`totals.boqWithheld`; `quantityRows` stays). Omitted, never zeroed: the web table and the mobile line
+  show "—" with the server's reason. The PDF (`GET /:date/export.pdf`, `progress:export`) renders for its viewer:
+  a BOQ reader's carries the code and the figures, anyone else's a dash per row, no per-unit total and the note
+  "Quantities per BOQ item are shown to members who may read the BOQ."; **the distributed document and the digest
+  are rendered as the most restricted reader would see them** — one stored file for the project, a digest that
+  reaches external addresses — so neither carries a code or a per-item quantity. Proven live
+  (`pc-6-daily-log-quantities`: the write answer, the read, the edit, the list, both PDFs and the stored document)
+  and mutation-proven (the withholding dropped on the read, on the write answer and on the PDF each fail it).
 - **Minting (`POST /daily-logs/{date}/submit`).** Every row that counts (not draft, not rejected by the site team)
   becomes one `QuantityProgressEntry`: `source 'daily_log'`, `status 'submitted'`, the log's date, `dailyLogId`
   + `dailyLogQuantityId`, the row's allocation, location, unit, quantity and notes, `createdBy` the row's author,

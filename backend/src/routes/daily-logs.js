@@ -5,7 +5,7 @@ const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
 const { requirePermission, getEffectiveRole } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
-const { boqFigureAccess, withheldDailyLog } = require("../utils/boq-figures");
+const { boqFigureAccess, withheldDailyLog, withheldDailyLogList } = require("../utils/boq-figures");
 const service = require("../services/daily-log.service");
 
 /** Project daily log (OCTA-FLD-DAILY-022): `/projects/:projectId/daily-logs`. */
@@ -19,8 +19,8 @@ const actor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffecti
 const viewer = (req) => ({ id: req.user.id, projectAccess: req.projectAccess });
 // PC-6: the quantities section names BOQ items, so every log answer goes
 // through utils/boq-figures — a reader who may not read the BOQ gets the
-// row's description, unit and the quantity the site recorded, never the
-// item's code or allocation (withheldDailyLog).
+// row's description and unit name, never its quantity, item or allocation,
+// and no per-unit total (withheldDailyLog; the list of days likewise).
 const send = (req, res, log, status) => sendSuccess(res, withheldDailyLog(log, boqFigureAccess(req)), status);
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -109,7 +109,7 @@ router.get(
   "/",
   requirePermission("progress", "read"),
   [query("from").optional().matches(DATE_RE), query("to").optional().matches(DATE_RE), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.listLogs({ ...scope(req), from: req.query.from || null, to: req.query.to || null, viewer: viewer(req) }))),
+  asyncHandler(async (req, res) => sendSuccess(res, withheldDailyLogList(await service.listLogs({ ...scope(req), from: req.query.from || null, to: req.query.to || null, viewer: viewer(req) }), boqFigureAccess(req)))),
 );
 
 // ── one day ──────────────────────────────────────────────────────────────

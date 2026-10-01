@@ -66,8 +66,8 @@ export interface DailyLogEntry {
   unitCode?: string | null
   /** The pending progress entry the server minted from this line (§4), when it says. Its status is progress' own, never this row's. */
   progressEntry?: { id?: string; status?: string | null; source?: string | null } | null
-  /** The server's reason when it withholds the item from this reader. */
-  boqWithheld?: { reason: string } | null
+  /** The server's withholding for this reader (utils/boq-figures): the keys omitted — the quantity among them for a member who may not read the BOQ — and why. */
+  boqWithheld?: { keys?: string[]; reason: string } | null
   // shared
   activityId?: string | null
   activity?: Named | null
@@ -79,8 +79,10 @@ export interface DailyLogEntry {
 
 /** A BOQ item as the daily log or the allocation list names it: the description and the unit, the code only when the server sent one. */
 export interface AllocatedItemRef {
-  id: string
+  /** Withheld, with the code, from a daily-log row read by a member who may not read the BOQ. */
+  id?: string
   description: string
+  unit?: string | null
   unitCode?: string | null
   code?: string | null
 }

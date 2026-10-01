@@ -925,6 +925,8 @@ export type DailyLogQuantityEntry = DailyLogEntry & {
   allocationId?: string | null
   unitCode?: string | null
   withheld?: { reason: string } | boolean | null
+  /** The server's withholding (utils/boq-figures): the keys omitted and why — a member who may not read the BOQ gets no quantity. */
+  boqWithheld?: { keys?: string[]; reason: string } | null
 }
 
 const dailyLogKey = (projectId: string) => ['daily-log', projectId] as const
@@ -1489,7 +1491,9 @@ export function QuantitiesSectionCard({
                       ? entry.withheld.reason
                       : entry.withheld
                         ? 'Withheld by the server'
-                        : null
+                        : entry.boqWithheld?.keys?.includes('quantity')
+                          ? entry.boqWithheld.reason
+                          : null
                   const unit =
                     entry.unitCode ??
                     entry.unit ??
