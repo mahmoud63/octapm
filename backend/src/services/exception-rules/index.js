@@ -5,7 +5,7 @@
  * helpers is a rule file: it exports an array of rules
  *
  *   { kind, severity: 'info'|'warning'|'critical', subjectType,
- *     module: 'boq'|'cost'|'schedule'|'progress', boqDerived: boolean,
+ *     module: 'boq'|'cost'|'schedule'|'progress'|'change_order', boqDerived: boolean,
  *     requires?: () => null | reason,          // a source that may be absent
  *     evaluate: async ({ orgId, projectId, cutoff, ctx }) => [row] }
  *
@@ -36,7 +36,9 @@ const path = require("path");
 const thresholds = require("./_thresholds");
 
 const SEVERITIES = Object.freeze(["info", "warning", "critical"]);
-const MODULES = Object.freeze(["boq", "cost", "schedule", "progress"]);
+// The permission module a reader needs (PC-7b integration J: change_order for
+// the kinds about change orders and the links naming them).
+const MODULES = Object.freeze(["boq", "cost", "schedule", "progress", "change_order"]);
 
 const ruleFiles = (dir = __dirname) =>
   fs

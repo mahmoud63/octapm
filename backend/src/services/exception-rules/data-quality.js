@@ -22,7 +22,7 @@
  *     basis }, limit: { value, unitCode?, basis }, groupKeys?, data? }]
  *
  * `module` is the permission module a reader needs (boq, cost, schedule,
- * progress); `boqDerived` withholds the kind WHOLE from a member without
+ * progress, change_order); `boqDerived` withholds the kind WHOLE from a member without
  * boq:read (utils/boq-figures decides; a per-activity figure read off the
  * mapping is BOQ-derived, owner decision E1 — project totals are a cost
  * reader's). A kind that mixes BOQ-derived and other rows is marked
@@ -921,7 +921,12 @@ const RULES = [
     kind: "orphan_change_link",
     severity: "warning",
     subjectType: "budget_revision",
-    module: "cost",
+    // The module of the record the link names (PC-7b integration J): a budget
+    // revision's and an RFI's link name a change order; a workflow activity
+    // link names a record of any type (RFI, submittal, NCR, …, change order).
+    // One kind, so one module: the links are mixed, and change_order is the
+    // module they share — the record each was meant to reach, or could be.
+    module: "change_order",
     boqDerived: false,
     label: "Change links",
     note: (count) => `${plural(count, "change link")} name${count === 1 ? "s" : ""} a record that is not in this project.`,
@@ -931,7 +936,8 @@ const RULES = [
     kind: "change_order_possible_duplicate",
     severity: "info",
     subjectType: "change_order",
-    module: "cost",
+    // Read under change_order:read — the orders it names are the change-order register's (PC-7b integration J).
+    module: "change_order",
     boqDerived: false,
     label: "Change orders",
     note: (count) => `${plural(count, "approved change order")} repeat${count === 1 ? "s" : ""} an earlier one's description and activity impact; the forecast counts each (review, nothing is changed).`,

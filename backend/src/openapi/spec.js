@@ -16481,7 +16481,7 @@ const exceptionSeverity = { type: "string", enum: ["info", "warning", "critical"
 const exceptionFigure = objectSchema({ value: { type: "number", nullable: true }, unitCode: { type: "string", nullable: true }, basis: { type: "string", description: "Where the figure came from, as its owning service states it." } }, ["value", "basis"]);
 const exceptionSubject = objectSchema({ type: { type: "string", example: "budget_line" }, id: uuid, label: { type: "string", nullable: true } }, ["type", "id"]);
 const exceptionWithheld = objectSchema(
-  { reason: { type: "string" }, modules: arrayOf({ type: "string", enum: ["boq", "cost", "schedule", "progress"] }) },
+  { reason: { type: "string" }, modules: arrayOf({ type: "string", enum: ["boq", "cost", "schedule", "progress", "change_order"] }) },
   ["reason"],
 );
 const exceptionSchema = objectSchema({
@@ -16491,7 +16491,7 @@ const exceptionSchema = objectSchema({
   kindLabel: { type: "string" },
   severity: exceptionSeverity,
   status: exceptionStatus,
-  module: { type: "string", enum: ["boq", "cost", "schedule", "progress"], description: "The module the exception is read through." },
+  module: { type: "string", enum: ["boq", "cost", "schedule", "progress", "change_order"], description: "The module the exception is read through (change_order: change_order_possible_duplicate and orphan_change_link — read under change_order:read)." },
   subject: exceptionSubject,
   secondarySubject: exceptionSubject,
   group: objectSchema({ wbsNodeId: nullableUuid, wbsNode: nullableRef("GenericObject"), locationId: nullableUuid, location: nullableRef("GenericObject"), costCodeId: nullableUuid, costCode: nullableRef("GenericObject") }),

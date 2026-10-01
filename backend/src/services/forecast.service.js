@@ -204,11 +204,12 @@ const dataQualityRules = () => require("./exception-rules/data-quality");
 // widened by the API's table (utils/boq-figures exceptionPolicy).
 const rulePolicy = (rule) => exceptionPolicy(rule.kind, { [rule.kind]: { module: rule.module, boqDerived: rule.boqDerived } });
 // Whether the caller reads a module: from `modules` when given, else the
-// { boq, budget } shape (a cost kind on budget = BOQ or cost read).
+// { boq, budget } shape (a cost kind on budget = BOQ or cost read; the
+// change-order kinds, cost kinds until PC-7b integration J, likewise).
 const moduleReadable = (module, access) => {
   if (access && access.modules) return access.modules[module] === true;
   if (module === "boq") return access.boq === true;
-  if (module === "cost") return access.budget === true;
+  if (module === "cost" || module === "change_order") return access.budget === true;
   return module === "schedule" || module === "progress";
 };
 const kindReadable = (rule, access) => {

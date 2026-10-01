@@ -118,8 +118,8 @@ describe("the registry", () => {
     period_not_locked: ["data-quality.js", "cost", false],
     ev_basis_divergence: ["data-quality.js", "cost", true],
     readiness_override_active: ["data-quality.js", "cost", true],
-    orphan_change_link: ["data-quality.js", "cost", false],
-    change_order_possible_duplicate: ["data-quality.js", "cost", false],
+    orphan_change_link: ["data-quality.js", "change_order", false],
+    change_order_possible_duplicate: ["data-quality.js", "change_order", false],
   });
 
   it("loads the §1 overrun kinds and the §7 data-quality kinds by name, each from its file with its module and BOQ flag — and nothing else", () => {

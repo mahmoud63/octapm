@@ -13,7 +13,7 @@ const service = require("../services/exception.service");
  * Project exceptions (PC-7b): `/projects/:projectId/controls/exceptions`.
  *
  * Reading needs no single module: each exception is read through its
- * subject's module (boq, cost, schedule, progress) and a BOQ-derived one only
+ * subject's module (boq, cost, schedule, progress, change_order) and a BOQ-derived one only
  * by a BOQ reader — decided per row in utils/boq-figures, as this project's
  * own routes decide each permission. Review, snooze and dismiss need
  * change_event update or the subject module's update; raising or associating

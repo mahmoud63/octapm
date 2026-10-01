@@ -286,7 +286,7 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     expect(RULES.DATA_QUALITY_KINDS).toEqual(kinds);
     for (const rule of RULES) {
       expect(["info", "warning"]).toContain(rule.severity);
-      expect(["boq", "cost", "schedule", "progress"]).toContain(rule.module);
+      expect(["boq", "cost", "schedule", "progress", "change_order"]).toContain(rule.module);
       expect(typeof rule.boqDerived).toBe("boolean");
       expect(typeof rule.evaluate).toBe("function");
       expect(typeof rule.label).toBe("string");

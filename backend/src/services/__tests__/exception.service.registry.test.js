@@ -13,8 +13,9 @@ const RULES_INDEX = path.join(__dirname, "..", "exception-rules", "index.js");
 
 // A member without boq:read who reads schedule and progress (a site engineer
 // on a no-BOQ template), and one who also reads cost.
-const SITE_NO_BOQ = Object.freeze({ boq: false, modules: { boq: false, cost: false, schedule: true, progress: true } });
-const COST_NO_BOQ = Object.freeze({ boq: false, modules: { boq: false, cost: true, schedule: true, progress: true } });
+const SITE_NO_BOQ = Object.freeze({ boq: false, modules: { boq: false, cost: false, schedule: true, progress: true, change_order: false } });
+const COST_NO_BOQ = Object.freeze({ boq: false, modules: { boq: false, cost: true, schedule: true, progress: true, change_order: true } });
+const COST_NO_CHANGE_ORDER = Object.freeze({ boq: false, modules: { boq: false, cost: true, schedule: true, progress: true, change_order: false } });
 
 // The shape exception-rules/index.js exports: constants and functions, no array.
 const engineShaped = (rules) => ({
@@ -65,16 +66,19 @@ describe("the engine's rule registry as the API reads it", () => {
 });
 
 describe("the API's own kind table agrees with the rules' statements", () => {
-  it("states the dq kinds as their rules do: structure_missing boq/BOQ-derived, readiness_override_active cost/BOQ-derived, change_order_possible_duplicate cost", () => {
+  it("states the dq kinds as their rules do: structure_missing boq/BOQ-derived, readiness_override_active cost/BOQ-derived, change_order_possible_duplicate and orphan_change_link change_order", () => {
     expect(EXCEPTION_KIND_POLICY.structure_missing).toEqual({ module: "boq", boqDerived: true });
     expect(EXCEPTION_KIND_POLICY.readiness_override_active).toEqual({ module: "cost", boqDerived: true });
-    expect(EXCEPTION_KIND_POLICY.change_order_possible_duplicate).toEqual({ module: "cost", boqDerived: false });
+    expect(EXCEPTION_KIND_POLICY.change_order_possible_duplicate).toEqual({ module: "change_order", boqDerived: false });
+    expect(EXCEPTION_KIND_POLICY.orphan_change_link).toEqual({ module: "change_order", boqDerived: false });
     // Without any registry (this track's base) the table alone withholds them.
     for (const kind of ["structure_missing", "readiness_override_active"]) {
       expect([kind, exceptionReadable({ kind, subjectType: "project" }, SITE_NO_BOQ, null)]).toEqual([kind, false]);
     }
     expect(exceptionReadable({ kind: "change_order_possible_duplicate", subjectType: "change_order" }, COST_NO_BOQ, null)).toBe(true);
     expect(exceptionReadable({ kind: "change_order_possible_duplicate", subjectType: "change_order" }, SITE_NO_BOQ, null)).toBe(false);
+    // Read under change_order:read, not cost (PC-7b integration J).
+    for (const kind of ["change_order_possible_duplicate", "orphan_change_link"]) expect([kind, exceptionReadable({ kind, subjectType: "change_order" }, COST_NO_CHANGE_ORDER, null)]).toEqual([kind, false]);
   });
 
   it("the real exception-rules folder loads, the registry is non-null, and the table states every rule's kind with its module and at least its BOQ derivation", () => {

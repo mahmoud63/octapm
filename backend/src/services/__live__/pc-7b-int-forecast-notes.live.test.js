@@ -102,7 +102,8 @@ liveDescribe("PC-7b integration D: the forecast's data-quality notes per reader"
     expect(dqKinds(answer)).toEqual(["progress_stale"]);
     const { reason } = answer.body.data.dataQualityWithheld;
     expect(reason).toMatch(/available only to members who may read the BOQ/);
-    expect(reason).toMatch(/cost module is available only to members who may read it/);
+    // The cost kinds and (PC-7b integration J) the change-order kinds.
+    expect(reason).toMatch(/cost, change order modules are available only to members who may read them/);
     expect(JSON.stringify(answer.body.data.dataQualityWithheld)).not.toMatch(/\d/);
   });
 

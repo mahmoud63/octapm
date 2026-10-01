@@ -113,11 +113,11 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     project2 = await prisma.project.create({ data: { orgId: live.org.id, name: "LiveTest PC-7b second project", startDate: new Date("2026-01-05"), endDate: new Date("2026-12-18") } });
     otherProject = await prisma.project.create({ data: { orgId: other.org.id, name: "LiveTest PC-7b other org", startDate: new Date("2026-01-05"), endDate: new Date("2026-12-18") } });
 
-    const member = async (key, role, { noBoq = false } = {}) => {
+    const member = async (key, role, { noBoq = false, tools = null } = {}) => {
       const user = await createLiveUser(prisma, { orgId: live.org.id, name: `LiveTest ${key}`, email: `live-pc7bx-${key.replace(/_/g, "")}-${tag}@octapm-live.test`, role });
       await prisma.projectAssignment.create({ data: { projectId: project.id, userId: user.id, role, orgId: live.org.id } });
-      if (noBoq) {
-        const template = await prisma.permissionTemplate.create({ data: { orgId: live.org.id, name: `LiveTest ${key} ${tag}`, baseRole: role, tools: { create: [{ module: "boq", level: "none" }] } } });
+      if (noBoq || tools) {
+        const template = await prisma.permissionTemplate.create({ data: { orgId: live.org.id, name: `LiveTest ${key} ${tag}`, baseRole: role, tools: { create: tools || [{ module: "boq", level: "none" }] } } });
         await prisma.projectUserPermission.create({ data: { orgId: live.org.id, projectId: project.id, userId: user.id, templateId: template.id } });
       }
       members[key] = user;
@@ -128,6 +128,10 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     await member("pm_member", "pm");
     await member("qs", "qs");
     await member("qs_noboq", "qs", { noBoq: true });
+    // PC-7b integration J: a cost controller who may not read change orders, and a
+    // site engineer (no cost read, no BOQ) who may.
+    await member("cost_noco", "cost_controller", { tools: [{ module: "change_order", level: "none" }] });
+    await member("site_co", "site_engineer", { tools: [{ module: "boq", level: "none" }, { module: "change_order", level: "read_only" }] });
     const otherPm = await createLiveUser(prisma, { orgId: other.org.id, name: "LiveTest other pm", email: `live-pc7bx-otherpm-${tag}@octapm-live.test`, role: "pm" });
     members.other_pm = otherPm;
 
@@ -210,7 +214,7 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     // BOQ-derived), not the cost kinds.
     expect(idsOf(answer)).toEqual([ex.stale.id]);
     expect(answer.body.data.withheld.reason).toContain(BOQ_REASON);
-    expect(answer.body.data.withheld.modules).toEqual(["boq", "cost"]);
+    expect(answer.body.data.withheld.modules).toEqual(["boq", "cost", "change_order"]);
     expect(JSON.stringify(answer.body.data.withheld)).not.toMatch(/\d/);
     expect(JSON.stringify(answer.body)).not.toContain("LTSECRET");
     for (const id of [ex.qtyAlloc.id, ex.qtyBoq.id, ex.slip.id, ex.committed.id, ex.structure.id]) {
@@ -220,7 +224,7 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     const filtered = await list(as(members.site_noboq), `?subject=activity:${ids.activity}&kind=schedule_slip_on_mapped_item`);
     ok("filtered", filtered);
     expect(filtered.body.data.data).toEqual([]);
-    expect(filtered.body.data.withheld.modules).toEqual(["boq", "cost"]);
+    expect(filtered.body.data.withheld.modules).toEqual(["boq", "cost", "change_order"]);
   });
 
   it("a cost controller sees the money kinds; without boq:read only the money kinds not built from the bill", async () => {
@@ -239,6 +243,44 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     expect(idsOf(noBoq)).toEqual([ex.committed, ex.stale, ex.forecast].map((row) => row.id).sort());
     expect(noBoq.body.data.withheld).toEqual({ reason: BOQ_REASON, modules: ["boq"] });
     refused("cost_noboq structure_missing", await api.get(at(`/controls/exceptions/${ex.structure.id}`), as(members.cost_noboq)), 404, "EXCEPTION_NOT_FOUND");
+  });
+
+  it("change_order_possible_duplicate and orphan_change_link are read under change_order:read, not cost (PC-7b integration J)", async () => {
+    const dup = await seedException({ kind: "change_order_possible_duplicate", severity: "info", subjectType: "change_order", subjectId: crypto.randomUUID(), secondarySubjectType: "change_order", secondarySubjectId: crypto.randomUUID(), measured: 2, limit: 1 });
+    const orphan = await seedException({ kind: "orphan_change_link", severity: "warning", subjectType: "budget_revision", subjectId: crypto.randomUUID(), measured: 1, limit: 0 });
+    const kinds = "?kind=change_order_possible_duplicate,orphan_change_link";
+    try {
+      expect(idsOf(await list(pm(), kinds))).toEqual([dup.id, orphan.id].sort());
+      expect((await api.get(at(`/controls/exceptions/${dup.id}`), pm())).body.data.module).toBe("change_order");
+      // Cost read without change_order read: neither is given; the marker names the module.
+      const noCo = await list(as(members.cost_noco), kinds);
+      ok("cost_noco", noCo);
+      expect(noCo.body.data.data).toEqual([]);
+      expect(noCo.body.data.withheld.modules).toEqual(["change_order"]);
+      for (const row of [dup, orphan]) refused(`cost_noco get ${row.kind}`, await api.get(at(`/controls/exceptions/${row.id}`), as(members.cost_noco)), 404, "EXCEPTION_NOT_FOUND");
+      // change_order read without cost read: both are given (neither is BOQ-derived).
+      const co = await list(as(members.site_co), kinds);
+      ok("site_co", co);
+      expect(idsOf(co)).toEqual([dup.id, orphan.id].sort());
+      expect(co.body.data.withheld.modules).toEqual(["boq", "cost"]);
+      // The tile: open dup + orphan are counted for the change-order reader, not for the cost controller without it.
+      const tileCo = await api.get("/api/v1/projects/workspace-dashboard", as(members.site_co));
+      const tileNoCo = await api.get("/api/v1/projects/workspace-dashboard", as(members.cost_noco));
+      const tilePm = await api.get("/api/v1/projects/workspace-dashboard", pm());
+      // Open on the project now: the seven seeded rows and these two. The PM counts 9; the cost controller
+      // without change_order read 7 (every BOQ and money kind, none of these two); the site engineer who reads
+      // change orders 3 (progress_stale and these two — the slip and structure_missing are BOQ-derived).
+      expect([tilePm.body.data.openExceptions.total, tileNoCo.body.data.openExceptions.total, tileCo.body.data.openExceptions.total]).toEqual([9, 7, 3]);
+      expect(tileNoCo.body.data.openExceptions.withheld.modules).toEqual(["change_order"]);
+      // The history goes where the exception goes: a dismissal of the orphan link is not in the cost controller's audit.
+      ok("pm dismiss orphan", await api.post(at(`/controls/exceptions/${orphan.id}/dismiss`), { reason: "LiveTest J" }, pm()));
+      const auditIds = async (headers) => new Set((await api.get(at("/audit?entityType=project_exception&limit=100"), headers)).body.data.events.map((event) => event.entityId || event.recordId));
+      expect((await auditIds(pm())).has(orphan.id)).toBe(true);
+      expect((await auditIds(as(members.cost_noco))).has(orphan.id)).toBe(false);
+    } finally {
+      await prisma.auditEvent.deleteMany({ where: { orgId: live.org.id, entityId: { in: [dup.id, orphan.id] } } });
+      await prisma.projectException.deleteMany({ where: { id: { in: [dup.id, orphan.id] } } });
+    }
   });
 
   it("filters by status, kind, severity and subject, and walks every page of the cursor once", async () => {
@@ -491,7 +533,7 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     ok("site dashboard", site);
     // The stale info only; the snoozed structure_missing is BOQ-derived, not counted.
     expect(site.body.data.openExceptions).toMatchObject({ total: 1, bySeverity: { critical: 0, warning: 0, info: 1 }, inChange: 0, snoozed: 0 });
-    expect(site.body.data.openExceptions.withheld.modules).toEqual(["boq", "cost"]);
+    expect(site.body.data.openExceptions.withheld.modules).toEqual(["boq", "cost", "change_order"]);
     expect(site.body.data.openExceptions.withheld.reason).toContain(BOQ_REASON);
     const otherOrg = await api.get("/api/v1/projects/workspace-dashboard", as(members.other_pm));
     ok("other org dashboard", otherOrg);

@@ -1064,7 +1064,14 @@ const withheldAuditHistory = (
   access = FULL_ACCESS,
   { contractValueSource = null, contractTerms = null } = {},
 ) => {
-  if (access.boq || !history || typeof history !== "object" || !Array.isArray(history.events)) return history;
+  if (!history || typeof history !== "object" || !Array.isArray(history.events)) return history;
+  // A BOQ reader keeps every BOQ figure, but an exception's events still go
+  // where the exception goes: its module's read (PC-7b integration J — a BOQ
+  // reader without change_order or cost read is not given those kinds' events).
+  if (access.boq) {
+    if (!access.modules) return history;
+    return { ...history, events: history.events.filter((event) => !(event && (event.recordType || event.entityType) === "project_exception" && withheldExceptionEvent(event, access))) };
+  }
   const capWithheld = retentionCapWithheld(contractTerms, access);
   const events = history.events
     .filter((event) => !(event && BOQ_RECORD_TYPES.has(event.recordType || event.entityType)))
@@ -1893,18 +1900,20 @@ const EXCEPTION_KIND_POLICY = Object.freeze({
   ev_basis_divergence: Object.freeze({ module: "cost", boqDerived: true }),
   committed_definition_mixed: Object.freeze({ module: "cost", boqDerived: false }),
   equipment_cost_unposted: Object.freeze({ module: "cost", boqDerived: false }),
-  orphan_change_link: Object.freeze({ module: "cost", boqDerived: false }),
+  // Read under the module of the record they name: change orders (PC-7b
+  // integration J — the links are mixed, change_order is what they share).
+  orphan_change_link: Object.freeze({ module: "change_order", boqDerived: false }),
   // An override of the readiness gate, whose blockers are the bill's.
   readiness_override_active: Object.freeze({ module: "cost", boqDerived: true }),
-  change_order_possible_duplicate: Object.freeze({ module: "cost", boqDerived: false }),
+  change_order_possible_duplicate: Object.freeze({ module: "change_order", boqDerived: false }),
 });
 const EXCEPTION_UNKNOWN_KIND_POLICY = Object.freeze({ module: "cost", boqDerived: true });
-const EXCEPTION_MODULES = Object.freeze(["boq", "cost", "schedule", "progress"]);
+const EXCEPTION_MODULES = Object.freeze(["boq", "cost", "schedule", "progress", "change_order"]);
 // Subjects that are the bill's own records.
 const EXCEPTION_BOQ_SUBJECT_TYPES = Object.freeze(["boq_item", "allocation", "activity_boq_allocation", "certificate_item", "ipc_item"]);
 const EXCEPTIONS_BOQ_WITHHELD =
   "Exceptions on the BOQ's items and allocations, and those measured from the BOQ's quantities or its mapping, are available only to members who may read the BOQ";
-const EXCEPTION_MODULE_NAMES = Object.freeze({ boq: "BOQ", cost: "cost", schedule: "schedule", progress: "progress" });
+const EXCEPTION_MODULE_NAMES = Object.freeze({ boq: "BOQ", cost: "cost", schedule: "schedule", progress: "progress", change_order: "change order" });
 
 /** A kind's module and whether its figures are the bill's (the table, widened by a rule's own statement). */
 const exceptionPolicy = (kind, registry = null) => {
@@ -2020,6 +2029,14 @@ const withheldExceptionEvent = (event, access) => {
   const meta = (event && (event.metadata || event.metadataJson)) || {};
   if (meta.boqDerived !== false && !access.boq) return true;
   if (meta.module === "cost" && !access.budget) return true;
+  // The exception's own module, when the caller's per-module reads are known
+  // (routes/audit passes exceptionAccess's modules): change_order kinds need
+  // change_order:read (PC-7b integration J).
+  if (meta.module && access.modules && access.modules[meta.module] !== true) return true;
+  // An entry that does not say its module (the status history the audit
+  // service writes beside the event carries no metadata) goes unless the
+  // caller reads every exception module: fail closed.
+  if (!meta.module && access.modules && EXCEPTION_MODULES.some((module) => access.modules[module] !== true)) return true;
   return false;
 };
 
