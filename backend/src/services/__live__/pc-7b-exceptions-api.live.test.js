@@ -53,23 +53,45 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
   const list = async (headers, qs = "") => api.get(at(`/controls/exceptions${qs}`), headers);
   const idsOf = (answer) => answer.body.data.data.map((row) => row.id).sort();
 
-  // Everything the handoff must never touch, as stored.
-  const footprint = async () => {
+  // Everything the handoff must never touch, as stored: the change orders and
+  // their links, the budget, the schedule, the bill and its allocations, the
+  // commitments, progress (EV reads ActivityProgress only), the IPC, the cost
+  // ledger, the budget / EV / health snapshots — and every OTHER exception of
+  // the project, whole. `claimed` rows may change by their change event link
+  // only (changeEventId, updatedAt); `skipped` rows are the ones a review
+  // action is about and are compared by the caller.
+  const footprint = async ({ claimed = [], skipped = [] } = {}) => {
     const where = { projectId: project.id };
-    const [changeOrders, activityLinks, allocationLinks, budgetLines, budgetLineChanges, budgetRevisions, activities, costRecords, allocations, boqItems, primeContracts] = await Promise.all([
-      prisma.changeOrder.findMany({ where, orderBy: { id: "asc" } }),
-      prisma.changeOrderActivityLink.findMany({ where, orderBy: { id: "asc" } }),
-      prisma.changeOrderAllocationLink.findMany({ where, orderBy: { id: "asc" } }),
-      prisma.budgetLine.findMany({ where, orderBy: { id: "asc" } }),
-      prisma.budgetLineChange.findMany({ where, orderBy: { id: "asc" } }),
-      prisma.budgetRevision.findMany({ where, orderBy: { id: "asc" } }),
-      prisma.activity.findMany({ where, orderBy: { id: "asc" } }),
-      prisma.costRecord.findMany({ where, orderBy: { id: "asc" } }),
-      prisma.activityBoqAllocation.findMany({ where, orderBy: { id: "asc" } }),
-      prisma.boqItem.findMany({ where, orderBy: { id: "asc" } }),
-      prisma.primeContract.findMany({ where, orderBy: { id: "asc" } }),
-    ]);
-    return JSON.stringify({ changeOrders, activityLinks, allocationLinks, budgetLines, budgetLineChanges, budgetRevisions, activities, costRecords, allocations, boqItems, primeContracts });
+    const all = (model, extra = where) => prisma[model].findMany({ where: extra, orderBy: { id: "asc" } });
+    const tables = {
+      changeOrders: all("changeOrder"),
+      activityLinks: all("changeOrderActivityLink"),
+      allocationLinks: all("changeOrderAllocationLink"),
+      budgetLines: all("budgetLine"),
+      budgetLineChanges: all("budgetLineChange"),
+      budgetRevisions: all("budgetRevision"),
+      activities: all("activity"),
+      activityProgress: all("activityProgress", { activity: { projectId: project.id } }),
+      costRecords: all("costRecord"),
+      allocations: all("activityBoqAllocation"),
+      boqItems: all("boqItem"),
+      primeContracts: all("primeContract"),
+      commitments: all("commitment"),
+      ipcCertificates: all("ipcCertificate"),
+      ipcItems: all("ipcItem"),
+      costLedgerEntries: all("costLedgerEntry"),
+      budgetSnapshots: all("budgetSnapshot"),
+      evSnapshots: all("evPeriodSnapshot"),
+      healthSnapshots: all("projectHealthSnapshot"),
+      exceptions: all("projectException"),
+    };
+    const rows = Object.fromEntries(await Promise.all(Object.entries(tables).map(async ([name, query]) => [name, await query])));
+    const claimedIds = new Set(claimed.map((row) => (typeof row === "string" ? row : row.id)));
+    const skippedIds = new Set(skipped.map((row) => (typeof row === "string" ? row : row.id)));
+    rows.exceptions = rows.exceptions
+      .filter((row) => !skippedIds.has(row.id))
+      .map((row) => (claimedIds.has(row.id) ? { ...row, changeEventId: "(claimed)", updatedAt: "(claimed)" } : row));
+    return JSON.stringify(rows);
   };
 
   const seedException = (data) =>
@@ -183,14 +205,15 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
   it("a site engineer without boq:read sees no BOQ-derived exception and no money kind — withheld whole, a marker, never a count", async () => {
     const answer = await list(as(members.site_noboq), "?status=all");
     ok("list", answer);
-    // progress_stale (progress) and structure_missing (schedule) only: not the
-    // allocation / BOQ item kinds, not the mapped-item slip, not the cost kinds.
-    expect(idsOf(answer)).toEqual([ex.stale.id, ex.structure.id].sort());
+    // progress_stale (progress) only: not the allocation / BOQ item kinds, not
+    // the mapped-item slip, not structure_missing (the dq rule states it
+    // BOQ-derived), not the cost kinds.
+    expect(idsOf(answer)).toEqual([ex.stale.id]);
     expect(answer.body.data.withheld.reason).toContain(BOQ_REASON);
     expect(answer.body.data.withheld.modules).toEqual(["boq", "cost"]);
     expect(JSON.stringify(answer.body.data.withheld)).not.toMatch(/\d/);
     expect(JSON.stringify(answer.body)).not.toContain("LTSECRET");
-    for (const id of [ex.qtyAlloc.id, ex.qtyBoq.id, ex.slip.id, ex.committed.id]) {
+    for (const id of [ex.qtyAlloc.id, ex.qtyBoq.id, ex.slip.id, ex.committed.id, ex.structure.id]) {
       refused(`get ${id}`, await api.get(at(`/controls/exceptions/${id}`), as(members.site_noboq)), 404, "EXCEPTION_NOT_FOUND");
     }
     // A filter that would match only withheld rows is an empty page with the marker, not "none".
@@ -213,8 +236,9 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
 
     const noBoq = await list(as(members.cost_noboq));
     ok("cost_noboq list", noBoq);
-    expect(idsOf(noBoq)).toEqual([ex.committed, ex.stale, ex.structure, ex.forecast].map((row) => row.id).sort());
+    expect(idsOf(noBoq)).toEqual([ex.committed, ex.stale, ex.forecast].map((row) => row.id).sort());
     expect(noBoq.body.data.withheld).toEqual({ reason: BOQ_REASON, modules: ["boq"] });
+    refused("cost_noboq structure_missing", await api.get(at(`/controls/exceptions/${ex.structure.id}`), as(members.cost_noboq)), 404, "EXCEPTION_NOT_FOUND");
   });
 
   it("filters by status, kind, severity and subject, and walks every page of the cursor once", async () => {
@@ -249,7 +273,9 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     refused("site dismiss hidden", await api.post(at(`/controls/exceptions/${ex.committed.id}/dismiss`), { reason: "x" }, as(members.site_noboq)), 404, "EXCEPTION_NOT_FOUND");
     refused("empty note", await api.post(at(`/controls/exceptions/${ex.committed.id}/review`), { note: " " }, as(members.cost)), 400, "VALIDATION_ERROR");
 
-    const before = await footprint();
+    // The three rows acted on are compared below; every other row and table is byte-identical.
+    const reviewScope = { skipped: [ex.committed, ex.structure, ex.forecast] };
+    const before = await footprint(reviewScope);
     const reviewed = await api.post(at(`/controls/exceptions/${ex.committed.id}/review`), { note: "LiveTest: commitment CO pending" }, as(members.cost));
     ok("review", reviewed);
     expect(reviewed.body.data.review).toMatchObject({ reviewedBy: members.cost.id, reviewedByName: "LiveTest cost", note: "LiveTest: commitment CO pending" });
@@ -276,7 +302,7 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     expect(idsOf(await list(pm(), "?status=snoozed"))).toEqual([ex.structure.id]);
     expect(idsOf(await list(pm()))).not.toContain(ex.forecast.id);
     // The review actions change nothing but the exception.
-    expect(await footprint()).toBe(before);
+    expect(await footprint(reviewScope)).toBe(before);
 
     const audit = await prisma.auditEvent.findMany({ where: { orgId: live.org.id, entityType: "project_exception" }, orderBy: { occurredAt: "asc" } });
     expect(audit.map((event) => [event.entityId, event.action, event.newStatus])).toEqual([
@@ -293,13 +319,15 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     const prefill = await api.get(at(`/controls/exceptions/${ex.qtyAlloc.id}/change-event-prefill`), pm());
     ok("prefill", prefill);
     expect(prefill.body.data.links).toEqual({ exceptionId: ex.qtyAlloc.id });
+    // The two exceptions raised may change by their change-event link only.
+    const claims = { claimed: [ex.qtyAlloc, ex.committed] };
 
-    const before = await footprint();
+    const before = await footprint(claims);
     const events = await prisma.changeEvent.count({ where: { projectId: project.id } });
     const raised = await api.post(at(`/controls/exceptions/${ex.qtyAlloc.id}/raise-change-event`), { origin: "manual", rfiId: ex.qtyAlloc.id }, pm());
     ok("raise", raised, 201);
     expect(await prisma.changeEvent.count({ where: { projectId: project.id } })).toBe(events + 1);
-    expect(await footprint()).toBe(before);
+    expect(await footprint(claims)).toBe(before);
 
     const event = raised.body.data.changeEvent;
     expect(event).toMatchObject({ status: "open", origin: "exception", activityId: ids.activity, locationId: ids.location, romAmount: 0, totals: { rom: 0, quoted: null, estimate: 0 }, changeOrderId: null });
@@ -325,7 +353,7 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     ok("raise money", money, 201);
     expect(money.body.data.changeEvent).toMatchObject({ title: "LiveTest commitment overrun", origin: "exception", romAmount: 0 });
     expect(money.body.data.changeEvent.lines[0]).toMatchObject({ budgetLineId: ids.budgetLine, costCodeId: ids.costCode, quantity: 1, romAmount: 0 });
-    expect(await footprint()).toBe(before);
+    expect(await footprint(claims)).toBe(before);
     ids.raisedEvent = event.id;
   });
 
@@ -343,6 +371,49 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     expect(associated.body.data).toMatchObject({ status: "in_change", changeEvent: { id: ids.raisedEvent } });
     // The association does not make the event "raised from" this exception.
     expect((await prisma.changeEvent.findUnique({ where: { id: ids.raisedEvent } })).exceptionId).toBe(ex.qtyAlloc.id);
+  });
+
+  it("a line's budget line must be this project's: another project's or organisation's is 400 on every raise and on a plain create, and nothing is written", async () => {
+    const foreignCode = await prisma.costCode.create({ data: { orgId: other.org.id, code: `LT7XO-${tag}`, name: "LiveTest other org code" } });
+    const foreignLine = await prisma.budgetLine.create({ data: { orgId: other.org.id, projectId: otherProject.id, costCodeId: foreignCode.id, description: "LiveTest other org line" } });
+    await prisma.projectCostCode.create({ data: { orgId: live.org.id, projectId: project2.id, costCodeId: ids.costCode } });
+    const siblingLine = await prisma.budgetLine.create({ data: { orgId: live.org.id, projectId: project2.id, costCodeId: ids.costCode, description: "LiveTest second project line" } });
+    const rfi = await prisma.rfi.create({ data: { projectId: project.id, ref: "RFI-LT7B", subject: "LiveTest budget line probe" } });
+
+    const before = await footprint();
+    const events = await prisma.changeEvent.count({ where: { orgId: { in: [live.org.id, other.org.id] } } });
+    const lineCount = await prisma.changeEventLine.count({ where: { orgId: { in: [live.org.id, other.org.id] } } });
+    for (const [label, budgetLineId] of [["other org", foreignLine.id], ["other project", siblingLine.id]]) {
+      const lines = [{ description: "LiveTest line", budgetLineId }];
+      refused(`exception ${label}`, await api.post(at(`/controls/exceptions/${ex.stale.id}/raise-change-event`), { lines }, pm()), 400, "CHANGE_EVENT_BUDGET_LINE_INVALID");
+      refused(`rfi ${label}`, await api.post(at(`/rfi/${rfi.id}/raise-change-event`), { lines }, pm()), 400, "CHANGE_EVENT_BUDGET_LINE_INVALID");
+      refused(`plain ${label}`, await api.post(at("/change-events"), { title: "LiveTest probe", lines }, pm()), 400, "CHANGE_EVENT_BUDGET_LINE_INVALID");
+    }
+    expect(await prisma.changeEvent.count({ where: { orgId: { in: [live.org.id, other.org.id] } } })).toBe(events);
+    expect(await prisma.changeEventLine.count({ where: { orgId: { in: [live.org.id, other.org.id] } } })).toBe(lineCount);
+    expect(await prisma.changeEvent.count({ where: { rfiId: rfi.id } })).toBe(0);
+    expect(await footprint()).toBe(before);
+    // This project's own budget line is taken.
+    const own = await api.post(at("/change-events"), { title: "LiveTest own line", lines: [{ description: "LiveTest line", budgetLineId: ids.budgetLine }] }, pm());
+    ok("own budget line", own, 201);
+    expect(own.body.data.lines[0]).toMatchObject({ budgetLineId: ids.budgetLine });
+  });
+
+  it("two raises of one exception at once: exactly one draft change event, the other 409, nothing else written", async () => {
+    const race = await seedException({ kind: "actual_over_committed", severity: "warning", subjectType: "commitment", subjectId: crypto.randomUUID(), measured: 7, limit: 6 });
+    const scope = { claimed: [race] };
+    const before = await footprint(scope);
+    const events = await prisma.changeEvent.count({ where: { projectId: project.id } });
+    const answers = await Promise.all([1, 2].map(() => api.post(at(`/controls/exceptions/${race.id}/raise-change-event`), {}, pm())));
+    expect(answers.map((answer) => answer.status).sort()).toEqual([201, 409]);
+    const lost = answers.find((answer) => answer.status === 409);
+    expect(lost.body.error.code).toBe("EXCEPTION_IN_CHANGE");
+    const won = answers.find((answer) => answer.status === 201);
+    expect(await prisma.changeEvent.count({ where: { projectId: project.id } })).toBe(events + 1);
+    expect(await prisma.changeEvent.count({ where: { exceptionId: race.id } })).toBe(1);
+    expect((await prisma.projectException.findUnique({ where: { id: race.id } })).changeEventId).toBe(won.body.data.changeEvent.id);
+    expect(await footprint(scope)).toBe(before);
+    ex.race = race;
   });
 
   it("raise change event from an RFI, daily log, NCR, punch item, drawing revision, submittal and meeting action: one shared helper, the typed link", async () => {
@@ -413,17 +484,47 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
   it("the workspace dashboard counts, org-wide, only the open exceptions the caller may read — and says when some are not counted", async () => {
     const full = await api.get("/api/v1/projects/workspace-dashboard", pm());
     ok("pm dashboard", full);
-    // Open now: stale (info), slip (warning). In change: qtyAlloc, qtyBoq, committed. Snoozed: structure. Dismissed: forecast.
-    expect(full.body.data.openExceptions).toMatchObject({ total: 2, bySeverity: { critical: 0, warning: 1, info: 1 }, inChange: 3, snoozed: 1 });
+    // Open now: stale (info), slip (warning). In change: qtyAlloc, qtyBoq, committed, race. Snoozed: structure. Dismissed: forecast.
+    expect(full.body.data.openExceptions).toMatchObject({ total: 2, bySeverity: { critical: 0, warning: 1, info: 1 }, inChange: 4, snoozed: 1 });
     expect(full.body.data.openExceptions).not.toHaveProperty("withheld");
     const site = await api.get("/api/v1/projects/workspace-dashboard", as(members.site_noboq));
     ok("site dashboard", site);
-    expect(site.body.data.openExceptions).toMatchObject({ total: 1, bySeverity: { critical: 0, warning: 0, info: 1 }, inChange: 0, snoozed: 1 });
+    // The stale info only; the snoozed structure_missing is BOQ-derived, not counted.
+    expect(site.body.data.openExceptions).toMatchObject({ total: 1, bySeverity: { critical: 0, warning: 0, info: 1 }, inChange: 0, snoozed: 0 });
     expect(site.body.data.openExceptions.withheld.modules).toEqual(["boq", "cost"]);
     expect(site.body.data.openExceptions.withheld.reason).toContain(BOQ_REASON);
     const otherOrg = await api.get("/api/v1/projects/workspace-dashboard", as(members.other_pm));
     ok("other org dashboard", otherOrg);
     expect(otherOrg.body.data.openExceptions).toMatchObject({ total: 1, bySeverity: { critical: 1, warning: 0, info: 0 } });
+  });
+
+  it("the tile's and the notice's per-project access fails closed: a view whose template did not attach is resolved again, and a lookup that fails counts nothing", async () => {
+    const exceptionService = require("../exception.service");
+    const templates = require("../permission-template.service");
+    const { requestForProject } = require("../../middleware/project-access");
+    const { resolveRequestPrincipal } = require("../membership.service");
+    const { exceptionAccess } = require("../../utils/boq-figures");
+    const principal = await resolveRequestPrincipal({ userId: members.cost_noboq.id, orgId: live.org.id });
+    const view = await requestForProject({ user: principal }, project.id);
+    expect(view.projectAccess.template).toBeTruthy();
+    expect(await exceptionService.exceptionAccessForView(view)).toMatchObject({ boq: false, modules: { cost: true } });
+    // As requestForProject leaves it when its template lookup fails (swallowed):
+    // the role's defaults read the BOQ — the over-count the tile must not make.
+    const unattached = { ...view, projectAccess: { ...view.projectAccess, template: undefined, templateSource: undefined } };
+    expect(exceptionAccess(unattached).boq).toBe(true);
+    expect(await exceptionService.exceptionAccessForView(unattached)).toMatchObject({ boq: false, modules: { cost: true } });
+    const spy = jest.spyOn(templates, "resolveTemplateContext").mockRejectedValueOnce(new Error("LiveTest: template lookup failed"));
+    const quiet = jest.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await exceptionService.exceptionAccessForView(unattached)).toBeNull();
+    } finally {
+      spy.mockRestore();
+      quiet.mockRestore();
+    }
+    // A member with no template keeps the role's own access.
+    const qsView = await requestForProject({ user: await resolveRequestPrincipal({ userId: members.qs.id, orgId: live.org.id }) }, project.id);
+    expect(await exceptionService.exceptionAccessForView(qsView)).toMatchObject({ boq: true, modules: { cost: true } });
+    expect(await exceptionService.exceptionAccessForView({ ...qsView, user: null })).toBeNull();
   });
 
   it("a newly opened critical exception notifies the project's PM and QS once, each only of what they may read; a snoozed one is not notified", async () => {
@@ -447,5 +548,101 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
       expect(row.category).toBe("commercial");
       expect(`${row.title} ${row.message}`).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
     }
+  });
+
+  // The bridge: the engine tells its evaluation listeners which rows opened
+  // or escalated; registerExceptionNotifier hands them to notifyOpened.
+  describe("the engine → notice bridge (registerExceptionNotifier)", () => {
+    let project3;
+    const exceptionService = () => require("../exception.service");
+    const notices = async (projectId) =>
+      prisma.notification.findMany({ where: { orgId: live.org.id, projectId, entityType: "project_exception" }, select: { entityId: true, recipientUserId: true } });
+    const pairs = (rows) => rows.map((row) => `${row.entityId}:${row.recipientUserId}`).sort();
+
+    beforeAll(async () => {
+      project3 = await prisma.project.create({ data: { orgId: live.org.id, name: "LiveTest PC-7b engine bridge", startDate: new Date("2026-01-05"), endDate: new Date("2026-12-18") } });
+      for (const user of [members.pm_member, members.qs]) {
+        await prisma.projectAssignment.create({ data: { projectId: project3.id, userId: user.id, role: user.role, orgId: live.org.id } });
+      }
+    });
+
+    it("registers one listener, stands down with EXCEPTIONS_ENGINE_ENABLED=false, and passes opened + escalated rows to the notice", async () => {
+      const listeners = [];
+      const engine = { registerEvaluationListener: (listener) => { listeners.push(listener); return () => listeners.splice(listeners.indexOf(listener), 1); } };
+      const quiet = { log: () => {} };
+      exceptionService().registerExceptionNotifier({ env: { EXCEPTIONS_ENGINE_ENABLED: "false" }, engine, logger: quiet });
+      expect(listeners).toHaveLength(0);
+      const off = exceptionService().registerExceptionNotifier({ env: { EXCEPTIONS_ENGINE_ENABLED: "true" }, engine, logger: quiet });
+      exceptionService().registerExceptionNotifier({ env: { EXCEPTIONS_ENGINE_ENABLED: "true" }, engine, logger: quiet });
+      expect(listeners).toHaveLength(1);
+      try {
+        const opened = await seedException({ projectId: project3.id, kind: "committed_over_budget", severity: "critical", subjectType: "budget_line", subjectId: crypto.randomUUID(), measured: 3, limit: 2 });
+        const escalated = await seedException({ projectId: project3.id, kind: "actual_over_committed", severity: "critical", subjectType: "commitment", subjectId: crypto.randomUUID(), measured: 3, limit: 2 });
+        const warning = await seedException({ projectId: project3.id, kind: "forecast_over_revised", severity: "warning", subjectType: "project", subjectId: project3.id, measured: 3, limit: 2 });
+        // The payload as the engine sends it (rowSummary rows).
+        const summary = (row, change) => ({ id: row.id, change, kind: row.kind, severity: row.severity, subjectType: row.subjectType, subjectId: row.subjectId, snoozed: false });
+        await listeners[0]({ orgId: live.org.id, projectId: project3.id, trigger: "test", opened: [summary(opened, "open"), summary(warning, "open")], escalated: [summary(escalated, "escalate")] });
+        await listeners[0]({ orgId: live.org.id, projectId: project3.id, trigger: "test", opened: [summary(opened, "open")], escalated: [summary(escalated, "escalate")] });
+        const told = await notices(project3.id);
+        expect(pairs(told)).toEqual(pairs([opened, escalated].flatMap((row) => [members.pm_member, members.qs].map((user) => ({ entityId: row.id, recipientUserId: user.id })))));
+      } finally {
+        off();
+      }
+      expect(listeners).toHaveLength(0);
+    });
+
+    // With the engine merged: a real evaluation of a LiveTest project (one
+    // stub rule, so nothing else of the project is touched) notifies through
+    // the bridge — the critical opening once, the warning never until it
+    // escalates, then once; an unchanged re-evaluation tells nobody.
+    const engineMerged = (() => {
+      try {
+        require.resolve("../exception-engine.service");
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    (engineMerged ? it : it.skip)("once merged: evaluateProject's openings and escalations reach the PM and QS once each", async () => {
+      // eslint-disable-next-line global-require
+      const engine = require("../exception-engine.service");
+      await prisma.notification.deleteMany({ where: { orgId: live.org.id, projectId: project3.id } });
+      await prisma.projectException.deleteMany({ where: { orgId: live.org.id, projectId: project3.id } });
+      const off = exceptionService().registerExceptionNotifier({ env: { EXCEPTIONS_ENGINE_ENABLED: "true" }, engine, logger: { log: () => {} } });
+      const subjects = { critical: crypto.randomUUID(), rising: crypto.randomUUID() };
+      let risingSeverity = "warning";
+      const rule = {
+        kind: "committed_over_budget",
+        severity: "warning",
+        subjectType: "budget_line",
+        module: "cost",
+        boqDerived: false,
+        evaluate: async () => [
+          { subjectType: "budget_line", subjectId: subjects.critical, severity: "critical", measured: { value: 1500, basis: "LiveTest stub: committed" }, limit: { value: 1000, basis: "LiveTest stub: revised budget" } },
+          { subjectType: "budget_line", subjectId: subjects.rising, severity: risingSeverity, measured: { value: 1100, basis: "LiveTest stub: committed" }, limit: { value: 1000, basis: "LiveTest stub: revised budget" } },
+        ],
+      };
+      const evaluate = () => engine.evaluateProject({ orgId: live.org.id, projectId: project3.id, trigger: "test", rules: [rule], logger: { log: () => {} } });
+      try {
+        const first = await evaluate();
+        expect(first.opened).toBe(2);
+        const rows = await prisma.projectException.findMany({ where: { projectId: project3.id }, select: { id: true, subjectId: true } });
+        const idOf = (subjectId) => rows.find((row) => row.subjectId === subjectId).id;
+        const expectTold = async (subjectIds) =>
+          expect(pairs(await notices(project3.id))).toEqual(pairs(subjectIds.flatMap((subjectId) => [members.pm_member, members.qs].map((user) => ({ entityId: idOf(subjectId), recipientUserId: user.id })))));
+        await expectTold([subjects.critical]);
+        await evaluate();
+        await expectTold([subjects.critical]);
+        risingSeverity = "critical";
+        await evaluate();
+        await expectTold([subjects.critical, subjects.rising]);
+        await evaluate();
+        await expectTold([subjects.critical, subjects.rising]);
+        // Only this LiveTest project's rows were written.
+        expect(await prisma.projectException.count({ where: { orgId: live.org.id, projectId: project3.id } })).toBe(2);
+      } finally {
+        off();
+      }
+    });
   });
 });
