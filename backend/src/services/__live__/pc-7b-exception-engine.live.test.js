@@ -131,7 +131,11 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
   };
 
   const rowsOf = (where = {}) => prisma.projectException.findMany({ where: { projectId: project.id, ...where }, orderBy: [{ kind: "asc" }, { subjectId: "asc" }, { createdAt: "asc" }] });
-  const evaluate = (extra = {}) => engine.evaluateProject({ orgId: live.org.id, projectId: project.id, trigger: "test", logger: { log: () => {} }, ...extra });
+  // The §1 overrun rules (quantity.js, money.js, schedule.js). Since the merge the registry also
+  // loads the §7 data-quality rules (data-quality.js), proven in pc-7b-data-quality.live.test.js;
+  // this suite counts the overrun kinds, so it evaluates those rules only.
+  const OVERRUN_RULES = require("../exception-rules").getRules().filter((rule) => rule.file !== "data-quality.js");
+  const evaluate = (extra = {}) => engine.evaluateProject({ orgId: live.org.id, projectId: project.id, trigger: "test", logger: { log: () => {} }, rules: OVERRUN_RULES, ...extra });
 
   beforeAll(async () => {
     tableColumns = await loadTableColumns();
@@ -349,6 +353,34 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     await expect(prisma.projectException.create({ data: copy })).rejects.toMatchObject({ code: "P2002" });
   });
 
+  it("an item the rule can no longer measure (its activity taken off the quantity method) is resolved 'not_comparable' with the reason — never 'cleared' — and the API says so", async () => {
+    const certRows = () => rowsOf({ kind: "certified_over_installed", subjectId: items.R2.id });
+    const [before] = await certRows();
+    expect(before.resolvedAt).toBeNull();
+    await prisma.activityProgressMethod.update({ where: { activityId: acts.C }, data: { method: "percent" } });
+    try {
+      const result = await evaluate();
+      expect([result.errors, result.notComparable, result.resolved]).toEqual([[], 1, 0]);
+      const [after] = await certRows();
+      expect([after.id, after.resolvedReason, after.resolvedAt !== null]).toEqual([before.id, "not_comparable", true]);
+      expect(after.dataJson.notComparable).toMatchObject({ reason: expect.stringMatching(/not every approved allocation of the item is on a quantity-method activity/), trigger: "test" });
+      // The figures stay as they were last measured.
+      expect([after.measured.toFixed(3), after.limit.toFixed(3)]).toEqual([before.measured.toFixed(3), before.limit.toFixed(3)]);
+      const read = await api.get(at(`/controls/exceptions/${before.id}`), auth());
+      ok("read not comparable", read);
+      expect(read.body.data).toMatchObject({ status: "resolved", resolution: { reason: "not_comparable", detail: expect.stringMatching(/quantity-method activity/) } });
+    } finally {
+      await prisma.activityProgressMethod.update({ where: { activityId: acts.C }, data: { method: "quantity" } });
+    }
+    // Measurable again and still over: a new open row.
+    const again = await evaluate();
+    expect([again.errors, again.opened]).toEqual([[], 1]);
+    const rows = await certRows();
+    expect(rows.map((row) => [row.resolvedReason, row.resolvedAt === null])).toEqual([["not_comparable", false], [null, true]]);
+    const cleared = await api.get(at(`/controls/exceptions/${rows[1].id}`), auth());
+    expect(cleared.body.data.resolution).toBeNull();
+  });
+
   it("a change order approved through the API with an allocation link raising the allocation clears the two quantity rows", async () => {
     const order = await api.post(at("/change-orders"), {
       description: "LiveTest slab extension",
@@ -369,7 +401,7 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     const result = await evaluate();
     expect(result.errors).toEqual([]);
     expect(result.resolved).toBe(2);
-    const cleared = await rowsOf({ resolvedAt: { not: null } });
+    const cleared = await rowsOf({ resolvedAt: { not: null }, resolvedReason: "cleared" });
     expect(cleared.map((row) => [row.kind, row.subjectId, row.resolvedReason])).toEqual([
       ["quantity_over_allocation", allocations.A, "cleared"],
       ["quantity_over_boq", items.R1.id, "cleared"],

@@ -19,7 +19,14 @@
  * `data.dismissalKey` (optional, a string) names the episode a row belongs to,
  * for a rule whose measured figure grows by itself (elapsed days): a
  * dismissal then holds while the key is the same and a new key reopens it,
- * whatever the figure (exception-engine reopensDismissal). Rules are
+ * whatever the figure (exception-engine reopensDismissal).
+ *
+ * The answer may also carry `notComparable` (an array, a property of the
+ * returned array): [{ subjectType, subjectId, secondarySubjectType?,
+ * secondarySubjectId?, reason }] — the subjects the rule cannot measure NOW
+ * (an activity off the quantity method, installed in another unit or not
+ * available, mixed allocations). The engine resolves an open row of such a
+ * subject 'not_comparable' with the reason, never 'cleared'. Rules are
  * pure reads; the engine (exception-engine.service) is the only writer, and
  * it writes ProjectException rows only. A file added here — the dq track's
  * data-quality.js — is picked up without touching this one.

@@ -212,7 +212,11 @@ describe("quantity_over_allocation", () => {
 
   it("an activity not measured by quantity, or inactive, is not read; another unit is never compared", async () => {
     prisma.activityProgressMethod.findMany.mockResolvedValue([{ activityId: "act-1", method: "percent" }]);
-    expect(await run("quantity_over_allocation")).toEqual([]);
+    let rows = await run("quantity_over_allocation");
+    expect(rows).toEqual([]);
+    // Not comparable (PC-7b integration G): the allocation is named with the reason, never "no gap".
+    expect(rows.notComparable).toEqual([{ subjectType: "allocation", subjectId: "alloc-1", reason: expect.stringMatching(/not measured by quantity/) }]);
+    expect(Object.keys(rows)).toEqual([]);
     expect(quantityCore.installedByActivity).not.toHaveBeenCalled();
     prisma.activityProgressMethod.findMany.mockResolvedValue([{ activityId: "act-1", method: "quantity" }]);
     prisma.activity.findMany.mockResolvedValue([activityRow({ isActive: false })]);
@@ -220,8 +224,18 @@ describe("quantity_over_allocation", () => {
     prisma.activity.findMany.mockResolvedValue([activityRow()]);
     quantityCore.installedByActivity.mockResolvedValue(installed(900, "t"));
     const ctx = context();
-    expect(await run("quantity_over_allocation", ctx)).toEqual([]);
+    rows = await run("quantity_over_allocation", ctx);
+    expect(rows).toEqual([]);
+    expect(rows.notComparable).toEqual([{ subjectType: "allocation", subjectId: "alloc-1", reason: expect.stringMatching(/not in the allocation's unit/) }]);
     expect(ctx.notes.join(" ")).toMatch(/not in the allocation's unit/);
+  });
+
+  it("two approved allocations of one item on one activity: neither is compared, both are not comparable", async () => {
+    allocationService.listAllocations.mockResolvedValue({ allocations: [allocation(), allocation({ id: "alloc-2" })], summary: { items: [] } });
+    quantityCore.installedByActivity.mockResolvedValue(installed(900));
+    const rows = await run("quantity_over_allocation");
+    expect(rows).toEqual([]);
+    expect(rows.notComparable.map((entry) => [entry.subjectId, /not knowable/.test(entry.reason)])).toEqual([["alloc-1", true], ["alloc-2", true]]);
   });
 });
 
@@ -256,11 +270,18 @@ describe("quantity_over_boq and certified_over_installed (the quantity views' fi
     expect(await run("quantity_over_boq")).toEqual([]);
   });
 
-  it("quantity_over_boq: an installed figure that is not available, or not in the row's unit, is never compared", async () => {
+  it("quantity_over_boq: an installed figure that is not available, or not in the row's unit, is never compared — and is said not comparable", async () => {
     quantityViews.quantityBlocks.mockResolvedValue({ blocks: block({ installedValue: null }) });
-    expect(await run("quantity_over_boq")).toEqual([]);
+    let rows = await run("quantity_over_boq");
+    expect(rows).toEqual([]);
+    expect(rows.notComparable).toEqual([{ subjectType: "boq_item", subjectId: "item-1", reason: expect.stringMatching(/installed is not available/) }]);
     quantityViews.quantityBlocks.mockResolvedValue({ blocks: block({ installed: 500, unitMatch: false }) });
-    expect(await run("quantity_over_boq")).toEqual([]);
+    rows = await run("quantity_over_boq");
+    expect(rows).toEqual([]);
+    expect(rows.notComparable).toEqual([{ subjectType: "boq_item", subjectId: "item-1", reason: expect.stringMatching(/nothing is compared across units/) }]);
+    // Measured and within: comparable, nothing to say.
+    quantityViews.quantityBlocks.mockResolvedValue({ blocks: block({ installed: 50 }) });
+    expect((await run("quantity_over_boq")).notComparable).toEqual([]);
   });
 
   it("certified_over_installed: the views' raw comparison, raised only when every approved allocation of the item is on a quantity-method activity", async () => {
@@ -276,10 +297,14 @@ describe("quantity_over_boq and certified_over_installed (the quantity views' fi
     expect(rows[0].severity).toBeUndefined();
     expect(rule("certified_over_installed").severity).toBe("critical");
     prisma.activityProgressMethod.findMany.mockResolvedValue([{ activityId: "act-1", method: "percent" }]);
-    expect(await run("certified_over_installed")).toEqual([]);
+    const off = await run("certified_over_installed");
+    expect(off).toEqual([]);
+    expect(off.notComparable).toEqual([{ subjectType: "boq_item", subjectId: "item-1", reason: expect.stringMatching(/not every approved allocation/) }]);
     prisma.activityProgressMethod.findMany.mockResolvedValue([{ activityId: "act-1", method: "quantity" }]);
     quantityViews.quantityBlocks.mockResolvedValue({ blocks: block({ installed: 10, certified: 20, flag: false }) });
-    expect(await run("certified_over_installed")).toEqual([]);
+    const within = await run("certified_over_installed");
+    expect(within).toEqual([]);
+    expect(within.notComparable).toEqual([]);
   });
 });
 

@@ -16502,6 +16502,11 @@ const exceptionSchema = objectSchema({
   resolvedAt: nullableDateString,
   review: { nullable: true, ...objectSchema({ reviewedAt: nullableDateString, reviewedBy: nullableUuid, reviewedByName: { type: "string", nullable: true }, note: { type: "string", nullable: true } }) },
   snooze: { nullable: true, ...objectSchema({ until: nullableDateString, by: nullableUuid, byName: { type: "string", nullable: true }, reason: { type: "string", nullable: true } }) },
+  resolution: {
+    nullable: true,
+    ...objectSchema({ reason: { type: "string", enum: ["cleared", "not_comparable"] }, at: nullableDateString, detail: { type: "string", nullable: true, description: "not_comparable: why the rule can no longer measure the subject (an activity off the quantity method, installed in another unit or not available, mixed allocations)." } }, ["reason"]),
+    description: "Status resolved only: cleared (the condition is no longer found) or not_comparable (the rule can no longer measure the subject — never read as cleared).",
+  },
   dismissal: { nullable: true, ...objectSchema({ at: nullableDateString, reason: { type: "string", nullable: true }, by: nullableUuid, byName: { type: "string", nullable: true } }) },
   changeEvent: { nullable: true, ...objectSchema({ id: uuid, ref: { type: "string" }, status: changeEventStatus, title: { type: "string" }, path: { type: "string" } }) },
   actions: objectSchema({ review: { type: "boolean" }, snooze: { type: "boolean" }, dismiss: { type: "boolean" }, raiseChangeEvent: { type: "boolean" }, associateChangeEvent: { type: "boolean" } }),

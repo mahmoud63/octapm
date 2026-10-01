@@ -236,6 +236,29 @@ describe("evaluateProject", () => {
     expect(bad.errors[0].message).toMatch(/reserved/);
   });
 
+  it("an open row the rule can no longer measure is resolved 'not_comparable' with the rule's reason — never 'cleared'", async () => {
+    openRows = [stored({ id: "measured-before" }), stored({ id: "cleared-one", subjectId: "item-2" })];
+    const rows = Object.defineProperty([], "notComparable", { value: [{ subjectType: "boq_item", subjectId: "item-1", reason: "installed is in t, the row in m3" }], enumerable: false });
+    const result = await evaluate([ruleOf("quantity_over_boq", rows)]);
+    expect(result).toMatchObject({ notComparable: 1, resolved: 1, opened: 0 });
+    expect(prisma.projectException.updateMany).toHaveBeenCalledWith({
+      where: { id: "measured-before", projectId: PROJECT, resolvedAt: null },
+      data: { resolvedAt: NOW, resolvedReason: "not_comparable", dataJson: { label: "1.1 Concrete", notComparable: { reason: "installed is in t, the row in m3", at: NOW.toISOString(), trigger: "test" } } },
+    });
+    expect(prisma.projectException.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["cleared-one"] }, projectId: PROJECT, resolvedAt: null },
+      data: { resolvedAt: NOW, resolvedReason: "cleared" },
+    });
+    expect(result.rows.map((row) => [row.change, row.id, row.reason])).toEqual([["resolve", "cleared-one", undefined], ["not_comparable", "measured-before", "installed is in t, the row in m3"]]);
+    // A subject the rule did find is a finding, whatever the list says; a list entry without a reason fails the rule.
+    prisma.projectException.updateMany.mockClear();
+    const both = Object.defineProperty([finding()], "notComparable", { value: [{ subjectType: "boq_item", subjectId: "item-1", reason: "x" }], enumerable: false });
+    expect(await evaluate([ruleOf("quantity_over_boq", both)])).toMatchObject({ notComparable: 0, unchanged: 1 });
+    const bad = Object.defineProperty([], "notComparable", { value: [{ subjectType: "boq_item", subjectId: "item-1" }], enumerable: false });
+    const failed = await evaluate([ruleOf("quantity_over_boq", bad)]);
+    expect([failed.errors[0]?.message, failed.notComparable, failed.resolved]).toEqual([expect.stringMatching(/needs a reason/), 0, 0]);
+  });
+
   it("a condition that was cleared and comes back opens a new row", async () => {
     resolvedRows = [stored({ id: "cleared-row", resolvedAt: new Date("2026-09-30"), resolvedReason: "cleared" })];
     const result = await evaluate([ruleOf("quantity_over_boq", [finding()])]);

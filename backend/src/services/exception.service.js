@@ -283,6 +283,13 @@ const serialize = (row, { labels, names, may, now = new Date() }) => {
     resolvedAt: toIso(row.resolvedAt),
     review: row.reviewedAt ? { reviewedAt: toIso(row.reviewedAt), reviewedBy: row.reviewedBy || null, reviewedByName: names.get(row.reviewedBy) || null, note: row.reviewNote || null } : null,
     snooze: row.snoozedUntil ? { until: toIso(row.snoozedUntil), by: row.snoozedBy || null, byName: names.get(row.snoozedBy) || null, reason: data.review?.snoozeReason || null } : null,
+    // How a resolved (not dismissed) exception was resolved: 'cleared' — the
+    // condition is no longer found — or 'not_comparable' — the rule can no
+    // longer measure the subject, with its reason (never read as cleared).
+    resolution:
+      status === "resolved"
+        ? { reason: row.resolvedReason || "cleared", at: toIso(row.resolvedAt), detail: row.resolvedReason === "not_comparable" ? data.notComparable?.reason || null : null }
+        : null,
     dismissal:
       status === "dismissed"
         ? { at: toIso(row.resolvedAt), reason: String(row.resolvedReason).slice(DISMISSED_PREFIX.length) || null, by: data.dismissedBy || null, byName: names.get(data.dismissedBy) || null }

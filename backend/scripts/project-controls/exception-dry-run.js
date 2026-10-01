@@ -121,7 +121,7 @@ const assertReadOnly = async (when) => {
 };
 
 // The engine's own tallies, summed over the projects.
-const engineTotals = { opened: 0, refreshed: 0, resolved: 0, unchanged: 0, suppressed: 0, released: 0 };
+const engineTotals = { opened: 0, refreshed: 0, resolved: 0, unchanged: 0, suppressed: 0, released: 0, notComparable: 0 };
 
 /**
  * What the engine's dry run says it would do with a row (exception-engine
@@ -131,8 +131,9 @@ const engineTotals = { opened: 0, refreshed: 0, resolved: 0, unchanged: 0, suppr
  * carry no change: they are what the rules FIND.
  */
 const OPENING_CHANGES = new Set(["open", "reopen"]);
-// "release": a dismissal whose condition has cleared would be marked released (PC-7b integration F).
-const ENGINE_CHANGES = Object.freeze(["open", "reopen", "refresh", "unchanged", "resolve", "suppressed", "release"]);
+// "release": a dismissal whose condition has cleared would be marked released (PC-7b integration F);
+// "not_comparable": an open row the rule can no longer measure would be resolved so (G), never cleared.
+const ENGINE_CHANGES = Object.freeze(["open", "reopen", "refresh", "unchanged", "resolve", "suppressed", "release", "not_comparable"]);
 
 /** One project's rows: the engine's dry-run rows (each with its change), or each data-quality rule's own answer. */
 const evaluationRows = async ({ orgId, projectId, cutoff }) => {
@@ -210,10 +211,10 @@ const TICK_PROJECTS = Object.freeze({ status: "active", archivedAt: null });
     };
   };
   if (engine) {
-    console.log("\n| kind | rows it would open (new + reopened) | projects | of which reopened | refresh | unchanged | resolve | suppressed (dismissed) | dismissals released |\n|---|---|---|---|---|---|---|---|---|");
+    console.log("\n| kind | rows it would open (new + reopened) | projects | of which reopened | refresh | unchanged | resolve | suppressed (dismissed) | dismissals released | not comparable |\n|---|---|---|---|---|---|---|---|---|---|");
     for (const kind of kinds) {
       const s = kindSummary(kind);
-      console.log(`| ${kind} | ${s.wouldOpen} | ${s.projects} | ${s.reopen} | ${s.refresh} | ${s.unchanged} | ${s.resolve} | ${s.suppressed} | ${s.release} |`);
+      console.log(`| ${kind} | ${s.wouldOpen} | ${s.projects} | ${s.reopen} | ${s.refresh} | ${s.unchanged} | ${s.resolve} | ${s.suppressed} | ${s.release} | ${s.not_comparable} |`);
     }
     console.log(`\nengine tallies (dry run, nothing written): ${JSON.stringify(engineTotals)}`);
   } else {
