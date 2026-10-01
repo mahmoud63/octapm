@@ -36,7 +36,16 @@ const assertions = [
       'WorkflowDecisionDialog',
       'BOQ:',
       'Locked',
+      // R5-5 (PC-7b): the server's related records, linked to the PC-5 drawers.
+      'relatedRecords',
+      'RelatedActivitiesCell',
+      'RelatedBoqItemsCell',
+      'RecordLink',
+      'via allocation',
+      'boqWithheld',
     ],
+    // Never "No activity" when the server says the order reaches one indirectly.
+    forbidden: ["'No activity'"],
   },
   {
     file: 'src/features/commercial/components/ipc-workbook.tsx',
@@ -109,6 +118,11 @@ for (const assertion of assertions) {
   for (const check of assertion.checks) {
     if (!source.includes(check)) {
       throw new Error(`${assertion.file} is missing ${check}`)
+    }
+  }
+  for (const banned of assertion.forbidden || []) {
+    if (source.includes(banned)) {
+      throw new Error(`${assertion.file} still contains ${banned}`)
     }
   }
 }

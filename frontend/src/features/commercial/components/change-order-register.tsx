@@ -9,6 +9,7 @@ import {
   AuditHistoryPanel,
   HistoryPanel,
 } from '@/features/audit/components/audit-history-panel'
+import { RecordLink } from '@/features/controls/components/detail-parts'
 import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
 import type { ScheduleActivity } from '@/features/schedule/data/schema'
 import {
@@ -96,6 +97,114 @@ function CoBadge({ status }: { status: string }) {
     >
       {changeOrderStatusLabel(status)}
     </span>
+  )
+}
+
+/**
+ * The activities a change order reaches (PC-7b, R5-5), as the server composed
+ * them: one row per activity, each a link to its drawer, the ones reached
+ * only through a BOQ allocation marked. What the server withheld from a
+ * member who may not read the BOQ is "—" with its reason — never "None",
+ * which is said only of an order that truly reaches nothing.
+ */
+function RelatedActivitiesCell({ order }: { order: ChangeOrderRecord }) {
+  const related = order.relatedRecords
+  if (!related) return <span className='text-muted-foreground'>—</span>
+  const withheld = related.boqWithheld
+  return (
+    <div
+      className='flex flex-col gap-1'
+      data-testid={`co-related-activities-${order.id}`}
+    >
+      {related.activities.map((activity) => (
+        <span
+          key={activity.id}
+          className='flex max-w-60 items-center gap-1'
+          data-relation={activity.relation}
+        >
+          <RecordLink
+            href={activity.href}
+            testId={`co-related-activity-${order.id}-${activity.id}`}
+            className='min-w-0 truncate'
+          >
+            <span className='truncate'>
+              {activity.code ? `${activity.code} · ` : ''}
+              {activity.name || activity.id}
+            </span>
+          </RecordLink>
+          {activity.relation === 'via_allocation' && (
+            <span
+              className='shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground'
+              title='Reached through a BOQ allocation linked to this change order'
+            >
+              via allocation
+            </span>
+          )}
+        </span>
+      ))}
+      {related.activities.length === 0 && !withheld && (
+        <span
+          className='text-muted-foreground'
+          data-testid={`co-related-activities-none-${order.id}`}
+        >
+          None
+        </span>
+      )}
+      {withheld && (
+        <span
+          className='max-w-60 truncate text-muted-foreground'
+          title={withheld.reason}
+          data-testid={`co-related-activities-withheld-${order.id}`}
+        >
+          — {withheld.reason}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** The BOQ items a change order's allocation links name, each a link to its drawer; "—" with the reason when withheld. */
+function RelatedBoqItemsCell({ order }: { order: ChangeOrderRecord }) {
+  const related = order.relatedRecords
+  if (!related) return <span className='text-muted-foreground'>—</span>
+  if (related.boqWithheld || !related.boqItems) {
+    const reason = related.boqWithheld?.reason
+    return (
+      <span
+        className='block max-w-48 truncate text-muted-foreground'
+        title={reason}
+        data-testid={`co-related-boq-withheld-${order.id}`}
+      >
+        —{reason ? ` ${reason}` : ''}
+      </span>
+    )
+  }
+  if (related.boqItems.length === 0) {
+    return (
+      <span
+        className='text-muted-foreground'
+        data-testid={`co-related-boq-none-${order.id}`}
+      >
+        None
+      </span>
+    )
+  }
+  return (
+    <div
+      className='flex flex-col gap-1'
+      data-testid={`co-related-boq-${order.id}`}
+    >
+      {related.boqItems.map((item) => (
+        <span key={item.id} title={item.description || undefined}>
+          <RecordLink
+            href={item.href}
+            testId={`co-related-boq-item-${order.id}-${item.id}`}
+          >
+            {item.code || item.description || item.id}
+          </RecordLink>
+        </span>
+      ))}
+    </div>
   )
 }
 
@@ -446,6 +555,8 @@ export function ChangeOrderRegister({
               <th className='p-2 text-left font-medium'>Approved</th>
               <th className='p-2 text-left font-medium'>Raised By</th>
               <th className='p-2 text-right font-medium'>Actions</th>
+              <th className='p-2 text-left font-medium'>Activities</th>
+              <th className='p-2 text-left font-medium'>BOQ items</th>
               <th className='p-2 text-left font-medium'>Trace</th>
             </tr>
           </thead>
@@ -453,7 +564,7 @@ export function ChangeOrderRegister({
             {filteredOrders.length === 0 ? (
               <tr>
                 <td
-                  colSpan={11}
+                  colSpan={13}
                   className='p-6 text-center text-muted-foreground'
                 >
                   No change orders match the current dashboard filter.
@@ -642,13 +753,14 @@ export function ChangeOrderRegister({
                       </Button>
                     </div>
                   </td>
+                  <td className='p-2 align-top text-xs'>
+                    <RelatedActivitiesCell order={order} />
+                  </td>
+                  <td className='p-2 align-top text-xs'>
+                    <RelatedBoqItemsCell order={order} />
+                  </td>
                   <td className='p-2 text-xs'>
                     <div className='flex flex-col gap-1'>
-                      <span className='max-w-44 truncate font-medium'>
-                        {order.activityLinks?.[0]?.activity?.name ||
-                          order.activity?.name ||
-                          'No activity'}
-                      </span>
                       {order.activityLinks?.slice(0, 2).map((link) => (
                         <span
                           key={link.id || link.activityId}

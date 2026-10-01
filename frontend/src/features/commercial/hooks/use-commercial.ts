@@ -131,6 +131,37 @@ export interface AllocationTraceLink {
   boqItem?: TraceBoqItem | null
 }
 
+/**
+ * What a change order reaches (PC-7b, owner decision R5-5), composed by the
+ * server from its links: one row per activity with its strongest relation,
+ * and the BOQ items its allocation links name, each with the path that opens
+ * its PC-5 drawer. For a member who may not read the BOQ there is no
+ * boqItems key and no via_allocation row, and boqWithheld says why.
+ */
+export interface ChangeOrderRelatedActivity {
+  id: string
+  code: string | null
+  name: string | null
+  relation: 'direct' | 'activity_link' | 'via_allocation'
+  impactDays?: number
+  href: string | null
+}
+
+export interface ChangeOrderRelatedBoqItem {
+  id: string
+  code: string | null
+  description: string | null
+  unitCode: string | null
+  relation: 'allocation_link'
+  href: string | null
+}
+
+export interface ChangeOrderRelatedRecords {
+  activities: ChangeOrderRelatedActivity[]
+  boqItems?: ChangeOrderRelatedBoqItem[]
+  boqWithheld?: { keys: string[]; reason: string }
+}
+
 export interface ChangeOrderRecord {
   id: string
   projectId: string
@@ -163,6 +194,7 @@ export interface ChangeOrderRecord {
   } | null
   activityLinks?: ActivityTraceLink[]
   allocationLinks?: AllocationTraceLink[]
+  relatedRecords?: ChangeOrderRelatedRecords
   correspondenceLinks?: CommercialCorrespondenceLink[]
   attachmentRefs?: CommercialAttachmentRef[]
   supportingDocumentIds?: string[]
