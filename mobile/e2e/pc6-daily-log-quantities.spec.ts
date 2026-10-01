@@ -88,6 +88,26 @@ interface Fixture {
 
 let fx: Fixture | null = null
 
+/**
+ * The organisation registered by beforeAll, recorded the moment sign-up
+ * succeeds — before anything that could still fail — so that it is dropped
+ * whether the rest of the fixture was built or threw halfway: a fixture
+ * failure after sign-up must not leave a "LiveTest <uuid>" organisation on
+ * the shared database. Dropping it once clears the record, so the drop in
+ * beforeAll's failure path and the one in afterAll cannot double up.
+ */
+let registeredOrgId: string | null = null
+const dropRegisteredOrg = () => {
+  const orgId = registeredOrgId
+  if (!orgId) return
+  registeredOrgId = null
+  try {
+    liveOrg('drop', orgId)
+  } catch (error) {
+    process.stderr.write(`[e2e] ${String(error)}\n`)
+  }
+}
+
 test.beforeAll(async ({ request }) => {
   test.setTimeout(300_000)
   const id = crypto.randomUUID()
@@ -96,8 +116,19 @@ test.beforeAll(async ({ request }) => {
   expect(registered.status, `register: ${JSON.stringify(registered.body?.error)}`).toBe(201)
   const user = registered.body!.data!.user as { id: string; orgId: string }
   const adminToken = (registered.body!.data!.tokens as { accessToken: string }).accessToken
-  liveOrg('activate', user.orgId)
-  await must(request, 'post', `/organisations/${user.orgId}/convert`, adminToken)
+  registeredOrgId = user.orgId
+  try {
+    fx = await buildFixture(request, { id, orgId: user.orgId, adminToken })
+  } catch (error) {
+    dropRegisteredOrg()
+    throw error
+  }
+})
+
+/** Everything after sign-up: the plan, the project, the schedule, the BOQ row and its allocation, the three members. */
+async function buildFixture(request: APIRequestContext, { id, orgId, adminToken }: { id: string; orgId: string; adminToken: string }): Promise<Fixture> {
+  liveOrg('activate', orgId)
+  await must(request, 'post', `/organisations/${orgId}/convert`, adminToken)
 
   const project = await must(request, 'post', '/projects', adminToken, { name: `PC6 quantities ${Date.now()}`, type: 'building', startDate: '2026-01-05', endDate: '2026-12-18' }, 201)
   const projectId = project.id as string
@@ -144,16 +175,11 @@ test.beforeAll(async ({ request }) => {
   const day = (await must(request, 'get', `/projects/${projectId}/daily-logs/${localDay(new Date())}`, siteToken)) as { sections?: Record<string, unknown> }
   const sectionOnServer = !!day.sections && 'quantities' in day.sections
 
-  fx = { orgId: user.orgId, adminToken, projectId, activityId: activity!.id, activityName: activity!.name, boqItemId, itemDescription: 'Blockwork 200 mm to external walls', siteEmail: site.email, siteToken, noBoqEmail: noBoq.email, financeEmail: finance.email, sectionOnServer }
-})
+  return { orgId, adminToken, projectId, activityId: activity!.id, activityName: activity!.name, boqItemId, itemDescription: 'Blockwork 200 mm to external walls', siteEmail: site.email, siteToken, noBoqEmail: noBoq.email, financeEmail: finance.email, sectionOnServer }
+}
 
 test.afterAll(() => {
-  if (!fx) return
-  try {
-    liveOrg('drop', fx.orgId)
-  } catch (error) {
-    process.stderr.write(`[e2e] ${String(error)}\n`)
-  }
+  dropRegisteredOrg()
 })
 
 /** Sign in on the field app; the one project is chosen when the server lists it. */
@@ -177,6 +203,30 @@ const quantitiesRoute = (projectId: string) => `/projects/${projectId}/daily-log
 const rowsWithKey = async (request: APIRequestContext, key: string) => {
   const day = (await must(request, 'get', `/projects/${fx!.projectId}/daily-logs/${localDay(new Date())}`, fx!.adminToken)) as { sections: { quantities?: { id: string; clientRequestId: string | null; quantity: number; unitCode?: string | null; boqItemId?: string | null; activityId?: string | null }[] } }
   return (day.sections.quantities ?? []).filter((row) => row.clientRequestId === key)
+}
+
+type Figure = { value: number | string | null; unitCode: string | null; notAvailable?: { reason: string } | null }
+
+/** The first few words of a reason, enough to tell the server's sentence from the app's "Not available". */
+const opening = (reason: string) => reason.split(/\s+/).slice(0, 5).join(' ')
+
+/** Each of the six lines on the activity screen against the figure the server gave for it (or the whole answer's withholding). */
+async function expectFigureLines(page: Page, figures: Record<string, Figure | null>, withheldReason: string | null) {
+  await expect(page.getByTestId('activity-quantities')).toBeVisible()
+  for (const key of ['received', 'issued', 'installed', 'certified', 'paid', 'committed']) {
+    const line = page.getByTestId(`activity-quantity-${key}`)
+    const figure = figures[key] ?? null
+    const reason = figure?.notAvailable?.reason ?? (figure == null ? withheldReason : null) ?? withheldReason
+    if (reason) {
+      await expect(line, key).toContainText('—')
+      await expect(line, `${key}: the server's reason`).toContainText(opening(reason))
+      await expect(line, `${key}: never a zero in place of a withheld figure`).not.toContainText(/\b0\b/)
+    } else {
+      expect(figure?.value, `${key}: a served figure has a value`).not.toBeNull()
+      await expect(line, `${key}: the figure in its unit`).toContainText(`${Number(figure!.value)}${figure!.unitCode ? ` ${figure!.unitCode}` : ''}`)
+      await expect(line, `${key}: no dash for a served figure`).not.toContainText('—')
+    }
+  }
 }
 
 test.describe('PC-6: quantities installed, recorded from site', () => {
@@ -276,8 +326,15 @@ test.describe('PC-6: quantities installed, recorded from site', () => {
       expect(mine[0]).toMatchObject({ source: 'daily_log', status: 'submitted' })
       expect(Number(mine[0]!.quantity)).toBe(25)
     }
-    const activity = (await must(request, 'get', `/projects/${fx!.projectId}/activities/${fx!.activityId}`, fx!.adminToken)) as { pctComplete: number | null }
-    expect(activity.pctComplete ?? 0).toBe(0)
+    // The server answers pctComplete 0 for an activity with no approved
+    // ActivityProgress at all (activity.service sanitizeActivity), so a 0 %
+    // cannot tell "no approved row" from "an approved 0 %": the approved
+    // row's own stamp and source say whether one exists, and the approval
+    // status must not read approved.
+    const activity = (await must(request, 'get', `/projects/${fx!.projectId}/activities/${fx!.activityId}`, fx!.adminToken)) as { pctComplete: number | null; approvedProgressUpdatedAt: string | null; approvedProgressSource: string | null; progressApprovalStatus: string | null }
+    expect(activity.approvedProgressUpdatedAt, 'no ActivityProgress row was approved by the capture').toBeNull()
+    expect(activity.approvedProgressSource).toBeNull()
+    expect(activity.progressApprovalStatus).not.toBe('approved')
   })
 
   test('the activity screen names PROGRESS SOURCE and counts the quantities awaiting approval', async ({ page, request }) => {
@@ -292,6 +349,39 @@ test.describe('PC-6: quantities installed, recorded from site', () => {
     } else {
       const count = items(register.body!.data as unknown as { items?: unknown[] } | unknown[]).length
       await expect(page.getByTestId('activity-pending-quantities')).toContainText(`${count} quantit${count === 1 ? 'y' : 'ies'} awaiting approval`)
+    }
+
+    // The five figures and the committed one, line by line against the
+    // server's own answer (views: the figures sit under `figures`): a figure
+    // the server gave is printed in its unit — a genuine 0 included — and
+    // one it did not carries a dash and the server's reason, never the
+    // app's own sentence and never a zero.
+    const figuresAnswer = await call(request, 'get', `/projects/${fx!.projectId}/activities/${fx!.activityId}/quantities`, { token: fx!.siteToken })
+    if (figuresAnswer.status === 404) {
+      await expect(page.getByTestId('activity-quantities')).toHaveCount(0)
+      test.info().annotations.push({ type: 'skipped-assertion', description: 'no quantity views on this server yet: the figures card is (rightly) absent' })
+    } else {
+      expect(figuresAnswer.status).toBe(200)
+      const served = figuresAnswer.body!.data as { figures?: Record<string, Figure | null>; withheld?: boolean; reason?: string }
+      expect(served.withheld, 'the site engineer may read the BOQ').toBeFalsy()
+      expect(served.figures, 'the server folds the figures under `figures`').toBeTruthy()
+      await expectFigureLines(page, served.figures!, null)
+    }
+
+    // A member the server withholds the bill from: every line a dash with the server's reason.
+    if (figuresAnswer.status !== 404) {
+      await page.goto('/more')
+      await page.getByTestId('sign-out').click()
+      await expect(page.getByTestId('sign-in-submit')).toBeVisible()
+      await signIn(page, fx!.noBoqEmail)
+      await page.goto(`/activities/${fx!.activityId}`)
+      await expect(page.getByTestId('screen-activity')).toBeVisible()
+      const noBoqLogin = await call(request, 'post', '/auth/login', { data: { email: fx!.noBoqEmail, password: PASSWORD } })
+      const noBoqToken = (noBoqLogin.body!.data!.tokens as { accessToken: string }).accessToken
+      const withheld = (await must(request, 'get', `/projects/${fx!.projectId}/activities/${fx!.activityId}/quantities`, noBoqToken)) as { figures?: Record<string, Figure | null>; withheld?: boolean; reason?: string }
+      expect(withheld.withheld, 'the server withholds the bill from this member').toBe(true)
+      expect(withheld.reason).toBeTruthy()
+      await expectFigureLines(page, withheld.figures ?? {}, withheld.reason!)
     }
   })
 
