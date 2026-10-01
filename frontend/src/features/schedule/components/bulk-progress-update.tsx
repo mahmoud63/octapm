@@ -96,10 +96,21 @@ const errorBatchFrom = (error: unknown) =>
 // method. The schedule payload does not carry it, so the screen reads the
 // register; an activity whose method has not been read is not offered either
 // (never assumed to be percent).
+//
+// The milestone method is respected like quantity (2026-10-01): the server
+// refuses a bare percentage against configured weighted milestones (400
+// MILESTONES_REQUIRED), and an inspection is measured by its result. So a
+// percentage is offered only for an activity measured by percent or manual;
+// every other method is listed disabled with its own reason.
 const QUANTITY_METHOD_REASON =
   'Measured by quantity — record installed quantities in the daily log or the Progress tab'
+const MILESTONE_METHOD_REASON =
+  'Measured by weighted milestones — mark the milestones complete in the Progress tab'
+const INSPECTION_METHOD_REASON =
+  'Measured by inspection — record the inspection result in the Progress tab'
 const METHOD_NOT_READ_REASON =
   'Progress method not read from the server yet — not offered for a percentage update'
+const PERCENTAGE_METHODS = new Set(['percent', 'manual'])
 
 const effectiveMethodOf = (activity: ScheduleActivity): string | null =>
   activity.progressMethodConfig?.method || activity.progressMethod || null
@@ -109,7 +120,10 @@ const percentageRefusalOf = (activity: ScheduleActivity): string | null => {
   const method = effectiveMethodOf(activity)
   if (method === 'quantity') return QUANTITY_METHOD_REASON
   if (!method) return METHOD_NOT_READ_REASON
-  return null
+  if (PERCENTAGE_METHODS.has(method)) return null
+  if (method === 'weighted_milestone') return MILESTONE_METHOD_REASON
+  if (method === 'inspection') return INSPECTION_METHOD_REASON
+  return `Measured by ${method} — not offered for a percentage update`
 }
 
 const activityLabel = (activity: ScheduleActivity) =>
@@ -171,7 +185,7 @@ export function BulkProgressUpdate({
       )
     )
   }, [activities, assignmentOverride, currentUserId])
-  // Offered for a percentage: listed, and not measured by quantity.
+  // Offered for a percentage: listed, and measured by percent or manual.
   const selectableActivityIds = useMemo(
     () =>
       new Set(
@@ -262,7 +276,7 @@ export function BulkProgressUpdate({
                         data-testid={`uat-bulk-progress-disabled-${activity.id}`}
                       >
                         {notOffered}
-                        {effectiveMethodOf(activity) === 'quantity' &&
+                        {effectiveMethodOf(activity) !== null &&
                           progressTabLink && (
                             <>
                               {' · '}

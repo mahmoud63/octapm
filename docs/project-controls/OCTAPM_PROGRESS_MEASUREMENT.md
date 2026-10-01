@@ -247,6 +247,24 @@ bundles entries, and approving it is what approves them:
   Proven live (`pc-6-method-authority`, the screed: every shape refused with the footprint and EV byte-identical,
   the official 25% standing, a hollow submission seeded in the queue refused by the writer) and mutation-proven (the
   check removed where the submission is made, and in the writer, each fail).
+- **The milestone method is respected like quantity** (integration decision, 2026-10-01, under the owner rule "the
+  activity's progress method is respected"). On an activity configured `weighted_milestone` with weighted milestones a
+  submission carrying no milestone state — `{ pctComplete: 60 }`, with or without the method named — was recorded as a
+  milestone submission whose percentage `calculateProgressPercent` worked from the configured milestones alone (0% when
+  none is marked complete): the client's percentage silently replaced, and its approval made that official.
+  `assertMilestoneStateStated` refuses it where it is made (`buildSubmissionData` — every path, a draft too, bulk
+  included) and, for one already in the queue, in the writer: 400 `MILESTONES_REQUIRED` `{ activityId, method,
+  milestones: [{ id, name }] }` (+ `submissionId` at approval). A configuration with no weighted milestone, and an
+  activity with no configured method, take the percentage as before. The inspection method was read for the same
+  silent replacement and has none (no result sent → the typed percentage; `failed` → 0 is a stated result), so it is
+  unchanged; `inspectionRequired` on the configuration is stored and served but enforced nowhere (owner finding). The
+  web's Progress tab and the mobile ProgressSheet always send every configured milestone with its state, so neither
+  is refused; the web's bulk screen offers a percentage only for an activity measured by percent or manual (milestone,
+  inspection and any other method listed disabled with its reason and the Progress tab link). Proven live
+  (`pc-6-method-authority`: every shape refused, bulk named, footprint and EV byte-identical, a queued one refused by
+  the writer, a stated one approved at 70%), by unit (`progress.service.test.js`) and the source check
+  (`quantity-progress-ui.test.mjs`); mutation-proven (the rule removed where the submission is made, in the writer,
+  and the screen's guard — each fails).
 - **A refused batch writes nothing** (verification fix, 2026-10-01). `POST /activities/bulk-progress` made its
   submissions one at a time, each in its own transaction; with the refusals above an ordinary batch (one activity
   measured by quantity among percent ones) answered 409 for the whole call after the earlier updates were written,

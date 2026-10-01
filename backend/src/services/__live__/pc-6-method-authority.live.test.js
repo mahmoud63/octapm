@@ -89,6 +89,15 @@
  * with its transition, status, source and provenance and none of those
  * figures (boqWithheld names what was left out); the PM's history is whole.
  *
+ * The milestone method is respected like quantity (integration decision
+ * under the owner rule "the activity's method is respected"): on an
+ * activity configured weighted_milestone with weighted milestones, a
+ * percentage with no milestone state — named or not, through bulk-progress
+ * too — is 400 MILESTONES_REQUIRED, never recorded at a figure worked from
+ * the configuration; one already in the queue is refused by the writer;
+ * a submission stating its milestones is recorded and approved at their
+ * weighted figure.
+ *
  *   DATABASE_CONNECTION_LIMIT=4 npm run test:live -- src/services/__live__/pc-6-method-authority.live.test.js
  */
 const { prisma } = require("../../config/db");
@@ -107,6 +116,7 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
   let kerb;
   let late;
   let screed;
+  let milestones;
   let site;
   let auditor;
   const bearer = (token) => ({ authorization: `Bearer ${token}` });
@@ -171,12 +181,14 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     kerb = await activity({ name: "Kerbs (typed)", activityCode: "A150", duration: 2, startDate: "2026-03-09", endDate: "2026-03-10", engineerIds: [live.user.id, site.id] });
     late = await activity({ name: "Late pour (configured after a percent submission)", activityCode: "A160", duration: 3, startDate: "2026-03-16", endDate: "2026-03-18", engineerIds: [live.user.id, site.id] });
     screed = await activity({ name: "Screed (a quantity submission states a quantity)", activityCode: "A170", duration: 3, startDate: "2026-03-23", endDate: "2026-03-25", engineerIds: [live.user.id, site.id] });
+    milestones = await activity({ name: "Steel erection (weighted milestones)", activityCode: "A180", duration: 5, startDate: "2026-03-30", endDate: "2026-04-03", engineerIds: [live.user.id, site.id] });
     for (const [row, quantity, configured = true] of [[pour, 100], [slab, 100], [slab2, 100], [kerb, 50], [late, 100, false], [screed, 100]]) {
       const allocation = await api.post(at("/activity-boq-allocations"), { boqItemId: concrete.id, activityId: row.id, quantity }, bearer(live.token));
       ok(allocation, 201);
       for (const step of ["submit", "approve"]) ok(await api.post(at(`/activity-boq-allocations/${allocation.body.data.id}/${step}`), {}, bearer(live.token)));
       if (configured) ok(await api.request("PUT", at(`/activities/${row.id}/progress-method`), { body: { method: "quantity", quantityUnit: "m3" }, headers: bearer(live.token) }));
     }
+    ok(await api.request("PUT", at(`/activities/${milestones.id}/progress-method`), { body: { method: "weighted_milestone", milestoneWeights: [{ id: "columns", name: "Columns", weight: 40 }, { id: "beams", name: "Beams", weight: 60 }] }, headers: bearer(live.token) }));
     // The pre-PC-6 state, exactly as the database holds it: an approved row
     // typed the legacy way — a quantityComplete, no submission, no entry.
     for (const row of [slab, slab2]) {
@@ -620,5 +632,42 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     const percentIds = new Set(fullSubmissions.filter((event) => (event.newSummary || event.summary)?.method === "percent").map((event) => event.id));
     expect(percentIds.size).toBeGreaterThan(0);
     for (const event of submissions.filter((row) => percentIds.has(row.id))) expect(event).toEqual(fullSubmissions.find((row) => row.id === event.id));
+  });
+  it("the milestone method is respected like quantity: a percentage with no milestone state is 400 MILESTONES_REQUIRED on every path, never recorded at a figure worked from the configuration; the writer refuses one in the queue; a submission stating its milestones is recorded and approved at their weighted figure", async () => {
+    const evBefore = await evReport();
+    const before = await footprint();
+    const configured = [{ id: "columns", name: "Columns" }, { id: "beams", name: "Beams" }];
+    for (const payload of [{ pctComplete: 60 }, { method: "weighted_milestone", pctComplete: 60 }, { pctComplete: 60, status: "draft" }, { method: "weighted_milestone", milestones: [] }]) {
+      const answer = await submit(milestones.id, payload, site.token);
+      refused(answer, 400, "MILESTONES_REQUIRED");
+      expect(answer.body.error.details).toEqual({ activityId: milestones.id, method: "weighted_milestone", milestones: configured });
+      expect(answer.body.error.message).toMatch(/measured by weighted milestones \(2 configured\).*a percentage is not a milestone state/);
+    }
+    const bulk = await api.post(at("/activities/bulk-progress"), { updates: [{ activityId: wall.id, pctComplete: 15 }, { activityId: milestones.id, pctComplete: 60 }] }, bearer(site.token));
+    refused(bulk, 400, "MILESTONES_REQUIRED");
+    expect(bulk.body.error.details.batch).toEqual({ index: 1, activityId: milestones.id, updates: 2, written: 0 });
+    // The percent method names itself: not the activity's, refused as before.
+    refused(await submit(milestones.id, { method: "percent", pctComplete: 60 }, site.token), 409, "PROGRESS_METHOD_MISMATCH");
+    expect(await footprint()).toBe(before);
+    expect(await evReport()).toBe(evBefore);
+
+    // One in the queue from before the rule (as the database would hold it): the writer refuses it; nothing official.
+    const queued = await prisma.progressSubmission.create({
+      data: { projectId: project.id, activityId: milestones.id, method: "weighted_milestone", source: "manual", pctComplete: 0, milestoneProgressJson: null, status: "submitted", submittedBy: site.id, submittedAt: new Date(), createdBy: site.id },
+    });
+    const held = await footprint();
+    const refusedApproval = await approve(milestones.id, queued.id);
+    refused(refusedApproval, 400, "MILESTONES_REQUIRED");
+    expect(refusedApproval.body.error.details).toMatchObject({ activityId: milestones.id, submissionId: queued.id });
+    expect(await footprint()).toBe(held);
+    expect(await progressRows(milestones.id)).toHaveLength(0);
+    ok(await api.post(at(`/activities/${milestones.id}/progress-submissions/${queued.id}/reject`), { reason: "LiveTest: states no milestone" }, bearer(live.token)));
+
+    // Stated: recorded and approved at the weighted figure (columns 40 + half the beams 30 = 70).
+    const stated = await submit(milestones.id, { milestones: [{ id: "columns", complete: true }, { id: "beams", pctComplete: 50 }] }, site.token);
+    ok(stated, 200);
+    expect(stated.body.data.submission).toMatchObject({ method: "weighted_milestone", pctComplete: 70 });
+    ok(await approve(milestones.id, stated.body.data.submission.id));
+    expect((await progressRows(milestones.id)).map((row) => [row.progressMethod, row.pctComplete])).toEqual([["weighted_milestone", 70]]);
   });
 });

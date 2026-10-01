@@ -693,6 +693,44 @@ const assertQuantityFigureStated = async ({ orgId, projectId, activityId, quanti
 };
 
 /**
+ * A milestone submission states its milestones (integration decision under
+ * the owner rule "the activity's progress method is respected", 2026-10-01).
+ * On an activity configured weighted_milestone with weighted milestones, a
+ * submission carrying no milestone state — { pctComplete: 60 }, with or
+ * without the method named — was recorded as a milestone submission whose
+ * percentage was worked from the configured milestones alone (0% when none
+ * is marked complete), the client's percentage silently replaced, and its
+ * approval made that official. It is refused instead, where it is made (a
+ * draft too) and — for one already in the queue — in the writer: 400
+ * MILESTONES_REQUIRED naming the configured milestones (id and name). A
+ * configuration with no weighted milestone keeps taking the percentage as
+ * before; so does an activity with no configured method.
+ */
+const configuredMilestonesOf = (methodConfig) => {
+  const rows = normalizeMilestones(methodConfig?.milestoneWeightsJson);
+  const totalWeight = rows.reduce((sum, row) => sum + toNumber(row.weight), 0);
+  return rows.length && totalWeight > 0 ? rows : [];
+};
+
+const assertMilestoneStateStated = ({ activityId, methodConfig, milestones, submissionId = null }) => {
+  const configured = configuredMilestonesOf(methodConfig);
+  if (!configured.length) return;
+  if (normalizeMilestones(milestones).length) return;
+  const outcome = submissionId ? 'approved; reject it and submit the milestones' : 'recorded';
+  throw new HttpError(
+    400,
+    'MILESTONES_REQUIRED',
+    `This activity is measured by weighted milestones (${configured.length} configured); a submission states which milestones are complete (milestones). This one states none — a percentage is not a milestone state — and is not ${outcome}`,
+    {
+      activityId,
+      method: 'weighted_milestone',
+      milestones: configured.map((row, index) => ({ id: String(row.id ?? row.name ?? index), name: row.name ?? row.label ?? null })),
+      ...(submissionId ? { submissionId } : {}),
+    },
+  );
+};
+
+/**
  * The latest official installed figure of the activity when it stands above
  * Σ approved entries: a quantityComplete approved the legacy way (typed, no
  * entries behind it), or a row that itself carried the floor. Installed is
@@ -941,6 +979,11 @@ const buildSubmissionData = async ({
       `Quantity entries are bundled by a quantity-method submission; this one is measured by ${method}`,
       { method },
     );
+  }
+  // The milestone method is respected like quantity: a submission against
+  // configured weighted milestones states their state, never a bare percentage.
+  if (method === 'weighted_milestone' && configRow) {
+    assertMilestoneStateStated({ activityId, methodConfig: configRow, milestones: payload.milestoneProgressJson ?? payload.milestones });
   }
 
   const pctComplete = quantity
@@ -1352,6 +1395,12 @@ const approveProgressSubmissionWithClient = async ({
   // The method rule, asked again where a figure becomes official.
   const configRow = await getMethodConfigRow({ projectId, activityId: submission.activityId }, tx);
   assertSubmissionMethodStands({ submission, configRow });
+  // A milestone submission in the queue that states no milestone (put
+  // forward before the rule) is not made official at a figure worked from
+  // the configuration alone.
+  if (configRow && normalizeMethod(submission.method) === 'weighted_milestone') {
+    assertMilestoneStateStated({ activityId: submission.activityId, methodConfig: configRow, milestones: submission.milestoneProgressJson, submissionId: submission.id });
+  }
   const methodConfig = configRow || (await resolveMethodConfig(
     { projectId, activityId: submission.activityId },
     tx,

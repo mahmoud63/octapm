@@ -186,6 +186,35 @@ match(
   /if \(!method\) return METHOD_NOT_READ_REASON/,
   'an activity whose method has not been read is not assumed to be percent'
 )
+// The milestone method is respected like quantity (2026-10-01): a percentage
+// is offered for percent and manual only; every other method is refused here
+// with its own reason, and the refusal comes before any fall-through.
+match(
+  bulkProgress,
+  /const PERCENTAGE_METHODS = new Set\(\['percent', 'manual'\]\)/,
+  'a percentage is offered for percent and manual only'
+)
+{
+  const body = bulkProgress.slice(
+    bulkProgress.indexOf('const percentageRefusalOf'),
+    bulkProgress.indexOf('const activityLabel')
+  )
+  match(
+    body,
+    /if \(PERCENTAGE_METHODS\.has\(method\)\) return null[\s\S]*if \(method === 'weighted_milestone'\) return MILESTONE_METHOD_REASON[\s\S]*if \(method === 'inspection'\) return INSPECTION_METHOD_REASON[\s\S]*return `Measured by \$\{method\} — not offered for a percentage update`\s*\}/,
+    'milestone, inspection and any other method are refused a percentage, each with its reason'
+  )
+  doesNotMatch(
+    body,
+    /return null\s*\}\s*$/,
+    'the refusal does not fall through to offering a percentage'
+  )
+}
+match(
+  bulkProgress,
+  /'Measured by weighted milestones — mark the milestones complete in the Progress tab'/,
+  'the milestone row says why, and where milestones are marked'
+)
 match(
   bulkProgress,
   /'Measured by quantity — record installed quantities in the daily log or the Progress tab'/,
