@@ -241,7 +241,12 @@ const SPEC_BOQ_WITHHELD = "BOQ coverage is worked from the BOQ's rows, available
 /** An activity as this caller may receive it. */
 const withheldActivity = (activity, access = FULL_ACCESS) => {
   if (access.boq || !activity || typeof activity !== "object") return activity;
-  return withoutKeys(activity, [...ACTIVITY_BOQ_KEYS, ...ACTIVITY_BUDGET_KEYS]);
+  const copy = withoutKeys(activity, [...ACTIVITY_BOQ_KEYS, ...ACTIVITY_BUDGET_KEYS]);
+  // PC-6 (core): the pending submission's quantity figures go the same way.
+  if (copy.pendingProgress && typeof copy.pendingProgress === "object") {
+    return { ...copy, pendingProgress: withheldProgressSubmission(copy.pendingProgress, access) };
+  }
+  return copy;
 };
 
 /**
@@ -1471,6 +1476,27 @@ const withheldQuantityWarning = (warning) => {
   return { ...withoutKeys(warning, keys), boqWithheld: { keys, reason: QUANTITY_ENTRY_WITHHELD } };
 };
 
+// A progress submission's quantity figures (quantityComplete — installed, Σ
+// the entries it bundles plus the approved ones; quantityPlanned — Σ the
+// approved allocations when nothing is typed; the transient `quantity`
+// block that says so) are worked from the bill's rows and the mapping, so
+// they go to BOQ readers only. The submission's percentage, status, method,
+// source, evidence and PROGRESS SOURCE provenance are progress data and stay.
+const PROGRESS_SUBMISSION_BOQ_KEYS = ["quantityComplete", "quantityPlanned", "quantityUnit", "quantity"];
+const PROGRESS_SUBMISSION_WITHHELD =
+  "The quantity figures of a progress submission are available only to members who may read the BOQ";
+
+/** A progress submission (pending, approved or rejected) as this caller may receive it. */
+const withheldProgressSubmission = (submission, access = FULL_ACCESS) => {
+  if (access.boq || !submission || typeof submission !== "object" || Array.isArray(submission)) return submission;
+  const keys = PROGRESS_SUBMISSION_BOQ_KEYS.filter((key) => has(submission, key));
+  if (!keys.length) return submission;
+  return { ...withoutKeys(submission, keys), boqWithheld: { keys, reason: PROGRESS_SUBMISSION_WITHHELD } };
+};
+
+const withheldProgressSubmissions = (submissions, access = FULL_ACCESS) =>
+  access.boq || !Array.isArray(submissions) ? submissions : submissions.map((row) => withheldProgressSubmission(row, access));
+
 /** A list of entries (GET /quantity-progress) as this caller may receive it. */
 const withheldQuantityEntries = (entries, access = FULL_ACCESS) =>
   access.boq || !Array.isArray(entries) ? entries : entries.map((entry) => withheldQuantityEntry(entry, access));
@@ -1495,6 +1521,10 @@ module.exports = {
   withheldQuantityEntry,
   withheldQuantityEntries,
   withheldQuantityEntryResult,
+  PROGRESS_SUBMISSION_BOQ_KEYS,
+  PROGRESS_SUBMISSION_WITHHELD,
+  withheldProgressSubmission,
+  withheldProgressSubmissions,
   ALLOCATION_LINK_BOQ_KEYS,
   ALLOCATION_LINK_WITHHELD,
   withheldAllocationLinks,

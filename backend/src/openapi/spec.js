@@ -1020,6 +1020,11 @@ const components = {
         "QUANTITY_ENTRY_LOCKED",
         "QUANTITY_ENTRY_BUNDLED",
         "QUANTITY_ENTRY_NOT_SUBMITTABLE",
+        // PC-6 (core): approval bundling
+        "QUANTITY_ENTRY_ACTIVITY_MISMATCH",
+        "QUANTITY_NO_ENTRIES_TO_BUNDLE",
+        "QUANTITY_BUNDLE_METHOD_MISMATCH",
+        "PROGRESS_METHOD_LOCKED",
         "PO_LINE_NOT_FOUND",
         "PO_LINES_REQUIRED",
         "PROCUREMENT_ACTIVITY_REQUIRED",
@@ -5150,13 +5155,34 @@ const components = {
         type: "string",
         enum: ["manual", "import", "mobile", "daily_report"],
       },
-      quantityComplete: nonNegativeNumber,
-      quantityPlanned: nonNegativeNumber,
+      quantityComplete: {
+        ...nonNegativeNumber,
+        description:
+          "Quantity method, typed the old way (no entries bundled): the cumulative installed quantity. Ignored when entries are bundled — installed is then Σ the bundled entries + the entries already approved on the activity.",
+      },
+      quantityPlanned: {
+        ...nonNegativeNumber,
+        description:
+          "Quantity method: counted only when the activity has neither a typed planned quantity on its method configuration nor an approved allocation (the answer's quantity.plannedBasis says 'client'). Otherwise the typed figure (basis method_config), else Σ approved allocation quantity (basis approved_allocations), is the planned quantity and this value is ignored (quantity.clientQuantityPlannedIgnored).",
+      },
       quantityUnit: { type: "string" },
       milestones: arrayOf(ref("GenericObject")),
       inspectionStatus: { type: "string" },
       evidence: ref("GenericObject"),
       notes: { type: "string" },
+      entryIds: {
+        type: "array",
+        maxItems: 500,
+        items: uuid,
+        description:
+          "PC-6: quantity entries this submission bundles — each on this activity, draft or submitted, in no other open submission (404 QUANTITY_ENTRY_NOT_FOUND, 400 QUANTITY_ENTRY_ACTIVITY_MISMATCH, 409 QUANTITY_ENTRY_LOCKED, 409 QUANTITY_ENTRY_BUNDLED). Quantity method only (400 QUANTITY_BUNDLE_METHOD_MISMATCH). The entries are submitted with the submission, approved or rejected with it.",
+      },
+      bundleSubmittedThrough: {
+        type: "string",
+        format: "date",
+        description:
+          "PC-6: also bundle every submitted entry of the activity dated on or before this day that no open submission holds. With neither this nor entryIds the submission is typed the old way; with either and nothing free to bundle, 400 QUANTITY_NO_ENTRIES_TO_BUNDLE.",
+      },
     }),
     BulkProgressRequest: objectSchema(
       {
@@ -5179,6 +5205,8 @@ const components = {
             evidence: ref("GenericObject"),
             notes: { type: "string" },
             milestones: arrayOf(ref("GenericObject")),
+            entryIds: { type: "array", maxItems: 500, items: uuid, description: "PC-6: the quantity entries to bundle (see ProgressPayload)." },
+            bundleSubmittedThrough: { type: "string", format: "date", description: "PC-6: bundle every free submitted entry dated on or before this day (see ProgressPayload)." },
           }),
         ),
       },
@@ -8849,7 +8877,7 @@ add(
     tag: "Progress",
     summary: "Submit progress for an activity. EV updates only after approval.",
     description:
-      "Creates a progress submission for one activity. Site and field users must be assigned to the activity before submitting; PM and Planning Engineer project roles may override assignment. Unassigned users receive 403 ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED and EV remains unchanged until an authorized submission is approved.",
+      "Creates a progress submission for one activity. Site and field users must be assigned to the activity before submitting; PM and Planning Engineer project roles may override assignment. Unassigned users receive 403 ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED and EV remains unchanged until an authorized submission is approved. PC-6: a quantity-method submission's figures are DERIVED, never typed over what the planner mapped — planned = the typed method-configuration figure (basis method_config), else Σ approved allocation quantity of the activity (basis approved_allocations), else the client's quantityPlanned (basis client; without one 400 PLANNED_QUANTITY_REQUIRED); with entryIds / bundleSubmittedThrough, installed = Σ the bundled entries + the entries already approved on the activity, in one unit (400 QUANTITY_UNIT_MISMATCH otherwise), and the entries are submitted with the submission (status submitted, submissionId) — an entry belongs to at most one open submission. The answer's quantity block says which basis each figure has and whether a client-sent quantityPlanned was ignored; quantityEntryIds and progressSource (PROGRESS SOURCE provenance) are on every submission. Percent, milestone, inspection and manual submissions are unchanged.",
     operationId: "submitActivityProgress",
     parameters: projectRecordParams,
     permissions: modulePermission("progress", "submit", "submission.submit"),
@@ -8878,6 +8906,8 @@ add(
   operation({
     tag: "Progress",
     summary: "Configure progress method for an activity.",
+    description:
+      "Writes (upserts) the activity's progress method row. PC-6: an activity with approved progress keeps the method it was measured by — its configured method, else the method its latest official figure was approved under, else percent — and naming another is 409 PROGRESS_METHOD_LOCKED with { effectiveMethod, effectiveMethodBasis, requestedMethod, approvedProgressCount }; a row naming that same method (with a planned quantity, unit, evidence or inspection flags) is still written, which is how an activity measured under the default clears PROGRESS_METHODS_INCOMPLETE in setup readiness.",
     operationId: "configureActivityProgressMethod",
     parameters: projectRecordParams,
     permissions: modulePermission("progress", "update", "method.configure"),
@@ -8913,6 +8943,7 @@ add(
     "Approve an activity progress submission.",
     "submission.approve",
     undefined,
+    "The one writer of official progress: the evidence gate, the open ITP hold points and the review authority apply, and exactly one new ActivityProgress row is written (an earlier approved row is never changed). PC-6: a quantity-method submission that bundles quantity entries approves exactly those entries in the same transaction (approvedBy/approvedAt), and its figures are read again at this moment — installed = Σ approved entries on the activity (the bundle included), planned = the typed method-configuration figure, else Σ approved allocation quantity — so the row's pctComplete = installed ÷ planned, clamped to 0..100, with the frozen quantities on the row; the answer carries the transient quantity block (installed, planned, unitCode, plannedBasis, installedBasis, bundledEntries) and approvedProgressId. The submission's progressSource (PROGRESS SOURCE provenance: source, submissionId, dailyLogId, importDocumentId, submittedBy, approvedBy, approvedAt, entries) is on every answer, additive beside the string fields. For a caller who may not read the BOQ the quantity figures are withheld (boqWithheld).",
   ],
   [
     "reject",
@@ -8920,14 +8951,16 @@ add(
     "Reject an activity progress submission.",
     "submission.reject",
     ref("RejectRequest"),
+    "Nothing official is written. PC-6: the quantity entries the submission bundles are marked rejected with it (rejectedBy/rejectedAt and the reason) — a correction is a new entry; an entry is never edited back.",
   ],
-].forEach(([suffix, operationId, summary, transition, bodySchema]) => {
+].forEach(([suffix, operationId, summary, transition, bodySchema, description]) => {
   add(
     `/projects/{projectId}/activities/{id}/progress-submissions/{submissionId}/${suffix}`,
     "post",
     operation({
       tag: "Progress",
       summary,
+      description,
       operationId,
       parameters: [
         ...projectRecordParams,

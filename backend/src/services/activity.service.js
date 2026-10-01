@@ -69,6 +69,24 @@ const activityInclude = {
     where: { status: 'approved' },
     orderBy: { updatedAt: 'desc' },
     take: 1,
+    // PC-6: the submission that made the figure official, for its PROGRESS
+    // SOURCE provenance (who put it forward, the daily log it came through,
+    // the quantity entries it bundled). Null for a row whose link SET NULL.
+    include: {
+      submission: {
+        select: {
+          id: true,
+          source: true,
+          status: true,
+          submittedBy: true,
+          submittedAt: true,
+          reviewedBy: true,
+          reviewedAt: true,
+          dailyReportId: true,
+          quantityEntries: { select: { id: true, status: true, dailyLogId: true } },
+        },
+      },
+    },
   },
   assignments: {
     include: { user: { select: { id: true, name: true, email: true } } },
@@ -110,6 +128,7 @@ const activityInclude = {
     where: { status: { in: ['draft', 'submitted'] } },
     orderBy: { updatedAt: 'desc' },
     take: 1,
+    include: { quantityEntries: { select: { id: true, status: true, dailyLogId: true } } },
   },
 };
 
@@ -213,6 +232,8 @@ const sanitizeActivity = (activity, allocationTotals = null, project = null) => 
     actualFinish: latestProgress?.actualFinish ?? null,
     approvedProgressUpdatedAt: latestProgress?.updatedAt ?? null,
     approvedProgressSource: latestProgress?.source ?? null,
+    // PC-6: the structured PROGRESS SOURCE of the official figure (additive).
+    progressSource: progressService.serializeProgressSource(latestProgress),
     progressMethod:
       activity.progressMethod?.method ||
       latestProgress?.progressMethod ||

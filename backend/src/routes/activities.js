@@ -11,7 +11,13 @@ const activityService = require('../services/activity.service');
 // those who may read the BOQ, its budget for those who may read the BOQ or
 // the cost module (§12); every answer that carries an activity goes through
 // utils/boq-figures, and a BOQ reader's is the service's own.
-const { boqFigureAccess, withheldActivity, withheldActivityDetail } = require('../utils/boq-figures');
+const {
+  boqFigureAccess,
+  withheldActivity,
+  withheldActivityDetail,
+  withheldProgressSubmission,
+  withheldProgressSubmissions,
+} = require('../utils/boq-figures');
 const controlsDetailService = require('../services/controls-detail.service');
 const progressService = require('../services/progress.service');
 
@@ -129,6 +135,9 @@ router.post(
     body('updates.*.notes').optional().isString().trim(),
     body('updates.*.evidence').optional().isObject(),
     body('updates.*.milestones').optional().isArray(),
+    body('updates.*.entryIds').optional().isArray({ max: 500 }),
+    body('updates.*.entryIds.*').optional().isUUID(),
+    body('updates.*.bundleSubmittedThrough').optional().isISO8601({ strict: true }),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -139,7 +148,7 @@ router.post(
       userRole: getEffectiveRole(req),
       updates: req.body.updates,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, { ...result, submissions: withheldProgressSubmissions(result.submissions, boqFigureAccess(req)) });
   }),
 );
 
@@ -162,7 +171,7 @@ router.get(
       from: req.query.from || null,
       to: req.query.to || null,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldProgressSubmissions(result, boqFigureAccess(req)));
   }),
 );
 
@@ -311,7 +320,7 @@ router.get(
       activityId: req.params.id,
       status: req.query.status || null,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldProgressSubmissions(result, boqFigureAccess(req)));
   }),
 );
 
@@ -345,6 +354,12 @@ router.post(
     body('inspectionStatus').optional().isString().trim(),
     body('evidence').optional().isObject(),
     body('notes').optional().isString().trim(),
+    // PC-6: a quantity-method submission bundles quantity entries — the ones
+    // named, and/or every submitted entry of the activity dated on or before
+    // a day. Its figures are then derived (see progress.service).
+    body('entryIds').optional().isArray({ max: 500 }),
+    body('entryIds.*').optional().isUUID(),
+    body('bundleSubmittedThrough').optional().isISO8601({ strict: true }),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -363,6 +378,7 @@ router.post(
     return sendSuccess(res, {
       ...result,
       activity: withheldActivity(result.activity, boqFigureAccess(req)),
+      submission: withheldProgressSubmission(result.submission, boqFigureAccess(req)),
     });
   }),
 );
@@ -381,7 +397,7 @@ router.post(
       submissionId: req.params.submissionId,
       userId: req.user.id,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldProgressSubmission(result, boqFigureAccess(req)));
   }),
 );
 
@@ -405,7 +421,7 @@ router.post(
       userId: req.user.id,
       reason: req.body.reason,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldProgressSubmission(result, boqFigureAccess(req)));
   }),
 );
 

@@ -855,6 +855,28 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "conflict",
     message: "Only a draft quantity entry is submitted",
   },
+  // PC-6 (core): approval bundling — a quantity-method progress submission
+  // bundles entries and is the one thing that approves them.
+  QUANTITY_ENTRY_ACTIVITY_MISMATCH: {
+    status: 400,
+    category: "validation",
+    message: "A submission bundles entries of its own activity only",
+  },
+  QUANTITY_NO_ENTRIES_TO_BUNDLE: {
+    status: 400,
+    category: "validation",
+    message: "No submitted quantity entry of this activity is free to bundle",
+  },
+  QUANTITY_BUNDLE_METHOD_MISMATCH: {
+    status: 400,
+    category: "validation",
+    message: "Quantity entries are bundled by a quantity-method submission only",
+  },
+  PROGRESS_METHOD_LOCKED: {
+    status: 409,
+    category: "conflict",
+    message: "An activity with approved progress keeps the method it was measured by; a row naming that same method is still written",
+  },
 });
 
 const DEFAULT_CODE_BY_STATUS = Object.freeze({

@@ -1,6 +1,6 @@
 jest.mock("../../middleware/rbac", () => ({ hasPermission: jest.fn() }));
 
-const { QUANTITY_ENTRY_BOQ_KEYS, QUANTITY_ENTRY_WITHHELD, withheldQuantityEntries, withheldQuantityEntry, withheldQuantityEntryResult } = require("../boq-figures");
+const { QUANTITY_ENTRY_BOQ_KEYS, QUANTITY_ENTRY_WITHHELD, withheldQuantityEntries, withheldQuantityEntry, withheldQuantityEntryResult, withheldProgressSubmission, withheldProgressSubmissions, withheldActivity } = require("../boq-figures");
 
 // An entry as quantity-progress.service builds it.
 const entry = (id) => ({
@@ -76,5 +76,44 @@ describe("PC-6: a quantity entry for a member who may not read the BOQ (binding 
   it("the delete answer, which carries no figure, passes untouched", () => {
     const deleted = { deleted: true, id: "e-1" };
     expect(withheldQuantityEntryResult(deleted, COST)).toEqual(deleted);
+  });
+});
+
+describe("PC-6: a progress submission's quantity figures (installed from the entries, planned from the allocations) go to BOQ readers only", () => {
+  const submission = {
+    id: "s-1",
+    activityId: "a-1",
+    method: "quantity",
+    status: "submitted",
+    pctComplete: 37.5,
+    quantityComplete: 60,
+    quantityPlanned: 160,
+    quantityUnit: "m3",
+    quantityEntryIds: ["e-1", "e-2"],
+    progressSource: { source: "manual", submissionId: "s-1", submittedBy: "u-1", approvedBy: null, entries: 2 },
+    quantity: { installed: 60, planned: 160, plannedBasis: "approved_allocations" },
+  };
+
+  it("a BOQ reader's submission is the same object", () => {
+    expect(withheldProgressSubmission(submission, BOQ)).toBe(submission);
+    expect(withheldProgressSubmissions([submission], BOQ)).toEqual([submission]);
+  });
+
+  it("a cost reader keeps the percentage, status, method, entry ids and provenance — never a quantity, a unit or the basis block", () => {
+    const answer = withheldProgressSubmission(submission, COST);
+    for (const key of ["quantityComplete", "quantityPlanned", "quantityUnit", "quantity"]) expect(answer).not.toHaveProperty(key);
+    expect(answer).toMatchObject({ pctComplete: 37.5, status: "submitted", method: "quantity", quantityEntryIds: ["e-1", "e-2"], progressSource: { entries: 2 }, boqWithheld: { keys: ["quantityComplete", "quantityPlanned", "quantityUnit", "quantity"], reason: expect.stringMatching(/may read the BOQ/) } });
+    expect(withheldProgressSubmissions([submission, null], COST)).toEqual([answer, null]);
+    const percent = { id: "s-2", method: "percent", pctComplete: 10, status: "submitted" };
+    expect(withheldProgressSubmission(percent, COST)).toBe(percent);
+  });
+
+  it("the activity's pendingProgress goes the same way, beside the mapping figures", () => {
+    const activity = { id: "a-1", name: "Pour", allocatedBoqQuantity: 160, pctComplete: 0, pendingProgress: submission, progressSource: null };
+    const answer = withheldActivity(activity, COST);
+    expect(answer).not.toHaveProperty("allocatedBoqQuantity");
+    expect(answer.pendingProgress).not.toHaveProperty("quantityPlanned");
+    expect(answer.pendingProgress).toMatchObject({ pctComplete: 37.5, boqWithheld: expect.any(Object) });
+    expect(withheldActivity(activity, BOQ)).toBe(activity);
   });
 });
