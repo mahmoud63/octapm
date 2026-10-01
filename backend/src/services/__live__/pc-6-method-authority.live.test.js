@@ -51,6 +51,18 @@
  *   official, EV byte-identical; rejected, the site records entries and the
  *   only official row is the derived one.
  *
+ * A quantity submission states a quantity (verification finding: "on a
+ * quantity-configured activity a submission that bundles no entries and
+ * types no quantity — { pctComplete: 90 } — is accepted as a quantity
+ * submission at 0%; approved, it writes an official 0% row with nothing
+ * behind it: 25% → 0%"):
+ * - the screed: { pctComplete: 90 } with or without the method named, as a
+ *   draft and through bulk-progress, is 400 QUANTITY_NO_ENTRIES_TO_BUNDLE
+ *   while the activity has no entry and 409 QUANTITY_ENTRIES_REQUIRED once
+ *   it has; nothing written, EV byte-identical, the official 25% stands;
+ *   one already in the queue (as the database would hold it from before the
+ *   rule) is refused by the writer the same way and can only be rejected.
+ *
  *   DATABASE_CONNECTION_LIMIT=4 npm run test:live -- src/services/__live__/pc-6-method-authority.live.test.js
  */
 const { prisma } = require("../../config/db");
@@ -68,6 +80,7 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
   let slab2;
   let kerb;
   let late;
+  let screed;
   let site;
   const bearer = (token) => ({ authorization: `Bearer ${token}` });
   const at = (route) => `/api/v1/projects/${project.id}${route}`;
@@ -108,7 +121,7 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     site.token = mintAccessToken(site);
     await prisma.projectAssignment.create({ data: { projectId: project.id, userId: site.id, role: "site_engineer", orgId: live.org.id } });
 
-    const item = await api.post(at("/boq/items"), { code: "1.1", description: "Concrete in strip footings", quantity: 500, unit: "m3", rate: 100 }, bearer(live.token));
+    const item = await api.post(at("/boq/items"), { code: "1.1", description: "Concrete in strip footings", quantity: 900, unit: "m3", rate: 100 }, bearer(live.token));
     ok(item, 201);
     concrete = item.body.data.item;
     const activity = async (payload) => {
@@ -122,7 +135,8 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     slab2 = await activity({ name: "Roof slab (legacy, typed below)", activityCode: "A140", duration: 4, startDate: "2026-03-02", endDate: "2026-03-05", engineerIds: [live.user.id, site.id] });
     kerb = await activity({ name: "Kerbs (typed)", activityCode: "A150", duration: 2, startDate: "2026-03-09", endDate: "2026-03-10", engineerIds: [live.user.id, site.id] });
     late = await activity({ name: "Late pour (configured after a percent submission)", activityCode: "A160", duration: 3, startDate: "2026-03-16", endDate: "2026-03-18", engineerIds: [live.user.id, site.id] });
-    for (const [row, quantity, configured = true] of [[pour, 100], [slab, 100], [slab2, 100], [kerb, 50], [late, 100, false]]) {
+    screed = await activity({ name: "Screed (a quantity submission states a quantity)", activityCode: "A170", duration: 3, startDate: "2026-03-23", endDate: "2026-03-25", engineerIds: [live.user.id, site.id] });
+    for (const [row, quantity, configured = true] of [[pour, 100], [slab, 100], [slab2, 100], [kerb, 50], [late, 100, false], [screed, 100]]) {
       const allocation = await api.post(at("/activity-boq-allocations"), { boqItemId: concrete.id, activityId: row.id, quantity }, bearer(live.token));
       ok(allocation, 201);
       for (const step of ["submit", "approve"]) ok(await api.post(at(`/activity-boq-allocations/${allocation.body.data.id}/${step}`), {}, bearer(live.token)));
@@ -348,5 +362,51 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     const rows = await progressRows(late.id);
     expect(rows.map((row) => [Number(row.pctComplete), row.progressMethod, row.quantityComplete === null ? null : Number(row.quantityComplete)])).toEqual([[10, "quantity", 10]]);
     expect((await activityPayload(late.id)).pctComplete).toBe(10);
+  });
+
+  it("a quantity submission states a quantity: one that bundles no entry and types no figure is refused — 400 QUANTITY_NO_ENTRIES_TO_BUNDLE, 409 QUANTITY_ENTRIES_REQUIRED once entries exist — never recorded at 0%; the writer refuses one already in the queue; the official 25% stands", async () => {
+    const evEmpty = await evReport();
+    const empty = await footprint();
+    // No entry yet: a percentage with no method named takes the activity's (quantity) and states no quantity.
+    const bare = await submit(screed.id, { pctComplete: 90 }, site.token);
+    refused(bare, 400, "QUANTITY_NO_ENTRIES_TO_BUNDLE");
+    expect(bare.body.error.details).toMatchObject({ activityId: screed.id });
+    expect(bare.body.error.message).toMatch(/bundles quantity entries .* or states a typed quantityComplete/);
+    refused(await submit(screed.id, { method: "quantity", pctComplete: 90 }, site.token), 400, "QUANTITY_NO_ENTRIES_TO_BUNDLE");
+    refused(await submit(screed.id, { pctComplete: 90, status: "draft" }, site.token), 400, "QUANTITY_NO_ENTRIES_TO_BUNDLE");
+    refused(await submit(screed.id, { quantityPlanned: 100, quantityUnit: "m3" }, site.token), 400, "QUANTITY_NO_ENTRIES_TO_BUNDLE");
+    refused(await api.post(at("/activities/bulk-progress"), { updates: [{ activityId: screed.id, pctComplete: 90 }] }, bearer(site.token)), 400, "QUANTITY_NO_ENTRIES_TO_BUNDLE");
+    expect(await footprint()).toBe(empty);
+    expect(await evReport()).toBe(evEmpty);
+    // An official 25 of 100 through entries.
+    ids.q1 = (await entry({ activityId: screed.id, boqItemId: concrete.id, quantity: 25, date: "2026-03-23", clientRequestId: "ma-q1" })).id;
+    const first = await submit(screed.id, { entryIds: [ids.q1] }, site.token);
+    ok(first, 200);
+    ok(await approve(screed.id, first.body.data.submission.id));
+    expect((await activityPayload(screed.id)).pctComplete).toBe(25);
+    const evBefore = await evReport();
+    const before = await footprint();
+    // Entries exist: the same payloads now say so.
+    const again = await submit(screed.id, { pctComplete: 90 }, site.token);
+    refused(again, 409, "QUANTITY_ENTRIES_REQUIRED");
+    expect(again.body.error.details).toEqual({ activityId: screed.id, entries: 1 });
+    refused(await submit(screed.id, { method: "quantity", pctComplete: 90 }, site.token), 409, "QUANTITY_ENTRIES_REQUIRED");
+    refused(await api.post(at("/activities/bulk-progress"), { updates: [{ activityId: screed.id, pctComplete: 90 }] }, bearer(site.token)), 409, "QUANTITY_ENTRIES_REQUIRED");
+    expect(await footprint()).toBe(before);
+    expect(await evReport()).toBe(evBefore);
+    // One already in the queue, as the database would hold it from before the rule: the writer refuses it.
+    const queued = await prisma.progressSubmission.create({
+      data: { projectId: project.id, activityId: screed.id, method: "quantity", source: "manual", pctComplete: 0, quantityComplete: null, quantityPlanned: 100, quantityUnit: "m3", status: "submitted", submittedBy: site.id, submittedAt: new Date(), createdBy: site.id },
+    });
+    const held = await footprint();
+    const refusal = await approve(screed.id, queued.id);
+    refused(refusal, 409, "QUANTITY_ENTRIES_REQUIRED");
+    expect(refusal.body.error.details).toEqual({ activityId: screed.id, entries: 1, submissionId: queued.id });
+    expect(await footprint()).toBe(held);
+    expect(await evReport()).toBe(evBefore);
+    expect((await progressRows(screed.id)).map((row) => [Number(row.pctComplete), Number(row.quantityComplete)])).toEqual([[25, 25]]);
+    expect((await activityPayload(screed.id)).pctComplete).toBe(25);
+    ok(await api.post(at(`/activities/${screed.id}/progress-submissions/${queued.id}/reject`), { reason: "A quantity submission states a quantity; bundle the entries" }, bearer(live.token)));
+    expect((await activityPayload(screed.id)).pctComplete).toBe(25);
   });
 });

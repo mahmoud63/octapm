@@ -58,6 +58,14 @@ const errorCodeFrom = (error: unknown) =>
     }
   )?.response?.data?.error?.code
 
+/** The server's own sentence for a refusal, when it sent one. */
+const errorMessageFrom = (error: unknown) =>
+  (
+    error as {
+      response?: { data?: { error?: { message?: string } } }
+    }
+  )?.response?.data?.error?.message
+
 export function BulkProgressUpdate({ projectId, activities }: Props) {
   const canSubmitProgress = useCanPerform(
     'progress',
@@ -210,7 +218,11 @@ export function BulkProgressUpdate({ projectId, activities }: Props) {
               toast.error(
                 errorCodeFrom(error) === 'ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED'
                   ? 'Only assigned users can submit progress for selected activities'
-                  : 'Failed to submit progress in bulk'
+                  : // A refused batch writes nothing; the server names the
+                    // activity's rule (PC-6: a percentage is not recorded
+                    // against an activity measured by quantity).
+                    (errorMessageFrom(error) ??
+                      'Failed to submit progress in bulk')
               )
             } finally {
               setSaving(false)

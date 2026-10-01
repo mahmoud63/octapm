@@ -661,6 +661,38 @@ const assertTypedQuantityAllowed = async ({ orgId, projectId, activityId, payloa
 };
 
 /**
+ * A quantity submission states a quantity (verification finding). One that
+ * bundles no entry and types no quantityComplete — { pctComplete: 90 } on an
+ * activity measured by quantity, with or without the method named — used to
+ * be recorded as a quantity submission at 0% (the client's percentage
+ * silently replaced), and its approval wrote an official 0% row with nothing
+ * behind it: 25% → 0%. It is refused instead, where it is made and — for one
+ * already in the queue — where it would become official: 409
+ * QUANTITY_ENTRIES_REQUIRED once the activity has entries (they are the
+ * truth; bundle them), else 400 QUANTITY_NO_ENTRIES_TO_BUNDLE.
+ */
+const assertQuantityFigureStated = async ({ orgId, projectId, activityId, quantityComplete, submissionId = null }, tx) => {
+  if (quantityComplete !== undefined && quantityComplete !== null && quantityComplete !== '') return;
+  const entries = await tx.quantityProgressEntry.count({ where: { projectId, ...(orgId ? { orgId } : {}), activityId } });
+  const named = submissionId ? { submissionId } : {};
+  const outcome = submissionId ? 'approved; reject it' : 'recorded';
+  if (entries) {
+    throw new HttpError(
+      409,
+      'QUANTITY_ENTRIES_REQUIRED',
+      `This activity's installed quantity is recorded as quantity entries per BOQ item (${entries} so far); a submission that bundles none of them states no quantity and is not ${outcome}. Bundle the entries (entryIds or bundleSubmittedThrough)`,
+      { activityId, entries, ...named },
+    );
+  }
+  throw new HttpError(
+    400,
+    'QUANTITY_NO_ENTRIES_TO_BUNDLE',
+    `This activity is measured by quantity: a submission bundles quantity entries (entryIds or bundleSubmittedThrough) or states a typed quantityComplete. This one does neither — a percentage is not a quantity — and is not ${outcome}`,
+    { activityId, entryIds: [], bundleSubmittedThrough: null, ...named },
+  );
+};
+
+/**
  * The latest official installed figure of the activity when it stands above
  * Σ approved entries: a quantityComplete approved the legacy way (typed, no
  * entries behind it), or a row that itself carried the floor. Installed is
@@ -897,7 +929,10 @@ const buildSubmissionData = async ({
   let quantity = null;
   if (method === 'quantity') {
     bundled = await resolveQuantityBundle({ orgId, projectId, activityId, payload }, tx);
-    if (!bundled) await assertTypedQuantityAllowed({ orgId, projectId, activityId, payload }, tx);
+    if (!bundled) {
+      await assertTypedQuantityAllowed({ orgId, projectId, activityId, payload }, tx);
+      await assertQuantityFigureStated({ orgId, projectId, activityId, quantityComplete: payload.quantityComplete }, tx);
+    }
     quantity = await deriveQuantityFigures({ orgId, projectId, activityId, payload, bundled, methodConfig }, tx);
   } else if (uniqueIds(payload.entryIds).length || payload.bundleSubmittedThrough || payload.bundleThrough) {
     throw new HttpError(
@@ -1375,6 +1410,14 @@ const approveProgressSubmissionWithClient = async ({
       tx,
     );
     bundledEntries = await settleBundledEntries({ tx, orgId, projectId, submission, entries: pending, outcome: 'approved', userId, now });
+  }
+  // A quantity submission with nothing behind it — no entry, no typed figure
+  // (one in the queue from before the rule) — is not made official at 0%.
+  if (submission.method === 'quantity' && !pending.length) {
+    await assertQuantityFigureStated(
+      { orgId, projectId, activityId: submission.activityId, quantityComplete: submission.quantityComplete, submissionId: submission.id },
+      tx,
+    );
   }
   // A quantity submission typed the old way (no entries): approved as it
   // stands, and ONE approved entry is minted from it so the activity has one

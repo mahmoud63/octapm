@@ -864,7 +864,9 @@ export function ProgressTab({ activities: scheduled, projectId }: Props) {
       toast.error(
         errorCodeFrom(error) === 'ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED'
           ? 'Only assigned users can submit progress for that activity'
-          : 'Failed to submit progress'
+          : // The server's own reason: a method that is not the activity's, a
+            // quantity submission that states no quantity (PC-6).
+            (errorMessageFrom(error) ?? 'Failed to submit progress')
       ),
   })
 
@@ -879,7 +881,10 @@ export function ProgressTab({ activities: scheduled, projectId }: Props) {
       toast.success('Progress approved')
       await refreshProgress()
     },
-    onError: () => toast.error('Failed to approve progress'),
+    // The writer's refusal says what to do (a gate, or a submission whose
+    // method is not the activity's: reject it).
+    onError: (error) =>
+      toast.error(errorMessageFrom(error) ?? 'Failed to approve progress'),
   })
 
   // PC-6: pending quantity entries are put forward as one quantity-method

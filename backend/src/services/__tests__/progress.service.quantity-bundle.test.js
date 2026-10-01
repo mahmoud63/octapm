@@ -207,6 +207,25 @@ describe("PC-6 quantity bundles in the one writer", () => {
     await expect(progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" })).resolves.toMatchObject({ status: "approved", method: "percent" });
     expect(mockPrisma.activityProgress.create).toHaveBeenCalledTimes(2);
   });
+  it("a quantity submission states a quantity: no entry bundled and no figure typed is 400 QUANTITY_NO_ENTRIES_TO_BUNDLE (409 QUANTITY_ENTRIES_REQUIRED once entries exist), never a 0% row — when it is made and when one in the queue would be approved", async () => {
+    for (const payload of [{ pctComplete: 90 }, { method: "quantity", pctComplete: 90 }, { pctComplete: 90, status: "draft" }, { quantityComplete: null, pctComplete: 90 }]) {
+      await expect(create(payload)).rejects.toMatchObject({ status: 400, code: "QUANTITY_NO_ENTRIES_TO_BUNDLE", details: { activityId: "activity-1" } });
+    }
+    mockPrisma.quantityProgressEntry.count.mockResolvedValueOnce(3);
+    await expect(create({ pctComplete: 90 })).rejects.toMatchObject({ status: 409, code: "QUANTITY_ENTRIES_REQUIRED", details: { activityId: "activity-1", entries: 3 } });
+    expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
+    // A typed zero is a stated quantity (nothing installed yet) and is still recorded.
+    await expect(create({ quantityComplete: 0 })).resolves.toMatchObject({ method: "quantity", pctComplete: 0, quantityComplete: 0 });
+    // One already in the queue with nothing behind it: the writer refuses it, naming the submission.
+    const hollow = { ...submitted([]), pctComplete: 0, quantityComplete: null };
+    mockPrisma.progressSubmission.findFirst.mockResolvedValue(hollow);
+    const approveIt = () => progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" });
+    await expect(approveIt()).rejects.toMatchObject({ status: 400, code: "QUANTITY_NO_ENTRIES_TO_BUNDLE", details: { activityId: "activity-1", submissionId: "sub-1" } });
+    mockPrisma.quantityProgressEntry.count.mockResolvedValueOnce(2);
+    await expect(approveIt()).rejects.toMatchObject({ status: 409, code: "QUANTITY_ENTRIES_REQUIRED", details: { activityId: "activity-1", entries: 2, submissionId: "sub-1" } });
+    expect(mockPrisma.progressSubmission.update).not.toHaveBeenCalled();
+    expect(mockPrisma.activityProgress.create).not.toHaveBeenCalled();
+  });
   it("a submission approved twice at once answers idempotently: the second reads 'approved' under the hold and writes nothing", async () => {
     mockPrisma.progressSubmission.findFirst.mockResolvedValueOnce(submitted([])).mockResolvedValueOnce({ ...submitted([]), status: "approved" });
     const answer = await progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" });
