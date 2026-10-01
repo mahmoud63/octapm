@@ -214,6 +214,84 @@ applicable). The financial snapshot and reconciliation delta must read 0.00 — 
 
 Mobile: the daily log form gets a "Quantities installed" section using the existing activity + location pickers; offline via the outbox with `clientRequestId` (already the pattern for the six sections).
 
+### 4.1 The quantities section, as shipped (PC-6 core, 2026-10-01) [C]
+
+`daily-log.service.js` carries a seventh section, `quantities` (model `DailyLogQuantity`), registered in the
+same `SECTIONS` table as its six siblings, so every generic path applies to it: add / edit / remove / review by
+row, the party-user scoping and visibility, the row's own `status` (approved at once for staff, submitted for a
+collaborator, reviewed by the site team), `clientRequestId` replay, the PDF, the digest, the manpower-style
+totals. What is specific to it:
+
+- **A row names** `activityId`, `boqItemId`, `quantity` (Decimal(18,3), ≥ 0 — `QUANTITY_NEGATIVE` in code before
+  the CHECK), `unitCode` (`unit` is accepted as a spelling of it), `allocationId?`, `locationId?`, `notes?`,
+  `clientRequestId?`. The item must be one the activity has an **approved, active allocation** of, else 400
+  `DAILY_LOG_QUANTITY_NOT_ALLOCATED`; an `allocationId` named must be one of those (400
+  `QUANTITY_ALLOCATION_MISMATCH`), and when none is named the single approved one is resolved onto the row (null
+  when there are several). The unit is the item's code or an alias the organisation's unit master maps to it
+  (§3.1's rule, `resolveEntryUnit`), else 400 `QUANTITY_UNIT_MISMATCH`; the row is stored under the item's code.
+  No copy-forward (`copyFields` is absent): a quantity installed yesterday is not installed again today.
+- **The recorder's rule.** The person adding or editing a row is under the progress submission's assignment rule
+  (`progress.service.assertProgressSubmitAllowed`: a site engineer on the activities assigned to them, a PM or
+  planning engineer on any) **when the row is recorded**, not when the log is submitted — the log is one record
+  per day submitted as a whole by one person for every author's rows, and the rule must not stop a site engineer
+  submitting a log that carries a colleague's row. The minting therefore passes `assignmentRule: false` and names
+  the row's author as `createdBy` (PROGRESS SOURCE `recordedBy`).
+- **The picker — `GET /projects/{id}/activities/{activityId}/allocated-items`** (progress:read,
+  `quantity-progress.service.allocatedItemsFor`): one line per BOQ item the activity has an approved, active
+  allocation of — `id, code, description, unit, unitCode, allocationId` (the single approved one, else null and
+  `allocationIds`), `allocatedQuantity` (Σ approved allocation quantity). **What a member without boq:read sees
+  (owner decision, this item): `id`, `description`, `unit` and `unitCode` only** — the least that lets a person
+  on site pick the item and name the unit — with `boqWithheld: { keys: [code, allocationId, allocationIds,
+  allocatedQuantity], reason }`. The list's existence tells such a member which items the activity is mapped to;
+  the owner asked for exactly that so a site engineer can record without reading the bill. Nothing of the bill's
+  quantities, values or counts beyond the lines themselves is given.
+- **What a member without boq:read sees of the section** (`utils/boq-figures.withheldDailyLog`, applied by every
+  daily-log route): the row as the site recorded it — the item's **description and unit, the quantity typed, the
+  activity, the location, the notes, the row's review state** and the state and provenance of the entry it
+  minted (`progressEntry`, which carries no quantity) — **minus the item's `code` and the `allocationId`**, named
+  in `boqWithheld`. The section's per-unit totals are the log's own tally of what was typed (like its man-hours)
+  and stay. The PDF export (`progress:export`) omits the code for such a member; the distribution digest, which
+  reaches external addresses, never carries it.
+- **Minting (`POST /daily-logs/{date}/submit`).** Every row that counts (not draft, not rejected by the site team)
+  becomes one `QuantityProgressEntry`: `source 'daily_log'`, `status 'submitted'`, the log's date, `dailyLogId`
+  + `dailyLogQuantityId`, the row's allocation, location, unit, quantity and notes, `createdBy` the row's author,
+  `clientRequestId 'daily_log:<rowId>'` (the replay key, so a resubmission never doubles). A row that already has
+  an entry keeps it: a free pending one is synced to the row (audit `quantity_entry.daily_log_sync`), a bundled,
+  approved or rejected one is left alone. The log's audit event says `{ minted, synced, kept }`. **Nothing here is
+  official**: no `ActivityProgress` row, EV unchanged, the entries wait for §3.2's writer.
+- **The row's status is never progress.** `POST /daily-logs/{date}/approve` moves every section row from
+  submitted to approved — the quantities rows too, as their site-record review state — and **does not touch an
+  entry**: after approving the log every entry is still `submitted`, `approvedBy` null, nothing official (proven
+  live, and mutation-proven: approving entries in `approveLog` fails the suite). Per-row review
+  (`/entries/quantities/{id}/review`) is the same site-record state. `reopen` leaves the entries as they are.
+- **Edits and removals before approval** (`dailyLogRowEntryGate`): a row whose entry is **approved or rejected**
+  is locked — 409 `DAILY_LOG_QUANTITY_LOCKED`; the correction is a new row (and a rejected row's resubmission
+  never re-mints: the row is settled). A row whose entry is **bundled into a draft/submitted submission** is held
+  — 409 `QUANTITY_ENTRY_BUNDLED` on edit and on removal. A row with a **free pending** entry: an edit syncs the
+  entry (quantity, unit, allocation, location, notes; the activity and the item are not moved — 400
+  `QUANTITY_ENTRY_IMMUTABLE_FIELD`; remove the row and record another); a removal deletes the entry with it
+  (audit `quantity_entry.daily_log_row_deleted`) — **never a pending ghost** (the reviewer's finding; mutation-proven:
+  leaving the entry behind fails the suite). Removing a row whose entry is approved or rejected is allowed: the
+  site record goes, the official figure stays with `dailyLogQuantityId` nulled by the database (SET NULL),
+  `dailyLogId` and `source` still naming where it came from.
+- **Provenance a client cannot claim.** `createEntries` honours an entry's `submissionId`, `dailyLogId`,
+  `dailyLogQuantityId` and `createdBy` only from this service's own callers (`internal: true`, the minting); a
+  client body carrying them on `POST /quantity-progress` is stored with those links null (closed in this item —
+  before it a client could attach an entry to a pending submission and have it approved with that bundle).
+- **The row payload** adds, beside the six siblings' fields: `boqItemId`, `boqItem { id, code, description, unit,
+  unitCode }`, `allocationId`, `quantity` (number, three places), `unitCode`, `progressEntry { id, status,
+  official, source, submissionId, submissionStatus, recordedBy, recordedAt, approvedBy, approvedAt, rejectedBy,
+  rejectedAt, rejectionReason } | null`. `totals` adds `quantityRows` and `quantities: [{ unitCode, quantity,
+  rows }]` — quantity per unit, never one figure across units.
+- **Live proof** — `src/services/__live__/pc-6-daily-log-quantities.live.test.js` (a real API process, the real
+  local Postgres, a throwaway LiveTest organisation): the picker for both members; the refusals; replay; rows are
+  site records (no entry); submit mints two submitted entries with the row's author as recordedBy and nothing
+  official (EV 0); an edit syncs; approving the log leaves the entries submitted; reopen / add / remove / resubmit
+  with no ghost; the one writer bundles a daily-log entry, writes ONE `ActivityProgress` row at 50 ÷ 100, the log
+  shows the row official, the row is locked, removing it leaves the entry (SET NULL) and the EV row; a rejected
+  bundle locks its row; the non-BOQ member records against the picker and reads the log withheld; a client-sent
+  `submissionId` / `dailyLogId` is ignored; the tenant 404; every other activity's EV row byte-identical.
+
 ## 5. Installed / certified / paid (§82) [D]
 
 Per BOQ item (and per activity, location, WBS group), three quantity columns with three different truths:
