@@ -145,6 +145,40 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
 
     if (gap) await prisma.procurementOrder.create({ data: { projectId: project.id, ref: `PO-${tag}`, item: "LiveTest rebar", status: "issued", value: 5000 } });
 
+    // Progress: A1 is 40 % done, approved 30 days ago (stale) or 2 days ago;
+    // on the gaps project A2 is complete and A3 has never begun.
+    const progress = (activityId, pctComplete, days) =>
+      prisma.activityProgress.create({ data: { activityId, pctComplete, status: "approved", approvedAt: daysAgo(days), updatedAt: daysAgo(days) } });
+    target.p1 = await progress(target.a1.id, 40, gap ? 30 : 2);
+    if (gap) await progress(target.a2.id, 100, 60);
+
+    // Reporting periods. Gaps: P0 locked over a PM override 60 days ago, P1
+    // open with its cutoff 40 days ago (the default EV period: progress
+    // approved after it is not in its EV), P2 open with its cutoff ahead.
+    // Clean: P0 locked 20 days ago WITHOUT an override, its snapshot's EV the
+    // same 20,000 the mapping summary reads.
+    const { storedValueForReportingDate } = require("../../utils/reporting-cutoff");
+    const localDate = (days) => new Date(NOW.getTime() - days * DAY).toISOString().slice(0, 10);
+    const period = (code, days, extra = {}) =>
+      prisma.reportingPeriod.create({ data: { projectId: project.id, code, label: `LiveTest ${code}`, periodStart: new Date(NOW.getTime() - (days + 27) * DAY), periodEnd: storedValueForReportingDate(localDate(days)), cutoffDate: storedValueForReportingDate(localDate(days)), ...extra } });
+    const lockedOver = async (code, days, { override, ev }) => {
+      const row = await period(code, days, { status: "locked", lockedAt: daysAgo(days - 1), lockedBy: live.user.id });
+      await prisma.evPeriodSnapshot.create({
+        data: {
+          projectId: project.id, reportingPeriodId: row.id, cutoffDate: row.cutoffDate, ev, totalBudget: 50000, lockedAt: daysAgo(days - 1), lockedBy: live.user.id,
+          basisJson: { readinessOverride: override ? { reason: "LiveTest: lock over the gate", actorId: live.user.id, actorRole: "pm", overriddenAt: daysAgo(days - 1).toISOString() } : null },
+        },
+      });
+      return row;
+    };
+    if (gap) {
+      target.period0 = await lockedOver("DQ-P0", 60, { override: true, ev: 0 });
+      target.period1 = await period("DQ-P1", 40);
+      target.period2 = await period("DQ-P2", -10);
+    } else {
+      target.period0 = await lockedOver("DQ-P0", 20, { override: false, ev: 20000 });
+    }
+
     // Equipment usage: DR1 with no posting (gap), DR2 posted, DR3 posted then
     // reversed (gap). The clean project's one report is posted.
     const report = (date) => prisma.dailyReport.create({ data: { projectId: project.id, activityId: target.a1.id, engineerId: live.user.id, date, status: "approved" } });
@@ -290,6 +324,48 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     expect([item.measured.value, item.measured.unitCode, item.data.columns]).toEqual([1, "m3", [{ figure: "committed", unitCode: "t" }]]);
     expect(item.measured.basis).toMatch(/quantity-views\.service quantityBlocks/);
     expect(await evaluate("unit_mismatch", clean)).toEqual([]);
+  });
+
+  // ─── progress and reporting ──────────────────────────────────────────────
+
+  it("progress_stale: a begun, incomplete activity whose latest approved progress is older than 14 days", async () => {
+    const [row, ...rest] = await evaluate("progress_stale", gaps);
+    expect(rest).toEqual([]);
+    expect([row.subjectType, row.subjectId, row.measured.value, row.measured.unitCode, row.limit.value]).toEqual(["activity", gaps.a1.id, 30, "day", 14]);
+    expect(row.data.progressId).toBe(gaps.p1.id);
+    expect(row.measured.basis).toMatch(/selectApprovedProgressForCutoff/);
+    expect(RULES.THRESHOLDS.PROGRESS_STALE_DAYS).toBe(require("../forecast.service").STALL_DAYS);
+    expect(await evaluate("progress_stale", clean)).toEqual([]);
+  });
+
+  it("period_not_locked: a period whose cutoff passed more than 7 days ago with no locked snapshot", async () => {
+    const [row, ...rest] = await evaluate("period_not_locked", gaps);
+    expect(rest).toEqual([]);
+    expect([row.subjectType, row.subjectId, row.limit.value]).toEqual(["reporting_period", gaps.period1.id, 7]);
+    expect(row.measured.value).toBe(Math.floor((NOW.getTime() - new Date(row.data.cutoffDate).getTime()) / DAY));
+    expect(row.measured.value).toBeGreaterThan(7);
+    expect(await evaluate("period_not_locked", clean)).toEqual([]);
+  });
+
+  it("ev_basis_divergence: the mapping summary's latest EV against the official EV at the default period's cutoff", async () => {
+    const [row, ...rest] = await evaluate("ev_basis_divergence", gaps);
+    expect(rest).toEqual([]);
+    // 50,000 × 40 % approved after P1's cutoff: in the summary, not in the official EV.
+    expect([row.measured.value, row.limit.value, row.data.period, row.data.isSnapshot]).toEqual([20000, 0, "DQ-P1", false]);
+    expect(row.limit.basis).toMatch(/buildOfficialEvReport ev/);
+    // Clean: the locked snapshot's EV and the summary agree.
+    expect(await evaluate("ev_basis_divergence", clean)).toEqual([]);
+  });
+
+  it("readiness_override_active: the last lock went over a PM override and the gate is still blocked; a lock without one never", async () => {
+    const [row, ...rest] = await evaluate("readiness_override_active", gaps);
+    expect(rest).toEqual([]);
+    expect([row.subjectType, row.subjectId, row.data.overriddenByRole]).toEqual(["reporting_period", gaps.period0.id, "pm"]);
+    expect(row.data.blockerCodes).toContain("NO_APPROVED_COST_LOADING");
+    expect(row.measured.value).toBe(row.data.blockerCodes.length);
+    expect(JSON.stringify(row.data)).not.toMatch(/Amount/);
+    // The clean project's gate is blocked too, but its lock carried no override.
+    expect(await evaluate("readiness_override_active", clean)).toEqual([]);
   });
 
   // ─── tenancy and read-only ───────────────────────────────────────────────

@@ -423,6 +423,155 @@ const unitMismatch = async ({ orgId, projectId, cutoff, ctx }) => {
   return rows;
 };
 
+// ─── progress and reporting ───────────────────────────────────────────────
+
+/** A rule that reads by projectId alone first proves the project is this organisation's. */
+const assertProject = (ctx, { orgId, projectId }) =>
+  memo(ctx, `project:${orgId}`, async () => {
+    const project = await prisma.project.findFirst({ where: { id: projectId, orgId }, select: { id: true } });
+    if (!project) {
+      const { HttpError } = require("../../utils/http-error");
+      throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
+    }
+    return project;
+  });
+
+// progress_stale — no approved progress in N days on an active activity.
+// Evidence: earned-value.service.js:150 progressEffectiveDate and :153
+// selectApprovedProgressForCutoff — the official progress of an activity is
+// its latest APPROVED ActivityProgress at or before the cutoff, dated by
+// approvedAt (updatedAt for a legacy row without one). EV reads
+// ActivityProgress only, so the same rows and the same rule are read here.
+// "Active" = begun (latest approved progress above 0 %, or an actual start
+// recorded) and not complete; a milestone has no duration to progress over.
+// A planned start that passed with nothing recorded is a schedule risk the
+// forecast reports (late start), not a data gap, and is not counted here.
+// N is the forecast's own stall threshold (forecast.service.js STALL_DAYS).
+const PROGRESS_STALE_DAYS = 14;
+
+const progressStale = async ({ orgId, projectId, cutoff }) => {
+  const at = instantOf(cutoff);
+  const activities = await prisma.activity.findMany({
+    where: { projectId, project: { orgId }, isActive: true, isMilestone: false },
+    select: {
+      id: true, name: true, activityCode: true, p6ActivityId: true, wbsCode: true, wbsNodeId: true, locationId: true,
+      progress: { where: { status: "approved" }, select: { id: true, status: true, pctComplete: true, approvedAt: true, updatedAt: true, actualStart: true } },
+    },
+    orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+  });
+  const rows = [];
+  for (const activity of activities) {
+    // selectApprovedProgressForCutoff, the same filter and order.
+    const candidates = activity.progress
+      .filter((row) => (row.approvedAt ? row.approvedAt <= at : row.updatedAt && row.updatedAt <= at))
+      .sort((a, b) => new Date(b.approvedAt || b.updatedAt || 0).getTime() - new Date(a.approvedAt || a.updatedAt || 0).getTime());
+    const latest = candidates[0];
+    if (!latest) continue;
+    const pct = Number(latest.pctComplete) || 0;
+    const begun = pct > 0 || candidates.some((row) => row.actualStart);
+    if (!begun || pct >= 100) continue;
+    const since = latest.approvedAt || latest.updatedAt;
+    const days = Math.floor((at.getTime() - new Date(since).getTime()) / DAY_MS);
+    if (!(days > PROGRESS_STALE_DAYS)) continue;
+    rows.push({
+      subjectType: "activity",
+      subjectId: activity.id,
+      measured: { value: days, unitCode: "day", basis: "Whole days from the activity's latest approved progress (ActivityProgress approvedAt, updatedAt for a legacy row; the earned-value report's own selection, earned-value.service selectApprovedProgressForCutoff) to the cutoff" },
+      limit: { value: PROGRESS_STALE_DAYS, unitCode: "day", basis: "Stale after 14 days without approved progress on a begun, incomplete activity (the forecast's stall threshold, forecast.service STALL_DAYS)" },
+      groupKeys: groupKeysOf(activity),
+      data: { lastApprovedAt: new Date(since).toISOString(), legacyDate: !latest.approvedAt, pctComplete: pct, progressId: latest.id, label: activityLabel(activity) },
+    });
+  }
+  return rows;
+};
+
+// period_not_locked — a reporting cutoff passed with no EvPeriodSnapshot.
+// Evidence: earned-value.service.js:1034 listReportingPeriods (each period's
+// cutoff instant as the reports cut it, its status and its snapshot) and
+// :1681 lockReportingPeriod (the only writer of a period's snapshot). An open
+// period whose cutoff passed has no measured history point (the S-curve
+// history is the locked snapshots only, EV_HISTORY_NOTE). A grace of 7 days
+// after the cutoff is allowed for the period's review before it is reported.
+const PERIOD_LOCK_GRACE_DAYS = 7;
+
+const periodNotLocked = async ({ orgId, projectId, cutoff }) => {
+  const at = instantOf(cutoff);
+  const { periods } = await require("../earned-value.service").listReportingPeriods({ orgId, projectId });
+  const rows = [];
+  for (const period of periods) {
+    if (period.status === "locked" && period.snapshot) continue;
+    if (!period.cutoffDate) continue;
+    const days = Math.floor((at.getTime() - new Date(period.cutoffDate).getTime()) / DAY_MS);
+    if (!(days > PERIOD_LOCK_GRACE_DAYS)) continue;
+    rows.push({
+      subjectType: "reporting_period",
+      subjectId: period.id,
+      measured: { value: days, unitCode: "day", basis: "Whole days since the period's cutoff instant as the EV reports cut it (earned-value.service listReportingPeriods), with no locked EvPeriodSnapshot" },
+      limit: { value: PERIOD_LOCK_GRACE_DAYS, unitCode: "day", basis: "A period is expected to be locked (earned-value.service lockReportingPeriod) within 7 days of its cutoff" },
+      data: { code: period.code, status: period.status, cutoffDate: period.cutoffDate, cutoffLocalDate: period.cutoffLocalDate || null, lockedWithoutSnapshot: period.status === "locked", label: period.label || period.code },
+    });
+  }
+  return rows;
+};
+
+// ev_basis_divergence — official EV (cutoff) vs summary EV (latest).
+// Evidence: earned-value.service.js:696 buildOfficialEvReport (`ev`: approved
+// allocations × the latest approved progress AT THE CUTOFF, the default
+// period every EV screen reads — a locked period answers with its snapshot)
+// against activity-boq-allocation.service.js:767 buildAllocationSummary
+// (`earnedValue`: approved allocations × the latest approved progress, no
+// cutoff, :851-857) shown on the mapping coverage. Two earned values on one
+// project that differ by more than a cent.
+const evBasisDivergence = async ({ orgId, projectId, ctx }) => {
+  await assertProject(ctx, { orgId, projectId });
+  const [report, summary] = await Promise.all([
+    require("../earned-value.service").buildOfficialEvReport({ orgId, projectId, useLockedSnapshot: true, includeReadiness: false }).catch(() => null),
+    require("../activity-boq-allocation.service").buildAllocationSummary({ projectId }),
+  ]);
+  if (!report) return [];
+  const official = toMoneyNumber(report.ev);
+  const latest = toMoneyNumber(summary.earnedValue);
+  if (!differs(latest, official)) return [];
+  const reporting = report.reporting || {};
+  return [{
+    subjectType: "project",
+    subjectId: projectId,
+    measured: { value: latest, basis: "Summary EV on the mapping coverage: Σ approved allocation × the latest approved progress, no cutoff (activity-boq-allocation.service buildAllocationSummary earnedValue)" },
+    limit: { value: official, basis: `Official EV at the reporting cutoff${reporting.cutoffLocalDate ? ` ${reporting.cutoffLocalDate}` : ""}${reporting.isSnapshot ? " (the locked period's snapshot)" : ""} (earned-value.service buildOfficialEvReport ev)` },
+    data: { cutoffDate: reporting.cutoffDate || null, period: reporting.period?.code || null, isSnapshot: Boolean(reporting.isSnapshot) },
+  }];
+};
+
+// readiness_override_active — a PM override on the reporting gate still in
+// force. Evidence: earned-value.service.js:1642 resolveReportingReadinessOverride
+// and :1729-1741 (lockReportingPeriod stores readinessOverride in the
+// snapshot's basisJson and audits it, :1807); the gate is
+// project-setup-readiness.service getSetupReadiness gates.reporting (what
+// getOfficialReportingGate freezes). Active = the latest locked period was
+// locked over an override and the gate is still not ready today. The row
+// carries the blockers' codes only — never their details or amounts.
+const readinessOverrideActive = async ({ orgId, projectId, ctx }) => {
+  const [snapshot, answer] = await Promise.all([
+    prisma.evPeriodSnapshot.findFirst({
+      where: { projectId, reportingPeriod: { projectId, status: "locked", project: { orgId } } },
+      orderBy: [{ cutoffDate: "desc" }, { lockedAt: "desc" }, { id: "desc" }],
+      select: { id: true, cutoffDate: true, lockedAt: true, basisJson: true, reportingPeriod: { select: { id: true, code: true, label: true } } },
+    }),
+    readiness(ctx, { orgId, projectId }),
+  ]);
+  const override = snapshot?.basisJson?.readinessOverride || null;
+  const gate = answer?.gates?.reporting;
+  if (!snapshot || !override || !gate || gate.ready) return [];
+  const codes = (gate.blockers || []).map((blocker) => blocker.code).filter(Boolean);
+  return [{
+    subjectType: "reporting_period",
+    subjectId: snapshot.reportingPeriod.id,
+    measured: { value: codes.length, basis: "Blockers on the official reporting gate today (project-setup-readiness.service getSetupReadiness gates.reporting)" },
+    limit: { value: 0, basis: "A gate overridden at the lock (EvPeriodSnapshot.basisJson.readinessOverride, earned-value.service lockReportingPeriod) is expected to be cleared afterwards" },
+    data: { code: snapshot.reportingPeriod.code, overriddenAt: override.overriddenAt || null, overriddenByRole: override.actorRole || null, blockerCodes: codes, label: snapshot.reportingPeriod.label || snapshot.reportingPeriod.code },
+  }];
+};
+
 // ─── the rules ────────────────────────────────────────────────────────────
 
 const RULES = [
@@ -511,6 +660,48 @@ const RULES = [
     note: (count) => `${plural(count, "structure check")} open: records not filed under a WBS node or cost code, or no WBS, locations or project cost codes yet.`,
     evaluate: structureMissing,
   },
+  {
+    kind: "progress_stale",
+    severity: "warning",
+    subjectType: "activity",
+    module: "progress",
+    boqDerived: false,
+    label: "Progress",
+    note: (count) => `${plural(count, "activity", "activities")} in progress ${count === 1 ? "has" : "have"} had no approved progress for more than two weeks.`,
+    evaluate: progressStale,
+  },
+  {
+    kind: "period_not_locked",
+    severity: "warning",
+    subjectType: "reporting_period",
+    module: "cost",
+    boqDerived: false,
+    label: "Reporting periods",
+    note: (count) => `${plural(count, "reporting period")} passed ${count === 1 ? "its" : "their"} cutoff more than a week ago and ${count === 1 ? "is" : "are"} not locked.`,
+    evaluate: periodNotLocked,
+  },
+  {
+    kind: "ev_basis_divergence",
+    severity: "info",
+    subjectType: "project",
+    module: "cost",
+    // The summary EV is the mapping coverage's (a BOQ endpoint's) figure.
+    boqDerived: true,
+    label: "Earned value",
+    note: () => "The official earned value at the reporting cutoff and the mapping summary's latest earned value differ.",
+    evaluate: evBasisDivergence,
+  },
+  {
+    kind: "readiness_override_active",
+    severity: "warning",
+    subjectType: "reporting_period",
+    module: "cost",
+    // The gate's blockers include the bill's coverage checks.
+    boqDerived: true,
+    label: "Reporting readiness",
+    note: () => "The last period was locked over a PM override of the reporting gate, and the gate is still not ready.",
+    evaluate: readinessOverrideActive,
+  },
 ];
 
 const DATA_QUALITY_KINDS = Object.freeze(RULES.map((rule) => rule.kind));
@@ -518,4 +709,4 @@ const DATA_QUALITY_KINDS = Object.freeze(RULES.map((rule) => rule.kind));
 module.exports = RULES;
 // Non-index properties: an array consumer (exception-rules/index.js) sees the rules only.
 Object.defineProperty(module.exports, "DATA_QUALITY_KINDS", { value: DATA_QUALITY_KINDS, enumerable: false });
-Object.defineProperty(module.exports, "THRESHOLDS", { value: Object.freeze({ MONEY_TOLERANCE, DAY_MS }), enumerable: false });
+Object.defineProperty(module.exports, "THRESHOLDS", { value: Object.freeze({ MONEY_TOLERANCE, DAY_MS, PROGRESS_STALE_DAYS, PERIOD_LOCK_GRACE_DAYS }), enumerable: false });
