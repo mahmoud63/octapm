@@ -1068,6 +1068,8 @@ const withheldAuditHistory = (
   const capWithheld = retentionCapWithheld(contractTerms, access);
   const events = history.events
     .filter((event) => !(event && BOQ_RECORD_TYPES.has(event.recordType || event.entityType)))
+    // PC-7b: an exception the caller may not read (withheldExceptionEvent).
+    .filter((event) => !(event && (event.recordType || event.entityType) === "project_exception" && withheldExceptionEvent(event, access)))
     .map((event) => {
       const type = event && (event.recordType || event.entityType);
       if (isContractManageEvent(event)) return withheldContractManageEvent(event, contractValueSource);
@@ -1844,7 +1846,195 @@ const withheldActivityQuantities = (view, access = FULL_ACCESS) => {
   };
 };
 
+// ─── PC-7b: project exceptions (§1 overrun kinds, §7 data quality) ────────
+//
+// An exception is read through the module its subject belongs to — boq for
+// the quantity kinds, cost for the money kinds, schedule for the schedule
+// kinds, progress for progress — and one whose subject is one of the bill's
+// own records (a BOQ item, an allocation, a certificate item: one per BOQ row)
+// or whose measured / limit figures are worked from the bill (the quantity
+// and allocation kinds, certified-over-earned, a default forecast built from
+// the allocation, the allocation-built EV) is withheld WHOLE from a member
+// who may not read the BOQ: not listed, not counted per project in any tile.
+// The answer then carries a marker { reason, modules } on EVERY list, whether
+// or not a row was left out — never a count, never "0 exceptions" that reads
+// as "none" (the R5-5 rule). The server omits; the screen shows "—" with the
+// reason.
+//
+// The table is the API's own statement of each kind; a rule's own `module`
+// and `boqDerived` (exception-rules, when merged) are passed in as `registry`
+// and only ever widen the withholding: the rule's module replaces the table's,
+// and either one saying "BOQ-derived" makes it so. A kind neither knows is
+// read as a BOQ-derived money kind (cost read AND BOQ read).
+const EXCEPTION_KIND_POLICY = Object.freeze({
+  // §1 overrun kinds
+  quantity_over_allocation: Object.freeze({ module: "boq", boqDerived: true }),
+  quantity_over_boq: Object.freeze({ module: "boq", boqDerived: true }),
+  certified_over_installed: Object.freeze({ module: "boq", boqDerived: true }),
+  certified_over_earned: Object.freeze({ module: "cost", boqDerived: true }),
+  committed_over_budget: Object.freeze({ module: "cost", boqDerived: false }),
+  actual_over_committed: Object.freeze({ module: "cost", boqDerived: false }),
+  forecast_over_revised: Object.freeze({ module: "cost", boqDerived: false }),
+  allocation_over_capacity: Object.freeze({ module: "boq", boqDerived: true }),
+  // Its presence says the activity is mapped to a BOQ item with
+  // certification pending (the mapping's own fact, as R5-5 treats it).
+  schedule_slip_on_mapped_item: Object.freeze({ module: "schedule", boqDerived: true }),
+  // §7 data-quality kinds
+  budget_truths_disagree: Object.freeze({ module: "cost", boqDerived: false }),
+  forecast_without_provenance: Object.freeze({ module: "cost", boqDerived: true }),
+  activity_budget_mismatch: Object.freeze({ module: "cost", boqDerived: true }),
+  unit_unresolved: Object.freeze({ module: "boq", boqDerived: true }),
+  unit_mismatch: Object.freeze({ module: "boq", boqDerived: true }),
+  structure_missing: Object.freeze({ module: "schedule", boqDerived: false }),
+  progress_stale: Object.freeze({ module: "progress", boqDerived: false }),
+  period_not_locked: Object.freeze({ module: "cost", boqDerived: false }),
+  ev_basis_divergence: Object.freeze({ module: "cost", boqDerived: true }),
+  committed_definition_mixed: Object.freeze({ module: "cost", boqDerived: false }),
+  equipment_cost_unposted: Object.freeze({ module: "cost", boqDerived: false }),
+  orphan_change_link: Object.freeze({ module: "cost", boqDerived: false }),
+  readiness_override_active: Object.freeze({ module: "schedule", boqDerived: false }),
+});
+const EXCEPTION_UNKNOWN_KIND_POLICY = Object.freeze({ module: "cost", boqDerived: true });
+const EXCEPTION_MODULES = Object.freeze(["boq", "cost", "schedule", "progress"]);
+// Subjects that are the bill's own records.
+const EXCEPTION_BOQ_SUBJECT_TYPES = Object.freeze(["boq_item", "allocation", "activity_boq_allocation", "certificate_item", "ipc_item"]);
+const EXCEPTIONS_BOQ_WITHHELD =
+  "Exceptions on the BOQ's items and allocations, and those measured from the BOQ's quantities or its mapping, are available only to members who may read the BOQ";
+const EXCEPTION_MODULE_NAMES = Object.freeze({ boq: "BOQ", cost: "cost", schedule: "schedule", progress: "progress" });
+
+/** A kind's module and whether its figures are the bill's (the table, widened by a rule's own statement). */
+const exceptionPolicy = (kind, registry = null) => {
+  const own = EXCEPTION_KIND_POLICY[kind] || null;
+  const rule = registry && typeof registry === "object" ? registry[kind] || null : null;
+  if (!own && !rule) return EXCEPTION_UNKNOWN_KIND_POLICY;
+  const module = EXCEPTION_MODULES.includes(rule?.module) ? rule.module : own ? own.module : EXCEPTION_UNKNOWN_KIND_POLICY.module;
+  return { module, boqDerived: Boolean(rule?.boqDerived) || Boolean(own?.boqDerived) || (!own && rule?.boqDerived !== false) };
+};
+
+const isBoqDerivedException = (row, policy = exceptionPolicy(row && row.kind)) =>
+  Boolean(policy.boqDerived) ||
+  EXCEPTION_BOQ_SUBJECT_TYPES.includes(row && row.subjectType) ||
+  EXCEPTION_BOQ_SUBJECT_TYPES.includes(row && row.secondarySubjectType);
+
+/**
+ * What a caller may read of a project's exceptions, decided as that project's
+ * own routes decide it: `modules[m]` is hasPermission(req, m, 'read'), `boq`
+ * is canReadBoq.
+ */
+const exceptionAccess = (req) => ({
+  boq: canReadBoq(req),
+  modules: Object.fromEntries(EXCEPTION_MODULES.map((module) => [module, hasPermission(req, module, "read")])),
+});
+
+/** Whether this caller may be given this exception at all. */
+const exceptionReadable = (row, access, registry = null) => {
+  if (!row || !access) return false;
+  const policy = exceptionPolicy(row.kind, registry);
+  if (!access.modules || access.modules[policy.module] !== true) return false;
+  return access.boq === true || !isBoqDerivedException(row, policy);
+};
+
+const knownExceptionKinds = (registry = null) => [
+  ...new Set([...Object.keys(EXCEPTION_KIND_POLICY), ...Object.keys(registry && typeof registry === "object" ? registry : {})]),
+];
+
+/**
+ * The Prisma `where` fragment that keeps a list to the exceptions this caller
+ * may read — applied in the query, so a page is never short and no count of
+ * the rows left out can be read off it. `null` when nothing may be read.
+ */
+const exceptionReadableWhere = (access, registry = null) => {
+  const known = knownExceptionKinds(registry);
+  const readable = known.filter((kind) => exceptionReadable({ kind }, access, registry));
+  const kindClauses = [];
+  if (readable.length) kindClauses.push({ kind: { in: readable } });
+  // A kind nobody has described is a BOQ-derived money kind.
+  if (exceptionReadable({ kind: "__unknown_kind__" }, access, registry)) kindClauses.push({ kind: { notIn: known } });
+  if (!kindClauses.length) return null;
+  const where = { OR: kindClauses };
+  if (access.boq === true) return where;
+  return {
+    AND: [
+      where,
+      { subjectType: { notIn: [...EXCEPTION_BOQ_SUBJECT_TYPES] } },
+      { OR: [{ secondarySubjectType: null }, { secondarySubjectType: { notIn: [...EXCEPTION_BOQ_SUBJECT_TYPES] } }] },
+    ],
+  };
+};
+
+/**
+ * The marker beside a list (or a tile) for a caller who may not read every
+ * kind: the BOQ-derived kinds (`boq`) and each module they may not read. It
+ * depends on the caller's access only, never on the rows.
+ */
+const exceptionsWithheldMarker = (access) => {
+  if (!access) return { reason: EXCEPTIONS_BOQ_WITHHELD, modules: [...EXCEPTION_MODULES] };
+  const modules = [];
+  if (access.boq !== true) modules.push("boq");
+  for (const module of EXCEPTION_MODULES) {
+    if (module !== "boq" && (!access.modules || access.modules[module] !== true)) modules.push(module);
+  }
+  if (!modules.length) return null;
+  const others = modules.filter((module) => module !== "boq");
+  const parts = [];
+  if (modules.includes("boq")) parts.push(EXCEPTIONS_BOQ_WITHHELD);
+  if (others.length) {
+    parts.push(`Exceptions of the ${others.map((module) => EXCEPTION_MODULE_NAMES[module]).join(", ")} ${others.length > 1 ? "modules are" : "module is"} available only to members who may read ${others.length > 1 ? "them" : "it"}`);
+  }
+  return { reason: parts.join(". "), modules };
+};
+
+/** A list of exception rows as this caller may receive it: { data, withheld? }. */
+const withheldExceptions = (rows, access, registry = null) => {
+  const data = (Array.isArray(rows) ? rows : []).filter((row) => exceptionReadable(row, access, registry));
+  const withheld = exceptionsWithheldMarker(access);
+  return withheld ? { data, withheld } : { data };
+};
+
+/**
+ * The workspace dashboard's open-exceptions figure (§35 rule 2: org-wide),
+ * counted per severity from only what the caller may read on each project
+ * (`accessFor(projectId)`, as that project's routes decide it). A project
+ * whose access is not known counts nothing.
+ */
+const withheldExceptionCounts = (rows, accessFor, registry = null) => {
+  const bySeverity = { critical: 0, warning: 0, info: 0 };
+  let total = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!exceptionReadable(row, accessFor(row.projectId), registry)) continue;
+    total += 1;
+    if (has(bySeverity, row.severity)) bySeverity[row.severity] += 1;
+  }
+  return { total, bySeverity };
+};
+
+// An exception's audit event names its kind and subject; for one the caller
+// may not read (BOQ-derived — or not marked either way — without BOQ read; a
+// money kind without the budget figures) the event goes, as the bill's own
+// records' events do. The summaries carry no figure.
+const withheldExceptionEvent = (event, access) => {
+  const meta = (event && (event.metadata || event.metadataJson)) || {};
+  if (meta.boqDerived !== false && !access.boq) return true;
+  if (meta.module === "cost" && !access.budget) return true;
+  return false;
+};
+
 module.exports = {
+  // PC-7b: project exceptions.
+  EXCEPTION_KIND_POLICY,
+  EXCEPTION_BOQ_SUBJECT_TYPES,
+  EXCEPTION_MODULES,
+  EXCEPTIONS_BOQ_WITHHELD,
+  exceptionPolicy,
+  exceptionAccess,
+  exceptionReadable,
+  exceptionReadableWhere,
+  exceptionsWithheldMarker,
+  isBoqDerivedException,
+  knownExceptionKinds,
+  withheldExceptions,
+  withheldExceptionCounts,
+  withheldExceptionEvent,
   // PC-6 (core): quantity progress entries.
   QUANTITY_ENTRY_BOQ_KEYS,
   QUANTITY_ENTRY_WITHHELD,

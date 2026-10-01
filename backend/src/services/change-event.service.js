@@ -25,7 +25,54 @@ const { nextNumber: nextCounterNumber } = require("../utils/reference-number");
 
 const STATUS = Object.freeze({ OPEN: "open", PRICING: "pricing", PRICED: "priced", CONVERTED: "converted", CLOSED: "closed", VOID: "void" });
 const TYPES = Object.freeze(["owner_change", "design_change", "site_condition", "error_omission", "allowance", "value_engineering", "other"]);
-const ORIGINS = Object.freeze(["manual", "rfi", "submittal", "daily_log", "observation", "meeting", "other"]);
+// `exception`: raised from a reviewed project exception (PC-7b §2 handoff).
+const ORIGINS = Object.freeze(["manual", "rfi", "submittal", "daily_log", "observation", "meeting", "exception", "other"]);
+
+/**
+ * PC-7b §126 typed traceability: the record a change event was raised from.
+ * Each is set only through the create path's `links` (the "Raise change
+ * event" handoffs, which check the caller may read the source), never from a
+ * request body, and must name a record of the event's own project (and
+ * organisation). `recordType` is what record-links opens it as.
+ */
+const SOURCE_LINKS = Object.freeze([
+  { field: "rfiId", model: "rfi", recordType: "rfi", orgScoped: false },
+  { field: "dailyLogId", model: "dailyLog", recordType: "daily_log", orgScoped: true },
+  { field: "ncrId", model: "ncrRecord", recordType: "ncr", orgScoped: false },
+  { field: "punchItemId", model: "punchItem", recordType: "punch_item", orgScoped: true },
+  { field: "drawingRevisionId", model: "sheetRevision", recordType: "sheet_revision", orgScoped: true },
+  { field: "submittalId", model: "submittal", recordType: "submittal", orgScoped: false },
+  { field: "meetingActionItemId", model: "meetingActionItem", recordType: "meeting_action", orgScoped: true },
+  { field: "exceptionId", model: "projectException", recordType: "project_exception", orgScoped: true },
+]);
+const SOURCE_LINK_FIELDS = Object.freeze(SOURCE_LINKS.map((link) => link.field));
+
+const normalizeLinks = (links) => {
+  const out = {};
+  if (!links || typeof links !== "object") return out;
+  for (const field of SOURCE_LINK_FIELDS) {
+    const value = links[field] === null || links[field] === undefined ? null : String(links[field]).trim();
+    if (value) out[field] = value;
+  }
+  return out;
+};
+
+const assertLinks = async ({ orgId, projectId, links }) => {
+  for (const link of SOURCE_LINKS) {
+    const id = links[link.field];
+    if (!id) continue;
+    const where = { id, projectId, ...(link.orgScoped ? { orgId } : {}) };
+    const found = await prisma[link.model].findFirst({ where, select: { id: true } });
+    if (!found) throw new HttpError(400, "CHANGE_EVENT_SOURCE_INVALID", `The ${link.recordType.replace(/_/g, " ")} the change event is raised from is not on this project`);
+  }
+};
+
+const sourceLinksOut = (row) =>
+  SOURCE_LINKS.filter((link) => row[link.field]).map((link) => ({
+    type: link.recordType,
+    id: row[link.field],
+    path: link.field === "exceptionId" ? null : recordWorkspacePath({ projectId: row.projectId, recordType: link.recordType, recordId: row[link.field] }),
+  }));
 const RFQ_STATUS = Object.freeze({ SENT: "sent", VIEWED: "viewed", QUOTED: "quoted", DECLINED: "declined", ACCEPTED: "accepted", REJECTED: "rejected", CANCELLED: "cancelled" });
 const RFQ_OPEN = [RFQ_STATUS.SENT, RFQ_STATUS.VIEWED, RFQ_STATUS.QUOTED];
 const LINK_DAYS = () => Math.max(1, Number(process.env.RFQ_LINK_DAYS || 45));
@@ -139,6 +186,8 @@ const eventOut = (row, { detail = false } = {}) => {
     sourceRecordType: row.sourceRecordType || null,
     sourceRecordId: row.sourceRecordId || null,
     sourcePath: row.sourceRecordType && row.sourceRecordId ? recordWorkspacePath({ projectId: row.projectId, recordType: row.sourceRecordType, recordId: row.sourceRecordId }) : null,
+    // PC-7b: the typed source(s) it was raised from — ids and links only.
+    sourceLinks: sourceLinksOut(row),
     status: row.status,
     activityId: row.activityId || null,
     activity: row.activity ? { id: row.activity.id, name: row.activity.name, code: row.activity.activityCode || row.activity.wbsCode || null } : null,
@@ -277,18 +326,41 @@ const nextNumber = async (tx, projectId) => {
   return nextCounterNumber(tx, { table: "ChangeEvent", scope: { projectId } });
 };
 
-const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null }) => {
+/**
+ * Creates a change event (status open — the draft a QS prices). `links`
+ * (PC-7b §126) sets the typed source(s) it is raised from; only the "Raise
+ * change event" handoffs pass it. With `links.exceptionId` the exception is
+ * claimed in the same transaction: it must still be unresolved and not
+ * already carried by a live change event (one void or closed may be
+ * replaced), else 409 EXCEPTION_IN_CHANGE and nothing is written.
+ */
+const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null, links = null }) => {
   await ensureProject({ orgId, projectId });
   const data = normalizeEvent(payload);
   const lines = normalizeLines(payload.lines);
+  const typed = normalizeLinks(links);
   await assertRefs({ projectId, data, lines });
+  await assertLinks({ orgId, projectId, links: typed });
   const created = await prisma.$transaction(async (tx) => {
     const number = await nextNumber(tx, projectId);
-    const row = await tx.changeEvent.create({ data: { ...data, orgId, projectId, number, ref: `CE-${String(number).padStart(3, "0")}`, status: STATUS.OPEN, createdBy: actor?.id || null, updatedBy: actor?.id || null } });
+    const row = await tx.changeEvent.create({ data: { ...data, ...typed, orgId, projectId, number, ref: `CE-${String(number).padStart(3, "0")}`, status: STATUS.OPEN, createdBy: actor?.id || null, updatedBy: actor?.id || null } });
     if (lines.length) await tx.changeEventLine.createMany({ data: lines.map(({ id, ...line }) => ({ ...line, orgId, projectId, changeEventId: row.id })) });
+    if (typed.exceptionId) {
+      const claimed = await tx.projectException.updateMany({
+        where: {
+          id: typed.exceptionId,
+          orgId,
+          projectId,
+          resolvedAt: null,
+          OR: [{ changeEventId: null }, { changeEvent: { status: { in: [STATUS.VOID, STATUS.CLOSED] } } }],
+        },
+        data: { changeEventId: row.id },
+      });
+      if (claimed.count !== 1) throw new HttpError(409, "EXCEPTION_IN_CHANGE", "This exception is already carried by a change event, or is no longer open");
+    }
     return loadEvent({ orgId, projectId, changeEventId: row.id, tx });
   });
-  await auditService.recordEvent({ orgId, projectId, entityType: "change_event", entityId: created.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, summary: { ref: created.ref, title: created.title, type: created.type, origin: created.origin, rom: estimateOf(created).rom } }).catch(() => null);
+  await auditService.recordEvent({ orgId, projectId, entityType: "change_event", entityId: created.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, summary: { ref: created.ref, title: created.title, type: created.type, origin: created.origin, rom: estimateOf(created).rom, ...(Object.keys(typed).length ? { sourceLinks: typed } : {}) } }).catch(() => null);
   return eventOut(created, { detail: true });
 };
 
@@ -589,4 +661,4 @@ const portalDecline = async (token, payload = {}) => {
   return portalOut(row);
 };
 
-module.exports = { STATUS, TYPES, ORIGINS, RFQ_STATUS, estimateOf, normalizeLines, listChangeEvents, getChangeEvent, createChangeEvent, updateChangeEvent, deleteChangeEvent, sendRfqs, remindRfq, cancelRfq, acceptQuote, rejectQuote, convertToChangeOrder, closeChangeEvent, voidChangeEvent, portalContext, portalView, portalSubmitQuote, portalDecline, hashToken };
+module.exports = { STATUS, TYPES, ORIGINS, SOURCE_LINKS, SOURCE_LINK_FIELDS, RFQ_STATUS, estimateOf, normalizeLines, listChangeEvents, getChangeEvent, createChangeEvent, updateChangeEvent, deleteChangeEvent, sendRfqs, remindRfq, cancelRfq, acceptQuote, rejectQuote, convertToChangeOrder, closeChangeEvent, voidChangeEvent, portalContext, portalView, portalSubmitQuote, portalDecline, hashToken };

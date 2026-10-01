@@ -5,7 +5,9 @@ const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
 const { requestForProject, requireProjectAccess } = require("../middleware/project-access");
 const { hasPermission, requireRoles } = require("../middleware/rbac");
-const { boqFigureAccess, canReadBoq, withheldWorkspaceDashboard } = require("../utils/boq-figures");
+const { boqFigureAccess, canReadBoq, exceptionAccess, withheldWorkspaceDashboard } = require("../utils/boq-figures");
+const exceptionService = require("../services/exception.service");
+const exceptionsRouter = require("./exceptions");
 const { validate } = require("../middleware/validate");
 const {
   enforceProjectLimit,
@@ -205,7 +207,18 @@ router.get(
         rows.map(async (row) => [row.id, boqFigureAccess(await viewFor(row.id))]),
       ),
     );
-    return sendSuccess(res, withheldWorkspaceDashboard(result, (projectId) => access.get(projectId)));
+    // PC-7b: the open-exceptions figure, org-wide (§35 rule 2) over the
+    // projects the caller can open, counting on each only the exceptions
+    // they may read there (utils/boq-figures, per project).
+    const openExceptions = await exceptionService.workspaceOpenExceptions({
+      orgId: req.user.orgId,
+      userId: req.user.id,
+      role: req.user.role,
+      isCompanyAdmin: req.user.isCompanyAdmin,
+      accessFor: async (projectId) => exceptionAccess(await viewFor(projectId)),
+    });
+    const dashboard = withheldWorkspaceDashboard(result, (projectId) => access.get(projectId));
+    return sendSuccess(res, { ...dashboard, openExceptions });
   }),
 );
 
@@ -300,6 +313,10 @@ router.delete(
   }),
 );
 
+// PC-7b: project exceptions, and "Raise change event" beside each source
+// record's own routes (full paths, registered before those modules' routers).
+router.use("/:projectId/controls/exceptions", nestedProjectAccess, exceptionsRouter);
+exceptionsRouter.registerSourceRaiseRoutes(router, nestedProjectAccess);
 router.use("/:projectId/boq", nestedProjectAccess, require("./boq"));
 router.use(
   "/:projectId/activity-boq-allocations",

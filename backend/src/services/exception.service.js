@@ -1,0 +1,866 @@
+const { prisma } = require("../config/db");
+const { HttpError } = require("../utils/http-error");
+const { cursorArgs, toCursorPage, normalizeListQuery } = require("../utils/list-query");
+const { recordWorkspacePath } = require("../utils/record-links");
+const {
+  EXCEPTION_BOQ_SUBJECT_TYPES,
+  EXCEPTION_MODULES,
+  exceptionPolicy,
+  exceptionReadable,
+  exceptionReadableWhere,
+  exceptionsWithheldMarker,
+  isBoqDerivedException,
+  withheldExceptionCounts,
+} = require("../utils/boq-figures");
+const auditService = require("./audit.service");
+const changeEventService = require("./change-event.service");
+
+/**
+ * Project exceptions — read, review and hand off (PC-7b, OCTAPM_CHANGE_INTELLIGENCE §1, §2, §5).
+ *
+ * The rows are derived and rebuildable: the exception engine writes them
+ * (exception-engine.service). This service only reads them, records a
+ * person's review of one (review, snooze, dismiss) and hands one off to a
+ * change event. Nothing here writes a change order, a budget, a schedule, a
+ * cost record or any figure: an exception's measured and limit figures are
+ * the ones its owning service stated, shown with their basis; a change event
+ * raised from one is a DRAFT (status open) with the amount left blank for
+ * the QS. Who may read which exception, and the BOQ-derived withholding, is
+ * decided in utils/boq-figures (the PC-7b exceptions block).
+ */
+
+const STATUSES = Object.freeze(["open", "in_change", "snoozed", "dismissed", "resolved"]);
+const SEVERITIES = Object.freeze(["info", "warning", "critical"]);
+const DISMISSED_PREFIX = "dismissed:";
+const RELEASED_EVENT_STATUSES = Object.freeze([changeEventService.STATUS.VOID, changeEventService.STATUS.CLOSED]);
+const MAX_SNOOZE_DAYS = 365;
+
+const KIND_LABELS = Object.freeze({
+  quantity_over_allocation: "Installed quantity over the allocation",
+  quantity_over_boq: "Installed quantity over the BOQ quantity",
+  certified_over_installed: "Certified quantity over the installed quantity",
+  certified_over_earned: "Certified value over earned value",
+  committed_over_budget: "Committed over the revised budget",
+  actual_over_committed: "Actual cost over the committed value",
+  forecast_over_revised: "Forecast over the revised budget",
+  allocation_over_capacity: "Allocations over the BOQ item",
+  schedule_slip_on_mapped_item: "Schedule slip on a mapped item",
+  budget_truths_disagree: "Budget totals disagree",
+  forecast_without_provenance: "Forecast without provenance",
+  activity_budget_mismatch: "Activity budget differs from its allocations",
+  unit_unresolved: "Unit not in the unit master",
+  unit_mismatch: "Units differ",
+  structure_missing: "Structure missing",
+  progress_stale: "Progress not updated",
+  period_not_locked: "Reporting period not locked",
+  ev_basis_divergence: "Earned value bases differ",
+  committed_definition_mixed: "Committed figures of different definitions",
+  equipment_cost_unposted: "Equipment cost not posted",
+  orphan_change_link: "Change link names a missing record",
+  readiness_override_active: "Readiness override active",
+});
+const kindLabel = (kind) => KIND_LABELS[kind] || String(kind || "Exception").replace(/_/g, " ");
+
+// Kinds whose measured − limit is a quantity the change event's line can carry.
+const QUANTITY_DELTA_KINDS = new Set(["quantity_over_allocation", "quantity_over_boq", "certified_over_installed", "allocation_over_capacity"]);
+
+const trimOrNull = (value) => {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text || null;
+};
+const toIso = (value) => (value ? new Date(value).toISOString() : null);
+const num = (value) => (value === null || value === undefined ? null : Number(value));
+const round3 = (value) => Math.round(Number(value) * 1000) / 1000;
+
+// ─── The engine's rule registry (when merged) ─────────────────────────────
+//
+// exception-rules/index.js (the engine track) loads every rule file; each
+// rule states its `module` and `boqDerived`. Read once; its statements only
+// widen the withholding (utils/boq-figures exceptionPolicy). Absent (this
+// track's base), the API's own table stands.
+let registryCache;
+const ruleRegistry = () => {
+  if (registryCache !== undefined) return registryCache;
+  registryCache = null;
+  let loaded;
+  try {
+    loaded = require("./exception-rules");
+  } catch (error) {
+    if (error && error.code === "MODULE_NOT_FOUND" && String(error.message).includes("exception-rules")) return registryCache;
+    throw error;
+  }
+  const list = Array.isArray(loaded)
+    ? loaded
+    : Array.isArray(loaded?.rules)
+      ? loaded.rules
+      : Array.isArray(loaded?.RULES)
+        ? loaded.RULES
+        : Object.values(loaded || {}).flat().filter((rule) => rule && typeof rule === "object" && rule.kind);
+  const registry = {};
+  for (const rule of list) {
+    if (rule && rule.kind) registry[rule.kind] = { module: rule.module, boqDerived: rule.boqDerived === true };
+  }
+  registryCache = Object.keys(registry).length ? registry : null;
+  return registryCache;
+};
+
+const policyOf = (row) => exceptionPolicy(row.kind, ruleRegistry());
+
+// ─── Status ───────────────────────────────────────────────────────────────
+
+const liveEvent = (row) => Boolean(row.changeEventId && row.changeEvent && !RELEASED_EVENT_STATUSES.includes(row.changeEvent.status));
+
+/** open | in_change | snoozed | dismissed | resolved, as of `now`. */
+const statusOf = (row, now = new Date()) => {
+  if (row.resolvedAt) return String(row.resolvedReason || "").startsWith(DISMISSED_PREFIX) ? "dismissed" : "resolved";
+  if (liveEvent(row)) return "in_change";
+  if (row.snoozedUntil && new Date(row.snoozedUntil).getTime() > now.getTime()) return "snoozed";
+  return "open";
+};
+
+// No live change event: none, or one void / closed (the gap is open again).
+const NOT_IN_CHANGE = Object.freeze({ OR: [{ changeEventId: null }, { changeEvent: { status: { in: [...RELEASED_EVENT_STATUSES] } } }] });
+const IN_CHANGE = Object.freeze({ changeEventId: { not: null }, changeEvent: { status: { notIn: [...RELEASED_EVENT_STATUSES] } } });
+
+const statusWhere = (status, now) => {
+  switch (status) {
+    case "open":
+      return { resolvedAt: null, AND: [NOT_IN_CHANGE, { OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }] }] };
+    case "in_change":
+      return { resolvedAt: null, ...IN_CHANGE };
+    case "snoozed":
+      return { resolvedAt: null, snoozedUntil: { gt: now }, AND: [NOT_IN_CHANGE] };
+    case "dismissed":
+      return { resolvedAt: { not: null }, resolvedReason: { startsWith: DISMISSED_PREFIX } };
+    case "resolved":
+      return { resolvedAt: { not: null }, OR: [{ resolvedReason: null }, { NOT: { resolvedReason: { startsWith: DISMISSED_PREFIX } } }] };
+    case "all":
+      return {};
+    default:
+      // Unresolved: open, in change and snoozed.
+      return { resolvedAt: null };
+  }
+};
+
+// ─── Labels ───────────────────────────────────────────────────────────────
+
+const activityLabel = (row) => [row.activityCode || row.wbsCode, row.name].filter(Boolean).join(" ") || "Activity";
+const boqLabel = (row) => [row.code || row.ref, row.description].filter(Boolean).join(" ") || "BOQ item";
+
+/** Words for every subject of these rows, read per type in one query each, scoped to the project. */
+const loadSubjectLabels = async ({ projectId, rows }) => {
+  const ids = {};
+  const add = (type, id) => {
+    if (!type || !id) return;
+    (ids[type] = ids[type] || new Set()).add(id);
+  };
+  for (const row of rows) {
+    add(row.subjectType, row.subjectId);
+    add(row.secondarySubjectType, row.secondarySubjectId);
+  }
+  const labels = new Map();
+  const put = (type, id, label) => labels.set(`${type}:${id}`, label);
+  const list = (type) => [...(ids[type] || [])];
+  const activitySelect = { id: true, name: true, activityCode: true, wbsCode: true };
+
+  const allocationIds = [...list("allocation"), ...list("activity_boq_allocation")];
+  const loaders = [
+    list("boq_item").length &&
+      prisma.boqItem.findMany({ where: { projectId, id: { in: list("boq_item") } }, select: { id: true, code: true, ref: true, description: true } }).then((found) => found.forEach((row) => put("boq_item", row.id, boqLabel(row)))),
+    allocationIds.length &&
+      prisma.activityBoqAllocation
+        .findMany({ where: { projectId, id: { in: allocationIds } }, select: { id: true, boqItem: { select: { code: true, ref: true, description: true } }, activity: { select: activitySelect } } })
+        .then((found) =>
+          found.forEach((row) => {
+            const label = `${row.boqItem ? row.boqItem.code || row.boqItem.ref || "BOQ item" : "BOQ item"} → ${row.activity ? activityLabel(row.activity) : "activity"}`;
+            put("allocation", row.id, label);
+            put("activity_boq_allocation", row.id, label);
+          }),
+        ),
+    list("activity").length &&
+      prisma.activity.findMany({ where: { projectId, id: { in: list("activity") } }, select: activitySelect }).then((found) => found.forEach((row) => put("activity", row.id, activityLabel(row)))),
+    list("budget_line").length &&
+      prisma.budgetLine
+        .findMany({ where: { projectId, id: { in: list("budget_line") } }, select: { id: true, description: true, costCode: { select: { code: true, name: true } } } })
+        .then((found) => found.forEach((row) => put("budget_line", row.id, [row.costCode?.code, row.description || row.costCode?.name].filter(Boolean).join(" ") || "Budget line"))),
+    list("commitment").length &&
+      prisma.commitment.findMany({ where: { projectId, id: { in: list("commitment") } }, select: { id: true, ref: true, title: true } }).then((found) => found.forEach((row) => put("commitment", row.id, [row.ref, row.title].filter(Boolean).join(" ")))),
+    [...list("certificate_item"), ...list("ipc_item")].length &&
+      prisma.ipcItem
+        .findMany({ where: { projectId, id: { in: [...list("certificate_item"), ...list("ipc_item")] } }, select: { id: true, ipcPeriod: true, boqItem: { select: { code: true, ref: true } } } })
+        .then((found) =>
+          found.forEach((row) => {
+            const label = `${row.ipcPeriod} · ${row.boqItem ? row.boqItem.code || row.boqItem.ref || "BOQ item" : "BOQ item"}`;
+            put("certificate_item", row.id, label);
+            put("ipc_item", row.id, label);
+          }),
+        ),
+    list("project").length &&
+      prisma.project.findMany({ where: { id: { in: list("project") } }, select: { id: true, name: true } }).then((found) => found.forEach((row) => put("project", row.id, row.name))),
+  ].filter(Boolean);
+  await Promise.all(loaders);
+  return labels;
+};
+
+const loadUserNames = async (rows) => {
+  const ids = [...new Set(rows.flatMap((row) => [row.reviewedBy, row.snoozedBy, row.dataJson?.dismissedBy]).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const users = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+  return new Map(users.map((user) => [user.id, user.name || null]));
+};
+
+const ROW_INCLUDE = Object.freeze({
+  changeEvent: { select: { id: true, ref: true, status: true, title: true } },
+  wbsNode: { select: { id: true, code: true, name: true } },
+  location: { select: { id: true, code: true, name: true } },
+  costCode: { select: { id: true, code: true, name: true } },
+});
+
+// ─── Serialising ──────────────────────────────────────────────────────────
+
+/**
+ * What this caller may do with this exception: review / snooze / dismiss on
+ * change_event update or the subject module's update; raise / associate on
+ * change_event create — and only in a state that allows it.
+ */
+const actionsFor = (row, status, may) => {
+  const policy = policyOf(row);
+  const reviewer = Boolean(may && (may.changeEventUpdate || (may.moduleUpdate && may.moduleUpdate[policy.module])));
+  const creator = Boolean(may && may.changeEventCreate);
+  const live = status === "open" || status === "snoozed";
+  return {
+    review: reviewer && (live || status === "in_change"),
+    snooze: reviewer && live,
+    dismiss: reviewer && live,
+    raiseChangeEvent: creator && live,
+    associateChangeEvent: creator && live,
+  };
+};
+
+const subjectOut = (type, id, labels) => (type && id ? { type, id, label: labels.get(`${type}:${id}`) || null } : null);
+
+const serialize = (row, { labels, names, may, now = new Date() }) => {
+  const status = statusOf(row, now);
+  const data = row.dataJson && typeof row.dataJson === "object" ? row.dataJson : {};
+  const out = {
+    id: row.id,
+    projectId: row.projectId,
+    kind: row.kind,
+    kindLabel: kindLabel(row.kind),
+    severity: row.severity,
+    status,
+    module: policyOf(row).module,
+    subject: subjectOut(row.subjectType, row.subjectId, labels),
+    group: {
+      wbsNodeId: row.wbsNodeId || null,
+      wbsNode: row.wbsNode ? { id: row.wbsNode.id, code: row.wbsNode.code, name: row.wbsNode.name } : null,
+      locationId: row.locationId || null,
+      location: row.location ? { id: row.location.id, code: row.location.code || null, name: row.location.name } : null,
+      costCodeId: row.costCodeId || null,
+      costCode: row.costCode ? { id: row.costCode.id, code: row.costCode.code, name: row.costCode.name } : null,
+    },
+    measured: { value: num(row.measured), unitCode: row.unitCode || null, basis: row.measuredBasis },
+    limit: { value: num(row.limit), unitCode: row.unitCode || null, basis: row.limitBasis },
+    detectedAt: toIso(row.detectedAt),
+    lastSeenAt: toIso(row.lastSeenAt),
+    resolvedAt: toIso(row.resolvedAt),
+    review: row.reviewedAt ? { reviewedAt: toIso(row.reviewedAt), reviewedBy: row.reviewedBy || null, reviewedByName: names.get(row.reviewedBy) || null, note: row.reviewNote || null } : null,
+    snooze: row.snoozedUntil ? { until: toIso(row.snoozedUntil), by: row.snoozedBy || null, byName: names.get(row.snoozedBy) || null, reason: data.review?.snoozeReason || null } : null,
+    dismissal:
+      status === "dismissed"
+        ? { at: toIso(row.resolvedAt), reason: String(row.resolvedReason).slice(DISMISSED_PREFIX.length) || null, by: data.dismissedBy || null, byName: names.get(data.dismissedBy) || null }
+        : null,
+    changeEvent: row.changeEvent
+      ? { id: row.changeEvent.id, ref: row.changeEvent.ref, status: row.changeEvent.status, title: row.changeEvent.title, path: recordWorkspacePath({ projectId: row.projectId, recordType: "change_event", recordId: row.changeEvent.id }) }
+      : null,
+    actions: actionsFor(row, status, may),
+  };
+  const secondary = subjectOut(row.secondarySubjectType, row.secondarySubjectId, labels);
+  if (secondary) out.secondarySubject = secondary;
+  return out;
+};
+
+const serializeAll = async ({ projectId, rows, may }) => {
+  const [labels, names] = await Promise.all([loadSubjectLabels({ projectId, rows }), loadUserNames(rows)]);
+  const now = new Date();
+  return rows.map((row) => serialize(row, { labels, names, may, now }));
+};
+
+// ─── Reading ──────────────────────────────────────────────────────────────
+
+const csv = (value) =>
+  (Array.isArray(value) ? value : String(value || "").split(","))
+    .map((part) => String(part).trim())
+    .filter(Boolean);
+
+/** Subject filter: the subject or secondary subject, and — for an activity or a BOQ item — the allocations that tie them. */
+const subjectWhere = async ({ projectId, subjectType, subjectId }) => {
+  if (!subjectType && !subjectId) return null;
+  const pair = (type, id) => ({ ...(type ? { subjectType: type } : {}), ...(id ? { subjectId: id } : {}) });
+  const second = (type, id) => ({ ...(type ? { secondarySubjectType: type } : {}), ...(id ? { secondarySubjectId: id } : {}) });
+  const clauses = [pair(subjectType, subjectId), second(subjectType, subjectId)];
+  if (subjectId && (subjectType === "activity" || subjectType === "boq_item")) {
+    const allocations = await prisma.activityBoqAllocation.findMany({
+      where: { projectId, ...(subjectType === "activity" ? { activityId: subjectId } : { boqItemId: subjectId }) },
+      select: { id: true },
+    });
+    if (allocations.length) clauses.push({ subjectType: { in: ["allocation", "activity_boq_allocation"] }, subjectId: { in: allocations.map((row) => row.id) } });
+  }
+  return { OR: clauses };
+};
+
+/**
+ * GET /projects/:id/controls/exceptions — the exceptions this caller may
+ * read (utils/boq-figures exceptionReadableWhere, in the query), newest
+ * first, cursor-paged; `withheld` on every answer whose caller may not read
+ * every kind (never a count).
+ */
+const listExceptions = async ({ orgId, projectId, access, may, query = {} }) => {
+  const registry = ruleRegistry();
+  const withheld = exceptionsWithheldMarker(access);
+  const { limit } = normalizeListQuery({ limit: query.limit }, { defaultLimit: 50, maxLimit: 100 });
+  const readable = exceptionReadableWhere(access, registry);
+  const answer = (data, nextCursor = null) => ({ data, pagination: { limit, nextCursor }, ...(withheld ? { withheld } : {}) });
+  if (!readable) return answer([]);
+
+  const now = new Date();
+  const and = [readable, statusWhere(query.status, now)];
+  const kinds = csv(query.kind);
+  if (kinds.length) and.push({ kind: { in: kinds } });
+  const severities = csv(query.severity).filter((value) => SEVERITIES.includes(value));
+  if (severities.length) and.push({ severity: { in: severities } });
+  let subjectType = trimOrNull(query.subjectType);
+  let subjectId = trimOrNull(query.subjectId);
+  const subject = trimOrNull(query.subject);
+  if (subject) {
+    const [type, id] = subject.split(":");
+    subjectType = trimOrNull(type) || subjectType;
+    subjectId = trimOrNull(id) || subjectId;
+  }
+  const bySubject = await subjectWhere({ projectId, subjectType, subjectId });
+  if (bySubject) and.push(bySubject);
+  for (const key of ["wbsNodeId", "locationId", "costCodeId"]) {
+    const value = trimOrNull(query[key]);
+    if (value) and.push({ [key]: value });
+  }
+
+  const rows = await prisma.projectException.findMany({
+    where: { orgId, projectId, AND: and },
+    include: ROW_INCLUDE,
+    orderBy: [{ detectedAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    ...cursorArgs(trimOrNull(query.cursor)),
+  });
+  // Belt and braces: the query already kept only readable rows.
+  const page = toCursorPage(rows.filter((row) => exceptionReadable(row, access, registry)), limit);
+  return answer(await serializeAll({ projectId, rows: page.rows, may }), page.pagination.nextCursor);
+};
+
+/** One exception this caller may read, or 404 — an unreadable one is not said to exist. */
+const loadReadable = async ({ orgId, projectId, exceptionId, access, tx = prisma }) => {
+  const row = await tx.projectException.findFirst({ where: { id: exceptionId, orgId, projectId }, include: ROW_INCLUDE });
+  if (!row || !exceptionReadable(row, access, ruleRegistry())) throw new HttpError(404, "EXCEPTION_NOT_FOUND", "Exception not found");
+  return row;
+};
+
+const getException = async ({ orgId, projectId, exceptionId, access, may }) => {
+  const row = await loadReadable({ orgId, projectId, exceptionId, access });
+  const [serialized] = await serializeAll({ projectId, rows: [row], may });
+  return serialized;
+};
+
+// ─── Review actions ───────────────────────────────────────────────────────
+
+const forbidden = (action, module) => {
+  const error = new HttpError(403, "FORBIDDEN", "You do not have permission for this action");
+  error.details = { action, requires: ["change_event:update", `${module}:update`] };
+  return error;
+};
+
+const requireReviewer = (row, may, action) => {
+  const policy = policyOf(row);
+  if (!(may.changeEventUpdate || (may.moduleUpdate && may.moduleUpdate[policy.module]))) throw forbidden(action, policy.module);
+};
+
+const requireCreator = (may, action) => {
+  if (!may.changeEventCreate) {
+    const error = new HttpError(403, "FORBIDDEN", "You do not have permission for this action");
+    error.details = { action, requires: ["change_event:create"] };
+    throw error;
+  }
+};
+
+const notOpen = (status) =>
+  status === "in_change"
+    ? new HttpError(409, "EXCEPTION_IN_CHANGE", "This exception is already carried by a change event")
+    : new HttpError(409, "EXCEPTION_NOT_OPEN", `A ${status} exception cannot take this action`);
+
+// The audit event names the kind, the subject and what was done — never a
+// figure — and says whether the exception is BOQ-derived and its module, so
+// the history withholds it as it withholds the exception (utils/boq-figures
+// withheldExceptionEvent).
+const auditExceptionEvent = ({ row, actor, action, oldStatus = null, newStatus = null, reason = null, summary = {} }) =>
+  auditService.recordEvent({
+    orgId: row.orgId,
+    projectId: row.projectId,
+    entityType: "project_exception",
+    entityId: row.id,
+    action,
+    actorId: actor?.id || null,
+    actorRole: actor?.role || null,
+    oldStatus,
+    newStatus,
+    reason,
+    summary: { kind: row.kind, severity: row.severity, subjectType: row.subjectType, subjectId: row.subjectId, ...summary },
+    metadata: { boqDerived: isBoqDerivedException(row, policyOf(row)), module: policyOf(row).module },
+  });
+
+const reread = async ({ orgId, projectId, exceptionId, access, may }) => getException({ orgId, projectId, exceptionId, access, may });
+
+/** POST …/:exceptionId/review — a reviewer's note; the exception stays as it is. */
+const reviewException = async ({ orgId, projectId, exceptionId, access, may, actor, payload = {} }) => {
+  const row = await loadReadable({ orgId, projectId, exceptionId, access });
+  requireReviewer(row, may, "review");
+  const status = statusOf(row);
+  if (!["open", "snoozed", "in_change"].includes(status)) throw notOpen(status);
+  const note = trimOrNull(payload.note);
+  if (!note) throw new HttpError(400, "VALIDATION_ERROR", "A review needs a note");
+  const updated = await prisma.projectException.updateMany({
+    where: { id: row.id, orgId, projectId, resolvedAt: null },
+    data: { reviewedAt: new Date(), reviewedBy: actor?.id || null, reviewNote: note.slice(0, 2000) },
+  });
+  if (updated.count !== 1) throw notOpen("resolved");
+  await auditExceptionEvent({ row, actor, action: auditService.ACTIONS.UPDATED, summary: { review: "reviewed", note: note.slice(0, 2000) } });
+  return reread({ orgId, projectId, exceptionId, access, may });
+};
+
+const mergeData = (row, patch) => ({ ...(row.dataJson && typeof row.dataJson === "object" ? row.dataJson : {}), ...patch });
+
+/** POST …/:exceptionId/snooze — kept refreshing by the engine, not re-notified until `until`. */
+const snoozeException = async ({ orgId, projectId, exceptionId, access, may, actor, payload = {} }) => {
+  const row = await loadReadable({ orgId, projectId, exceptionId, access });
+  requireReviewer(row, may, "snooze");
+  const status = statusOf(row);
+  if (!["open", "snoozed"].includes(status)) throw notOpen(status);
+  const until = new Date(payload.until);
+  const now = new Date();
+  if (Number.isNaN(until.getTime()) || until.getTime() <= now.getTime() || until.getTime() > now.getTime() + MAX_SNOOZE_DAYS * 86_400_000) {
+    throw new HttpError(400, "EXCEPTION_SNOOZE_INVALID", `Snooze until a moment in the next ${MAX_SNOOZE_DAYS} days`);
+  }
+  const reason = trimOrNull(payload.reason);
+  if (!reason) throw new HttpError(400, "VALIDATION_ERROR", "A snooze needs a reason");
+  const updated = await prisma.projectException.updateMany({
+    where: { id: row.id, orgId, projectId, resolvedAt: null, AND: [NOT_IN_CHANGE] },
+    data: {
+      snoozedUntil: until,
+      snoozedBy: actor?.id || null,
+      dataJson: mergeData(row, { review: { ...(row.dataJson?.review || {}), snoozeReason: reason.slice(0, 500), snoozedAt: now.toISOString(), snoozedBy: actor?.id || null } }),
+    },
+  });
+  if (updated.count !== 1) throw notOpen("in_change");
+  await auditExceptionEvent({ row, actor, action: auditService.ACTIONS.STATUS_CHANGED, oldStatus: status, newStatus: "snoozed", reason: reason.slice(0, 500), summary: { snoozedUntil: until.toISOString() } });
+  return reread({ orgId, projectId, exceptionId, access, may });
+};
+
+/**
+ * POST …/:exceptionId/dismiss — resolved by a person: resolvedAt now,
+ * resolvedReason `dismissed:<reason>`, and the measured / limit it was
+ * dismissed at kept in dataJson.dismissedFingerprint. The engine keeps it
+ * dismissed while those are unchanged and opens a new row only when the
+ * measured value moves past it in the adverse direction.
+ */
+const dismissException = async ({ orgId, projectId, exceptionId, access, may, actor, payload = {} }) => {
+  const row = await loadReadable({ orgId, projectId, exceptionId, access });
+  requireReviewer(row, may, "dismiss");
+  const status = statusOf(row);
+  if (!["open", "snoozed"].includes(status)) throw notOpen(status);
+  const reason = trimOrNull(payload.reason);
+  if (!reason) throw new HttpError(400, "VALIDATION_ERROR", "A dismissal needs a reason");
+  const now = new Date();
+  const updated = await prisma.projectException.updateMany({
+    where: { id: row.id, orgId, projectId, resolvedAt: null, AND: [NOT_IN_CHANGE] },
+    data: {
+      resolvedAt: now,
+      resolvedReason: `${DISMISSED_PREFIX}${reason.slice(0, 500)}`,
+      dataJson: mergeData(row, {
+        dismissedFingerprint: { measured: num(row.measured), limit: num(row.limit), unitCode: row.unitCode || null, measuredBasis: row.measuredBasis, limitBasis: row.limitBasis },
+        dismissedBy: actor?.id || null,
+        dismissedAt: now.toISOString(),
+      }),
+    },
+  });
+  if (updated.count !== 1) throw notOpen("in_change");
+  await auditExceptionEvent({ row, actor, action: auditService.ACTIONS.STATUS_CHANGED, oldStatus: status, newStatus: "dismissed", reason: reason.slice(0, 500) });
+  return reread({ orgId, projectId, exceptionId, access, may });
+};
+
+// ─── The handoff (§2) ─────────────────────────────────────────────────────
+
+const projectCostCode = async ({ projectId, costCodeId }) => {
+  if (!costCodeId) return null;
+  const found = await prisma.projectCostCode.findFirst({ where: { projectId, costCodeId }, select: { costCodeId: true } });
+  return found ? costCodeId : null;
+};
+
+/**
+ * The draft a change event raised from this exception starts from: origin
+ * `exception`, the activity and location, and one line from the subject
+ * (cost code / budget line / activity / commitment; the quantity delta as
+ * the line quantity for the quantity kinds), unit cost and amount 0 — blank
+ * for the QS. The words carry no figure and, for a BOQ-derived exception, no
+ * BOQ item's code or description: the change event is the commercial
+ * module's record, read by change-event readers who may not read the BOQ or
+ * the cost module. The exception link (exceptionId) carries the rest.
+ */
+const exceptionPrefill = async (row) => {
+  const projectId = row.projectId;
+  const label = kindLabel(row.kind);
+  const boqDerived = isBoqDerivedException(row, policyOf(row));
+  const line = { description: label.slice(0, 500), quantity: 1, unit: null, unitCost: 0, romAmount: 0 };
+  let activityId = row.subjectType === "activity" ? row.subjectId : row.secondarySubjectType === "activity" ? row.secondarySubjectId : null;
+  let costCodeId = row.costCodeId || null;
+  let hasRef = false;
+
+  if (row.subjectType === "allocation" || row.subjectType === "activity_boq_allocation") {
+    const allocation = await prisma.activityBoqAllocation.findFirst({ where: { id: row.subjectId, projectId }, select: { activityId: true, unitCode: true, boqItem: { select: { costCodeId: true } } } });
+    if (allocation) {
+      activityId = allocation.activityId;
+      costCodeId = costCodeId || allocation.boqItem?.costCodeId || null;
+    }
+  } else if (row.subjectType === "boq_item") {
+    const item = await prisma.boqItem.findFirst({ where: { id: row.subjectId, projectId }, select: { costCodeId: true } });
+    costCodeId = costCodeId || item?.costCodeId || null;
+  } else if (row.subjectType === "budget_line") {
+    const budgetLine = await prisma.budgetLine.findFirst({ where: { id: row.subjectId, projectId, orgId: row.orgId }, select: { id: true, costCodeId: true } });
+    if (budgetLine) {
+      line.budgetLineId = budgetLine.id;
+      costCodeId = budgetLine.costCodeId;
+      hasRef = true;
+    }
+  } else if (row.subjectType === "commitment") {
+    const commitment = await prisma.commitment.findFirst({ where: { id: row.subjectId, projectId, orgId: row.orgId }, select: { id: true } });
+    if (commitment) {
+      line.commitmentId = commitment.id;
+      hasRef = true;
+    }
+  } else if (row.subjectType === "certificate_item" || row.subjectType === "ipc_item") {
+    const item = await prisma.ipcItem.findFirst({ where: { id: row.subjectId, projectId }, select: { boqItem: { select: { costCodeId: true } } } });
+    costCodeId = costCodeId || item?.boqItem?.costCodeId || null;
+  }
+
+  if (activityId) {
+    const activity = await prisma.activity.findFirst({ where: { id: activityId, projectId }, select: { id: true } });
+    activityId = activity ? activity.id : null;
+  }
+  costCodeId = await projectCostCode({ projectId, costCodeId });
+  if (activityId) {
+    line.activityId = activityId;
+    hasRef = true;
+  }
+  if (costCodeId) {
+    line.costCodeId = costCodeId;
+    hasRef = true;
+  }
+  if (QUANTITY_DELTA_KINDS.has(row.kind)) {
+    const delta = round3(num(row.measured) - num(row.limit));
+    if (delta > 0) {
+      line.quantity = delta;
+      line.unit = row.unitCode ? String(row.unitCode).slice(0, 20) : null;
+      hasRef = true;
+    }
+  }
+  let locationId = row.locationId || null;
+  if (locationId) {
+    const location = await prisma.location.findFirst({ where: { id: locationId, projectId }, select: { id: true } });
+    locationId = location ? location.id : null;
+  }
+  const subjectWords = boqDerived ? null : (await loadSubjectLabels({ projectId, rows: [row] })).get(`${row.subjectType}:${row.subjectId}`) || null;
+  return {
+    title: (subjectWords ? `${label}: ${subjectWords}` : label).slice(0, 200),
+    description: `Raised from a project exception (${label}) detected ${toIso(row.detectedAt)?.slice(0, 10) || ""}. The amount is left for the QS to price.`.slice(0, 8000),
+    type: "other",
+    origin: "exception",
+    activityId,
+    locationId,
+    romAmount: 0,
+    scheduleImpactDays: 0,
+    lines: hasRef ? [line] : [],
+  };
+};
+
+// What a person may set over a prefill when they raise the event: the words,
+// the type, the activity, location and schedule estimate, and the lines (the
+// QS may price them). Origin and the typed source link are the endpoint's.
+const OVERRIDABLE = Object.freeze(["title", "description", "type", "notes", "activityId", "locationId", "scheduleImpactDays", "ownerChange", "romAmount", "lines"]);
+const withOverrides = (prefill, body = {}) => {
+  const merged = { ...prefill };
+  for (const key of OVERRIDABLE) if (body[key] !== undefined) merged[key] = body[key];
+  return merged;
+};
+
+const getExceptionPrefill = async ({ orgId, projectId, exceptionId, access, may }) => {
+  const row = await loadReadable({ orgId, projectId, exceptionId, access });
+  requireCreator(may, "raiseChangeEvent");
+  const status = statusOf(row);
+  if (!["open", "snoozed"].includes(status)) throw notOpen(status);
+  return { prefill: await exceptionPrefill(row), links: { exceptionId: row.id } };
+};
+
+/**
+ * POST …/:exceptionId/raise-change-event — a person's explicit act: ONE
+ * change event, status open (the draft), through change-event.service
+ * createChangeEvent with the typed exceptionId link; the exception is
+ * claimed (changeEventId) in the same transaction and reads in_change.
+ * Nothing else is written: no change order, budget, schedule or figure.
+ */
+const raiseFromException = async ({ orgId, projectId, exceptionId, access, may, actor, payload = {} }) => {
+  const row = await loadReadable({ orgId, projectId, exceptionId, access });
+  requireCreator(may, "raiseChangeEvent");
+  const status = statusOf(row);
+  if (!["open", "snoozed"].includes(status)) throw notOpen(status);
+  const draft = withOverrides(await exceptionPrefill(row), payload);
+  draft.origin = "exception";
+  const changeEvent = await changeEventService.createChangeEvent({ orgId, projectId, payload: draft, actor, links: { exceptionId: row.id } });
+  await auditExceptionEvent({ row, actor, action: auditService.ACTIONS.STATUS_CHANGED, oldStatus: status, newStatus: "in_change", summary: { changeEventId: changeEvent.id, changeEventRef: changeEvent.ref, handoff: "raised" } });
+  return { exception: await reread({ orgId, projectId, exceptionId, access, may }), changeEvent };
+};
+
+/** POST …/:exceptionId/associate-change-event — carried by an existing change event of the same project. */
+const associateChangeEvent = async ({ orgId, projectId, exceptionId, access, may, actor, payload = {} }) => {
+  const row = await loadReadable({ orgId, projectId, exceptionId, access });
+  requireCreator(may, "associateChangeEvent");
+  const status = statusOf(row);
+  if (!["open", "snoozed"].includes(status)) throw notOpen(status);
+  const changeEventId = trimOrNull(payload.changeEventId);
+  const event = changeEventId ? await prisma.changeEvent.findFirst({ where: { id: changeEventId, orgId, projectId }, select: { id: true, ref: true, status: true } }) : null;
+  if (!event) throw new HttpError(404, "CHANGE_EVENT_NOT_FOUND", "Change event not found");
+  if (RELEASED_EVENT_STATUSES.includes(event.status)) throw new HttpError(409, "EXCEPTION_CHANGE_EVENT_CLOSED", `A ${event.status} change event cannot carry an exception`);
+  const updated = await prisma.projectException.updateMany({
+    where: { id: row.id, orgId, projectId, resolvedAt: null, AND: [NOT_IN_CHANGE] },
+    data: { changeEventId: event.id },
+  });
+  if (updated.count !== 1) throw notOpen("in_change");
+  await auditExceptionEvent({ row, actor, action: auditService.ACTIONS.STATUS_CHANGED, oldStatus: status, newStatus: "in_change", summary: { changeEventId: event.id, changeEventRef: event.ref, handoff: "associated" } });
+  return reread({ orgId, projectId, exceptionId, access, may });
+};
+
+// ─── "Raise change event" from a project record (§2, §126) ────────────────
+//
+// One shared helper for every source: it fills the typed link, the origin
+// and the title (and the source's activity / location where it has them).
+const dateOnly = (value) => (value ? new Date(value).toISOString().slice(0, 10) : "");
+const SOURCES = Object.freeze({
+  rfi: {
+    model: "rfi", link: "rfiId", module: "rfi", origin: "rfi", orgScoped: false,
+    select: { id: true, ref: true, subject: true, activityId: true, locationId: true },
+    title: (row) => `${row.ref} ${row.subject || ""}`,
+  },
+  daily_log: {
+    model: "dailyLog", link: "dailyLogId", module: "progress", origin: "daily_log", orgScoped: true,
+    select: { id: true, date: true },
+    title: (row) => `Daily log ${dateOnly(row.date)}`,
+  },
+  ncr: {
+    model: "ncrRecord", link: "ncrId", module: "ncr", origin: "observation", orgScoped: false,
+    select: { id: true, ref: true, description: true, activityId: true },
+    title: (row) => `${row.ref} ${row.description || ""}`,
+  },
+  punch_item: {
+    model: "punchItem", link: "punchItemId", module: "punch", origin: "observation", orgScoped: true,
+    select: { id: true, ref: true, title: true, activityId: true, locationId: true },
+    title: (row) => `${row.ref} ${row.title || ""}`,
+  },
+  drawing_revision: {
+    model: "sheetRevision", link: "drawingRevisionId", module: "document_control", origin: "other", orgScoped: true,
+    select: { id: true, number: true, title: true, revision: true },
+    title: (row) => `Drawing ${[row.number, row.title].filter(Boolean).join(" ") || "revision"}${row.revision ? ` rev ${row.revision}` : ""}`,
+  },
+  submittal: {
+    model: "submittal", link: "submittalId", module: "submittal", origin: "submittal", orgScoped: false,
+    select: { id: true, ref: true, title: true, activityId: true },
+    title: (row) => `${row.ref} ${row.title || ""}`,
+  },
+  meeting_action: {
+    model: "meetingActionItem", link: "meetingActionItemId", module: "meeting", origin: "meeting", orgScoped: true,
+    select: { id: true, title: true, activityId: true },
+    title: (row) => `Meeting action: ${row.title || ""}`,
+  },
+});
+const SOURCE_TYPES = Object.freeze(Object.keys(SOURCES));
+
+const loadSource = async ({ orgId, projectId, sourceType, sourceId }) => {
+  const source = SOURCES[sourceType];
+  if (!source) throw new HttpError(404, "NOT_FOUND", "Unknown source");
+  const row = await prisma[source.model].findFirst({ where: { id: sourceId, projectId, ...(source.orgScoped ? { orgId } : {}) }, select: source.select });
+  if (!row) throw new HttpError(404, "CHANGE_EVENT_SOURCE_NOT_FOUND", "The record to raise a change event from was not found");
+  return { source, row };
+};
+
+const sourcePrefill = ({ source, row }) => ({
+  title: source.title(row).trim().slice(0, 200) || "Change event",
+  type: "other",
+  origin: source.origin,
+  activityId: row.activityId || null,
+  locationId: row.locationId || null,
+  romAmount: 0,
+  scheduleImpactDays: 0,
+  lines: [],
+});
+
+const getSourcePrefill = async ({ orgId, projectId, sourceType, sourceId }) => {
+  const loaded = await loadSource({ orgId, projectId, sourceType, sourceId });
+  return { prefill: sourcePrefill(loaded), links: { [loaded.source.link]: loaded.row.id } };
+};
+
+/** POST …/<record>/:id/raise-change-event — one DRAFT change event with the typed source link. */
+const raiseFromSource = async ({ orgId, projectId, sourceType, sourceId, actor, payload = {} }) => {
+  const loaded = await loadSource({ orgId, projectId, sourceType, sourceId });
+  const draft = withOverrides(sourcePrefill(loaded), payload);
+  draft.origin = loaded.source.origin;
+  return changeEventService.createChangeEvent({ orgId, projectId, payload: draft, actor, links: { [loaded.source.link]: loaded.row.id } });
+};
+
+// ─── The workspace dashboard's open-exceptions figure ─────────────────────
+
+/**
+ * Org-wide (§35 rule 2) over the projects the caller can open: unresolved
+ * exceptions they may read, as each project's routes decide it
+ * (`accessFor(projectId)` → exceptionAccess). `total` / `bySeverity` count
+ * the open ones (not in a live change event, not snoozed); `inChange` and
+ * `snoozed` the others. BOQ-derived kinds are not counted on a project whose
+ * BOQ the caller may not read, nor a module's kinds where they may not read
+ * it — and `withheld` says so, without a count.
+ */
+const workspaceOpenExceptions = async ({ orgId, userId, role, isCompanyAdmin = false, accessFor }) => {
+  const basis = "Unresolved project exceptions the caller may read, on every project they can open; open = not carried by a live change event and not snoozed";
+  const empty = { total: 0, bySeverity: { critical: 0, warning: 0, info: 0 }, inChange: 0, snoozed: 0, basis };
+  const { getProjectAccessWhere } = require("./project-authorization.service");
+  const projects = await prisma.project.findMany({
+    where: { orgId, archivedAt: null, ...getProjectAccessWhere({ userId, role, isCompanyAdmin, orgId }) },
+    select: { id: true },
+  });
+  const projectIds = projects.map((project) => project.id);
+  if (!projectIds.length) return empty;
+  const accessById = new Map(await Promise.all(projectIds.map(async (id) => [id, (await accessFor(id)) || null])));
+  const rows = await prisma.projectException.findMany({
+    where: { orgId, projectId: { in: projectIds }, resolvedAt: null },
+    select: { projectId: true, kind: true, severity: true, subjectType: true, secondarySubjectType: true, snoozedUntil: true, changeEventId: true, changeEvent: { select: { status: true } } },
+  });
+  const registry = ruleRegistry();
+  const now = new Date();
+  const byStatus = { open: [], in_change: [], snoozed: [] };
+  for (const row of rows) byStatus[statusOf(row, now)]?.push(row);
+  const accessOf = (projectId) => accessById.get(projectId) || null;
+  const open = withheldExceptionCounts(byStatus.open, accessOf, registry);
+  const inChange = withheldExceptionCounts(byStatus.in_change, accessOf, registry).total;
+  const snoozed = withheldExceptionCounts(byStatus.snoozed, accessOf, registry).total;
+  // What the caller may read on EVERY project: a module (or the BOQ) missing
+  // on any one is named in the marker.
+  const accesses = [...accessById.values()];
+  const union = {
+    boq: accesses.every((access) => access && access.boq === true),
+    modules: Object.fromEntries(EXCEPTION_MODULES.map((module) => [module, accesses.every((access) => access && access.modules && access.modules[module] === true)])),
+  };
+  const marker = exceptionsWithheldMarker(union);
+  return {
+    ...open,
+    inChange,
+    snoozed,
+    basis,
+    ...(marker ? { withheld: { reason: `On some of your projects: ${marker.reason}`, modules: marker.modules } } : {}),
+  };
+};
+
+// ─── Notifications for a newly opened critical exception ─────────────────
+
+/**
+ * Notifies the project's PM and QS (their project assignments) of each open,
+ * critical, unsnoozed exception of the project — once per opening: the
+ * dedupe key is the exception and its detectedAt, so a refresh, a snoozed
+ * row or an unchanged one is never re-notified, and a row the engine opens
+ * again (a new detectedAt) is. Each person is told only of an exception they
+ * may read (module, and BOQ for a BOQ-derived one). Category commercial.
+ * The engine calls this after it commits a project's evaluation.
+ */
+const notifyOpenedCritical = async ({ orgId, projectId, exceptionIds = null }) => {
+  const notificationService = require("./notification.service");
+  const { normalizeRoleId } = require("../config/permissions");
+  const { resolveRequestPrincipal } = require("./membership.service");
+  const { requestForProject } = require("../middleware/project-access");
+  const { exceptionAccess } = require("../utils/boq-figures");
+  const now = new Date();
+  const rows = await prisma.projectException.findMany({
+    where: {
+      orgId,
+      projectId,
+      severity: "critical",
+      resolvedAt: null,
+      OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }],
+      ...(Array.isArray(exceptionIds) ? { id: { in: exceptionIds } } : {}),
+    },
+    include: ROW_INCLUDE,
+  });
+  const due = rows.filter((row) => statusOf(row, now) === "open");
+  if (!due.length) return { notified: 0, exceptions: 0 };
+  const assignments = await prisma.projectAssignment.findMany({ where: { projectId, orgId }, select: { userId: true, role: true } });
+  const candidates = [...new Set(assignments.filter((row) => ["pm", "qs"].includes(normalizeRoleId(row.role))).map((row) => row.userId))];
+  const accessByUser = new Map();
+  for (const userId of candidates) {
+    const principal = await resolveRequestPrincipal({ userId, orgId }).catch(() => null);
+    accessByUser.set(userId, principal ? exceptionAccess(await requestForProject({ user: principal }, projectId)) : null);
+  }
+  const labels = await loadSubjectLabels({ projectId, rows: due });
+  const registry = ruleRegistry();
+  let notified = 0;
+  for (const row of due) {
+    const recipients = candidates.filter((userId) => exceptionReadable(row, accessByUser.get(userId), registry));
+    if (!recipients.length) continue;
+    const subject = labels.get(`${row.subjectType}:${row.subjectId}`) || row.subjectType.replace(/_/g, " ");
+    const unit = row.unitCode ? ` ${row.unitCode}` : "";
+    const result = await notificationService.createNotifications({
+      orgId,
+      projectId,
+      recipientUserIds: recipients,
+      type: "project_exception",
+      category: notificationService.NOTIFICATION_CATEGORIES.COMMERCIAL,
+      event: "exception.opened",
+      priority: "high",
+      title: `Critical exception: ${kindLabel(row.kind)}`,
+      message: `${subject}: ${num(row.measured)}${unit} (${row.measuredBasis}) against ${num(row.limit)}${unit} (${row.limitBasis}). Review it, or raise a change event.`,
+      actionUrl: recordWorkspacePath({ projectId, recordType: "project_exception", recordId: row.id }),
+      entityType: "project_exception",
+      entityId: row.id,
+      dedupeKeyBase: `project_exception:${row.id}:opened:${new Date(row.detectedAt).getTime()}`,
+      metadata: { kind: row.kind, severity: row.severity },
+    });
+    notified += result.created;
+  }
+  return { notified, exceptions: due.length };
+};
+
+module.exports = {
+  STATUSES,
+  SEVERITIES,
+  SOURCE_TYPES,
+  DISMISSED_PREFIX,
+  KIND_LABELS,
+  statusOf,
+  listExceptions,
+  getException,
+  reviewException,
+  snoozeException,
+  dismissException,
+  getExceptionPrefill,
+  raiseFromException,
+  associateChangeEvent,
+  getSourcePrefill,
+  raiseFromSource,
+  workspaceOpenExceptions,
+  notifyOpenedCritical,
+  // for tests
+  _exceptionPrefill: exceptionPrefill,
+  _resetRegistry: () => {
+    registryCache = undefined;
+  },
+};
