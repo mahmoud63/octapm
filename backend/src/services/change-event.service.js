@@ -302,6 +302,9 @@ const assertRefs = async ({ orgId, projectId, data, lines = [] }) => {
   }
 };
 
+// A kept line's reference and text fields a save leaves out keep the stored
+// value; an explicit null clears them.
+const KEPT_WHEN_OMITTED = Object.freeze(["costCodeId", "budgetLineId", "activityId", "commitmentId", "notes"]);
 const normalizeLines = (rows) => {
   const list = Array.isArray(rows) ? rows : [];
   if (list.length > 200) throw new HttpError(400, "CHANGE_EVENT_TOO_MANY_LINES", "A change event takes up to 200 lines");
@@ -311,7 +314,11 @@ const normalizeLines = (rows) => {
     const quantity = toNumber(row.quantity, 1);
     const unitCost = round2(row.unitCost);
     const romAmount = row.romAmount !== undefined && row.romAmount !== null && row.romAmount !== "" ? round2(row.romAmount) : round2(quantity * unitCost);
+    // What the body states of the line: a kept line keeps every field it
+    // leaves out (updateChangeEvent) — the web dialog never shows or sends a
+    // line's notes or budget line, so a save must not wipe them.
     const given = { quantity: row.quantity !== undefined, unit: row.unit !== undefined, unitCost: row.unitCost !== undefined && row.unitCost !== null, romAmount: row.romAmount !== undefined && row.romAmount !== null && row.romAmount !== "" };
+    for (const field of KEPT_WHEN_OMITTED) given[field] = row[field] !== undefined;
     return { id: trimOrNull(row.id), description: description.slice(0, 500), costCodeId: trimOrNull(row.costCodeId), budgetLineId: trimOrNull(row.budgetLineId), activityId: trimOrNull(row.activityId), commitmentId: trimOrNull(row.commitmentId), quantity, unit: trimOrNull(row.unit)?.slice(0, 20) || null, unitCost, romAmount, notes: trimOrNull(row.notes)?.slice(0, 1000) || null, sortOrder: index, given };
   });
 };
@@ -550,7 +557,9 @@ const RFQ_DISCLOSED_FIELDS = Object.freeze(["quantity", "unit", "activityId"]);
  * amounts are kept by line id). A caller who was not given a field (PC-7b:
  * withheldForCaller) never writes it: sending one — even null — is refused
  * with 409 CHANGE_EVENT_FIELD_WITHHELD and the reason, nothing written; one
- * left out keeps the stored value.
+ * left out keeps the stored value. For every caller, a kept line (sent with
+ * its id) keeps any field the body leaves out — its quantity, unit, unit
+ * cost, cost code, budget line, activity, commitment and notes; null clears.
  */
 const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}, actor = null, access = null }) => {
   const existing = await loadEvent({ orgId, projectId, changeEventId });
@@ -574,16 +583,18 @@ const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}
       for (const { id, given, ...line } of lines) {
         const existingLine = id ? existing.lines.find((row) => row.id === id) : null;
         if (existingLine) {
-          // A kept line whose quantity, unit or unit cost the body leaves out
-          // keeps the stored one — a reader who was not given them (a change
-          // event raised from a BOQ-derived exception, utils/boq-figures
-          // withheldChangeEvent) cannot reset them by saving the line.
+          // A kept line whose body leaves a field out keeps the stored one —
+          // a reader who was not given it (a change event raised from a
+          // BOQ-derived exception, utils/boq-figures withheldChangeEvent), or
+          // a client that never shows it (the web dialog: notes, budget
+          // line), cannot reset it by saving the line.
           const kept = { ...line };
           for (const field of (withheld && withheld.lines.get(id)) || []) kept[field] = field === "unitCost" ? round2(existingLine.unitCost) : field === "quantity" ? toNumber(existingLine.quantity, 1) : existingLine[field] ?? null;
           if (!given.quantity) kept.quantity = toNumber(existingLine.quantity, 1);
           if (!given.unit) kept.unit = existingLine.unit || null;
           if (!given.unitCost) kept.unitCost = round2(existingLine.unitCost);
           if (!given.romAmount) kept.romAmount = round2(kept.quantity * kept.unitCost);
+          for (const field of KEPT_WHEN_OMITTED) if (!given[field]) kept[field] = existingLine[field] ?? null;
           await tx.changeEventLine.update({ where: { id }, data: kept });
         } else await tx.changeEventLine.create({ data: { ...line, orgId, projectId, changeEventId } });
       }

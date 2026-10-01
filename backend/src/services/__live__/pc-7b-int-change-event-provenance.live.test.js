@@ -254,4 +254,28 @@ liveDescribe("PC-7b integration fixer: a change event's prefill provenance, per 
     const pmSent = await api.post(at(`/change-events/${event.id}/rfqs`), { recipients: [{ companyName: "LiveTest Vendor 2", contactEmail: `vendor2-${tag}@octapm-live.test` }], lineIds: [withheldLine.id] }, pm());
     ok("pm sends the withheld line", pmSent, 201);
   });
+
+  // Second fixer, item 7: the web dialog never shows or sends a line's notes
+  // or budget line. A kept line whose body leaves a field out keeps the
+  // stored value — for every member, on any event; an explicit null still
+  // clears it, and a new line starts empty.
+  it("a save that leaves a kept line's notes or budget line out keeps them; null clears; a new line starts empty", async () => {
+    const budgetLine = await prisma.budgetLine.create({ data: { orgId: live.org.id, projectId: project.id, costCodeId: ids.costCode, costType: "material", description: "LiveTest kept budget line" } });
+    const created = await api.post(at("/change-events"), { title: "LiveTest kept notes", type: "owner_change", origin: "manual", lines: [{ description: "LiveTest noted line", costCodeId: ids.costCode, budgetLineId: budgetLine.id, quantity: 2, unit: "nr", unitCost: 50, notes: "LiveTest chk note" }] }, pm());
+    ok("pm creates", created, 201);
+    const event = created.body.data;
+    const lineId = event.lines[0].id;
+    const stored = () => prisma.changeEventLine.findMany({ where: { changeEventId: event.id }, orderBy: { sortOrder: "asc" } });
+    expect((await stored()).map((line) => [line.notes, line.budgetLineId])).toEqual([["LiveTest chk note", budgetLine.id]]);
+    // The exact body the web dialog sends for a line it was given in full.
+    const dialogLine = { id: lineId, description: "LiveTest noted line", commitmentId: null, costCodeId: ids.costCode, activityId: null, quantity: 2, unit: "nr", unitCost: 50 };
+    for (const [label, headers] of [["no-BOQ QS", as(members.qs_noboq)], ["PM", pm()]]) {
+      const saved = await api.request("PATCH", at(`/change-events/${event.id}`), { body: { title: `LiveTest kept notes ${label}`, lines: [dialogLine] }, headers });
+      ok(`${label} dialog save`, saved);
+      expect([label, (await stored()).map((line) => [line.notes, line.budgetLineId, line.costCodeId, line.quantity, Number(line.romAmount)])]).toEqual([label, [["LiveTest chk note", budgetLine.id, ids.costCode, 2, 100]]]);
+    }
+    const cleared = await api.request("PATCH", at(`/change-events/${event.id}`), { body: { lines: [{ ...dialogLine, notes: null, budgetLineId: null }, { description: "LiveTest new line", quantity: 1, unitCost: 5 }] }, headers: pm() });
+    ok("pm clears", cleared);
+    expect((await stored()).map((line) => [line.description, line.notes, line.budgetLineId])).toEqual([["LiveTest noted line", null, null], ["LiveTest new line", null, null]]);
+  });
 });
