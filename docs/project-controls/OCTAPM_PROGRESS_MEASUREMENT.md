@@ -236,6 +236,17 @@ bundles entries, and approving it is what approves them:
   Proven live (`pc-6-method-authority.live.test.js`: every path refused, footprint and EV byte-identical; no method
   named → the activity's, derived; the unconfigured wall takes the client's) and mutation-proven (coercing silently
   and accepting the client's method each fail the suite).
+- **A quantity submission states a quantity** (verification fix, 2026-10-01). On an activity measured by quantity a
+  submission that bundled no entry and typed no `quantityComplete` — `{ pctComplete: 90 }`, with or without the
+  method named — was recorded as a quantity submission at **0%** (the client's percentage silently replaced), and its
+  approval wrote an official 0% row with nothing behind it: 25% → 0%. `assertQuantityFigureStated` refuses it where
+  it is made (`POST /activities/{id}/progress`, `bulk-progress`, a draft too) and — for one already in the queue —
+  in the writer: 409 `QUANTITY_ENTRIES_REQUIRED` `{ activityId, entries }` once the activity has entries (bundle
+  them), else 400 `QUANTITY_NO_ENTRIES_TO_BUNDLE`; at approval the details name the `submissionId`. A typed
+  `quantityComplete` of 0 is a stated quantity and is still recorded. The web forms relay the server's sentence.
+  Proven live (`pc-6-method-authority`, the screed: every shape refused with the footprint and EV byte-identical,
+  the official 25% standing, a hollow submission seeded in the queue refused by the writer) and mutation-proven (the
+  check removed where the submission is made, and in the writer, each fail).
 - **The rule holds in the one writer too** (verification fix, 2026-10-01). Asked only when a submission is made, the
   rule could be passed by ordering: a percent submission put forward while the activity was unconfigured stayed
   approvable after the planner configured it as quantity (the method lock below reads approved progress only), the
