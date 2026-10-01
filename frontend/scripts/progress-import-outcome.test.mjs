@@ -11,6 +11,7 @@ import {
   progressImportHeadline,
   progressImportRowFigure,
   progressImportRowLabel,
+  progressImportRowSupersededNote,
   progressImportSupersededNote,
 } from '../src/features/schedule/lib/progress-import-outcome.ts'
 
@@ -320,6 +321,35 @@ assert.equal(
   '2 older pending import submissions at another figure are still in the approval queue (P300 at 30%, P400 at 40%) — reject there if no longer wanted.'
 )
 
+// A row names every older pending figure it left behind — all of them,
+// since an activity may leave several — also when it approved an
+// already-pending submission.
+assert.equal(progressImportRowSupersededNote(row('approved')), '')
+assert.equal(
+  progressImportRowSupersededNote(row('approved', null, { superseded: [] })),
+  ''
+)
+assert.equal(
+  progressImportRowSupersededNote(
+    row('approved', null, {
+      approvesPending: true,
+      superseded: [{ submissionId: 's65', pctComplete: 65 }],
+    })
+  ),
+  'An older import submission at 65% is still in the approval queue; reject it there if no longer wanted.'
+)
+assert.equal(
+  progressImportRowSupersededNote(
+    row('submitted', null, {
+      superseded: [
+        { submissionId: 's85', pctComplete: 85 },
+        { submissionId: 's40', pctComplete: 40 },
+      ],
+    })
+  ),
+  '2 older import submissions (at 85%, 40%) are still in the approval queue; reject them there if no longer wanted.'
+)
+
 // Every row status the API can answer has a label.
 for (const status of [
   'submit',
@@ -368,6 +398,16 @@ assert.ok(
     dialog.includes('{progressImportRowFigure(row)}') &&
     !dialog.includes('{row.pctComplete}%'),
   'the dialog shows the skipped and superseded counts, the superseded note, and the row figure through the outcome module'
+)
+// Each written row says every older figure it left in the queue, through
+// the outcome module (never only the first of several), and a row with any
+// is listed.
+assert.ok(
+  dialog.includes('{progressImportRowSupersededNote(row)}') &&
+    !dialog.includes('row.superseded.pctComplete') &&
+    !dialog.includes('row.superseded[0]') &&
+    dialog.includes('(row.superseded?.length ?? 0) > 0'),
+  'the dialog names every older pending figure a row left behind'
 )
 assert.ok(
   dialog.includes("row.status !== 'unchanged'"),

@@ -52,8 +52,12 @@ export type ProgressImportRow = {
    * (or would approve) that submission itself — submissionId is its id.
    */
   approvesPending?: boolean
-  /** An older pending import submission at another figure this row leaves in the queue. */
-  superseded?: ProgressImportSuperseded | null
+  /**
+   * Every older pending import submission at another figure this row leaves
+   * in the queue (newest first; there may be several) — also on a row that
+   * approved an already-pending submission. Empty when none.
+   */
+  superseded?: ProgressImportSuperseded[]
   reason: { code: string; message: string } | null
 }
 
@@ -71,7 +75,7 @@ export type ProgressImportResult = {
   /** Rows the file names without a percentage; nothing written. */
   skipped: number
   refused: number
-  /** Older pending import submissions at another figure left in the queue. */
+  /** Older pending import submissions at another figure left in the queue (submissions, not rows). */
   supersededPending: number
   supersededPendingSubmissions: ProgressImportSupersededSubmission[]
   wouldSubmit?: number
@@ -144,6 +148,20 @@ export function progressImportSupersededNote(
     (names ? ` (${names})` : '') +
     ' — reject there if no longer wanted.'
   )
+}
+
+/**
+ * What a row says about the older pending import submissions it left in
+ * the queue at other figures — every one of them, since an activity may
+ * leave several (a site engineer's 30 then 32). Empty when none.
+ */
+export function progressImportRowSupersededNote(row: ProgressImportRow): string {
+  const older = row.superseded ?? []
+  if (!older.length) return ''
+  const figures = older.map((entry) => `${entry.pctComplete}%`).join(', ')
+  return older.length === 1
+    ? `An older import submission at ${figures} is still in the approval queue; reject it there if no longer wanted.`
+    : `${older.length} older import submissions (at ${figures}) are still in the approval queue; reject them there if no longer wanted.`
 }
 
 // The gates' refusal codes, in words (the row keeps the server's message).

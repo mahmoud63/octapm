@@ -18,6 +18,7 @@ import {
   progressImportHeadline,
   progressImportRowFigure,
   progressImportRowLabel,
+  progressImportRowSupersededNote,
   progressImportSupersededNote,
   type ProgressImportResult,
   type ProgressImportRowStatus,
@@ -136,7 +137,7 @@ export function ImportProgressDialog({ projectId, open, onOpenChange }: Props) {
           (row.reason && row.status !== 'unchanged') ||
           row.methodMismatch ||
           row.approvesPending ||
-          row.superseded
+          (row.superseded?.length ?? 0) > 0
       )
     : []
   const supersededNote = shown ? progressImportSupersededNote(shown) : ''
@@ -266,11 +267,9 @@ export function ImportProgressDialog({ projectId, open, onOpenChange }: Props) {
                         percentage, recorded as a percent submission.
                       </span>
                     )}
-                    {row.superseded && (
+                    {(row.superseded?.length ?? 0) > 0 && (
                       <span className='text-muted-foreground'>
-                        An older import submission at{' '}
-                        {row.superseded.pctComplete}% is still in the approval
-                        queue; reject it there if no longer wanted.
+                        {progressImportRowSupersededNote(row)}
                       </span>
                     )}
                   </li>
