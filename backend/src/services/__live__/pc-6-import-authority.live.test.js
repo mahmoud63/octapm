@@ -37,6 +37,10 @@
  *   the submission's method is the activity's, never the file's) for the
  *   site engineer and the PM alike, previewed as 'refuse', nothing written;
  *   a 0% row on it changes nothing and is unchanged, never refused.
+ * - A manual pending submission (integration item 6) is treated exactly like
+ *   an import one: same figure → already_pending for a submit-only person,
+ *   approved as it stands by an approver's import (no second identical
+ *   submission); another figure → reported as superseded pending.
  * - A member of another organisation: 404 PROJECT_NOT_FOUND, nothing written.
  * - The site engineer re-uploads the PM's figures: unchanged / already_pending,
  *   nothing written.
@@ -594,5 +598,76 @@ liveDescribe("PC-6: a progress import makes progress only in the importer's own 
     ok(zero);
     expect(zero.body.data).toMatchObject({ matched: 1, unchanged: 1, refused: 0 });
     expect(rowsByCode(zero.body.data).P600).toMatchObject({ status: "unchanged", reason: { code: "PROGRESS_ALREADY_OFFICIAL" } });
+  });
+
+  it("a MANUAL pending submission is treated exactly like an import one: a submit-only import of the same figure is already_pending; an approver's import approves THAT submission through the writer (no second identical one), and a manual row at another figure is reported as superseded pending", async () => {
+    // P100: official 68, with the site engineer's import of 65 still in the queue. The site engineer puts 72 forward by hand, then 74.
+    const import65 = await prisma.progressSubmission.findFirst({ where: { activityId: byCode.P100, status: "submitted", pctComplete: 65 } });
+    expect(import65).toMatchObject({ source: "import", submittedBy: siteEngineer.id });
+    const base = { P200: 0, P300: 0, P400: 95, P500: 55 };
+    const manual = async (pctComplete) => {
+      const answer = await api.post(at(`/activities/${byCode.P100}/progress`), { pctComplete, notes: "typed on the progress tab" }, bearer(siteEngineer.token));
+      ok(answer);
+      return answer.body.data.submission;
+    };
+    const manual72 = await manual(72);
+    expect(manual72).toMatchObject({ status: "submitted", source: "manual", method: "percent", pctComplete: 72, submittedBy: siteEngineer.id });
+
+    // A submit-only person's import of the same figure: already pending, nothing written — and the reason names what waits.
+    let before = await footprint();
+    const same = await upload(siteEngineer.token, xerWith({ ...base, P100: 72 }));
+    ok(same);
+    expect(same.body.data).toMatchObject({ submitted: 0, alreadyPending: 1, unchanged: 4, supersededPending: 0 });
+    expect(rowsByCode(same.body.data).P100).toMatchObject({ status: "already_pending", submissionId: manual72.id, waitingStatus: "submitted", reason: { code: "PROGRESS_ALREADY_PENDING", message: "A manual submission at 72% is already awaiting approval; no second submission" } });
+    expect(JSON.parse(await footprint())).toEqual({ ...JSON.parse(before), documents: JSON.parse(before).documents + 1 });
+
+    const manual74 = await manual(74);
+    const row74 = JSON.stringify(await prisma.progressSubmission.findUnique({ where: { id: manual74.id } }));
+    const submissionsBefore = await prisma.progressSubmission.count({ where: { projectId: project.id } });
+    const progressBefore = await prisma.activityProgress.count({ where: { activityId: byCode.P100 } });
+
+    // The approver's import of 72: the manual 72 is approved as it stands; the manual 74 is reported, untouched.
+    const file = { ...base, P100: 72 };
+    const entry = (submissionId, pctComplete) => ({ activityId: byCode.P100, p6ActivityId: "P100", name: "Excavate", submissionId, pctComplete, importedPctComplete: 72 });
+    // Newest first: the manual 74, then the older import 65 — a manual row is reported like an import one.
+    const superseded = [entry(manual74.id, 74), entry(import65.id, 65)];
+    const left = [{ submissionId: manual74.id, pctComplete: 74 }, { submissionId: import65.id, pctComplete: 65 }];
+    const preview = await upload(live.token, xerWith(file), { dryRun: true });
+    ok(preview);
+    expect(preview.body.data).toMatchObject({ dryRun: true, wouldApprove: 1, wouldHold: 0, unchanged: 4, alreadyPending: 0, supersededPending: 2 });
+    expect(rowsByCode(preview.body.data).P100).toMatchObject({ status: "approve", approvesPending: true, submissionId: manual72.id, waitingStatus: "submitted", superseded: left });
+    expect(preview.body.data.supersededPendingSubmissions).toEqual(superseded);
+    expect(preview.body.data.message).toMatch(/ 2 older pending submissions at another figure left in the approval queue \(superseded pending\) — reject them there\.$/);
+    expect(preview.body.data).not.toHaveProperty("supersededAllImport");
+    expect(await prisma.progressSubmission.count({ where: { projectId: project.id } })).toBe(submissionsBefore);
+
+    const answer = await upload(live.token, xerWith(file));
+    ok(answer);
+    const data = answer.body.data;
+    expect(data).toMatchObject({ approved: 1, pending: 0, submitted: 0, unchanged: 4, alreadyPending: 0, refused: 0, supersededPending: 2, updated: 1 });
+    expect(data.message).toBe("1 row approved through the progress approval gates (1 of them already pending at the same figure, approved as it stood), 0 left pending (a gate refused), 0 refused, 4 already official, 0 already pending, 0 skipped (no percentage), 0 not matched. 2 older pending submissions at another figure left in the approval queue (superseded pending) — reject them there.");
+    const row = rowsByCode(data).P100;
+    expect(row).toMatchObject({ status: "approved", approvesPending: true, submissionId: manual72.id, pctComplete: 72, officialPctComplete: 68, superseded: left, reason: null });
+    expect(Object.keys(row)).not.toContain("supersededAllImport");
+    expect(data.supersededPendingSubmissions).toEqual(superseded);
+    // No second, identical submission: the manual one is the one approved — by the PM, through the writer.
+    expect(await prisma.progressSubmission.count({ where: { projectId: project.id } })).toBe(submissionsBefore);
+    expect(await prisma.progressSubmission.count({ where: { activityId: byCode.P100, pctComplete: 72 } })).toBe(1);
+    expect(await prisma.progressSubmission.findUnique({ where: { id: manual72.id } })).toMatchObject({ status: "approved", source: "manual", pctComplete: 72, submittedBy: siteEngineer.id, reviewedBy: live.user.id });
+    expect(await prisma.activityProgress.count({ where: { activityId: byCode.P100 } })).toBe(progressBefore + 1);
+    expect(await prisma.activityProgress.findUnique({ where: { id: row.progressId } })).toMatchObject({ activityId: byCode.P100, submissionId: manual72.id, pctComplete: 72, status: "approved", approvedBy: live.user.id, source: "manual" });
+    const trail = await prisma.auditEvent.findMany({ where: { entityType: "progress_submission", entityId: manual72.id }, orderBy: { occurredAt: "asc" } });
+    expect(trail.map((event) => [event.action, event.actorId])).toEqual([["created", siteEngineer.id], ["approved", live.user.id]]);
+    expect(await officialPct("P100")).toEqual([72, "manual", "submitted"]);
+    // The manual 74 still waits, byte-identical: the import never rejects or deletes.
+    expect(JSON.stringify(await prisma.progressSubmission.findUnique({ where: { id: manual74.id } }))).toBe(row74);
+
+    // A differing figure from the approver: a new import submission is approved and the manual 74 is reported as superseded pending.
+    const other = await upload(live.token, xerWith({ ...base, P100: 80 }));
+    ok(other);
+    expect(other.body.data).toMatchObject({ approved: 1, unchanged: 4, supersededPending: 2 });
+    expect(rowsByCode(other.body.data).P100).toMatchObject({ status: "approved", approvesPending: false, superseded: left });
+    expect(other.body.data.supersededPendingSubmissions).toEqual(superseded.map((row) => ({ ...row, importedPctComplete: 80 })));
+    expect(JSON.stringify(await prisma.progressSubmission.findUnique({ where: { id: manual74.id } }))).toBe(row74);
   });
 });
