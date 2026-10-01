@@ -350,6 +350,9 @@ test('a BOQ item leads to its activities and back, an activity to its BOQ rows a
   await expect(registerRow.locator('[data-relation]')).toHaveCount(1)
   await expect(registerRow.locator('[data-relation="via_allocation"]')).toContainText('via allocation')
   await expect(registerRow.getByTestId(`co-related-activities-none-${changeOrderId}`)).toHaveCount(0)
+  // The Trace line counts the same activity: never "0 act" beside the activity the order reaches.
+  await expect(registerRow.getByTestId(`co-trace-activity-count-${changeOrderId}`)).toHaveText('1 act')
+  await expect(registerRow).not.toContainText('0 act')
   await expect(registerRow.getByTestId(`co-related-boq-item-${changeOrderId}-${rows.A}`)).toHaveText('N5.1')
   await expect(registerRow.getByTestId(`co-related-boq-withheld-${changeOrderId}`)).toHaveCount(0)
   await viaAllocation.click()
@@ -434,6 +437,12 @@ test('a BOQ item leads to its activities and back, an activity to its BOQ rows a
   await expect(otherRow.locator('[data-relation]')).toHaveCount(0)
   await expect(otherRow.getByTestId(`co-related-activities-none-${changeOrderId}`)).toHaveCount(0)
   await expect(otherRow.getByTestId(`co-related-boq-none-${changeOrderId}`)).toHaveCount(0)
+  // Its Trace count is "—" marked withheld with the same reason, never a bare "0 act" that reads as none.
+  const otherCount = otherRow.getByTestId(`co-trace-activity-count-${changeOrderId}`)
+  await expect(otherCount).toHaveText('— act')
+  await expect(otherCount).toHaveAttribute('data-withheld', 'true')
+  await expect(otherCount).toHaveAttribute('title', relatedReason)
+  await expect(otherRow).not.toContainText('0 act')
   for (const leaked of ['N5X', 'N5.1', 'Pour slab X', 'No activity']) await expect(otherRow).not.toContainText(leaked)
   await context.close()
 
