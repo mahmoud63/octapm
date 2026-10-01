@@ -63,6 +63,13 @@
  *   one already in the queue (as the database would hold it from before the
  *   rule) is refused by the writer the same way and can only be rejected.
  *
+ * A refused batch writes nothing (verification finding: "bulk-progress
+ * writes submissions one at a time outside a transaction; a mixed batch
+ * answers 409 for the whole call after the earlier updates were written,
+ * and a client that retries duplicates them"): a batch whose second update
+ * is refused leaves no submission of the first; the refusal names the
+ * update; a clean batch writes every update.
+ *
  *   DATABASE_CONNECTION_LIMIT=4 npm run test:live -- src/services/__live__/pc-6-method-authority.live.test.js
  */
 const { prisma } = require("../../config/db");
@@ -408,5 +415,33 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     expect((await activityPayload(screed.id)).pctComplete).toBe(25);
     ok(await api.post(at(`/activities/${screed.id}/progress-submissions/${queued.id}/reject`), { reason: "A quantity submission states a quantity; bundle the entries" }, bearer(live.token)));
     expect((await activityPayload(screed.id)).pctComplete).toBe(25);
+  });
+
+  it("bulk-progress is one transaction: a batch with one refused update writes nothing — the refusal names the update — and a retry duplicates nothing; a clean batch writes every update", async () => {
+    const evBefore = await evReport();
+    const before = await footprint();
+    const wallBefore = await prisma.progressSubmission.count({ where: { activityId: wall.id } });
+    const bulk = (updates) => api.post(at("/activities/bulk-progress"), { updates }, bearer(site.token));
+    // The wall (unconfigured) first, then the pour (measured by quantity): the second is refused.
+    const mixed = await bulk([{ activityId: wall.id, method: "percent", pctComplete: 11 }, { activityId: pour.id, method: "percent", pctComplete: 90 }]);
+    refused(mixed, 409, "PROGRESS_METHOD_MISMATCH");
+    expect(mixed.body.error.details).toEqual({ activityId: pour.id, effectiveMethod: "quantity", effectiveMethodBasis: "method_config", requestedMethod: "percent", batch: { index: 1, activityId: pour.id, updates: 2, written: 0 } });
+    expect(await prisma.progressSubmission.count({ where: { activityId: wall.id } })).toBe(wallBefore);
+    expect(await footprint()).toBe(before);
+    // The retry a client would make: still nothing.
+    refused(await bulk([{ activityId: wall.id, method: "percent", pctComplete: 11 }, { activityId: pour.id, method: "percent", pctComplete: 90 }]), 409, "PROGRESS_METHOD_MISMATCH");
+    // Another refusal of the writer, later in a longer batch: the same.
+    const hollow = await bulk([{ activityId: wall.id, pctComplete: 12 }, { activityId: wall.id, pctComplete: 13 }, { activityId: screed.id, pctComplete: 90 }]);
+    refused(hollow, 409, "QUANTITY_ENTRIES_REQUIRED");
+    expect(hollow.body.error.details).toMatchObject({ activityId: screed.id, batch: { index: 2, activityId: screed.id, updates: 3, written: 0 } });
+    expect(await footprint()).toBe(before);
+    expect(await evReport()).toBe(evBefore);
+    // A clean batch writes every update, in order.
+    const clean = await bulk([{ activityId: wall.id, pctComplete: 12 }, { activityId: wall.id, method: "manual", pctComplete: 13, notes: "typed" }]);
+    ok(clean, 200);
+    expect(clean.body.data.submitted).toBe(2);
+    expect(clean.body.data.submissions.map((row) => [row.activityId, row.method, row.pctComplete, row.status])).toEqual([[wall.id, "percent", 12, "submitted"], [wall.id, "manual", 13, "submitted"]]);
+    expect(await prisma.progressSubmission.count({ where: { activityId: wall.id } })).toBe(wallBefore + 2);
+    expect(await evReport()).toBe(evBefore);
   });
 });

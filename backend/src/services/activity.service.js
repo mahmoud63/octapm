@@ -700,6 +700,19 @@ const updateProgress = async ({
   };
 };
 
+// A batch is long enough to outlive Prisma's default interactive window.
+const BULK_PROGRESS_TRANSACTION = { maxWait: 10_000, timeout: 60_000 };
+
+/**
+ * POST /activities/bulk-progress: every update of the batch is written, or
+ * none is. The submissions used to be made one at a time, each in its own
+ * transaction, so a batch whose third update the writer refused (a method
+ * that is not the activity's, a quantity submission that states no quantity,
+ * missing evidence) answered the refusal for the whole call after the first
+ * two were written — and a client that retried the batch duplicated them.
+ * The batch is one transaction now; the refusal names the update it came
+ * from (`details.batch`), and says that nothing was written.
+ */
 const bulkUpdateProgress = async ({
   orgId,
   projectId,
@@ -724,21 +737,39 @@ const bulkUpdateProgress = async ({
     userRole,
   });
 
-  const submissions = [];
-  for (const update of updates || []) {
-    const activity = activityMap.get(update.activityId);
-    if (!activity) continue;
+  const list = updates || [];
+  const submissions = await prisma.$transaction(async (tx) => {
+    const written = [];
+    for (const [index, update] of list.entries()) {
+      const activity = activityMap.get(update.activityId);
+      if (!activity) continue;
 
-    const submission = await progressService.createProgressSubmission({
-      orgId,
-      projectId,
-      activityId: update.activityId,
-      userId,
-      userRole,
-      payload: update,
-    });
-    submissions.push(submission);
-  }
+      try {
+        written.push(
+          await progressService.createProgressSubmission({
+            orgId,
+            projectId,
+            activityId: update.activityId,
+            userId,
+            userRole,
+            payload: update,
+            tx,
+          }),
+        );
+      } catch (error) {
+        // The writer's refusal, with the update it came from. Throwing rolls
+        // the whole batch back: nothing of it is written.
+        if (error instanceof HttpError) {
+          error.details = {
+            ...(error.details && typeof error.details === 'object' ? error.details : {}),
+            batch: { index, activityId: update.activityId, updates: list.length, written: 0 },
+          };
+        }
+        throw error;
+      }
+    }
+    return written;
+  }, BULK_PROGRESS_TRANSACTION);
 
   return { submitted: submissions.length, submissions };
 };

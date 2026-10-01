@@ -1,4 +1,6 @@
+const mockTx = { tx: true };
 const mockPrisma = {
+  $transaction: jest.fn((fn) => fn(mockTx)),
   project: { findFirst: jest.fn() },
   activity: {
     findFirst: jest.fn(),
@@ -102,6 +104,53 @@ describe('activity progress assignment authorization', () => {
       userRole: 'site_engineer',
     });
     expect(mockProgressService.createProgressSubmission).toHaveBeenCalledTimes(2);
+    // One transaction for the whole batch: every submission is made on it.
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.$transaction.mock.calls[0][1]).toEqual({ maxWait: 10_000, timeout: 60_000 });
+    for (const [call] of mockProgressService.createProgressSubmission.mock.calls) expect(call.tx).toBe(mockTx);
+  });
+
+  it('a refused update fails the whole batch inside its one transaction and names the update; nothing after it is attempted', async () => {
+    const { HttpError } = require('../../utils/http-error');
+    mockPrisma.activity.findMany.mockResolvedValue([
+      { id: 'activity-1', budget: 1000 },
+      { id: 'activity-2', budget: 2000 },
+      { id: 'activity-3', budget: 3000 },
+    ]);
+    mockProgressService.createProgressSubmission
+      .mockResolvedValueOnce({ id: 'submission-1', activityId: 'activity-1', status: 'submitted' })
+      .mockRejectedValueOnce(new HttpError(409, 'PROGRESS_METHOD_MISMATCH', 'measured by quantity', { activityId: 'activity-2', effectiveMethod: 'quantity' }));
+    let thrownInside = null;
+    mockPrisma.$transaction.mockImplementationOnce(async (fn) => {
+      try {
+        return await fn(mockTx);
+      } catch (error) {
+        thrownInside = error;
+        throw error;
+      }
+    });
+
+    await expect(
+      activityService.bulkUpdateProgress({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        userId: 'site-1',
+        userRole: 'site_engineer',
+        updates: [
+          { activityId: 'activity-1', pctComplete: 10 },
+          { activityId: 'activity-2', method: 'percent', pctComplete: 90 },
+          { activityId: 'activity-3', pctComplete: 30 },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: 'PROGRESS_METHOD_MISMATCH',
+      details: { activityId: 'activity-2', effectiveMethod: 'quantity', batch: { index: 1, activityId: 'activity-2', updates: 3, written: 0 } },
+    });
+    // The refusal left the transaction's callback (so the database rolls the first submission back), and the third update was never attempted.
+    expect(thrownInside).toMatchObject({ code: 'PROGRESS_METHOD_MISMATCH' });
+    expect(mockProgressService.createProgressSubmission).toHaveBeenCalledTimes(2);
+    for (const [call] of mockProgressService.createProgressSubmission.mock.calls) expect(call.tx).toBe(mockTx);
   });
 
   it('does not create partial bulk submissions when authorization fails', async () => {
