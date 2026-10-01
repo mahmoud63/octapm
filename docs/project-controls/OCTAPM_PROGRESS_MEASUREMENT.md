@@ -247,6 +247,14 @@ bundles entries, and approving it is what approves them:
   Proven live (`pc-6-method-authority`, the screed: every shape refused with the footprint and EV byte-identical,
   the official 25% standing, a hollow submission seeded in the queue refused by the writer) and mutation-proven (the
   check removed where the submission is made, and in the writer, each fail).
+- **A refused batch writes nothing** (verification fix, 2026-10-01). `POST /activities/bulk-progress` made its
+  submissions one at a time, each in its own transaction; with the refusals above an ordinary batch (one activity
+  measured by quantity among percent ones) answered 409 for the whole call after the earlier updates were written,
+  and a retry duplicated them. `activity.service bulkUpdateProgress` is one transaction now (`createProgressSubmission`
+  on the batch's `tx`): every update is written or none is, and the refusal's details carry `batch { index,
+  activityId, updates, written: 0 }`. Proven live (`pc-6-method-authority`: a mixed batch and its retry leave the
+  footprint byte-identical; a clean batch writes both) and mutation-proven (the submissions made outside the batch's
+  transaction → the wall's submission is written despite the refusal).
 - **The rule holds in the one writer too** (verification fix, 2026-10-01). Asked only when a submission is made, the
   rule could be passed by ordering: a percent submission put forward while the activity was unconfigured stayed
   approvable after the planner configured it as quantity (the method lock below reads approved progress only), the

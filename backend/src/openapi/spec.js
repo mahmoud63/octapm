@@ -9013,7 +9013,7 @@ add(
     tag: "Progress",
     summary: "Submit progress updates for multiple activities.",
     description:
-      "Submits draft/submitted progress rows for several activities. Non-PM/planning users must be assigned to every activity in the batch; otherwise the API returns 403 ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED with the blocked activityIds. PM and Planning Engineer project roles may override assignment.",
+      "Submits draft/submitted progress rows for several activities. Non-PM/planning users must be assigned to every activity in the batch; otherwise the API returns 403 ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED with the blocked activityIds. PM and Planning Engineer project roles may override assignment. The batch is one transaction: every update is written or none is — an update the writer refuses (403 assignment, 409 PROGRESS_METHOD_MISMATCH, 409 QUANTITY_ENTRIES_REQUIRED, 400 QUANTITY_NO_ENTRIES_TO_BUNDLE, 400 PROGRESS_EVIDENCE_REQUIRED, …) fails the whole call with that refusal, whose details carry batch { index, activityId, updates, written: 0 } naming the update, so a retry never duplicates the updates before it.",
     operationId: "submitBulkProgress",
     parameters: projectParams,
     permissions: modulePermission("progress", "submit", "submission.submit"),
