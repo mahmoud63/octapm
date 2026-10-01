@@ -82,7 +82,13 @@ const ruleOf = (kind) => {
 const NOW = new Date();
 const DAY = 86_400_000;
 const daysAgo = (days) => new Date(NOW.getTime() - days * DAY);
-const n = (value) => Number(value);
+// What the standalone tests assert, rule by rule, on the gaps project.
+const EXPECTED_GAPS = Object.freeze({
+  budget_truths_disagree: 3, forecast_without_provenance: 2, activity_budget_mismatch: 2, committed_definition_mixed: 1, equipment_cost_unposted: 2,
+  unit_unresolved: 1, unit_mismatch: 2, structure_missing: 4,
+  progress_stale: 1, period_not_locked: 1, ev_basis_divergence: 1, readiness_override_active: 1,
+  orphan_change_link: 3, change_order_possible_duplicate: 1,
+});
 
 liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, read-only, each citing its evidence", () => {
   let live;
@@ -526,6 +532,48 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     }
   }, 120_000);
 
+  // ─── the read-only dry-run script ────────────────────────────────────────
+
+  const runDryRun = (extra) => {
+    const { spawnSync } = require("child_process");
+    const path = require("path");
+    const os = require("os");
+    const out = path.join(os.tmpdir(), `pc7b-dq-dry-run-${process.pid}-${Date.now()}.json`);
+    const run = spawnSync(process.execPath, ["scripts/project-controls/exception-dry-run.js", "--org", live.org.id, "--cutoff", NOW.toISOString(), "--json", out, ...extra], {
+      cwd: path.resolve(__dirname, "..", "..", ".."),
+      env: { ...process.env, DATABASE_CONNECTION_LIMIT: "1" },
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    const result = run.status === 0 && require("fs").existsSync(out) ? JSON.parse(require("fs").readFileSync(out, "utf8")) : null;
+    if (result) require("fs").unlinkSync(out);
+    return { status: run.status, output: `${run.stdout}\n${run.stderr}`, result };
+  };
+
+  it("exception-dry-run.js --rules-only: one read-only session, the counts each rule would open, nothing written", async () => {
+    const scope = { orgId: live.org.id, projectIds: [gaps.project.id, clean.project.id] };
+    const before = await everyRow(scope);
+    const { status, output, result } = runDryRun(["--rules-only"]);
+    expect([status, output]).toEqual([0, expect.stringContaining("read-only session verified")]);
+    expect([result.mode, result.sessionReadOnly, result.projects, result.errors]).toEqual(["rules_only", "on", 2, []]);
+    const counts = Object.fromEntries(result.perProject.map((row) => [row.projectId, row.counts]));
+    expect(counts[gaps.project.id]).toEqual(EXPECTED_GAPS);
+    expect(counts[clean.project.id]).toEqual({});
+    for (const [kind, rows] of Object.entries(EXPECTED_GAPS)) expect([kind, result.kinds[kind]]).toEqual([kind, { rows, projects: 1 }]);
+    expect(changesBetween(before, await everyRow(scope))).toEqual([]);
+  }, 180_000);
+
+  it("exception-dry-run.js without --rules-only goes through the engine's dryRun (exit 3 while the engine is not on the base)", async () => {
+    const { status, output, result } = runDryRun([]);
+    if (!engine) {
+      expect([status, output]).toEqual([3, expect.stringContaining("exception-engine.service.js is not on this base")]);
+      return;
+    }
+    expect([status, result.mode, result.sessionReadOnly]).toEqual([0, "engine_dry_run", "on"]);
+    const counts = Object.fromEntries(result.perProject.map((row) => [row.projectId, row.counts]));
+    for (const [kind, rows] of Object.entries(EXPECTED_GAPS)) expect([kind, counts[gaps.project.id][kind]]).toEqual([kind, rows]);
+  }, 180_000);
+
   // ─── the engine (after the merge) ────────────────────────────────────────
 
   engineIt("the engine's rule registry picks the data-quality kinds up", () => {
@@ -548,13 +596,7 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
 
     await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
     const first = await openRows();
-    // What the standalone tests above assert, rule by rule, on this project.
-    const expected = {
-      budget_truths_disagree: 3, forecast_without_provenance: 2, activity_budget_mismatch: 2, committed_definition_mixed: 1, equipment_cost_unposted: 2,
-      unit_unresolved: 1, unit_mismatch: 2, structure_missing: 4,
-      progress_stale: 1, period_not_locked: 1, ev_basis_divergence: 1, readiness_override_active: 1,
-      orphan_change_link: 3, change_order_possible_duplicate: 1,
-    };
+    const expected = EXPECTED_GAPS;
     expect(Object.keys(expected).sort()).toEqual([...dqKinds].sort());
     for (const [kind, count] of Object.entries(expected)) expect([kind, first.filter((row) => row.kind === kind).length]).toEqual([kind, count]);
     expect(first.every((row) => ["info", "warning"].includes(row.severity) && row.measuredBasis && row.limitBasis)).toBe(true);
