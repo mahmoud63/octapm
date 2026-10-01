@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { Modal, ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useActivities, useLocations } from '@/api/record-hooks'
+import { useAllocatedItems } from '@/api/site-hooks'
 import { DELAY_TYPES, NOTE_KINDS, type DailyLogSection, type EntryInput } from '@/api/site-types'
 import { FilterChip } from '@/components/FilterChip'
 import { PickerField } from '@/components/PickerField'
 import { Button, Input, Text, spacing, useTheme } from '@/design-system'
+import { userMessage } from '@/api/errors'
 import { humanise } from '@/utilities/format'
 import { newId } from '@/utilities/id'
 
@@ -58,6 +60,9 @@ export const ENTRY_FIELDS: Record<DailyLogSection, FieldSpec[]> = {
     { key: 'hoursLost', label: 'Hours lost', kind: 'number', required: true },
   ],
   notes: [{ key: 'text', label: 'Note', kind: 'multiline', required: true }],
+  // PC-6: a quantity installed, in the allocated item's own unit. The item
+  // and the activity are chosen below; the unit is the item's, never typed.
+  quantities: [{ key: 'quantity', label: 'Quantity installed', kind: 'number', required: true, placeholder: '0 or more' }],
 }
 
 const CHOICE_FIELDS: Partial<Record<DailyLogSection, { key: string; label: string; options: readonly string[] }>> = {
@@ -72,7 +77,10 @@ const LINKS: Record<DailyLogSection, { activity: boolean; location: boolean }> =
   visitors: { activity: false, location: false },
   delays: { activity: true, location: false },
   notes: { activity: true, location: true },
+  quantities: { activity: true, location: true },
 }
+
+const TITLES: Record<DailyLogSection, string> = { manpower: 'Add manpower', equipment: 'Add equipment', deliveries: 'Add a delivery', visitors: 'Add a visitor', delays: 'Add a delay', notes: 'Add a note', quantities: 'Add a quantity installed' }
 
 /**
  * One entry for one section of the day, with the fields that section takes,
@@ -88,7 +96,11 @@ export function DailyLogEntrySheet({ visible, projectId, section, busy, error, o
   const [choice, setChoice] = useState<string | null>(null)
   const [activityId, setActivityId] = useState<string | null>(null)
   const [locationId, setLocationId] = useState<string | null>(null)
+  const [boqItemId, setBoqItemId] = useState<string | null>(null)
   const [notes, setNotes] = useState('')
+  // The items are the activity's approved allocations, read from the server
+  // once an activity is chosen; a member without BOQ read is given none.
+  const allocated = useAllocatedItems(projectId, section === 'quantities' ? activityId : null)
 
   useEffect(() => {
     if (visible) {
@@ -96,19 +108,31 @@ export function DailyLogEntrySheet({ visible, projectId, section, busy, error, o
       setChoice(null)
       setActivityId(null)
       setLocationId(null)
+      setBoqItemId(null)
       setNotes('')
     }
   }, [visible, section])
+  // A different activity has different items; a choice made for the last one does not carry over.
+  useEffect(() => setBoqItemId(null), [activityId])
 
   const fields = ENTRY_FIELDS[section]
   const choiceField = CHOICE_FIELDS[section]
   const links = LINKS[section]
   const work = useMemo(() => (activities.data ?? []).map((a) => ({ id: a.id, label: a.name, sublabel: [a.activityCode, a.wbsCode].filter(Boolean).join(' · ') })), [activities.data])
   const places = useMemo(() => (locations.data ?? []).map((l) => ({ id: l.id, label: l.fullName || l.name, sublabel: l.code })), [locations.data])
+  const allocatedItems = useMemo(() => allocated.data?.items ?? [], [allocated.data])
+  // Description and unit, the code only when the server sent one — never a figure the server withheld.
+  const itemOptions = useMemo(() => allocatedItems.map((i) => ({ id: i.boqItemId, label: i.description, sublabel: [i.code, i.unitCode].filter(Boolean).join(' · ') || null })), [allocatedItems])
+  const chosenItem = allocatedItems.find((i) => i.boqItemId === boqItemId) ?? null
 
   const missing = fields.filter((f) => f.required && !values[f.key]?.trim()).map((f) => f.label)
   const missingChoice = choiceField && !choice ? [choiceField.label] : []
-  const ready = missing.length === 0 && missingChoice.length === 0
+  // A quantity is a number of zero or more in the item's unit; a correction is
+  // never a negative line (§3), and both the activity and the item are required.
+  const quantityNumber = Number(values.quantity ?? '')
+  const quantityOk = section !== 'quantities' || (values.quantity?.trim() !== '' && Number.isFinite(quantityNumber) && quantityNumber >= 0)
+  const missingLinks = section === 'quantities' ? [...(activityId ? [] : ['Activity']), ...(chosenItem ? [] : ['Item'])] : []
+  const ready = missing.length === 0 && missingChoice.length === 0 && missingLinks.length === 0 && quantityOk
 
   const save = () => {
     const body: EntryInput = { clientRequestId: newId() }
@@ -120,6 +144,11 @@ export function DailyLogEntrySheet({ visible, projectId, section, busy, error, o
     if (choiceField && choice) body[choiceField.key] = choice
     if (links.activity && activityId) body.activityId = activityId
     if (links.location && locationId) body.locationId = locationId
+    if (section === 'quantities' && chosenItem) {
+      body.boqItemId = chosenItem.boqItemId
+      if (chosenItem.allocationId) body.allocationId = chosenItem.allocationId
+      if (chosenItem.unitCode) body.unitCode = chosenItem.unitCode
+    }
     if (notes.trim()) body.notes = notes.trim()
     onSave(body)
   }
@@ -129,7 +158,7 @@ export function DailyLogEntrySheet({ visible, projectId, section, busy, error, o
       <View style={[styles.sheet, { backgroundColor: theme.colors.background, paddingTop: insets.top + spacing.md }]} testID={`entry-sheet-${section}`}>
         <View style={styles.header}>
           <Text variant="title" style={styles.grow}>
-            Add {section === 'manpower' ? 'manpower' : section === 'notes' ? 'a note' : section === 'delays' ? 'a delay' : `${section.slice(0, -1)}`}
+            {TITLES[section]}
           </Text>
           <Button title="Cancel" variant="ghost" onPress={onCancel} disabled={busy} testID="entry-cancel" />
         </View>
@@ -146,10 +175,41 @@ export function DailyLogEntrySheet({ visible, projectId, section, busy, error, o
               </View>
             </View>
           ) : null}
+          {section === 'quantities' ? (
+            <Text variant="caption" tone="muted" testID="entry-quantities-note">
+              What goes down here is sent for approval with the day. It becomes progress only when the progress approvers approve it on the Progress screen.
+            </Text>
+          ) : null}
+          {section === 'quantities' ? <PickerField label="Activity" required options={work} value={activityId} onChange={(v) => setActivityId(v as string | null)} loading={activities.isPending} testID="entry-activity" /> : null}
+          {section === 'quantities' ? (
+            allocated.data?.notAvailable ? (
+              <View style={styles.stack} testID="entry-item-withheld">
+                <Text variant="label" label tone="muted">
+                  Item *
+                </Text>
+                <Text>—</Text>
+                <Text variant="caption" tone="muted">
+                  {allocated.data.notAvailable.reason}
+                </Text>
+              </View>
+            ) : (
+              <PickerField
+                label="Item"
+                required
+                placeholder={activityId ? 'Choose an allocated item' : 'Choose the activity first'}
+                options={itemOptions}
+                value={boqItemId}
+                onChange={(v) => setBoqItemId(v as string | null)}
+                loading={!!activityId && allocated.isPending}
+                error={allocated.isError ? userMessage(allocated.error) : undefined}
+                testID="entry-item"
+              />
+            )
+          ) : null}
           {fields.map((f) => (
             <Input
               key={f.key}
-              label={f.label}
+              label={section === 'quantities' && f.key === 'quantity' ? `${f.label}${chosenItem?.unitCode ? ` (${chosenItem.unitCode})` : ''}` : f.label}
               required={f.required}
               placeholder={f.placeholder}
               value={values[f.key] ?? ''}
@@ -160,12 +220,12 @@ export function DailyLogEntrySheet({ visible, projectId, section, busy, error, o
               testID={`entry-${f.key}`}
             />
           ))}
-          {links.activity ? <PickerField label="Activity" options={work} value={activityId} onChange={(v) => setActivityId(v as string | null)} loading={activities.isPending} testID="entry-activity" /> : null}
+          {links.activity && section !== 'quantities' ? <PickerField label="Activity" options={work} value={activityId} onChange={(v) => setActivityId(v as string | null)} loading={activities.isPending} testID="entry-activity" /> : null}
           {links.location ? <PickerField label="Location" options={places} value={locationId} onChange={(v) => setLocationId(v as string | null)} loading={locations.isPending} testID="entry-location" /> : null}
           {section !== 'notes' ? <Input label="Notes" value={notes} onChangeText={setNotes} multiline testID="entry-notes" /> : null}
           {!ready ? (
             <Text variant="caption" tone="muted">
-              Still needed: {[...missingChoice, ...missing].join(', ')}
+              Still needed: {[...missingChoice, ...missingLinks, ...missing, ...(section === 'quantities' && !quantityOk && values.quantity?.trim() ? ['a quantity of 0 or more'] : [])].join(', ')}
             </Text>
           ) : null}
           {error ? (

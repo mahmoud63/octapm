@@ -165,3 +165,44 @@ export const pmSite = matrix('pm', {
   rfi: { actions: ['read', 'create'] },
   task: { actions: ['read'] },
 })
+
+// ── PC-6: quantities installed ──
+
+/** A member who reads progress but may not submit it: no entry form, no Add. */
+export const financeSite = matrix('finance', {
+  progress: { actions: ['read'] },
+  schedule: { actions: ['read'] },
+})
+
+/** The allocation register's answer for a1: two approved allocations, as the server lists them (only what the picker reads). */
+export const allocationsOfA1 = {
+  allocations: [
+    { id: 'al1', projectId: 'p1', boqItemId: 'b1', activityId: 'a1', quantity: 480, unitCode: 'm3', status: 'approved', isActive: true, boqItem: { id: 'b1', code: 'C-030', description: 'Concrete C30 to raft', unit: 'm3', unitCode: 'm3', quantity: 480 } },
+    { id: 'al2', projectId: 'p1', boqItemId: 'b2', activityId: 'a1', quantity: 12000, unitCode: 'kg', status: 'approved', isActive: true, boqItem: { id: 'b2', code: '', description: 'Reinforcement to raft', unit: 'kg', unitCode: 'kg', quantity: 12000 } },
+  ],
+  summary: {},
+}
+
+export const quantityEntry = (over: Partial<DailyLogEntry> = {}): DailyLogEntry => ({
+  id: 'q1',
+  section: 'quantities',
+  partyId: null,
+  party: null,
+  // The row's own review state — a staff row is approved at once — which is never progress approval.
+  status: 'approved',
+  createdBy: 'u1',
+  clientRequestId: 'cq1',
+  activityId: 'a1',
+  activity: { id: 'a1', name: 'Foundation concrete' },
+  boqItemId: 'b1',
+  boqItem: { id: 'b1', description: 'Concrete C30 to raft', unitCode: 'm3', code: 'C-030' },
+  allocationId: 'al1',
+  quantity: 120,
+  unitCode: 'm3',
+  locationId: null,
+  location: null,
+  notes: null,
+  progressEntry: { id: 'qpe1', status: 'submitted', source: 'daily_log' },
+  createdAt: `${today}T09:00:00.000Z`,
+  ...over,
+})
