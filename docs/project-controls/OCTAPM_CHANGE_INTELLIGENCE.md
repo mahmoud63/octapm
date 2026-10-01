@@ -183,6 +183,24 @@ Kinds evaluated by the same engine, all `info`/`warning`, never blocking:
 
 Proof: `src/services/__live__/pc-7b-data-quality.live.test.js` (a gaps and a clean LiveTest project; every rule row by row, tenancy, read-only, the forecast's notes per reader, the dry run; the engine part runs once `exception-engine.service.js` is on the base).
 
+**For the owner — the dry run on the shared database (PC-7b integration, item R, 2026-10-01 18:34 UTC, HEAD after item O).** The script was read first: it opens one connection read-only (`default_transaction_read_only=on` in the URL — it refuses, exit 2, a URL that already carries `options` —, `SET SESSION … READ ONLY`, `SHOW transaction_read_only` checked before the run, before each project and after; exit 2 otherwise) with `EXCEPTIONS_ENGINE_ENABLED=false`. Run under the database lock as `node scripts/project-controls/exception-dry-run.js --json C:/Temp/r6-pc7b-dryrun.json`: engine dry run, 24 durable organisations, 7 projects in the nightly tick's scope (active, not archived; 424 out of scope), 0 errors, session read-only before/after. A read-only fingerprint before and after was identical (ProjectException 0 rows, same row hash; BackgroundJob 1,657 of which 34 `exceptions.evaluate`; AuditEvent 30,592 of which 16 `project_exception`) — nothing written. What the first enabled tick would OPEN (all new; nothing to refresh, resolve, suppress, release or mark not comparable, since no row exists yet), 148 rows in all:
+
+| kind | rows it would open | projects |
+|---|---|---|
+| `activity_budget_mismatch` | 50 | 4 |
+| `forecast_without_provenance` | 39 | 5 |
+| `structure_missing` | 19 | 7 |
+| `budget_truths_disagree` | 12 | 5 |
+| `period_not_locked` | 12 | 1 |
+| `change_order_possible_duplicate` | 5 | 1 |
+| `progress_stale` | 4 | 2 |
+| `schedule_slip_on_mapped_item` | 3 | 3 |
+| `unit_mismatch` | 2 | 2 |
+| `forecast_over_revised` | 2 | 2 |
+| `equipment_cost_unposted`, `unit_unresolved`, `ev_basis_divergence`, `readiness_override_active`, `orphan_change_link`, `quantity_over_allocation`, `quantity_over_boq`, `certified_over_installed`, `allocation_over_capacity`, `certified_over_earned`, `committed_over_budget`, `actual_over_committed` | 0 | 0 |
+
+Most of the volume is data-quality (`activity_budget_mismatch`, `forecast_without_provenance`, `structure_missing`: 108 of 148); the overrun kinds open 5 rows (`forecast_over_revised` 2, `schedule_slip_on_mapped_item` 3). Whether to switch the tick on for these organisations with that first-night volume is the owner's call; nothing is enabled by this run.
+
 ## 8. Tests
 
 - Live: `pc-7-exceptions.js` — seed an over-installation, assert the exception, raise the change event from it, approve the order with an allocation link, re-run the engine, assert resolution; run twice, assert idempotent (no duplicate open rows).
