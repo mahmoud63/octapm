@@ -1436,10 +1436,85 @@ const withheldActivityDetail = (detail, access = FULL_ACCESS) => {
       boqWithheld: { reason: ACTIVITY_HISTORY_BOQ_WITHHELD },
     };
   }
+  // PC-6: the progress section's installed quantity is Σ approved quantity
+  // entries per BOQ item — the bill's figure; the approved % complete beside
+  // it is progress data and stays.
+  if (sections.progress && sections.progress.allowed && has(sections.progress, "installedQuantity")) {
+    sections.progress = { ...sections.progress, installedQuantity: withheldQuantityFigure() };
+  }
   return { ...detail, sections };
 };
 
+// ─── PC-6: the quantity views ─────────────────────────────────────────────
+//
+// Installed, certified, paid, received, issued and committed quantities per
+// BOQ item — and per activity, which is those per the activity's items — are
+// worked from the bill's rows: a member who may not read the BOQ gets none
+// of them (cost, IPC, inventory or commitment read does not unlock a BOQ
+// figure). GET /boq/items/:id/quantities is admitted on boq:read, so its
+// withholding hands anyone else the row's id only, as the BOQ item detail
+// does; GET /activities/:id/quantities is admitted on schedule:read, so a
+// non-BOQ reader keeps the activity's identity and its progress section (the
+// approved % complete follows progress:read) and gets every figure, the
+// comparison and the items as withheld with the reason — a dash, never zero.
+const QUANTITY_FIGURES_WITHHELD =
+  "Installed, certified, paid, received, issued and committed quantities are worked from the BOQ's rows, available only to members who may read the BOQ";
+const QUANTITY_KEYS = ["installed", "certified", "paid", "received", "issued", "committed"];
+
+const withheldQuantityFigure = (reason = QUANTITY_FIGURES_WITHHELD) => ({
+  value: null,
+  truth: null,
+  basis: reason,
+  unitCode: null,
+  unitMatch: null,
+  derivedFrom: [],
+  withheld: true,
+  notAvailable: { reason },
+});
+
+const withheldQuantityFigures = (figures) => {
+  const keys = figures && typeof figures === "object" ? Object.keys(figures) : QUANTITY_KEYS;
+  return Object.fromEntries((keys.length ? keys : QUANTITY_KEYS).map((key) => [key, withheldQuantityFigure()]));
+};
+
+const withheldBoqItemQuantities = (view, access = FULL_ACCESS) => {
+  if (access.boq || !view || typeof view !== "object") return view;
+  return { kind: view.kind, id: view.id, boqItemId: view.boqItemId ?? view.id, withheld: true, reason: QUANTITY_FIGURES_WITHHELD };
+};
+
+const withheldActivityQuantities = (view, access = FULL_ACCESS) => {
+  if (access.boq || !view || typeof view !== "object") return view;
+  const progress =
+    view.progress && view.progress.allowed
+      ? // The planned quantity is Σ approved allocations (or the method's
+        // configured figure): the bill's. The % complete and method stay.
+        { ...view.progress, ...(has(view.progress, "planned") ? { planned: withheldQuantityFigure() } : {}) }
+      : view.progress;
+  return {
+    kind: view.kind,
+    id: view.id,
+    activityId: view.activityId ?? view.id,
+    code: view.code ?? null,
+    name: view.name ?? null,
+    cutoffDate: view.cutoffDate ?? null,
+    asOf: view.asOf ?? null,
+    core: view.core ?? null,
+    progress,
+    figures: withheldQuantityFigures(view.figures),
+    comparisons: { withheld: true, reason: QUANTITY_FIGURES_WITHHELD },
+    items: { withheld: true, reason: QUANTITY_FIGURES_WITHHELD },
+    keys: Array.isArray(view.keys) ? view.keys : QUANTITY_KEYS,
+    withheld: true,
+    reason: QUANTITY_FIGURES_WITHHELD,
+  };
+};
+
 module.exports = {
+  // PC-6 quantity views
+  QUANTITY_FIGURES_WITHHELD,
+  withheldQuantityFigure,
+  withheldBoqItemQuantities,
+  withheldActivityQuantities,
   ALLOCATION_LINK_BOQ_KEYS,
   ALLOCATION_LINK_WITHHELD,
   withheldAllocationLinks,
