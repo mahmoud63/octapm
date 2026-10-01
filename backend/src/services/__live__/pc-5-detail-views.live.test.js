@@ -541,7 +541,13 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     expect([item.status, item.body?.error]).toEqual([200, undefined]);
     expect(item.body.data.sections.certification).toEqual({ allowed: false, module: "ipc", reason: expect.any(String) });
     expect(item.body.data.sections.commitments).toMatchObject({ allowed: false });
-    expect(item.text.includes('"certifiedQuantity"')).toBe(false);
+    // PC-6: the quantities section names its certified and committed
+    // quantities for everyone, with no value and the module for a member the
+    // module does not admit.
+    expect(item.body.data.sections.quantities.certifiedQuantity).toMatchObject({ value: null, truth: "source", module: "ipc", notAvailable: { reason: expect.any(String) } });
+    expect(item.body.data.sections.quantities.paid).toMatchObject({ value: null, module: "ipc" });
+    expect(item.body.data.sections.quantities.committedQuantity).toMatchObject({ value: null, module: "commitment" });
+    expect(item.text.includes('"certifiedQuantity":{"value":30')).toBe(false);
     expect(item.text.includes('"committed"')).toBe(false);
   });
 
