@@ -114,4 +114,12 @@ assert.match(dialog, /\(anyBlocked && lineIds\.size === 0\)/, '"all lines" is no
 assert.match(service, /new HttpError\(409, "CHANGE_EVENT_LINE_WITHHELD"/, 'the server refuses an RFQ of a withheld line')
 assert.match(service, /const RFQ_DISCLOSED_FIELDS = Object\.freeze\(\["quantity", "unit", "activityId"\]\)/, 'the server and the dialog name the same disclosed fields')
 
+// PC-7b integration fixer 4: the screens say why the source is missing — the
+// register row and the event dialog read "Raised from — <the server's
+// reason>", and a withheld activity reads "—" with the reason; never a bare
+// 'Project exception' origin with no source and no explanation.
+assert.match(panel, /\{event\.sourceWithheld && \([^]*?Raised from — \{event\.sourceWithheld\.reason\}/, 'the register row names the reason')
+assert.match(panel, /isChangeEventFieldWithheld\(event, 'activityId'\) \?[^]*?title=\{event\.sourceWithheld\?\.reason\}/, 'a withheld activity in the register reads "—" with the reason')
+assert.match(dialog, /\{!sourceLink && event\.sourceWithheld && \([^]*?Raised from — \{event\.sourceWithheld\.reason\}/, 'the dialog names the reason where the source would be')
+
 console.log('change-events-ui: ok')

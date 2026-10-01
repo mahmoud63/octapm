@@ -124,6 +124,38 @@ describe('change events', () => {
     expect(await screen.findByText(/From Project exception/)).toBeTruthy()
   })
 
+  it('says, with the server\'s reason, what it withheld of an event raised from a BOQ-derived exception — never a bare origin, never "undefined" (PC-7b)', async () => {
+    const reason = 'Part of this change event is withheld from you: the record it was raised from, and what came from that record onto the event, are available only to members with access to that record'
+    const base = changeEvent()
+    const [first, ...rest] = base.lines ?? []
+    const { activityId: _a, activity: _b, costCodeId: _c, costCode: _d, quantity: _q, unit: _u, unitCost: _uc, ...withheldLine } = first!
+    const { activityId: _ea, activity: _eb, ...withheldEvent } = base
+    calls = fakeServer({
+      'GET /projects': () => ({ status: 200, body: envelope(page(projects)) }),
+      'GET /auth/me/permissions': () => ({ status: 200, body: envelope(siteEngineerCommercial) }),
+      'GET /projects/p1/change-events/ce1': () => ({
+        status: 200,
+        body: envelope({
+          ...withheldEvent,
+          origin: 'exception',
+          sourceRecordType: null,
+          sourceRecordId: null,
+          sourcePath: null,
+          lines: [withheldLine, ...rest],
+          sourceWithheld: { keys: ['sourceLinks.project_exception', 'sourceRecordType', 'sourceRecordId', 'sourcePath', 'activityId', ...['activityId', 'costCodeId', 'quantity', 'unit', 'unitCost'].map((field) => `lines[${first!.id}].${field}`)], reason },
+        }),
+      }),
+      'GET /projects/p1/comments': () => ({ status: 200, body: envelope({ items: [], pagination: { limit: 100, nextCursor: null } }) }),
+      'GET /projects/p1/audit': () => ({ status: 200, body: envelope({ events: [], nextCursor: null }) }),
+    })
+    await renderScreen(<ChangeEventScreen />)
+    expect(await screen.findByText(/From Project exception/)).toBeTruthy()
+    expect(screen.getByTestId('change-event-source-withheld')).toHaveTextContent(`Raised from — ${reason}`)
+    expect(screen.getByTestId(`change-event-line-withheld-${first!.id}`)).toHaveTextContent(`— ${reason}`)
+    for (const line of rest) expect(screen.queryByTestId(`change-event-line-withheld-${line.id}`)).toBeNull()
+    expect(JSON.stringify(screen.toJSON())).not.toContain('undefined')
+  })
+
   it('offers no "exception" origin on the manual form — that origin is the handoff\'s, with its typed link', async () => {
     serve()
     ;(useLocalSearchParams as jest.Mock).mockReturnValue({ origin: 'exception' })

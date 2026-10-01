@@ -50,19 +50,25 @@ export const changeEventOriginLabel = (origin: string | null | undefined): strin
 }
 export const CHANGE_EVENT_STATUSES = ['open', 'pricing', 'priced', 'converted', 'closed', 'void'] as const
 
+/**
+ * A line. Its activity, cost code, quantity, unit and unit cost are left out
+ * for a member without BOQ read when the line took them from a BOQ-derived
+ * project exception: the event's sourceWithheld.keys names each as
+ * lines[<id>].<field>, with the reason (PC-7b).
+ */
 export interface ChangeEventLine {
   id: string
   description: string
-  costCodeId: string | null
-  costCode: { id: string; code: string; name: string } | null
+  costCodeId?: string | null
+  costCode?: { id: string; code: string; name: string } | null
   budgetLineId: string | null
-  activityId: string | null
-  activity: { id: string; name: string; code: string | null } | null
+  activityId?: string | null
+  activity?: { id: string; name: string; code: string | null } | null
   commitmentId: string | null
   commitment: { id: string; ref: string; title: string; vendorName: string | null } | null
-  quantity: number
-  unit: string | null
-  unitCost: number
+  quantity?: number
+  unit?: string | null
+  unitCost?: number
   romAmount: number
   quotedAmount: number | null
   quotedRfqId: string | null
@@ -102,8 +108,9 @@ export interface ChangeEvent {
   sourceRecordId: string | null
   sourcePath: string | null
   status: string
-  activityId: string | null
-  activity: { id: string; name: string; code: string | null } | null
+  /** Left out when withheld (sourceWithheld.keys has 'activityId'). */
+  activityId?: string | null
+  activity?: { id: string; name: string; code: string | null } | null
   locationId: string | null
   location: Named | null
   romAmount: number
@@ -124,7 +131,18 @@ export interface ChangeEvent {
   createdBy: string | null
   createdAt: string
   updatedAt: string
+  /**
+   * PC-7b: present when the event was raised from a BOQ-derived project
+   * exception and this member may not read the BOQ: what the server left out
+   * (the source link, the activity, lines[<id>].<field>) and why. Shown as
+   * "—" with the reason where the source and those fields would be.
+   */
+  sourceWithheld?: { keys: string[]; reason: string }
 }
+
+/** Whether the server withheld anything of this line from this member. */
+export const changeEventLineWithheld = (event: Pick<ChangeEvent, 'sourceWithheld'>, lineId: string): boolean =>
+  Boolean(event.sourceWithheld?.keys.some((key) => key.startsWith(`lines[${lineId}].`)))
 
 export interface ChangeEventList {
   items: ChangeEvent[]

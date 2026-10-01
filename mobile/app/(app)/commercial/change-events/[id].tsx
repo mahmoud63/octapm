@@ -1,7 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { StyleSheet, View } from 'react-native'
 import { useChangeEvent } from '@/api/commercial-hooks'
-import { changeEventOriginLabel } from '@/api/commercial-types'
+import { changeEventLineWithheld, changeEventOriginLabel } from '@/api/commercial-types'
 import { userMessage } from '@/api/errors'
 import { useProjects } from '@/api/hooks'
 import { Comments } from '@/components/Comments'
@@ -80,6 +80,11 @@ export default function ChangeEventScreen() {
               </Text>
               <Button title="Open source" variant="ghost" onPress={() => (sourceRoute ? router.push(sourceRoute as never) : void openOnWeb(webPathForTarget({ projectId, module: 'commercial', recordType: e.sourceRecordType, recordId: e.sourceRecordId })))} />
             </View>
+          ) : e.sourceWithheld ? (
+            // PC-7b: the server withheld the source (and what came from it) from this member — "—" with its reason, never a bare origin.
+            <Text variant="caption" tone="muted" testID="change-event-source-withheld" accessibilityLabel={`Raised from — ${e.sourceWithheld.reason}`}>
+              Raised from — {e.sourceWithheld.reason}
+            </Text>
           ) : null}
           {e.voidReason ? <Fact label="Voided because" value={e.voidReason} /> : null}
         </View>
@@ -99,8 +104,13 @@ export default function ChangeEventScreen() {
               <View style={styles.grow}>
                 <Text>{l.description}</Text>
                 <Text variant="caption" tone="muted">
-                  {[l.activity?.name, l.commitment ? `${l.commitment.ref} ${l.commitment.vendorName ?? ''}`.trim() : null, l.quantity && l.unit ? `${l.quantity} ${l.unit}` : null].filter(Boolean).join(' · ')}
+                  {[l.activity?.name, l.commitment ? `${l.commitment.ref} ${l.commitment.vendorName ?? ''}`.trim() : null, l.quantity != null && l.unit ? `${l.quantity} ${l.unit}` : null].filter(Boolean).join(' · ')}
                 </Text>
+                {changeEventLineWithheld(e, l.id) ? (
+                  <Text variant="caption" tone="muted" testID={`change-event-line-withheld-${l.id}`}>
+                    — {e.sourceWithheld?.reason}
+                  </Text>
+                ) : null}
               </View>
               <Text>{money(l.amount, currency)}</Text>
             </View>

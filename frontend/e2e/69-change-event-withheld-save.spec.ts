@@ -166,6 +166,9 @@ test('a member without BOQ read opens and saves a change event raised from a BOQ
   await signInForm(page, qsEmail)
   await page.goto(`/o/${org!.segment}/projects/${projectId}/commercial/change-events`)
   await expect(page.getByTestId('uat-change-events-rows')).toBeVisible({ timeout: 45_000 })
+  // The register row says why the source is missing (item 4), and the activity reads "—".
+  await expect(page.getByTestId(`uat-change-events-withheld-${event.id}`)).toContainText(`Raised from — ${reason}`)
+  await expect(page.getByTestId(`uat-change-events-activity-withheld-${event.id}`)).toHaveText('—')
   await page.getByTestId('uat-change-events-rows').getByText(event.ref, { exact: true }).click()
   const dialog = page.getByTestId('uat-change-event')
   await expect(dialog.getByTestId('uat-change-event-title')).toHaveValue(event.title, { timeout: 30_000 })

@@ -27,6 +27,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   CHANGE_EVENT_STATUS_LABEL,
   CHANGE_EVENT_TYPE_LABEL,
+  isChangeEventFieldWithheld,
   useChangeEvents,
   useCreateChangeEvent,
   type ChangeEventStatus,
@@ -371,12 +372,35 @@ export function ChangeEventsPanel({
                   onClick={() => setOpenId(event.id)}
                 >
                   <td className='px-2 py-1 font-mono text-xs'>{event.ref}</td>
-                  <td className='px-2 py-1'>{event.title}</td>
+                  <td className='px-2 py-1'>
+                    {event.title}
+                    {event.sourceWithheld && (
+                      // PC-7b: the server withheld the source (and what came
+                      // from it) from this member — "—" with its reason.
+                      <p
+                        className='text-[11px] text-muted-foreground'
+                        data-testid={`uat-change-events-withheld-${event.id}`}
+                        data-reason={event.sourceWithheld.reason}
+                      >
+                        Raised from — {event.sourceWithheld.reason}
+                      </p>
+                    )}
+                  </td>
                   <td className='px-2 py-1 text-xs'>
                     {CHANGE_EVENT_TYPE_LABEL[event.type]}
                   </td>
                   <td className='px-2 py-1 text-xs'>
-                    {event.activity?.name ?? '—'}
+                    {isChangeEventFieldWithheld(event, 'activityId') ? (
+                      <span
+                        className='cursor-help text-muted-foreground'
+                        title={event.sourceWithheld?.reason}
+                        data-testid={`uat-change-events-activity-withheld-${event.id}`}
+                      >
+                        —
+                      </span>
+                    ) : (
+                      (event.activity?.name ?? '—')
+                    )}
                   </td>
                   <td className='px-2 py-1 text-right tabular-nums'>
                     {money(event.totals.rom)}
