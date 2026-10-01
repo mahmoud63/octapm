@@ -32,10 +32,17 @@ import {
   projectSetupReadinessKey,
   useProjectSetupReadiness,
 } from '@/features/projects/hooks/use-projects'
-import type {
-  ProgressMethod,
-  ProgressSubmission,
-  ScheduleActivity,
+import { QUANTITY_TERMS } from '@/lib/financial-terms'
+import {
+  quantityEntriesOf,
+  withheldReason,
+  type ActivityProgressExtras,
+  type ProgressMethod,
+  type ProgressSource,
+  type ProgressSubmission,
+  type QuantityProgressEntry,
+  type ScheduleActivity,
+  type SubmissionExtras,
 } from '../data/schema'
 
 interface Props {
@@ -43,7 +50,338 @@ interface Props {
   projectId: string
 }
 
-type SubmissionRow = NonNullable<ProgressSubmission>
+type SubmissionRow = NonNullable<ProgressSubmission> & SubmissionExtras
+
+// ─── PC-6: PROGRESS SOURCE ───
+// Every official and every pending figure says where it came from: the
+// daily log and its date, the submission, the import, who and when. The
+// server's structured provenance is read first; a server without it (or an
+// older row) falls back to the approvedProgressSource string. Nothing here
+// computes a figure.
+const SOURCE_WORD: Record<string, string> = {
+  manual: 'Manual submission',
+  mobile: 'Mobile capture',
+  daily_log: 'Daily log',
+  daily_report: 'Daily report',
+  import: 'Progress import',
+  submission: 'Submission',
+}
+
+const sourceWord = (source: string | null | undefined) =>
+  source ? (SOURCE_WORD[source] ?? source.replace(/_/g, ' ')) : null
+
+const when = (value: string | null | undefined) =>
+  value ? new Date(value).toLocaleString() : null
+
+type SourceStory = { headline: string; details: string[] }
+
+const describeSource = (
+  provenance: ProgressSource | null | undefined,
+  fallback: { source?: string | null; at?: string | null } = {}
+): SourceStory | null => {
+  if (provenance) {
+    const dates = provenance.dailyLogDates?.length
+      ? provenance.dailyLogDates
+      : provenance.dailyLogDate
+        ? [provenance.dailyLogDate]
+        : []
+    const headline =
+      provenance.label ??
+      [
+        sourceWord(provenance.source) ?? 'Progress',
+        dates.length ? dates.join(', ') : null,
+        provenance.importFileName ?? null,
+      ]
+        .filter(Boolean)
+        .join(' ')
+    const details: string[] = []
+    const submitter = provenance.submittedByName ?? provenance.submittedBy
+    if (submitter || provenance.submittedAt) {
+      details.push(
+        [
+          'Submitted',
+          submitter ? `by ${submitter}` : null,
+          when(provenance.submittedAt),
+        ]
+          .filter(Boolean)
+          .join(' ')
+      )
+    }
+    const approver = provenance.approvedByName ?? provenance.approvedBy
+    if (approver || provenance.approvedAt) {
+      details.push(
+        [
+          'Approved',
+          approver ? `by ${approver}` : null,
+          when(provenance.approvedAt),
+        ]
+          .filter(Boolean)
+          .join(' ')
+      )
+    }
+    if (provenance.entryCount != null) {
+      details.push(
+        `${provenance.entryCount} quantity entr${provenance.entryCount === 1 ? 'y' : 'ies'}`
+      )
+    }
+    if (provenance.basis) details.push(provenance.basis.replace(/_/g, ' '))
+    return { headline, details }
+  }
+  const word = sourceWord(fallback.source)
+  if (!word) return null
+  const at = when(fallback.at)
+  return { headline: word, details: at ? [`Approved ${at}`] : [] }
+}
+
+function ProgressSourceCell({
+  story,
+  kind,
+  testId,
+}: {
+  story: SourceStory | null
+  kind: 'official' | 'pending'
+  testId: string
+}) {
+  return (
+    <div
+      className='min-w-0 text-xs'
+      data-testid={testId}
+      data-progress-source-kind={kind}
+    >
+      <p className='text-[10px] font-semibold tracking-wide text-muted-foreground uppercase'>
+        Progress source
+      </p>
+      {story ? (
+        <>
+          <p className='font-medium' data-progress-source-headline={story.headline}>
+            {story.headline}
+          </p>
+          {story.details.length > 0 && (
+            <p className='text-muted-foreground'>{story.details.join(' · ')}</p>
+          )}
+        </>
+      ) : (
+        <p className='text-muted-foreground' data-progress-source-headline=''>
+          — {kind === 'official' ? 'No approved progress yet' : 'Not stated'}
+        </p>
+      )}
+    </div>
+  )
+}
+
+const extrasOf = (activity: ScheduleActivity) =>
+  activity as ScheduleActivity & ActivityProgressExtras
+
+const entryItemLabel = (entry: QuantityProgressEntry) =>
+  [entry.boqItem?.code, entry.boqItem?.description].filter(Boolean).join(' · ') ||
+  entry.boqItemId ||
+  'BOQ item'
+
+/** The entries a submission bundles: quantity + unit per item, "—" + reason when withheld. */
+function BundledEntries({
+  submission,
+}: {
+  submission: SubmissionRow
+}) {
+  const { entries, reason } = quantityEntriesOf(
+    submission.quantityEntries ?? submission.entries
+  )
+  if (!entries.length && !reason) return null
+  return (
+    <div
+      className='mt-2 rounded-md border bg-muted/30 p-2 text-xs'
+      data-testid={`uat-progress-queue-entries-${submission.id}`}
+    >
+      <p className='text-[10px] font-semibold tracking-wide text-muted-foreground uppercase'>
+        Bundled quantity entries
+      </p>
+      {reason && (
+        <p className='text-muted-foreground' data-withheld-reason={reason}>
+          — {reason}
+        </p>
+      )}
+      {entries.length > 0 && (
+        <ul className='mt-1 space-y-0.5'>
+          {entries.map((entry) => {
+            const withheld = withheldReason(
+              entry.withheld,
+              'Withheld by the server'
+            )
+            const absent =
+              withheld ?? (entry.quantity == null ? 'Not stated' : null)
+            const unit = entry.unitCode ?? entry.boqItem?.unitCode ?? entry.boqItem?.unit ?? ''
+            const story = describeSource(entry.progressSource, {
+              source: entry.source,
+            })
+            return (
+              <li
+                key={entry.id}
+                className='flex flex-wrap items-baseline justify-between gap-x-3'
+                data-testid={`uat-progress-queue-entry-${entry.id}`}
+              >
+                <span className='min-w-0'>
+                  {entryItemLabel(entry)}
+                  <span className='ml-1 text-muted-foreground'>
+                    {[
+                      story?.headline,
+                      entry.dailyLogDate ?? entry.date ?? null,
+                      entry.location?.name ?? null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </span>
+                <span className='tabular-nums'>
+                  {absent ? (
+                    <span
+                      className='text-muted-foreground'
+                      title={absent}
+                      data-withheld-reason={absent}
+                    >
+                      — {absent}
+                    </span>
+                  ) : (
+                    <span data-entry-quantity={entry.quantity ?? ''} data-entry-unit={unit}>
+                      {Number(entry.quantity).toLocaleString(undefined, {
+                        maximumFractionDigits: 3,
+                      })}{' '}
+                      {unit}
+                    </span>
+                  )}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Installed / planned for a quantity-method activity, read from the
+ * server (installedByActivity, plannedQuantityFor): one installed figure per
+ * BOQ item in its own unit, never summed; the planned figure with its basis
+ * (approved allocations, or the figure typed on the method) on hover.
+ */
+function InstalledPlanned({ activity }: { activity: ScheduleActivity }) {
+  const extras = extrasOf(activity)
+  const installed = extras.installedQuantity ?? null
+  const planned = extras.plannedQuantity ?? null
+  const installedReason =
+    withheldReason(installed?.withheld, 'Withheld by the server') ??
+    withheldReason(installed?.notAvailable, 'Not available') ??
+    (installed?.installed?.length ? null : 'Not reported by this server yet')
+  const plannedValue = planned?.planned ?? planned?.value ?? null
+  const plannedReason =
+    withheldReason(planned?.withheld, 'Withheld by the server') ??
+    withheldReason(planned?.notAvailable, 'Not available') ??
+    (plannedValue == null
+      ? planned?.basis === 'none'
+        ? 'No approved allocation and no planned quantity on the method'
+        : 'Not reported by this server yet'
+      : null)
+  const plannedBasis =
+    planned?.basis === 'approved_allocations'
+      ? 'Σ approved allocation quantities for this activity'
+      : planned?.basis === 'method_config'
+        ? 'The planned quantity typed on the progress method'
+        : (planned?.basis ?? QUANTITY_TERMS.planned.hint)
+  return (
+    <div
+      className='grid gap-2 rounded-md border p-2 text-xs sm:grid-cols-2'
+      data-testid={`uat-progress-installed-planned-${activity.id}`}
+    >
+      <div>
+        <p
+          className='text-[10px] font-semibold tracking-wide text-muted-foreground uppercase'
+          title={QUANTITY_TERMS.installed.hint}
+        >
+          {QUANTITY_TERMS.installed.label}
+        </p>
+        {installedReason ? (
+          <p
+            className='text-muted-foreground'
+            data-testid={`uat-progress-installed-${activity.id}`}
+            data-absent='true'
+            title={installedReason}
+          >
+            — {installedReason}
+          </p>
+        ) : (
+          <ul data-testid={`uat-progress-installed-${activity.id}`}>
+            {installed!.installed!.map((row, index) => {
+              const rowReason = withheldReason(row.withheld, 'Withheld by the server')
+              return (
+                <li
+                  key={row.boqItemId ?? index}
+                  className='flex justify-between gap-2'
+                  title={installed?.basis ?? QUANTITY_TERMS.installed.hint}
+                >
+                  <span className='truncate text-muted-foreground'>
+                    {[row.code, row.description].filter(Boolean).join(' · ') ||
+                      row.boqItemId}
+                  </span>
+                  <span className='tabular-nums'>
+                    {rowReason || row.quantity == null ? (
+                      <span className='text-muted-foreground' title={rowReason ?? undefined}>
+                        — {rowReason ?? ''}
+                      </span>
+                    ) : (
+                      <span data-installed-quantity={row.quantity} data-installed-unit={row.unitCode ?? ''}>
+                        {Number(row.quantity).toLocaleString(undefined, {
+                          maximumFractionDigits: 3,
+                        })}{' '}
+                        {row.unitCode ?? ''}
+                      </span>
+                    )}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+        {installed?.asOf && (
+          <p className='text-[10px] text-muted-foreground/80'>
+            As of {when(installed.asOf)}
+          </p>
+        )}
+      </div>
+      <div>
+        <p
+          className='text-[10px] font-semibold tracking-wide text-muted-foreground uppercase'
+          title={QUANTITY_TERMS.planned.hint}
+        >
+          {QUANTITY_TERMS.planned.label}
+        </p>
+        {plannedReason ? (
+          <p
+            className='text-muted-foreground'
+            data-testid={`uat-progress-planned-${activity.id}`}
+            data-absent='true'
+            title={plannedReason}
+          >
+            — {plannedReason}
+          </p>
+        ) : (
+          <p
+            className='tabular-nums'
+            data-testid={`uat-progress-planned-${activity.id}`}
+            data-planned-quantity={plannedValue ?? ''}
+            data-planned-basis={planned?.basis ?? ''}
+            title={plannedBasis}
+          >
+            {Number(plannedValue).toLocaleString(undefined, {
+              maximumFractionDigits: 3,
+            })}{' '}
+            {planned?.unitCode ?? ''}
+            <span className='ml-1 text-muted-foreground'>({plannedBasis})</span>
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
 
 type RowDraft = {
   method: ProgressMethod
@@ -305,6 +643,11 @@ export function ProgressTab({ activities, projectId }: Props) {
         ...row,
         complete: Boolean(draft.milestoneChecks[row.id]),
       }))
+      // PC-6: when the server derives the planned quantity from the
+      // approved allocations, the client sends none — a typed figure must
+      // not override the allocation-derived one (progress measurement §2).
+      const planned = extrasOf(activity).plannedQuantity
+      const plannedFromAllocations = planned?.basis === 'approved_allocations'
       const payload = {
         method: draft.method,
         pctComplete: draft.pctComplete,
@@ -312,11 +655,14 @@ export function ProgressTab({ activities, projectId }: Props) {
           draft.quantityComplete.trim() === ''
             ? undefined
             : Number(draft.quantityComplete),
-        quantityPlanned:
-          draft.quantityPlanned.trim() === ''
+        quantityPlanned: plannedFromAllocations
+          ? undefined
+          : draft.quantityPlanned.trim() === ''
             ? undefined
             : Number(draft.quantityPlanned),
-        quantityUnit: draft.quantityUnit || undefined,
+        quantityUnit: plannedFromAllocations
+          ? (planned?.unitCode ?? undefined)
+          : draft.quantityUnit || undefined,
         inspectionStatus: draft.inspectionStatus,
         milestones:
           draft.method === 'weighted_milestone' ? milestones : undefined,
@@ -583,7 +929,9 @@ export function ProgressTab({ activities, projectId }: Props) {
           {(pendingQuery.data ?? []).map((submission) => (
             <div
               key={submission.id}
-              className='flex flex-col gap-3 p-3 sm:flex-row sm:items-center'
+              className='flex flex-col gap-3 p-3 sm:flex-row sm:items-start'
+              data-testid={`uat-progress-queue-${submission.id}`}
+              data-activity-id={submission.activityId}
             >
               <div className='min-w-0 flex-1'>
                 <p className='truncate text-sm font-medium'>
@@ -594,8 +942,18 @@ export function ProgressTab({ activities, projectId }: Props) {
                 </p>
                 <p className='text-xs text-muted-foreground'>
                   {METHOD_LABELS[submission.method]} - {submission.pctComplete}%
-                  - {submission.source}
                 </p>
+                <div className='mt-1'>
+                  <ProgressSourceCell
+                    kind='pending'
+                    testId={`uat-progress-source-queue-${submission.id}`}
+                    story={describeSource(submission.progressSource, {
+                      source: submission.source,
+                      at: submission.submittedAt,
+                    })}
+                  />
+                </div>
+                <BundledEntries submission={submission} />
               </div>
               {(canApproveProgress || canRejectProgress) && (
                 <div className='flex gap-2'>
@@ -643,8 +1001,29 @@ export function ProgressTab({ activities, projectId }: Props) {
             activity.id
           )
           const canSubmitThisActivity = canSubmitProgress && assignmentAllowed
+          const extras = extrasOf(activity)
+          const officialSource = describeSource(extras.progressSource, {
+            source: activity.approvedProgressSource,
+            at: activity.approvedProgressUpdatedAt,
+          })
+          const pending = activity.pendingProgress as
+            | (NonNullable<ProgressSubmission> & SubmissionExtras)
+            | null
+            | undefined
+          const pendingSource = pending
+            ? describeSource(pending.progressSource, {
+                source: pending.source,
+                at: pending.submittedAt,
+              })
+            : null
+          const plannedFromAllocations =
+            extras.plannedQuantity?.basis === 'approved_allocations'
           return (
-            <div key={activity.id} className='space-y-3 p-3'>
+            <div
+              key={activity.id}
+              className='space-y-3 p-3'
+              data-testid={`uat-progress-activity-${activity.id}`}
+            >
               <div className='flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between'>
                 <div className='min-w-0'>
                   <div className='flex flex-wrap items-center gap-2'>
@@ -670,8 +1049,30 @@ export function ProgressTab({ activities, projectId }: Props) {
                     {fmtUSD(activity.budget)}
                     {activity.budget === undefined &&
                       ' (Mapping details unavailable to you)'}{' '}
-                    - Approved {activity.pctComplete}%
+                    - Approved{' '}
+                    <span data-testid={`uat-progress-approved-pct-${activity.id}`}>
+                      {activity.pctComplete}%
+                    </span>
                   </p>
+                  <div className='mt-1 grid gap-2 sm:grid-cols-2'>
+                    <ProgressSourceCell
+                      kind='official'
+                      testId={`uat-progress-source-official-${activity.id}`}
+                      story={
+                        activity.progressApprovalStatus === 'missing' &&
+                        !extras.progressSource
+                          ? null
+                          : officialSource
+                      }
+                    />
+                    {pending && (
+                      <ProgressSourceCell
+                        kind='pending'
+                        testId={`uat-progress-source-pending-${activity.id}`}
+                        story={pendingSource}
+                      />
+                    )}
+                  </div>
                 </div>
 
                 <div className='flex flex-wrap items-center gap-2'>
@@ -709,6 +1110,10 @@ export function ProgressTab({ activities, projectId }: Props) {
                 </div>
               </div>
 
+              {draft.method === 'quantity' && (
+                <InstalledPlanned activity={activity} />
+              )}
+
               <div className='grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_160px] lg:items-end'>
                 {draft.method === 'quantity' ? (
                   <div className='grid grid-cols-3 gap-2'>
@@ -728,23 +1133,44 @@ export function ProgressTab({ activities, projectId }: Props) {
                     </div>
                     <div>
                       <Label className='text-xs'>Planned Qty</Label>
-                      <Input
-                        type='number'
-                        min={0}
-                        disabled={!canSubmitThisActivity}
-                        value={draft.quantityPlanned}
-                        onChange={(e) =>
-                          patchDraft(activity.id, {
-                            quantityPlanned: e.target.value,
-                          })
-                        }
-                      />
+                      {plannedFromAllocations ? (
+                        // Derived by the server from the approved
+                        // allocations: shown, never typed over (PC-6).
+                        <Input
+                          readOnly
+                          disabled
+                          title='Σ approved allocation quantities — set by the mapping, not typed here'
+                          data-testid={`uat-progress-planned-readonly-${activity.id}`}
+                          value={String(
+                            extras.plannedQuantity?.planned ??
+                              extras.plannedQuantity?.value ??
+                              ''
+                          )}
+                        />
+                      ) : (
+                        <Input
+                          type='number'
+                          min={0}
+                          disabled={!canSubmitThisActivity}
+                          value={draft.quantityPlanned}
+                          onChange={(e) =>
+                            patchDraft(activity.id, {
+                              quantityPlanned: e.target.value,
+                            })
+                          }
+                        />
+                      )}
                     </div>
                     <div>
                       <Label className='text-xs'>Unit</Label>
                       <Input
-                        disabled={!canSubmitThisActivity}
-                        value={draft.quantityUnit}
+                        disabled={!canSubmitThisActivity || plannedFromAllocations}
+                        readOnly={plannedFromAllocations}
+                        value={
+                          plannedFromAllocations
+                            ? (extras.plannedQuantity?.unitCode ?? '')
+                            : draft.quantityUnit
+                        }
                         onChange={(e) =>
                           patchDraft(activity.id, {
                             quantityUnit: e.target.value,

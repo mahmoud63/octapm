@@ -5,7 +5,10 @@ import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
 import { useCanPerform } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
-import type { ScheduleActivity } from '../data/schema'
+import type {
+  ActivityProgressExtras,
+  ScheduleActivity,
+} from '../data/schema'
 
 type Props = {
   projectId: string
@@ -16,6 +19,37 @@ const PROGRESS_ASSIGNMENT_OVERRIDE_ROLES = new Set(['pm', 'planning_eng'])
 
 const isProgressAssignmentOverride = (role?: string | null) =>
   PROGRESS_ASSIGNMENT_OVERRIDE_ROLES.has(String(role || '').toLowerCase())
+
+// PC-6: the official figure's PROGRESS SOURCE beside it — the server's
+// structured provenance first, the older source string otherwise.
+const SOURCE_WORD: Record<string, string> = {
+  manual: 'Manual submission',
+  mobile: 'Mobile capture',
+  daily_log: 'Daily log',
+  daily_report: 'Daily report',
+  import: 'Progress import',
+  submission: 'Submission',
+}
+
+const progressSourceOf = (activity: ScheduleActivity): string | null => {
+  const provenance = (activity as ScheduleActivity & ActivityProgressExtras)
+    .progressSource
+  if (provenance) {
+    if (provenance.label) return provenance.label
+    const source = provenance.source
+      ? (SOURCE_WORD[provenance.source] ?? provenance.source)
+      : 'Progress'
+    const dates = provenance.dailyLogDates?.length
+      ? provenance.dailyLogDates.join(', ')
+      : provenance.dailyLogDate
+    const who = provenance.approvedByName ?? provenance.approvedBy
+    return [source, dates, who ? `approved by ${who}` : null]
+      .filter(Boolean)
+      .join(' · ')
+  }
+  const source = activity.approvedProgressSource
+  return source ? (SOURCE_WORD[source] ?? source) : null
+}
 
 const errorCodeFrom = (error: unknown) =>
   (
@@ -119,6 +153,12 @@ export function BulkProgressUpdate({ projectId, activities }: Props) {
                 </td>
                 <td className='p-2 text-right font-mono text-xs'>
                   {activity.pctComplete}%
+                  <span
+                    className='block font-sans text-[10px] text-muted-foreground'
+                    data-testid={`uat-bulk-progress-source-${activity.id}`}
+                  >
+                    {progressSourceOf(activity) ?? '— No approved progress yet'}
+                  </span>
                 </td>
               </tr>
             ))}
