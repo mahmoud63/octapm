@@ -299,6 +299,19 @@ bundles entries, and approving it is what approves them:
   refused where it was silently worked at the client's percentage before (owner finding). Proven live
   (`pc-6-method-authority`: three unknown-id shapes, bulk, a queued one refused by the writer) and by unit
   (`progress.service.test.js`); mutation-proven (the old non-empty check restored — unit and live fail).
+
+  **A partial list is weighed against every configured milestone** (integration fix, 2026-10-01; the rule existed
+  before PC-6). `mergeMilestoneWeights` used to weigh only the rows a submission stated, with the weight the client
+  sent winning over the configured one, so `{ m1 complete }` of m1 40 / m2 60 was recorded at 100%, and any client
+  could inflate a milestone's weight. With a configuration, the figure is now worked over every configured milestone at
+  its configured weight: a milestone not mentioned is not complete, a client-sent weight is ignored (`{ m1 complete }`
+  is 40%, `{ m1 complete, weight 1000 }` is still 40%); without a configuration the stated rows are weighed as they
+  come, as before. `assertMilestoneStateStated` counts the configured weight of the stated milestones, so stated
+  milestones that are all configured at weight 0 are still refused ("carry no configured weight"). No existing figure
+  moves: every ActivityProgressMethod row on the shared database is `percent` (no weighted-milestone submission
+  exists), and approved rows are never recomputed. Proven live (`pc-6-method-authority`: the partial list and the
+  client weight recorded at 40%, nothing official) and by unit; mutation-proven (the old stated-rows-only weighing
+  restored — unit 2 and live 1 fail).
 - **A refused batch writes nothing** (verification fix, 2026-10-01). `POST /activities/bulk-progress` made its
   submissions one at a time, each in its own transaction; with the refusals above an ordinary batch (one activity
   measured by quantity among percent ones) answered 409 for the whole call after the earlier updates were written,

@@ -145,26 +145,28 @@ const normalizeMilestones = (value) => {
   });
 };
 
+// With configured milestones, the figure is worked over EVERY configured
+// milestone with its configured weight (PC-6: the activity's method is
+// respected): a milestone the submission does not mention is not complete,
+// and a weight the client sends never replaces the configured one — so a
+// partial list ({ m1 complete } of m1 40 / m2 60) is 40 %, never 100 %.
+// Without a configuration the stated rows are weighed as they come.
 const mergeMilestoneWeights = (configured, submitted) => {
   const submittedRows = normalizeMilestones(submitted);
   const configuredRows = normalizeMilestones(configured);
-  const configMap = new Map(
-    configuredRows.map((row, index) => [
-      String(row.id || row.name || index),
-      row,
-    ]),
-  );
-
   if (!submittedRows.length) return configuredRows;
+  if (!configuredRows.length) {
+    return submittedRows.map((row) => ({ ...row, weight: row.weight ?? 0 }));
+  }
 
-  return submittedRows.map((row, index) => {
-    const key = String(row.id || row.name || index);
-    const config = configMap.get(key) || {};
-    return {
-      ...config,
-      ...row,
-      weight: row.weight ?? config.weight ?? 0,
-    };
+  const keyOf = (row, index) => String(row.id || row.name || index);
+  const stated = new Map(submittedRows.map((row, index) => [keyOf(row, index), row]));
+  return configuredRows.map((config, index) => {
+    const row = stated.get(keyOf(config, index));
+    const weight = config.weight ?? 0;
+    return row
+      ? { ...config, ...row, weight }
+      : { ...config, complete: false, completed: false, pctComplete: 0, weight };
   });
 };
 
@@ -801,9 +803,11 @@ const assertMilestoneStateStated = ({ activityId, methodConfig, milestones, subm
   const stated = normalizeMilestones(milestones);
   const configuredKeys = new Set(configured.map(milestoneKey));
   const unknownMilestones = stated.map(milestoneKey).filter((key) => !configuredKeys.has(key));
+  // The configured weight of the milestones THIS submission states (a stated
+  // row never brings its own weight): zero means it states nothing that counts.
+  const configuredWeight = new Map(configured.map((row, index) => [milestoneKey(row, index), toNumber(row.weight)]));
   const statedWeight = stated.length && !unknownMilestones.length
-    ? mergeMilestoneWeights(methodConfig?.milestoneWeightsJson, milestones)
-      .reduce((sum, row) => sum + toNumber(row.weight), 0)
+    ? stated.reduce((sum, row, index) => sum + (configuredWeight.get(milestoneKey(row, index)) || 0), 0)
     : 0;
   if (statedWeight > 0) return;
   const outcome = submissionId ? 'approved; reject it and submit the milestones' : 'recorded';

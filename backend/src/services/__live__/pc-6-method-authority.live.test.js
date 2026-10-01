@@ -723,6 +723,20 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     expect(await progressRows(milestones.id)).toHaveLength(0);
     ok(await api.post(at(`/activities/${milestones.id}/progress-submissions/${queued.id}/reject`), { reason: "LiveTest: states no milestone" }, bearer(live.token)));
 
+    // A partial list is weighed against EVERY configured milestone with its configured weight: columns complete
+    // alone is 40 % of 100, never 100 % of the 40 it names; a weight the client sends never replaces the
+    // configured one (columns "weight 1000" is still 40). Recorded, then rejected — nothing official.
+    for (const payload of [
+      { milestones: [{ id: "columns", complete: true }] },
+      { milestones: [{ id: "columns", complete: true, weight: 1000 }] },
+    ]) {
+      const partial = await submit(milestones.id, payload, site.token);
+      ok(partial, 200);
+      expect(partial.body.data.submission).toMatchObject({ method: "weighted_milestone", pctComplete: 40 });
+      ok(await api.post(at(`/activities/${milestones.id}/progress-submissions/${partial.body.data.submission.id}/reject`), { reason: "LiveTest: partial list" }, bearer(live.token)));
+    }
+    expect(await progressRows(milestones.id)).toHaveLength(0);
+
     // Stated: recorded and approved at the weighted figure (columns 40 + half the beams 30 = 70).
     const stated = await submit(milestones.id, { milestones: [{ id: "columns", complete: true }, { id: "beams", pctComplete: 50 }] }, site.token);
     ok(stated, 200);
