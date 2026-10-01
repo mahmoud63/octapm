@@ -783,19 +783,44 @@ const configuredMilestonesOf = (methodConfig) => {
   return rows.length && totalWeight > 0 ? rows : [];
 };
 
+/**
+ * The stated rows are merged onto the configured ones exactly as the figure
+ * is worked (mergeMilestoneWeights keys a row by id, else name, else index).
+ * A stated milestone the activity does not configure has weight 0, and rows
+ * that together carry no weight leave the figure to the client's pctComplete
+ * — { pctComplete: 60, milestones: [{ id: 'bogus' }] } was a bare percentage
+ * recorded, and approved, under weighted_milestone. Both are refused like no
+ * milestone state: 400 MILESTONES_REQUIRED, unknownMilestones naming the ids
+ * that are not configured.
+ */
+const milestoneKey = (row, index) => String(row?.id || row?.name || index);
+
 const assertMilestoneStateStated = ({ activityId, methodConfig, milestones, submissionId = null }) => {
   const configured = configuredMilestonesOf(methodConfig);
   if (!configured.length) return;
-  if (normalizeMilestones(milestones).length) return;
+  const stated = normalizeMilestones(milestones);
+  const configuredKeys = new Set(configured.map(milestoneKey));
+  const unknownMilestones = stated.map(milestoneKey).filter((key) => !configuredKeys.has(key));
+  const statedWeight = stated.length && !unknownMilestones.length
+    ? mergeMilestoneWeights(methodConfig?.milestoneWeightsJson, milestones)
+      .reduce((sum, row) => sum + toNumber(row.weight), 0)
+    : 0;
+  if (statedWeight > 0) return;
   const outcome = submissionId ? 'approved; reject it and submit the milestones' : 'recorded';
+  const why = !stated.length
+    ? 'This one states none — a percentage is not a milestone state'
+    : unknownMilestones.length
+      ? `This one names milestones the activity does not configure (${unknownMilestones.join(', ')}) — a percentage beside them is not a milestone state`
+      : 'The milestones it states carry no configured weight — a percentage beside them is not a milestone state';
   throw new HttpError(
     400,
     'MILESTONES_REQUIRED',
-    `This activity is measured by weighted milestones (${configured.length} configured); a submission states which milestones are complete (milestones). This one states none — a percentage is not a milestone state — and is not ${outcome}`,
+    `This activity is measured by weighted milestones (${configured.length} configured); a submission states which milestones are complete (milestones). ${why} — and is not ${outcome}`,
     {
       activityId,
       method: 'weighted_milestone',
       milestones: configured.map((row, index) => ({ id: String(row.id ?? row.name ?? index), name: row.name ?? row.label ?? null })),
+      ...(unknownMilestones.length ? { unknownMilestones } : {}),
       ...(submissionId ? { submissionId } : {}),
     },
   );

@@ -681,8 +681,35 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     expect(bulk.body.error.details.batch).toEqual({ index: 1, activityId: milestones.id, updates: 2, written: 0 });
     // The percent method names itself: not the activity's, refused as before.
     refused(await submit(milestones.id, { method: "percent", pctComplete: 60 }, site.token), 409, "PROGRESS_METHOD_MISMATCH");
+    // A milestone the activity does not configure is no milestone state: a percentage beside it is refused, never
+    // recorded at the client's percentage under weighted_milestone (the unknown row weighs 0).
+    for (const [payload, unknownMilestones] of [
+      [{ method: "weighted_milestone", pctComplete: 60, milestones: [{ id: "bogus", complete: true }] }, ["bogus"]],
+      [{ pctComplete: 60, milestoneProgressJson: [{ id: "nope" }] }, ["nope"]],
+      [{ pctComplete: 60, milestones: [{ id: "columns", complete: true }, { id: "bogus", complete: true }] }, ["bogus"]],
+    ]) {
+      const answer = await submit(milestones.id, payload, site.token);
+      refused(answer, 400, "MILESTONES_REQUIRED");
+      expect(answer.body.error.details).toEqual({ activityId: milestones.id, method: "weighted_milestone", milestones: configured, unknownMilestones });
+      expect(answer.body.error.message).toMatch(/names milestones the activity does not configure/);
+    }
+    const bulkUnknown = await api.post(at("/activities/bulk-progress"), { updates: [{ activityId: wall.id, pctComplete: 15 }, { activityId: milestones.id, pctComplete: 60, milestones: [{ id: "bogus", complete: true }] }] }, bearer(site.token));
+    refused(bulkUnknown, 400, "MILESTONES_REQUIRED");
+    expect(bulkUnknown.body.error.details).toMatchObject({ unknownMilestones: ["bogus"], batch: { index: 1, activityId: milestones.id, updates: 2, written: 0 } });
     expect(await footprint()).toBe(before);
     expect(await evReport()).toBe(evBefore);
+
+    // Queued naming only an unknown milestone (as the database would hold it): the writer refuses it too.
+    const queuedUnknown = await prisma.progressSubmission.create({
+      data: { projectId: project.id, activityId: milestones.id, method: "weighted_milestone", source: "manual", pctComplete: 60, milestoneProgressJson: [{ id: "bogus", complete: true }], status: "submitted", submittedBy: site.id, submittedAt: new Date(), createdBy: site.id },
+    });
+    const heldUnknown = await footprint();
+    const refusedUnknown = await approve(milestones.id, queuedUnknown.id);
+    refused(refusedUnknown, 400, "MILESTONES_REQUIRED");
+    expect(refusedUnknown.body.error.details).toMatchObject({ activityId: milestones.id, submissionId: queuedUnknown.id, unknownMilestones: ["bogus"] });
+    expect(await footprint()).toBe(heldUnknown);
+    expect(await progressRows(milestones.id)).toHaveLength(0);
+    ok(await api.post(at(`/activities/${milestones.id}/progress-submissions/${queuedUnknown.id}/reject`), { reason: "LiveTest: names an unknown milestone" }, bearer(live.token)));
 
     // One in the queue from before the rule (as the database would hold it): the writer refuses it; nothing official.
     const queued = await prisma.progressSubmission.create({

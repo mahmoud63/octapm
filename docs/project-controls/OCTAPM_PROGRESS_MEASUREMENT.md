@@ -287,6 +287,18 @@ bundles entries, and approving it is what approves them:
   the writer, a stated one approved at 70%), by unit (`progress.service.test.js`) and the source check
   (`quantity-progress-ui.test.mjs`); mutation-proven (the rule removed where the submission is made, in the writer,
   and the screen's guard — each fails).
+  A non-empty milestone list was not enough (verification fix, 2026-10-01): `{ pctComplete: 60, milestones: [{ id:
+  'bogus', complete: true }] }` passed the rule, the unknown row weighed 0, the total weight was 0 and
+  `calculateProgressPercent` fell back to the client's 60% — recorded and approved under `weighted_milestone`.
+  `assertMilestoneStateStated` (submission and writer) now merges the stated rows onto the configured ones the way the
+  figure is worked (keyed by id, else name, else index) and refuses with the same 400 `MILESTONES_REQUIRED` when any
+  stated milestone is not configured (`details.unknownMilestones` lists those ids beside the configured `{ id, name }`)
+  or when the stated rows carry no weight. The web writes every configured row with an id and sends it back, and the
+  mobile sends the configured ids, so neither is refused. A configuration written straight to the API with name-only
+  rows (no id) is matched by name; the mobile ProgressSheet sends only `id`, so on such a configuration it is now
+  refused where it was silently worked at the client's percentage before (owner finding). Proven live
+  (`pc-6-method-authority`: three unknown-id shapes, bulk, a queued one refused by the writer) and by unit
+  (`progress.service.test.js`); mutation-proven (the old non-empty check restored — unit and live fail).
 - **A refused batch writes nothing** (verification fix, 2026-10-01). `POST /activities/bulk-progress` made its
   submissions one at a time, each in its own transaction; with the refusals above an ordinary batch (one activity
   measured by quantity among percent ones) answered 409 for the whole call after the earlier updates were written,
