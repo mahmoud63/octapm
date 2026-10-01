@@ -2,7 +2,7 @@ import { useRouter } from 'expo-router'
 import { useMemo, useState } from 'react'
 import { FlatList, ScrollView, StyleSheet, View } from 'react-native'
 import { useChangeEvents } from '@/api/commercial-hooks'
-import { CHANGE_EVENT_STATUSES, CHANGE_EVENT_TYPES } from '@/api/commercial-types'
+import { CHANGE_EVENT_STATUSES, CHANGE_EVENT_TYPES, changeEventFieldWithheld } from '@/api/commercial-types'
 import { userMessage } from '@/api/errors'
 import { useProjects } from '@/api/hooks'
 import { FilterChip } from '@/components/FilterChip'
@@ -72,7 +72,8 @@ export default function ChangeEventsScreen() {
             reference={item.ref}
             title={item.title}
             status={item.status}
-            meta={[humanise(item.type), item.activity?.name, item.rfqCounts.open ? `${item.rfqCounts.open} quote${item.rfqCounts.open === 1 ? '' : 's'} out` : null, item.changeOrder ? `→ ${item.changeOrder.ref}` : null].filter(Boolean).join(' · ')}
+            // PC-7b: a withheld activity reads "Activity —" (its reason is on the detail), never a bare gap.
+            meta={[humanise(item.type), changeEventFieldWithheld(item, 'activityId') ? 'Activity —' : item.activity?.name,item.rfqCounts.open ? `${item.rfqCounts.open} quote${item.rfqCounts.open === 1 ? '' : 's'} out` : null, item.changeOrder ? `→ ${item.changeOrder.ref}` : null].filter(Boolean).join(' · ')}
             trailing={money(item.totals.estimate, currency)}
             onPress={() => router.push(`/commercial/change-events/${item.id}`)}
             testID={`change-event-row-${item.id}`}

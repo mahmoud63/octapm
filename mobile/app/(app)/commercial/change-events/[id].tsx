@@ -1,7 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { StyleSheet, View } from 'react-native'
 import { useChangeEvent } from '@/api/commercial-hooks'
-import { changeEventLineWithheld, changeEventOriginLabel } from '@/api/commercial-types'
+import { changeEventFieldWithheld, changeEventLineWithheld, changeEventOriginLabel } from '@/api/commercial-types'
 import { userMessage } from '@/api/errors'
 import { useProjects } from '@/api/hooks'
 import { Comments } from '@/components/Comments'
@@ -54,7 +54,8 @@ export default function ChangeEventScreen() {
 
   return (
     <Screen contentStyle={styles.content} testID="screen-change-event">
-      <RecordHeader reference={e.ref} title={e.title} status={e.status} meta={[humanise(e.type), `From ${changeEventOriginLabel(e.origin)}`, e.activity?.name, e.location?.name, e.ownerChange ? 'Owner-directed' : null].filter((v): v is string => !!v)} testID="change-event-header" />
+      {/* PC-7b: a withheld activity reads "—" with the server's reason where it would be — it never just disappears. */}
+      <RecordHeader reference={e.ref} title={e.title} status={e.status} meta={[humanise(e.type), `From ${changeEventOriginLabel(e.origin)}`, changeEventFieldWithheld(e, 'activityId') ? `Activity — ${e.sourceWithheld?.reason ?? ''}`.trim() : e.activity?.name, e.location?.name, e.ownerChange ? 'Owner-directed' : null].filter((v): v is string => !!v)} testID="change-event-header" />
       <View style={styles.kpis}>
         <KPI label="Rough order of magnitude" value={money(e.totals.rom, currency)} />
         <KPI label="Quoted" value={e.totals.quoted != null ? money(e.totals.quoted, currency) : '—'} />

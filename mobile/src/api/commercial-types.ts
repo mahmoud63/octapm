@@ -144,6 +144,10 @@ export interface ChangeEvent {
 export const changeEventLineWithheld = (event: Pick<ChangeEvent, 'sourceWithheld'>, lineId: string): boolean =>
   Boolean(event.sourceWithheld?.keys.some((key) => key.startsWith(`lines[${lineId}].`)))
 
+/** Whether the server withheld this field of the event itself (a key of sourceWithheld, e.g. 'activityId') from this member. */
+export const changeEventFieldWithheld = (event: Pick<ChangeEvent, 'sourceWithheld'>, field: string): boolean =>
+  Boolean(event.sourceWithheld?.keys.includes(field))
+
 export interface ChangeEventList {
   items: ChangeEvent[]
   summary: { count: number; byStatus: Record<string, number>; romTotal: number; quotedTotal: number; convertedValue: number; openRfqs: number; quotesWaiting: number }

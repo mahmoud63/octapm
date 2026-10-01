@@ -153,7 +153,29 @@ describe('change events', () => {
     expect(screen.getByTestId('change-event-source-withheld')).toHaveTextContent(`Raised from — ${reason}`)
     expect(screen.getByTestId(`change-event-line-withheld-${first!.id}`)).toHaveTextContent(`— ${reason}`)
     for (const line of rest) expect(screen.queryByTestId(`change-event-line-withheld-${line.id}`)).toBeNull()
+    // The event's activity reads "—" with the reason where it would be — it never just disappears (second fixer, item 9).
+    expect(screen.getByTestId('change-event-header')).toHaveTextContent(`Activity — ${reason}`, { exact: false })
     expect(JSON.stringify(screen.toJSON())).not.toContain('undefined')
+  })
+
+  it('lists an event whose activity was withheld with "Activity —" in its row, never a bare gap; an event given its activity names it (PC-7b)', async () => {
+    const reason = 'Part of this change event is withheld from you: the record it was raised from, and what came from that record onto the event, are available only to members with access to that record'
+    const { activityId: _ea, activity: _eb, ...withheldEvent } = changeEvent()
+    const shown = changeEvent({ id: 'ce2', number: 2, ref: 'CE-002', title: 'Client asked for a second lift pit' })
+    calls = fakeServer({
+      'GET /projects': () => ({ status: 200, body: envelope(page(projects)) }),
+      'GET /auth/me/permissions': () => ({ status: 200, body: envelope(siteEngineerCommercial) }),
+      'GET /projects/p1/change-events': () => ({ status: 200, body: envelope(changeEventList([{ ...withheldEvent, origin: 'exception', sourceRecordType: null, sourceRecordId: null, sourcePath: null, sourceWithheld: { keys: ['sourceRecordType', 'sourceRecordId', 'sourcePath', 'activityId'], reason } }, shown])) }),
+    })
+    await renderScreen(<ChangeEventsScreen />)
+    const row = await screen.findByTestId('change-event-row-ce1')
+    expect(row).toHaveTextContent('Activity —', { exact: false })
+    expect(row.props.accessibilityLabel).toContain('Activity —')
+    expect(row).not.toHaveTextContent('Foundation concrete', { exact: false })
+    expect(screen.getByTestId('change-event-row-ce2')).toHaveTextContent('Foundation concrete', { exact: false })
+    expect(screen.getByTestId('change-event-row-ce2')).not.toHaveTextContent('Activity —', { exact: false })
+    expect(row).not.toHaveTextContent('undefined', { exact: false })
+    expect(row.props.accessibilityLabel).not.toContain('undefined')
   })
 
   it('offers no "exception" origin on the manual form — that origin is the handoff\'s, with its typed link', async () => {
