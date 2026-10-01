@@ -9,6 +9,8 @@ jest.mock("../../config/db", () => ({
   prisma: {
     boqItem: { findMany: jest.fn() },
     activity: { findMany: jest.fn() },
+    activityProgress: { findMany: jest.fn() },
+    project: { findFirst: jest.fn() },
     activityProgressMethod: { findMany: jest.fn() },
     ipcCertificate: { findMany: jest.fn() },
   },
@@ -51,6 +53,8 @@ const context = (extra = {}) => {
     projectName: "Riverside",
     currency: "USD",
     cutoff: null,
+    // The evaluation's own time: a week after the project's start (index 5), before every planned finish below.
+    now: new Date("2026-01-12T15:00:00.000Z"),
     memo(key, read) {
       if (!cache.has(key)) cache.set(key, Promise.resolve().then(read));
       return cache.get(key);
@@ -78,6 +82,9 @@ beforeEach(() => {
   jest.resetAllMocks();
   prisma.activity.findMany.mockResolvedValue([activityRow()]);
   prisma.activityProgressMethod.findMany.mockResolvedValue([{ activityId: "act-1", method: "quantity" }]);
+  prisma.activityProgress.findMany.mockResolvedValue([]);
+  // The CPM index's anchor: a Monday start on the five-day calendar.
+  prisma.project.findFirst.mockResolvedValue({ startDate: new Date("2026-01-05T00:00:00.000Z"), projectCalendar: null, timezone: "UTC", org: { defaultTimezone: null } });
   prisma.boqItem.findMany.mockResolvedValue([{ id: "item-1", code: "1.1", description: "Concrete", unit: "m3", unitCode: "m3", qty: 100, amount: 10000, wbsNodeId: "wbs-1", locationId: null, costCodeId: "cc-1" }]);
   allocationService.listAllocations.mockResolvedValue({ allocations: [allocation()], summary: { items: [] } });
   ipcService.getApprovedVariationAllowances.mockImplementation(async ({ pairs }) => pairs.map(() => ({ quantity: 0, amount: 0 })));
@@ -369,5 +376,88 @@ describe("schedule_slip_on_mapped_item", () => {
     allocationService.buildAllocationSummary.mockResolvedValue(summary(0));
     prisma.activity.findMany.mockResolvedValue([activityRow({ isActive: false, earlyFinish: 60, baselineFinish: 22 })]);
     expect(await run("schedule_slip_on_mapped_item")).toEqual([]);
+  });
+
+  // Working-day indices from the Monday 2026-01-05 start on the five-day
+  // calendar: 2026-01-30 → 19, 2026-02-06 → 24, 2026-03-31 → 61,
+  // 2026-07-01 → 127, 2026-10-01 → 193.
+  const approved = (overrides) => ({ activityId: "act-1", status: "approved", pctComplete: 100, actualStart: null, actualFinish: null, approvedAt: new Date("2026-07-02T10:00:00Z"), updatedAt: new Date("2026-07-02T10:00:00Z"), ...overrides });
+  const slipOf = async (ctx) => {
+    const rows = await run("schedule_slip_on_mapped_item", ctx);
+    return rows.map((row) => [row.measured.value, row.severity, row.data.finishBasis, row.data.finishDate]);
+  };
+
+  it("a late actual finish: the approved progress's actualFinish against the baseline, though the CPM's early finish has not moved", async () => {
+    allocationService.buildAllocationSummary.mockResolvedValue(summary(0));
+    prisma.activity.findMany.mockResolvedValue([activityRow({ earlyFinish: 20, baselineFinish: 20 })]);
+    prisma.activityProgress.findMany.mockResolvedValue([approved({ actualFinish: new Date("2026-07-01T00:00:00Z") })]);
+    const rows = await run("schedule_slip_on_mapped_item", context({ now: new Date("2026-10-01T15:00:00Z") }));
+    expect(rows.map((row) => [row.measured.value, row.severity, row.data.finishBasis, row.data.finishDate, row.data.actualFinish])).toEqual([[107, "critical", "actual_finish", "2026-07-01", "2026-07-01"]]);
+    expect(rows[0].measured.basis).toMatch(/actual finish \(latest approved ActivityProgress\.actualFinish/);
+    expect(rows[0].measured.basis).toMatch(/change-order impacts are not read/);
+    // An actual finish ahead of the baseline is no slip, however late the early finish reads.
+    prisma.activity.findMany.mockResolvedValue([activityRow({ earlyFinish: 40, baselineFinish: 20 })]);
+    prisma.activityProgress.findMany.mockResolvedValue([approved({ actualFinish: new Date("2026-01-30T00:00:00Z") })]);
+    expect(await slipOf(context({ now: new Date("2026-10-01T15:00:00Z") }))).toEqual([]);
+    // Finished (100 %) with no actual finish recorded: when it finished is unknown, so its
+    // early finish stands — the data date is never charged to a finished activity.
+    prisma.activity.findMany.mockResolvedValue([activityRow({ earlyFinish: 30, baselineFinish: 22 })]);
+    prisma.activityProgress.findMany.mockResolvedValue([approved({ pctComplete: 100, actualFinish: null })]);
+    expect(await slipOf(context({ now: new Date("2026-10-01T15:00:00Z") }))).toEqual([[8, "warning", "early_finish", null]]);
+  });
+
+  it("an overdue, incomplete activity: the data date against the baseline, with or without approved progress", async () => {
+    allocationService.buildAllocationSummary.mockResolvedValue(summary(0));
+    prisma.activity.findMany.mockResolvedValue([activityRow({ earlyFinish: 20, baselineFinish: 20 })]);
+    const october = context({ now: new Date("2026-10-01T15:00:00Z") });
+    expect(await slipOf(october)).toEqual([[173, "critical", "data_date", "2026-10-01"]]);
+    prisma.activityProgress.findMany.mockResolvedValue([approved({ pctComplete: 40 })]);
+    const rows = await run("schedule_slip_on_mapped_item", context({ now: new Date("2026-10-01T15:00:00Z") }));
+    expect(rows.map((row) => [row.measured.value, row.data.finishBasis, row.data.pctComplete])).toEqual([[173, "data_date", 40]]);
+    expect(rows[0].measured.basis).toMatch(/the data date/);
+    // Before its planned finish an incomplete activity stands at its early finish.
+    prisma.activity.findMany.mockResolvedValue([activityRow({ earlyFinish: 30, baselineFinish: 22 })]);
+    expect(await slipOf(context())).toEqual([[8, "warning", "early_finish", null]]);
+  });
+
+  it("the latest approved progress decides (EV's selection: approvedAt, else updatedAt), at the evaluation's cutoff", async () => {
+    allocationService.buildAllocationSummary.mockResolvedValue(summary(0));
+    prisma.activity.findMany.mockResolvedValue([activityRow({ earlyFinish: 20, baselineFinish: 20 })]);
+    // A finish reported in July, then corrected back to 60 % in August: the activity is not finished.
+    prisma.activityProgress.findMany.mockResolvedValue([
+      approved({ pctComplete: 60, approvedAt: new Date("2026-08-01T10:00:00Z") }),
+      approved({ actualFinish: new Date("2026-07-01T00:00:00Z") }),
+    ]);
+    expect(await slipOf(context({ now: new Date("2026-10-01T15:00:00Z") }))).toEqual([[173, "critical", "data_date", "2026-10-01"]]);
+    // A row without approvedAt counts by its updatedAt.
+    prisma.activityProgress.findMany.mockResolvedValue([
+      approved({ pctComplete: 60, approvedAt: new Date("2026-06-01T10:00:00Z"), updatedAt: new Date("2026-06-01T10:00:00Z") }),
+      approved({ actualFinish: new Date("2026-07-01T00:00:00Z"), approvedAt: null, updatedAt: new Date("2026-07-05T10:00:00Z") }),
+    ]);
+    expect(await slipOf(context({ now: new Date("2026-10-01T15:00:00Z") }))).toEqual([[107, "critical", "actual_finish", "2026-07-01"]]);
+
+    // At an asked cutoff: progress approved by then, and the cutoff's date is the data date.
+    prisma.activityProgress.findMany.mockResolvedValue([]);
+    const cutoff = new Date("2026-03-31T23:59:59.999Z");
+    expect(await slipOf(context({ cutoff, now: new Date("2026-10-01T15:00:00Z") }))).toEqual([[41, "critical", "data_date", "2026-03-31"]]);
+    expect(prisma.activityProgress.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: "approved",
+          activity: { projectId: PROJECT },
+          OR: [{ approvedAt: { lte: cutoff } }, { approvedAt: null, updatedAt: { lte: cutoff } }],
+        }),
+      }),
+    );
+  });
+
+  it("without a CPM early finish the planned end date is placed in the index; without a project start no date can be placed", async () => {
+    allocationService.buildAllocationSummary.mockResolvedValue(summary(0));
+    prisma.activity.findMany.mockResolvedValue([activityRow({ earlyFinish: null, endDate: new Date("2026-02-06T00:00:00Z"), baselineFinish: 12 })]);
+    expect(await slipOf(context())).toEqual([[12, "warning", "early_finish", null]]);
+    prisma.project.findFirst.mockResolvedValue({ startDate: null, projectCalendar: null, timezone: "UTC", org: null });
+    prisma.activity.findMany.mockResolvedValue([activityRow({ earlyFinish: 30, baselineFinish: 22 })]);
+    prisma.activityProgress.findMany.mockResolvedValue([approved({ actualFinish: new Date("2026-07-01T00:00:00Z") })]);
+    expect(await slipOf(context({ now: new Date("2026-10-01T15:00:00Z") }))).toEqual([[8, "warning", "early_finish", null]]);
   });
 });

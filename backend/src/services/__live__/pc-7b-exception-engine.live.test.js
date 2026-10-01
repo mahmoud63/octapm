@@ -13,8 +13,12 @@
  *   actual_over_committed      1,600 on the ledger against that 1,500 commitment
  *   forecast_over_revised      official EAC above revised BAC (CPI < 0.9), and the
  *                              line's forecast (the register's default) above its revised
- *   schedule_slip_on_mapped_item  a finish 10 working days behind its baseline on an
- *                              item with certification pending
+ *   schedule_slip_on_mapped_item  on items with certification pending, three ways:
+ *                              D's CPM early finish 10 working days behind its baseline
+ *                              (a replanned, not yet due activity); S finished — approved
+ *                              100 % through the API — with an actual finish months after
+ *                              its baseline while its early finish never moved; T, at 0 %,
+ *                              past its planned finish (the data date is its finish)
  *
  * allocation_over_capacity cannot be built: the database's capacity triggers
  * refuse approved allocations above their item, so the run asserts none.
@@ -43,6 +47,7 @@ const engine = require("../exception-engine.service");
 const evService = require("../earned-value.service");
 const budgetService = require("../budget.service");
 const costLedger = require("../cost-ledger.service");
+const { dateToWorkingDay } = require("../cpm.service");
 
 const SKIP_TABLES = new Set(["ProjectException", "_prisma_migrations"]);
 const SCOPE_COLUMNS = ["projectId", "orgId", "activityId", "boqItemId"];
@@ -61,6 +66,8 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
   const at = (route) => `/api/v1/projects/${project.id}${route}`;
   const ok = (label, answer, status = 200) => expect([label, answer.status, answer.body?.error]).toEqual([label, status, undefined]);
   const today = () => new Date().toISOString().slice(0, 10);
+  // Today (the project is in UTC) in the CPM's working-day index, from the project's 2026-01-05 start.
+  const dataDateIndex = () => dateToWorkingDay(new Date("2026-01-05T00:00:00Z"), new Date(`${today()}T00:00:00Z`), { projectCalendar: null });
 
   // ─── the footprint of an organisation: every table, scoped ───────────────
   let tableColumns;
@@ -139,18 +146,19 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
       R1: { code: "7B.1", description: "LTSECRET concrete slab", quantity: 100, unit: "m3", rate: 100 },
       R2: { code: "7B.2", description: "LTSECRET reinforcement", quantity: 50, unit: "t", rate: 1000 },
       R3: { code: "7B.3", description: "LTSECRET blockwork", quantity: 10, unit: "m2", rate: 500 },
+      R4: { code: "7B.4", description: "LTSECRET render", quantity: 10, unit: "m2", rate: 100 },
     })) {
       const created = await api.post(at("/boq/items"), data, auth());
       ok(`boq ${key}`, created, 201);
       items[key] = created.body.data.item;
     }
-    // Activities A, B, C measured by quantity; D by percent.
-    for (const key of ["A", "B", "C", "D"]) {
+    // Activities A, B, C measured by quantity; D, S and T by percent.
+    for (const key of ["A", "B", "C", "D", "S", "T"]) {
       const created = await api.post(at("/activities"), { engineerIds: [live.user.id], name: `LiveTest ${key}-7B`, activityCode: `E7${key}`, duration: 5, startDate: "2026-02-02", endDate: "2026-02-06" }, auth());
       ok(`activity ${key}`, created, 201);
       acts[key] = created.body.data.id;
     }
-    for (const [key, item, activity, quantity] of [["A", "R1", "A", 60], ["B", "R1", "B", 40], ["C", "R2", "C", 30], ["D", "R3", "D", 10]]) {
+    for (const [key, item, activity, quantity] of [["A", "R1", "A", 60], ["B", "R1", "B", 40], ["C", "R2", "C", 30], ["D", "R3", "D", 10], ["S", "R4", "S", 5], ["T", "R4", "T", 5]]) {
       const created = await api.post(at("/activity-boq-allocations"), { boqItemId: items[item].id, activityId: acts[activity], quantity }, auth());
       ok(`allocation ${key}`, created, 201);
       allocations[key] = created.body.data.id;
@@ -205,9 +213,19 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
       await costLedger.post({ tx, orgId: live.org.id, projectId: project.id, sourceType: "manual", sourceId: `pc7b-${tag}-burn`, amount: 30000, activityId: acts.B, incurredOn: today(), postedBy: live.user.id, note: "LiveTest" });
     });
 
-    // D's finish 10 working days behind its baseline (as a baseline lock then
-    // a CPM re-run leave it), off the critical path; R3 has nothing certified.
-    await prisma.activity.update({ where: { id: acts.D }, data: { baselineFinish: 20, earlyFinish: 30, isCritical: false } });
+    // S finished: 100 % with an actual finish on 2026-07-01, submitted and approved through the API.
+    const finished = await api.post(at(`/activities/${acts.S}/progress`), { method: "percent", pctComplete: 100, actualStart: "2026-02-02", actualFinish: "2026-07-01", notes: "LiveTest finished late" }, auth());
+    ok("progress S", finished);
+    ok("approve S", await api.post(at(`/activities/${acts.S}/progress-submissions/${finished.body.data.submission.id}/approve`), {}, auth()));
+
+    // D's early finish 10 working days behind its baseline (as a baseline lock
+    // then a CPM re-run leave it), in 2027 — not yet due, so its early finish
+    // is its finish — off the critical path; R3 has nothing certified.
+    await prisma.activity.update({ where: { id: acts.D }, data: { baselineFinish: 300, earlyFinish: 310, isCritical: false } });
+    // S and T: the CPM's forward pass never moved them (early finish = baseline
+    // = working day 20, 2026-02-02); S finished on 2026-07-01 (working day 127),
+    // T has no progress and is past its planned finish. R4 has nothing certified.
+    for (const key of ["S", "T"]) await prisma.activity.update({ where: { id: acts[key] }, data: { baselineFinish: 20, earlyFinish: 20, isCritical: false } });
   }, 300_000);
 
   afterAll(async () => {
@@ -231,7 +249,7 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     const before = await footprint(live.org.id, { includeExceptions: true });
     const planned = await evaluate({ dryRun: true });
     expect(planned.errors).toEqual([]);
-    expect(planned).toMatchObject({ dryRun: true, opened: 9, refreshed: 0, resolved: 0, unchanged: 0 });
+    expect(planned).toMatchObject({ dryRun: true, opened: 11, refreshed: 0, resolved: 0, unchanged: 0 });
     expect(await footprint(live.org.id, { includeExceptions: true })).toEqual(before);
     expect(await prisma.projectException.count({ where: { orgId: live.org.id } })).toBe(0);
   });
@@ -244,7 +262,7 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     const result = await evaluate();
     expect(result.errors).toEqual([]);
     expect(result.skipped).toEqual([]);
-    expect(result).toMatchObject({ opened: 9, refreshed: 0, resolved: 0, unchanged: 0, suppressed: 0 });
+    expect(result).toMatchObject({ opened: 11, refreshed: 0, resolved: 0, unchanged: 0, suppressed: 0 });
 
     // Every other table of the organisation, byte-identical; no figure moved (delta 0.00).
     const after = await footprint(live.org.id);
@@ -268,6 +286,8 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
         ["quantity_over_allocation", "allocation", allocations.A, "critical", "70.000", "60.000", items.R1.unitCode],
         ["quantity_over_boq", "boq_item", items.R1.id, "warning", "110.000", "100.000", items.R1.unitCode],
         ["schedule_slip_on_mapped_item", "activity", acts.D, "warning", "10.000", "5.000", "working_day"],
+        ["schedule_slip_on_mapped_item", "activity", acts.S, "critical", "107.000", "5.000", "working_day"],
+        ["schedule_slip_on_mapped_item", "activity", acts.T, "critical", (dataDateIndex() - 20).toFixed(3), "5.000", "working_day"],
       ].sort((a, b) => (a[0] + a[2]).localeCompare(b[0] + b[2])),
     );
     expect(firstRows.some((row) => row.kind === "allocation_over_capacity")).toBe(false);
@@ -281,7 +301,18 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     expect(byKind("actual_over_committed").measuredBasis).toMatch(/certifiedAgainstCommitment/);
     expect(byKind("forecast_over_revised", "project").measuredBasis).toMatch(/Official EAC/);
     expect(byKind("forecast_over_revised", "budget_line").measuredBasis).toMatch(/default/);
-    expect(byKind("schedule_slip_on_mapped_item").measuredBasis).toMatch(/change-order impacts are not read/);
+    const slipOf = (key) => firstRows.find((row) => row.kind === "schedule_slip_on_mapped_item" && row.subjectId === acts[key]);
+    for (const key of ["D", "S", "T"]) expect(slipOf(key).measuredBasis).toMatch(/change-order impacts are not read/);
+    expect(slipOf("D").measuredBasis).toMatch(/Activity\.earlyFinish − Activity\.baselineFinish/);
+    expect(slipOf("S").measuredBasis).toMatch(/actual finish \(latest approved ActivityProgress\.actualFinish/);
+    expect(slipOf("T").measuredBasis).toMatch(/the data date/);
+    expect([slipOf("D"), slipOf("S"), slipOf("T")].map((row) => [row.dataJson.finishBasis, row.dataJson.finishIndex, row.dataJson.finishDate])).toEqual([
+      ["early_finish", 310, null],
+      ["actual_finish", 127, "2026-07-01"],
+      ["data_date", dataDateIndex(), today()],
+    ]);
+    expect(slipOf("S").dataJson).toMatchObject({ pctComplete: 100, actualFinish: "2026-07-01", earlyFinish: 20, baselineFinish: 20 });
+    expect(slipOf("S").dataJson.boq.pendingItems.map((row) => row.boqItemId)).toEqual([items.R4.id]);
     for (const row of firstRows) {
       expect([row.orgId, row.resolvedAt, row.changeEventId, row.snoozedUntil]).toEqual([live.org.id, null, null, null]);
       expect(row.measuredBasis.length).toBeGreaterThan(10);
@@ -289,13 +320,13 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     }
     expect(byKind("quantity_over_allocation").dataJson).toMatchObject({ activityId: acts.A, boqItemId: items.R1.id, allocationQuantity: 60, approvedVariationQuantity: 0, exceedance: 10 });
     expect(byKind("committed_over_budget").costCodeId).toBeTruthy();
-    expect(byKind("schedule_slip_on_mapped_item").dataJson.boq.pendingItems.map((row) => row.boqItemId)).toEqual([items.R3.id]);
+    expect(slipOf("D").dataJson.boq.pendingItems.map((row) => row.boqItemId)).toEqual([items.R3.id]);
   });
 
   it("a second run makes no duplicate and moves lastSeenAt only", async () => {
     const before = await footprint(live.org.id);
     const result = await evaluate();
-    expect(result).toMatchObject({ opened: 0, refreshed: 0, resolved: 0, unchanged: 9, suppressed: 0, errors: [] });
+    expect(result).toMatchObject({ opened: 0, refreshed: 0, resolved: 0, unchanged: 11, suppressed: 0, errors: [] });
     const rows = await rowsOf();
     expect(rows.map((row) => row.id)).toEqual(firstRows.map((row) => row.id));
     const strip = ({ lastSeenAt, updatedAt, ...rest }) => rest;
@@ -333,12 +364,13 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
       ["quantity_over_boq", items.R1.id, "cleared"],
     ]);
     const open = await rowsOf({ resolvedAt: null });
-    expect(open).toHaveLength(7);
+    expect(open).toHaveLength(9);
     expect(open.every((row) => !["quantity_over_allocation", "quantity_over_boq"].includes(row.kind))).toBe(true);
   });
 
   it("a dismissed slip is not reopened while it stands still, and reopens as a new row when it worsens", async () => {
-    const slip = (await rowsOf({ kind: "schedule_slip_on_mapped_item" }))[0];
+    const slipRows = () => rowsOf({ kind: "schedule_slip_on_mapped_item", subjectId: acts.D });
+    const slip = (await slipRows())[0];
     const dismissed = await engine.setDismissed({ orgId: live.org.id, projectId: project.id, exceptionId: slip.id, actorId: live.user.id, reason: "recovery plan accepted", note: "LiveTest" });
     expect(dismissed).toMatchObject({ resolvedReason: "dismissed:recovery plan accepted", reviewedBy: live.user.id, reviewNote: "LiveTest" });
     expect(dismissed.dataJson.dismissal).toMatchObject({ measured: "10.000", limit: "5.000", dismissedBy: live.user.id });
@@ -348,15 +380,15 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
 
     let result = await evaluate();
     expect(result).toMatchObject({ opened: 0, suppressed: 1, resolved: 0, errors: [] });
-    let rows = await rowsOf({ kind: "schedule_slip_on_mapped_item" });
+    let rows = await slipRows();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toEqual(dismissed);
 
     // The CPM moves D's finish further out.
-    await prisma.activity.update({ where: { id: acts.D }, data: { earlyFinish: 35 } });
+    await prisma.activity.update({ where: { id: acts.D }, data: { earlyFinish: 315 } });
     result = await evaluate();
     expect(result).toMatchObject({ opened: 1, suppressed: 0, errors: [] });
-    rows = await rowsOf({ kind: "schedule_slip_on_mapped_item" });
+    rows = await slipRows();
     expect(rows).toHaveLength(2);
     expect(rows[0]).toEqual(dismissed);
     expect(rows[1]).toMatchObject({ resolvedAt: null, severity: "warning" });

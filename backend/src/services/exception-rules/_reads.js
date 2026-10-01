@@ -8,7 +8,10 @@
  *   boqItems             the active BOQ rows (source: BoqItem.qty / unit)
  *   quantityBlocks       quantity-views quantityBlocks — installed / certified per
  *                        item and the views' raw certified-over-installed comparison
- *   activities           the activity rows (source: CPM dates, active flag)
+ *   activities           the activity rows (source: CPM dates, calendar, active flag)
+ *   scheduleAnchor       the project's start date, calendar and zone (the CPM index's anchor)
+ *   latestApprovedProgress  the approved ActivityProgress each activity stands at, at the
+ *                        evaluation's as-of instant, by EV's selection rule (actual dates)
  *   methods              the progress method of each activity (normalised by
  *                        progress.service normalizeMethod, as the views read it)
  *   variations           ipc.service getApprovedVariationAllowances — the approved
@@ -65,11 +68,49 @@ const activities = (ctx) =>
     const rows = await prisma.activity.findMany({
       where: { projectId: ctx.projectId },
       select: {
-        id: true, name: true, activityCode: true, p6ActivityId: true, isActive: true, isCritical: true,
+        id: true, name: true, activityCode: true, p6ActivityId: true, isActive: true, isCritical: true, calendarId: true,
         earlyFinish: true, baselineFinish: true, totalFloat: true, endDate: true, wbsNodeId: true, locationId: true,
       },
     });
     return new Map(rows.map((row) => [row.id, row]));
+  });
+
+/** The project's schedule anchor: the CPM's working-day index counts from startDate on its calendar. */
+const scheduleAnchor = (ctx) =>
+  ctx.memo("scheduleAnchor", () =>
+    prisma.project.findFirst({
+      where: { id: ctx.projectId, orgId: ctx.orgId },
+      select: { startDate: true, projectCalendar: true, timezone: true, org: { select: { defaultTimezone: true } } },
+    }),
+  );
+
+/** The instant the evaluation stands at: its cutoff, else the evaluation's own time. */
+const asOf = (ctx) => ctx.cutoff || ctx.now || new Date();
+
+// earned-value.service selectApprovedProgressForCutoff's rule (EV reads
+// ActivityProgress only): an approved row counts at the cutoff by its
+// approvedAt, or by its updatedAt when it has none; the latest by that
+// effective date is the activity's progress.
+const progressEffectiveTime = (row) => new Date(row.approvedAt || row.updatedAt || 0).getTime();
+
+/** The approved ActivityProgress each activity stands at, at the evaluation's as-of instant (EV's selection). */
+const latestApprovedProgress = (ctx) =>
+  ctx.memo("latestApprovedProgress", async () => {
+    const at = asOf(ctx);
+    const rows = await prisma.activityProgress.findMany({
+      where: {
+        status: "approved",
+        activity: { projectId: ctx.projectId },
+        OR: [{ approvedAt: { lte: at } }, { approvedAt: null, updatedAt: { lte: at } }],
+      },
+      select: { activityId: true, status: true, pctComplete: true, actualStart: true, actualFinish: true, approvedAt: true, updatedAt: true },
+    });
+    const map = new Map();
+    for (const row of rows) {
+      const held = map.get(row.activityId);
+      if (!held || progressEffectiveTime(row) > progressEffectiveTime(held)) map.set(row.activityId, row);
+    }
+    return map;
   });
 
 const methods = (ctx) =>
@@ -93,10 +134,13 @@ module.exports = {
   activityLabel,
   allocationSummary,
   approvedAllocations,
+  asOf,
   boqItems,
   itemLabel,
+  latestApprovedProgress,
   methodOf,
   methods,
   quantityBlocks,
+  scheduleAnchor,
   variations,
 };
