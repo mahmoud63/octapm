@@ -60,6 +60,7 @@
     "project-setup-readiness.test.mjs",
     "punch-ui.test.mjs",
     "pwa-offline-ui.test.mjs",
+    "quantity-progress-ui.test.mjs",
     "record-assignments-ui.test.mjs",
     "registration-gate-ui.test.mjs",
     "report-assistant-ui.test.mjs",
