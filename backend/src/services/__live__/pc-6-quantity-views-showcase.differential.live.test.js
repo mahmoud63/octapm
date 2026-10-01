@@ -26,10 +26,29 @@ const inventoryService = require("../inventory.service");
 const ipcService = require("../ipc.service");
 const progressService = require("../progress.service");
 const quantityViews = require("../quantity-views.service");
+const uomService = require("../uom.service");
 const { toMoneyNumber } = require("../../utils/money");
 
 const SHOWCASE_PREFIX = "4735659e";
 const can = () => true;
+
+// The units the differential compares are the units the view compares: every
+// spelling resolved through the organisation's unit list (uom.service, the
+// owner of unit spelling), an unrecognised spelling keeping its comparison
+// key. "m3", "M3" and "cum" on one item are ONE unit, summed — not a mixed
+// set that would expect "not available".
+const unitResolver = async (orgId) => {
+  const index = await uomService.loadUnitIndex(orgId);
+  return (unit) => {
+    const text = unit == null ? "" : String(unit).trim();
+    if (!text) return null;
+    return uomService.normaliseWith(index, text) || uomService.unitKey(text);
+  };
+};
+// The distinct units of rows, each row's own spelling resolved, a row without
+// one taking the item's unit (as the view's perUnitFigure does).
+const unitsOf = (codeOf, rows, unitOf, itemUnit) => new Set(rows.map((row) => codeOf(unitOf(row)) || itemUnit || null));
+const itemUnitOf = (codeOf, item) => item.unitCode || codeOf(item.unit) || null;
 
 let realCore = null;
 try {
@@ -98,19 +117,23 @@ liveDescribe("PC-6 quantity views: showcase differential (read-only)", () => {
     const stock = (await inventoryService.listTransactions({ orgId: project.orgId, projectId: project.id, limit: 500 })).items;
     const entries = await prisma.quantityProgressEntry.findMany({ where: { projectId: project.id, status: "approved" }, select: { boqItemId: true, quantity: true } });
     const summary = await allocationService.buildAllocationSummary({ projectId: project.id });
+    const codeOf = await unitResolver(project.orgId);
 
     let committedLinesSeen = 0;
     for (const item of items) {
       const view = await quantityViews.getBoqItemQuantities({ orgId: project.orgId, projectId: project.id, itemId: item.id, can, core: realCore || undefined });
       const { figures } = view;
+      const itemUnit = itemUnitOf(codeOf, item);
 
       // committed: the posting-status commitments' lines naming the item, as listCommitments lists them.
       const mine = postingLines.filter((line) => line.boqItemId === item.id);
       committedLinesSeen += mine.length;
-      const units = new Set(mine.map((line) => line.unit || item.unitCode || item.unit));
+      const units = unitsOf(codeOf, mine, (line) => line.unit, itemUnit);
       if (units.size <= 1) {
         expect([item.code, figures.committed.value, figures.committed.label]).toEqual([item.code, sum(mine, (line) => line.qty), "Committed quantity (excludes variations)"]);
         expect(figures.committed.commitments).toBe(new Set(mine.map((line) => line.commitmentId)).size);
+        // The one unit the test resolved is the one unit the view states.
+        if (mine.length) expect([item.code, figures.committed.unitCode]).toEqual([item.code, [...units][0]]);
       } else {
         expect([item.code, figures.committed.value, figures.committed.notAvailable?.reason]).toEqual([item.code, null, quantityViews.MIXED_UNITS_REASON]);
       }
@@ -137,7 +160,7 @@ liveDescribe("PC-6 quantity views: showcase differential (read-only)", () => {
       const receipts = movements.filter((row) => row.type === "receipt");
       const issues = movements.filter((row) => row.type === "issue");
       const returns = movements.filter((row) => row.type === "return");
-      if (new Set(movements.map((row) => row.item?.unit)).size <= 1) {
+      if (unitsOf(codeOf, movements, (row) => row.item?.unit, itemUnit).size <= 1) {
         expect([item.code, figures.received.value]).toEqual([item.code, sum(receipts, (row) => Math.abs(row.quantity))]);
         expect([item.code, figures.issued.value, figures.issued.components]).toEqual([
           item.code,
@@ -162,11 +185,27 @@ liveDescribe("PC-6 quantity views: showcase differential (read-only)", () => {
     console.log(`[pc-6 differential] ${project.name}: ${items.length} items, ${committedLinesSeen} posting SOV lines, ${certifiedRows.length} certified lines, ${certificates.length} certificates, ${stock.length} movements, ${entries.length} approved entries`);
   });
 
+  it("the differential's unit predicate resolves spellings as the view does: aliases of one unit are one unit, not a mixed set", async () => {
+    if (!project) return;
+    const codeOf = await unitResolver(project.orgId);
+    const item = { unitCode: "m3", unit: "m3" };
+    const itemUnit = itemUnitOf(codeOf, item);
+    // Four spellings of the cubic metre on one item: one unit, the item's — the view sums them; so must the test.
+    const aliases = [{ unit: "m3" }, { unit: "M3" }, { unit: "M³" }, { unit: "m 3" }, { unit: null }];
+    expect([...unitsOf(codeOf, aliases, (row) => row.unit, itemUnit)]).toEqual(["m3"]);
+    // Two units stay two: the mixed case the view reports as not available.
+    expect(unitsOf(codeOf, [{ unit: "m3" }, { unit: "KG" }], (row) => row.unit, itemUnit).size).toBe(2);
+    // An unrecognised spelling keeps its own key, never passing as the item's unit.
+    expect(unitsOf(codeOf, [{ unit: "widgets" }], (row) => row.unit, itemUnit).size).toBe(1);
+    expect([...unitsOf(codeOf, [{ unit: "widgets" }], (row) => row.unit, itemUnit)][0]).not.toBe(itemUnit);
+  });
+
   it("every activity's figures equal the owners' listings, and no percent-method activity states an installed quantity", async () => {
     if (!project) return;
     const activities = await prisma.activity.findMany({ where: { projectId: project.id }, select: { id: true, activityCode: true }, orderBy: { sortOrder: "asc" } });
     const commitments = await commitmentService.listCommitments({ orgId: project.orgId, projectId: project.id, query: { includeVoid: true } });
     const postingLines = commitments.items.filter((entry) => commitmentService.POSTING_STATUSES.includes(entry.status)).flatMap((entry) => entry.lines);
+    const codeOf = await unitResolver(project.orgId);
     let percentActivities = 0;
     for (const activity of activities) {
       const method = await progressService.getProgressMethod({ orgId: project.orgId, projectId: project.id, activityId: activity.id });
@@ -180,7 +219,7 @@ liveDescribe("PC-6 quantity views: showcase differential (read-only)", () => {
       const mine = postingLines.filter((line) => line.activityId === activity.id && line.boqItemId);
       for (const block of view.items) {
         const lines = mine.filter((line) => line.boqItemId === block.boqItemId);
-        if (new Set(lines.map((line) => line.unit)).size <= 1) expect([activity.activityCode, block.boqItemId, block.figures.committed.value]).toEqual([activity.activityCode, block.boqItemId, lines.reduce((total, line) => total + line.qty, 0)]);
+        if (unitsOf(codeOf, lines, (line) => line.unit, block.unitCode).size <= 1) expect([activity.activityCode, block.boqItemId, block.figures.committed.value]).toEqual([activity.activityCode, block.boqItemId, lines.reduce((total, line) => total + line.qty, 0)]);
       }
       expect(view.sovLinesWithoutBoqItem).toBe(postingLines.filter((line) => line.activityId === activity.id && !line.boqItemId).length);
     }
