@@ -17,7 +17,9 @@ import {
  * felt like two products. A reviewer walks
  *
  *   BOQ grid → a row's detail → one of its activities → back to the row
- *   the row's change order → its register row → browser Back → the row again
+ *   the row's change order → its register row → (R5-5) the register's activity, reached
+ *     only through the order's allocation link → its drawer → Back; its BOQ row → its
+ *     drawer → Back → the register → browser Back → the row again
  *   Gantt row → the activity's detail → one of its BOQ allocations → the
  *     row's drawer → back to the activity
  *   a change order reached from the activity → its own register, open
@@ -339,6 +341,26 @@ test('a BOQ item leads to its activities and back, an activity to its BOQ rows a
     { timeout: 45_000 },
   )
   await expect(page.getByTestId(`uat-record-row-${changeOrderId}`)).toBeVisible({ timeout: 30_000 })
+  // R5-5 (PC-7b): the register names what the order reaches — activity X only through its allocation
+  // link, never "No activity" — and its BOQ row; each opens its drawer, and Back returns to the register.
+  const registerRow = page.getByTestId(`uat-record-row-${changeOrderId}`)
+  await expect(registerRow).not.toContainText('No activity')
+  const viaAllocation = registerRow.getByTestId(`co-related-activity-${changeOrderId}-${acts.X}`)
+  await expect(viaAllocation).toContainText('N5X')
+  await expect(registerRow.locator('[data-relation]')).toHaveCount(1)
+  await expect(registerRow.locator('[data-relation="via_allocation"]')).toContainText('via allocation')
+  await expect(registerRow.getByTestId(`co-related-activities-none-${changeOrderId}`)).toHaveCount(0)
+  await expect(registerRow.getByTestId(`co-related-boq-item-${changeOrderId}-${rows.A}`)).toHaveText('N5.1')
+  await expect(registerRow.getByTestId(`co-related-boq-withheld-${changeOrderId}`)).toHaveCount(0)
+  await viaAllocation.click()
+  await expectOpen(page, 'activity', acts.X)
+  await expect(page.getByTestId('activity-detail-title')).toContainText('N5X')
+  await page.goBack()
+  await expect(registerRow).toBeVisible({ timeout: 30_000 })
+  await registerRow.getByTestId(`co-related-boq-item-${changeOrderId}-${rows.A}`).click()
+  await expectOpen(page, 'boq_item', rows.A)
+  await page.goBack()
+  await expect(registerRow).toBeVisible({ timeout: 30_000 })
   await page.goBack()
   await expectOpen(page, 'boq_item', rows.A)
   await expect(page.getByTestId('boq-detail-title')).toContainText('N5.1')
@@ -399,6 +421,20 @@ test('a BOQ item leads to its activities and back, an activity to its BOQ rows a
   await expect(other.getByTestId('activity-detail-changes')).not.toContainText('No change order touches this activity')
   await expect(other.getByTestId(`activity-detail-change-order-${changeOrderId}`)).toHaveCount(0)
   await expect(other.getByTestId('activity-detail-history-boq-withheld')).toBeVisible()
+  // R5-5: in the change-order register the same member is told the order's allocation-derived activity
+  // and its BOQ row are withheld — "—" with the server's reason, never "None" or "No activity".
+  await other.goto(projectPath(projectId, `commercial/change-orders?recordId=${changeOrderId}&source=change_order`))
+  const otherRow = other.getByTestId(`uat-record-row-${changeOrderId}`)
+  await expect(otherRow).toBeVisible({ timeout: 30_000 })
+  const relatedReason =
+    'BOQ items, and the activities a change order reaches through BOQ allocations, are available only to members who may read the BOQ'
+  await expect(otherRow.getByTestId(`co-related-activities-withheld-${changeOrderId}`)).toHaveText(`— ${relatedReason}`)
+  await expect(otherRow.getByTestId(`co-related-boq-withheld-${changeOrderId}`)).toHaveText(`— ${relatedReason}`)
+  await expect(otherRow.getByTestId(`co-related-activity-${changeOrderId}-${acts.X}`)).toHaveCount(0)
+  await expect(otherRow.locator('[data-relation]')).toHaveCount(0)
+  await expect(otherRow.getByTestId(`co-related-activities-none-${changeOrderId}`)).toHaveCount(0)
+  await expect(otherRow.getByTestId(`co-related-boq-none-${changeOrderId}`)).toHaveCount(0)
+  for (const leaked of ['N5X', 'N5.1', 'Pour slab X', 'No activity']) await expect(otherRow).not.toContainText(leaked)
   await context.close()
 
   // ── A procurement member (schedule, no progress): refused on both drawers alike ─
