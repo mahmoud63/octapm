@@ -459,3 +459,103 @@ export type ControlsFigure = z.infer<typeof ControlsFigureSchema>
 export type ControlsSectionDenied = z.infer<typeof ControlsSectionDeniedSchema>
 export type ControlsStructure = z.infer<typeof ControlsStructureSchema>
 export type BoqItemDetail = z.infer<typeof BoqItemDetailSchema>
+
+// ─── PC-6: the five quantities and the committed quantity ───
+// (GET /projects/:id/boq/items/:itemId/quantities and
+//  GET /projects/:id/activities/:activityId/quantities — the views contract.)
+// Received, issued, installed, certified and paid are five figures with five
+// truths: the server sends each as { value, truth, basis, unitCode, unitMatch,
+// notAvailable? } and the screen draws them one by one — never merged, never
+// summed across units, no arithmetic on the client. A figure the server could
+// not or may not give is `notAvailable: { reason }` (or `withheld`), drawn as
+// "—" with that reason, never as 0. Typed from the contract: a server that
+// sends more passes through; one that sends less reads as "—".
+export const QuantityFigureSchema = z
+  .object({
+    value: z.number().nullable().optional(),
+    truth: z.enum(['source', 'derived', 'projection']).nullable().optional(),
+    basis: z.string().nullable().optional(),
+    unitCode: z.string().nullable().optional(),
+    unit: z.string().nullable().optional(),
+    // false when the figure's unit is not the BOQ item's unit (an inventory
+    // item's unit): the figure is still the server's, with a warning.
+    unitMatch: z.boolean().nullable().optional(),
+    notAvailable: z
+      .union([z.object({ reason: z.string() }).passthrough(), z.boolean()])
+      .nullable()
+      .optional(),
+    withheld: z
+      .union([z.object({ reason: z.string() }).passthrough(), z.boolean()])
+      .nullable()
+      .optional(),
+    reason: z.string().nullable().optional(),
+    wave: z.string().nullable().optional(),
+    asOf: z.string().nullable().optional(),
+    derivedFrom: z.array(z.record(z.string(), z.unknown())).optional(),
+  })
+  .passthrough()
+
+export const QUANTITY_FIGURE_KEYS = [
+  'installed',
+  'certified',
+  'paid',
+  'received',
+  'issued',
+  'committed',
+] as const
+export type QuantityFigureKey = (typeof QUANTITY_FIGURE_KEYS)[number]
+
+const quantityFigureBlock = z.object({
+  installed: QuantityFigureSchema.nullable().optional(),
+  certified: QuantityFigureSchema.nullable().optional(),
+  paid: QuantityFigureSchema.nullable().optional(),
+  received: QuantityFigureSchema.nullable().optional(),
+  issued: QuantityFigureSchema.nullable().optional(),
+  committed: QuantityFigureSchema.nullable().optional(),
+})
+
+/** One BOQ item's six figures (the per-item block controls-detail reuses). */
+export const BoqItemQuantitiesSchema = quantityFigureBlock
+  .extend({
+    boqItemId: z.string().nullable().optional(),
+    boqItem: z
+      .object({
+        id: z.string(),
+        code: z.string().nullable().optional(),
+        description: z.string().nullable().optional(),
+        unit: z.string().nullable().optional(),
+        unitCode: z.string().nullable().optional(),
+      })
+      .passthrough()
+      .nullable()
+      .optional(),
+    unitCode: z.string().nullable().optional(),
+    unit: z.string().nullable().optional(),
+    // Raw comparisons only (PC-6): the exceptions they may raise are PC-7b's.
+    installedOverAllocation: z.boolean().nullable().optional(),
+    certifiedOverInstalled: z.boolean().nullable().optional(),
+  })
+  .passthrough()
+
+/**
+ * The quantities read for one record. A BOQ item answers one block; an
+ * activity may carry several items in several units, so it answers a block
+ * per item (`items`) — the screen never adds them up.
+ */
+export const RecordQuantitiesSchema = BoqItemQuantitiesSchema.extend({
+  kind: z.string().optional(),
+  id: z.string().optional(),
+  activityId: z.string().nullable().optional(),
+  asOf: z.string().nullable().optional(),
+  cutoffDate: z.string().nullable().optional(),
+  items: z.array(BoqItemQuantitiesSchema).optional(),
+  byBoqItem: z.array(BoqItemQuantitiesSchema).optional(),
+  figures: quantityFigureBlock.passthrough().nullable().optional(),
+  allowed: z.boolean().optional(),
+  module: z.string().optional(),
+  reason: z.string().optional(),
+}).passthrough()
+
+export type QuantityFigure = z.infer<typeof QuantityFigureSchema>
+export type BoqItemQuantities = z.infer<typeof BoqItemQuantitiesSchema>
+export type RecordQuantities = z.infer<typeof RecordQuantitiesSchema>
