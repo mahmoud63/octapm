@@ -89,10 +89,16 @@ const describeSource = (
       : provenance.dailyLogDate
         ? [provenance.dailyLogDate]
         : []
+    // A figure that came through a daily log says so first, whoever put its
+    // entries forward for approval (the submission's own source is how it
+    // was put forward; the day is where the quantities were recorded).
+    const throughDailyLog = dates.length > 0 || Boolean(provenance.dailyLogId)
     const headline =
       provenance.label ??
       [
-        sourceWord(provenance.source) ?? 'Progress',
+        throughDailyLog
+          ? SOURCE_WORD.daily_log
+          : (sourceWord(provenance.source) ?? 'Progress'),
         dates.length ? dates.join(', ') : null,
         provenance.importFileName ?? null,
       ]
@@ -123,10 +129,12 @@ const describeSource = (
           .join(' ')
       )
     }
-    if (provenance.entryCount != null) {
-      details.push(
-        `${provenance.entryCount} quantity entr${provenance.entryCount === 1 ? 'y' : 'ies'}`
-      )
+    const entryCount = provenance.entryCount ?? provenance.entries ?? null
+    if (entryCount) {
+      details.push(`${entryCount} quantity entr${entryCount === 1 ? 'y' : 'ies'}`)
+    }
+    if (provenance.legacyFloor) {
+      details.push('legacy typed quantity carried as the floor')
     }
     if (provenance.basis) details.push(provenance.basis.replace(/_/g, ' '))
     return { headline, details }
@@ -184,6 +192,75 @@ const entryItemLabel = (entry: QuantityProgressEntry) =>
   entry.boqItemId ||
   'BOQ item'
 
+/** One quantity entry as the server sent it: item, day, source — quantity + unit, or "—" + the reason when withheld. */
+function QuantityEntryLines({
+  entries,
+  testIdPrefix,
+}: {
+  entries: QuantityProgressEntry[]
+  testIdPrefix: string
+}) {
+  return (
+    <ul className='mt-1 space-y-0.5'>
+      {entries.map((entry) => {
+        const withheld =
+          withheldReason(entry.withheld, 'Withheld by the server') ??
+          (entry.boqWithheld?.keys?.includes('quantity')
+            ? entry.boqWithheld.reason
+            : null)
+        const absent =
+          withheld ?? (entry.quantity == null ? 'Not stated' : null)
+        const unit =
+          entry.unitCode ?? entry.boqItem?.unitCode ?? entry.boqItem?.unit ?? ''
+        const story = describeSource(entry.progressSource, {
+          source: entry.source,
+        })
+        return (
+          <li
+            key={entry.id}
+            className='flex flex-wrap items-baseline justify-between gap-x-3'
+            data-testid={`${testIdPrefix}-${entry.id}`}
+          >
+            <span className='min-w-0'>
+              {entryItemLabel(entry)}
+              <span className='ml-1 text-muted-foreground'>
+                {[
+                  story?.headline,
+                  entry.dailyLogDate ?? entry.date ?? null,
+                  entry.location?.name ?? null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
+            </span>
+            <span className='tabular-nums'>
+              {absent ? (
+                <span
+                  className='text-muted-foreground'
+                  title={absent}
+                  data-withheld-reason={absent}
+                >
+                  — {absent}
+                </span>
+              ) : (
+                <span
+                  data-entry-quantity={entry.quantity ?? ''}
+                  data-entry-unit={unit}
+                >
+                  {Number(entry.quantity).toLocaleString(undefined, {
+                    maximumFractionDigits: 3,
+                  })}{' '}
+                  {unit}
+                </span>
+              )}
+            </span>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 /** The entries a submission bundles: quantity + unit per item, "—" + reason when withheld. */
 function BundledEntries({
   submission,
@@ -208,58 +285,77 @@ function BundledEntries({
         </p>
       )}
       {entries.length > 0 && (
-        <ul className='mt-1 space-y-0.5'>
-          {entries.map((entry) => {
-            const withheld = withheldReason(
-              entry.withheld,
-              'Withheld by the server'
-            )
-            const absent =
-              withheld ?? (entry.quantity == null ? 'Not stated' : null)
-            const unit = entry.unitCode ?? entry.boqItem?.unitCode ?? entry.boqItem?.unit ?? ''
-            const story = describeSource(entry.progressSource, {
-              source: entry.source,
-            })
-            return (
-              <li
-                key={entry.id}
-                className='flex flex-wrap items-baseline justify-between gap-x-3'
-                data-testid={`uat-progress-queue-entry-${entry.id}`}
-              >
-                <span className='min-w-0'>
-                  {entryItemLabel(entry)}
-                  <span className='ml-1 text-muted-foreground'>
-                    {[
-                      story?.headline,
-                      entry.dailyLogDate ?? entry.date ?? null,
-                      entry.location?.name ?? null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </span>
-                </span>
-                <span className='tabular-nums'>
-                  {absent ? (
-                    <span
-                      className='text-muted-foreground'
-                      title={absent}
-                      data-withheld-reason={absent}
-                    >
-                      — {absent}
-                    </span>
-                  ) : (
-                    <span data-entry-quantity={entry.quantity ?? ''} data-entry-unit={unit}>
-                      {Number(entry.quantity).toLocaleString(undefined, {
-                        maximumFractionDigits: 3,
-                      })}{' '}
-                      {unit}
-                    </span>
-                  )}
-                </span>
-              </li>
-            )
-          })}
-        </ul>
+        <QuantityEntryLines
+          entries={entries}
+          testIdPrefix='uat-progress-queue-entry'
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * The submitted entries of an activity that no submission holds yet — from a
+ * daily log, a site capture or the ledger. They are pending and not
+ * official: a progress approver approves them through a submission, so the
+ * one action here puts them forward (bundles every submitted entry up to
+ * the latest day shown) and the bundle joins the approval queue. Nothing is
+ * added up on the screen; the server derives the figure.
+ */
+function PendingEntries({
+  activity,
+  canPutForward,
+  busy,
+  onPutForward,
+}: {
+  activity: ScheduleActivity
+  canPutForward: boolean
+  busy: boolean
+  onPutForward: (activity: ScheduleActivity, through: string) => void
+}) {
+  const { entries, reason } = quantityEntriesOf(
+    extrasOf(activity).pendingQuantityEntries
+  )
+  if (!entries.length && !reason) return null
+  // The latest day among the entries: every submitted entry on or before it is bundled.
+  const days = entries
+    .map((entry) => (entry.dailyLogDate ?? entry.date ?? '').slice(0, 10))
+    .filter(Boolean)
+    .sort()
+  const through = days.length ? days[days.length - 1] : null
+  return (
+    <div
+      className='rounded-md border border-dashed p-2 text-xs'
+      data-testid={`uat-progress-pending-entries-${activity.id}`}
+    >
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <p className='text-[10px] font-semibold tracking-wide text-muted-foreground uppercase'>
+          Quantity entries awaiting approval — not official
+        </p>
+        {canPutForward && through && (
+          <Button
+            size='sm'
+            variant='outline'
+            className='h-7'
+            disabled={busy}
+            onClick={() => onPutForward(activity, through)}
+            data-testid={`uat-progress-put-forward-${activity.id}`}
+          >
+            <Send className='mr-1.5 h-3.5 w-3.5' />
+            Put forward for approval
+          </Button>
+        )}
+      </div>
+      {reason && (
+        <p className='text-muted-foreground' data-withheld-reason={reason}>
+          — {reason}
+        </p>
+      )}
+      {entries.length > 0 && (
+        <QuantityEntryLines
+          entries={entries}
+          testIdPrefix='uat-progress-pending-entry'
+        />
       )}
     </div>
   )
@@ -289,7 +385,12 @@ function InstalledPlanned({ activity }: { activity: ScheduleActivity }) {
   const installedReason =
     withheldReason(installed?.withheld, 'Withheld by the server') ??
     withheldReason(installed?.notAvailable, 'Not available') ??
-    (installed?.installed?.length ? null : 'Not reported by this server yet')
+    (installed?.installed?.length
+      ? null
+      : installed?.installed
+        ? // The server reported the list and it is empty: nothing approved yet.
+          'No approved quantity entry yet'
+        : 'Not reported by this server yet')
   const plannedValue = planned?.planned ?? planned?.value ?? null
   const plannedReason =
     withheldReason(planned?.withheld, 'Withheld by the server') ??
@@ -457,6 +558,14 @@ const errorCodeFrom = (error: unknown) =>
       response?: { data?: { error?: { code?: string } } }
     }
   )?.response?.data?.error?.code
+
+/** The server's own sentence for a refusal, when it sent one. */
+const errorMessageFrom = (error: unknown) =>
+  (
+    error as {
+      response?: { data?: { error?: { message?: string } } }
+    }
+  )?.response?.data?.error?.message
 
 const asProgressMethod = (
   method: string | null | undefined
@@ -771,6 +880,32 @@ export function ProgressTab({ activities: scheduled, projectId }: Props) {
       await refreshProgress()
     },
     onError: () => toast.error('Failed to approve progress'),
+  })
+
+  // PC-6: pending quantity entries are put forward as one quantity-method
+  // submission; the server derives installed ÷ planned and the approver
+  // approves it in the queue. The screen sends the day, never a figure.
+  const putForwardEntries = useMutation({
+    mutationFn: ({
+      activity,
+      through,
+    }: {
+      activity: ScheduleActivity
+      through: string
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/activities/${activity.id}/progress`, {
+          bundleSubmittedThrough: through,
+        })
+        .then((r) => r.data.data),
+    onSuccess: async () => {
+      toast.success('Quantity entries put forward for approval')
+      await refreshProgress()
+    },
+    onError: (error) =>
+      toast.error(
+        errorMessageFrom(error) ?? 'Failed to put the entries forward'
+      ),
   })
 
   const rejectSubmission = useMutation({
@@ -1184,6 +1319,14 @@ export function ProgressTab({ activities: scheduled, projectId }: Props) {
               {draft.method === 'quantity' && (
                 <InstalledPlanned activity={activity} />
               )}
+              <PendingEntries
+                activity={activity}
+                canPutForward={canSubmitThisActivity}
+                busy={putForwardEntries.isPending}
+                onPutForward={(target, through) =>
+                  putForwardEntries.mutate({ activity: target, through })
+                }
+              />
 
               <div className='grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_160px] lg:items-end'>
                 {draft.method === 'quantity' ? (

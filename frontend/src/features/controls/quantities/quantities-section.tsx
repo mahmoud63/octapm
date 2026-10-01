@@ -250,7 +250,25 @@ export function RecordQuantities({
     )
   }
   const { data } = read
-  const perItem = data.items ?? data.byBoqItem ?? []
+  // The views answer an item's figures under `figures`, its code and
+  // description beside them, and its raw comparison under `comparisons`:
+  // read as the block the rows draw, nothing computed.
+  const perItem: BoqItemQuantities[] = (
+    Array.isArray(data.items) ? data.items : (data.byBoqItem ?? [])
+  ).map((block) => {
+    const flag = (block.comparisons as { certifiedOverInstalled?: { flag?: boolean | null } } | null | undefined)
+      ?.certifiedOverInstalled?.flag
+    return {
+      ...block,
+      ...(block.figures ?? {}),
+      boqItem:
+        block.boqItem ??
+        (block.boqItemId
+          ? { id: block.boqItemId, code: block.code ?? null, description: block.description ?? null }
+          : null),
+      certifiedOverInstalled: block.certifiedOverInstalled ?? (flag === true ? true : null),
+    }
+  })
   const top: BoqItemQuantities | null = data.figures
     ? { ...data.figures, unitCode: data.unitCode, unit: data.unit }
     : hasTopLevelFigures(data)

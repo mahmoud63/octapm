@@ -534,7 +534,14 @@ export const BoqItemQuantitiesSchema = quantityFigureBlock
       .optional(),
     unitCode: z.string().nullable().optional(),
     unit: z.string().nullable().optional(),
+    // The views answer an item's six figures under `figures` (quantity-views
+    // quantityBlocks), with the item's own code and description beside them.
+    code: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    figures: quantityFigureBlock.passthrough().nullable().optional(),
     // Raw comparisons only (PC-6): the exceptions they may raise are PC-7b's.
+    // `comparisons.certifiedOverInstalled.flag` is the server's raw flag.
+    comparisons: z.record(z.string(), z.unknown()).nullable().optional(),
     installedOverAllocation: z.boolean().nullable().optional(),
     certifiedOverInstalled: z.boolean().nullable().optional(),
   })
@@ -551,10 +558,18 @@ export const RecordQuantitiesSchema = BoqItemQuantitiesSchema.extend({
   activityId: z.string().nullable().optional(),
   asOf: z.string().nullable().optional(),
   cutoffDate: z.string().nullable().optional(),
-  items: z.array(BoqItemQuantitiesSchema).optional(),
+  // An array of item blocks — or, for a member who may not read the BOQ, the
+  // server's withheld marker in its place ({ withheld: true, reason }).
+  items: z
+    .union([
+      z.array(BoqItemQuantitiesSchema),
+      z.object({ withheld: z.boolean().optional(), reason: z.string().optional() }).passthrough(),
+    ])
+    .optional(),
   byBoqItem: z.array(BoqItemQuantitiesSchema).optional(),
-  figures: quantityFigureBlock.passthrough().nullable().optional(),
   allowed: z.boolean().optional(),
+  // utils/boq-figures withheldActivityQuantities: the whole read is withheld.
+  withheld: z.boolean().optional(),
   module: z.string().optional(),
   reason: z.string().optional(),
 }).passthrough()

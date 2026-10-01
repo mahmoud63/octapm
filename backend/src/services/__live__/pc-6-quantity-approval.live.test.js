@@ -243,7 +243,7 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
     // The official figure, with its provenance, on the activity and in the EV report.
     const activity = await activityPayload(pour.id);
     expect([activity.pctComplete, activity.progressApprovalStatus, activity.approvedProgressSource]).toEqual([37.5, "approved", "manual"]);
-    expect(activity.progressSource).toEqual({ source: "manual", installedBasis: "approved_entries", legacyFloor: false, submissionId: ids.s1, dailyLogId: null, dailyReportId: null, importDocumentId: null, submittedBy: site.id, submittedAt: expect.any(String), approvedBy: live.user.id, approvedAt: rows[0].approvedAt.toISOString(), entries: 2 });
+    expect(activity.progressSource).toEqual({ source: "manual", installedBasis: "approved_entries", legacyFloor: false, dailyLogDate: null, dailyLogDates: [], entryCount: 2, submissionId: ids.s1, dailyLogId: null, dailyReportId: null, importDocumentId: null, submittedBy: site.id, submittedAt: expect.any(String), approvedBy: live.user.id, approvedAt: rows[0].approvedAt.toISOString(), entries: 2 });
     const ev = await evRow(pour.id);
     expect(ev).toMatchObject({ pct: 37.5, progressMethod: "quantity", progressStatus: "approved", status: "in_progress" });
     expect(ev.budget).toBe(100 * 100 + 60 * 150);
@@ -258,6 +258,55 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
     expect(approvedEvent.newSummaryJson).toMatchObject({ quantityInstalled: 60, quantityPlanned: 160, plannedBasis: "approved_allocations", quantityEntries: 2, approvedProgressId: rows[0].id });
     // Approving again is idempotent: no second row.
     ok(await approve(pour.id, ids.s1));
+    expect(await progressRows(pour.id)).toHaveLength(1);
+  });
+
+  it("the activity register carries what the Progress screen draws: installed per BOQ item (Σ approved entries), planned with its basis, the entries not yet put forward, and the pending submission's bundled entries — only on a quantity-measured activity", async () => {
+    // Official: e1 (40 m3 of 1.1) and e2 (20 m3 of 1.2). Free and submitted: e3, e4. e6 is a draft.
+    const expected = {
+      installedQuantity: {
+        installed: expect.arrayContaining([
+          { boqItemId: concreteA.id, code: "1.1", description: "Concrete in strip footings", unitCode: "m3", quantity: 40, entries: 1 },
+          { boqItemId: concreteB.id, code: "1.2", description: "Concrete in pad footings", unitCode: "m3", quantity: 20, entries: 1 },
+        ]),
+        asOf: expect.any(String),
+        lastApprovedAt: (await progressRows(pour.id))[0].approvedAt.toISOString(),
+        basis: expect.stringMatching(/Σ approved quantity progress entries/),
+      },
+      plannedQuantity: { planned: 160, unitCode: "m3", basis: "approved_allocations" },
+    };
+    const single = await activityPayload(pour.id);
+    expect(single).toMatchObject(expected);
+    expect(single.installedQuantity.installed).toHaveLength(2);
+    // Never one figure across items: no installed total on the payload.
+    expect(single.installedQuantity).not.toHaveProperty("quantity");
+    expect(single.pendingQuantityEntries.map((row) => row.id).sort()).toEqual([ids.e3, ids.e4].sort());
+    expect(single.pendingQuantityEntries.find((row) => row.id === ids.e3)).toMatchObject({ status: "submitted", quantity: 40, unitCode: "m3", date: "2026-09-08", submissionId: null, boqItem: { id: concreteA.id, code: "1.1" }, provenance: { source: "manual", recordedBy: site.id, official: false } });
+    // The list answers the same figures (one set of queries for every activity).
+    const listed = await api.get(at("/activities"), bearer(live.token));
+    ok(listed);
+    const row = listed.body.data.find((entry) => entry.id === pour.id);
+    expect(row).toMatchObject(expected);
+    expect(row.pendingQuantityEntries.map((entry) => entry.id).sort()).toEqual([ids.e3, ids.e4].sort());
+    // The fixing is measured by quantity too: nothing installed, its typed planned figure.
+    const fixing = listed.body.data.find((entry) => entry.id === fix.id);
+    expect(fixing).toMatchObject({ installedQuantity: { installed: [], asOf: null }, plannedQuantity: { planned: 50, unitCode: "t", basis: "method_config" }, pendingQuantityEntries: [] });
+    // An activity not configured to be measured by quantity carries none of the three.
+    const blockwork = listed.body.data.find((entry) => entry.id === wall.id);
+    for (const key of ["installedQuantity", "plannedQuantity", "pendingQuantityEntries"]) expect(blockwork).not.toHaveProperty(key);
+    // A pending bundle carries its entries, whole, on the activity and in the queue — then is rejected, leaving the fixture as it was.
+    const probe = await entry({ activityId: pour.id, boqItemId: concreteA.id, quantity: 1, date: "2026-09-09", clientRequestId: "ap-probe" });
+    const bundle = await submit(pour.id, { entryIds: [probe.id] }, site.token);
+    ok(bundle, 200);
+    const bundledEntry = { id: probe.id, status: "submitted", quantity: 1, unitCode: "m3", date: "2026-09-09", submissionId: bundle.body.data.submission.id, boqItem: { id: concreteA.id, code: "1.1", description: "Concrete in strip footings" } };
+    expect(bundle.body.data.submission.quantityEntries).toMatchObject([bundledEntry]);
+    expect(bundle.body.data.submission.quantityEntries).toHaveLength(1);
+    expect((await activityPayload(pour.id)).pendingProgress).toMatchObject({ id: bundle.body.data.submission.id, quantityEntryIds: [probe.id], quantityEntries: [bundledEntry], progressSource: { entryCount: 1, entries: 1 } });
+    expect((await activityPayload(pour.id)).pendingQuantityEntries.map((row) => row.id)).not.toContain(probe.id);
+    const queue = await api.get(at("/activities/progress-submissions?status=submitted"), bearer(live.token));
+    ok(queue);
+    expect(queue.body.data.find((row) => row.id === bundle.body.data.submission.id)).toMatchObject({ quantityEntries: [bundledEntry] });
+    ok(await reject(pour.id, bundle.body.data.submission.id, "LiveTest probe"));
     expect(await progressRows(pour.id)).toHaveLength(1);
   });
 

@@ -238,10 +238,27 @@ const MAPPING_DETAILS_WITHHELD = "Mapping details unavailable to you";
  */
 const SPEC_BOQ_WITHHELD = "BOQ coverage is worked from the BOQ's rows, available only to members who may read the BOQ";
 
+// PC-6 (integration): what the register carries of a quantity-measured
+// activity — installed per BOQ item, the planned quantity (Σ approved
+// allocations, or the method's) and the pending entries. Per-BOQ-item
+// quantities: a member who may not read the BOQ gets none of them. The two
+// figures are answered as a withheld marker — no value, the reason — so the
+// screen draws "—" with the server's reason, never a zero and never "not
+// reported"; each pending entry goes through the ledger's own withholding.
+const ACTIVITY_QUANTITY_FIGURE_KEYS = ["installedQuantity", "plannedQuantity"];
+const ACTIVITY_QUANTITY_WITHHELD =
+  "Installed and planned quantities are worked from the BOQ's rows and their allocations, available only to members who may read the BOQ";
+
 /** An activity as this caller may receive it. */
 const withheldActivity = (activity, access = FULL_ACCESS) => {
   if (access.boq || !activity || typeof activity !== "object") return activity;
   const copy = withoutKeys(activity, [...ACTIVITY_BOQ_KEYS, ...ACTIVITY_BUDGET_KEYS]);
+  for (const key of ACTIVITY_QUANTITY_FIGURE_KEYS) {
+    if (has(copy, key)) copy[key] = { withheld: { reason: ACTIVITY_QUANTITY_WITHHELD } };
+  }
+  if (Array.isArray(copy.pendingQuantityEntries)) {
+    copy.pendingQuantityEntries = copy.pendingQuantityEntries.map((entry) => withheldQuantityEntry(entry, access));
+  }
   // PC-6 (core): the pending submission's quantity figures go the same way.
   if (copy.pendingProgress && typeof copy.pendingProgress === "object") {
     return { ...copy, pendingProgress: withheldProgressSubmission(copy.pendingProgress, access) };
@@ -1496,8 +1513,13 @@ const PROGRESS_SUBMISSION_WITHHELD =
 const withheldProgressSubmission = (submission, access = FULL_ACCESS) => {
   if (access.boq || !submission || typeof submission !== "object" || Array.isArray(submission)) return submission;
   const keys = PROGRESS_SUBMISSION_BOQ_KEYS.filter((key) => has(submission, key));
-  if (!keys.length) return submission;
-  return { ...withoutKeys(submission, keys), boqWithheld: { keys, reason: PROGRESS_SUBMISSION_WITHHELD } };
+  // The entries it bundles: each under the ledger's rule (no quantity, unit,
+  // item or allocation; its id, status, date and provenance stay).
+  const entries = Array.isArray(submission.quantityEntries)
+    ? { quantityEntries: submission.quantityEntries.map((entry) => withheldQuantityEntry(entry, access)) }
+    : {};
+  if (!keys.length) return Object.keys(entries).length ? { ...submission, ...entries } : submission;
+  return { ...withoutKeys(submission, keys), ...entries, boqWithheld: { keys, reason: PROGRESS_SUBMISSION_WITHHELD } };
 };
 
 const withheldProgressSubmissions = (submissions, access = FULL_ACCESS) =>
@@ -1659,6 +1681,8 @@ module.exports = {
   QUANTITY_ENTRY_WITHHELD,
   DAILY_LOG_QUANTITY_WITHHELD,
   DAILY_LOG_TOTALS_WITHHELD,
+  ACTIVITY_QUANTITY_WITHHELD,
+  ACTIVITY_QUANTITY_FIGURE_KEYS,
   withheldDailyLogTotals,
   withheldDailyLogList,
   ALLOCATED_ITEM_WITHHELD,

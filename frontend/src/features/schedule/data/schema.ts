@@ -632,6 +632,11 @@ export const progressSourceSchema = z
     dailyLogIds: z.array(z.string()).nullable().optional(),
     dailyLogDates: z.array(z.string()).nullable().optional(),
     entryCount: z.number().nullable().optional(),
+    // The server's own count of the entries behind the figure (the same number).
+    entries: z.number().nullable().optional(),
+    // approved_entries | client | legacy_typed_floor (quantity method), else null.
+    installedBasis: z.string().nullable().optional(),
+    legacyFloor: z.boolean().nullable().optional(),
   })
   .passthrough()
 
@@ -666,6 +671,12 @@ export const quantityProgressEntrySchema = z
     // Withheld from a member who may not read the BOQ: absent, with the reason.
     quantity: z.number().nullable().optional(),
     withheld: withheldNote,
+    // utils/boq-figures withheldQuantityEntry: the keys omitted and why.
+    boqWithheld: z
+      .object({ keys: z.array(z.string()).optional(), reason: z.string() })
+      .passthrough()
+      .nullable()
+      .optional(),
     date: z.string().nullable().optional(),
     source: z.string().nullable().optional(),
     status: z.string().nullable().optional(),

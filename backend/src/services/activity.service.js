@@ -83,7 +83,7 @@ const activityInclude = {
           reviewedBy: true,
           reviewedAt: true,
           dailyReportId: true,
-          quantityEntries: { select: { id: true, status: true, source: true, dailyLogId: true } },
+          quantityEntries: { select: { id: true, status: true, source: true, dailyLogId: true, date: true } },
         },
       },
     },
@@ -128,7 +128,9 @@ const activityInclude = {
     where: { status: { in: ['draft', 'submitted'] } },
     orderBy: { updatedAt: 'desc' },
     take: 1,
-    include: { quantityEntries: { select: { id: true, status: true, source: true, dailyLogId: true } } },
+    // The pending submission carries the entries it bundles, whole: what the
+    // approver is asked to approve (serializeSubmission.quantityEntries).
+    include: { quantityEntries: { select: progressService.BUNDLED_ENTRY_SELECT, orderBy: [{ date: 'asc' }, { createdAt: 'asc' }] } },
   },
 };
 
@@ -260,6 +262,32 @@ const sanitizeActivity = (activity, allocationTotals = null, project = null) => 
   };
 };
 
+// PC-6 (integration): what the register carries of a quantity-measured
+// activity — installed per BOQ item (Σ approved entries), the planned
+// quantity with its basis, and the submitted entries nobody has put forward
+// yet — read from the entries service in a fixed number of queries. Only
+// for activities configured to be measured by quantity; the routes withhold
+// all three from a member who may not read the BOQ. Required lazily:
+// quantity-progress.service requires progress.service, as this file does.
+const isQuantityMeasured = (activity) => {
+  try {
+    return progressService.normalizeMethod(activity.progressMethod?.method) === 'quantity' && Boolean(activity.progressMethod);
+  } catch {
+    return false;
+  }
+};
+
+const quantityFiguresFor = async ({ orgId, projectId, activities }) => {
+  const activityIds = activities.filter(isQuantityMeasured).map((activity) => activity.id);
+  if (!activityIds.length) return new Map();
+  return require('./quantity-progress.service').activityQuantityFigures({ orgId, projectId, activityIds });
+};
+
+const withQuantityFigures = (sanitized, figures) => {
+  const own = figures.get(sanitized.id);
+  return own ? { ...sanitized, ...own } : sanitized;
+};
+
 const ensureProject = async (orgId, projectId) => {
   const project = await prisma.project.findFirst({
     where: { id: projectId, orgId },
@@ -317,8 +345,9 @@ const listActivities = async ({ orgId, projectId }) => {
     getApprovedActivityAllocationTotals({ projectId }),
   ]);
 
+  const quantityFigures = await quantityFiguresFor({ orgId, projectId, activities });
   return activities.map((activity) =>
-    sanitizeActivity(activity, allocationTotals.get(activity.id), project),
+    withQuantityFigures(sanitizeActivity(activity, allocationTotals.get(activity.id), project), quantityFigures),
   );
 };
 
@@ -433,7 +462,8 @@ const getActivityById = async ({ orgId, projectId, activityId }) => {
     ensureActivity(projectId, activityId),
     getApprovedActivityAllocationTotals({ projectId }),
   ]);
-  return sanitizeActivity(activity, allocationTotals.get(activity.id), project);
+  const quantityFigures = await quantityFiguresFor({ orgId, projectId, activities: [activity] });
+  return withQuantityFigures(sanitizeActivity(activity, allocationTotals.get(activity.id), project), quantityFigures);
 };
 
 const updateActivity = async ({ orgId, projectId, activityId, payload }) => {

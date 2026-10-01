@@ -23,8 +23,11 @@ const QUANTITY_ENTRY_ENTITY_TYPE = 'quantity_progress_entry';
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}/;
 const BUNDLED_ENTRY_SELECT = {
   id: true,
+  projectId: true,
   activityId: true,
   boqItemId: true,
+  allocationId: true,
+  locationId: true,
   quantity: true,
   unitCode: true,
   date: true,
@@ -32,8 +35,20 @@ const BUNDLED_ENTRY_SELECT = {
   status: true,
   submissionId: true,
   dailyLogId: true,
+  dailyLogQuantityId: true,
+  note: true,
+  clientRequestId: true,
   createdBy: true,
-  submission: { select: { id: true, status: true } },
+  createdAt: true,
+  updatedAt: true,
+  approvedBy: true,
+  approvedAt: true,
+  rejectedBy: true,
+  rejectedAt: true,
+  rejectionReason: true,
+  submission: { select: { id: true, status: true, source: true, pctComplete: true } },
+  boqItem: { select: { id: true, code: true, ref: true, description: true, unit: true, unitCode: true } },
+  location: { select: { id: true, name: true, code: true } },
 };
 
 // quantity-progress.service requires this file (the assignment rule); the
@@ -239,6 +254,15 @@ const serializeMethodConfig = (row) =>
 const buildProgressSource = ({ submission = null, progress = null }) => {
   const entries = Array.isArray(submission?.quantityEntries) ? submission.quantityEntries : [];
   const dailyLogId = entries.find((entry) => entry?.dailyLogId)?.dailyLogId || null;
+  // The day(s) of the daily log(s) the figure came through: an entry minted
+  // from a daily log is dated the log's day.
+  const dailyLogDates = [
+    ...new Set(
+      entries
+        .filter((entry) => entry?.dailyLogId && entry.date)
+        .map((entry) => new Date(entry.date).toISOString().slice(0, 10)),
+    ),
+  ].sort();
   const approved = progress || (submission?.status === 'approved' ? submission : null);
   // How a quantity figure's installed quantity was arrived at: Σ entries, a
   // typed figure (the legacy shape — minted into one entry at approval), or
@@ -257,6 +281,8 @@ const buildProgressSource = ({ submission = null, progress = null }) => {
     legacyFloor: installedBasis === LEGACY_FLOOR_BASIS,
     submissionId: progress?.submissionId ?? submission?.id ?? null,
     dailyLogId,
+    dailyLogDate: dailyLogDates.length ? dailyLogDates[dailyLogDates.length - 1] : null,
+    dailyLogDates,
     dailyReportId: submission?.dailyReportId || null,
     importDocumentId: null,
     submittedBy: submission?.submittedBy || null,
@@ -264,7 +290,21 @@ const buildProgressSource = ({ submission = null, progress = null }) => {
     approvedBy: progress?.approvedBy ?? (approved ? approved.reviewedBy ?? submission?.reviewedBy ?? null : null),
     approvedAt: toIso(progress?.approvedAt ?? (approved ? approved.reviewedAt ?? submission?.reviewedAt ?? null : null)),
     entries: entries.length,
+    entryCount: entries.length,
   };
+};
+
+/**
+ * The entries a submission bundles, as the ledger serialises them, when the
+ * rows were read whole (the queue and the activity's pending submission) —
+ * so the approver sees what they are approving: the item, the quantity in
+ * its unit, the day and where it came from. The route withholds each from a
+ * member who may not read the BOQ (utils/boq-figures).
+ */
+const serializeBundledEntries = (entries) => {
+  if (!Array.isArray(entries) || !entries.length) return [];
+  if (!entries.every((entry) => entry && entry.quantity !== undefined && entry.boqItemId !== undefined)) return undefined;
+  return entries.map((entry) => quantityProgressService().serializeEntry(entry));
 };
 
 /** The activity payload's structured provenance of its official figure (additive beside approvedProgressSource). */
@@ -302,6 +342,7 @@ const serializeSubmission = (row) =>
         // PC-6: the quantity entries this submission bundles (ids and their
         // state), and the structured PROGRESS SOURCE beside the string fields.
         quantityEntryIds: Array.isArray(row.quantityEntries) ? row.quantityEntries.map((entry) => entry.id) : [],
+        quantityEntries: serializeBundledEntries(row.quantityEntries),
         progressSource: buildProgressSource({ submission: row }),
         activity: row.activity
           ? {
@@ -1174,7 +1215,8 @@ const listProgressSubmissions = async ({
           p6ActivityId: true,
         },
       },
-      quantityEntries: { select: { id: true, status: true, source: true, dailyLogId: true } },
+      // The queue shows what each submission bundles: the entries, whole.
+      quantityEntries: { select: BUNDLED_ENTRY_SELECT, orderBy: [{ date: 'asc' }, { createdAt: 'asc' }] },
     },
     orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
   });
@@ -1534,6 +1576,7 @@ module.exports = {
   serializeSubmission,
   serializeProgressSource,
   buildProgressSource,
+  BUNDLED_ENTRY_SELECT,
   effectiveMethodFor,
   resolveSubmissionMethod,
   getProgressMethod,

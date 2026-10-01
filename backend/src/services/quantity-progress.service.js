@@ -855,17 +855,26 @@ const installedByBoqItem = async ({ orgId, projectId, boqItemIds = null, cutoffD
  * one unit, since nothing is summed across units), else none. A client's
  * quantityPlanned never comes into it.
  */
+const PLANNED_ALLOCATION_SELECT = Object.freeze({ id: true, activityId: true, boqItemId: true, quantity: true, unitCode: true, boqItem: { select: { unit: true, unitCode: true } } });
+
 const plannedQuantityFor = async ({ orgId, projectId, activityId, tx = prisma }) => {
   await ensureProject({ orgId, projectId }, tx);
   const config = await tx.activityProgressMethod.findFirst({ where: { projectId, activityId } });
   const typed = quantityDecimal(config?.plannedQuantity);
+  if (typed && typed.greaterThan(0)) return plannedFrom(config, []);
+  const allocations = await tx.activityBoqAllocation.findMany({
+    where: { projectId, activityId, status: ALLOCATION_COUNTED_STATUS, isActive: true },
+    select: PLANNED_ALLOCATION_SELECT,
+  });
+  return plannedFrom(config, allocations);
+};
+
+/** The rule of plannedQuantityFor on rows already read (one activity's method row and approved, active allocations). */
+const plannedFrom = (config, allocations) => {
+  const typed = quantityDecimal(config?.plannedQuantity);
   if (typed && typed.greaterThan(0)) {
     return { planned: quantityNumber(typed), unitCode: trimOrNull(config.quantityUnit), basis: "method_config", method: config.method };
   }
-  const allocations = await tx.activityBoqAllocation.findMany({
-    where: { projectId, activityId, status: ALLOCATION_COUNTED_STATUS, isActive: true },
-    select: { id: true, boqItemId: true, quantity: true, unitCode: true, boqItem: { select: { unit: true, unitCode: true } } },
-  });
   if (!allocations.length) {
     return { planned: null, unitCode: null, basis: "none", method: config?.method || null, reason: "No typed planned quantity and no approved allocation" };
   }
@@ -887,6 +896,63 @@ const plannedQuantityFor = async ({ orgId, projectId, activityId, tx = prisma })
     method: config?.method || null,
     allocationIds: allocations.map((row) => row.id),
   };
+};
+
+// ─── what the activity register carries (PC-6 integration) ────────────────
+
+/**
+ * The quantity figures of the activities named, for the activity register
+ * and the Progress screen (GET /activities, GET /activities/{id}): Map
+ * activityId → {
+ *   installedQuantity: { installed: [{ boqItemId, code, description, unitCode,
+ *     quantity, entries }], asOf, lastApprovedAt, basis } — Σ approved entries
+ *     per BOQ item, in the item's unit, never summed across items or units;
+ *   plannedQuantity: { planned, unitCode, basis, reason? } — plannedQuantityFor;
+ *   pendingQuantityEntries: the submitted entries no open submission holds —
+ *     what a planner can still put forward (bundle) for approval.
+ * }
+ * A fixed number of queries for any number of activities. Nothing here is
+ * official and nothing is written; the route withholds all three from a
+ * member who may not read the BOQ (utils/boq-figures withheldActivity).
+ */
+const INSTALLED_BASIS = "Σ approved quantity progress entries per BOQ item (only approval counts)";
+const activityQuantityFigures = async ({ orgId, projectId, activityIds, tx = prisma }) => {
+  const result = new Map();
+  const ids = [...new Set((activityIds || []).filter(Boolean))];
+  if (!ids.length) return result;
+  const [installed, configs, allocations, pending] = await Promise.all([
+    installedByActivity({ orgId, projectId, activityIds: ids, tx }),
+    tx.activityProgressMethod.findMany({ where: { projectId, activityId: { in: ids } } }),
+    tx.activityBoqAllocation.findMany({ where: { projectId, activityId: { in: ids }, status: ALLOCATION_COUNTED_STATUS, isActive: true }, select: PLANNED_ALLOCATION_SELECT }),
+    tx.quantityProgressEntry.findMany({ where: { projectId, orgId, activityId: { in: ids }, status: "submitted" }, include: ENTRY_INCLUDE, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
+  ]);
+  const itemIds = [...new Set([...installed.values()].flatMap((entry) => entry.installed.map((line) => line.boqItemId)))];
+  const items = itemIds.length
+    ? await tx.boqItem.findMany({ where: { id: { in: itemIds }, projectId }, select: { id: true, code: true, ref: true, description: true } })
+    : [];
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const configByActivity = new Map(configs.map((row) => [row.activityId, row]));
+  for (const activityId of ids) {
+    const figure = installed.get(activityId) || null;
+    result.set(activityId, {
+      installedQuantity: {
+        installed: (figure?.installed || []).map((line) => ({
+          boqItemId: line.boqItemId,
+          code: itemById.get(line.boqItemId)?.code || itemById.get(line.boqItemId)?.ref || null,
+          description: itemById.get(line.boqItemId)?.description ?? null,
+          unitCode: line.unitCode,
+          quantity: line.quantity,
+          entries: line.entries,
+        })),
+        asOf: figure?.asOf || null,
+        lastApprovedAt: figure?.lastApprovedAt || null,
+        basis: INSTALLED_BASIS,
+      },
+      plannedQuantity: plannedFrom(configByActivity.get(activityId) || null, allocations.filter((row) => row.activityId === activityId)),
+      pendingQuantityEntries: pending.filter((entry) => entry.activityId === activityId && !isOpenlyBundled(entry)).map(serializeEntry),
+    });
+  }
+  return result;
 };
 
 // ─── the activity's allocated items (the site's picker) ────────────────────
@@ -1206,4 +1272,7 @@ module.exports = {
   installedByActivity,
   installedByBoqItem,
   plannedQuantityFor,
+  plannedFrom,
+  activityQuantityFigures,
+  ENTRY_INCLUDE,
 };

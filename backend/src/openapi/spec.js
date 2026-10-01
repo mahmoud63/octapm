@@ -5237,6 +5237,23 @@ const components = {
         ...ref("ScheduleRiskSummary"),
         nullable: true,
       },
+      installedQuantity: {
+        type: "object",
+        additionalProperties: true,
+        description:
+          "PC-6, on the activity endpoints, only for an activity configured to be measured by quantity: { installed: [{ boqItemId, code, description, unitCode, quantity, entries }], asOf, lastApprovedAt, basis } — Σ approved quantity entries per BOQ item in the item's unit (quantity-progress.service installedByActivity), never one figure across items or units; an empty list when nothing is approved. For a caller who may not read the BOQ: { withheld: { reason } } — no figure, never a zero.",
+      },
+      plannedQuantity: {
+        type: "object",
+        additionalProperties: true,
+        description:
+          "PC-6, as installedQuantity: { planned, unitCode, basis: method_config | approved_allocations | none, reason? } — the figure typed on the method configuration, else Σ approved, active allocation quantity when in one unit (plannedQuantityFor). For a caller who may not read the BOQ: { withheld: { reason } }.",
+      },
+      pendingQuantityEntries: {
+        ...arrayOf(ref("GenericObject")),
+        description:
+          "PC-6, as installedQuantity: the activity's submitted quantity entries no open submission holds — pending, not official — each as GET /quantity-progress serialises it. POST /activities/{id}/progress with bundleSubmittedThrough (or entryIds) puts them forward for approval. For a caller who may not read the BOQ each entry is under the ledger's rule (no quantity, unit, item or allocation; boqWithheld).",
+      },
       isMilestone: { type: "boolean" },
       isCritical: { type: "boolean" },
       pctComplete: percent,
@@ -9098,7 +9115,7 @@ add(
     "Approve an activity progress submission.",
     "submission.approve",
     undefined,
-    "The one writer of official progress: the evidence gate, the open ITP hold points and the review authority apply, and exactly one new ActivityProgress row is written (an earlier approved row is never changed). PC-6: a quantity-method submission that bundles quantity entries approves exactly those entries in the same transaction (approvedBy/approvedAt), and its figures are read again at this moment — installed = Σ approved entries on the activity (the bundle included), planned = the typed method-configuration figure (basis method_config), else Σ approved allocation quantity (basis approved_allocations), else — nothing typed, nothing mapped — the figure the submission was put forward with, its frozen quantityPlanned (basis submission; a bundle a client planned is approvable, never stuck pending) — so the row's pctComplete = installed ÷ planned, clamped to 0..100, with the frozen quantities on the row; the answer carries the transient quantity block (installed, planned, unitCode, plannedBasis, installedBasis — approved_entries, client for a typed figure, or legacy_typed_floor when installed = max(Σ approved entries, the latest official installed figure) + the bundle carried a typed figure as the floor, with legacyFloor { quantity, unitCode, progressId, approvedAt, note } — bundledEntries; for a typed figure mintedEntry | mintSkipped) and approvedProgressId. The official row carries the floor's trace as a note (no figure in it). Approvals are serialised per activity (the activity row is held for the transaction): two bundles approved at once commit one after the other and the later official row carries Σ approved entries; the same submission approved twice at once answers idempotently. The submission's progressSource (PROGRESS SOURCE provenance: source, installedBasis (quantity method: approved_entries | client | legacy_typed_floor; null otherwise), legacyFloor (boolean), submissionId, dailyLogId, importDocumentId, submittedBy, approvedBy, approvedAt, entries) is on every answer, additive beside the string fields. For a caller who may not read the BOQ the quantity figures are withheld (boqWithheld).",
+    "The one writer of official progress: the evidence gate, the open ITP hold points and the review authority apply, and exactly one new ActivityProgress row is written (an earlier approved row is never changed). PC-6: a quantity-method submission that bundles quantity entries approves exactly those entries in the same transaction (approvedBy/approvedAt), and its figures are read again at this moment — installed = Σ approved entries on the activity (the bundle included), planned = the typed method-configuration figure (basis method_config), else Σ approved allocation quantity (basis approved_allocations), else — nothing typed, nothing mapped — the figure the submission was put forward with, its frozen quantityPlanned (basis submission; a bundle a client planned is approvable, never stuck pending) — so the row's pctComplete = installed ÷ planned, clamped to 0..100, with the frozen quantities on the row; the answer carries the transient quantity block (installed, planned, unitCode, plannedBasis, installedBasis — approved_entries, client for a typed figure, or legacy_typed_floor when installed = max(Σ approved entries, the latest official installed figure) + the bundle carried a typed figure as the floor, with legacyFloor { quantity, unitCode, progressId, approvedAt, note } — bundledEntries; for a typed figure mintedEntry | mintSkipped) and approvedProgressId. The official row carries the floor's trace as a note (no figure in it). Approvals are serialised per activity (the activity row is held for the transaction): two bundles approved at once commit one after the other and the later official row carries Σ approved entries; the same submission approved twice at once answers idempotently. The submission's progressSource (PROGRESS SOURCE provenance: source, installedBasis (quantity method: approved_entries | client | legacy_typed_floor; null otherwise), legacyFloor (boolean), submissionId, dailyLogId, dailyLogDate and dailyLogDates (the day(s) of the daily log(s) its entries came through), importDocumentId, submittedBy, approvedBy, approvedAt, entries and entryCount (the same count)) is on every answer, and quantityEntries carries the entries it bundles, whole, beside quantityEntryIds (each under the ledger's withholding for a caller who may not read the BOQ), additive beside the string fields. For a caller who may not read the BOQ the quantity figures are withheld (boqWithheld).",
   ],
   [
     "reject",

@@ -255,6 +255,45 @@ bundles entries, and approving it is what approves them:
   nothing mapped approved with its frozen figure; the method lock both ways with readiness; the tenant 404) and
   `__tests__/progress.service.quantity-bundle.test.js`.
 
+### 3.3 The activity register and the Progress screen, as integrated (2026-10-01) [C]
+
+The web Progress tab and its spec were written against contracts the merged server did not send: installed and
+planned quantity on the activity register, the entries a pending submission bundles, a withheld views answer, and a
+submission appearing in the approval queue the moment a day is submitted. The merged contract (§4.1) is different —
+submitting the day mints **pending entries**, and nothing reaches the queue until someone bundles them — and the web
+had no way to do that, so daily-log quantities could not be approved from the web at all. Closed at the source:
+
+- **The register carries the figures** (`GET /activities`, `GET /activities/{id}`; `activity.service
+  quantityFiguresFor` → `quantity-progress.service activityQuantityFigures`, a fixed number of queries for any number
+  of activities, only for activities configured to be measured by quantity): `installedQuantity { installed: [{
+  boqItemId, code, description, unitCode, quantity, entries }], asOf, lastApprovedAt, basis }` (Σ approved entries per
+  BOQ item — never one figure across items or units; an empty list when nothing is approved), `plannedQuantity {
+  planned, unitCode, basis, reason? }` (`plannedFrom`, the rule of `plannedQuantityFor` on rows already read) and
+  `pendingQuantityEntries` (the submitted entries no open submission holds). Read-only: nothing is written, nothing
+  is official, EV is untouched.
+- **A submission carries the entries it bundles, whole** (`quantityEntries`, beside `quantityEntryIds`) wherever it is
+  serialised — the queue, the activity's `pendingProgress`, the submit / approve / reject answers — and
+  `progressSource` adds `dailyLogDate` / `dailyLogDates` (the day(s) of the daily log(s) its entries came through)
+  and `entryCount`.
+- **BOQ withholding** (`utils/boq-figures withheldActivity`, `withheldProgressSubmission`): for a member who may not
+  read the BOQ, `installedQuantity` and `plannedQuantity` are answered as `{ withheld: { reason } }` — no figure,
+  never a zero — and every pending or bundled entry goes through the ledger's rule (`withheldQuantityEntry`).
+- **The web** (`progress-tab.tsx`): the pending entries are listed under their activity as "awaiting approval — not
+  official" with their source and day, and **Put forward for approval** sends `{ bundleSubmittedThrough: <the latest
+  day shown> }` — the day, never a figure — to `POST /activities/{id}/progress`; the bundle then stands in the queue
+  with its entries and is approved there. A figure that came through a daily log is headed "Daily log <date>"
+  whoever put it forward. The drawer (`use-record-quantities`, `quantities-section`) reads the views' real answer: a
+  record-level `withheld: true` is the withheld state with the server's reason, `items` may be the withheld marker,
+  and an item's figures are under `figures`.
+- **Proof**: live — `pc-6-quantity-approval` (the register case: both readers' figures, the fixing's typed planned
+  figure, an unconfigured activity carrying none of the three, a bundle's entries on the activity and in the queue)
+  and `pc-6-daily-log-quantities` (the member without BOQ read: the withheld markers and entries, single and list);
+  browser — `frontend/e2e/55-quantity-progress.spec.ts`, no skip gate, green twice against its own API and Vite
+  (the walk: daily log → pending entry on the tab → put forward → the queue's bundle → approve → official 75 % with
+  the daily log as its source; the surveyor without BOQ read sees "—" with the reason). Mutation-proven: the
+  register's figures not withheld (live), the drawer ignoring the withheld marker and the register carrying no
+  figures (browser) each fail.
+
 ## 4. Daily-report contribution (§81) [D]
 
 `DailyLog` gains a section table `DailyLogQuantity` (same columns, status semantics, `partyId` column, composite tenant key and indexes as the six `DailyLog*` sections — the ENT-3 versions of them already carry `dailyLog / org / project` relations — and **with** relations to what it names): `dailyLogId, projectId, orgId, partyId?, activityId, boqItemId, allocationId?, locationId?, quantity Decimal(18,3), unitCode, notes, status, createdBy, submittedAt, reviewedBy/At, rejectionReason, clientRequestId, sortOrder`. As built, the row carries `allocationId?` too (the approved allocation the site picked the item from, a hint that SET NULLs if the mapping row goes) and names its text column `notes` like its six siblings, so the section registry's generic handling applies. Its `status` is the section row's own review state, never progress. ON DELETE: `dailyLog / org / project` CASCADE like the siblings; `activityId / boqItemId` RESTRICT (a signed site record on the log's PDF is not emptied by a hard delete); `allocationId / locationId` SET NULL. Submitting the daily log creates matching `QuantityProgressEntry` rows with `source='daily_log'`, `status='submitted'`, linked by `dailyLogQuantityId`; editing the daily log before approval updates them; approval is done on the Progress screen (or in bulk from the daily log by an approver). The legacy `DailyReport → ProgressSubmission(pct)` path stays for `percent`-method activities.

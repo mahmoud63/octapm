@@ -532,6 +532,27 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
     expect(storedText).toContain("Concrete in foundations");
     expect(storedText).not.toContain("1.1 Concrete");
     expect(storedText).not.toMatch(/\b8 m3\b|installed 8/);
+    // The activity register for the same member (integration item 8): installed and planned are a withheld marker with the
+    // reason — never a figure, never a zero — and each pending entry is under the ledger's rule; a BOQ reader gets the figures.
+    const mine = await api.get(at(`/activities/${pour.id}`), bearer(members.noBoq.token));
+    ok(mine);
+    const reason = { withheld: { reason: expect.stringContaining("may read the BOQ") } };
+    expect(mine.body.data).toMatchObject({ installedQuantity: reason, plannedQuantity: reason });
+    expect(Object.keys(mine.body.data.installedQuantity)).toEqual(["withheld"]);
+    expect(mine.body.data.pendingQuantityEntries.length).toBeGreaterThan(0);
+    for (const entry of mine.body.data.pendingQuantityEntries) {
+      expect(entry).toMatchObject({ status: "submitted", provenance: expect.any(Object), boqWithheld: { keys: expect.arrayContaining(["quantity", "unitCode", "boqItemId"]) } });
+      for (const key of ["quantity", "unitCode", "boqItemId", "boqItem", "allocationId"]) expect(entry).not.toHaveProperty(key);
+    }
+    expect(mine.body.data.pendingQuantityEntries.map((entry) => entry.provenance.dailyLogQuantityId)).toContain(ids.row6);
+    const listed = await api.get(at("/activities"), bearer(members.noBoq.token));
+    ok(listed);
+    expect(listed.body.data.find((row) => row.id === pour.id)).toMatchObject({ installedQuantity: reason, plannedQuantity: reason });
+    expect(JSON.stringify(listed.body.data)).not.toMatch(/"installed":\s*\[|"planned":\s*\d/);
+    const theirs = await api.get(at(`/activities/${pour.id}`), bearer(live.token));
+    ok(theirs);
+    expect(theirs.body.data).toMatchObject({ installedQuantity: { installed: expect.any(Array), basis: expect.any(String) }, plannedQuantity: { planned: 100, unitCode: "m3", basis: "approved_allocations" } });
+    expect(theirs.body.data.pendingQuantityEntries.find((entry) => entry.provenance.dailyLogQuantityId === ids.row6)).toMatchObject({ quantity: 8, unitCode: "m3", source: "daily_log", boqItem: { code: "1.1" } });
     // The distribute answer to the PM is the PM's view; the row count and provenance are everyone's.
     expect(rowOf(distributed.body.data, ids.row6)).toMatchObject({ quantity: 8, boqItem: { code: "1.1" } });
   });

@@ -1,6 +1,6 @@
 jest.mock("../../middleware/rbac", () => ({ hasPermission: jest.fn() }));
 
-const { QUANTITY_ENTRY_BOQ_KEYS, QUANTITY_ENTRY_WITHHELD, withheldQuantityEntries, withheldQuantityEntry, withheldQuantityEntryResult, withheldProgressSubmission, withheldProgressSubmissions, withheldActivity, withheldDailyLog, withheldDailyLogQuantity, withheldAllocatedItems, DAILY_LOG_QUANTITY_WITHHELD, DAILY_LOG_TOTALS_WITHHELD, ALLOCATED_ITEM_WITHHELD } = require("../boq-figures");
+const { QUANTITY_ENTRY_BOQ_KEYS, QUANTITY_ENTRY_WITHHELD, withheldQuantityEntries, withheldQuantityEntry, withheldQuantityEntryResult, withheldProgressSubmission, withheldProgressSubmissions, withheldActivity, withheldDailyLog, withheldDailyLogQuantity, withheldAllocatedItems, DAILY_LOG_QUANTITY_WITHHELD, DAILY_LOG_TOTALS_WITHHELD, ALLOCATED_ITEM_WITHHELD, ACTIVITY_QUANTITY_WITHHELD, ACTIVITY_QUANTITY_FIGURE_KEYS } = require("../boq-figures");
 
 // An entry as quantity-progress.service builds it.
 const entry = (id) => ({
@@ -115,6 +115,29 @@ describe("PC-6: a progress submission's quantity figures (installed from the ent
     expect(answer.pendingProgress).not.toHaveProperty("quantityPlanned");
     expect(answer.pendingProgress).toMatchObject({ pctComplete: 37.5, boqWithheld: expect.any(Object) });
     expect(withheldActivity(activity, BOQ)).toBe(activity);
+  });
+
+  it("the register's quantity figures (PC-6 integration): installed and planned are answered as a withheld marker with the reason — no value, never a zero; pending and bundled entries go through the ledger's rule", () => {
+    const entry = { id: "e-1", activityId: "a-1", status: "submitted", date: "2026-09-05", quantity: 15, unitCode: "m3", boqItemId: "item-1", boqItem: { id: "item-1", code: "1.1" }, allocationId: "al-1", provenance: { source: "daily_log", recordedBy: "u-1" } };
+    const activity = {
+      id: "a-1",
+      pctComplete: 75,
+      installedQuantity: { installed: [{ boqItemId: "item-1", code: "1.1", description: "Blockwork", unitCode: "m3", quantity: 15, entries: 1 }], asOf: "2026-10-01T00:00:00.000Z", basis: "Σ approved entries" },
+      plannedQuantity: { planned: 20, unitCode: "m3", basis: "approved_allocations" },
+      pendingQuantityEntries: [entry],
+      pendingProgress: { ...submission, quantityEntries: [entry] },
+    };
+    const answer = withheldActivity(activity, COST);
+    for (const key of ACTIVITY_QUANTITY_FIGURE_KEYS) expect(answer[key]).toEqual({ withheld: { reason: ACTIVITY_QUANTITY_WITHHELD } });
+    expect(answer.pctComplete).toBe(75);
+    for (const row of [answer.pendingQuantityEntries[0], answer.pendingProgress.quantityEntries[0]]) {
+      expect(row).toMatchObject({ id: "e-1", status: "submitted", date: "2026-09-05", provenance: { source: "daily_log" }, boqWithheld: { keys: ["quantity", "unitCode", "boqItemId", "boqItem", "allocationId"], reason: QUANTITY_ENTRY_WITHHELD } });
+      for (const key of QUANTITY_ENTRY_BOQ_KEYS) expect(row).not.toHaveProperty(key);
+    }
+    expect(JSON.stringify(answer)).not.toMatch(/"quantity":\s*(15|20)|"planned":\s*20|"1\.1"/);
+    // A BOQ reader's activity is the same object; an activity without the figures gains none.
+    expect(withheldActivity(activity, BOQ)).toBe(activity);
+    expect(withheldActivity({ id: "a-2", pctComplete: 10 }, COST)).toEqual({ id: "a-2", pctComplete: 10 });
   });
 });
 
