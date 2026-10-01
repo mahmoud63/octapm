@@ -391,6 +391,17 @@ notification of its own. Proven live: `pc-6-daily-report-withholding` (a site en
 template, on every route; each answer swept for every quantity key, the unit code and every seeded figure; the BOQ
 reader is given them all).
 
+**The daily-log assistant's evidence (integration fix, 2026-10-01).** `POST /daily-logs/{date}/ai/draft` (admitted on
+`assistant:read` + `progress:update`) read the day's progress submissions whole and printed each one's typed quantity,
+unit and planned quantity into the evidence shown to the model — and stored as the run's prompt, served back to its
+author — whatever the caller may read. The route now passes the caller's `boqFigureAccess`; without `boq` the
+progress line states the percentage, the method and the status only (`→ 45% by quantity · submitted`), and with no
+access given nothing of the bill is shown. A draft whose evidence showed a quantity is a BOQ-bearing run
+(`assistant.service` `BOQ_BEARING_KINDS` gains `daily_log_draft`: served back only while its author may read the BOQ);
+one that showed none is marked `builtWithoutBoq`. The evidence does not include the day's quantities section. No
+other assistant or AI evidence builder reads `ProgressSubmission`, `QuantityProgressEntry` or `DailyLogQuantity`.
+Proven by `daily-log-assistant.service.test.js` (the evidence block for a reader and a non-reader; no live model).
+
 ### 4.1 The quantities section, as shipped (PC-6 core, 2026-10-01) [C]
 
 `daily-log.service.js` carries a seventh section, `quantities` (model `DailyLogQuantity`), registered in the

@@ -91,8 +91,11 @@ const serializeConversation = (row, { withMessages = false } = {}) => ({
  * the bill says so on its prompt message (BUILT_WITHOUT_BOQ) and is served
  * as it is; a run with no project (a report narrative across projects)
  * cannot be decided per project and is withheld unless it says so.
+ * The daily-log draft (PC-6 integration, 2026-10-01) is one of them: its
+ * evidence states a progress submission's typed, planned and unit
+ * quantities for a BOQ reader; a draft that showed none says so.
  */
-const BOQ_BEARING_KINDS = new Set(["scope_gap", "forecast"]);
+const BOQ_BEARING_KINDS = new Set(["scope_gap", "forecast", "daily_log_draft"]);
 const ASSISTANT_RUN_BOQ_WITHHELD = "This AI run was built from the BOQ's rows or the mapping, available only to members who may read the BOQ";
 let mappingNarrativeTitles = null;
 const isMappingNarrative = (title) => {

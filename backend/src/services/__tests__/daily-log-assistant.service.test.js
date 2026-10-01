@@ -13,7 +13,7 @@ const mockPrisma = {
     findMany: jest.fn(async () => photos()),
     findFirst: jest.fn(async ({ where }) => photos().find((photo) => photo.id === where.id) || null),
   },
-  progressSubmission: { findMany: jest.fn(async () => [{ id: "ps-1", pctComplete: 45, quantityComplete: 120, quantityPlanned: 260, quantityUnit: "m3", status: "submitted", notes: "Pour completed bays 1-3", activity: { id: "act-1", name: "Level 3 slab pour", wbsCode: "1.2.3", p6ActivityId: "A1030" } }]) },
+  progressSubmission: { findMany: jest.fn(async () => [{ id: "ps-1", method: "quantity", pctComplete: 45, quantityComplete: 120, quantityPlanned: 260, quantityUnit: "m3", status: "submitted", notes: "Pour completed bays 1-3", activity: { id: "act-1", name: "Level 3 slab pour", wbsCode: "1.2.3", p6ActivityId: "A1030" } }]) },
   formInstance: { findMany: jest.fn(async () => [{ id: "fi-1", ref: "ITP-004", type: "itp", title: "Pre-pour inspection", status: "complete", outcome: "pass", completedAt: new Date("2026-09-05T05:00:00Z") }]) },
   punchItem: { findMany: jest.fn(async () => [{ id: "pi-1", ref: "OBS-002", title: "Missing edge protection at L3 east", kind: "observation", observationType: "safety", priority: "high", status: "open", trade: "Formwork", locationText: "L3 east" }]) },
   safetyIncident: { findMany: jest.fn(async () => []) },
@@ -111,7 +111,7 @@ describe("daily report auto-draft", () => {
       expect(text).toContain("Weather: Sunny, 24–41 °C, wind 18 km/h, ALERT Heat above 40 °C");
       expect(text).toContain("- Alpha Concrete · Carpenters · 8 × 9 h · Level 3 slab pour");
       expect(text).toContain("- Rebar T16 · 12 t · SteelCo · PO PO-118");
-      expect(text).toContain("- progress:ps-1 · Level 3 slab pour → 45% (120 m3 of 260) · submitted · Pour completed bays 1-3");
+      expect(text).toContain("- progress:ps-1 · Level 3 slab pour → 45% by quantity (120 m3 of 260) · submitted · Pour completed bays 1-3");
       expect(text).toContain("- ITP-004 Pre-pour inspection (itp) · complete · pass");
       expect(text).toContain("- OBS-002 Missing edge protection at L3 east · observation (safety) · high · Formwork · L3 east");
       expect(text).toContain("- P1 06:30 UTC · Level 3 · no caption · tags formwork");
@@ -133,7 +133,8 @@ describe("daily report auto-draft", () => {
         usage: { inputTokens: 1200, outputTokens: 300 },
       };
     });
-    const result = await service.draftReport({ ...scope, payload: { notes: "crane down one hour" }, user, transport, fetchImpl });
+    // A BOQ reader (boqFigureAccess): the evidence states the submission's quantities.
+    const result = await service.draftReport({ ...scope, payload: { notes: "crane down one hour" }, user, access: { boq: true, budget: true }, transport, fetchImpl });
     expect(mockPrisma.progressSubmission.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ OR: [{ submittedAt: { gte: new Date("2026-09-04T21:00:00.000Z"), lte: new Date("2026-09-05T20:59:59.999Z") } }, expect.anything()] }) }));
     expect(mockDailyLog.getLog).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", projectId: "p1", date: "2026-09-05" }));
     expect(mockAttachments.getPhotoFile).toHaveBeenCalledWith(expect.objectContaining({ photoId: "ph-1", variant: "thumbnail" }));
@@ -155,6 +156,37 @@ describe("daily report auto-draft", () => {
     expect(result.message).toEqual(expect.objectContaining({ id: expect.any(String), model: "test" }));
     expect(store.conversations[0]).toMatchObject({ kind: "daily_log_draft", recordType: "daily_log", recordId: "log-1", title: "Daily report draft 2026-09-05", userId: "u-1" });
     expect(store.messages[1].usageJson).toEqual({ inputTokens: 1200, outputTokens: 300 });
+    // It showed a quantity: a BOQ-bearing run, served back only while its author may read the BOQ.
+    expect(store.messages[0].usageJson).toBeUndefined();
+  });
+
+  it("the evidence for a member who may not read the BOQ: percentage, method and status — no typed, planned or unit figure; the stored run says it was built without the bill", async () => {
+    const evidence = await service.collectEvidence({ ...scope });
+    const reader = service.evidenceBlock({ ...evidence, access: { boq: true, budget: true } });
+    expect(reader).toContain("- progress:ps-1 · Level 3 slab pour → 45% by quantity (120 m3 of 260) · submitted · Pour completed bays 1-3");
+    for (const access of [{ boq: false, budget: true }, { boq: false, budget: false }, undefined]) {
+      const text = service.evidenceBlock({ ...evidence, ...(access ? { access } : {}) });
+      expect(text).toContain("- progress:ps-1 · Level 3 slab pour → 45% by quantity · submitted · Pour completed bays 1-3");
+      expect(text).not.toMatch(/\b120\b|\b260\b|\bm3\b/);
+      // Everything else in the evidence is the same as the reader's.
+      expect(text.replace(" (120 m3 of 260)", "")).toBe(reader.replace(" (120 m3 of 260)", ""));
+    }
+    // A submission with no typed figure reads the same for both.
+    const percent = { id: "ps-2", method: "percent", pctComplete: 30, quantityComplete: null, status: "approved", activity: { name: "Blockwork" } };
+    expect(service.progressLine(percent, { boq: true })).toBe(service.progressLine(percent, { boq: false }));
+    expect(service.progressLine(percent, { boq: false })).toBe("- progress:ps-2 · Blockwork → 30% by percent · approved");
+
+    let sent = null;
+    const transport = jest.fn(async ({ messages }) => {
+      sent = typeof messages[0].content === "string" ? messages[0].content : messages[0].content[0].text;
+      return { text: JSON.stringify({ summary: "Slab pour at 45%.", confidence: "medium" }), usage: { inputTokens: 10, outputTokens: 5 } };
+    });
+    const result = await service.draftReport({ ...scope, payload: { includePhotos: false }, user, access: { boq: false, budget: true }, transport });
+    expect(result.degraded).toBe(false);
+    expect(sent).toContain("→ 45% by quantity · submitted");
+    expect(sent).not.toMatch(/\b120\b|\b260\b|\bm3\b/);
+    expect(store.messages[0].content).toBe(sent);
+    expect(store.messages[0].usageJson).toEqual({ builtWithoutBoq: true });
   });
 
   it("builds a factual draft from the records when no provider answers", async () => {
