@@ -25,7 +25,23 @@ const shift = (date: string, days: number) => {
   const next = new Date(y!, m! - 1, d! + days, 12)
   return isoDay(next)
 }
-const SECTION_LABELS: Record<DailyLogSection, string> = { manpower: 'Manpower', equipment: 'Equipment', deliveries: 'Deliveries', visitors: 'Visitors', delays: 'Delays', notes: 'Notes' }
+const SECTION_LABELS: Record<DailyLogSection, string> = { manpower: 'Manpower', equipment: 'Equipment', deliveries: 'Deliveries', visitors: 'Visitors', delays: 'Delays', notes: 'Notes', quantities: 'Quantities installed' }
+
+/** The source a quantity line carries, as the server names it; a daily-log line is a daily log's unless the server says otherwise. */
+const quantitySource = (e: DailyLogEntry) => humanise(e.progressEntry?.source ?? 'daily_log').toLowerCase()
+
+/**
+ * What a quantity line amounts to as progress: nothing, until the progress
+ * approvers approve it on the Progress screen. The row's own section status
+ * (the day's review state) is never read as that approval; only the progress
+ * entry's status, when the server reports it, is.
+ */
+export function quantityStanding(e: DailyLogEntry): string {
+  const status = e.progressEntry?.status ?? null
+  if (status === 'approved') return `approved as progress · source ${quantitySource(e)}`
+  if (status === 'rejected') return `rejected · source ${quantitySource(e)}`
+  return `awaiting approval · source ${quantitySource(e)}`
+}
 
 export function describeEntry(section: DailyLogSection, e: DailyLogEntry): string {
   switch (section) {
@@ -43,11 +59,20 @@ export function describeEntry(section: DailyLogSection, e: DailyLogEntry): strin
       return [humanise(e.type), e.hoursLost != null ? `${e.hoursLost} h lost` : null, e.description ?? e.notes].filter(Boolean).join(' · ')
     case 'notes':
       return [humanise(e.kind), e.text].filter(Boolean).join(': ')
+    case 'quantities': {
+      // The item is the server's to name or withhold: a reader without the BOQ sees
+      // a dash and the reason, never a figure of the bill and never a zero.
+      const item = e.boqItem?.description ?? (e.boqWithheld ? '—' : 'Item')
+      // A Decimal(18,3) may arrive as "25.000": read as a number, shown without the padding.
+      const qty = e.quantity == null ? NaN : Number(e.quantity)
+      const quantity = Number.isFinite(qty) ? `${qty} ${e.unitCode ?? e.unit ?? ''}`.trim() : '—'
+      return `${quantity} · ${item} — ${quantityStanding(e)}`
+    }
   }
 }
 
 /**
- * The daily log: one day, six sections, submitted once at the end of it.
+ * The daily log: one day, seven sections, submitted once at the end of it.
  * Entries are added as they happen and carry a replay key; the day is
  * submitted through the server's route, and approval stays on the web.
  */
@@ -156,6 +181,8 @@ export default function DailyLogScreen() {
                 { id: 'deliveries', label: 'Deliveries', value: String(log.data.totals.deliveries) },
                 { id: 'visitors', label: 'Visitors', value: String(log.data.totals.visitors) },
                 { id: 'delays', label: 'Delays', value: log.data.totals.hoursLost ? `${log.data.totals.hoursLost} h lost` : '0', tone: log.data.totals.hoursLost > 0 ? 'warning' : 'default' },
+                // Quantities recorded are pending until approved on the Progress screen; the line says so rather than counting them as progress.
+                ...(log.data.sections.quantities ? [{ id: 'quantities', label: 'Quantities installed', value: `${log.data.sections.quantities.length} awaiting approval` }] : []),
                 { id: 'constraints', label: 'Open constraints', value: String(openConstraints), tone: openConstraints > 0 ? 'warning' : 'default' },
               ]}
               action={open && canSubmit ? { title: log.data.totals.entries === 0 ? 'Start the report' : 'Continue the report', onPress: () => setAdding('manpower'), testID: 'site-continue' } : null}
@@ -194,6 +221,8 @@ export default function DailyLogScreen() {
 
             {DAILY_LOG_SECTIONS.map((section) => {
               const entries = log.data.sections[section] ?? []
+              // A server without the quantities section (the day's answer does not carry it) gets no card for it: nothing to add to, nothing to count.
+              if (section === 'quantities' && !log.data.sections.quantities) return null
               return (
                 <Card key={section} testID={`daily-log-section-${section}`}>
                   <View style={styles.stack}>
@@ -205,6 +234,11 @@ export default function DailyLogScreen() {
                       <View style={styles.grow} />
                       {open && canSubmit ? <Button title="Add" variant="ghost" onPress={() => setAdding(section)} testID={`daily-log-add-${section}`} /> : null}
                     </View>
+                    {section === 'quantities' ? (
+                      <Text variant="caption" tone="muted" testID="daily-log-quantities-note">
+                        Quantities installed against the allocated items. Each goes for approval on the Progress screen; none is progress until then.
+                      </Text>
+                    ) : null}
                     {entries.length === 0 ? (
                       <Text tone="muted">Nothing recorded.</Text>
                     ) : (
@@ -213,7 +247,8 @@ export default function DailyLogScreen() {
                           <View style={styles.grow}>
                             <Text>{describeEntry(section, e)}</Text>
                             <Text variant="caption" tone="muted">
-                              {[e.activity?.name, e.location?.name, e.party?.name, e.status !== 'approved' ? humanise(e.status) : null].filter(Boolean).join(' · ')}
+                              {/* A quantity row's section status is the day's review state, not progress approval, so it is left out of a line that would read as one. */}
+                              {[e.activity?.name, e.location?.name, e.party?.name, section !== 'quantities' && e.status !== 'approved' ? humanise(e.status) : null].filter(Boolean).join(' · ')}
                             </Text>
                             {/*
                               A delivery observed here is not stock received. The

@@ -4,24 +4,31 @@
  * timesheets. Writes that the server can replay carry a clientRequestId.
  */
 import { api, run } from '@/api/client'
-import type {
-  Activity,
-  Crew,
-  DailyLog,
-  DailyLogDay,
-  DailyLogSection,
-  DailyLogSettings,
-  EntryInput,
-  Lookahead,
-  LookaheadItem,
-  Photo,
-  PhotosPage,
-  ProgressInput,
-  ProgressMethod,
-  ProgressSubmission,
-  Timesheet,
-  TimesheetEntry,
-  Worker,
+import { isAppError, looksTechnical } from '@/api/errors'
+import {
+  QUANTITY_FIGURE_KEYS,
+  type Activity,
+  type ActivityQuantities,
+  type ActivityQuantitiesAnswer,
+  type AllocatedItem,
+  type AllocatedItemsAnswer,
+  type Crew,
+  type DailyLog,
+  type DailyLogDay,
+  type DailyLogSection,
+  type DailyLogSettings,
+  type EntryInput,
+  type Lookahead,
+  type LookaheadItem,
+  type Photo,
+  type PhotosPage,
+  type ProgressInput,
+  type ProgressMethod,
+  type ProgressSubmission,
+  type QuantityProgressEntry,
+  type Timesheet,
+  type TimesheetEntry,
+  type Worker,
 } from '@/api/site-types'
 
 type Query = Record<string, string | number | boolean | undefined>
@@ -109,6 +116,77 @@ export const approveProgressSubmission = (projectId: string, activityId: string,
 
 export const rejectProgressSubmission = (projectId: string, activityId: string, submissionId: string, reason: string) =>
   send<ProgressSubmission>('POST', '/projects/{projectId}/activities/{id}/progress-submissions/{submissionId}/reject', { path: { projectId, id: activityId, submissionId }, body: { reason } })
+
+// ── Quantities (PC-6) ──
+
+/** An allocation row as the register lists it; only what the picker needs is read. */
+interface AllocationRow {
+  id: string
+  boqItemId: string
+  quantity: number | null
+  unitCode: string | null
+  boqItem: { id: string; code?: string | null; description: string; unit?: string | null; unitCode?: string | null } | null
+}
+
+/**
+ * The items the site may record an installed quantity against: the approved
+ * allocations of the activity, read from the allocation register — the one
+ * list the server already keeps and already gates on reading the BOQ. The
+ * answer carries each item's description and unit, and its code when the
+ * server sent one; nothing is recomputed. A refusal is the server
+ * withholding the bill from this reader (§12): it comes back as
+ * `notAvailable` with the server's own reason, and no item is invented.
+ */
+export const listAllocatedItems = async (projectId: string, activityId: string, signal?: AbortSignal): Promise<AllocatedItemsAnswer> => {
+  try {
+    const data = await get<{ allocations: AllocationRow[] }>('/projects/{projectId}/activity-boq-allocations', { path: { projectId }, query: { activityId, status: 'approved' }, signal })
+    const items: AllocatedItem[] = (data.allocations ?? [])
+      .filter((row) => row.boqItem)
+      .map((row) => ({
+        id: row.boqItem!.id,
+        boqItemId: row.boqItemId,
+        allocationId: row.id,
+        description: row.boqItem!.description,
+        unitCode: row.unitCode ?? row.boqItem!.unitCode ?? row.boqItem!.unit ?? null,
+        code: row.boqItem!.code || null,
+        plannedQuantity: row.quantity ?? null,
+      }))
+    return { items, notAvailable: null }
+  } catch (error) {
+    // The server's own reason when it wrote one a person can read; the app's sentence otherwise.
+    if (isAppError(error) && error.code === 'FORBIDDEN') return { items: [], notAvailable: { reason: error.message && error.message !== error.code && !looksTechnical(error.message) ? error.message : error.userMessage } }
+    throw error
+  }
+}
+
+/** The project's quantity progress entries (core contract: GET /projects/:id/quantity-progress), narrowed by activity, item or status. */
+export const listQuantityProgress = async (projectId: string, filters: { activityId?: string; boqItemId?: string; status?: string } = {}, signal?: AbortSignal): Promise<QuantityProgressEntry[]> => {
+  const data = await get<{ items?: QuantityProgressEntry[] } | QuantityProgressEntry[]>('/projects/{projectId}/quantity-progress', { path: { projectId }, query: { activityId: filters.activityId, boqItemId: filters.boqItemId, status: filters.status }, signal })
+  return Array.isArray(data) ? data : (data.items ?? [])
+}
+
+/**
+ * The views server's answer as the app reads it. The six figures sit under
+ * `figures` (quantity-views.service folds them there; they are never at the
+ * top level), and a member the server withholds the bill from gets
+ * `withheld: true` with the reason at the top — that becomes the answer's
+ * `notAvailable`, so a dash and the server's reason stand in for every
+ * figure. A figure the server did send — a genuine 0 received, a figure with
+ * its own `notAvailable` reason — is passed through as it came, reason and
+ * all: the app never substitutes its own sentence for the server's.
+ */
+export const readActivityQuantities = (answer: ActivityQuantitiesAnswer | null | undefined): ActivityQuantities => {
+  const figures = answer?.figures && typeof answer.figures === 'object' ? answer.figures : {}
+  const read: ActivityQuantities = {}
+  for (const key of QUANTITY_FIGURE_KEYS) if (key in figures) read[key] = figures[key] ?? null
+  read.notAvailable = answer?.withheld ? { reason: answer.reason || 'Not available' } : null
+  read.progressSource = answer?.progress && answer.progress.allowed ? (answer.progress.progressSource ?? null) : null
+  return read
+}
+
+/** The five quantities and the committed one for an activity (views contract), each with its truth, basis and unit — or the reason it is not available. */
+export const getActivityQuantities = async (projectId: string, activityId: string, signal?: AbortSignal): Promise<ActivityQuantities> =>
+  readActivityQuantities(await get<ActivityQuantitiesAnswer>('/projects/{projectId}/activities/{id}/quantities', { path: { projectId, id: activityId }, signal }))
 
 // ── Lookaheads ──
 

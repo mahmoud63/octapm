@@ -2,11 +2,11 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { userMessage } from '@/api/errors'
-import { useActivity, useConstraints, useProgressMethod, useProgressReview, useProgressSubmissions, useSubmitProgress } from '@/api/site-hooks'
+import { useActivity, useActivityQuantities, useConstraints, usePendingQuantities, useProgressMethod, useProgressReview, useProgressSubmissions, useSubmitProgress } from '@/api/site-hooks'
 import { useForms } from '@/api/quality-hooks'
 import { useRfis } from '@/api/record-hooks'
 import { useStockMovements } from '@/api/inventory-hooks'
-import type { ProgressInput } from '@/api/site-types'
+import { QUANTITY_FIGURE_KEYS, type ProgressInput, type QuantityFigure } from '@/api/site-types'
 import { useAuthStore } from '@/auth/store'
 import { ActionBar, type RecordAction } from '@/components/ActionBar'
 import { Evidence } from '@/components/Evidence'
@@ -19,6 +19,24 @@ import { Badge, Button, Card, ErrorState, KPI, SkeletonList, Text, spacing, tone
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, dateTime, humanise } from '@/utilities/format'
+
+/** PROGRESS SOURCE: the provenance of the official figure, as the server records it on the approved row. */
+export function progressSourceLine(a: { pctComplete: number | null; approvedProgressSource?: string | null; approvedProgressUpdatedAt: string | null }): string {
+  // The server answers 0 for an activity with no approved row at all (activity.service sanitizeActivity); the approved row's own stamp says whether one exists.
+  if (a.approvedProgressUpdatedAt == null && a.approvedProgressSource == null) return 'No approved progress yet. Nothing recorded on site is official until the progress approvers approve it.'
+  const source = a.approvedProgressSource ? humanise(a.approvedProgressSource) : 'Not recorded'
+  return `Progress source: ${source}${a.approvedProgressUpdatedAt ? ` · approved ${day(a.approvedProgressUpdatedAt)}` : ''}`
+}
+
+/** One of the five figures as a line: its value in its unit with its truth, or a dash and the server's reason — never a zero in place of a withheld figure. */
+export function quantityFigureLine(figure: QuantityFigure | null | undefined, withheld: { reason: string } | null | undefined): { value: string; detail: string | null } {
+  const reason = figure?.notAvailable?.reason ?? (figure == null ? withheld?.reason : null) ?? null
+  const value = figure?.value == null ? NaN : Number(figure.value)
+  if (reason || figure == null || !Number.isFinite(value)) return { value: '—', detail: reason ?? 'Not available' }
+  const unit = figure.unitCode ? ` ${figure.unitCode}` : ''
+  const detail = [figure.truth ? humanise(figure.truth) : null, figure.basis ? humanise(figure.basis) : null, figure.unitMatch === false ? 'unit differs from the item' : null].filter(Boolean).join(' · ')
+  return { value: `${value}${unit}`, detail: detail || null }
+}
 
 function Fact({ label, value }: { label: string; value: string | null | undefined }) {
   if (!value) return null
@@ -51,6 +69,8 @@ export default function ActivityScreen() {
   const issued = useStockMovements({ projectId: projectId ?? undefined, activityId: id, type: 'issue' }, !!projectId && !!id)
   const method = useProgressMethod(projectId, id ?? null)
   const submissions = useProgressSubmissions(projectId, id ?? null)
+  const pendingQuantities = usePendingQuantities(projectId, id ?? null)
+  const quantities = useActivityQuantities(projectId, id ?? null)
   const submit = useSubmitProgress(projectId ?? '', id ?? '')
   const [updating, setUpdating] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
@@ -122,6 +142,20 @@ export default function ActivityScreen() {
           <KPI label="Float" value={a.totalFloat != null ? `${a.totalFloat} d` : '—'} tone={a.totalFloat != null && a.totalFloat <= 0 ? 'error' : 'default'} />
           <KPI label="Duration" value={a.duration != null ? `${a.duration} d` : '—'} />
         </View>
+
+        <Card>
+          <View style={styles.stack}>
+            <Text variant="caption" tone="muted" testID="activity-progress-source">
+              {progressSourceLine(a)}
+            </Text>
+            {/* Quantities recorded on site wait for the same approvers; the count is of what is waiting, never of progress. Absent on a server without the register. */}
+            {pendingQuantities.data ? (
+              <View style={styles.row} testID="activity-pending-quantities">
+                <Badge label={`${pendingQuantities.data.length} quantit${pendingQuantities.data.length === 1 ? 'y' : 'ies'} awaiting approval`} tone={pendingQuantities.data.length ? 'warning' : 'neutral'} />
+              </View>
+            ) : null}
+          </View>
+        </Card>
 
         <Card>
           <View style={styles.stack}>
@@ -210,6 +244,38 @@ export default function ActivityScreen() {
             )}
           </View>
         </Card>
+
+        {/*
+          The five quantities and the committed one, each its own truth (PC-6
+          §5): received, issued, installed, certified, paid — never merged,
+          never summed across units. The server hands over a figure or
+          withholds it with its reason; the app prints a dash for the latter.
+        */}
+        {quantities.data ? (
+          <Card testID="activity-quantities">
+            <View style={styles.stack}>
+              <Text variant="label" label tone="muted">
+                Quantities
+              </Text>
+              {QUANTITY_FIGURE_KEYS.map((key) => {
+                const line = quantityFigureLine(quantities.data?.[key], quantities.data?.notAvailable)
+                return (
+                  <View key={key} style={styles.fact} testID={`activity-quantity-${key}`}>
+                    <Text variant="caption" tone="muted">
+                      {humanise(key)}
+                    </Text>
+                    <Text>{line.value}</Text>
+                    {line.detail ? (
+                      <Text variant="caption" tone="muted">
+                        {line.detail}
+                      </Text>
+                    ) : null}
+                  </View>
+                )
+              })}
+            </View>
+          </Card>
+        ) : null}
 
         {/*
           What else belongs to this job. Only the registers that can genuinely
