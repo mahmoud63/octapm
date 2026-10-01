@@ -119,38 +119,42 @@ export const rejectProgressSubmission = (projectId: string, activityId: string, 
 
 // ── Quantities (PC-6) ──
 
-/** An allocation row as the register lists it; only what the picker needs is read. */
-interface AllocationRow {
+/** One line of the server's picker (GET /activities/{id}/allocated-items); only what the form needs is read. */
+interface AllocatedItemRow {
   id: string
-  boqItemId: string
-  quantity: number | null
-  unitCode: string | null
-  boqItem: { id: string; code?: string | null; description: string; unit?: string | null; unitCode?: string | null } | null
+  description: string
+  unit?: string | null
+  unitCode?: string | null
+  /** Withheld, with the allocation and its quantity, from a member who may not read the BOQ. */
+  code?: string | null
+  allocationId?: string | null
+  allocatedQuantity?: number | null
 }
 
 /**
- * The items the site may record an installed quantity against: the approved
- * allocations of the activity, read from the allocation register — the one
- * list the server already keeps and already gates on reading the BOQ. The
- * answer carries each item's description and unit, and its code when the
- * server sent one; nothing is recomputed. A refusal is the server
- * withholding the bill from this reader (§12): it comes back as
- * `notAvailable` with the server's own reason, and no item is invented.
+ * The items the site may record an installed quantity against: the BOQ
+ * items the activity has an approved allocation of, read from the server's
+ * own picker — GET /projects/{id}/activities/{activityId}/allocated-items,
+ * admitted on reading progress (PC-6 §4.1, the owner's decision: a person on
+ * site records without reading the bill). The server gives every such
+ * reader the item's id, description and unit; the code, the allocation and
+ * the allocated quantity only to a member who may read the BOQ — so those
+ * are read when sent and never invented. A refusal of the whole read comes
+ * back as `notAvailable` with the server's own reason.
  */
 export const listAllocatedItems = async (projectId: string, activityId: string, signal?: AbortSignal): Promise<AllocatedItemsAnswer> => {
   try {
-    const data = await get<{ allocations: AllocationRow[] }>('/projects/{projectId}/activity-boq-allocations', { path: { projectId }, query: { activityId, status: 'approved' }, signal })
-    const items: AllocatedItem[] = (data.allocations ?? [])
-      .filter((row) => row.boqItem)
-      .map((row) => ({
-        id: row.boqItem!.id,
-        boqItemId: row.boqItemId,
-        allocationId: row.id,
-        description: row.boqItem!.description,
-        unitCode: row.unitCode ?? row.boqItem!.unitCode ?? row.boqItem!.unit ?? null,
-        code: row.boqItem!.code || null,
-        plannedQuantity: row.quantity ?? null,
-      }))
+    const data = await get<{ items?: AllocatedItemRow[] }>('/projects/{projectId}/activities/{id}/allocated-items', { path: { projectId, id: activityId }, signal })
+    const items: AllocatedItem[] = (data.items ?? []).map((row) => ({
+      id: row.id,
+      boqItemId: row.id,
+      allocationId: row.allocationId ?? null,
+      description: row.description,
+      unit: row.unit ?? null,
+      unitCode: row.unitCode ?? row.unit ?? null,
+      code: row.code || null,
+      plannedQuantity: row.allocatedQuantity ?? null,
+    }))
     return { items, notAvailable: null }
   } catch (error) {
     // The server's own reason when it wrote one a person can read; the app's sentence otherwise.

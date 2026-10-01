@@ -1131,7 +1131,8 @@ function QuantityEntryForm({
   const canSave =
     Boolean(activityId && boqItemId && unit) &&
     Number.isFinite(quantityNumber) &&
-    quantityNumber >= 0
+    // Zero is no work, and no work is no row: the server refuses it (QUANTITY_INVALID).
+    quantityNumber > 0
   return (
     <form
       className='grid gap-2 rounded-md border bg-muted/20 p-2 sm:grid-cols-4'

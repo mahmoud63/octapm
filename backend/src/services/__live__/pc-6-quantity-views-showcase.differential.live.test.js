@@ -174,9 +174,9 @@ liveDescribe("PC-6 quantity views: showcase differential (read-only)", () => {
       if (realCore) expect([item.code, figures.installed.value]).toEqual([item.code, sum(approved, (row) => row.quantity)]);
       else expect([item.code, figures.installed.notAvailable]).toEqual([item.code, { reason: "PC-6 core pending" }]);
 
-      // Five truths, kept apart.
+      // Six figures, kept apart, each with its truth label (certified is a Σ over IpcItem rows: derived — integration item 5).
       expect([figures.installed.truth, figures.certified.truth, figures.paid.truth, figures.received.truth, figures.issued.truth, figures.committed.truth]).toEqual([
-        "derived", "source", "projection", "derived", "derived", "derived",
+        "derived", "derived", "projection", "derived", "derived", "derived",
       ]);
     }
     // The substantive comparison stood on real rows.

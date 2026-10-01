@@ -89,9 +89,10 @@ export interface AllocatedItemRef {
 
 /**
  * One item the site may record a quantity against: an approved allocation
- * of the activity, read from the server's own list. The bill's figures are
- * the server's to hand over or withhold (§12): a member who may not read
- * the BOQ gets `notAvailable` with the server's reason and no item at all.
+ * of the activity, read from the server's own picker. Every reader of
+ * progress gets the item's id, description and unit; its code, allocation
+ * and allocated quantity are the server's to hand over or withhold (§12):
+ * a member who may not read the BOQ picks by description and unit alone.
  */
 export interface AllocatedItem extends AllocatedItemRef {
   boqItemId: string

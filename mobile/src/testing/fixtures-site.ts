@@ -175,12 +175,25 @@ export const financeSite = matrix('finance', {
 })
 
 /** The allocation register's answer for a1: two approved allocations, as the server lists them (only what the picker reads). */
+/** GET /projects/p1/activities/a1/allocated-items as a member who may read the BOQ gets it (the server's picker). */
 export const allocationsOfA1 = {
-  allocations: [
-    { id: 'al1', projectId: 'p1', boqItemId: 'b1', activityId: 'a1', quantity: 480, unitCode: 'm3', status: 'approved', isActive: true, boqItem: { id: 'b1', code: 'C-030', description: 'Concrete C30 to raft', unit: 'm3', unitCode: 'm3', quantity: 480 } },
-    { id: 'al2', projectId: 'p1', boqItemId: 'b2', activityId: 'a1', quantity: 12000, unitCode: 'kg', status: 'approved', isActive: true, boqItem: { id: 'b2', code: '', description: 'Reinforcement to raft', unit: 'kg', unitCode: 'kg', quantity: 12000 } },
+  activityId: 'a1',
+  activity: { id: 'a1', name: 'Pour raft', code: 'A100' },
+  items: [
+    { id: 'b1', code: 'C-030', description: 'Concrete C30 to raft', unit: 'm3', unitCode: 'm3', allocationId: 'al1', allocationIds: ['al1'], allocatedQuantity: 480 },
+    { id: 'b2', code: null, description: 'Reinforcement to raft', unit: 'kg', unitCode: 'kg', allocationId: 'al2', allocationIds: ['al2'], allocatedQuantity: 12000 },
   ],
-  summary: {},
+}
+
+/** The same picker for a member who may not read the BOQ: id, description and unit — no code, allocation or quantity. */
+export const allocationsOfA1Withheld = {
+  activityId: 'a1',
+  activity: { id: 'a1', name: 'Pour raft', code: 'A100' },
+  items: [
+    { id: 'b1', description: 'Concrete C30 to raft', unit: 'm3', unitCode: 'm3' },
+    { id: 'b2', description: 'Reinforcement to raft', unit: 'kg', unitCode: 'kg' },
+  ],
+  boqWithheld: { keys: ['code', 'allocationId', 'allocationIds', 'allocatedQuantity'], reason: 'The code, allocation and allocated quantity of an activity’s BOQ items are available only to members who may read the BOQ' },
 }
 
 export const quantityEntry = (over: Partial<DailyLogEntry> = {}): DailyLogEntry => ({
