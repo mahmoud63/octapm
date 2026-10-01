@@ -5,8 +5,15 @@
  */
 import type { Named, Person } from '@/api/record-types'
 
-export type DailyLogSection = 'manpower' | 'equipment' | 'deliveries' | 'visitors' | 'delays' | 'notes'
-export const DAILY_LOG_SECTIONS: readonly DailyLogSection[] = ['manpower', 'equipment', 'deliveries', 'visitors', 'delays', 'notes']
+/**
+ * The seventh section, `quantities` (PC-6, progress measurement §4), is a
+ * line of the day like the other six — a quantity installed against a BOQ
+ * item allocated to an activity. The server mints a *pending* progress entry
+ * from it; nothing recorded here is official until the progress approvers
+ * approve it on the Progress screen, so the app never reads it as progress.
+ */
+export type DailyLogSection = 'manpower' | 'equipment' | 'deliveries' | 'visitors' | 'delays' | 'notes' | 'quantities'
+export const DAILY_LOG_SECTIONS: readonly DailyLogSection[] = ['manpower', 'equipment', 'deliveries', 'visitors', 'delays', 'notes', 'quantities']
 // The server's own nine (daily-log.service.js DELAY_TYPES). Offering a tenth
 // only produces a refusal at the end of a form someone has already filled in.
 export const DELAY_TYPES = ['weather', 'access', 'design', 'material', 'labour', 'equipment', 'inspection', 'utility', 'other'] as const
@@ -51,6 +58,16 @@ export interface DailyLogEntry {
   // notes
   kind?: string | null
   text?: string | null
+  // quantities (PC-6): `quantity` above, in the item's unit
+  boqItemId?: string | null
+  /** The allocated BOQ item the quantity was installed against; absent when the server withholds the bill (§12). */
+  boqItem?: AllocatedItemRef | null
+  allocationId?: string | null
+  unitCode?: string | null
+  /** The pending progress entry the server minted from this line (§4), when it says. Its status is progress' own, never this row's. */
+  progressEntry?: { id?: string; status?: string | null; source?: string | null } | null
+  /** The server's reason when it withholds the item from this reader. */
+  boqWithheld?: { reason: string } | null
   // shared
   activityId?: string | null
   activity?: Named | null
@@ -59,6 +76,72 @@ export interface DailyLogEntry {
   notes?: string | null
   createdAt?: string
 }
+
+/** A BOQ item as the daily log or the allocation list names it: the description and the unit, the code only when the server sent one. */
+export interface AllocatedItemRef {
+  id: string
+  description: string
+  unitCode?: string | null
+  code?: string | null
+}
+
+/**
+ * One item the site may record a quantity against: an approved allocation
+ * of the activity, read from the server's own list. The bill's figures are
+ * the server's to hand over or withhold (§12): a member who may not read
+ * the BOQ gets `notAvailable` with the server's reason and no item at all.
+ */
+export interface AllocatedItem extends AllocatedItemRef {
+  boqItemId: string
+  allocationId: string | null
+  /** The approved allocation's quantity in the item's unit, when the server sent it. Never a figure to invent. */
+  plannedQuantity?: number | null
+}
+
+export interface AllocatedItemsAnswer {
+  items: AllocatedItem[]
+  notAvailable: { reason: string } | null
+}
+
+/** A quantity progress entry (PC-6 §3): source data for the installed figure once approved; pending until then. */
+export interface QuantityProgressEntry {
+  id: string
+  activityId: string
+  boqItemId: string
+  allocationId?: string | null
+  locationId?: string | null
+  unitCode: string | null
+  quantity: number
+  date?: string | null
+  source: 'submission' | 'daily_log' | 'manual' | 'import' | string
+  status: 'draft' | 'submitted' | 'approved' | 'rejected' | string
+  submissionId?: string | null
+  dailyLogId?: string | null
+  note?: string | null
+  boqItem?: AllocatedItemRef | null
+  createdAt?: string
+  approvedAt?: string | null
+}
+
+/**
+ * One of the five quantities (received, issued, installed, certified, paid)
+ * or the committed one, each with its own truth and basis — never merged,
+ * never summed across units. `notAvailable` is the server withholding or
+ * not having the figure; the app shows "—" and the reason, never 0.
+ */
+export interface QuantityFigure {
+  value: number | null
+  truth: 'source' | 'derived' | 'projection' | string | null
+  basis: string | null
+  unitCode: string | null
+  unitMatch?: boolean | null
+  notAvailable?: { reason: string } | null
+}
+
+export type QuantityFigureKey = 'received' | 'issued' | 'installed' | 'certified' | 'paid' | 'committed'
+export const QUANTITY_FIGURE_KEYS: readonly QuantityFigureKey[] = ['received', 'issued', 'installed', 'certified', 'paid', 'committed']
+
+export type ActivityQuantities = Partial<Record<QuantityFigureKey, QuantityFigure | null>> & { notAvailable?: { reason: string } | null }
 
 export interface DailyLogWeather {
   condition?: string | null
@@ -84,8 +167,9 @@ export interface DailyLog {
   submittedBy: string | Person | null
   approvedAt: string | null
   approvedBy: string | Person | null
-  sections: Record<DailyLogSection, DailyLogEntry[]>
-  totals: { workers: number; manHours: number; companies: number; equipmentCount: number; equipmentHours: number; idleHours: number; deliveries: number; visitors: number; hoursLost: number; notes: number; entries: number; awaitingReview: number }
+  /** The quantities section is absent from a server that does not keep it yet; the six others are always there. */
+  sections: Record<Exclude<DailyLogSection, 'quantities'>, DailyLogEntry[]> & { quantities?: DailyLogEntry[] }
+  totals: { workers: number; manHours: number; companies: number; equipmentCount: number; equipmentHours: number; idleHours: number; deliveries: number; visitors: number; hoursLost: number; notes: number; entries: number; awaitingReview: number; quantities?: number }
   path: string
 }
 
@@ -132,6 +216,8 @@ export interface Activity {
   actualStart: string | null
   actualFinish: string | null
   approvedProgressUpdatedAt: string | null
+  /** PROGRESS SOURCE: where the official figure came from (manual, mobile, daily_log, daily_report, import), as the server records it on the approved row. */
+  approvedProgressSource?: string | null
   progressMethod: ProgressMethodKind | string | null
   pendingProgress: { pctComplete?: number | null; status?: string | null; submittedAt?: string | null } | null
   progressApprovalStatus: 'draft' | 'submitted' | 'approved' | 'missing' | string

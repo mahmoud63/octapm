@@ -1,5 +1,6 @@
 /** Server state for the site-reporting and schedule screens (M3). */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { isAppError } from '@/api/errors'
 import { keys } from '@/api/query'
 import type { PhotoFilters } from '@/api/site-endpoints'
 import {
@@ -8,15 +9,18 @@ import {
   createTimesheet,
   deleteDailyLogEntry,
   getActivity,
+  getActivityQuantities,
   getDailyLog,
   getDailyLogSettings,
   getLookahead,
   getProgressMethod,
   getTimesheet,
   listActivitiesFull,
+  listAllocatedItems,
   listCrews,
   listDailyLogDays,
   listProjectProgressSubmissions,
+  listQuantityProgress,
   listLookaheads,
   listPhotos,
   listProgressSubmissions,
@@ -109,6 +113,52 @@ export function useProgressReview(projectId: string, activityId: string) {
   const approve = useMutation({ mutationFn: (submissionId: string) => approveProgressSubmission(projectId, activityId, submissionId), onSuccess: settle })
   const reject = useMutation({ mutationFn: ({ submissionId, reason }: { submissionId: string; reason: string }) => rejectProgressSubmission(projectId, activityId, submissionId, reason), onSuccess: settle })
   return { approve, reject }
+}
+
+// ── Quantities (PC-6) ──
+
+/** The register is not on this server yet: the screen shows nothing rather than an error, and never a figure. */
+const absentRegister = (error: unknown) => isAppError(error) && error.code === 'NOT_FOUND'
+
+/** The approved allocations of one activity, as items to record a quantity against; the server withholds them from a member without BOQ read. */
+export function useAllocatedItems(projectId: string | null, activityId: string | null) {
+  return useQuery({ queryKey: scoped(projectId ?? 'none', 'activity', activityId, 'allocated-items'), queryFn: ({ signal }) => listAllocatedItems(projectId!, activityId!, signal), enabled: !!projectId && !!activityId, staleTime: 2 * 60_000 })
+}
+
+/**
+ * The quantity entries of an activity still waiting for approval. `null`
+ * when the server has no quantity register (the endpoint is not there), so
+ * a screen can leave the line out instead of counting nothing as zero.
+ */
+export function usePendingQuantities(projectId: string | null, activityId: string | null) {
+  return useQuery({
+    queryKey: scoped(projectId ?? 'none', 'activity', activityId, 'pending-quantities'),
+    queryFn: async ({ signal }) => {
+      try {
+        return await listQuantityProgress(projectId!, { activityId: activityId!, status: 'submitted' }, signal)
+      } catch (error) {
+        if (absentRegister(error)) return null
+        throw error
+      }
+    },
+    enabled: !!projectId && !!activityId,
+  })
+}
+
+/** The five quantities and the committed one for an activity; `null` when the server has no such view yet. */
+export function useActivityQuantities(projectId: string | null, activityId: string | null) {
+  return useQuery({
+    queryKey: scoped(projectId ?? 'none', 'activity', activityId, 'quantities'),
+    queryFn: async ({ signal }) => {
+      try {
+        return await getActivityQuantities(projectId!, activityId!, signal)
+      } catch (error) {
+        if (absentRegister(error)) return null
+        throw error
+      }
+    },
+    enabled: !!projectId && !!activityId,
+  })
 }
 
 // ── Lookaheads ──
