@@ -58,19 +58,28 @@ const TARGETS = {
 } satisfies Record<string, ProjectSetupTarget>
 
 /**
- * The open-exceptions figure (PC-7b): the server's total and its counts per
- * severity, never summed here; withheld exceptions are said with the
- * server's reason, never as 0.
+ * The open-exceptions figure (PC-7b): GET …/controls/exceptions/summary — the
+ * server's total (open and in change) and its counts per severity, never
+ * summed here, with how many of them are in change. The withheld marker,
+ * which the server derives from this person's access alone, reads "—" with
+ * its reason: it never says whether anything was left out, and a 0 beside it
+ * is a dash, never "none".
  */
-function openExceptionsFigure(offered: boolean, summary: ExceptionsSummary | undefined) {
+function openExceptionsFigure(
+  offered: boolean,
+  summary: ExceptionsSummary | undefined,
+  failed: boolean
+) {
   if (!offered) return { value: '—', basis: 'exceptions not offered', tone: 'neutral' as StatusTone }
+  if (failed) return { value: '—', basis: 'the exceptions summary could not be read', tone: 'neutral' as StatusTone }
   if (!summary) return { value: '—', basis: 'reading exceptions', tone: 'neutral' as StatusTone }
   if (summary.state === 'not-on-server') {
-    // No project summary on this API yet: a dash, never a count made here.
-    return { value: '—', basis: 'the exceptions summary is not on this server yet', tone: 'neutral' as StatusTone }
+    // An API without PC-7b: a dash, never a count made here.
+    return { value: '—', basis: 'the exceptions summary is not on this server', tone: 'neutral' as StatusTone }
   }
   const counts = severityCountsText(summary.bySeverity)
-  const withheld = summary.withheld ? `some withheld: ${summary.withheld.reason}` : ''
+  const inChange = summary.inChange != null ? `${summary.inChange.toLocaleString()} in change` : ''
+  const withheld = summary.withheld ? `— ${summary.withheld.reason}` : ''
   const critical = summary.bySeverity.critical ?? 0
   const warning = summary.bySeverity.warning ?? 0
   return {
@@ -79,7 +88,8 @@ function openExceptionsFigure(offered: boolean, summary: ExceptionsSummary | und
       summary.total == null || (summary.withheld && summary.total === 0)
         ? '—'
         : summary.total.toLocaleString(),
-    basis: [counts || (summary.withheld ? '' : 'no counts sent'), withheld].filter(Boolean).join(' · '),
+    basis: [counts || (summary.withheld ? '' : 'no counts sent'), inChange, withheld].filter(Boolean).join(' · '),
+    title: summary.basis ?? undefined,
     tone: (critical > 0 ? 'blocked' : warning > 0 ? 'review' : 'neutral') as StatusTone,
   }
 }
@@ -318,10 +328,14 @@ export function ControlsStrip({
   // PC-7b: open exceptions per severity, as the server counted the ones this
   // person may see — asked only when the Exceptions page is offered to them.
   const exceptionsOffered = canNavigate(TARGETS.exceptions)
-  const { data: exceptionsSummary } = useExceptionsSummary(projectId, {
+  const { data: exceptionsSummary, isError: exceptionsSummaryFailed } = useExceptionsSummary(projectId, {
     enabled: exceptionsOffered && !permissionsSettling,
   })
-  const exceptionsFigure = openExceptionsFigure(exceptionsOffered, exceptionsSummary)
+  const exceptionsFigure = openExceptionsFigure(
+    exceptionsOffered,
+    exceptionsSummary,
+    exceptionsSummaryFailed
+  )
 
   if (isLoading && !readiness) {
     return (
@@ -849,6 +863,7 @@ export function ControlsStrip({
         truth='derived'
         basis={exceptionsFigure.basis}
         tone={exceptionsFigure.tone}
+        title={'title' in exceptionsFigure ? exceptionsFigure.title : undefined}
         testId='uat-controls-figure-open-exceptions'
         onClick={linkTo(TARGETS.exceptions)}
       />

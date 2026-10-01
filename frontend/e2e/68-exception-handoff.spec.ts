@@ -557,7 +557,7 @@ test('the screens draw the API’s shapes as sent and send what its validators t
     const rest = url.pathname.split('/controls/exceptions')[1] ?? ''
     if (rest === '/summary') {
       return route.fulfill({
-        json: { success: true, data: { total: 2, bySeverity: { critical: 1, warning: 1, info: 0 }, withheld: { reason } } },
+        json: { success: true, data: { total: 2, bySeverity: { critical: 1, warning: 1, info: 0 }, open: { total: 1 }, inChange: { total: 1 }, basis: 'open and in change', withheld: { reason } } },
       })
     }
     if (method === 'GET' && rest === `/${openId}/change-event-prefill`) {
@@ -695,7 +695,9 @@ test('the screens draw the API’s shapes as sent and send what its validators t
   await expect(page.getByTestId('uat-controls-figure-open-exceptions-value')).toHaveText('2', { timeout: 45_000 })
   const basis = page.getByTestId('uat-controls-figure-open-exceptions-basis')
   await expect(basis).toContainText('1 critical · 1 warning · 0 info')
-  await expect(basis).toContainText(`some withheld: ${reason}`)
+  await expect(basis).toContainText('1 in change')
+  await expect(basis).toContainText(`— ${reason}`)
+  await expect(basis).not.toContainText('some withheld')
 
   // The workspace tile, as the API sends openExceptions: a withheld project named with its reason, never a count.
   const otherProjectId = crypto.randomUUID()
@@ -764,5 +766,5 @@ test('a member without BOQ read reaches Exceptions, not Mapping, and an all-with
   // The Overview figure: a dash and the reason, never 0.
   await page.goto(projectPath(projectId, 'overview'))
   await expect(page.getByTestId('uat-controls-figure-open-exceptions-value')).toHaveText('—', { timeout: 45_000 })
-  await expect(page.getByTestId('uat-controls-figure-open-exceptions-basis')).toContainText(`some withheld: ${reason}`)
+  await expect(page.getByTestId('uat-controls-figure-open-exceptions-basis')).toContainText(`— ${reason}`)
 })

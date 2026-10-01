@@ -179,10 +179,26 @@ assert.match(
   "the strip's total is the server's, never summed here, and never a 0 beside withheld exceptions"
 )
 assert.match(strip, /severityCountsText\(summary\.bySeverity\)/, 'per-severity counts as the server sent them')
-assert.match(strip, /some withheld: \$\{summary\.withheld\.reason\}/, 'withheld exceptions are said with the reason on the strip')
 assert.match(strip, /testId='uat-controls-figure-open-exceptions'/, 'the strip has the open-exceptions figure')
 const stripFigure = strip.slice(strip.indexOf('function openExceptionsFigure'), strip.indexOf('* Which of the three truths'))
 assert.ok(!/bySeverity\.(critical|warning|info)[^\n]*\+/.test(stripFigure), 'the strip never adds the severity counts')
+// PC-7b integration N: the summary route is on the API (GET …/controls/exceptions/summary,
+// declared before /:exceptionId). The withheld marker is "—" with the server's reason —
+// it says nothing about whether anything was left out ("some withheld" would), and
+// what is in change is the server's own count beside the total.
+assert.match(stripFigure, /`— \$\{summary\.withheld\.reason\}`/, 'the withheld marker reads "—" with the reason on the strip')
+assert.ok(!/some withheld/i.test(stripFigure), 'the strip never says that some were withheld — the marker comes from access alone')
+assert.match(stripFigure, /summary\.inChange\b/, 'the strip says how many are in change, as the server counted them')
+assert.match(stripFigure, /title: summary\.basis/, "the server's basis is the figure's title")
+const exceptionsApi = all['api.ts']
+const summaryHook = exceptionsApi.slice(exceptionsApi.indexOf('export const useExceptionsSummary'), exceptionsApi.indexOf('/** The bodies the API'))
+assert.match(summaryHook, /if \(isRouteMissing\(error\)\)/, 'only the API\'s own "route not found" reads as not on this server')
+assert.ok(!/isSummaryMissing|VALIDATION_ERROR/.test(exceptionsApi), 'a refused summary request is an error, never read as "not on this server"')
+const backendRoutes = readFileSync(resolve(root, '..', 'backend', 'src', 'routes', 'exceptions.js'), 'utf8')
+assert.ok(
+  backendRoutes.indexOf('router.get("/summary"') > 0 && backendRoutes.indexOf('router.get("/summary"') < backendRoutes.indexOf('router.get("/:exceptionId"'),
+  'the API declares the summary route before /:exceptionId'
+)
 const tile = all['exceptions-dashboard-card.tsx']
 assert.match(
   tile,

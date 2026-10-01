@@ -128,15 +128,32 @@ export type ExceptionList =
 
 export type SeverityCounts = Partial<Record<ExceptionSeverity, number>>
 
-/** Open-exception counts per severity, as the server counted what this caller may see. */
+/**
+ * GET …/controls/exceptions/summary as the server counted what this caller
+ * may see: `total` and `bySeverity` are the open and in-change exceptions
+ * together, `open` / `inChange` each apart (their totals), `basis` the
+ * server's sentence for what is counted. `withheld` comes from the caller's
+ * access alone — it never says whether anything was left out.
+ */
 export type ExceptionsSummary =
   | {
       state: 'ok'
       total: number | null
       bySeverity: SeverityCounts
+      open: number | null
+      inChange: number | null
+      basis: string | null
       withheld: ExceptionsWithheld | null
     }
-  | { state: 'not-on-server'; total: null; bySeverity: SeverityCounts; withheld: null }
+  | {
+      state: 'not-on-server'
+      total: null
+      bySeverity: SeverityCounts
+      open: null
+      inChange: null
+      basis: null
+      withheld: null
+    }
 
 export type ExceptionListQuery = {
   status?: string
@@ -179,7 +196,7 @@ const exceptionsBase = (projectId: string) => `/projects/${projectId}/controls/e
 
 export const EXCEPTION_ROUTES = {
   list: (projectId: string) => exceptionsBase(projectId),
-  /** Open counts per severity for one project (to be declared by the API before /:exceptionId). */
+  /** Open and in-change counts per severity for one project (declared by the API before /:exceptionId). */
   summary: (projectId: string) => `${exceptionsBase(projectId)}/summary`,
   action: (
     projectId: string,
@@ -215,23 +232,6 @@ export const isRouteMissing = (error: unknown) => {
   if (!(error instanceof AxiosError) || error.response?.status !== 404) return false
   const body = (error.response.data ?? {}) as ErrorBody
   return body.error?.code === 'NOT_FOUND' && /^Route not found/.test(body.error.message ?? '')
-}
-
-/**
- * The summary address on an API whose exceptions router has no summary
- * route yet: `/summary` is read as an exception id and refused on that
- * parameter. Said as "not on this server", never as a count.
- */
-const isSummaryMissing = (error: unknown) => {
-  if (isRouteMissing(error)) return true
-  if (!(error instanceof AxiosError) || error.response?.status !== 400) return false
-  const body = (error.response.data ?? {}) as ErrorBody
-  return (
-    body.error?.code === 'VALIDATION_ERROR' &&
-    (body.error.details ?? []).some(
-      (detail) => detail.field === 'exceptionId' && detail.location === 'params'
-    )
-  )
 }
 
 const asWithheld = (value: unknown): ExceptionsWithheld | null => {
@@ -323,9 +323,9 @@ export const useProjectExceptions = (
   })
 
 /**
- * The project's open counts: `{ total, bySeverity, withheld? }` (the shape
- * of the workspace dashboard's openExceptions, for one project). The counts
- * are the server's; nothing here adds them up.
+ * The project's counts (exception.service exceptionsSummary): `{ total,
+ * bySeverity, open: { total, bySeverity }, inChange: { total, bySeverity },
+ * basis, withheld? }`. Every count is the server's; nothing here adds them up.
  */
 export const readExceptionsSummary = (body: unknown): ExceptionsSummary => {
   const data = (((body ?? {}) as { data?: unknown }).data ?? {}) as Record<string, unknown>
@@ -334,10 +334,17 @@ export const readExceptionsSummary = (body: unknown): ExceptionsSummary => {
   for (const severity of ['critical', 'warning', 'info'] as const) {
     if (typeof counts[severity] === 'number') bySeverity[severity] = counts[severity] as number
   }
+  const totalOf = (value: unknown) => {
+    const total = ((value ?? {}) as { total?: unknown }).total
+    return typeof total === 'number' ? total : null
+  }
   return {
     state: 'ok',
     total: typeof data.total === 'number' ? data.total : null,
     bySeverity,
+    open: totalOf(data.open),
+    inChange: totalOf(data.inChange),
+    basis: typeof data.basis === 'string' && data.basis ? data.basis : null,
     withheld: asWithheld(data.withheld),
   }
 }
@@ -353,8 +360,18 @@ export const useExceptionsSummary = (
         const response = await apiClient.get(EXCEPTION_ROUTES.summary(projectId))
         return readExceptionsSummary(response.data)
       } catch (error) {
-        if (isSummaryMissing(error)) {
-          return { state: 'not-on-server', total: null, bySeverity: {}, withheld: null }
+        // The API's own "route not found" only (a server without PC-7b); a
+        // refused request (400, 403, 404 on the project) is an error, said as one.
+        if (isRouteMissing(error)) {
+          return {
+            state: 'not-on-server',
+            total: null,
+            bySeverity: {},
+            open: null,
+            inChange: null,
+            basis: null,
+            withheld: null,
+          }
         }
         throw error
       }
