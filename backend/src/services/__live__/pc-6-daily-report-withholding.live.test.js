@@ -21,6 +21,13 @@
  * and `boqWithheld` names what was omitted and why. The PM who reads the
  * BOQ is given the figures (the sweep has teeth).
  *
+ * A typed figure below the official one is never lowered silently here
+ * either (verification finding: the create and approve answers dropped
+ * QUANTITY_BELOW_OFFICIAL that the activity route and bulk carry): on walls
+ * (two allocated items, so nothing is minted) the BOQ reader's create and
+ * approve answers warn with the figures; a boq:none site engineer's create
+ * and a boq:none PM's review carry the code alone.
+ *
  *   DATABASE_CONNECTION_LIMIT=4 npm run test:live -- src/services/__live__/pc-6-daily-report-withholding.live.test.js
  */
 const { prisma } = require("../../config/db");
@@ -169,5 +176,54 @@ liveDescribe("PC-6: the legacy daily report withholds its submissions' quantitie
     expect(reviewed.status).toBe("approved");
     // And once more on the list after the reviews.
     withheld(await api.get(at("/daily-reports"), bearer(members.pm.token)));
+  });
+
+  it("a typed figure below the official one is never lowered silently through /daily-reports: the create and the approval answers carry QUANTITY_BELOW_OFFICIAL — whole for the BOQ reader, the code alone for a PM without boq:read", async () => {
+    // Walls: two allocated items (200 + 200 m3), so an approved typed figure mints no entry and the next typed figure is
+    // accepted — the legacy shape the verifier lowered 46.67% → 26.67% with no warning on either answer.
+    const second = await api.post(at("/boq/items"), { code: "1.2", description: "Concrete in walls", quantity: 1500, unit: "m3", rate: 100 }, bearer(live.token));
+    ok(second, 201);
+    const created = await api.post(at("/activities"), { name: "Walls", activityCode: "A130", duration: 4, startDate: "2026-02-23", endDate: "2026-02-26", engineerIds: [live.user.id, members.site.id, members.pm.id] }, bearer(live.token));
+    ok(created, 201);
+    const walls = created.body.data;
+    for (const item of [concrete, second.body.data.item]) {
+      const allocation = await api.post(at("/activity-boq-allocations"), { boqItemId: item.id, activityId: walls.id, quantity: 200 }, bearer(live.token));
+      ok(allocation, 201);
+      for (const step of ["submit", "approve"]) ok(await api.post(at(`/activity-boq-allocations/${allocation.body.data.id}/${step}`), {}, bearer(live.token)));
+    }
+    ok(await api.request("PUT", at(`/activities/${walls.id}/progress-method`), { body: { method: "quantity", quantityUnit: "m3" }, headers: bearer(live.token) }));
+    const wallsReport = (typed, date, token) =>
+      api.post(at("/daily-reports"), { activityId: walls.id, date, status: "submitted", notes: "LiveTest walls", progress: { method: "quantity", quantityComplete: typed } }, bearer(token));
+    const official = async () => (await prisma.activityProgress.findMany({ where: { activityId: walls.id }, orderBy: { approvedAt: "asc" } })).map((row) => [row.pctComplete, row.quantityComplete]);
+
+    // 300 m3 made official: above nothing, no warning on either answer.
+    const first = await wallsReport(300, "2026-02-23", live.token);
+    ok(first, 201);
+    expect(first.body.data.progressSubmissions[0].warnings).toBeUndefined();
+    const firstApproved = await api.post(at(`/daily-reports/${first.body.data.id}/approve`), {}, bearer(live.token));
+    ok(firstApproved);
+    expect(firstApproved.body.data.progressSubmissions[0].warnings).toBeUndefined();
+    expect(await official()).toEqual([[75, 300]]);
+
+    // The BOQ reader types 120: both answers say the approval lowers 300 to 120, with the figures.
+    const whole = (officialInstalled, typed) => [{ code: "QUANTITY_BELOW_OFFICIAL", officialInstalled, typed, message: expect.stringContaining("approving it lowers the official installed figure to the typed one") }];
+    const lower = await wallsReport(120, "2026-02-24", live.token);
+    ok(lower, 201);
+    expect(lower.body.data.progressSubmissions[0]).toMatchObject({ status: "submitted", pctComplete: 30, warnings: whole(300, 120) });
+    const lowerApproved = await api.post(at(`/daily-reports/${lower.body.data.id}/approve`), {}, bearer(live.token));
+    ok(lowerApproved);
+    expect(lowerApproved.body.data.progressSubmissions[0]).toMatchObject({ status: "approved", warnings: whole(300, 120) });
+    expect(await official()).toEqual([[75, 300], [30, 120]]);
+
+    // Without boq:read: the site engineer types 80 and the PM reviews it — each answer keeps the code, never a figure.
+    const codeOnly = [{ code: "QUANTITY_BELOW_OFFICIAL", boqWithheld: { keys: ["officialInstalled", "typed", "message"], reason: expect.stringContaining("only to members who may read the BOQ") } }];
+    const blind = withheld(await wallsReport(80, "2026-02-25", members.site.token), 201);
+    expect(blind.progressSubmissions[0].warnings).toEqual(codeOnly);
+    const blindApproved = withheld(await api.post(at(`/daily-reports/${blind.id}/review`), {}, bearer(members.pm.token)));
+    expect(blindApproved.progressSubmissions[0]).toMatchObject({ status: "approved", warnings: codeOnly });
+    // No compared figure anywhere outside the boqWithheld notes (which name the omitted keys).
+    const figures = (answer) => JSON.stringify(answer, (key, value) => (key === "boqWithheld" ? undefined : value));
+    for (const answer of [blind, blindApproved]) expect(figures(answer)).not.toMatch(/"officialInstalled"|"typed"|:(80|120|300)[,}\]]/);
+    expect(await official()).toEqual([[75, 300], [30, 120], [20, 80]]);
   });
 });

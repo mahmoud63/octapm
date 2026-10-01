@@ -447,6 +447,20 @@ notification of its own. Proven live: `pc-6-daily-report-withholding` (a site en
 template, on every route; each answer swept for every quantity key, the unit code and every seeded figure; the BOQ
 reader is given them all).
 
+**The daily report's answers carry `QUANTITY_BELOW_OFFICIAL` (verification fix, 2026-10-01).** The warning a typed
+figure below the official installed one carries (§3.2: the approval lowers the official figure, and so EV) is
+transient — on the submission the progress service answers with — and the daily report's answers are read again from
+the database, so `createDailyReport` dropped `createLinkedProgress`'s warnings and `approveDailyReport` (approve and
+review) ignored the writer's answer: a report typing 40 under an official 70, approved, lowered the figure 46.67% →
+26.67% with no warning on either answer while the activity route and bulk warned. Each of create, submit and
+approve/review now collects the warnings of the submission it makes or approves and carries them on the matching
+`progressSubmissions[i].warnings` of its answer; `withheldDailyReport → withheldProgressSubmission` keeps the code alone
+for a member without `boq:read`. Proven live (`pc-6-daily-report-withholding`: walls with two allocated items, typed 300
+then 120 by the BOQ reader — both answers warn with the figures — then 80 by a `boq: none` site engineer reviewed by a
+`boq: none` PM — both answers carry the code only, no compared figure) and by unit
+(`daily-report.service.warnings.test.js`); mutation-proven (the approval's warnings dropped, the create's dropped, the
+carrier a no-op, the warning withholding removed — each fails).
+
 **The daily-log assistant's evidence (integration fix, 2026-10-01).** `POST /daily-logs/{date}/ai/draft` (admitted on
 `assistant:read` + `progress:update`) read the day's progress submissions whole and printed each one's typed quantity,
 unit and planned quantity into the evidence shown to the model — and stored as the run's prompt, served back to its

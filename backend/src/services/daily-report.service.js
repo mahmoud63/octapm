@@ -378,6 +378,35 @@ const buildReportData = ({ payload, projectId, userId, existing = null }) => {
   };
 };
 
+/**
+ * The warnings the progress service answers with (QUANTITY_BELOW_OFFICIAL —
+ * a typed figure below the official installed one: approving it lowers the
+ * official figure, and so EV) are transient: on the submission it returns,
+ * never stored. A daily report's answer is read again from the database, so
+ * they are carried onto the matching progressSubmissions[i].warnings here —
+ * the create, submit and approve/review answers say what the activity route
+ * and bulk say. withheldDailyReport → withheldProgressSubmission keeps the
+ * code alone for a member who may not read the BOQ.
+ */
+const noteWarnings = (warningsBySubmission, answer) => {
+  if (answer?.id && Array.isArray(answer.warnings) && answer.warnings.length) {
+    warningsBySubmission.set(answer.id, answer.warnings);
+  }
+  return answer;
+};
+
+const withSubmissionWarnings = (report, warningsBySubmission) => {
+  if (!report || !warningsBySubmission.size || !Array.isArray(report.progressSubmissions)) return report;
+  return {
+    ...report,
+    progressSubmissions: report.progressSubmissions.map((submission) =>
+      warningsBySubmission.has(submission.id)
+        ? { ...submission, warnings: warningsBySubmission.get(submission.id) }
+        : submission,
+    ),
+  };
+};
+
 const createLinkedProgress = async ({
   tx,
   orgId,
@@ -522,7 +551,8 @@ const createDailyReport = async ({
       entityId: report.id,
     });
 
-    await createLinkedProgress({
+    const warnings = new Map();
+    noteWarnings(warnings, await createLinkedProgress({
       tx,
       orgId,
       projectId,
@@ -531,7 +561,7 @@ const createDailyReport = async ({
       report,
       progressPayload: payload.progress || null,
       status: status === 'submitted' ? 'submitted' : 'draft',
-    });
+    }));
 
     await auditService.recordEvent({
       tx,
@@ -553,12 +583,12 @@ const createDailyReport = async ({
       attachments: photoAttachments(report.photosJson),
     });
 
-    return serializeDailyReport(
+    return withSubmissionWarnings(serializeDailyReport(
       await tx.dailyReport.findFirst({
         where: { id: report.id, projectId },
         include: reportInclude,
       }),
-    );
+    ), warnings);
   });
 
 const getDailyReport = async ({ orgId, projectId, reportId }) => {
@@ -679,8 +709,9 @@ const submitDailyReport = async ({
     const activeProgress = row.progressSubmissions.filter(
       (submission) => submission.status !== 'rejected',
     );
+    const warnings = new Map();
     if (!activeProgress.length) {
-      await createLinkedProgress({
+      noteWarnings(warnings, await createLinkedProgress({
         tx,
         orgId,
         projectId,
@@ -688,7 +719,7 @@ const submitDailyReport = async ({
         userRole,
         report: row,
         status: 'submitted',
-      });
+      }));
     }
 
     await auditService.recordEvent({
@@ -706,12 +737,12 @@ const submitDailyReport = async ({
       attachments: photoAttachments(row.photosJson),
     });
 
-    return serializeDailyReport(
+    return withSubmissionWarnings(serializeDailyReport(
       await tx.dailyReport.findFirst({
         where: { id: row.id, projectId },
         include: reportInclude,
       }),
-    );
+    ), warnings);
   });
 
 const approveDailyReport = async ({
@@ -736,8 +767,9 @@ const approveDailyReport = async ({
     let progressRows = existing.progressSubmissions.filter(
       (submission) => submission.status !== 'rejected',
     );
+    const warnings = new Map();
     if (!progressRows.length) {
-      const created = await createLinkedProgress({
+      const created = noteWarnings(warnings, await createLinkedProgress({
         tx,
         orgId,
         projectId,
@@ -745,20 +777,23 @@ const approveDailyReport = async ({
         userRole,
         report: existing,
         status: 'submitted',
-      });
+      }));
       progressRows = created ? [{ id: created.id, status: created.status }] : [];
     }
 
+    // The one writer's answer carries the warnings of the approval (a typed
+    // figure below the official one: this approval lowers it) — carried
+    // onto the report's answer, never dropped.
     for (const submission of progressRows) {
       if (submission.status === 'draft' || submission.status === 'submitted') {
-        await progressService.approveProgressSubmissionWithClient({
+        noteWarnings(warnings, await progressService.approveProgressSubmissionWithClient({
           tx,
           orgId,
           projectId,
           activityId: existing.activityId,
           submissionId: submission.id,
           userId,
-        });
+        }));
       }
     }
 
@@ -808,7 +843,7 @@ const approveDailyReport = async ({
       attachments: photoAttachments(row.photosJson),
     });
 
-    return serializeDailyReport(row);
+    return withSubmissionWarnings(serializeDailyReport(row), warnings);
   });
 
 const rejectDailyReport = async ({
