@@ -169,6 +169,75 @@ const dataQualityList = () => {
   };
 };
 
+/**
+ * The project's open data-quality exceptions as notes (PC-7b,
+ * OCTAPM_CHANGE_INTELLIGENCE.md §7: "forecast.service.dataQuality is
+ * refactored to read these rows so web and mobile show one list").
+ *
+ * The rows are the exception engine's (ProjectException, kinds of
+ * exception-rules/data-quality.js, severity info / warning, open — not
+ * resolved, dismissed or snoozed at asOf). One note per kind, in the rules'
+ * order, worded by the rule (`label`, `note(count)`): a count of open rows and
+ * no figure, so a note never carries money. The engine's rows are only read
+ * here; the forecast's figures never read them.
+ *
+ * Who may see which kind is decided per reader, as the exceptions list
+ * decides it: a BOQ-derived kind needs boq:read (access.boq), a cost kind the
+ * BOQ or the cost module (access.budget, utils/boq-figures boqFigureAccess),
+ * a schedule or progress kind any forecast reader (the route requires
+ * schedule:read). Without an `access` the reader is assumed to hold neither
+ * the BOQ nor the cost module: only the schedule and progress kinds are read.
+ */
+const NO_EXCEPTION_ACCESS = Object.freeze({ boq: false, budget: false });
+// Read when first needed (the rule file requires its owner services lazily too).
+// eslint-disable-next-line global-require
+const dataQualityRules = () => require("./exception-rules/data-quality");
+const kindReadable = (rule, access) => {
+  if (rule.boqDerived) return access.boq === true;
+  if (rule.module === "boq") return access.boq === true;
+  if (rule.module === "cost") return access.budget === true;
+  return rule.module === "schedule" || rule.module === "progress";
+};
+const SEVERITY_RANK = Object.freeze({ info: 0, warning: 1 });
+const exceptionNotes = async ({ orgId, projectId, asOf, access }) => {
+  const rules = dataQualityRules().filter((rule) => kindReadable(rule, access || NO_EXCEPTION_ACCESS));
+  if (!rules.length) return [];
+  const rows = await safeMany("projectException", {
+    where: {
+      orgId,
+      projectId,
+      resolvedAt: null,
+      kind: { in: rules.map((rule) => rule.kind) },
+      severity: { in: ["info", "warning"] },
+      OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: asOf } }],
+    },
+    select: { kind: true, severity: true },
+  });
+  const byKind = new Map();
+  for (const row of rows) {
+    const entry = byKind.get(row.kind) || { count: 0, severity: "info" };
+    entry.count += 1;
+    if ((SEVERITY_RANK[row.severity] ?? 0) > (SEVERITY_RANK[entry.severity] ?? 0)) entry.severity = row.severity;
+    byKind.set(row.kind, entry);
+  }
+  return rules
+    .filter((rule) => byKind.has(rule.kind))
+    .map((rule) => ({ kind: rule.kind, severity: byKind.get(rule.kind).severity, subject: rule.label, message: rule.note(byKind.get(rule.kind).count) }));
+};
+
+/**
+ * The forecast's own notes and the exception notes as one list, the same two
+ * shapes (string[] and items): the forecast's notes first, in their order,
+ * then the exceptions'. A note of the same kind and subject as an exception
+ * note is the exception's (the engine has evaluated it); none is listed twice.
+ */
+const mergeDataQuality = (notes, fromExceptions) => {
+  const keyOf = (item) => `${item.kind}|${item.subject}`;
+  const covered = new Set(fromExceptions.map(keyOf));
+  const items = [...notes.items.filter((item) => !covered.has(keyOf(item))), ...fromExceptions];
+  return { strings: items.map((item) => item.message), items };
+};
+
 const groupBy = (rows, key) => {
   const map = new Map();
   for (const row of rows) {
@@ -413,10 +482,17 @@ const budgetLineRisks = (lines) =>
     .sort((a, b) => b.overrun - a.overrun)
     .slice(0, 10);
 
-/** The forecast for one project; `asOf` defaults to now. */
-const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
+/**
+ * The forecast for one project; `asOf` defaults to now. `access` ({ boq,
+ * budget }, utils/boq-figures boqFigureAccess) decides which data-quality
+ * exception kinds are among the notes (exceptionNotes); no figure depends on it.
+ */
+const buildForecast = async ({ orgId, projectId, asOf = new Date(), access = null }) => {
   const schedule = await scheduleService.getProjectSchedule({ orgId, projectId });
-  if (!schedule) return { available: false, reason: "No schedule yet — generate or import one first.", asOf: asOf.toISOString(), activities: [], schedule: null, cost: null, summary: null, dataQuality: [], dataQualityItems: [] };
+  if (!schedule) {
+    const merged = mergeDataQuality(dataQualityList(), await exceptionNotes({ orgId, projectId, asOf, access }));
+    return { available: false, reason: "No schedule yet — generate or import one first.", asOf: asOf.toISOString(), activities: [], schedule: null, cost: null, summary: null, dataQuality: merged.strings, dataQualityItems: merged.items };
+  }
   const ctx = await loadContext({ orgId, projectId, asOf });
   const activities = (schedule.activities || []).filter((activity) => activity.isActive !== false).map((activity) => forecastActivity(activity, ctx, asOf));
   const open = activities.filter((activity) => activity.status !== "complete");
@@ -479,6 +555,7 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
     if (earnedValueCutoff?.timeZoneNote) notes.add("timezone_default", "info", "Time zone", earnedValueCutoff.timeZoneNote);
   }
   if (!ctx.budgetLines.length) notes.add("no_budget_lines", "info", "Budget lines", "No budget lines by cost code; the cost view uses activity budgets only.");
+  const merged = mergeDataQuality(notes, await exceptionNotes({ orgId, projectId, asOf, access }));
 
   return {
     available: true,
@@ -517,8 +594,8 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
       truth: FORECAST_COST_TRUTH,
     },
     summary: { scheduleLevel: projectSlip > 14 || scheduleRisks.some((row) => row.level === "high") ? "high" : projectSlip > 0 || scheduleRisks.length ? "medium" : "low", costLevel: totalBudget > 0 && costOverrun / totalBudget > 0.05 ? "high" : costOverrun > 0 ? "medium" : "low" },
-    dataQuality: notes.strings,
-    dataQualityItems: notes.items,
+    dataQuality: merged.strings,
+    dataQualityItems: merged.items,
     activities,
   };
 };
@@ -660,7 +737,7 @@ const explain = async ({ orgId, projectId, user, transport = null, asOf = new Da
   // Written from the forecast this caller may receive (§12): a reader of
   // neither the BOQ nor the cost module gives the model no cost figure and
   // gets none back.
-  const forecast = withheldForecast(await buildForecast({ orgId, projectId, asOf }), access);
+  const forecast = withheldForecast(await buildForecast({ orgId, projectId, asOf, access }), access);
   if (!forecast.available) throw new HttpError(409, "FORECAST_UNAVAILABLE", forecast.reason);
   const project = await prisma.project.findFirst({ where: { id: projectId, orgId }, select: { name: true } });
   const text = forecastBlock(forecast, project?.name || "Project");
