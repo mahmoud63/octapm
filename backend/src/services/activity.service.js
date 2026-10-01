@@ -83,7 +83,7 @@ const activityInclude = {
           reviewedBy: true,
           reviewedAt: true,
           dailyReportId: true,
-          quantityEntries: { select: { id: true, status: true, dailyLogId: true } },
+          quantityEntries: { select: { id: true, status: true, source: true, dailyLogId: true } },
         },
       },
     },
@@ -128,7 +128,7 @@ const activityInclude = {
     where: { status: { in: ['draft', 'submitted'] } },
     orderBy: { updatedAt: 'desc' },
     take: 1,
-    include: { quantityEntries: { select: { id: true, status: true, dailyLogId: true } } },
+    include: { quantityEntries: { select: { id: true, status: true, source: true, dailyLogId: true } } },
   },
 };
 

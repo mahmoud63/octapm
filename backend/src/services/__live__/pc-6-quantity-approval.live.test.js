@@ -238,7 +238,7 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
     // The official figure, with its provenance, on the activity and in the EV report.
     const activity = await activityPayload(pour.id);
     expect([activity.pctComplete, activity.progressApprovalStatus, activity.approvedProgressSource]).toEqual([37.5, "approved", "manual"]);
-    expect(activity.progressSource).toEqual({ source: "manual", submissionId: ids.s1, dailyLogId: null, dailyReportId: null, importDocumentId: null, submittedBy: site.id, submittedAt: expect.any(String), approvedBy: live.user.id, approvedAt: rows[0].approvedAt.toISOString(), entries: 2 });
+    expect(activity.progressSource).toEqual({ source: "manual", installedBasis: "approved_entries", legacyFloor: false, submissionId: ids.s1, dailyLogId: null, dailyReportId: null, importDocumentId: null, submittedBy: site.id, submittedAt: expect.any(String), approvedBy: live.user.id, approvedAt: rows[0].approvedAt.toISOString(), entries: 2 });
     const ev = await evRow(pour.id);
     expect(ev).toMatchObject({ pct: 37.5, progressMethod: "quantity", progressStatus: "approved", status: "in_progress" });
     expect(ev.budget).toBe(100 * 100 + 60 * 150);

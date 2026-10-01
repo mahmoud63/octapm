@@ -179,6 +179,34 @@ bundles entries, and approving it is what approves them:
   its official figure beside `approvedProgressSource` (the `ActivityProgress` row plus the submission it came
   from). `importDocumentId` is carried for the shape and is null: no column links a submission to the import
   document (the import names itself in `source` and `notes`).
+- **The legacy typed-quantity floor** (integration fix, 2026-10-01; owner rule: an official figure never regresses by the
+  act of deriving). Finding: on an activity approved the legacy way — a typed `quantityComplete`, no entries behind it
+  — the first bundle approved after PC-6 derived installed = Σ approved entries + the bundle and discarded the official
+  figure (60% → 10%). Now a bundle derives installed = **max(Σ approved entries, the latest official installed
+  figure)** + the bundle (`legacyInstalledFloor`: the latest approved `ActivityProgress.quantityComplete`; one in
+  another unit is not a floor — reported `legacyFloorSkipped`, nothing converted). When the floor applied the basis is
+  `legacy_typed_floor` with `legacyFloor { quantity, unitCode, progressId, approvedAt, note }`, the new official row
+  carries the sentence "Legacy typed quantity carried as the floor of the installed figure (PC-6)" as its note (a
+  sentence, no figure — a note is progress data every reader sees), and `progressSource.installedBasis` /
+  `legacyFloor: true` read it from the row. In the ordinary case Σ approved entries ≥ the latest official figure and
+  the rule is the one shipped. Decision for the owner: the frozen basis lives in the row's `notes` (no column records
+  a derivation basis; the audit `approved` event carries the full `legacyFloor` block).
+- **A typed quantityComplete is still accepted — once** (the legacy shape; what the mobile ProgressSheet sends):
+  while the activity has **no quantity entry at all**. Its approval mints ONE approved `QuantityProgressEntry`
+  (`source 'submission'`, `clientRequestId 'submission:<id>'`, recorded by the submitter, approved by the approver at
+  the row's instant, the typed figure as a **delta over the official floor** — `mintTypedQuantityEntry`) when the
+  activity has a single allocated BOQ item in that unit, so the activity has one truth of installed quantity from
+  then on and the next bundle adds to it (`quantity.mintedEntry`). Nothing is minted when the delta is zero or
+  negative (the approved row stands as approved; the floor rule keeps the figure from regressing by derivation),
+  when the activity has several allocated items or none (an entry names one item; an activity-level figure cannot
+  be attributed — `quantity.mintSkipped` says so and the floor carries it) or when the typed unit is not the
+  item's. Once entries exist a typed figure is 409 `QUANTITY_ENTRIES_REQUIRED` `{ activityId, entries }` — the
+  unsafe case shown: a typed activity-level figure beside per-item entries would be a second truth. Proven live
+  (`pc-6-method-authority`: the seeded 60-of-100 legacy row + a 10 bundle → 70, the next → 75, the legacy row
+  byte-identical, the note and PROGRESS SOURCE; the kerb's typed 20 minted as one approved entry in the ledger with
+  its provenance and the activity's installed figure reading it, then 409; a typed 50 below an official 60 minting
+  nothing and standing as the next floor) and mutation-proven (the floor removed → the regression reproduces; the
+  minting removed → fails).
 - **The submission's method is the activity's** (integration fix, 2026-10-01; owner rule: respect the activity's progress
   method). `progress.service resolveSubmissionMethod`, in `buildSubmissionData`, so every path — `POST
   /activities/{id}/progress`, `bulk-progress`, the daily report's legacy linked progress and the import — is under it:

@@ -240,16 +240,29 @@ const buildProgressSource = ({ submission = null, progress = null }) => {
   const entries = Array.isArray(submission?.quantityEntries) ? submission.quantityEntries : [];
   const dailyLogId = entries.find((entry) => entry?.dailyLogId)?.dailyLogId || null;
   const approved = progress || (submission?.status === 'approved' ? submission : null);
+  // How a quantity figure's installed quantity was arrived at: Σ entries, a
+  // typed figure (the legacy shape — minted into one entry at approval), or
+  // Σ entries over the legacy typed floor (the official row's own note says
+  // so; the note carries no figure). null for the other methods.
+  const method = progress?.progressMethod ?? submission?.method ?? null;
+  let installedBasis = null;
+  if (method === 'quantity') {
+    if (String(progress?.notes || '').includes(LEGACY_FLOOR_NOTE)) installedBasis = LEGACY_FLOOR_BASIS;
+    else if (!entries.length || entries.every((entry) => entry?.source === MINTED_ENTRY_SOURCE)) installedBasis = 'client';
+    else installedBasis = 'approved_entries';
+  }
   return {
     source: progress?.source ?? submission?.source ?? null,
+    installedBasis,
+    legacyFloor: installedBasis === LEGACY_FLOOR_BASIS,
     submissionId: progress?.submissionId ?? submission?.id ?? null,
     dailyLogId,
     dailyReportId: submission?.dailyReportId || null,
     importDocumentId: null,
     submittedBy: submission?.submittedBy || null,
     submittedAt: toIso(submission?.submittedAt),
-    approvedBy: progress?.approvedBy ?? (approved ? approved.reviewedBy || null : null),
-    approvedAt: toIso(progress?.approvedAt ?? (approved ? approved.reviewedAt : null)),
+    approvedBy: progress?.approvedBy ?? (approved ? approved.reviewedBy ?? submission?.reviewedBy ?? null : null),
+    approvedAt: toIso(progress?.approvedAt ?? (approved ? approved.reviewedAt ?? submission?.reviewedAt ?? null : null)),
     entries: entries.length,
   };
 };
@@ -579,6 +592,67 @@ const resolveQuantityBundle = async ({ orgId, projectId, activityId, payload }, 
   return [...bundled.values()];
 };
 
+// PC-6 integration: the legacy typed-quantity floor. Carried on the official
+// row's notes (no figure in it — a note is progress data every reader sees)
+// so PROGRESS SOURCE can say the floor applied.
+const LEGACY_FLOOR_BASIS = 'legacy_typed_floor';
+const LEGACY_FLOOR_NOTE = 'Legacy typed quantity carried as the floor of the installed figure (PC-6)';
+const MINTED_ENTRY_SOURCE = 'submission';
+
+/**
+ * A typed quantityComplete (the legacy shape, still what the mobile
+ * ProgressSheet sends) is accepted only while the activity has no quantity
+ * entry at all. Once entries exist they are the one truth of installed
+ * quantity, per BOQ item; an activity-level typed figure cannot be
+ * attributed to an item and would be a second truth — 409
+ * QUANTITY_ENTRIES_REQUIRED says so.
+ */
+const assertTypedQuantityAllowed = async ({ orgId, projectId, activityId, payload }, tx) => {
+  if (payload.quantityComplete === undefined || payload.quantityComplete === null) return;
+  const entries = await tx.quantityProgressEntry.count({ where: { projectId, orgId, activityId } });
+  if (!entries) return;
+  throw new HttpError(
+    409,
+    'QUANTITY_ENTRIES_REQUIRED',
+    `This activity's installed quantity is recorded as quantity entries per BOQ item (${entries} so far); a typed quantity is not a second truth. Record an entry and bundle it`,
+    { activityId, entries },
+  );
+};
+
+/**
+ * The latest official installed figure of the activity when it stands above
+ * Σ approved entries: a quantityComplete approved the legacy way (typed, no
+ * entries behind it), or a row that itself carried the floor. Installed is
+ * then max(Σ approved entries, that figure) + the bundle, so an official
+ * figure never regresses by the act of deriving. A legacy row in another
+ * unit cannot be a floor (nothing is converted) and is reported as skipped.
+ */
+const legacyInstalledFloor = async ({ activityId, approvedBefore, expectedUnit }, tx) => {
+  const qp = quantityProgressService();
+  const latest = await tx.activityProgress.findFirst({
+    where: { activityId, status: 'approved', quantityComplete: { not: null } },
+    orderBy: [{ approvedAt: 'desc' }, { updatedAt: 'desc' }],
+    select: { id: true, quantityComplete: true, quantityUnit: true, approvedAt: true },
+  });
+  if (!latest) return { floor: null, skipped: null };
+  const official = qp.quantityDecimal(latest.quantityComplete);
+  if (!official || !official.greaterThan(approvedBefore)) return { floor: null, skipped: null };
+  const unitKey = uomService().unitKey;
+  const unit = latest.quantityUnit?.trim() || null;
+  if (unit && expectedUnit && unitKey(unit) !== unitKey(expectedUnit)) {
+    return {
+      floor: null,
+      skipped: {
+        progressId: latest.id,
+        quantity: qp.quantityNumber(official),
+        unitCode: unit,
+        reason: `The latest official installed figure is in "${unit}", the entries in "${expectedUnit}"; no conversion is made, so it is not carried as the floor`,
+      },
+    };
+  }
+  return { floor: { quantity: official, unitCode: unit || expectedUnit || null, progressId: latest.id, approvedAt: latest.approvedAt }, skipped: null };
+};
+
 /**
  * The figures of a quantity-method submission (PC-6 §2, §3):
  *
@@ -653,13 +727,24 @@ const deriveQuantityFigures = async ({ orgId, projectId, activityId, payload, bu
       );
     }
     const approvedBefore = qp.sumQuantities(approvedRows.map((row) => row.quantity));
-    const installed = approvedBefore.plus(qp.sumQuantities(bundled.map((row) => row.quantity)));
+    // The floor: an official figure never goes backwards by the act of
+    // deriving (owner rule). An activity approved the legacy way — a typed
+    // quantityComplete with no entries behind it — stands at that figure, and
+    // the first bundle after PC-6 adds to it rather than discarding it.
+    const { floor, skipped } = await legacyInstalledFloor({ activityId, approvedBefore, expectedUnit: expectedUnit || units[0] || null }, tx);
+    const base = floor ? floor.quantity : approvedBefore;
+    const installed = base.plus(qp.sumQuantities(bundled.map((row) => row.quantity)));
     figures.installed = qp.quantityNumber(installed);
-    figures.installedBasis = 'approved_entries';
+    figures.installedBasis = floor ? LEGACY_FLOOR_BASIS : 'approved_entries';
     figures.approvedBefore = qp.quantityNumber(approvedBefore);
     figures.approvedEntries = approvedRows.length;
     figures.bundledEntries = bundled.length;
     figures.unitCode = expectedUnit || units[0] || null;
+    if (floor) {
+      figures.legacyFloor = { quantity: qp.quantityNumber(floor.quantity), unitCode: floor.unitCode, progressId: floor.progressId, approvedAt: toIso(floor.approvedAt), note: LEGACY_FLOOR_NOTE };
+    } else if (skipped) {
+      figures.legacyFloorSkipped = skipped;
+    }
   } else {
     figures.installed = payload.quantityComplete !== undefined && payload.quantityComplete !== null ? toNumber(payload.quantityComplete) : null;
   }
@@ -739,6 +824,7 @@ const buildSubmissionData = async ({
   let quantity = null;
   if (method === 'quantity') {
     bundled = await resolveQuantityBundle({ orgId, projectId, activityId, payload }, tx);
+    if (!bundled) await assertTypedQuantityAllowed({ orgId, projectId, activityId, payload }, tx);
     quantity = await deriveQuantityFigures({ orgId, projectId, activityId, payload, bundled, methodConfig }, tx);
   } else if (uniqueIds(payload.entryIds).length || payload.bundleSubmittedThrough || payload.bundleThrough) {
     throw new HttpError(
@@ -813,7 +899,10 @@ const buildSubmissionData = async ({
 /** The submission's entries as they stand after some were settled. */
 const withSettledEntries = (entries, settled) => {
   const byId = new Map((settled || []).map((entry) => [entry.id, entry]));
-  return (entries || []).map((entry) => byId.get(entry.id) || entry);
+  const known = new Set((entries || []).map((entry) => entry.id));
+  // A settled entry the submission did not list before (the one minted from
+  // a typed figure at approval) is its entry from now on.
+  return [...(entries || []).map((entry) => byId.get(entry.id) || entry), ...(settled || []).filter((entry) => !known.has(entry.id))];
 };
 
 /** Marks a bundled entry approved or rejected, with its own audit trail. */
@@ -852,6 +941,101 @@ const settleBundledEntries = async ({ tx, orgId, projectId, submission, entries,
     });
   }
   return entries.map((entry) => ({ ...entry, ...data }));
+};
+
+/**
+ * A typed quantityComplete approved (the legacy shape; what the mobile
+ * ProgressSheet sends) mints ONE approved QuantityProgressEntry (source
+ * 'submission') carrying the typed figure as a delta over the previous
+ * official installed figure — max(Σ approved entries, the latest official
+ * installed figure), the floor — so the activity has one truth of installed
+ * quantity from then on and the next bundle adds to it. Nothing is minted
+ * when the delta is zero or negative (the floor rule keeps the figure from
+ * regressing by derivation; the approved row stands as approved), when the
+ * activity has no single allocated BOQ item (an entry names an item; an
+ * activity-level figure on several items cannot be attributed to one — the
+ * answer says so, and such an activity is served by entries from then on,
+ * 409 QUANTITY_ENTRIES_REQUIRED on the next typed figure) or when the typed
+ * unit is not the item's. Replay-safe by clientRequestId 'submission:<id>'.
+ */
+const mintTypedQuantityEntry = async ({ tx, orgId, projectId, submission, userId, now }) => {
+  const qp = quantityProgressService();
+  const activityId = submission.activityId;
+  const typedUnit = submission.quantityUnit?.trim() || null;
+  const answer = { installed: toNumber(submission.quantityComplete), planned: submission.quantityPlanned ?? null, unitCode: typedUnit, plannedBasis: 'submission', installedBasis: 'client', mintedEntry: null, mintSkipped: null };
+  const result = { installed: answer.installed, planned: answer.planned, unitCode: typedUnit, entry: null, skipped: null, answer };
+  const skip = (reason, extra = {}) => {
+    result.skipped = { reason, ...extra };
+    answer.mintSkipped = result.skipped;
+    return result;
+  };
+  const typed = qp.quantityDecimal(submission.quantityComplete);
+  const approvedRows = await tx.quantityProgressEntry.findMany({ where: { projectId, orgId, activityId, status: 'approved' }, select: { quantity: true } });
+  const approvedBefore = qp.sumQuantities(approvedRows.map((row) => row.quantity));
+  const { floor } = await legacyInstalledFloor({ activityId, approvedBefore, expectedUnit: typedUnit }, tx);
+  const base = floor ? floor.quantity : approvedBefore;
+  const delta = typed.minus(base);
+  if (!delta.greaterThan(0)) {
+    return skip('The typed figure does not exceed the official installed figure; nothing is minted and the official figure is not lowered by derivation', { typed: qp.quantityNumber(typed), officialBefore: qp.quantityNumber(base) });
+  }
+  const allocations = await tx.activityBoqAllocation.findMany({
+    where: { projectId, activityId, status: 'approved', isActive: true },
+    select: { id: true, boqItemId: true, boqItem: { select: { id: true, unit: true, unitCode: true } } },
+  });
+  const items = [...new Set(allocations.map((row) => row.boqItemId))];
+  if (items.length !== 1) {
+    return skip(
+      items.length
+        ? `The activity has ${items.length} allocated BOQ items; a typed activity-level figure cannot be attributed to one, so no entry is minted (the floor rule carries the figure)`
+        : 'The activity has no approved allocation; an entry names a BOQ item, so none is minted (the floor rule carries the figure)',
+      { items: items.length },
+    );
+  }
+  const item = allocations[0].boqItem || {};
+  const boqItemId = items[0];
+  const unitKey = uomService().unitKey;
+  const itemUnit = item.unitCode?.trim() || item.unit?.trim() || null;
+  if (typedUnit && itemUnit && unitKey(typedUnit) !== unitKey(itemUnit)) {
+    return skip(`The typed figure is in "${typedUnit}", the allocated item in "${itemUnit}"; no conversion is made, so no entry is minted`, { itemUnit });
+  }
+  const when = submission.submittedAt || now;
+  const row = await tx.quantityProgressEntry.create({
+    data: {
+      orgId,
+      projectId,
+      activityId,
+      boqItemId,
+      allocationId: allocations.length === 1 ? allocations[0].id : null,
+      unitCode: itemUnit || typedUnit,
+      quantity: delta,
+      date: new Date(`${toIso(when).slice(0, 10)}T00:00:00.000Z`),
+      source: MINTED_ENTRY_SOURCE,
+      status: 'approved',
+      submissionId: submission.id,
+      approvedBy: userId || null,
+      approvedAt: now,
+      createdBy: submission.submittedBy || userId || null,
+      clientRequestId: `submission:${submission.id}`,
+      note: 'Minted from a typed quantity submission: the typed figure as a delta over the previous official installed figure',
+    },
+  });
+  const summary = { activityId, boqItemId, quantity: qp.quantityNumber(delta), unitCode: row.unitCode, source: row.source, status: row.status, submissionId: submission.id, typed: qp.quantityNumber(typed), officialBefore: qp.quantityNumber(base) };
+  await auditService.recordEvent({
+    tx,
+    orgId,
+    projectId,
+    entityType: QUANTITY_ENTRY_ENTITY_TYPE,
+    entityId: row.id,
+    action: auditService.ACTIONS.CREATED,
+    actorId: userId,
+    occurredAt: now,
+    newStatus: 'approved',
+    newSummary: summary,
+    summary: { transition: 'quantity_entry.mint_from_typed_submission', ...summary },
+  });
+  result.entry = { ...row, submission: { id: submission.id, status: 'approved' } };
+  answer.mintedEntry = { id: row.id, boqItemId, quantity: summary.quantity, unitCode: row.unitCode, officialBefore: summary.officialBefore };
+  return result;
 };
 
 const createProgressSubmission = async ({
@@ -990,7 +1174,7 @@ const listProgressSubmissions = async ({
           p6ActivityId: true,
         },
       },
-      quantityEntries: { select: { id: true, status: true, dailyLogId: true } },
+      quantityEntries: { select: { id: true, status: true, source: true, dailyLogId: true } },
     },
     orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
   });
@@ -1115,6 +1299,13 @@ const approveProgressSubmissionWithClient = async ({
     );
     bundledEntries = await settleBundledEntries({ tx, orgId, projectId, submission, entries: pending, outcome: 'approved', userId, now });
   }
+  // A quantity submission typed the old way (no entries): approved as it
+  // stands, and ONE approved entry is minted from it so the activity has one
+  // truth of installed quantity from here on (see mintTypedQuantityEntry).
+  const typed =
+    submission.method === 'quantity' && !pending.length && submission.quantityComplete !== null && submission.quantityComplete !== undefined
+      ? await mintTypedQuantityEntry({ tx, orgId, projectId, submission, userId, now })
+      : null;
 
   const approved = await tx.progressSubmission.update({
     where: { id: submissionId },
@@ -1136,7 +1327,7 @@ const approveProgressSubmissionWithClient = async ({
         : {}),
     },
   });
-  approved.quantityEntries = withSettledEntries(submission.quantityEntries, bundledEntries);
+  approved.quantityEntries = withSettledEntries(submission.quantityEntries, typed?.entry ? [...bundledEntries, typed.entry] : bundledEntries);
 
   const approvedProgress = await tx.activityProgress.create({
     data: {
@@ -1157,7 +1348,8 @@ const approveProgressSubmissionWithClient = async ({
       status: 'approved',
       approvedBy: userId || null,
       approvedAt: now,
-      notes: approved.notes,
+      // The floor's trace on the official row itself: a sentence, never a figure.
+      notes: quantity?.legacyFloor ? [approved.notes, LEGACY_FLOOR_NOTE].filter(Boolean).join('\n') : approved.notes,
       updatedBy: userId || null,
     },
   });
@@ -1195,8 +1387,10 @@ const approveProgressSubmissionWithClient = async ({
             plannedBasis: quantity.plannedBasis,
             installedBasis: quantity.installedBasis,
             quantityEntries: bundledEntries.length,
+            ...(quantity.legacyFloor ? { legacyFloor: quantity.legacyFloor } : {}),
           }
         : {}),
+      ...(typed ? { quantityInstalled: typed.installed, quantityPlanned: typed.planned, quantityUnit: typed.unitCode, installedBasis: 'client', mintedEntryId: typed.entry?.id || null, mintSkipped: typed.skipped || null } : {}),
     },
     summary: {
       transition: 'submission.approve',
@@ -1210,8 +1404,12 @@ const approveProgressSubmissionWithClient = async ({
     attachments: getEvidenceAttachments(approved.evidenceJson),
   });
 
-  const serialized = serializeSubmission(approved);
-  return quantity ? { ...serialized, quantity, approvedProgressId: approvedProgress.id } : serialized;
+  // PROGRESS SOURCE of the answer reads the official row just written (its
+  // note says whether the legacy floor applied), as the activity payload will.
+  const serialized = { ...serializeSubmission(approved), progressSource: buildProgressSource({ submission: approved, progress: approvedProgress }) };
+  if (quantity) return { ...serialized, quantity, approvedProgressId: approvedProgress.id };
+  if (typed) return { ...serialized, quantity: typed.answer, approvedProgressId: approvedProgress.id };
+  return serialized;
 };
 
 const approveProgressSubmission = async (params) =>

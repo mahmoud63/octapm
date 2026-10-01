@@ -14,7 +14,11 @@ const mockPrisma = {
   },
   activityProgress: {
     create: jest.fn(),
+    findFirst: jest.fn(async () => null),
   },
+  // PC-6 integration: a typed quantity submission mints one entry at approval.
+  quantityProgressEntry: { count: jest.fn(async () => 0), findMany: jest.fn(async () => []), create: jest.fn(async ({ data }) => ({ id: 'entry-minted', ...data })), updateMany: jest.fn() },
+  activityBoqAllocation: { findMany: jest.fn(async () => []) },
 };
 const mockAuditService = {
   ACTIONS: { APPROVED: 'approved', CREATED: 'created', REJECTED: 'rejected' },
