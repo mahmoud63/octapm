@@ -143,7 +143,10 @@ liveDescribe("Tenant constraint teeth (M7)", () => {
 
     await expect(insertEntry({ orgId: b.org.id, clientRequestId: key })).rejects.toThrow(/QuantityProgressEntry_projectId_orgId_fkey/);
     await insertEntry({ orgId: a.org.id, clientRequestId: key });
-    await expect(insertEntry({ orgId: a.org.id, clientRequestId: key })).rejects.toThrow(/QuantityProgressEntry_projectId_clientRequestId_key/);
+    // Prisma reports a raw unique violation by its SQLSTATE and the key's
+    // columns, not by the constraint's name (a foreign-key violation names the
+    // constraint); both forms are the database refusing the replay.
+    await expect(insertEntry({ orgId: a.org.id, clientRequestId: key })).rejects.toThrow(/Code: `23505`[\s\S]*\("projectId", "clientRequestId"\)/);
     const rows = await prisma.$queryRaw`SELECT count(*)::int AS n FROM "QuantityProgressEntry" WHERE "projectId" = ${projectA.id}`;
     expect(rows[0].n).toBe(1);
 
