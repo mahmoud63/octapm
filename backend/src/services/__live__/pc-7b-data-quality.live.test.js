@@ -578,7 +578,7 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     return baseForecast;
   };
   const FULL = { boq: true, budget: true };
-  const forecastFigures = (forecast) => stable({ ...forecast, dataQuality: undefined, dataQualityItems: undefined });
+  const forecastFigures = (forecast) => stable({ ...forecast, dataQuality: undefined, dataQualityItems: undefined, dataQualityWithheld: undefined });
 
   it("forecast.dataQuality lists the open data-quality rows per reader beside its own notes; every figure is byte-identical to the base code's", async () => {
     const { buildForecast } = require("../forecast.service");
@@ -631,6 +631,10 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
       const cost = await buildForecast({ orgId, projectId, asOf: NOW, access: COST });
       expect(figures(cost)).toBe(figures(before));
       expect(cost.dataQualityItems.slice(own.length).map((item) => item.kind)).toEqual(["budget_truths_disagree", "progress_stale"]);
+      // The kinds left out are named (PC-7b integration D): from the access, with no count; the full reader has no marker.
+      expect(full).not.toHaveProperty("dataQualityWithheld");
+      expect(cost.dataQualityWithheld.reason).toMatch(/available only to members who may read the BOQ/);
+      expect(JSON.stringify(cost.dataQualityWithheld)).not.toMatch(/d/);
       // A schedule reader of neither, and a caller that names no access: the progress kind only.
       for (const access of [NONE, null, undefined]) {
         const plain = await buildForecast({ orgId, projectId, asOf: NOW, ...(access === undefined ? {} : { access }) });

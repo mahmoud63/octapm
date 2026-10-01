@@ -5,7 +5,7 @@ const assistant = require("./assistant.service");
 const scheduleService = require("./schedule.service");
 const evService = require("./earned-value.service");
 const budgetService = require("./budget.service");
-const { forecastCostWithheld, withheldForecast } = require("../utils/boq-figures");
+const { EXCEPTIONS_BOQ_WITHHELD, exceptionPolicy, exceptionReadable, forecastCostWithheld, withheldForecast } = require("../utils/boq-figures");
 const { EAC_BASES, EAC_BASIS_LABELS, eacBasisOf, eacIsBudgetFallback } = require("../utils/eac-basis");
 const { EV_NOTES, cpiNoteFor, spiNoteFor, cutoffNotReached } = require("../utils/ev-notes");
 // Source / derived / projection labels (control model §3) — labels only.
@@ -187,16 +187,55 @@ const dataQualityList = () => {
  * a schedule or progress kind any forecast reader (the route requires
  * schedule:read). Without an `access` the reader is assumed to hold neither
  * the BOQ nor the cost module: only the schedule and progress kinds are read.
+ *
+ * When `access` carries `modules` (utils/boq-figures exceptionAccess — what
+ * GET /forecast and /explain pass), each kind is read exactly as the
+ * exceptions list reads it (exceptionReadable over the kind's policy: its
+ * module's read, and boq:read for a BOQ-derived kind), so the notes and the
+ * list never disagree. The kinds withheld from the caller are said once, in
+ * `dataQualityWithheld { reason }` (dataQualityWithheldFor): from the
+ * caller's access alone, never a count or whether such rows exist.
  */
 const NO_EXCEPTION_ACCESS = Object.freeze({ boq: false, budget: false });
 // Read when first needed (the rule file requires its owner services lazily too).
 // eslint-disable-next-line global-require
 const dataQualityRules = () => require("./exception-rules/data-quality");
+// The kind's policy as the exceptions API reads it: the rule's own statement,
+// widened by the API's table (utils/boq-figures exceptionPolicy).
+const rulePolicy = (rule) => exceptionPolicy(rule.kind, { [rule.kind]: { module: rule.module, boqDerived: rule.boqDerived } });
+// Whether the caller reads a module: from `modules` when given, else the
+// { boq, budget } shape (a cost kind on budget = BOQ or cost read).
+const moduleReadable = (module, access) => {
+  if (access && access.modules) return access.modules[module] === true;
+  if (module === "boq") return access.boq === true;
+  if (module === "cost") return access.budget === true;
+  return module === "schedule" || module === "progress";
+};
 const kindReadable = (rule, access) => {
-  if (rule.boqDerived) return access.boq === true;
-  if (rule.module === "boq") return access.boq === true;
-  if (rule.module === "cost") return access.budget === true;
-  return rule.module === "schedule" || rule.module === "progress";
+  const policy = rulePolicy(rule);
+  if (access && access.modules) return exceptionReadable({ kind: rule.kind, subjectType: rule.subjectType }, access, { [rule.kind]: policy });
+  if (policy.boqDerived && access.boq !== true) return false;
+  return moduleReadable(policy.module, access);
+};
+/**
+ * The data-quality kinds this caller is not given, as one sentence: the
+ * BOQ-derived ones (no boq:read) and those of each module they may not read.
+ * Decided by the caller's access and the rules alone — never by the rows —
+ * so it carries no count and does not say whether any such row exists.
+ * `null` when every kind is readable.
+ */
+const DATA_QUALITY_MODULE_NAMES = Object.freeze({ boq: "BOQ", cost: "cost", schedule: "schedule", progress: "progress", change_order: "change order", commercial: "commercial" });
+const dataQualityWithheldFor = (access) => {
+  const reader = access || NO_EXCEPTION_ACCESS;
+  const withheld = dataQualityRules().filter((rule) => !kindReadable(rule, reader));
+  if (!withheld.length) return null;
+  const boq = withheld.some((rule) => (rulePolicy(rule).boqDerived || rulePolicy(rule).module === "boq") && reader.boq !== true);
+  const modules = [...new Set(withheld.map((rule) => rulePolicy(rule).module).filter((module) => module !== "boq" && !moduleReadable(module, reader)))];
+  const parts = [];
+  if (boq) parts.push(`Data-quality notes measured from the BOQ's quantities or its mapping are not listed: ${EXCEPTIONS_BOQ_WITHHELD.charAt(0).toLowerCase()}${EXCEPTIONS_BOQ_WITHHELD.slice(1)}`);
+  if (modules.length) parts.push(`Data-quality notes of the ${modules.map((module) => DATA_QUALITY_MODULE_NAMES[module] || module).join(", ")} ${modules.length > 1 ? "modules are" : "module is"} available only to members who may read ${modules.length > 1 ? "them" : "it"}`);
+  if (!parts.length) parts.push("Some data-quality notes are available only to members who may read their module");
+  return { reason: parts.join(". ") };
 };
 const SEVERITY_RANK = Object.freeze({ info: 0, warning: 1 });
 const exceptionNotes = async ({ orgId, projectId, asOf, access }) => {
@@ -484,14 +523,17 @@ const budgetLineRisks = (lines) =>
 
 /**
  * The forecast for one project; `asOf` defaults to now. `access` ({ boq,
- * budget }, utils/boq-figures boqFigureAccess) decides which data-quality
- * exception kinds are among the notes (exceptionNotes); no figure depends on it.
+ * budget }, utils/boq-figures boqFigureAccess, with `modules` from
+ * exceptionAccess when the route passes them) decides which data-quality
+ * exception kinds are among the notes (exceptionNotes) and the
+ * `dataQualityWithheld` marker; no figure depends on it.
  */
 const buildForecast = async ({ orgId, projectId, asOf = new Date(), access = null }) => {
   const schedule = await scheduleService.getProjectSchedule({ orgId, projectId });
   if (!schedule) {
     const merged = mergeDataQuality(dataQualityList(), await exceptionNotes({ orgId, projectId, asOf, access }));
-    return { available: false, reason: "No schedule yet — generate or import one first.", asOf: asOf.toISOString(), activities: [], schedule: null, cost: null, summary: null, dataQuality: merged.strings, dataQualityItems: merged.items };
+    const withheldNotes = dataQualityWithheldFor(access);
+    return { available: false, reason: "No schedule yet — generate or import one first.", asOf: asOf.toISOString(), activities: [], schedule: null, cost: null, summary: null, dataQuality: merged.strings, dataQualityItems: merged.items, ...(withheldNotes ? { dataQualityWithheld: withheldNotes } : {}) };
   }
   const ctx = await loadContext({ orgId, projectId, asOf });
   const activities = (schedule.activities || []).filter((activity) => activity.isActive !== false).map((activity) => forecastActivity(activity, ctx, asOf));
@@ -556,6 +598,7 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date(), access = nul
   }
   if (!ctx.budgetLines.length) notes.add("no_budget_lines", "info", "Budget lines", "No budget lines by cost code; the cost view uses activity budgets only.");
   const merged = mergeDataQuality(notes, await exceptionNotes({ orgId, projectId, asOf, access }));
+  const withheldNotes = dataQualityWithheldFor(access);
 
   return {
     available: true,
@@ -596,6 +639,7 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date(), access = nul
     summary: { scheduleLevel: projectSlip > 14 || scheduleRisks.some((row) => row.level === "high") ? "high" : projectSlip > 0 || scheduleRisks.length ? "medium" : "low", costLevel: totalBudget > 0 && costOverrun / totalBudget > 0.05 ? "high" : costOverrun > 0 ? "medium" : "low" },
     dataQuality: merged.strings,
     dataQualityItems: merged.items,
+    ...(withheldNotes ? { dataQualityWithheld: withheldNotes } : {}),
     activities,
   };
 };
