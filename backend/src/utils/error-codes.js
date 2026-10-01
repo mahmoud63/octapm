@@ -362,6 +362,11 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "commercial",
     message: "The record to raise a change event from was not found",
   },
+  CHANGE_EVENT_BUDGET_LINE_INVALID: {
+    status: 400,
+    category: "commercial",
+    message: "A budget line is not on this project",
+  },
   NCR_NUMBERING_FAILED: {
     status: 500,
     category: "quality",

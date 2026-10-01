@@ -1199,6 +1199,7 @@ const components = {
         "CHANGE_EVENT_NOT_FOUND",
         "CHANGE_EVENT_SOURCE_INVALID",
         "CHANGE_EVENT_SOURCE_NOT_FOUND",
+        "CHANGE_EVENT_BUDGET_LINE_INVALID",
       ],
     },
     CursorPage: objectSchema({

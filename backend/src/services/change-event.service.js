@@ -272,7 +272,7 @@ const normalizeEvent = (payload, existing = null) => {
   };
 };
 
-const assertRefs = async ({ projectId, data, lines = [] }) => {
+const assertRefs = async ({ orgId, projectId, data, lines = [] }) => {
   const activityIds = uniqueIds([data?.activityId, ...lines.map((line) => line.activityId)]);
   if (activityIds.length) {
     const found = await prisma.activity.findMany({ where: { id: { in: activityIds }, projectId }, select: { id: true } });
@@ -291,6 +291,13 @@ const assertRefs = async ({ projectId, data, lines = [] }) => {
   if (commitmentIds.length) {
     const found = await prisma.commitment.findMany({ where: { id: { in: commitmentIds }, projectId }, select: { id: true } });
     if (found.length !== commitmentIds.length) throw new HttpError(400, "CHANGE_EVENT_COMMITMENT_INVALID", "A commitment is not on this project");
+  }
+  // A line's budget line must be this project's (and this organisation's):
+  // the column is a single-id FK, and a conversion copies it onto the order.
+  const budgetLineIds = uniqueIds(lines.map((line) => line.budgetLineId));
+  if (budgetLineIds.length) {
+    const found = await prisma.budgetLine.findMany({ where: { id: { in: budgetLineIds }, projectId, ...(orgId ? { orgId } : {}) }, select: { id: true } });
+    if (found.length !== budgetLineIds.length) throw new HttpError(400, "CHANGE_EVENT_BUDGET_LINE_INVALID", "A budget line is not on this project");
   }
 };
 
@@ -354,7 +361,7 @@ const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null,
   const data = normalizeEvent(payload);
   const lines = normalizeLines(payload.lines);
   const typed = normalizeLinks(links);
-  await assertRefs({ projectId, data, lines });
+  await assertRefs({ orgId, projectId, data, lines });
   await assertLinks({ orgId, projectId, links: typed });
   const created = await prisma.$transaction(async (tx) => {
     const number = await nextNumber(tx, projectId);
@@ -516,7 +523,7 @@ const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}
   assertEditable(existing);
   const data = normalizeEvent(payload, existing);
   const lines = payload.lines !== undefined ? normalizeLines(payload.lines) : null;
-  await assertRefs({ projectId, data, lines: lines || [] });
+  await assertRefs({ orgId, projectId, data, lines: lines || [] });
   const updated = await prisma.$transaction(async (tx) => {
     await tx.changeEvent.update({ where: { id: changeEventId }, data: { ...data, updatedBy: actor?.id || null } });
     if (lines) {
