@@ -1395,14 +1395,53 @@ const withheldAllocationLink = (link) => {
  * The link's own figures — a change order's quantity and amount, a
  * valuation's quantity, work done, materials on site and retention — its
  * notes, and every figure of the record itself stay. Nothing about the
- * workflow depends on it. A BOQ reader's record, and one without allocation
- * links, is returned untouched (the same object).
+ * workflow depends on it. A change order's `relatedRecords` (PC-7b) go
+ * through withheldRelatedRecords below. A BOQ reader's record, and one
+ * without allocation links or related records, is returned untouched (the
+ * same object).
  */
 const withheldAllocationLinks = (record, access = FULL_ACCESS) => {
   if (access.boq || !record || typeof record !== "object" || Array.isArray(record)) return record;
-  if (!Array.isArray(record.allocationLinks) || !record.allocationLinks.length) return record;
-  return { ...record, allocationLinks: record.allocationLinks.map(withheldAllocationLink) };
+  const links = Array.isArray(record.allocationLinks) && record.allocationLinks.length > 0;
+  const related = has(record, "relatedRecords");
+  if (!links && !related) return record;
+  return {
+    ...record,
+    ...(links ? { allocationLinks: record.allocationLinks.map(withheldAllocationLink) } : {}),
+    ...(related ? { relatedRecords: withheldRelatedRecords(record.relatedRecords) } : {}),
+  };
 };
+
+// ─── PC-7b: a change order's related records (owner decision R5-5) ────────
+//
+// change-order.service puts `relatedRecords` on every register row and every
+// write's answer: { activities: [{ id, code, name, relation, impactDays?,
+// href }], boqItems: [{ id, code, description, unitCode, relation, href }] },
+// one row per activity with its strongest relation (direct, activity_link,
+// via_allocation). A BOQ item, and an activity the order reaches only
+// through an allocation link (the relationship is the mapping's — its
+// presence says the activity is mapped), are the bill's: a member who may
+// not read the BOQ is given the activities the order names directly or
+// through its activity links, no boqItems key and no via_allocation row, and
+// `boqWithheld: { keys, reason }` — on EVERY order, whether or not anything
+// was removed, so the marker says nothing of a mapping and an empty list is
+// never read as "none". An activity reached both directly and through an
+// allocation is one row, 'direct', and stays.
+const RELATED_RECORDS_WITHHELD =
+  "BOQ items, and the activities a change order reaches through BOQ allocations, are available only to members who may read the BOQ";
+const RELATED_RECORDS_BOQ_KEYS = Object.freeze(["boqItems", "activities.via_allocation"]);
+
+function withheldRelatedRecords(related) {
+  const boqWithheld = { keys: [...RELATED_RECORDS_BOQ_KEYS], reason: RELATED_RECORDS_WITHHELD };
+  if (!related || typeof related !== "object" || Array.isArray(related)) return { activities: [], boqWithheld };
+  const kept = withoutKeys(related, ["boqItems"]);
+  const { activities } = related;
+  return {
+    ...kept,
+    activities: Array.isArray(activities) ? activities.filter((row) => row?.relation !== "via_allocation") : [],
+    boqWithheld,
+  };
+}
 
 // ─── PC-5: the BOQ item and activity detail views ─────────────────────────
 //
@@ -1843,6 +1882,10 @@ module.exports = {
   ALLOCATION_LINK_BOQ_KEYS,
   ALLOCATION_LINK_WITHHELD,
   withheldAllocationLinks,
+  // PC-7b: a change order's related records.
+  RELATED_RECORDS_WITHHELD,
+  RELATED_RECORDS_BOQ_KEYS,
+  withheldRelatedRecords,
   BILLING_LINES_WITHHELD,
   withheldBillingStatement,
   CONTRACT_EVENT_VALUE_WITHHELD,

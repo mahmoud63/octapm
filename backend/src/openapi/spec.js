@@ -6715,6 +6715,56 @@ const components = {
       materialsOnSiteAmount: money,
       notes: { type: "string", nullable: true },
     }),
+    // PC-7b (owner decision R5-5): which activities and BOQ items a change
+    // order reaches, composed read-only from its own links.
+    ChangeOrderRelatedRecords: {
+      ...objectSchema({
+        activities: arrayOf(
+          objectSchema(
+            {
+              id: uuid,
+              code: { type: "string", nullable: true, description: "Activity code (activityCode, else the P6 activity id)." },
+              name: { type: "string", nullable: true },
+              relation: {
+                type: "string",
+                enum: ["direct", "activity_link", "via_allocation"],
+                description:
+                  "The strongest way the order reaches the activity: direct (ChangeOrder.activityId), activity_link (a ChangeOrderActivityLink), via_allocation (only through a ChangeOrderAllocationLink whose allocation maps a BOQ item to the activity).",
+              },
+              impactDays: {
+                type: "integer",
+                description:
+                  "The order's recorded schedule impact on the activity: the largest scheduleImpactDays of its activity-link rows on it (a recorded figure, never computed). Absent when the order has no activity link on the activity.",
+              },
+              href: { type: "string", nullable: true, description: "Web path that opens the activity's detail drawer (PC-5)." },
+            },
+            ["id", "relation"],
+          ),
+        ),
+        boqItems: arrayOf(
+          objectSchema(
+            {
+              id: uuid,
+              code: { type: "string", nullable: true },
+              description: { type: "string", nullable: true },
+              unitCode: { type: "string", nullable: true },
+              relation: { type: "string", enum: ["allocation_link"] },
+              href: { type: "string", nullable: true, description: "Web path that opens the BOQ item's detail drawer (PC-5)." },
+            },
+            ["id", "relation"],
+          ),
+        ),
+        boqWithheld: objectSchema(
+          {
+            keys: arrayOf({ type: "string", enum: ["boqItems", "activities.via_allocation"] }),
+            reason: { type: "string" },
+          },
+          ["keys", "reason"],
+        ),
+      }, ["activities"]),
+      description:
+        "One row per activity (no duplicates), ordered direct, activity_link, via_allocation; an activity reached both directly and through an allocation is one 'direct' row. boqItems lists each BOQ item the order's allocation links name, once. For a caller who may not read the BOQ (boq:read), boqItems is omitted, no via_allocation row is listed, and boqWithheld { keys, reason } is present on every order (whether or not anything was removed), so an empty list is never read as 'none'. Composed read-only: no approval, budget or contract figure is touched.",
+    },
     ChangeOrderRequest: objectSchema(
       {
         description: { type: "string" },
@@ -9632,7 +9682,16 @@ const allocationLinkWithholding = (ownFigures) =>
   "Each of `allocationLinks` carries the BOQ row it points at (boqItemId, boqItem: id, code, ref, description, unit, qty, rate, amount) and its allocation (allocationId, allocation: id, quantity, amount, weight, status, with the row and its activity). A caller who may not read the BOQ (boq:read) is given each link without those four keys and `boqWithheld: { keys, reason }` in their place; the link's own " +
   ownFigures +
   ", its notes, and every figure of the record itself are returned to every reader, and boq:read is not needed to read or work the record.";
-const changeOrderLinkWithholding = allocationLinkWithholding("quantity and amount");
+const changeOrderLinkWithholding =
+  allocationLinkWithholding("quantity and amount") +
+  " Every order (each register row, and the order every write and transition answers with) carries `relatedRecords` (ChangeOrderRelatedRecords, PC-7b / R5-5): the activities it reaches — one row per activity, relation direct, activity_link or via_allocation, each with a link to the activity's detail drawer — and the BOQ items its allocation links name, each with a link to the BOQ item's drawer. For a caller who may not read the BOQ, `relatedRecords` has no boqItems and no via_allocation row, and carries `boqWithheld: { keys, reason }` on every order. Read-only: composing it changes no approval, budget, contract value or other figure.";
+const changeOrderListRow = {
+  type: "object",
+  additionalProperties: true,
+  description: "A change order with its links, evidence and approval history.",
+  properties: { relatedRecords: ref("ChangeOrderRelatedRecords") },
+  required: ["relatedRecords"],
+};
 const subValuationLinkWithholding = allocationLinkWithholding(
   "quantity, workDoneAmount, materialsOnSiteAmount and retentionAmount",
 );
@@ -9655,6 +9714,15 @@ add(
       includeArchivedParam,
     ],
     permissions: modulePermission("change_order", "read"),
+    responseSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        orders: arrayOf(changeOrderListRow),
+        summary: freeObject("Approved and pending totals, schedule impact and approved count."),
+      },
+      required: ["orders", "summary"],
+    },
   }),
 );
 
