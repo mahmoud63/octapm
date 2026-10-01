@@ -57,7 +57,12 @@ import {
   type DailyLogEntry,
 } from '../hooks/use-daily-log'
 import { DailyLogDraftAssistant } from './daily-log-ai-draft'
-import { SectionCard } from './daily-log-sections'
+import {
+  QUANTITIES_SECTION,
+  QuantitiesSectionCard,
+  SectionCard,
+  type DailyLogQuantityEntry,
+} from './daily-log-sections'
 import { DailyLogSettingsDialog } from './daily-log-settings-dialog'
 import { ManpowerReport } from './manpower-report'
 
@@ -501,6 +506,12 @@ export function DailyLogPanel({
   const recentByDate = new Map(
     (recent?.items ?? []).map((item) => [item.date, item])
   )
+  // PC-6: the seventh section, sent by a server that has it; an older
+  // server sends none and the card shows an empty section.
+  const quantityEntries =
+    ((log?.sections as Record<string, DailyLogEntry[] | undefined> | undefined)?.[
+      QUANTITIES_SECTION
+    ] as DailyLogQuantityEntry[] | undefined) ?? []
 
   const runAction = async (action: 'submit' | 'approve' | 'reopen') => {
     const reason =
@@ -870,6 +881,16 @@ export function DailyLogPanel({
                 ownsEntry={ownsEntry}
               />
             ))}
+            <QuantitiesSectionCard
+              projectId={projectId}
+              date={date}
+              entries={quantityEntries}
+              context={context}
+              canWrite={canWrite}
+              canReview={canReview}
+              locked={locked}
+              ownsEntry={ownsEntry}
+            />
           </div>
 
           {log.id && (
