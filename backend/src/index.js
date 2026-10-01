@@ -10,6 +10,7 @@ const { registerAutoSubscriptions } = require('./services/comment.service');
 const { registerWebhookSubscriber } = require('./services/webhook.service');
 const { startJobWorker, stopJobWorker } = require('./jobs/worker');
 const { installGracefulShutdown, waitForEventBus } = require('./utils/graceful-shutdown');
+const { registerExceptionNotifier } = require('./services/exception.service');
 
 validateProductionEnv();
 
@@ -52,6 +53,10 @@ httpServer.listen(PORT, () => {
 // polls — run by whichever process holds scheduler leadership. Production
 // API tasks set SCHEDULERS_ENABLED=false and leave them to the worker.
 startSchedulerLeadership();
+// PC-7b: an exception evaluation (a job run here) that opens a critical
+// exception tells the project's PM and QS, once; off with
+// EXCEPTIONS_ENGINE_ENABLED=false (exception.service registerExceptionNotifier).
+registerExceptionNotifier();
 // Durable job worker (BOQ AI, schedule generation). Set JOB_WORKER_ENABLED=false
 // on API instances when running dedicated workers via `npm run worker`.
 startJobWorker();

@@ -5,7 +5,7 @@ const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
 const { requestForProject, requireProjectAccess } = require("../middleware/project-access");
 const { hasPermission, requireRoles } = require("../middleware/rbac");
-const { boqFigureAccess, canReadBoq, exceptionAccess, withheldWorkspaceDashboard } = require("../utils/boq-figures");
+const { boqFigureAccess, canReadBoq, withheldWorkspaceDashboard } = require("../utils/boq-figures");
 const exceptionService = require("../services/exception.service");
 const exceptionsRouter = require("./exceptions");
 const { validate } = require("../middleware/validate");
@@ -215,7 +215,7 @@ router.get(
       userId: req.user.id,
       role: req.user.role,
       isCompanyAdmin: req.user.isCompanyAdmin,
-      accessFor: async (projectId) => exceptionAccess(await viewFor(projectId)),
+      accessFor: async (projectId) => exceptionService.exceptionAccessForView(await viewFor(projectId)),
     });
     const dashboard = withheldWorkspaceDashboard(result, (projectId) => access.get(projectId));
     return sendSuccess(res, { ...dashboard, openExceptions });

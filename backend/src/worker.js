@@ -24,12 +24,16 @@ const { subscribeBroadcasts } = require('./realtime/socket');
 const { registerAutoSubscriptions } = require('./services/comment.service');
 const { registerWebhookSubscriber } = require('./services/webhook.service');
 const { installGracefulShutdown, waitForEventBus } = require('./utils/graceful-shutdown');
+const { registerExceptionNotifier } = require('./services/exception.service');
 
 // Job handlers publish domain events here (progress, audit, notifications).
 // Their side effects — webhook deliveries, record follows — run in the
 // process that published, exactly once, so this process registers them too.
 registerWebhookSubscriber();
 registerAutoSubscriptions();
+// PC-7b: exception evaluation jobs run here too; a newly opened critical
+// exception tells the project's PM and QS (off with EXCEPTIONS_ENGINE_ENABLED=false).
+registerExceptionNotifier();
 
 // People waiting on those events are connected to the API tasks. A socket.io
 // server with no HTTP listener, bound to the same cluster adapter, relays

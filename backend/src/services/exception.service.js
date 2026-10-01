@@ -5,6 +5,7 @@ const { recordWorkspacePath } = require("../utils/record-links");
 const {
   EXCEPTION_BOQ_SUBJECT_TYPES,
   EXCEPTION_MODULES,
+  exceptionAccess,
   exceptionPolicy,
   exceptionReadable,
   exceptionReadableWhere,
@@ -58,6 +59,7 @@ const KIND_LABELS = Object.freeze({
   equipment_cost_unposted: "Equipment cost not posted",
   orphan_change_link: "Change link names a missing record",
   readiness_override_active: "Readiness override active",
+  change_order_possible_duplicate: "Change order may duplicate another",
 });
 const kindLabel = (kind) => KIND_LABELS[kind] || String(kind || "Exception").replace(/_/g, " ");
 
@@ -79,6 +81,31 @@ const round3 = (value) => Math.round(Number(value) * 1000) / 1000;
 // rule states its `module` and `boqDerived`. Read once; its statements only
 // widen the withholding (utils/boq-figures exceptionPolicy). Absent (this
 // track's base), the API's own table stands.
+//
+// The engine's index exports functions (kindMeta, getRules, …), not an
+// array: kindMeta() — kind → { module, boqDerived } — is its statement,
+// getRules() the fallback; a bare array (or .rules) is still read.
+const ruleListOf = (loaded) => {
+  if (!loaded) return [];
+  if (typeof loaded.kindMeta === "function") return Object.values(loaded.kindMeta() || {});
+  if (typeof loaded.getRules === "function") return [...(loaded.getRules() || [])];
+  if (Array.isArray(loaded)) return loaded;
+  if (Array.isArray(loaded.rules)) return loaded.rules;
+  if (Array.isArray(loaded.RULES)) return loaded.RULES;
+  return [];
+};
+
+/** kind → { module, boqDerived } from a loaded rule registry; null when it states none. */
+const registryFrom = (loaded) => {
+  const registry = {};
+  for (const rule of ruleListOf(loaded)) {
+    if (rule && typeof rule === "object" && typeof rule.kind === "string" && rule.kind) {
+      registry[rule.kind] = { module: rule.module, boqDerived: rule.boqDerived === true };
+    }
+  }
+  return Object.keys(registry).length ? registry : null;
+};
+
 let registryCache;
 const ruleRegistry = () => {
   if (registryCache !== undefined) return registryCache;
@@ -90,18 +117,7 @@ const ruleRegistry = () => {
     if (error && error.code === "MODULE_NOT_FOUND" && String(error.message).includes("exception-rules")) return registryCache;
     throw error;
   }
-  const list = Array.isArray(loaded)
-    ? loaded
-    : Array.isArray(loaded?.rules)
-      ? loaded.rules
-      : Array.isArray(loaded?.RULES)
-        ? loaded.RULES
-        : Object.values(loaded || {}).flat().filter((rule) => rule && typeof rule === "object" && rule.kind);
-  const registry = {};
-  for (const rule of list) {
-    if (rule && rule.kind) registry[rule.kind] = { module: rule.module, boqDerived: rule.boqDerived === true };
-  }
-  registryCache = Object.keys(registry).length ? registry : null;
+  registryCache = registryFrom(loaded);
   return registryCache;
 };
 
@@ -638,6 +654,33 @@ const associateChangeEvent = async ({ orgId, projectId, exceptionId, access, may
 // ─── The workspace dashboard's open-exceptions figure ─────────────────────
 
 /**
+ * What the caller may read of one project's exceptions, from that project's
+ * view (middleware/project-access requestForProject) — failing CLOSED.
+ * requestForProject attaches the member's permission template, but a failed
+ * lookup there is swallowed and leaves the role's defaults in place (which
+ * read the BOQ for a QS or site engineer whose template says "none"). For a
+ * figure that withholds, that would count what the template withholds; so a
+ * view with no template attached is resolved once more here, and a lookup
+ * that fails counts nothing on that project (`null`: named in the marker).
+ */
+const exceptionAccessForView = async (view) => {
+  if (!view || !view.user) return null;
+  const projectAccess = view.projectAccess;
+  if (!projectAccess || !projectAccess.id) return null;
+  if (projectAccess.template) return exceptionAccess(view);
+  const templates = require("./permission-template.service");
+  let context;
+  try {
+    context = await templates.resolveTemplateContext({ projectId: projectAccess.id, userId: view.user.id, partyAccess: projectAccess.partyAccess || [] });
+  } catch (error) {
+    console.error("[exceptions] permission template lookup failed; the project's exceptions are not counted", error?.message || error);
+    return null;
+  }
+  if (!context) return exceptionAccess(view);
+  return exceptionAccess({ ...view, projectAccess: { ...projectAccess, template: context.compiled, templateSource: context.source } });
+};
+
+/**
  * Org-wide (§35 rule 2) over the projects the caller can open: unresolved
  * exceptions they may read, as each project's routes decide it
  * (`accessFor(projectId)` → exceptionAccess). `total` / `bySeverity` count
@@ -709,7 +752,6 @@ const notifyOpenedCritical = async ({ orgId, projectId, exceptionIds = null }) =
   const { normalizeRoleId } = require("../config/permissions");
   const { resolveRequestPrincipal } = require("./membership.service");
   const { requestForProject } = require("../middleware/project-access");
-  const { exceptionAccess } = require("../utils/boq-figures");
   const now = new Date();
   const rows = await prisma.projectException.findMany({
     where: {
@@ -729,7 +771,7 @@ const notifyOpenedCritical = async ({ orgId, projectId, exceptionIds = null }) =
   const accessByUser = new Map();
   for (const userId of candidates) {
     const principal = await resolveRequestPrincipal({ userId, orgId }).catch(() => null);
-    accessByUser.set(userId, principal ? exceptionAccess(await requestForProject({ user: principal }, projectId)) : null);
+    accessByUser.set(userId, principal ? await exceptionAccessForView(await requestForProject({ user: principal }, projectId)) : null);
   }
   const labels = await loadSubjectLabels({ projectId, rows: due });
   const registry = ruleRegistry();
@@ -775,6 +817,49 @@ const notifyOpened = ({ orgId, projectId, exceptions = [] }) =>
       .filter(Boolean),
   });
 
+/**
+ * The bridge from the engine to the notice: the engine tells its evaluation
+ * listeners, after each committed evaluation, which rows OPENED and which
+ * became critical (`escalated`, never notified as a warning); both go to
+ * notifyOpened, which tells only the open, critical, unsnoozed ones, once
+ * per opening. Registered once per process — by the API entry point and the
+ * dedicated worker (src/index.js, src/worker.js), wherever an evaluation job
+ * may run — and stands down with EXCEPTIONS_ENGINE_ENABLED=false, as the
+ * engine's own trigger and tick do. Without the engine (this track's base)
+ * it registers nothing. Returns the unregister function.
+ */
+let notifierOff = null;
+const engineEnabledByEnv = (env) => String(env.EXCEPTIONS_ENGINE_ENABLED ?? "true").trim().toLowerCase() !== "false";
+const evaluationListener = async ({ orgId, projectId, opened = [], escalated = [] } = {}) => {
+  const exceptions = [...(Array.isArray(opened) ? opened : []), ...(Array.isArray(escalated) ? escalated : [])];
+  if (!orgId || !projectId || !exceptions.length) return { notified: 0, exceptions: 0 };
+  return notifyOpened({ orgId, projectId, exceptions });
+};
+const registerExceptionNotifier = ({ env = process.env, engine = null, logger = console } = {}) => {
+  if (notifierOff) return notifierOff;
+  if (!engineEnabledByEnv(env)) {
+    logger?.log?.("[exception-notifier] disabled by EXCEPTIONS_ENGINE_ENABLED=false");
+    return () => {};
+  }
+  let target = engine;
+  if (!target) {
+    try {
+      // eslint-disable-next-line global-require
+      target = require("./exception-engine.service");
+    } catch (error) {
+      if (error && error.code === "MODULE_NOT_FOUND" && String(error.message).includes("exception-engine.service")) return () => {};
+      throw error;
+    }
+  }
+  if (typeof target?.registerEvaluationListener !== "function") return () => {};
+  const off = target.registerEvaluationListener(evaluationListener);
+  notifierOff = () => {
+    if (typeof off === "function") off();
+    notifierOff = null;
+  };
+  return notifierOff;
+};
+
 module.exports = {
   STATUSES,
   SEVERITIES,
@@ -792,8 +877,13 @@ module.exports = {
   workspaceOpenExceptions,
   notifyOpenedCritical,
   notifyOpened,
+  exceptionAccessForView,
+  registerExceptionNotifier,
   // for tests
+  _evaluationListener: evaluationListener,
   _exceptionPrefill: exceptionPrefill,
+  _registryFrom: registryFrom,
+  _ruleRegistry: () => ruleRegistry(),
   _resetRegistry: () => {
     registryCache = undefined;
   },

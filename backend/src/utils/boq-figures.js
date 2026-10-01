@@ -1885,14 +1885,18 @@ const EXCEPTION_KIND_POLICY = Object.freeze({
   activity_budget_mismatch: Object.freeze({ module: "cost", boqDerived: true }),
   unit_unresolved: Object.freeze({ module: "boq", boqDerived: true }),
   unit_mismatch: Object.freeze({ module: "boq", boqDerived: true }),
-  structure_missing: Object.freeze({ module: "schedule", boqDerived: false }),
+  // The BOQ / schedule structure the bill is mapped through (the rule's own
+  // statement: BOQ-derived, withheld whole).
+  structure_missing: Object.freeze({ module: "boq", boqDerived: true }),
   progress_stale: Object.freeze({ module: "progress", boqDerived: false }),
   period_not_locked: Object.freeze({ module: "cost", boqDerived: false }),
   ev_basis_divergence: Object.freeze({ module: "cost", boqDerived: true }),
   committed_definition_mixed: Object.freeze({ module: "cost", boqDerived: false }),
   equipment_cost_unposted: Object.freeze({ module: "cost", boqDerived: false }),
   orphan_change_link: Object.freeze({ module: "cost", boqDerived: false }),
-  readiness_override_active: Object.freeze({ module: "schedule", boqDerived: false }),
+  // An override of the readiness gate, whose blockers are the bill's.
+  readiness_override_active: Object.freeze({ module: "cost", boqDerived: true }),
+  change_order_possible_duplicate: Object.freeze({ module: "cost", boqDerived: false }),
 });
 const EXCEPTION_UNKNOWN_KIND_POLICY = Object.freeze({ module: "cost", boqDerived: true });
 const EXCEPTION_MODULES = Object.freeze(["boq", "cost", "schedule", "progress"]);
