@@ -31,6 +31,10 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Main } from '@/components/layout/main'
+import {
+  OpenExceptionsCard,
+  type WorkspaceOpenExceptions,
+} from '@/features/controls/exceptions/exceptions-dashboard-card'
 import { MyWorkflowStepsSection } from '@/features/workflows/components/my-workflow-steps'
 import { QuickActions } from './quick-actions'
 
@@ -183,6 +187,8 @@ type WorkspaceDashboard = {
     metrics: PendingReviewMetric[]
     sourceRule: KpiSourceRule
   }
+  /** PC-7b: open exceptions per severity across what this person may read (absent before the API ships it). */
+  openExceptions?: WorkspaceOpenExceptions | null
   healthDimensions: HealthDimension[]
   workflowQueues: WorkflowQueue[]
   projectHealth: ProjectHealth[]
@@ -1055,6 +1061,8 @@ export function Dashboard() {
                 ))}
               </div>
             </section>
+
+            {data.openExceptions && <OpenExceptionsCard data={data.openExceptions} />}
 
             <MyWorkflowStepsSection />
 

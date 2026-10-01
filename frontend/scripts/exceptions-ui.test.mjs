@@ -113,4 +113,22 @@ for (const [file, kind, testId] of [
   assert.ok(drawer.includes(`testId='${testId}'`), `${file}: the section is ${testId}`)
 }
 
+// ── Counts: the Overview strip and the workspace tile ───────────────────
+const strip = read('src/features/projects/components/controls-strip.tsx')
+assert.match(strip, /useExceptionsSummary\(projectId/, 'the strip reads the server summary')
+assert.match(strip, /enabled: exceptionsOffered && !permissionsSettling/, 'asked only when the Exceptions page is offered and permissions settled')
+assert.match(strip, /summary\.total == null \? '—' : summary\.total\.toLocaleString\(\)/, "the strip's total is the server's, never summed here")
+assert.match(strip, /severityCountsText\(summary\.bySeverity\)/, 'per-severity counts as the server sent them')
+assert.match(strip, /some withheld: \$\{summary\.withheld\.reason\}/, 'withheld exceptions are said with the reason on the strip')
+assert.match(strip, /testId='uat-controls-figure-open-exceptions'/, 'the strip has the open-exceptions figure')
+const stripFigure = strip.slice(strip.indexOf('function openExceptionsFigure'), strip.indexOf('* Which of the three truths'))
+assert.ok(!/bySeverity\.(critical|warning|info)[^\n]*\+/.test(stripFigure), 'the strip never adds the severity counts')
+const tile = all['exceptions-dashboard-card.tsx']
+assert.match(tile, /data\.total == null \? '—' : data\.total\.toLocaleString\(\)/, "the tile's total is the server's")
+assert.match(tile, /<SeverityCountChips counts=\{data\.bySeverity/, 'the tile draws the per-severity counts as sent')
+assert.match(tile, /<WithheldNote withheld=\{data\.withheld\}/, 'the tile says what was withheld')
+assert.match(tile, /project\.withheld \?/, "a project's withheld exceptions are said with the reason, never as 0")
+const dashboard = read('src/features/dashboard/index.tsx')
+assert.match(dashboard, /data\.openExceptions && <OpenExceptionsCard data=\{data\.openExceptions\} \/>/, 'the workspace dashboard draws the tile the server sends')
+
 console.log('exceptions-ui: ok')
