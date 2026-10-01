@@ -4,6 +4,9 @@ const mockPrisma = {
   costRecord: { count: jest.fn() },
   activityProgress: { count: jest.fn() },
   dailyReport: { count: jest.fn() },
+  // PC-6: the installed quantities recorded against the activity keep it too.
+  quantityProgressEntry: { count: jest.fn() },
+  dailyLogQuantity: { count: jest.fn() },
 };
 
 jest.mock('../../config/db', () => ({ prisma: mockPrisma }));
@@ -49,13 +52,15 @@ describe('deleteActivity', () => {
     mockPrisma.costRecord.count.mockResolvedValue(0);
     mockPrisma.activityProgress.count.mockResolvedValue(0);
     mockPrisma.dailyReport.count.mockResolvedValue(0);
+    mockPrisma.quantityProgressEntry.count.mockResolvedValue(0);
+    mockPrisma.dailyLogQuantity.count.mockResolvedValue(0);
     mockPrisma.activity.delete.mockResolvedValue(activity);
   });
 
   it('deletes an activity that no record keeps', async () => {
     await expect(call()).resolves.toEqual({ deleted: true });
     expect(mockPrisma.activity.delete).toHaveBeenCalledWith({ where: { id: 'activity-1' } });
-    for (const model of ['costRecord', 'activityProgress', 'dailyReport']) {
+    for (const model of ['costRecord', 'activityProgress', 'dailyReport', 'quantityProgressEntry', 'dailyLogQuantity']) {
       expect(mockPrisma[model].count).toHaveBeenCalledWith({ where: { activityId: 'activity-1' } });
     }
   });
@@ -67,7 +72,7 @@ describe('deleteActivity', () => {
       409,
       'ACTIVITY_IN_USE',
       `Activity G100 cannot be deleted: 1 cost record is linked to it. ${MESSAGE_TAIL}`,
-      { activityId: 'activity-1', activityCode: 'G100', partOfActiveSchedule: true, keptBy: { costRecords: 1, progress: 0, dailyReports: 0 } },
+      { activityId: 'activity-1', activityCode: 'G100', partOfActiveSchedule: true, keptBy: { costRecords: 1, progress: 0, dailyReports: 0, quantityEntries: 0, dailyLogQuantities: 0 } },
     ]);
     expect(mockPrisma.activity.delete).not.toHaveBeenCalled();
   });
@@ -77,9 +82,11 @@ describe('deleteActivity', () => {
     mockPrisma.costRecord.count.mockResolvedValue(2);
     mockPrisma.activityProgress.count.mockResolvedValue(1);
     mockPrisma.dailyReport.count.mockResolvedValue(3);
+    mockPrisma.quantityProgressEntry.count.mockResolvedValue(4);
+    mockPrisma.dailyLogQuantity.count.mockResolvedValue(1);
     const error = await refusal();
-    expect(error.message).toBe(`Activity Excavate cannot be deleted: 2 cost records, 1 progress record, 3 daily reports are linked to it. ${MESSAGE_TAIL}`);
-    expect(error.details).toEqual({ activityId: 'activity-1', activityCode: null, partOfActiveSchedule: false, keptBy: { costRecords: 2, progress: 1, dailyReports: 3 } });
+    expect(error.message).toBe(`Activity Excavate cannot be deleted: 2 cost records, 1 progress record, 3 daily reports, 4 quantity progress entries, 1 daily-log quantity row are linked to it. ${MESSAGE_TAIL}`);
+    expect(error.details).toEqual({ activityId: 'activity-1', activityCode: null, partOfActiveSchedule: false, keptBy: { costRecords: 2, progress: 1, dailyReports: 3, quantityEntries: 4, dailyLogQuantities: 1 } });
   });
 
   it('turns a foreign-key refusal the list does not know (Prisma P2003) into the same structured 409, never a 500', async () => {
@@ -94,7 +101,7 @@ describe('deleteActivity', () => {
       'ACTIVITY_IN_USE',
       `Activity G100 cannot be deleted: another record is linked to it. ${MESSAGE_TAIL}`,
     ]);
-    expect(error.details.keptBy).toEqual({ costRecords: 0, progress: 0, dailyReports: 0, constraint: 'Other_activityId_fkey (index)' });
+    expect(error.details.keptBy).toEqual({ costRecords: 0, progress: 0, dailyReports: 0, quantityEntries: 0, dailyLogQuantities: 0, constraint: 'Other_activityId_fkey (index)' });
   });
 
   it('lets any other failure through unchanged', async () => {

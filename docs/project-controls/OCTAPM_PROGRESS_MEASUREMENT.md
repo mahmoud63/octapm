@@ -93,7 +93,18 @@ siblings (`daily-log.service` drives it).
   is refused in code (400 `QUANTITY_NEGATIVE`) before the CHECK constraint sees it.
 - **Over-allocation is a warning, never a block**: the write answers `warnings[]` with `QUANTITY_OVER_ALLOCATION`
   (approved installed + this entry > Σ approved, active allocation quantity of the item on the activity — the raw
-  comparison, with the figures) or `QUANTITY_NO_APPROVED_ALLOCATION`. No `ProjectException` row (PC-7b).
+  comparison, with the figures). No `ProjectException` row (PC-7b). **An unmapped pairing is refused** (integration
+  fix, 2026-10-01): the route records against an item the activity has an approved, active allocation of — the
+  daily log's section rule — else 400 `QUANTITY_ITEM_NOT_ALLOCATED` (the finding: a pending manual entry on an item
+  with no approved allocation to the activity was accepted and reached the approver with no planned figure behind
+  it). `QUANTITY_NO_APPROVED_ALLOCATION` remains a warning only for an entry whose mapping was retired after it was
+  recorded (an edit, the daily log's own minting). Proven live (`pc-6-quantity-entries`), mutation-proven.
+- **A row the entries name is kept** (integration fix, 2026-10-01): `DELETE /boq/items/{id}` counts its keepers —
+  `BOQ_ITEM_KEEPERS` in `boq.service`: IPC lines, quantity progress entries, daily-log quantity rows (the three
+  RESTRICT relations) — and answers 409 `BOQ_ITEM_IN_USE` naming them, before the delete and under the row's lock;
+  a RESTRICT the list does not know (Prisma P2003) is answered the same with the constraint's name, never a 500 with
+  the invocation text. `activity.service ACTIVITY_KEEPERS` counts `QuantityProgressEntry` and `DailyLogQuantity`
+  too (409 `ACTIVITY_IN_USE`). Proven live and by unit (`boq.service.test`, `activity-delete.service.test`).
 - **Patch / delete** (progress `submission.submit`): a draft or submitted entry's quantity, unit, date, location,
   allocation or note, by its creator or by anyone holding `submission.approve` (403 `QUANTITY_ENTRY_FORBIDDEN`).
   An approved or rejected entry is history (409 `QUANTITY_ENTRY_LOCKED`); an entry bundled into a submission that is

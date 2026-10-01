@@ -578,9 +578,13 @@ const ACTIVITY_KEEPERS = [
   { key: 'costRecords', model: 'costRecord', noun: 'cost record' },
   { key: 'progress', model: 'activityProgress', noun: 'progress record' },
   { key: 'dailyReports', model: 'dailyReport', noun: 'daily report' },
+  // PC-6: installed quantities recorded against the activity, source data
+  // for an official figure (RESTRICT, like ActivityProgress).
+  { key: 'quantityEntries', model: 'quantityProgressEntry', noun: 'quantity progress entry' },
+  { key: 'dailyLogQuantities', model: 'dailyLogQuantity', noun: 'daily-log quantity row' },
 ];
 
-const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+const plural = (count, noun) => `${count} ${count === 1 ? noun : noun.endsWith('y') ? `${noun.slice(0, -1)}ies` : `${noun}s`}`;
 
 // The activity's code, or the P6 id an import gave it, or its name.
 const activityLabel = (activity) =>

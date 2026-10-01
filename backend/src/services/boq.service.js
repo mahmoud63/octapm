@@ -2282,6 +2282,37 @@ async function retiresWithRow(tx, { projectId, activityId, boqItemId }) {
   return footprint.every((count) => !count);
 }
 
+// The records that keep a BOQ row (ON DELETE RESTRICT on their boqItemId):
+// a certified line and — PC-6 — the installed quantities the site recorded
+// against it, each source data for an official figure. Counted before the
+// delete and named in the refusal; the constraint itself (Prisma P2003) is
+// answered the same way, never as a 500 with the invocation text.
+const BOQ_ITEM_KEEPERS = [
+  { key: 'ipcItems', model: 'ipcItem', noun: 'IPC line' },
+  { key: 'quantityEntries', model: 'quantityProgressEntry', noun: 'quantity progress entry' },
+  { key: 'dailyLogQuantities', model: 'dailyLogQuantity', noun: 'daily-log quantity row' },
+];
+
+const pluralKeeper = (count, noun) => `${count} ${count === 1 ? noun : noun.endsWith('y') ? `${noun.slice(0, -1)}ies` : `${noun}s`}`;
+
+const boqItemInUse = (item, keptBy, kept) =>
+  new HttpError(
+    409,
+    'BOQ_ITEM_IN_USE',
+    `BOQ row ${item.code || item.ref || item.description} cannot be deleted: ${kept} linked to it. Records stay on their row; revise it through a BOQ revision instead.`,
+    { boqItemId: item.id, code: item.code || item.ref || null, keptBy },
+  );
+
+const assertBoqItemDeletable = async (item, tx = prisma) => {
+  const counts = await Promise.all(BOQ_ITEM_KEEPERS.map(({ model }) => (tx[model]?.count ? tx[model].count({ where: { boqItemId: item.id } }) : 0)));
+  const keptBy = Object.fromEntries(BOQ_ITEM_KEEPERS.map(({ key }, index) => [key, counts[index]]));
+  const kept = BOQ_ITEM_KEEPERS.filter(({ key }) => keptBy[key] > 0)
+    .map(({ key, noun }) => pluralKeeper(keptBy[key], noun))
+    .join(', ');
+  if (kept) throw boqItemInUse(item, keptBy, `${kept} ${counts.reduce((sum, count) => sum + count, 0) === 1 ? 'is' : 'are'}`);
+  return keptBy;
+};
+
 async function deleteBoqItem(projectId, itemId, options = {}) {
   await assertProjectAccess(projectId, options.orgId);
   await assertBoqEditable(projectId);
@@ -2320,11 +2351,14 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
     );
   }
 
+  await assertBoqItemDeletable(item);
+
   await prisma.$transaction(async (tx) => {
     // The eligibility check ran before the lock; hold the row and re-read the
     // allocations under it, so a submission or approval that landed since is
     // caught and not overwritten (Phase 21D, CX21-553).
     if (tx.$queryRaw) await tx.$queryRaw`SELECT id FROM "BoqItem" WHERE id = ${itemId} FOR UPDATE`;
+    const keptBy = await assertBoqItemDeletable(item, tx);
     const held = tx.activityBoqAllocation.findMany
       ? await tx.activityBoqAllocation.findMany({ where: { projectId, boqItemId: itemId, isActive: true }, select: { id: true, activityId: true, status: true } })
       : allocations;
@@ -2364,7 +2398,16 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
       }
     }
 
-    await tx.boqItem.delete({ where: { id: itemId } });
+    try {
+      await tx.boqItem.delete({ where: { id: itemId } });
+    } catch (error) {
+      // A record this list does not know keeps it: still a refusal, naming
+      // the constraint, never a 500 with Prisma's invocation text.
+      if (error?.code === 'P2003') {
+        throw boqItemInUse(item, { ...keptBy, constraint: error.meta?.field_name || error.meta?.constraint || null }, 'another record is');
+      }
+      throw error;
+    }
     await recordBoqAudit({
       tx,
       orgId: options.orgId,

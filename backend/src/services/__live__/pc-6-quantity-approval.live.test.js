@@ -133,6 +133,10 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
       ok(created, 201);
       for (const step of ["submit", "approve"]) ok(await api.post(at(`/activity-boq-allocations/${created.body.data.id}/${step}`), {}, bearer(live.token)));
     }
+    // The fixing is mapped to 20 t of rebar (its typed planned quantity below still wins).
+    const fixing = await api.post(at("/activity-boq-allocations"), { boqItemId: rebar.id, activityId: fix.id, quantity: 20 }, bearer(live.token));
+    ok(fixing, 201);
+    for (const step of ["submit", "approve"]) ok(await api.post(at(`/activity-boq-allocations/${fixing.body.data.id}/${step}`), {}, bearer(live.token)));
     // The pour is measured by quantity; nothing typed, so the allocations are the planned figure.
     ok(await api.request("PUT", at(`/activities/${pour.id}/progress-method`), { body: { method: "quantity", quantityUnit: "m3" }, headers: bearer(live.token) }));
     // The fixing: a typed planned quantity, and evidence before anything is approved.
@@ -162,7 +166,8 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
     ids.e3 = (await entry({ activityId: pour.id, boqItemId: concreteA.id, quantity: 40, date: "2026-09-08", clientRequestId: "ap-3" })).id;
     ids.e4 = (await entry({ activityId: pour.id, boqItemId: concreteA.id, quantity: 30, date: "2026-09-15", clientRequestId: "ap-4" })).id;
     // A draft in another unit (rebar, t) on the pour: named by id below, never taken by a date bundle (drafts are not).
-    ids.e6 = (await entry({ activityId: pour.id, boqItemId: rebar.id, quantity: 2, date: "2026-09-03", clientRequestId: "ap-6", status: "draft" }, live.token)).id;
+    // (Seeded: the route records against a mapped item only, and mapping rebar to the pour would mix its planned units.)
+    ids.e6 = (await prisma.quantityProgressEntry.create({ data: { orgId: live.org.id, projectId: project.id, activityId: pour.id, boqItemId: rebar.id, unitCode: "t", quantity: 2, date: new Date("2026-09-03T00:00:00.000Z"), source: "manual", status: "draft", createdBy: live.user.id, clientRequestId: "ap-6" } })).id;
     expect(await prisma.activityProgress.count({ where: { activityId: { in: activityIds() } } })).toBe(0);
     expect(await evRow(pour.id)).toMatchObject({ pct: 0, ev: 0, progressStatus: "missing" });
   });
@@ -347,10 +352,14 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
   });
 
   it("a bundle on an activity with nothing typed and nothing mapped is planned by the client and APPROVED with that frozen figure (basis submission)", async () => {
-    const recorded = await api.post(at("/quantity-progress"), { status: "submitted", activityId: slab.id, boqItemId: concreteA.id, quantity: 5, date: "2026-09-05", clientRequestId: "ap-7" }, bearer(live.token));
-    ok(recorded, 201);
-    ids.e7 = recorded.body.data.entry.id;
-    expect(recorded.body.data.warnings.map((warning) => warning.code)).toContain("QUANTITY_NO_APPROVED_ALLOCATION");
+    // The route records against a mapped item only (integration item 3): the
+    // slab has none, so the entry stands in for one whose mapping was retired
+    // after it was recorded — seeded as the database would hold it.
+    refused(await api.post(at("/quantity-progress"), { status: "submitted", activityId: slab.id, boqItemId: concreteA.id, quantity: 5, date: "2026-09-05", clientRequestId: "ap-7" }, bearer(live.token)), 400, "QUANTITY_ITEM_NOT_ALLOCATED");
+    const recorded = await prisma.quantityProgressEntry.create({
+      data: { orgId: live.org.id, projectId: project.id, activityId: slab.id, boqItemId: concreteA.id, unitCode: "m3", quantity: 5, date: new Date("2026-09-05T00:00:00.000Z"), source: "manual", status: "submitted", createdBy: live.user.id, clientRequestId: "ap-7" },
+    });
+    ids.e7 = recorded.id;
     // Without a planned figure from anywhere the bundle is refused as before, and the entry stays free.
     refused(await submit(slab.id, { entryIds: [ids.e7] }), 400, "PLANNED_QUANTITY_REQUIRED");
     expect(await entryRow(ids.e7)).toMatchObject({ status: "submitted", submissionId: null });

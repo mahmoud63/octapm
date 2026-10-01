@@ -856,6 +856,7 @@ const components = {
         "BOQ_ITEM_CODE_REQUIRED",
         "BOQ_BASELINE_LOCKED",
         "BOQ_ITEM_HAS_LINKED_ALLOCATIONS",
+        "BOQ_ITEM_IN_USE",
         "BOQ_ITEM_INACTIVE",
         "BOQ_ITEM_NOT_DELETABLE",
         "BOQ_ITEM_NOT_FOUND",
@@ -1028,6 +1029,7 @@ const components = {
         // PC-6 (integration): the submission's method is the activity's
         "PROGRESS_METHOD_MISMATCH",
         "QUANTITY_ENTRIES_REQUIRED",
+        "QUANTITY_ITEM_NOT_ALLOCATED",
         // PC-6 (core): the daily log's quantities section
         "DAILY_LOG_QUANTITY_NOT_ALLOCATED",
         "DAILY_LOG_QUANTITY_LOCKED",
@@ -8437,6 +8439,8 @@ add(
   operation({
     tag: "BOQ",
     summary: "Delete a BOQ item.",
+    description:
+      "Deletes a manual BOQ row no record keeps. A row with an IPC line, a quantity progress entry or a daily-log quantity row (ON DELETE RESTRICT: each is source data for an official figure) is 409 BOQ_ITEM_IN_USE with details { boqItemId, code, keptBy: { ipcItems, quantityEntries, dailyLogQuantities } } — never a 500; a constraint this list does not know answers the same with its name. A row with a submitted or approved allocation is 409 BOQ_ITEM_HAS_LINKED_ALLOCATIONS; an uploaded row 403 BOQ_ITEM_NOT_DELETABLE; a historical row 409 BOQ_ITEM_INACTIVE.",
     operationId: "deleteBoqItem",
     parameters: projectRecordParams,
     permissions: rolesPermission("pm", "planning_eng", "qs"),
@@ -8976,7 +8980,7 @@ add(
     tag: "Activities",
     summary: "Delete an activity that no record keeps.",
     description:
-      "Deletes an activity with no cost record, progress record or daily report (the activity-linked data model keeps those on their activity). Otherwise 409 ACTIVITY_IN_USE with details { activityId, activityCode, partOfActiveSchedule, keptBy: { costRecords, progress, dailyReports } } — an activated revision writes a cost record per activity, so an activity of the active schedule leaves the programme through a schedule revision, never through this endpoint.",
+      "Deletes an activity with no cost record, progress record or daily report (the activity-linked data model keeps those on their activity). Otherwise 409 ACTIVITY_IN_USE with details { activityId, activityCode, partOfActiveSchedule, keptBy: { costRecords, progress, dailyReports, quantityEntries, dailyLogQuantities } } — an activated revision writes a cost record per activity, so an activity of the active schedule leaves the programme through a schedule revision, never through this endpoint.",
     operationId: "deleteActivity",
     parameters: projectRecordParams,
     permissions: modulePermission("schedule", "delete"),
@@ -9160,7 +9164,7 @@ add(
     tag: "Progress",
     summary: "Record quantity progress entries (draft or submitted; never official by themselves).",
     description:
-      "Records one entry or a batch. The unit must be the BOQ item's unit code or a registered alias of it (400 QUANTITY_UNIT_MISMATCH otherwise; nothing is converted); a quantity is never negative (400 QUANTITY_NEGATIVE); the day the work was done is required. The site-engineer assignment rule of progress submissions applies (403 ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED); PM and planning engineer override it. An entry whose clientRequestId was seen before on this project is answered with the entry it made, unchanged, flagged replayed — 201 when anything was recorded, 200 when every entry was a replay; the (projectId, clientRequestId) unique index enforces it. An entry taking approved installed past the approved allocation of the item on the activity, or naming an item the activity has no approved allocation of, is accepted with a warning (a raw comparison; no block, no exception row). " +
+      "Records one entry or a batch. The unit must be the BOQ item's unit code or a registered alias of it (400 QUANTITY_UNIT_MISMATCH otherwise; nothing is converted); a quantity is never negative (400 QUANTITY_NEGATIVE); the day the work was done is required. The site-engineer assignment rule of progress submissions applies (403 ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED); PM and planning engineer override it. An entry whose clientRequestId was seen before on this project is answered with the entry it made, unchanged, flagged replayed — 201 when anything was recorded, 200 when every entry was a replay; the (projectId, clientRequestId) unique index enforces it. An entry taking approved installed past the approved allocation of the item on the activity, is accepted with a warning (a raw comparison; no block, no exception row); an item the activity has no approved, active allocation of is refused (400 QUANTITY_ITEM_NOT_ALLOCATED — the daily log's section rule, GET /activities/{id}/allocated-items lists what may be named). " +
       QUANTITY_ENTRY_AUTHORITY,
     operationId: "createQuantityProgressEntries",
     parameters: projectParams,

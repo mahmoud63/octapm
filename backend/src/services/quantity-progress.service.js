@@ -297,6 +297,16 @@ const allocationQuantityFor = async ({ projectId, activityId, boqItemId }, tx = 
   return { allocations: rows, quantity: sumQuantities(rows.map((row) => row.quantity)) };
 };
 
+/** An entry recorded through the route names an item the activity has an approved, active allocation of (400 QUANTITY_ITEM_NOT_ALLOCATED). */
+const assertItemAllocated = async ({ projectId, activityId, boqItemId }, tx = prisma) => {
+  const { allocations } = await allocationQuantityFor({ projectId, activityId, boqItemId }, tx);
+  if (allocations.length) return allocations;
+  throw new HttpError(400, "QUANTITY_ITEM_NOT_ALLOCATED", "The activity has no approved allocation of this BOQ item; pick one of the activity's allocated items", {
+    activityId,
+    boqItemId,
+  });
+};
+
 const approvedInstalledFor = async ({ projectId, activityId, boqItemId }, tx = prisma) => {
   const rows = await tx.quantityProgressEntry.findMany({
     where: { projectId, activityId, boqItemId, status: "approved" },
@@ -467,6 +477,13 @@ const createEntriesWithClient = async ({
     if (quantity.isNegative()) {
       throw new HttpError(400, "QUANTITY_NEGATIVE", "A quantity entry is never negative; a correction is a rejection plus a new entry", { field: `entries[${i}].quantity` });
     }
+    // The direct route records against an item the activity is mapped to —
+    // an approved, active allocation — exactly as the daily log's quantities
+    // section does (DAILY_LOG_QUANTITY_NOT_ALLOCATED); a figure on an
+    // unmapped pairing has no planned quantity to stand against and would
+    // reach the approver as a bundle with nothing behind it. The daily log's
+    // minting (`internal`) admitted its rows at recording time.
+    if (!internal) await assertItemAllocated({ projectId, activityId, boqItemId }, tx);
     const unitCode = resolveEntryUnit({ unit: entry.unitCode ?? entry.unit, item, index });
     const date = parseEntryDate(entry.date, `entries[${i}].date`);
     const locationId = trimOrNull(entry.locationId);
