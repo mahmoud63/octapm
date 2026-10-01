@@ -24,6 +24,8 @@ import {
   formatQuantity,
 } from '@/features/controls/lib/detail-format'
 import { useBoqItemDetail } from '@/features/controls/hooks/use-controls-detail'
+import { RecordQuantities } from '@/features/controls/quantities/quantities-section'
+import { useRecordQuantities } from '@/features/controls/quantities/use-record-quantities'
 import { useProject } from '@/features/projects/hooks/use-projects'
 import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import type { BoqItemDetail, ControlsStructure } from '../data/schema'
@@ -103,15 +105,18 @@ export function HistoryList({
 }
 
 function BoqDetailBody({
+  projectId,
   detail,
   currency,
   onOpenActivity,
 }: {
+  projectId: string
   detail: BoqItemDetail
   currency: string
   onOpenActivity: (activityId: string) => void
 }) {
   const { sections } = detail
+  const { data: quantities } = useRecordQuantities(projectId, 'boq_item', detail.id)
   const unit = sections.quantities.unit ?? ''
   const allocations = sections.mapping.allocations
   return (
@@ -254,8 +259,16 @@ function BoqDetailBody({
         <FigureRow label='Authorised (revised) quantity' figure={sections.quantities.authorised} suffix={unit} testId='boq-detail-qty-authorised' />
         <FigureRow label='Mapped to activities' figure={sections.quantities.mapped} suffix={unit} testId='boq-detail-qty-mapped' />
         <FigureRow label='Unallocated' figure={sections.quantities.unallocated} suffix={unit} testId='boq-detail-qty-unallocated' />
-        <FigureRow label='Installed' figure={sections.quantities.installed} testId='boq-detail-qty-installed' />
-        <FigureRow label='Paid' figure={sections.quantities.paid} testId='boq-detail-qty-paid' />
+        {/* PC-6: the five quantities and the committed quantity, from the
+            quantity views — five truths, never merged. Until that read
+            answers, the detail's own installed / paid rows say what they can. */}
+        {quantities?.state === 'ok' ? null : (
+          <>
+            <FigureRow label='Installed' figure={sections.quantities.installed} testId='boq-detail-qty-installed' />
+            <FigureRow label='Paid' figure={sections.quantities.paid} testId='boq-detail-qty-paid' />
+          </>
+        )}
+        <RecordQuantities projectId={projectId} kind='boq_item' id={detail.id} testId='boq-detail-quantities-pc6' />
         <FigureRow label='Forecast' figure={sections.quantities.forecast} testId='boq-detail-qty-forecast' />
       </DetailSection>
 
@@ -471,7 +484,7 @@ export function BoqDetailDrawer({ projectId, itemId, onClose, onOpenActivity, ba
               {status?.data?.error?.message ?? 'This BOQ item could not be read.'}
             </p>
           ) : detail ? (
-            <BoqDetailBody detail={detail} currency={currency} onOpenActivity={onOpenActivity} />
+            <BoqDetailBody projectId={projectId} detail={detail} currency={currency} onOpenActivity={onOpenActivity} />
           ) : null}
         </div>
       </SheetContent>

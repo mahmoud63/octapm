@@ -27,6 +27,7 @@ import {
 } from '@/features/controls/lib/detail-format'
 import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { useActivityDetail } from '@/features/controls/hooks/use-controls-detail'
+import { RecordQuantities } from '@/features/controls/quantities/quantities-section'
 import { useProject } from '@/features/projects/hooks/use-projects'
 import type { ActivityDetail } from '../data/schema'
 
@@ -88,11 +89,13 @@ function PartlyWithheld({ reason, testId }: { reason: string; testId: string }) 
 }
 
 function ActivityDetailBody({
+  projectId,
   detail,
   currency,
   onOpenBoqItem,
   onOpenActivity,
 }: {
+  projectId: string
   detail: ActivityDetail
   currency: string
   onOpenBoqItem: (itemId: string) => void
@@ -188,6 +191,15 @@ function ActivityDetailBody({
         ) : (
           <Withheld section={sections.mapping} testId='activity-detail-mapping-withheld' />
         )}
+      </DetailSection>
+
+      {/* PC-6: the five quantities and the committed quantity of the BOQ
+          items this activity carries, one block per item in its own unit,
+          from the quantity views — never added up across items. Withheld
+          from a member who may not read the BOQ, with the server's reason;
+          the approved percentage below is progress data and stays. */}
+      <DetailSection title='Quantities' testId='activity-detail-quantities'>
+        <RecordQuantities projectId={projectId} kind='activity' id={detail.id} testId='activity-detail-quantities-pc6' />
       </DetailSection>
 
       <DetailSection title='Progress' testId='activity-detail-progress'>
@@ -545,7 +557,7 @@ export function ActivityDetailDrawer({
               {response?.data?.error?.message ?? 'This activity could not be read.'}
             </p>
           ) : detail ? (
-            <ActivityDetailBody
+            <ActivityDetailBody projectId={projectId}
               detail={detail}
               currency={currency}
               onOpenBoqItem={onOpenBoqItem}

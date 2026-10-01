@@ -592,3 +592,297 @@ export const ActivityDetailSchema = z.object({
 })
 
 export type ActivityDetail = z.infer<typeof ActivityDetailSchema>
+
+// ─── PC-6: progress provenance, quantity progress entries, planned / installed ───
+// (core contract: quantity-progress.service installedByActivity /
+//  plannedQuantityFor and the provenance the progress serializers carry.)
+// A daily log, a site capture or an import never changes official progress
+// by itself (OCTAPM_PROGRESS_MEASUREMENT §3): it makes pending entries that
+// a progress approver approves through the one writer. Every official and
+// every pending figure says where it came from — PROGRESS SOURCE. Typed from
+// the contract, every field optional: a server without the field reads as
+// the older `approvedProgressSource` string, or as "—".
+const withheldNote = z
+  .union([z.object({ reason: z.string() }).passthrough(), z.boolean()])
+  .nullable()
+  .optional()
+
+export const progressSourceSchema = z
+  .object({
+    // manual | mobile | daily_log | daily_report | import | submission
+    source: z.string().nullable().optional(),
+    // The server's own sentence, when it sends one, wins over anything
+    // the screen could put together.
+    label: z.string().nullable().optional(),
+    // installed_over_planned | typed_pct | milestones | inspection
+    basis: z.string().nullable().optional(),
+    method: z.string().nullable().optional(),
+    submissionId: z.string().nullable().optional(),
+    submittedBy: z.string().nullable().optional(),
+    submittedByName: z.string().nullable().optional(),
+    submittedAt: z.string().nullable().optional(),
+    approvedBy: z.string().nullable().optional(),
+    approvedByName: z.string().nullable().optional(),
+    approvedAt: z.string().nullable().optional(),
+    importId: z.string().nullable().optional(),
+    importDocumentId: z.string().nullable().optional(),
+    importFileName: z.string().nullable().optional(),
+    dailyLogId: z.string().nullable().optional(),
+    dailyLogDate: z.string().nullable().optional(),
+    dailyLogIds: z.array(z.string()).nullable().optional(),
+    dailyLogDates: z.array(z.string()).nullable().optional(),
+    entryCount: z.number().nullable().optional(),
+  })
+  .passthrough()
+
+export const quantityProgressEntrySchema = z
+  .object({
+    id: z.string(),
+    activityId: z.string().nullable().optional(),
+    boqItemId: z.string().nullable().optional(),
+    boqItem: z
+      .object({
+        id: z.string().optional(),
+        code: z.string().nullable().optional(),
+        description: z.string().nullable().optional(),
+        unit: z.string().nullable().optional(),
+        unitCode: z.string().nullable().optional(),
+      })
+      .passthrough()
+      .nullable()
+      .optional(),
+    allocationId: z.string().nullable().optional(),
+    locationId: z.string().nullable().optional(),
+    location: z
+      .object({
+        id: z.string().optional(),
+        name: z.string().nullable().optional(),
+        code: z.string().nullable().optional(),
+      })
+      .passthrough()
+      .nullable()
+      .optional(),
+    unitCode: z.string().nullable().optional(),
+    // Withheld from a member who may not read the BOQ: absent, with the reason.
+    quantity: z.number().nullable().optional(),
+    withheld: withheldNote,
+    date: z.string().nullable().optional(),
+    source: z.string().nullable().optional(),
+    status: z.string().nullable().optional(),
+    submissionId: z.string().nullable().optional(),
+    dailyLogId: z.string().nullable().optional(),
+    dailyLogDate: z.string().nullable().optional(),
+    dailyLogQuantityId: z.string().nullable().optional(),
+    clientRequestId: z.string().nullable().optional(),
+    note: z.string().nullable().optional(),
+    createdBy: z.string().nullable().optional(),
+    createdByName: z.string().nullable().optional(),
+    createdAt: z.string().nullable().optional(),
+    approvedBy: z.string().nullable().optional(),
+    approvedAt: z.string().nullable().optional(),
+    rejectedAt: z.string().nullable().optional(),
+    rejectionReason: z.string().nullable().optional(),
+    progressSource: progressSourceSchema.nullable().optional(),
+  })
+  .passthrough()
+
+/** The entries a submission bundles — or the server's reason for sending none. */
+export const quantityEntriesListSchema = z.union([
+  z.array(quantityProgressEntrySchema),
+  z
+    .object({
+      allowed: z.literal(false),
+      module: z.string().optional(),
+      reason: z.string(),
+    })
+    .passthrough(),
+  z
+    .object({
+      items: z.array(quantityProgressEntrySchema),
+      total: z.number().optional(),
+      withheld: withheldNote,
+    })
+    .passthrough(),
+])
+
+/** installedByActivity: one figure per BOQ item in its own unit, never summed. */
+export const activityInstalledQuantitySchema = z
+  .object({
+    installed: z
+      .array(
+        z
+          .object({
+            boqItemId: z.string().nullable().optional(),
+            code: z.string().nullable().optional(),
+            description: z.string().nullable().optional(),
+            unitCode: z.string().nullable().optional(),
+            quantity: z.number().nullable().optional(),
+            entries: z.number().nullable().optional(),
+            withheld: withheldNote,
+          })
+          .passthrough()
+      )
+      .nullable()
+      .optional(),
+    asOf: z.string().nullable().optional(),
+    basis: z.string().nullable().optional(),
+    truth: z.string().nullable().optional(),
+    withheld: withheldNote,
+    notAvailable: withheldNote,
+  })
+  .passthrough()
+
+/** plannedQuantityFor: { planned, unitCode, basis: method_config | approved_allocations | none }. */
+export const activityPlannedQuantitySchema = z
+  .object({
+    planned: z.number().nullable().optional(),
+    value: z.number().nullable().optional(),
+    unitCode: z.string().nullable().optional(),
+    basis: z.string().nullable().optional(),
+    items: z
+      .array(
+        z
+          .object({
+            boqItemId: z.string().nullable().optional(),
+            code: z.string().nullable().optional(),
+            unitCode: z.string().nullable().optional(),
+            quantity: z.number().nullable().optional(),
+          })
+          .passthrough()
+      )
+      .nullable()
+      .optional(),
+    withheld: withheldNote,
+    notAvailable: withheldNote,
+  })
+  .passthrough()
+
+/**
+ * What the activity and submission payloads carry once core is on the server
+ * (every field optional — the screen reads them off the raw payload and
+ * falls back to the older string fields).
+ */
+export const activityProgressExtrasSchema = z
+  .object({
+    progressSource: progressSourceSchema.nullable().optional(),
+    installedQuantity: activityInstalledQuantitySchema.nullable().optional(),
+    plannedQuantity: activityPlannedQuantitySchema.nullable().optional(),
+    pendingQuantityEntries: quantityEntriesListSchema.nullable().optional(),
+  })
+  .passthrough()
+
+export const submissionExtrasSchema = z
+  .object({
+    progressSource: progressSourceSchema.nullable().optional(),
+    quantityEntries: quantityEntriesListSchema.nullable().optional(),
+    entries: quantityEntriesListSchema.nullable().optional(),
+    entryCount: z.number().nullable().optional(),
+    submittedByName: z.string().nullable().optional(),
+    dailyLogDate: z.string().nullable().optional(),
+    dailyLogDates: z.array(z.string()).nullable().optional(),
+  })
+  .passthrough()
+
+/** GET /projects/:id/activities/:activityId/allocated-items — the daily log's item picker. */
+export const allocatedItemSchema = z
+  .object({
+    boqItemId: z.string().nullable().optional(),
+    id: z.string().nullable().optional(),
+    allocationId: z.string().nullable().optional(),
+    code: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    unitCode: z.string().nullable().optional(),
+    unit: z.string().nullable().optional(),
+    quantity: z.number().nullable().optional(),
+    allocatedQuantity: z.number().nullable().optional(),
+    status: z.string().nullable().optional(),
+    boqItem: z
+      .object({
+        id: z.string().optional(),
+        code: z.string().nullable().optional(),
+        description: z.string().nullable().optional(),
+        unit: z.string().nullable().optional(),
+        unitCode: z.string().nullable().optional(),
+      })
+      .passthrough()
+      .nullable()
+      .optional(),
+  })
+  .passthrough()
+
+export const allocatedItemsResponseSchema = z.union([
+  z.array(allocatedItemSchema),
+  z
+    .object({
+      items: z.array(allocatedItemSchema).optional(),
+      allowed: z.boolean().optional(),
+      module: z.string().optional(),
+      reason: z.string().optional(),
+      withheld: withheldNote,
+    })
+    .passthrough(),
+])
+
+export type ProgressSource = z.infer<typeof progressSourceSchema>
+export type QuantityProgressEntry = z.infer<typeof quantityProgressEntrySchema>
+export type QuantityEntriesList = z.infer<typeof quantityEntriesListSchema>
+export type ActivityInstalledQuantity = z.infer<
+  typeof activityInstalledQuantitySchema
+>
+export type ActivityPlannedQuantity = z.infer<
+  typeof activityPlannedQuantitySchema
+>
+export type ActivityProgressExtras = z.infer<typeof activityProgressExtrasSchema>
+export type SubmissionExtras = z.infer<typeof submissionExtrasSchema>
+export type AllocatedItem = z.infer<typeof allocatedItemSchema>
+export type AllocatedItemsResponse = z.infer<typeof allocatedItemsResponseSchema>
+
+type WithheldNote = z.infer<typeof withheldNote>
+
+/** A withheld / not-available note's reason, whatever shape the server used. */
+export const withheldReason = (
+  note: WithheldNote | undefined,
+  fallback: string
+): string | null => {
+  if (!note) return null
+  if (typeof note === 'object' && 'reason' in note) return note.reason
+  return fallback
+}
+
+/** The allocated items of a response, and the reason when the server sent none. */
+export const allocatedItemsOf = (
+  response: AllocatedItemsResponse | null | undefined
+): { items: AllocatedItem[]; reason: string | null } => {
+  if (!response) return { items: [], reason: null }
+  if (Array.isArray(response)) return { items: response, reason: null }
+  if (response.allowed === false)
+    return { items: [], reason: response.reason ?? 'Withheld by the server' }
+  return {
+    items: response.items ?? [],
+    reason: withheldReason(
+      response.withheld,
+      response.reason ?? 'Withheld by the server'
+    ),
+  }
+}
+
+/** The entries of a bundle, and the reason when the server withheld them. */
+export const quantityEntriesOf = (
+  list: QuantityEntriesList | null | undefined
+): { entries: QuantityProgressEntry[]; reason: string | null } => {
+  if (!list) return { entries: [], reason: null }
+  if (Array.isArray(list)) return { entries: list, reason: null }
+  const denied = list as { allowed?: boolean; reason?: string }
+  if (denied.allowed === false)
+    return { entries: [], reason: denied.reason ?? 'Withheld by the server' }
+  const capped = list as {
+    items?: QuantityProgressEntry[]
+    withheld?: WithheldNote
+  }
+  if (Array.isArray(capped.items))
+    return {
+      entries: capped.items,
+      reason: withheldReason(capped.withheld, 'Withheld by the server'),
+    }
+  return { entries: [], reason: null }
+}

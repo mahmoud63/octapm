@@ -163,3 +163,43 @@ export const parseTruth = (
     return null
   return { kind, basis: rest.length ? rest.join(':') : null }
 }
+
+/**
+ * One vocabulary for quantities on screen (PC-6; OCTAPM_PROGRESS_MEASUREMENT
+ * §5–§6). Received, issued, installed, certified and paid are five figures
+ * with five truths: never merged, never summed across units, each with its
+ * own basis. Labels and one-line meanings only — no figure is computed from
+ * them, and every value comes from the server with its truth and basis.
+ */
+export const QUANTITY_TERMS = {
+  installed: {
+    label: 'Installed',
+    hint: 'Σ approved quantity progress entries — official only once a progress approver has approved them; "—" on an activity not measured by quantity, never pct × quantity',
+  },
+  certified: {
+    label: 'Certified',
+    hint: 'Σ IPC item quantity on certified or paid client certificates; a subcontract pay application carries amounts only, so its certified quantity reads "—"',
+  },
+  paidProRata: {
+    label: 'Paid (pro-rata)',
+    hint: 'A projection: certified quantity × (Σ payments received ÷ certificate total), per certificate — never a fact',
+  },
+  received: {
+    label: 'Received',
+    hint: 'Σ stock receipts naming this BOQ item, in the inventory item’s unit — shown only when that unit is the BOQ unit',
+  },
+  issued: {
+    label: 'Issued',
+    hint: 'Σ stock issues (less returns) naming this BOQ item, in the inventory item’s unit — shown only when that unit is the BOQ unit',
+  },
+  committedQuantity: {
+    label: 'Committed quantity (excluding variations)',
+    hint: 'Σ commitment SOV line quantity on executed or closed commitments naming this BOQ item — approved commitment change orders carry no quantity and are not included',
+  },
+  planned: {
+    label: 'Planned',
+    hint: 'The quantity the activity is measured against: Σ approved allocation quantities per BOQ item (or the figure typed on the method when no allocation defines it)',
+  },
+} as const
+
+export type QuantityTermKey = keyof typeof QUANTITY_TERMS
