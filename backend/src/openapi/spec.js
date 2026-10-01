@@ -2084,7 +2084,7 @@ const components = {
     QuantityFigure: {
       type: "object",
       description:
-        "One quantity and where it comes from. truth: installed derived (Σ approved QuantityProgressEntry — only approval counts), certified source (Σ IpcItem.qty on the allocation summary's certified basis), paid projection (certified × the certificate's paid share, pro-rata per certificate), received and issued derived (StockTransaction receipt / issue net of returns, in the inventory item's unit), committed derived (Σ CommitmentSovLine.qty on executed/closed commitments — excludes variations). unitCode is the unit the value is in; unitMatch says whether it is the BOQ row's unit (null when nothing was counted). A figure that cannot be stated has value null and notAvailable: { reason } — the viewer's modules do not admit it (module names which), the core track's module is pending, the activity is not measured by quantity (installed is never % × quantity), or the rows are in more than one unit (byUnit lists each unit's own sum; nothing is summed across units). Figures are never merged or netted against each other.",
+        "One quantity and where it comes from. truth: installed derived (Σ approved QuantityProgressEntry — only approval counts), certified derived (Σ IpcItem.qty on the allocation summary's certified basis — a Σ over rows; the certification section gives the same figure the same label and basis), paid projection (certified × the share of the certificate's net payable that has been paid — amountPaid ÷ netPayable, capped at 1; a fully paid certificate projects paid = certified — pro-rata per certificate), received and issued derived (StockTransaction receipt / issue net of returns, in the inventory item's unit), committed derived (Σ CommitmentSovLine.qty on executed/closed commitments — excludes variations). unitCode is the unit the value is in; unitMatch says whether it is the BOQ row's unit (null when nothing was counted). A figure that cannot be stated has value null and notAvailable: { reason } — the viewer's modules do not admit it (module names which), the core track's module is pending, the activity is not measured by quantity (installed is never % × quantity), or the rows are in more than one unit (byUnit lists each unit's own sum; nothing is summed across units). Figures are never merged or netted against each other.",
       additionalProperties: true,
       properties: {
         value: { type: "number", nullable: true },
@@ -2148,7 +2148,8 @@ const components = {
         unit: { type: "string", nullable: true },
         unitCode: { type: "string", nullable: true, description: "The row's unit code (BoqItem.unitCode, or its typed unit resolved against the organisation's unit list)." },
         quantity: ref("QuantityFigure"),
-        cutoffDate: { type: "string", format: "date-time", nullable: true },
+        cutoffDate: { type: "string", format: "date-time", nullable: true, description: "THE reporting cutoff instant (utils/reporting-cutoff, owner decision D1): the END of the requested date in Project.timezone, else Organisation.defaultTimezone, else UTC — the same instant EV and the core's installed figure select against. A date-time names the date it falls on in that zone." },
+        reportingCutoff: { type: "object", nullable: true, description: "How cutoffDate was read: { localDate (YYYY-MM-DD), timeZone (IANA), timeZoneSource (project | organisation | utc), timeZoneNote, endOfLocalDay }. null without a cutoff.", additionalProperties: true },
         asOf: { type: "string", format: "date-time" },
         core: { type: "string", enum: ["present", "pending"], description: "Whether the core track's quantity-progress module is merged; pending means every installed figure is not available." },
         figures: ref("QuantityFigures"),
@@ -2166,7 +2167,8 @@ const components = {
         activityId: uuid,
         code: { type: "string", nullable: true },
         name: { type: "string", nullable: true },
-        cutoffDate: { type: "string", format: "date-time", nullable: true },
+        cutoffDate: { type: "string", format: "date-time", nullable: true, description: "THE reporting cutoff instant (utils/reporting-cutoff, owner decision D1): the END of the requested date in Project.timezone, else Organisation.defaultTimezone, else UTC — the same instant EV and the core's installed figure select against. A date-time names the date it falls on in that zone." },
+        reportingCutoff: { type: "object", nullable: true, description: "How cutoffDate was read: { localDate (YYYY-MM-DD), timeZone (IANA), timeZoneSource (project | organisation | utc), timeZoneNote, endOfLocalDay }. null without a cutoff.", additionalProperties: true },
         asOf: { type: "string", format: "date-time", nullable: true },
         core: { type: "string", enum: ["present", "pending"], nullable: true },
         progress: {

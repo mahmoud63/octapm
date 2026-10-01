@@ -305,7 +305,8 @@ liveDescribe("PC-6 quantity views", () => {
     // certified: the allocation summary's certified basis — 30 + 10; not the draft 99, not the unallocated 4.
     const onBasis = await prisma.ipcItem.findMany({ where: { ...allocationService.certifiedIpcItemWhere(project.id), boqItemId: rows.A.id }, select: { qty: true } });
     expect(onBasis.reduce((sum, row) => sum + row.qty, 0)).toBe(40);
-    expect(figures.certified).toMatchObject({ value: 40, truth: "source", unitCode: "m3", unitMatch: true, rows: 2 });
+    // A Σ over IpcItem rows is derived (the label the certification section gives the same rows).
+    expect(figures.certified).toMatchObject({ value: 40, truth: "derived", unitCode: "m3", unitMatch: true, rows: 2 });
     expect(figures.certified.subcontract).toMatchObject({ value: null, notAvailable: { reason: expect.stringMatching(/SubPayAppLine/) } });
 
     // paid: per certificate, the owner's payment state — 30 × 250/1000 + 10 × 500/500.
@@ -331,7 +332,8 @@ liveDescribe("PC-6 quantity views", () => {
 
     // Five figures with five truths, kept apart; no sixth that nets two of them.
     expect(Object.keys(figures).sort()).toEqual(["certified", "committed", "installed", "issued", "paid", "received"]);
-    expect(new Set([figures.installed.truth, figures.certified.truth, figures.paid.truth])).toEqual(new Set(["derived", "source", "projection"]));
+    expect([figures.installed.truth, figures.certified.truth, figures.paid.truth]).toEqual(["derived", "derived", "projection"]);
+    expect(figures.paid.basis).toMatch(/share of the certificate's net payable that has been paid .*capped at 1.*a fully paid certificate projects paid = certified/);
     // installed 55 ≥ certified 40: no over-certification.
     expect(view.comparisons.certifiedOverInstalled).toMatchObject({ flag: false, certified: 40, installed: 55, unitCode: "m3" });
   });
@@ -365,7 +367,9 @@ liveDescribe("PC-6 quantity views", () => {
     expect(view.figures.installed.byUnit).toEqual(expect.arrayContaining([{ unitCode: "m3", value: 35 }, { unitCode: "t", value: 3 }]));
     expect(view.figures.received.byUnit).toEqual(expect.arrayContaining([{ unitCode: "m3", value: 40 }, { unitCode: "kg", value: 1500 }]));
     expect(view.figures.committed).toMatchObject({ value: 60, unitCode: "m3" });
-    expect(view.progress.planned).toMatchObject({ value: 70, truth: "derived", plannedBasis: "approved_allocations" });
+    // Planned: X's approved allocations are 60 m3 and 10 t — never summed across units (the core's rule); the view says why.
+    if (realCore) expect(view.progress.planned).toMatchObject({ value: null, truth: null, plannedBasis: "none", units: expect.arrayContaining(["m3", "t"]), notAvailable: { reason: "The approved allocations are in more than one unit; type the planned quantity on the method configuration" } });
+    else expect(view.progress.planned).toMatchObject({ value: 70, truth: "derived", plannedBasis: "approved_allocations" });
 
     // Y: installed 20 against certified 10 (AY) — and, with a certified line pushed past it, the raw flag flips.
     const y = await quantityViews.getActivityQuantities({ orgId: live.org.id, projectId: project.id, activityId: acts.Y.id, can, core });
@@ -399,8 +403,10 @@ liveDescribe("PC-6 quantity views", () => {
   });
 
   it("cutoffDate bounds installed, certified and the stock movements", async () => {
+    // A date-time is read as its reporting date: the end of that day in the reporting zone (UTC here).
     const view = await quantityViews.getBoqItemQuantities({ orgId: live.org.id, projectId: project.id, itemId: rows.A.id, can, core, cutoffDate: "2026-02-04T23:59:59.000Z" });
-    expect(view.cutoffDate).toBe("2026-02-04T23:59:59.000Z");
+    expect(view.cutoffDate).toBe("2026-02-04T23:59:59.999Z");
+    expect(view.reportingCutoff).toMatchObject({ localDate: "2026-02-04", timeZone: "UTC", timeZoneSource: "utc" });
     // Entries approved on or before the 4th: 25 (X, 3rd) + 20 (Y, 4th); the 10 of the 5th is after.
     expect(view.figures.installed).toMatchObject({ value: 45 });
     // No certificate is certified by then.
@@ -410,11 +416,43 @@ liveDescribe("PC-6 quantity views", () => {
     expect(view.figures.issued).toMatchObject({ value: 25, components: { issued: 25, returned: 0 } });
   });
 
+  it("the one cutoff: a calendar date is the END of that day in the project's zone (America/Chicago), the instant the core's installed figure and EV select against — not the start of the day in UTC", async () => {
+    // An entry approved at 03:00Z on the 5th: still the evening of the 4th in Chicago.
+    const late = await prisma.quantityProgressEntry.create({
+      data: { orgId: live.org.id, projectId: project.id, activityId: acts.X.id, boqItemId: rows.A.id, allocationId: allocations.AX, unitCode: "m3", quantity: 7, date: new Date("2026-02-04"), source: "manual", status: "approved", clientRequestId: crypto.randomUUID(), createdBy: live.user.id, approvedBy: live.user.id, approvedAt: new Date("2026-02-05T03:00:00.000Z") },
+    });
+    await prisma.project.update({ where: { id: project.id }, data: { timezone: "America/Chicago" } });
+    try {
+      const item = await api.get(at(`/boq/items/${rows.A.id}/quantities?cutoffDate=2026-02-04`), auth());
+      expect([item.status, item.body?.error]).toEqual([200, undefined]);
+      expect(item.body.data.cutoffDate).toBe("2026-02-05T05:59:59.999Z");
+      expect(item.body.data.reportingCutoff).toEqual({ localDate: "2026-02-04", timeZone: "America/Chicago", timeZoneSource: "project", timeZoneNote: null, endOfLocalDay: "2026-02-05T05:59:59.999Z" });
+      // 25 (3rd) + 20 (4th, 12:00Z) + 7 (the 4th's evening in Chicago); the 10 of the 5th at 12:00Z is after.
+      if (realCore) expect(item.body.data.figures.installed).toMatchObject({ value: 52 });
+      // The receipt (1st) and the issue (3rd) are before; nothing is certified by then.
+      expect(item.body.data.figures.received).toMatchObject({ value: 40 });
+      expect(item.body.data.figures.certified).toMatchObject({ value: 0 });
+      // The views' instant is the core's own: the same call to the core, with the calendar date, agrees.
+      if (realCore) {
+        const coreFigure = await realCore.installedByBoqItem({ orgId: live.org.id, projectId: project.id, boqItemIds: [rows.A.id], cutoffDate: "2026-02-04" });
+        expect(coreFigure.get(rows.A.id)).toMatchObject({ quantity: 52, asOf: "2026-02-05T05:59:59.999Z" });
+      }
+      const activity = await api.get(at(`/activities/${acts.X.id}/quantities?cutoffDate=2026-02-04`), auth());
+      expect([activity.status, activity.body?.error]).toEqual([200, undefined]);
+      expect(activity.body.data).toMatchObject({ cutoffDate: "2026-02-05T05:59:59.999Z", reportingCutoff: { localDate: "2026-02-04", timeZone: "America/Chicago" } });
+      // On X: 25 (3rd) + 7 (the Chicago evening of the 4th).
+      if (realCore) expect(activity.body.data.items.find((block) => block.boqItemId === rows.A.id).figures.installed).toMatchObject({ value: 32 });
+    } finally {
+      await prisma.project.update({ where: { id: project.id }, data: { timezone: null } });
+      await prisma.quantityProgressEntry.delete({ where: { id: late.id } });
+    }
+  });
+
   it("the two endpoints answer a BOQ reader the service's figures, and a member without BOQ read none of them", async () => {
     const item = await api.get(at(`/boq/items/${rows.A.id}/quantities`), auth());
     expect([item.status, item.body?.error]).toEqual([200, undefined]);
     expect(item.body.data).toMatchObject({ kind: "boq_item", id: rows.A.id, unitCode: "m3" });
-    expect(item.body.data.figures.certified).toMatchObject({ value: 40, truth: "source" });
+    expect(item.body.data.figures.certified).toMatchObject({ value: 40, truth: "derived" });
     expect(item.body.data.figures.paid).toMatchObject({ value: 17.5, truth: "projection" });
     expect(item.body.data.figures.received).toMatchObject({ value: 40 });
     expect(item.body.data.figures.issued).toMatchObject({ value: 20 });
@@ -424,7 +462,7 @@ liveDescribe("PC-6 quantity views", () => {
 
     const activity = await api.get(at(`/activities/${acts.X.id}/quantities?cutoffDate=2026-12-31`), auth());
     expect([activity.status, activity.body?.error]).toEqual([200, undefined]);
-    expect(activity.body.data).toMatchObject({ kind: "activity", id: acts.X.id, cutoffDate: "2026-12-31T00:00:00.000Z" });
+    expect(activity.body.data).toMatchObject({ kind: "activity", id: acts.X.id, cutoffDate: "2026-12-31T23:59:59.999Z", reportingCutoff: { localDate: "2026-12-31", timeZone: "UTC" } });
     expect(activity.body.data.items.find((block) => block.boqItemId === rows.A.id).figures.certified).toMatchObject({ value: 30 });
     const bad = await api.get(at(`/activities/${acts.X.id}/quantities?cutoffDate=yesterday`), auth());
     expect(bad.status).toBe(400);
@@ -457,8 +495,10 @@ liveDescribe("PC-6 quantity views", () => {
     const detail = await api.get(at(`/boq/items/${rows.A.id}/detail`), auth());
     expect([detail.status, detail.body?.error]).toEqual([200, undefined]);
     const { quantities, certification } = detail.body.data.sections;
-    expect(quantities.certifiedQuantity).toMatchObject({ value: 40, truth: "source", unitCode: "m3", unitMatch: true });
+    // One figure, one truth label, one basis — in both sections of the same payload.
+    expect(quantities.certifiedQuantity).toMatchObject({ value: 40, truth: "derived", unitCode: "m3", unitMatch: true });
     expect(certification.certifiedQuantity.value).toBe(quantities.certifiedQuantity.value);
+    expect([certification.certifiedQuantity.truth, certification.certifiedQuantity.basis]).toEqual([quantities.certifiedQuantity.truth, quantities.certifiedQuantity.basis]);
     expect(quantities.paid).toMatchObject({ value: 17.5, truth: "projection" });
     expect(quantities.received).toMatchObject({ value: 40 });
     expect(quantities.issued).toMatchObject({ value: 20 });

@@ -400,8 +400,8 @@ Per BOQ item (and per activity, location, WBS group), three quantity columns wit
 | Column | Truth | Source of the figure | Money twin |
 |---|---|---|---|
 | **Installed** | derived | Σ approved `QuantityProgressEntry` | earned value (approved allocation × pct) — note: for `percent` activities installed quantity is *not* available and the column shows "—", never pct × qty |
-| **Certified** | source | Σ `IpcItemProgressLink.certifiedQuantity` on certified/paid certificates (`ipc.service.js:1226-1400`) — client side; Σ `SubPayAppLine.thisPeriodQty` cumulative on certified pay apps — subcontractor side | certified value (IPC) / subcontract cost (ledger, `sub-pay-app.service.js:650-705`) |
-| **Paid** | projection | certified quantity × (Σ `IpcPayment` ÷ certificate total) pro-rata per certificate; subcontractor side likewise from `SubPayAppPayment` | paid amount (cash flow, `cash-flow.service.js:93-195`) |
+| **Certified** | derived | Σ `IpcItem.qty` on certified/paid certificates on the allocation summary's certified basis — client side (a Σ over rows is **derived**, not source: corrected at integration, 2026-10-01 — the figure is unchanged, the label was wrong, and one payload carried both); the subcontractor side carries no quantity as built (§5.1) | certified value (IPC) / subcontract cost (ledger, `sub-pay-app.service.js:650-705`) |
+| **Paid** | projection | certified quantity × the **share of the certificate's net payable that has been paid** (`IpcCertificate.amountPaid ÷ netPayable`, capped at 1), pro-rata per certificate; a fully paid certificate projects paid = certified | paid amount (cash flow, `cash-flow.service.js:93-195`) |
 
 Rule: installed ≥ certified is expected; certified > installed is an exception (over-certification — already tracked as `overCertificationAmount` on the certificate [C], now also visible in quantity).
 
@@ -426,8 +426,8 @@ truths, from five owners, and no sixth that nets two of them:
 | Figure | Truth | Read from | Not available when |
 |---|---|---|---|
 | installed | derived | the core track's `quantity-progress.service installedByBoqItem` / `installedByActivity` (Σ **approved** `QuantityProgressEntry`; only approval counts), behind an adapter | the module is absent (`"PC-6 core pending"`); the activity is not measured by quantity (never % × quantity — approved entries on a percent activity notwithstanding) |
-| certified | source | Σ `IpcItem.qty` on the allocation summary's certified basis (`activity-boq-allocation certifiedIpcItemWhere`: status ∈ {certified, paid} on an approved, active allocation — the rows `certifiedValue` sums); `certified.subcontract` is "—" (`SubPayAppLine` has no quantity) | the viewer may not read `ipc` |
-| paid | projection | certified quantity × the certificate's paid share — `IpcCertificate.amountPaid ÷ netPayable`, capped at 1, the payment state `ipc.service syncPaymentState` keeps — pro-rata per certificate (`paid.certificates` lists each); money is paid per certificate, never per line | the viewer may not read `ipc` |
+| certified | derived | Σ `IpcItem.qty` on the allocation summary's certified basis (`activity-boq-allocation certifiedIpcItemWhere`: status ∈ {certified, paid} on an approved, active allocation — the rows `certifiedValue` sums); `certified.subcontract` is "—" (`SubPayAppLine` has no quantity) | the viewer may not read `ipc` |
+| paid | projection | certified quantity × the share of the certificate's net payable that has been paid — `IpcCertificate.amountPaid ÷ netPayable`, capped at 1, the payment state `ipc.service syncPaymentState` keeps; a fully paid certificate projects paid = certified — pro-rata per certificate (`paid.certificates` lists each); money is paid per certificate, never per line | the viewer may not read `ipc` |
 | received | derived | Σ `StockTransaction` receipts naming the item, in the **inventory item's** unit | the viewer may not read `inventory`; the rows are in more than one unit |
 | issued | derived | Σ issues net of returns (the sign the inventory ledger gives each, `CONSUMPTION_SIGN`), `components { issued, returned }` | as received |
 | committed | derived | Σ `CommitmentSovLine.qty` on `commitment.service POSTING_STATUSES` (executed, closed), **"Committed quantity (excludes variations)"** — approved commitment change orders carry no quantity and no BOQ item (critic's correction of the rule in §6) | the viewer may not read `commitment`; a party-scoped member; mixed units |
@@ -441,7 +441,18 @@ unit (`flag`, `certified`, `installed`, `unitCode`; `null` with the reason when 
 units differ) — the reviewed exception and the Change Event are PC-7b; the view writes no `ProjectException`,
 no change order, no budget or schedule change. `cutoffDate` bounds installed (`approvedAt`), certified
 (`certDate`, else the certificate's `certifiedAt`), the stock movements (`occurredAt`) and the activity's approved
-% complete; paid and committed are as of now and say so. One query per source for any number of items.
+% complete; paid and committed are as of now and say so. **It is THE reporting cutoff** (integration fix,
+2026-10-01): `resolveViewCutoff` reads a calendar date through `utils/reporting-cutoff` — the END of that date in
+`Project.timezone` → `Organisation.defaultTimezone` → UTC, the one instant EV and the core's `installedBy*` select
+against (the views used to read it as the start of the day in UTC, so the same date gave the view and the core two
+different installed figures); the answer carries the instant as `cutoffDate` and how it was read as
+`reportingCutoff { localDate, timeZone, timeZoneSource, timeZoneNote, endOfLocalDay }`. Proven live with the
+project in America/Chicago (an entry approved at 03:00Z on the 5th counts at the cutoff date of the 4th, in the
+view and in the core alike) and mutation-proven. The certified quantity is one figure with one truth label and one
+basis wherever the payload states it (`quantities.certifiedQuantity` and `certification.certifiedQuantity`: both
+`derived`, the same basis text). A planned quantity the core cannot state says the core's own reason (allocations in
+more than one unit are never summed: "type the planned quantity on the method configuration"), not "no approved
+allocation". One query per source for any number of items.
 
 BOQ access: `utils/boq-figures` (`QUANTITY_FIGURES_WITHHELD`, `withheldBoqItemQuantities`,
 `withheldActivityQuantities`, and the activity detail's `progress.installedQuantity`) withholds every per-item

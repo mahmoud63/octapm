@@ -69,6 +69,8 @@ const filterIpc = (where) => {
 
 const mockPrisma = {
   project: { findFirst: jest.fn(async ({ where }) => rows.projects.find((row) => row.id === where.id && row.orgId === where.orgId) || null) },
+  // The reporting zone: Project.timezone → Organisation.defaultTimezone → UTC.
+  organisation: { findUnique: jest.fn(async () => ({ defaultTimezone: null })) },
   boqItem: {
     findFirst: jest.fn(async ({ where }) => rows.items.find((row) => row.id === where.id && row.projectId === where.projectId) || null),
     findMany: jest.fn(async ({ where }) => rows.items.filter((row) => where.id.in.includes(row.id) && row.projectId === where.projectId)),
@@ -161,7 +163,10 @@ describe("quantity views (PC-6)", () => {
     // installed: Σ approved entries only (25 + 10; the submitted 500 never counts)
     expect(figures.installed).toMatchObject({ value: 35, truth: "derived", unitCode: "m3", unitMatch: true, entries: 2 });
     // certified: the two lines on the certified basis (30 + 10); draft, unallocated and rejected-allocation lines are not counted
-    expect(figures.certified).toMatchObject({ value: 40, truth: "source", unitCode: "m3", unitMatch: true, rows: 2 });
+    // A Σ over IpcItem rows is derived — the one label the certification section gives the same rows.
+    expect(figures.certified).toMatchObject({ value: 40, truth: "derived", unitCode: "m3", unitMatch: true, rows: 2 });
+    expect(service.TRUTH.certified).toBe("derived");
+    expect(figures.paid.basis).toMatch(/share of the certificate's net payable that has been paid .*capped at 1.*a fully paid certificate projects paid = certified/);
     expect(figures.certified.subcontract).toMatchObject({ value: null, notAvailable: { reason: service.SUBCONTRACT_CERTIFIED_REASON } });
     // paid: per certificate — 30 × (250 ÷ 1000) + 10 × (500 ÷ 500) = 7.5 + 10
     expect(figures.paid).toMatchObject({ value: 17.5, truth: "projection", unitCode: "m3", unitMatch: true });
@@ -270,10 +275,19 @@ describe("quantity views (PC-6)", () => {
     await expect(service.getBoqItemQuantities({ orgId: ORG, projectId: PROJECT, itemId: ITEM, cutoffDate: "not-a-date", can: allow })).rejects.toMatchObject({ status: 400, code: "VALIDATION_ERROR" });
   });
 
-  it("passes the cutoff to installed, certified and the stock movements", async () => {
+  it("passes THE reporting cutoff — the end of that date in the project's zone, not the start of the day in UTC — to installed, certified and the stock movements", async () => {
     const core = coreWith(ENTRIES);
-    await service.getBoqItemQuantities({ orgId: ORG, projectId: PROJECT, itemId: ITEM, can: allow, cutoffDate: "2026-02-28", core });
-    const cutoff = new Date("2026-02-28");
+    // No zone configured: UTC, the end of the 28th.
+    const utc = await service.getBoqItemQuantities({ orgId: ORG, projectId: PROJECT, itemId: ITEM, can: allow, cutoffDate: "2026-02-28", core });
+    expect(utc.cutoffDate).toBe("2026-02-28T23:59:59.999Z");
+    expect(utc.reportingCutoff).toMatchObject({ localDate: "2026-02-28", timeZone: "UTC", timeZoneSource: "utc" });
+    // The project's zone decides: the end of the 28th in Chicago is 05:59:59.999Z on 1 March.
+    rows.projects[0].timezone = "America/Chicago";
+    const view = await service.getBoqItemQuantities({ orgId: ORG, projectId: PROJECT, itemId: ITEM, can: allow, cutoffDate: "2026-02-28", core });
+    delete rows.projects[0].timezone;
+    expect(view.cutoffDate).toBe("2026-03-01T05:59:59.999Z");
+    expect(view.reportingCutoff).toEqual({ localDate: "2026-02-28", timeZone: "America/Chicago", timeZoneSource: "project", timeZoneNote: null, endOfLocalDay: "2026-03-01T05:59:59.999Z" });
+    const cutoff = new Date("2026-03-01T05:59:59.999Z");
     expect(core.installedByBoqItem).toHaveBeenCalledWith(expect.objectContaining({ cutoffDate: cutoff }));
     expect(mockPrisma.ipcItem.findMany.mock.calls.at(-1)[0].where.AND[0]).toMatchObject({ OR: [{ certDate: { lte: cutoff } }, expect.objectContaining({ certDate: null })] });
     expect(mockPrisma.stockTransaction.findMany.mock.calls.at(-1)[0].where).toMatchObject({ occurredAt: { lte: cutoff } });

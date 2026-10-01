@@ -4,12 +4,16 @@
  *
  *   installed  derived     Σ approved QuantityProgressEntry (the core track's
  *                          quantity-progress.service: only approval counts)
- *   certified  source      Σ IpcItem.qty on the allocation summary's certified
- *                          basis (certifiedIpcItemWhere); the subcontract side
+ *   certified  derived     Σ IpcItem.qty on the allocation summary's certified
+ *                          basis (certifiedIpcItemWhere) — a Σ over rows is
+ *                          derived, the one truth label the certification
+ *                          section gives the same rows; the subcontract side
  *                          has no quantity (SubPayAppLine carries none)
- *   paid       projection  certified quantity × the certificate's paid share
- *                          (IpcCertificate.amountPaid ÷ netPayable, the
- *                          payment state ipc.service keeps), per certificate
+ *   paid       projection  certified quantity × the share of the certificate's
+ *                          net payable that has been paid (IpcCertificate
+ *                          amountPaid ÷ netPayable, capped at 1 — a fully
+ *                          paid certificate projects paid = certified), per
+ *                          certificate
  *   received   derived     Σ StockTransaction receipt quantity, in the
  *   issued     derived     inventory item's unit (issues net of returns, as
  *                          the inventory ledger credits a return)
@@ -45,6 +49,7 @@
  */
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
+const { resolveReportingCutoff, resolveReportingTimeZone } = require("../utils/reporting-cutoff");
 const { toMoneyNumber } = require("../utils/money");
 const allocationService = require("./activity-boq-allocation.service");
 const commitmentService = require("./commitment.service");
@@ -63,7 +68,7 @@ const MIXED_UNITS_REASON = "The rows are in more than one unit: the figure is no
 
 const TRUTH = Object.freeze({
   installed: "derived",
-  certified: "source",
+  certified: "derived",
   paid: "projection",
   received: "derived",
   issued: "derived",
@@ -76,7 +81,7 @@ const BASIS = Object.freeze({
   certified:
     "Σ IpcItem.qty on the allocation summary's certified basis — status ∈ {certified, paid} on an approved, active allocation (activity-boq-allocation certifiedIpcItemWhere) — the client side; the subcontract side carries no quantity",
   paid:
-    "Projection: certified quantity × the certificate's paid share (IpcCertificate.amountPaid ÷ IpcCertificate.netPayable, capped at 1 — the payment state ipc.service syncPaymentState keeps), per certificate; money is paid per certificate, not per line, so no paid quantity is ever recorded",
+    "Projection: certified quantity × the share of the certificate's net payable that has been paid (IpcCertificate.amountPaid ÷ IpcCertificate.netPayable, capped at 1 — the payment state ipc.service syncPaymentState keeps); a fully paid certificate projects paid = certified; pro-rata per certificate — money is paid per certificate, not per line, so no paid quantity is ever recorded",
   received:
     "Σ StockTransaction.quantity of type receipt naming this item, in the inventory item's unit (inventory.service postMovement): never converted to the BOQ unit",
   issued:
@@ -202,11 +207,43 @@ const groupBy = (rows, keyOf) => {
   return map;
 };
 
+// A Date instant is taken as it is (a caller that resolved its own); null
+// for no cutoff. A string is not read here: resolveViewCutoff turns it into
+// THE reporting cutoff through utils/reporting-cutoff — the end of that date
+// in the project's zone (Project.timezone → Organisation.defaultTimezone →
+// UTC, owner decision D1), the one instant EV and the core's installedBy*
+// select against. The views used to read a calendar date as the START of the
+// day in UTC, a different instant from the core's own (integration item 5).
 const parseCutoff = (cutoffDate) => {
   if (cutoffDate == null || cutoffDate === "") return null;
-  const cutoff = new Date(cutoffDate);
-  if (Number.isNaN(cutoff.getTime())) throw new HttpError(400, "VALIDATION_ERROR", "cutoffDate must be a valid date");
-  return cutoff;
+  if (!(cutoffDate instanceof Date)) throw new HttpError(400, "VALIDATION_ERROR", "cutoffDate must be resolved through the reporting cutoff first");
+  if (Number.isNaN(cutoffDate.getTime())) throw new HttpError(400, "VALIDATION_ERROR", "cutoffDate must be a valid date");
+  return cutoffDate;
+};
+
+/**
+ * The one cutoff: { cutoffDate: Date | null, reportingCutoff: { localDate,
+ * timeZone, timeZoneSource, timeZoneNote } | null }. A Date instant passes as
+ * it is (its reporting date read in the zone); a calendar date or date-time
+ * string is the end of its local day in the project's reporting zone.
+ */
+const resolveViewCutoff = async ({ cutoffDate, orgId, projectId }) => {
+  if (cutoffDate == null || cutoffDate === "") return { cutoffDate: null, reportingCutoff: null };
+  const project = await prisma.project.findFirst({ where: { id: projectId, orgId }, select: { id: true, orgId: true, timezone: true } });
+  if (!project) throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
+  const organisation = await prisma.organisation.findUnique({ where: { id: project.orgId }, select: { defaultTimezone: true } });
+  const zone = resolveReportingTimeZone({ project, organisation });
+  let resolved;
+  try {
+    resolved = resolveReportingCutoff({ value: cutoffDate, timeZone: zone.timeZone, timeZoneSource: zone.source });
+  } catch {
+    throw new HttpError(400, "VALIDATION_ERROR", "cutoffDate must be a valid date");
+  }
+  const instant = cutoffDate instanceof Date ? cutoffDate : resolved.cutoffDate;
+  return {
+    cutoffDate: instant,
+    reportingCutoff: { localDate: resolved.localDate, timeZone: resolved.timeZone, timeZoneSource: resolved.timeZoneSource, timeZoneNote: resolved.timeZoneNote, endOfLocalDay: resolved.cutoffDate.toISOString() },
+  };
 };
 
 // ─── the source reads (batched: one query per source for any number of items) ───
@@ -490,8 +527,9 @@ const ensureProject = async ({ orgId, projectId }) => {
   return project;
 };
 
-const getBoqItemQuantities = async ({ orgId, projectId, itemId, can = () => true, partyScoped = false, cutoffDate = null, core }) => {
+const getBoqItemQuantities = async ({ orgId, projectId, itemId, can = () => true, partyScoped = false, cutoffDate: requestedCutoff = null, core }) => {
   await ensureProject({ orgId, projectId });
+  const { cutoffDate, reportingCutoff } = await resolveViewCutoff({ cutoffDate: requestedCutoff, orgId, projectId });
   const item = await prisma.boqItem.findFirst({
     where: { id: itemId, projectId },
     select: { id: true, code: true, ref: true, description: true, unit: true, unitCode: true, qty: true, isActive: true },
@@ -516,6 +554,7 @@ const getBoqItemQuantities = async ({ orgId, projectId, itemId, can = () => true
       derivedFrom: [{ type: "boq_item", id: item.id }],
     },
     cutoffDate: cutoff ? cutoff.toISOString() : null,
+    reportingCutoff,
     asOf: new Date().toISOString(),
     core: corePresent ? "present" : "pending",
     figures: block.figures,
@@ -572,12 +611,15 @@ const plannedFigureOf = (answer) => ({
   unitCode: answer?.unitCode ?? null,
   unitMatch: null,
   derivedFrom: answer && answer.planned != null ? [{ type: answer.basis === "approved_allocations" ? "activity_boq_allocation" : "activity_progress_method" }] : [],
-  ...(answer && answer.planned != null ? {} : { notAvailable: { reason: "No planned quantity: no approved allocation and no method configuration states one" } }),
+  // The core's own reason when it has one (allocations in more than one unit
+  // are never summed: "type the planned quantity on the method configuration").
+  ...(answer && answer.planned != null ? {} : { notAvailable: { reason: answer?.reason || "No planned quantity: no approved allocation and no method configuration states one" }, ...(Array.isArray(answer?.units) ? { units: answer.units } : {}) }),
   plannedBasis: answer?.basis || "none",
 });
 
-const getActivityQuantities = async ({ orgId, projectId, activityId, can = () => true, partyScoped = false, cutoffDate = null, core }) => {
+const getActivityQuantities = async ({ orgId, projectId, activityId, can = () => true, partyScoped = false, cutoffDate: requestedCutoff = null, core }) => {
   await ensureProject({ orgId, projectId });
+  const { cutoffDate, reportingCutoff } = await resolveViewCutoff({ cutoffDate: requestedCutoff, orgId, projectId });
   const activity = await prisma.activity.findFirst({
     where: { id: activityId, projectId },
     select: { id: true, name: true, activityCode: true, p6ActivityId: true },
@@ -659,6 +701,7 @@ const getActivityQuantities = async ({ orgId, projectId, activityId, can = () =>
     code: activity.activityCode || activity.p6ActivityId || null,
     name: activity.name,
     cutoffDate: cutoff ? cutoff.toISOString() : null,
+    reportingCutoff,
     asOf: new Date().toISOString(),
     core: adapter.present ? "present" : "pending",
     progress: canProgress
@@ -726,6 +769,7 @@ module.exports = {
   TRUTH,
   BASIS,
   paidShareOf,
+  resolveViewCutoff,
   quantityBlocks,
   getBoqItemQuantities,
   getActivityQuantities,
