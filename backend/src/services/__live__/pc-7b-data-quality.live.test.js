@@ -87,17 +87,25 @@ const EXPECTED_GAPS = Object.freeze({
   budget_truths_disagree: 3, forecast_without_provenance: 2, activity_budget_mismatch: 2, committed_definition_mixed: 1, equipment_cost_unposted: 2,
   unit_unresolved: 1, unit_mismatch: 2, structure_missing: 4,
   progress_stale: 1, period_not_locked: 1, ev_basis_divergence: 1, readiness_override_active: 1,
-  orphan_change_link: 3, change_order_possible_duplicate: 1,
+  orphan_change_link: 4, change_order_possible_duplicate: 1,
 });
+// The kinds that compare two owner figures: each measures the gap between them.
+const GAP_KINDS = Object.freeze(["budget_truths_disagree", "forecast_without_provenance", "activity_budget_mismatch", "committed_definition_mixed", "equipment_cost_unposted", "ev_basis_divergence"]);
 
 liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, read-only, each citing its evidence", () => {
   let live;
   let other;
   const gaps = {};
   const clean = {};
+  // edges: the thresholds' boundaries; bare: a project with no schedule;
+  // outOfScope: an archived and a completed project the nightly tick skips.
+  const edges = {};
+  const bare = {};
+  const outOfScope = [];
 
   const evaluate = (kind, built, { orgId = live.org.id, ctx = {} } = {}) => ruleOf(kind).evaluate({ orgId, projectId: built.project.id, cutoff: NOW, ctx });
-  const bySubject = (rows) => new Map(rows.map((row) => [`${row.subjectType}:${row.subjectId}${row.secondarySubjectId ? `:${row.secondarySubjectId}` : ""}`, row]));
+  const figuresOf = (row) => Object.fromEntries(Object.entries(row.data.figures || {}).map(([name, figure]) => [name, figure.value]));
+  const bySubject = (rows) =>new Map(rows.map((row) => [`${row.subjectType}:${row.subjectId}${row.secondarySubjectId ? `:${row.secondarySubjectId}` : ""}`, row]));
 
   /** A project with the records every rule reads; `gap` sets each §7 gap up on purpose. */
   const build = async (target, { gap }) => {
@@ -248,6 +256,30 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     await build(clean, { gap: false });
     // An RFI of the gaps project whose change order is the clean project's.
     gaps.crossRfi = await prisma.rfi.create({ data: { projectId: gaps.project.id, ref: "RFI-2", subject: "LiveTest converted elsewhere", changeOrderId: clean.vo1.id } });
+    // A workflow link of the gaps project naming the CLEAN project's RFI: a
+    // record that exists, but not in the link's own project.
+    gaps.crossLink = await prisma.workflowActivityLink.create({ data: { projectId: gaps.project.id, recordType: "rfi", recordId: clean.rfi.id, activityId: gaps.a1.id } });
+
+    // Edges: progress approved exactly 14 and 15 days before the cutoff; four
+    // open periods whose cutoffs fall 6-9 local days back (whole days elapsed
+    // 7 and 8 among them, whatever instant a local cutoff date maps to).
+    const orgId = live.org.id;
+    const { storedValueForReportingDate } = require("../../utils/reporting-cutoff");
+    edges.project = await prisma.project.create({ data: { orgId, name: `LiveTest PC-7b data quality edges-${Date.now().toString(36)}`, status: "active" } });
+    const edgeActivity = (code) => prisma.activity.create({ data: { projectId: edges.project.id, name: `LiveTest ${code}`, activityCode: code, duration: 10, startDate: new Date("2026-02-02"), endDate: new Date("2026-02-13") } });
+    edges.e14 = await edgeActivity("DQ-E14");
+    edges.e15 = await edgeActivity("DQ-E15");
+    for (const [activity, days] of [[edges.e14, 14], [edges.e15, 15]]) {
+      await prisma.activityProgress.create({ data: { activityId: activity.id, pctComplete: 40, status: "approved", approvedAt: daysAgo(days), updatedAt: daysAgo(days) } });
+    }
+    edges.periods = [];
+    for (const days of [6, 7, 8, 9]) {
+      const local = new Date(NOW.getTime() - days * DAY).toISOString().slice(0, 10);
+      edges.periods.push(await prisma.reportingPeriod.create({ data: { projectId: edges.project.id, code: `DQ-E${days}`, label: `LiveTest E${days}`, periodStart: daysAgo(days + 27), periodEnd: storedValueForReportingDate(local), cutoffDate: storedValueForReportingDate(local) } }));
+    }
+    bare.project = await prisma.project.create({ data: { orgId, name: `LiveTest PC-7b data quality bare-${Date.now().toString(36)}`, status: "active" } });
+    outOfScope.push(await prisma.project.create({ data: { orgId, name: "LiveTest PC-7b archived", status: "active", archivedAt: daysAgo(1) } }));
+    outOfScope.push(await prisma.project.create({ data: { orgId, name: "LiveTest PC-7b completed", status: "completed" } }));
   }, 120_000);
 
   afterAll(async () => {
@@ -281,11 +313,14 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     // register 80,000; EV BAC 50,000 + 1,000 = 51,000; waterfall 100,000 + 1,000 = 101,000.
     expect([...rows.keys()].sort()).toEqual([`project:${pid}:ev_bac_vs_contract_waterfall`, `project:${pid}:register_vs_contract_waterfall`, `project:${pid}:register_vs_ev_bac`]);
     const pair = rows.get(`project:${pid}:register_vs_ev_bac`);
-    expect([pair.measured.value, pair.limit.value]).toEqual([80000, 51000]);
-    expect(pair.measured.basis).toMatch(/budget\.service listBudgetLines/);
-    expect(pair.limit.basis).toMatch(/earned-value\.service buildOfficialEvReport totalBudget/);
-    expect([rows.get(`project:${pid}:ev_bac_vs_contract_waterfall`).measured.value, rows.get(`project:${pid}:ev_bac_vs_contract_waterfall`).limit.value]).toEqual([51000, 101000]);
-    expect(rows.get(`project:${pid}:register_vs_contract_waterfall`).limit.basis).toMatch(/budget-revision\.service listBudgetRevisions/);
+    // The gap is measured; both figures stay in data with their owners' bases.
+    expect([pair.measured.value, pair.limit.value, figuresOf(pair), pair.data.higher]).toEqual([29000, 0.01, { register: 80000, evBac: 51000 }, "register"]);
+    expect(pair.data.figures.register.basis).toMatch(/budget\.service listBudgetLines/);
+    expect(pair.data.figures.evBac.basis).toMatch(/earned-value\.service buildOfficialEvReport totalBudget/);
+    expect(pair.measured.basis).toMatch(/budget\.service listBudgetLines[\s\S]*buildOfficialEvReport totalBudget/);
+    const evVsContract = rows.get(`project:${pid}:ev_bac_vs_contract_waterfall`);
+    expect([evVsContract.measured.value, figuresOf(evVsContract), evVsContract.data.higher]).toEqual([50000, { evBac: 51000, contract: 101000 }, "contract"]);
+    expect(rows.get(`project:${pid}:register_vs_contract_waterfall`).data.figures.contract.basis).toMatch(/budget-revision\.service listBudgetRevisions/);
     expect(await evaluate("budget_truths_disagree", clean)).toEqual([]);
   });
 
@@ -295,11 +330,11 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     const unknown = rows.get(`cost_record:${gaps.r1.id}`);
     expect(unknown.data.reason).toBe("source_not_recorded");
     // The stored 1,200 beside what the R5-2 default would be now: max(0, the approved allocation 50,000, actual 300).
-    expect([unknown.measured.value, unknown.limit.value]).toEqual([1200, 50000]);
-    expect(unknown.limit.basis).toMatch(/defaultForecast/);
+    expect([unknown.measured.value, figuresOf(unknown), unknown.data.higher]).toEqual([48800, { storedForecast: 1200, defaultNow: 50000 }, "defaultNow"]);
+    expect(unknown.data.figures.defaultNow.basis).toMatch(/defaultForecast/);
     const passed = rows.get(`cost_record:${gaps.r2.id}`);
     expect(passed.data.reason).toBe("default_below_actual");
-    expect([passed.measured.value, passed.limit.value]).toEqual([9000, 7000]);
+    expect([passed.measured.value, figuresOf(passed), passed.data.higher]).toEqual([2000, { actual: 9000, storedDefault: 7000 }, "actual"]);
     expect(await evaluate("forecast_without_provenance", clean)).toEqual([]);
   });
 
@@ -307,27 +342,91 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     const rows = bySubject(await evaluate("activity_budget_mismatch", gaps));
     expect([...rows.keys()].sort()).toEqual([`activity:${gaps.a1.id}`, `activity:${gaps.a2.id}`].sort());
     const a1 = rows.get(`activity:${gaps.a1.id}`);
-    expect([a1.measured.value, a1.limit.value, a1.data.field]).toEqual([0, 50000, "cost_record.budget"]);
-    expect(a1.limit.basis).toMatch(/getApprovedActivityAllocationTotals/);
+    expect([a1.measured.value, figuresOf(a1), a1.data.field, a1.data.higher]).toEqual([50000, { storedBudget: 0, approvedAllocation: 50000 }, "cost_record.budget", "approvedAllocation"]);
+    expect(a1.data.figures.approvedAllocation.basis).toMatch(/getApprovedActivityAllocationTotals/);
     const a2 = rows.get(`activity:${gaps.a2.id}`);
-    expect([a2.measured.value, a2.limit.value]).toEqual([7000, 0]);
+    expect([a2.measured.value, figuresOf(a2), a2.data.higher]).toEqual([7000, { storedBudget: 7000, approvedAllocation: 0 }, "storedBudget"]);
     expect(await evaluate("activity_budget_mismatch", clean)).toEqual([]);
   });
 
   it("committed_definition_mixed: the purchase-order register's `committed` alias beside the register's committed cost", async () => {
     const [row, ...rest] = await evaluate("committed_definition_mixed", gaps);
     expect(rest).toEqual([]);
-    expect([row.subjectType, row.subjectId, row.measured.value, row.limit.value]).toEqual(["project", gaps.project.id, 5000, 0]);
-    expect(row.measured.basis).toMatch(/NOT committed cost/);
+    expect([row.subjectType, row.subjectId, row.measured.value, row.limit.value, figuresOf(row)]).toEqual(["project", gaps.project.id, 5000, 0.01, { purchaseOrderCommitted: 5000, registerCommitted: 0 }]);
+    expect(row.data.figures.purchaseOrderCommitted.basis).toMatch(/NOT committed cost/);
     expect(await evaluate("committed_definition_mixed", clean)).toEqual([]);
   });
 
   it("equipment_cost_unposted: usage cost a daily report carries beyond the ledger's net posting", async () => {
     const rows = bySubject(await evaluate("equipment_cost_unposted", gaps));
     expect([...rows.keys()].sort()).toEqual([`daily_report:${gaps.dr1.id}`, `daily_report:${gaps.dr3.id}`].sort());
-    expect([rows.get(`daily_report:${gaps.dr1.id}`).measured.value, rows.get(`daily_report:${gaps.dr1.id}`).limit.value]).toEqual([400, 0]);
-    expect([rows.get(`daily_report:${gaps.dr3.id}`).measured.value, rows.get(`daily_report:${gaps.dr3.id}`).limit.value]).toEqual([500, 0]);
+    expect([rows.get(`daily_report:${gaps.dr1.id}`).measured.value, figuresOf(rows.get(`daily_report:${gaps.dr1.id}`))]).toEqual([400, { usageCost: 400, ledgerNet: 0 }]);
+    expect([rows.get(`daily_report:${gaps.dr3.id}`).measured.value, figuresOf(rows.get(`daily_report:${gaps.dr3.id}`))]).toEqual([500, { usageCost: 500, ledgerNet: 0 }]);
     expect(await evaluate("equipment_cost_unposted", clean)).toEqual([]);
+  });
+
+  it("every two-figure kind measures the GAP: it rises when the figures move apart on either side, so a dismissal can never hide a worsening", async () => {
+    const { subtractMoney } = require("../../utils/money");
+    // Shape: |a − b| against the cent tolerance, both figures (and their bases) in data.
+    for (const kind of GAP_KINDS) {
+      const rows = await evaluate(kind, gaps);
+      expect([kind, rows.length > 0]).toEqual([kind, true]);
+      for (const row of rows) {
+        const figures = Object.values(row.data.figures);
+        expect([kind, figures.length]).toEqual([kind, 2]);
+        expect([kind, row.measured.value]).toEqual([kind, Math.abs(subtractMoney(figures[0].value, figures[1].value))]);
+        expect([kind, row.limit.value, row.measured.value > row.limit.value]).toEqual([kind, 0.01, true]);
+        for (const figure of figures) expect(row.measured.basis).toContain(figure.basis);
+      }
+    }
+    const pid = gaps.project.id;
+    const measuredOf = async (kind, key) => bySubject(await evaluate(kind, gaps)).get(key)?.measured.value;
+
+    // The LARGER figure of a pair rises (the contract waterfall): the gap widens.
+    const evVsContract = `project:${pid}:ev_bac_vs_contract_waterfall`;
+    expect(await measuredOf("budget_truths_disagree", evVsContract)).toBe(50000);
+    await prisma.project.update({ where: { id: pid }, data: { contractValue: 140000 } });
+    try {
+      expect(await measuredOf("budget_truths_disagree", evVsContract)).toBe(90000);
+    } finally {
+      await prisma.project.update({ where: { id: pid }, data: { contractValue: 100000 } });
+    }
+    // The approved allocation (A1's larger figure; the stored budget is 0)
+    // rises from 40,000 back to 50,000 (the BOQ row's amount caps it): the gap follows.
+    await prisma.activityBoqAllocation.update({ where: { id: gaps.allocation.id }, data: { amount: 40000 } });
+    try {
+      expect(await measuredOf("activity_budget_mismatch", `activity:${gaps.a1.id}`)).toBe(40000);
+    } finally {
+      await prisma.activityBoqAllocation.update({ where: { id: gaps.allocation.id }, data: { amount: 50000 } });
+    }
+    expect(await measuredOf("activity_budget_mismatch", `activity:${gaps.a1.id}`)).toBe(50000);
+    // A daily report's posting (the smaller figure) is reversed: the unposted gap grows back.
+    const entry = (amount, suffix) => prisma.costLedgerEntry.create({ data: { orgId: live.org.id, projectId: pid, sourceKey: `equipment:${gaps.dr1.id}:${suffix}`, sourceType: "equipment", sourceId: gaps.dr1.id, amount, incurredOn: daysAgo(5), activityId: gaps.a1.id, costType: "equipment" } });
+    const added = [];
+    try {
+      added.push(await entry(150, "partial"));
+      expect(await measuredOf("equipment_cost_unposted", `daily_report:${gaps.dr1.id}`)).toBe(250);
+      added.push(await entry(-150, "partial-reversal"));
+      expect(await measuredOf("equipment_cost_unposted", `daily_report:${gaps.dr1.id}`)).toBe(400);
+    } finally {
+      await prisma.costLedgerEntry.deleteMany({ where: { id: { in: added.map((row) => row.id) } } });
+    }
+  }, 120_000);
+
+  it("a failure of the EV report reaches the engine: the rules that read it throw instead of answering fewer rows", async () => {
+    const earnedValue = require("../earned-value.service");
+    const spy = jest.spyOn(earnedValue, "buildOfficialEvReport").mockRejectedValue(Object.assign(new Error("Connection terminated unexpectedly"), { code: "P1017" }));
+    try {
+      for (const kind of ["budget_truths_disagree", "ev_basis_divergence"]) {
+        await expect(evaluate(kind, gaps)).rejects.toThrow(/Connection terminated unexpectedly/);
+      }
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+    // Restored: both answer again.
+    expect((await evaluate("budget_truths_disagree", gaps)).length).toBe(3);
+    expect((await evaluate("ev_basis_divergence", gaps)).length).toBe(1);
   });
 
   // ─── structure and units ─────────────────────────────────────────────────
@@ -387,12 +486,25 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     expect(await evaluate("period_not_locked", clean)).toEqual([]);
   });
 
+  it("the thresholds' boundaries: stale after MORE than 14 days (14 is not), late after MORE than 7 days (7 is not)", async () => {
+    const stale = await evaluate("progress_stale", edges);
+    expect(stale.map((row) => [row.subjectId, row.measured.value])).toEqual([[edges.e15.id, 15]]);
+    const { periods } = await require("../earned-value.service").listReportingPeriods({ orgId: live.org.id, projectId: edges.project.id });
+    const elapsed = new Map(periods.map((period) => [period.id, Math.floor((NOW.getTime() - new Date(period.cutoffDate).getTime()) / DAY)]));
+    expect([...elapsed.values()]).toEqual(expect.arrayContaining([7, 8]));
+    const late = await evaluate("period_not_locked", edges);
+    const expected = [...elapsed].filter(([, days]) => days > 7).map(([id]) => id).sort();
+    expect(late.map((row) => row.subjectId).sort()).toEqual(expected);
+    expect(late.map((row) => row.measured.value).sort()).toEqual(expected.map((id) => elapsed.get(id)).sort());
+    expect(late.map((row) => row.measured.value)).not.toContain(7);
+  });
+
   it("ev_basis_divergence: the mapping summary's latest EV against the official EV at the default period's cutoff", async () => {
     const [row, ...rest] = await evaluate("ev_basis_divergence", gaps);
     expect(rest).toEqual([]);
     // 50,000 × 40 % approved after P1's cutoff: in the summary, not in the official EV.
-    expect([row.measured.value, row.limit.value, row.data.period, row.data.isSnapshot]).toEqual([20000, 0, "DQ-P1", false]);
-    expect(row.limit.basis).toMatch(/buildOfficialEvReport ev/);
+    expect([row.measured.value, row.limit.value, figuresOf(row), row.data.higher, row.data.period, row.data.isSnapshot]).toEqual([20000, 0.01, { summaryEv: 20000, officialEv: 0 }, "summaryEv", "DQ-P1", false]);
+    expect(row.data.figures.officialEv.basis).toMatch(/buildOfficialEvReport ev/);
     // Clean: the locked snapshot's EV and the summary agree.
     expect(await evaluate("ev_basis_divergence", clean)).toEqual([]);
   });
@@ -412,9 +524,11 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
 
   it("orphan_change_link: a revision naming no order, a workflow link to a missing record, an RFI pointing at another project's order", async () => {
     const rows = bySubject(await evaluate("orphan_change_link", gaps));
-    expect([...rows.keys()].sort()).toEqual([`budget_revision:${gaps.orphanRevision.id}`, `rfi:${gaps.crossRfi.id}`, `workflow_activity_link:${gaps.orphanLink.id}`].sort());
+    expect([...rows.keys()].sort()).toEqual([`budget_revision:${gaps.orphanRevision.id}`, `rfi:${gaps.crossRfi.id}`, `workflow_activity_link:${gaps.orphanLink.id}`, `workflow_activity_link:${gaps.crossLink.id}`].sort());
     expect(rows.get(`budget_revision:${gaps.orphanRevision.id}`).data.value).toBe("VO-404");
     expect(rows.get(`workflow_activity_link:${gaps.orphanLink.id}`).data.recordType).toBe("rfi");
+    // A record that exists in ANOTHER project does not resolve the link: it is checked in the link's own project.
+    expect([rows.get(`workflow_activity_link:${gaps.crossLink.id}`).data.recordType, rows.get(`workflow_activity_link:${gaps.crossLink.id}`).data.value]).toEqual(["rfi", clean.rfi.id]);
     expect(rows.get(`rfi:${gaps.crossRfi.id}`).data.crossProject).toBe(true);
     for (const row of rows.values()) expect([row.measured.value, row.limit.value]).toEqual([1, 0]);
     expect(await evaluate("orphan_change_link", clean)).toEqual([]);
@@ -457,27 +571,35 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
 
   // ─── the forecast reads the open data-quality rows ───────────────────────
 
-  it("forecast.dataQuality lists the open data-quality rows per reader beside its own notes; every figure is byte-identical to the base code's", async () => {
+  // The forecast as the base (dfb2e77, before PC-7b dq) builds it, compiled
+  // in memory beside the real file so its requires resolve; nothing written.
+  let baseForecast = null;
+  const baseForecastService = () => {
+    if (baseForecast) return baseForecast;
     const { execFileSync } = require("child_process");
     const Module = require("module");
     const path = require("path");
-    const { buildForecast } = require("../forecast.service");
-    // The forecast as the base (dfb2e77, before PC-7b dq) builds it, compiled
-    // in memory beside the real file so its requires resolve; nothing written.
     const source = execFileSync("git", ["show", "dfb2e77:backend/src/services/forecast.service.js"], { cwd: path.resolve(__dirname, "..", "..", ".."), encoding: "utf8" });
     const filename = path.join(__dirname, "..", "forecast.service.at-dfb2e77.in-memory.js");
     const baseModule = new Module(filename, module);
     baseModule.filename = filename;
     baseModule.paths = Module._nodeModulePaths(path.dirname(filename));
     baseModule._compile(source, filename);
-    const base = baseModule.exports;
+    baseForecast = baseModule.exports;
+    return baseForecast;
+  };
+  const FULL = { boq: true, budget: true };
+  const forecastFigures = (forecast) => stable({ ...forecast, dataQuality: undefined, dataQualityItems: undefined });
+
+  it("forecast.dataQuality lists the open data-quality rows per reader beside its own notes; every figure is byte-identical to the base code's", async () => {
+    const { buildForecast } = require("../forecast.service");
+    const base = baseForecastService();
 
     const orgId = live.org.id;
     const projectId = gaps.project.id;
-    const FULL = { boq: true, budget: true };
     const COST = { boq: false, budget: true };
     const NONE = { boq: false, budget: false };
-    const figures = (forecast) => stable({ ...forecast, dataQuality: undefined, dataQualityItems: undefined });
+    const figures = forecastFigures;
 
     const before = await base.buildForecast({ orgId, projectId, asOf: NOW });
     expect(before.available).toBe(true);
@@ -532,6 +654,26 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     }
   }, 120_000);
 
+  it("a project without a schedule: the forecast's 'no schedule' answer lists its open data-quality rows too, nothing else changes", async () => {
+    const { buildForecast } = require("../forecast.service");
+    const orgId = live.org.id;
+    const projectId = bare.project.id;
+    const before = await baseForecastService().buildForecast({ orgId, projectId, asOf: NOW });
+    expect(before.available).toBe(false);
+    // No rows yet: the base's answer.
+    expect(stable(await buildForecast({ orgId, projectId, asOf: NOW, access: FULL }))).toBe(stable(before));
+    await prisma.projectException.create({ data: { orgId, projectId, kind: "progress_stale", severity: "warning", subjectType: "test", subjectId: "bare", measured: 20, limit: 14, measuredBasis: "LiveTest", limitBasis: "LiveTest" } });
+    try {
+      const after = await buildForecast({ orgId, projectId, asOf: NOW, access: FULL });
+      expect(after.available).toBe(false);
+      expect(forecastFigures(after)).toBe(forecastFigures(before));
+      expect(after.dataQualityItems).toEqual([...before.dataQualityItems, { kind: "progress_stale", severity: "warning", subject: ruleOf("progress_stale").label, message: ruleOf("progress_stale").note(1) }]);
+      expect(after.dataQuality).toEqual(after.dataQualityItems.map((item) => item.message));
+    } finally {
+      await prisma.projectException.deleteMany({ where: { orgId, projectId, subjectType: "test" } });
+    }
+  }, 120_000);
+
   // ─── the read-only dry-run script ────────────────────────────────────────
 
   const runDryRun = (extra) => {
@@ -543,25 +685,36 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
       cwd: path.resolve(__dirname, "..", "..", ".."),
       env: { ...process.env, DATABASE_CONNECTION_LIMIT: "1" },
       encoding: "utf8",
-      timeout: 120_000,
+      timeout: 180_000,
     });
     const result = run.status === 0 && require("fs").existsSync(out) ? JSON.parse(require("fs").readFileSync(out, "utf8")) : null;
     if (result) require("fs").unlinkSync(out);
     return { status: run.status, output: `${run.stdout}\n${run.stderr}`, result };
   };
+  const activeProjectIds = () => [gaps.project.id, clean.project.id, edges.project.id, bare.project.id];
 
-  it("exception-dry-run.js --rules-only: one read-only session, the counts each rule would open, nothing written", async () => {
-    const scope = { orgId: live.org.id, projectIds: [gaps.project.id, clean.project.id] };
+  it("exception-dry-run.js --rules-only: one read-only session, the tick's projects only, the rows each rule finds, nothing written", async () => {
+    const scope = { orgId: live.org.id, projectIds: [...activeProjectIds(), ...outOfScope.map((project) => project.id)] };
     const before = await everyRow(scope);
     const { status, output, result } = runDryRun(["--rules-only"]);
     expect([status, output]).toEqual([0, expect.stringContaining("read-only session verified")]);
-    expect([result.mode, result.sessionReadOnly, result.projects, result.errors]).toEqual(["rules_only", "on", 2, []]);
+    // The nightly tick's filter (status 'active', not archived): the archived and the completed project are not evaluated.
+    expect([result.mode, result.sessionReadOnly, result.scope, result.projects, result.projectsOutOfScope, result.errors]).toEqual(["rules_only", "on", "active", 4, 2, []]);
+    expect(result.perProject.map((row) => row.projectId).sort()).toEqual(activeProjectIds().sort());
     const counts = Object.fromEntries(result.perProject.map((row) => [row.projectId, row.counts]));
     expect(counts[gaps.project.id]).toEqual(EXPECTED_GAPS);
     expect(counts[clean.project.id]).toEqual({});
-    for (const [kind, rows] of Object.entries(EXPECTED_GAPS)) expect([kind, result.kinds[kind]]).toEqual([kind, { rows, projects: 1 }]);
+    expect(counts[edges.project.id].progress_stale).toBe(1);
+    // Rules only: what the rules FIND, never called "would open".
+    for (const [kind, rows] of Object.entries(EXPECTED_GAPS)) expect([kind, result.kinds[kind].found >= rows, "wouldOpen" in result.kinds[kind]]).toEqual([kind, true, false]);
+    expect(output).toContain("rows the rules find");
+    expect(output).not.toContain("would open");
     expect(changesBetween(before, await everyRow(scope))).toEqual([]);
-  }, 180_000);
+
+    // --all-projects: every project of the organisation, archived and completed included.
+    const all = runDryRun(["--rules-only", "--all-projects"]);
+    expect([all.status, all.result.scope, all.result.projects, all.result.projectsOutOfScope]).toEqual([0, "all", 6, 0]);
+  }, 300_000);
 
   it("exception-dry-run.js without --rules-only goes through the engine's dryRun (exit 3 while the engine is not on the base)", async () => {
     const { status, output, result } = runDryRun([]);
@@ -569,17 +722,24 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
       expect([status, output]).toEqual([3, expect.stringContaining("exception-engine.service.js is not on this base")]);
       return;
     }
-    expect([status, result.mode, result.sessionReadOnly]).toEqual([0, "engine_dry_run", "on"]);
+    expect([status, result.mode, result.sessionReadOnly, result.projects, result.errors]).toEqual([0, "engine_dry_run", "on", 4, []]);
+    // A first pass: every data-quality row the gaps project would hold is a new one.
     const counts = Object.fromEntries(result.perProject.map((row) => [row.projectId, row.counts]));
     for (const [kind, rows] of Object.entries(EXPECTED_GAPS)) expect([kind, counts[gaps.project.id][kind]]).toEqual([kind, rows]);
+    expect(output).toContain("rows it would open");
   }, 180_000);
 
   // ─── the engine (after the merge) ────────────────────────────────────────
 
-  engineIt("the engine's rule registry picks the data-quality kinds up", () => {
+  engineIt("the engine's rule registry picks the data-quality kinds up, with their module and BOQ flag", () => {
     const registry = require("../exception-rules");
-    const kinds = new Set((Array.isArray(registry) ? registry : registry.RULES || registry.rules || []).map((rule) => rule.kind));
-    for (const kind of RULES.DATA_QUALITY_KINDS) expect([kind, kinds.has(kind)]).toEqual([kind, true]);
+    const rules = typeof registry.getRules === "function" ? registry.getRules() : registry;
+    const meta = registry.kindMeta();
+    for (const rule of RULES) {
+      const loaded = rules.find((entry) => entry.kind === rule.kind);
+      expect([rule.kind, Boolean(loaded), loaded?.file]).toEqual([rule.kind, true, "data-quality.js"]);
+      expect([rule.kind, meta[rule.kind]]).toEqual([rule.kind, { kind: rule.kind, severity: rule.severity, subjectType: rule.subjectType, module: rule.module, boqDerived: rule.boqDerived }]);
+    }
   });
 
   engineIt("evaluateProject opens the data-quality rows once, a dry run writes nothing, and a fixed gap resolves", async () => {
@@ -587,7 +747,8 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     const projectId = gaps.project.id;
     const scope = { orgId, projectIds: [projectId, clean.project.id] };
     const dqKinds = [...RULES.DATA_QUALITY_KINDS];
-    const openRows = () => prisma.projectException.findMany({ where: { orgId, projectId, kind: { in: dqKinds }, resolvedAt: null }, orderBy: [{ kind: "asc" }, { subjectId: "asc" }] });
+    const openRows = () => prisma.projectException.findMany({ where: { orgId, projectId, kind: { in: dqKinds }, resolvedAt: null } });
+    const idsOf = (rows) => rows.map((row) => row.id).sort();
 
     const before = await everyRow(scope);
     const dry = await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test", dryRun: true });
@@ -600,13 +761,14 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     expect(Object.keys(expected).sort()).toEqual([...dqKinds].sort());
     for (const [kind, count] of Object.entries(expected)) expect([kind, first.filter((row) => row.kind === kind).length]).toEqual([kind, count]);
     expect(first.every((row) => ["info", "warning"].includes(row.severity) && row.measuredBasis && row.limitBasis)).toBe(true);
+    // The two-figure kinds hold the gap: measured above the cent tolerance on every row.
+    for (const row of first.filter((entry) => GAP_KINDS.includes(entry.kind))) expect([row.kind, Number(row.measured) >= Number(row.limit), Number(row.limit)]).toEqual([row.kind, true, 0.01]);
     // The dry run said what the write did.
-    for (const [kind, count] of Object.entries(expected)) expect([kind, dry.rows.filter((row) => row.kind === kind).length]).toEqual([kind, count]);
+    for (const [kind, count] of Object.entries(expected)) expect([kind, dry.rows.filter((row) => row.kind === kind && row.change === "open").length]).toEqual([kind, count]);
 
     // Idempotent: a second pass opens nothing new and keeps one open row per subject.
     await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
-    const second = await openRows();
-    expect(second.map((row) => row.id)).toEqual(first.map((row) => row.id));
+    expect(idsOf(await openRows())).toEqual(idsOf(first));
 
     // The clean project opens none of these kinds.
     await engine.evaluateProject({ orgId, projectId: clean.project.id, cutoff: NOW, trigger: "test" });
@@ -620,6 +782,44 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
       expect([resolved.resolvedAt !== null, resolved.resolvedReason]).toEqual([true, "cleared"]);
     } finally {
       await prisma.costRecord.update({ where: { id: gaps.r1.id }, data: { forecastSource: null } });
+    }
+  }, 180_000);
+
+  engineIt("after a real pass the dry run counts nothing as 'would open': refreshes, unchanged rows, resolutions and suppressions are tallied apart", async () => {
+    const orgId = live.org.id;
+    for (const projectId of activeProjectIds()) await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+    // Dismiss one open row: the dry run must count it as suppressed, never as an opening.
+    const dismissed = await prisma.projectException.findFirst({ where: { orgId, projectId: gaps.project.id, kind: "orphan_change_link", subjectId: gaps.orphanRevision.id, resolvedAt: null } });
+    await engine.setDismissed({ orgId, projectId: gaps.project.id, exceptionId: dismissed.id, actorId: live.user.id, reason: "LiveTest reviewed" });
+    const { status, output, result } = runDryRun([]);
+    expect([status, result.mode, result.errors]).toEqual([0, "engine_dry_run", []]);
+    for (const row of result.perProject) expect([row.projectId, row.counts]).toEqual([row.projectId, {}]);
+    for (const [kind, entry] of Object.entries(result.kinds)) expect([kind, entry.wouldOpen, entry.projects]).toEqual([kind, 0, 0]);
+    expect(result.engineTotals.opened).toBe(0);
+    expect(result.kinds.orphan_change_link.suppressed).toBe(1);
+    expect(result.kinds.orphan_change_link.unchanged).toBe(EXPECTED_GAPS.orphan_change_link - 1);
+    expect(output).toContain("rows it would open");
+  }, 240_000);
+
+  engineIt("a dismissed disagreement whose LARGER figure moves further away reopens (the gap is measured, so the worsening is seen)", async () => {
+    const orgId = live.org.id;
+    const projectId = gaps.project.id;
+    const where = { orgId, projectId, kind: "budget_truths_disagree", secondarySubjectId: "ev_bac_vs_contract_waterfall" };
+    await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+    const row = await prisma.projectException.findFirst({ where: { ...where, resolvedAt: null } });
+    expect(Number(row.measured)).toBe(50000);
+    await engine.setDismissed({ orgId, projectId, exceptionId: row.id, actorId: live.user.id, reason: "LiveTest reviewed" });
+    // Unchanged: it stays dismissed.
+    await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+    expect(await prisma.projectException.count({ where: { ...where, resolvedAt: null } })).toBe(0);
+    // The contract waterfall (the larger figure) rises: the EV BAC is 51,000 still, the gap 90,000.
+    await prisma.project.update({ where: { id: projectId }, data: { contractValue: 140000 } });
+    try {
+      await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+      const reopened = await prisma.projectException.findFirst({ where: { ...where, resolvedAt: null } });
+      expect([Boolean(reopened), reopened && Number(reopened.measured), reopened?.dataJson?.reopenedFrom?.id]).toEqual([true, 90000, row.id]);
+    } finally {
+      await prisma.project.update({ where: { id: projectId }, data: { contractValue: 100000 } });
     }
   }, 180_000);
 });

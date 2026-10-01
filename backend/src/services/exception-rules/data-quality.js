@@ -31,9 +31,25 @@
  * rows of the kind (no figure, so the note never carries money).
  *
  * The thresholds are documented constants per kind (owner rule: no settings
- * column until the owner asks for one). `measured > limit` reads as "worse"
- * for every kind, so the engine's dismissal rule (a dismissed row reopens only
- * when measured moves past the dismissed value in the adverse direction) holds.
+ * column until the owner asks for one). For every kind a RISING measured
+ * figure is the worsening, because the engine's dismissal rule reopens a
+ * dismissed row only when measured moves past the dismissed value upwards:
+ *   - a count, a number of days or a group size rises as the gap grows;
+ *   - a comparison of two owner figures (budget_truths_disagree,
+ *     forecast_without_provenance, activity_budget_mismatch,
+ *     committed_definition_mixed, equipment_cost_unposted,
+ *     ev_basis_divergence) measures the GAP between them, |a − b|, against
+ *     the cent tolerance (`comparison` below). Either figure may be the larger
+ *     and either may move, so neither is put in `measured` on its own — a
+ *     widening on the side held in `limit` would leave a dismissed row
+ *     dismissed. The two figures, each with its basis, stay in
+ *     data.figures and data.higher names the larger. The gap is a comparison
+ *     of the owners' figures, never a figure of its own: nothing reads it as
+ *     a cost, a budget, a forecast or an EAC.
+ *
+ * A rule never swallows its owner's failure: an error reaches the engine,
+ * which records it and keeps that kind's open rows as they are (a kind whose
+ * rule failed is not "evaluated", so nothing of it is resolved as cleared).
  *
  * `ctx` is the engine's per-project context: when it is an object, owner
  * answers read by more than one rule (the readiness, the budget register, the
@@ -81,6 +97,27 @@ const groupKeysOf = (record) => {
 };
 const plural = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
+/**
+ * Two owner figures that should agree, as a row's measured / limit: the gap
+ * |a − b| against the cent tolerance (see the header: a rising measured is the
+ * worsening, whichever figure moved). `a` and `b` are [name, { value, basis }];
+ * both figures and their bases go to data.figures, data.higher names the
+ * larger (null when equal). `limitBasis` says why the gap should be 0.
+ */
+const comparison = ([aName, a], [bName, b], { limitBasis }) => {
+  const aValue = toMoneyNumber(a.value);
+  const bValue = toMoneyNumber(b.value);
+  return {
+    measured: {
+      value: Math.abs(subtractMoney(aValue, bValue)),
+      basis: `Gap |${aName} − ${bName}| between two owner figures (data.figures): ${aName} = ${a.basis}; ${bName} = ${b.basis}`,
+    },
+    limit: { value: MONEY_TOLERANCE, basis: `Tolerance 0.01 (budget.service TOLERANCE): ${limitBasis}` },
+    figures: { [aName]: { value: aValue, basis: a.basis }, [bName]: { value: bValue, basis: b.basis } },
+    higher: aValue > bValue ? aName : bValue > aValue ? bName : null,
+  };
+};
+
 // ─── owner answers shared between rules ───────────────────────────────────
 
 // budget.service.js:257 listBudgetLines — the register; summary.totals from summarize (:214).
@@ -115,31 +152,34 @@ const TRUTH_PAIRS = Object.freeze([
 
 const budgetTruths = async ({ orgId, projectId, cutoff, ctx }) => {
   const at = instantOf(cutoff);
+  // The EV report's failure is the rule's failure, never "no report": the
+  // engine then keeps this kind's open rows instead of clearing them.
   const [register, report, waterfall, project] = await Promise.all([
     budgetRegister(ctx, { orgId, projectId }),
-    require("../earned-value.service")
-      .buildOfficialEvReport({ orgId, projectId, cutoffDate: at.toISOString(), useLockedSnapshot: false, includeReadiness: false })
-      .catch(() => null),
+    require("../earned-value.service").buildOfficialEvReport({ orgId, projectId, cutoffDate: at.toISOString(), useLockedSnapshot: false, includeReadiness: false }),
     require("../budget-revision.service").listBudgetRevisions({ orgId, projectId }),
     prisma.project.findFirst({ where: { id: projectId, orgId }, select: { contractValue: true } }),
   ]);
   // A truth exists only where its owner has something to state: a register
-  // with no line, a report that could not be built and a project with no
-  // contract value are absent, not 0.
+  // with no line and a project with no contract value are absent, not 0.
   const truths = {};
   if (register.items.length) truths.register = toMoneyNumber(register.summary.totals.revisedBudget);
   if (report) truths.evBac = toMoneyNumber(report.totalBudget);
   if (project && toMoneyNumber(project.contractValue) > 0) truths.contract = toMoneyNumber(waterfall.summary.currentBudget);
   const cutoffNote = report?.reporting?.cutoffLocalDate ? ` (cutoff ${report.reporting.cutoffLocalDate})` : "";
-  return TRUTH_PAIRS.filter(([a, b]) => a in truths && b in truths && differs(truths[a], truths[b])).map(([a, b, pair]) => ({
-    subjectType: "project",
-    subjectId: projectId,
-    secondarySubjectType: "budget_truth_pair",
-    secondarySubjectId: pair,
-    measured: { value: truths[a], basis: `${TRUTH_BASES[a]}${a === "evBac" ? cutoffNote : ""}` },
-    limit: { value: truths[b], basis: `${TRUTH_BASES[b]}${b === "evBac" ? cutoffNote : ""}` },
-    data: { pair, tolerance: MONEY_TOLERANCE, truths: Object.keys(truths) },
-  }));
+  const truth = (name) => [name, { value: truths[name], basis: `${TRUTH_BASES[name]}${name === "evBac" ? cutoffNote : ""}` }];
+  return TRUTH_PAIRS.filter(([a, b]) => a in truths && b in truths && differs(truths[a], truths[b])).map(([a, b, pair]) => {
+    const { measured, limit, figures, higher } = comparison(truth(a), truth(b), { limitBasis: "the two budgets of the pair are expected to agree" });
+    return {
+      subjectType: "project",
+      subjectId: projectId,
+      secondarySubjectType: "budget_truth_pair",
+      secondarySubjectId: pair,
+      measured,
+      limit,
+      data: { pair, tolerance: MONEY_TOLERANCE, truths: Object.keys(truths), figures, higher },
+    };
+  });
 };
 
 // ─── forecast_without_provenance ──────────────────────────────────────────
@@ -173,19 +213,19 @@ const forecastProvenance = async ({ orgId, projectId, ctx }) => {
     if (record.forecastSource !== FORECAST_SOURCES.ENTERED && record.forecastSource !== FORECAST_SOURCES.DEFAULT) {
       if (!(forecast > 0)) continue;
       const budget = allocations.get(record.activityId)?.amount || 0;
-      rows.push({
-        ...base,
-        measured: { value: forecast, basis: "CostRecord.forecast as stored; its source was not recorded (forecastSource NULL — utils/cost-forecast FORECAST_BASIS.notRecorded): entered or an older default, unknown" },
-        limit: { value: defaultForecast({ budget, actual }), basis: "What the R5-2 default would be now: max(0, approved allocation, actual) (utils/cost-forecast defaultForecast over activity-boq-allocation getApprovedActivityAllocationTotals and CostRecord.actual)" },
-        data: { reason: "source_not_recorded", activityId: record.activityId, label: activityLabel(record.activity) },
-      });
+      const { measured, limit, figures, higher } = comparison(
+        ["storedForecast", { value: forecast, basis: "CostRecord.forecast as stored; its source was not recorded (forecastSource NULL — utils/cost-forecast FORECAST_BASIS.notRecorded): entered or an older default, unknown" }],
+        ["defaultNow", { value: defaultForecast({ budget, actual }), basis: "What the R5-2 default would be now: max(0, approved allocation, actual) (utils/cost-forecast defaultForecast over activity-boq-allocation getApprovedActivityAllocationTotals and CostRecord.actual)" }],
+        { limitBasis: "a forecast nobody is known to have entered is compared with the default it would be now; a gap means it is neither known to be entered nor the default" },
+      );
+      rows.push({ ...base, measured, limit, data: { reason: "source_not_recorded", activityId: record.activityId, label: activityLabel(record.activity), figures, higher } });
     } else if (record.forecastSource === FORECAST_SOURCES.DEFAULT && differs(actual, forecast) && actual > forecast) {
-      rows.push({
-        ...base,
-        measured: { value: actual, basis: "CostRecord.actual: the cost ledger's projection on the record (cost-ledger.service post)" },
-        limit: { value: forecast, basis: "CostRecord.forecast, a DEFAULT (forecastSource 'default': max(budget, actual) as they stood when it was set, utils/cost-forecast FORECAST_BASIS.default); nobody entered a forecast" },
-        data: { reason: "default_below_actual", activityId: record.activityId, label: activityLabel(record.activity) },
-      });
+      const { measured, limit, figures, higher } = comparison(
+        ["actual", { value: actual, basis: "CostRecord.actual: the cost ledger's projection on the record (cost-ledger.service post)" }],
+        ["storedDefault", { value: forecast, basis: "CostRecord.forecast, a DEFAULT (forecastSource 'default': max(budget, actual) as they stood when it was set, utils/cost-forecast FORECAST_BASIS.default); nobody entered a forecast" }],
+        { limitBasis: "the actual is expected not to pass the default forecast" },
+      );
+      rows.push({ ...base, measured, limit, data: { reason: "default_below_actual", activityId: record.activityId, label: activityLabel(record.activity), figures, higher } });
     }
   }
   return rows;
@@ -218,18 +258,26 @@ const activityBudgets = async ({ orgId, projectId, ctx }) => {
     const activityDiffers = differs(stored, allocated);
     if (!recordDiffers && !activityDiffers) continue;
     const field = recordDiffers ? "cost_record.budget" : "activity.budget";
+    const { measured, limit, figures, higher } = comparison(
+      [
+        "storedBudget",
+        {
+          value: recordDiffers ? recordBudget : stored,
+          basis: recordDiffers
+            ? "CostRecord.budget as stored (shown as generatedBudget beside the approved allocation, cost.service attachApprovedBudgets)"
+            : "Activity.budget as stored (shown as generatedBudget beside the approved allocation, schedule.service)",
+        },
+      ],
+      ["approvedAllocation", { value: allocated, basis: "Σ approved, active BOQ allocations to the activity (activity-boq-allocation.service getApprovedActivityAllocationTotals) — the budget every read shows" }],
+      { limitBasis: "the stored budget and the approved allocations are expected to agree" },
+    );
     rows.push({
       subjectType: "activity",
       subjectId: activity.id,
-      measured: {
-        value: recordDiffers ? recordBudget : stored,
-        basis: recordDiffers
-          ? "CostRecord.budget as stored (shown as generatedBudget beside the approved allocation, cost.service attachApprovedBudgets)"
-          : "Activity.budget as stored (shown as generatedBudget beside the approved allocation, schedule.service)",
-      },
-      limit: { value: allocated, basis: "Σ approved, active BOQ allocations to the activity (activity-boq-allocation.service getApprovedActivityAllocationTotals) — the budget every read shows" },
+      measured,
+      limit,
       groupKeys: groupKeysOf(activity),
-      data: { field, activityBudget: stored, costRecordBudget: recordBudget, approvedAllocation: allocated, label: activityLabel(activity) },
+      data: { field, activityBudget: stored, costRecordBudget: recordBudget, approvedAllocation: allocated, label: activityLabel(activity), figures, higher },
     });
   }
   return rows;
@@ -252,12 +300,17 @@ const committedDefinitions = async ({ orgId, projectId, ctx }) => {
   const poCommitted = toMoneyNumber(orders.summary.committed);
   const registerCommitted = toMoneyNumber(register.summary.totals.committed);
   if (!differs(poCommitted, registerCommitted)) return [];
+  const { measured, limit, figures, higher } = comparison(
+    ["purchaseOrderCommitted", { value: poCommitted, basis: "Purchase-order summary `committed`: a deprecated alias of orderValue — the value of orders neither planned nor cancelled, NOT committed cost (purchase-order.service listOrders)" }],
+    ["registerCommitted", { value: registerCommitted, basis: "Budget register committed: executed commitments + approved commitment change orders, or the manual figure while nothing is committed (budget.service listBudgetLines summary.totals.committed)" }],
+    { limitBasis: "two figures both named `committed` on one project are expected to agree, or to be read as different figures" },
+  );
   return [{
     subjectType: "project",
     subjectId: projectId,
-    measured: { value: poCommitted, basis: "Purchase-order summary `committed`: a deprecated alias of orderValue — the value of orders neither planned nor cancelled, NOT committed cost (purchase-order.service listOrders)" },
-    limit: { value: registerCommitted, basis: "Budget register committed: executed commitments + approved commitment change orders, or the manual figure while nothing is committed (budget.service listBudgetLines summary.totals.committed)" },
-    data: { orders: orders.items.length, field: "summary.committed", alias: "orderValue" },
+    measured,
+    limit,
+    data: { orders: orders.items.length, field: "summary.committed", alias: "orderValue", figures, higher },
   }];
 };
 
@@ -297,13 +350,19 @@ const equipmentUnposted = async ({ orgId, projectId }) => {
   for (const [reportId, bucket] of [...byReport.entries()].sort(([a], [b]) => String(a).localeCompare(String(b)))) {
     const net = reportId ? posted.get(reportId) || 0 : 0;
     if (!(bucket.cost > net) || !differs(bucket.cost, net)) continue;
+    // A reversed posting lowers the net: the gap, not the usage, is measured.
+    const { measured, limit, figures, higher } = comparison(
+      ["usageCost", { value: bucket.cost, basis: "Σ ActivityEquipmentUsage.costAmount recorded for the daily report (equipment.service postDailyReportEquipmentUsage)" }],
+      ["ledgerNet", { value: net, basis: "Net Σ CostLedgerEntry.amount of source 'equipment' for the daily report (cost-ledger.service post, called by equipment.service postEquipmentCostImpact)" }],
+      { limitBasis: "the usage cost a daily report carries is expected to be posted to the cost ledger in full" },
+    );
     rows.push({
       subjectType: reportId ? "daily_report" : "project",
       subjectId: reportId || projectId,
       ...(reportId ? {} : { secondarySubjectType: "equipment_usage", secondarySubjectId: "without_daily_report" }),
-      measured: { value: bucket.cost, basis: "Σ ActivityEquipmentUsage.costAmount recorded for the daily report (equipment.service postDailyReportEquipmentUsage)" },
-      limit: { value: net, basis: "Net Σ CostLedgerEntry.amount of source 'equipment' for the daily report (cost-ledger.service post, called by equipment.service postEquipmentCostImpact)" },
-      data: { usageRows: bucket.rows, activityIds: [...bucket.activityIds].sort() },
+      measured,
+      limit,
+      data: { usageRows: bucket.rows, activityIds: [...bucket.activityIds].sort(), figures, higher },
     });
   }
   return rows;
@@ -524,8 +583,9 @@ const periodNotLocked = async ({ orgId, projectId, cutoff }) => {
 // project that differ by more than a cent.
 const evBasisDivergence = async ({ orgId, projectId, ctx }) => {
   await assertProject(ctx, { orgId, projectId });
+  // The EV report's failure is the rule's failure (see budgetTruths).
   const [report, summary] = await Promise.all([
-    require("../earned-value.service").buildOfficialEvReport({ orgId, projectId, useLockedSnapshot: true, includeReadiness: false }).catch(() => null),
+    require("../earned-value.service").buildOfficialEvReport({ orgId, projectId, useLockedSnapshot: true, includeReadiness: false }),
     require("../activity-boq-allocation.service").buildAllocationSummary({ projectId }),
   ]);
   if (!report) return [];
@@ -533,12 +593,17 @@ const evBasisDivergence = async ({ orgId, projectId, ctx }) => {
   const latest = toMoneyNumber(summary.earnedValue);
   if (!differs(latest, official)) return [];
   const reporting = report.reporting || {};
+  const { measured, limit, figures, higher } = comparison(
+    ["summaryEv", { value: latest, basis: "Summary EV on the mapping coverage: Σ approved allocation × the latest approved progress, no cutoff (activity-boq-allocation.service buildAllocationSummary earnedValue)" }],
+    ["officialEv", { value: official, basis: `Official EV at the reporting cutoff${reporting.cutoffLocalDate ? ` ${reporting.cutoffLocalDate}` : ""}${reporting.isSnapshot ? " (the locked period's snapshot)" : ""} (earned-value.service buildOfficialEvReport ev)` }],
+    { limitBasis: "two earned values shown for one project are expected to agree, or to be read as different cutoffs" },
+  );
   return [{
     subjectType: "project",
     subjectId: projectId,
-    measured: { value: latest, basis: "Summary EV on the mapping coverage: Σ approved allocation × the latest approved progress, no cutoff (activity-boq-allocation.service buildAllocationSummary earnedValue)" },
-    limit: { value: official, basis: `Official EV at the reporting cutoff${reporting.cutoffLocalDate ? ` ${reporting.cutoffLocalDate}` : ""}${reporting.isSnapshot ? " (the locked period's snapshot)" : ""} (earned-value.service buildOfficialEvReport ev)` },
-    data: { cutoffDate: reporting.cutoffDate || null, period: reporting.period?.code || null, isSnapshot: Boolean(reporting.isSnapshot) },
+    measured,
+    limit,
+    data: { cutoffDate: reporting.cutoffDate || null, period: reporting.period?.code || null, isSnapshot: Boolean(reporting.isSnapshot), figures, higher },
   }];
 };
 
