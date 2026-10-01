@@ -24,8 +24,10 @@
  * refuse approved allocations above their item, so the run asserts none.
  *
  * Then: a dry run writes nothing; the evaluation writes ProjectException rows
- * only (every other table scoped to the organisation — by projectId, orgId,
- * activityId or boqItemId — byte-identical around it) and moves no figure (EV
+ * only (every other table's rows of the organisation — a row matching ANY of
+ * projectId, orgId, activityId or boqItemId the table carries, so an
+ * organisation-level notification, job, outbound event or audit row counts —
+ * and the Organisation row itself, byte-identical around it) and moves no figure (EV
  * report, budget register and ledger sums identical: delta 0.00); a second
  * run makes no duplicate and moves lastSeenAt only; a change order approved
  * through the API with an allocation link clears the two quantity rows
@@ -91,14 +93,19 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     for (const table of [...tableColumns.keys()].sort()) {
       if (SKIP_TABLES.has(table) && !(includeExceptions && table === "ProjectException")) continue;
       const columns = tableColumns.get(table);
-      const column = SCOPE_COLUMNS.find((name) => columns.has(name));
-      if (!column) {
+      // A row belongs to the organisation when ANY scope column the table has
+      // names it: an organisation-level Notification, BackgroundJob,
+      // OutboundEvent or AuditEvent (orgId set, projectId NULL) is seen as
+      // well as a project's. The organisation's own row is matched by its id.
+      const scope = table === "Organisation" ? [["id", [orgId]]] : SCOPE_COLUMNS.filter((name) => columns.has(name)).map((name) => [name, values[name]]);
+      if (!scope.length) {
         unscoped.push(table);
         continue;
       }
+      const where = scope.map(([name], index) => `t."${name}"::text = ANY($${index + 1}::text[])`).join(" OR ");
       const [row] = await prisma.$queryRawUnsafe(
-        `SELECT count(*)::int AS n, md5(coalesce(string_agg(md5(t::text), ',' ORDER BY md5(t::text)), '')) AS h FROM "${table}" t WHERE t."${column}"::text = ANY($1::text[])`,
-        values[column],
+        `SELECT count(*)::int AS n, md5(coalesce(string_agg(md5(t::text), ',' ORDER BY md5(t::text)), '')) AS h FROM "${table}" t WHERE ${where}`,
+        ...scope.map(([, list]) => list),
       );
       result[table] = `${row.n}:${row.h}`;
     }
@@ -258,6 +265,10 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     const before = await footprint(live.org.id);
     const moneyBefore = await money();
     expect(scopedRows(before)).toBeGreaterThan(50);
+    // The side-effect tables are fingerprinted over every scope column they carry (an
+    // organisation-level row included), and the organisation's own row by its id.
+    expect(Object.keys(before.tables)).toEqual(expect.arrayContaining(["Notification", "BackgroundJob", "OutboundEvent", "AuditEvent", "Organisation", "User"]));
+    expect(before.unscoped).not.toContain("Organisation");
 
     const result = await evaluate();
     expect(result.errors).toEqual([]);
