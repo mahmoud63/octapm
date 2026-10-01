@@ -154,7 +154,18 @@ bundles entries, and approving it is what approves them:
   approved, a planned quantity typed, since the submission was made), the bundled entries are set `approved`
   (`approvedBy/approvedAt` = the row's) in the same transaction, the submission's frozen columns are updated to
   what was approved, and exactly ONE new `ActivityProgress` row is written; no earlier approved row is touched
-  (proven byte-identical). A quantity submission typed the old way (no entries) is approved as it stands. Audit:
+  (proven byte-identical). A quantity submission typed the old way (no entries) is approved as it stands.
+  **Approvals are serialised per activity** (review fix, 2026-10-01): the writer holds the activity's row
+  (`SELECT … FOR UPDATE`, the pattern `boq.service` uses for an item) and reads the submission again under the
+  hold before deriving, so two bundles approved at once commit one after the other and the later official row
+  carries Σ approved entries — never less than its own source data (proven live: 10 and 20 approved with
+  `Promise.all` on 100 of 160 → the later row 130, EV 81.25; without the hold the later row read 120). The
+  same submission approved twice at once answers idempotently. **When still nothing is typed and nothing is
+  mapped at approval**, the planned figure the submission was put forward with (its frozen `quantityPlanned`,
+  basis `submission`) stands, so a bundle a client planned is approvable (review fix: before it the approval
+  re-derived with an empty payload, answered 400 `PLANNED_QUANTITY_REQUIRED` and left the entries stuck in a
+  submission that was neither approvable nor editable); a typed or mapped figure found at approval still wins.
+  Audit:
   the submission's `approved` event carries `quantityInstalled, quantityPlanned, plannedBasis, installedBasis,
   quantityEntries, approvedProgressId`; each entry gets its own `approved` event (`entityType
   quantity_progress_entry`), all through `audit.service.recordEvent` — the existing record.changed path, no new
@@ -181,8 +192,10 @@ bundles entries, and approving it is what approves them:
 - **Proof**: `backend/src/services/__live__/pc-6-quantity-approval.live.test.js` (derived figures with the client's
   ignored; the bundle's refusals; a submit-only person's 403; approve → one row at installed ÷ planned, entries
   approved in the same transaction, provenance on the submission, the activity and the EV report's row; a second
-  bundle by date leaving the first row byte-identical; reject; the evidence gate holding a bundle; the typed
-  method-configuration basis; the method lock both ways with readiness; the tenant 404) and
+  bundle by date leaving the first row byte-identical; reject; two bundles approved at once serialised with the
+  later row at Σ approved entries and the same submission twice at once idempotent; the evidence gate holding a
+  bundle; the typed method-configuration basis; a client-planned bundle on an activity with nothing typed and
+  nothing mapped approved with its frozen figure; the method lock both ways with readiness; the tenant 404) and
   `__tests__/progress.service.quantity-bundle.test.js`.
 
 ## 4. Daily-report contribution (§81) [D]
@@ -260,10 +273,33 @@ totals. What is specific to it:
   approved or rejected one is left alone. The log's audit event says `{ minted, synced, kept }`. **Nothing here is
   official**: no `ActivityProgress` row, EV unchanged, the entries wait for §3.2's writer.
 - **The row's status is never progress.** `POST /daily-logs/{date}/approve` moves every section row from
-  submitted to approved — the quantities rows too, as their site-record review state — and **does not touch an
+  submitted to approved — the quantities rows too, as their site-record review state — and **does not approve an
   entry**: after approving the log every entry is still `submitted`, `approvedBy` null, nothing official (proven
-  live, and mutation-proven: approving entries in `approveLog` fails the suite). Per-row review
-  (`/entries/quantities/{id}/review`) is the same site-record state. `reopen` leaves the entries as they are.
+  live, and mutation-proven: approving entries in `approveLog` fails the suite). `reopen` leaves the entries as
+  they are.
+- **A submitted day's rows are never left unminted** (review fix, 2026-10-01). Staff may add a row to a day
+  already submitted; before the fix it was minted by nothing — `approveLog` minted nothing and an approved day
+  refuses a resubmit (409 `DAILY_LOG_APPROVED`) — so the figure sat in an approved log and never reached the
+  approvers. Now a counted row on a **submitted** day is pending at once (`mintOnSubmittedDay`: on add, on an
+  edit that resubmits a rejected row, on a review `approve`), and `approveLog` mints for every counted row still
+  without an entry before it closes the day (the same `mintDailyLogEntries` call as submit; minting only — it
+  approves nothing; proven live with a row left unminted, mutation-proven: `approveLog` minting nothing fails
+  the suite). An open day's row stays a site record. The same call **retires** the free pending entry of a row
+  that no longer counts (`retiredRows`: draft, or rejected by the site team) — audit
+  `quantity_entry.daily_log_row_retired` — so the log's events say `{ minted, synced, kept, retired }`.
+- **The site team's reject takes the entry with it** (review fix, 2026-10-01; §4.1's rule that a row rejected by
+  the site team does not count). Before it, `/entries/quantities/{id}/review` with `reject` moved the row only
+  and left its minted entry `submitted` and free, so a planner's `bundleSubmittedThrough` picked it up and the
+  writer made a figure the site withdrew official. `reviewEntry` now calls `rejectDailyLogRowEntry` first: the
+  free pending entry is **deleted** with the decision (audit `quantity_entry.daily_log_row_rejected`, the
+  reviewer's reason — deleted, not marked, so a row approved back is minted afresh under its
+  `daily_log:<rowId>` replay key); an entry already **approved progress locks the row** (409
+  `DAILY_LOG_QUANTITY_LOCKED` — the site team cannot reject what the approver made official; the correction is
+  a new row); one **bundled** into a pending submission holds it (409 `QUANTITY_ENTRY_BUNDLED`); one the
+  approver rejected stays as the trail. A review `approve` never touches an entry (and on a submitted day mints
+  one when the row has none). Proven live (reject after submit → the entry is gone, a date bundle finds
+  nothing, EV unchanged; the two refusals) and mutation-proven (the reject leaving the entry, the official lock
+  off, each fail the suite).
 - **Edits and removals before approval** (`dailyLogRowEntryGate`): a row whose entry is **approved or rejected**
   is locked — 409 `DAILY_LOG_QUANTITY_LOCKED`; the correction is a new row (and a rejected row's resubmission
   never re-mints: the row is settled). A row whose entry is **bundled into a draft/submitted submission** is held
@@ -289,8 +325,12 @@ totals. What is specific to it:
   official (EV 0); an edit syncs; approving the log leaves the entries submitted; reopen / add / remove / resubmit
   with no ghost; the one writer bundles a daily-log entry, writes ONE `ActivityProgress` row at 50 ÷ 100, the log
   shows the row official, the row is locked, removing it leaves the entry (SET NULL) and the EV row; a rejected
-  bundle locks its row; the non-BOQ member records against the picker and reads the log withheld; a client-sent
-  `submissionId` / `dailyLogId` is ignored; the tenant 404; every other activity's EV row byte-identical.
+  bundle locks its row; a second day: the site team's reject after submit takes the entry with it and a date
+  bundle finds nothing, a row approved back or added to the submitted day is pending at once, the day's approval
+  mints a row left unminted and approves nothing, a bundled or official row cannot be rejected by the site team,
+  a stale rejected row's entry is retired on the next submit; the non-BOQ member records against the picker
+  (on a submitted day: pending at once) and reads the log withheld; a client-sent `submissionId` / `dailyLogId`
+  is ignored; the tenant 404; every other activity's EV row byte-identical.
 
 ## 5. Installed / certified / paid (§82) [D]
 
