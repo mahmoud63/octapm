@@ -61,7 +61,8 @@ const { startApi } = require("./auth-live-kit");
 const TRUTHS = new Set(["source", "derived", "projection"]);
 
 // Every { value, truth, basis } in a payload: a stated figure carries a
-// known truth and a basis; a figure not available says so and names its wave.
+// known truth and a basis; a figure not available says so and names its wave
+// (PC-5's shape) or the reason (PC-6's quantity figures: notAvailable: { reason }).
 const figuresOf = (node, path = "", out = []) => {
   if (!node || typeof node !== "object") return out;
   if (Object.prototype.hasOwnProperty.call(node, "truth") && Object.prototype.hasOwnProperty.call(node, "value")) {
@@ -300,7 +301,17 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     expect(variation.quantity).toBe(12);
     expect(detail.sections.quantities.authorised).toMatchObject({ value: 100 + variation.quantity, truth: "derived" });
     expect(detail.sections.quantities.mapped.value).toBe(item.approvedAllocatedQuantity);
-    expect(detail.sections.quantities.installed).toMatchObject({ value: null, notAvailable: true, wave: "PC-6" });
+    // PC-6: the installed quantity is the quantity view's figure (Σ approved
+    // quantity entries, none here); until the core track's module is merged
+    // it is not available and says so — never a wave, never a zero in its place.
+    const { installed } = detail.sections.quantities;
+    expect([installed.truth, installed.unitCode]).toEqual(["derived", "m3"]);
+    if (installed.value === null) expect(installed.notAvailable).toEqual({ reason: "PC-6 core pending" });
+    else expect(installed).toMatchObject({ value: 0, unitMatch: null });
+    expect(detail.sections.quantities.paid).toMatchObject({ truth: "projection", unitCode: "m3" });
+    expect(detail.sections.quantities.certifiedQuantity).toMatchObject({ value: 30, truth: "source", unitCode: "m3", unitMatch: true });
+    expect(detail.sections.quantities.committedQuantity).toMatchObject({ value: 100, truth: "derived", unitCode: "m3", label: "Committed quantity (excludes variations)" });
+    expect(detail.sections.quantities.forecast).toMatchObject({ value: null, notAvailable: true, wave: "PC-7" });
     expect(detail.sections.money.amount.value).toBe(1000);
     expect(detail.sections.money.approvedAllocated.value).toBe(item.approvedAllocatedAmount);
     expect(detail.sections.money.earnedValue.value).toBe(item.earnedValue);
@@ -345,7 +356,8 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     expect(ax.activity.href).toBe(`/o/${live.org.slug || live.org.id}/projects/${project.id}/activities?recordId=${acts.X.id}&source=activity`);
 
     for (const { path, figure } of figuresOf(detail.sections)) {
-      if (figure.notAvailable) expect([path, figure.wave]).toEqual([path, expect.stringMatching(/^PC-\d$/)]);
+      // PC-5's placeholders name a wave; PC-6's quantity figures say why (notAvailable: { reason }).
+      if (figure.notAvailable) expect([path, figure.wave ?? figure.notAvailable?.reason]).toEqual([path, expect.stringMatching(/^PC-\d$|\S/)]);
       else expect([path, TRUTHS.has(figure.truth), typeof figure.basis]).toEqual([path, true, "string"]);
     }
   });

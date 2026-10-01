@@ -41,6 +41,7 @@ const attachmentService = require("./attachment.service");
 const commitmentService = require("./commitment.service");
 const readinessService = require("./project-setup-readiness.service");
 const { getApprovedVariationAllowances } = require("./ipc.service");
+const quantityViews = require("./quantity-views.service");
 const { applyPartyWorkflowVisibility } = require("./company-party.service");
 const { withDraftVisibility } = require("./rfi-workflow.service");
 
@@ -212,7 +213,7 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
   // The IPC certification cap's approved-variation rule, for the row and for
   // each listed allocation, in one query (ipc.service getApprovedVariationAllowances).
   const listedAllocations = allocations.slice(0, LIST_CAP);
-  const [[variation, ...perAllocation], activities, progress, original] = await Promise.all([
+  const [[variation, ...perAllocation], activities, progress, original, quantityBlocks] = await Promise.all([
     getApprovedVariationAllowances({
       tx: prisma,
       projectId,
@@ -231,7 +232,11 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
       : [],
     canReadProgress ? latestApprovedProgress(activityIds) : new Map(),
     originalQuantityOf({ projectId, item, lock }),
+    // PC-6: the row's installed, certified, paid, received, issued and
+    // committed quantities, each from its owner (quantity-views.service).
+    quantityViews.quantityBlocks({ orgId, projectId, items: [item], can, partyScoped }),
   ]);
+  const quantityBlock = quantityBlocks.blocks.get(item.id);
   const activityById = new Map(activities.map((entry) => [entry.id, entry]));
 
   const allocationRows = listedAllocations.map((allocation, index) => {
@@ -315,8 +320,19 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
           { type: "activity_boq_allocation" },
         ])
       : null,
-    installed: notAvailable("PC-6", "Not available yet (PC-6): installed quantity per BOQ item comes with quantity progress"),
-    paid: notAvailable("PC-6", "Not available yet (PC-6): payments are recorded per certificate, not per BOQ item"),
+    // PC-6: five separate quantities with five truths, never merged or summed
+    // across units (quantity-views.service); the certified quantity here is
+    // the certification section's figure on the same rows, in the same
+    // envelope as its four siblings. Each is { value, truth, basis, unitCode,
+    // unitMatch, notAvailable?: { reason } }: a figure the viewer's modules
+    // do not admit, or the core track has not delivered, says so.
+    installed: quantityBlock.figures.installed,
+    certifiedQuantity: quantityBlock.figures.certified,
+    paid: quantityBlock.figures.paid,
+    received: quantityBlock.figures.received,
+    issued: quantityBlock.figures.issued,
+    committedQuantity: quantityBlock.figures.committed,
+    comparisons: quantityBlock.comparisons,
     forecast: notAvailable("PC-7", "Not available yet (PC-7): a per-item forecast comes with forecast intelligence"),
   };
   sections.money = {
@@ -706,8 +722,8 @@ const getActivityDetail = async ({
   };
 
   if (can("progress")) {
-    const [method, submissions, history, approvedCount] = await Promise.all([
-      progressService.getProgressMethod({ orgId, projectId, activityId }),
+    const method = await progressService.getProgressMethod({ orgId, projectId, activityId });
+    const [submissions, history, approvedCount, installedQuantity] = await Promise.all([
       progressService.listProgressSubmissions({ orgId, projectId, activityId }),
       prisma.activityProgress.findMany({
         where: { activityId, status: "approved" },
@@ -719,6 +735,11 @@ const getActivityDetail = async ({
         },
       }),
       prisma.activityProgress.count({ where: { activityId, status: "approved" } }),
+      // PC-6: Σ approved quantity entries per BOQ item of the activity, folded
+      // into one unit (quantity-views.service); "—" on an activity measured by
+      // percent, never % × quantity. The frozen quantityComplete of each
+      // approved row stays on the history rows below.
+      quantityViews.installedForActivity({ orgId, projectId, activityId, method: method?.method }),
     ]);
     const submissionList = Array.isArray(submissions) ? submissions : submissions?.submissions || submissions?.items || [];
     sections.progress = {
@@ -728,12 +749,7 @@ const getActivityDetail = async ({
         ? fig(toNumber(latest.pctComplete), "source", "Latest approved ActivityProgress (most recently updated)", [{ type: "activity_progress" }])
         : fig(0, "source", "No approved progress yet", []),
       progressSource: latest?.source ?? null,
-      installedQuantity:
-        history[0] && history[0].quantityComplete != null
-          ? fig(toNumber(history[0].quantityComplete), "source", "ActivityProgress.quantityComplete on the latest approved row (quantity method)", [
-              { type: "activity_progress", id: history[0].id },
-            ])
-          : notAvailable("PC-6", "Not available yet (PC-6): installed quantity is recorded only on quantity-method progress"),
+      installedQuantity,
       approvedHistory: capped(
         history.map((entry) => ({ ...entry, pctComplete: toNumber(entry.pctComplete), approvedAt: iso(entry.approvedAt) })),
         approvedCount,
