@@ -44,6 +44,7 @@ import { workspaceLink } from '@/features/workflows/hooks/use-workflow-engine'
 import {
   CHANGE_EVENT_STATUS_LABEL,
   CHANGE_EVENT_TYPE_LABEL,
+  isChangeEventFieldWithheld,
   useChangeEvent,
   useChangeEventAction,
   useDeleteChangeEvent,
@@ -82,6 +83,16 @@ const RFQ_STATUS_CLASS: Record<RfqStatus, string> = {
   cancelled: 'border-zinc-300 text-zinc-500 dark:text-zinc-400',
 }
 
+/** The line fields the server may withhold (PC-7b: taken from a BOQ-derived exception). */
+const LINE_WITHHOLDABLE = [
+  'activityId',
+  'costCodeId',
+  'quantity',
+  'unit',
+  'unitCost',
+] as const
+type LineField = (typeof LINE_WITHHOLDABLE)[number]
+
 type LineRow = {
   key: string
   id: string | null
@@ -92,7 +103,11 @@ type LineRow = {
   quantity: string
   unit: string
   unitCost: string
+  /** The stored amount — shown (and sent) for a line whose quantity or unit cost is withheld. */
+  romAmount: string
   quotedAmount: number | null
+  /** What the server left out of this line for this member: shown "—" with the reason, never sent back. */
+  withheld: LineField[]
 }
 
 const rowsFrom = (event: ChangeEvent): LineRow[] =>
@@ -103,11 +118,42 @@ const rowsFrom = (event: ChangeEvent): LineRow[] =>
     costCodeId: line.costCodeId ?? '',
     activityId: line.activityId ?? '',
     commitmentId: line.commitmentId ?? '',
-    quantity: String(line.quantity),
+    quantity: line.quantity === undefined ? '' : String(line.quantity),
     unit: line.unit ?? '',
-    unitCost: String(line.unitCost),
+    unitCost: line.unitCost === undefined ? '' : String(line.unitCost),
+    romAmount: String(line.romAmount ?? 0),
     quotedAmount: line.quotedAmount,
+    withheld: LINE_WITHHOLDABLE.filter((field) =>
+      isChangeEventFieldWithheld(event, field, line.id)
+    ),
   }))
+
+/** A line's amount: its stored amount when the quantity or unit cost is withheld, else quantity × unit cost. */
+const rowAmount = (row: LineRow) =>
+  row.withheld.includes('quantity') || row.withheld.includes('unitCost')
+    ? Number(row.romAmount) || 0
+    : (Number(row.quantity) || 0) * (Number(row.unitCost) || 0)
+
+/** A field the server withheld from this member: "—", with the server's reason. */
+function WithheldValue({
+  reason,
+  testId,
+}: {
+  reason: string | undefined
+  testId?: string
+}) {
+  return (
+    <span
+      className='cursor-help text-muted-foreground'
+      title={reason}
+      aria-label={reason ? `— ${reason}` : '—'}
+      data-testid={testId ?? 'uat-change-event-withheld'}
+      data-reason={reason}
+    >
+      —
+    </span>
+  )
+}
 
 function SendRfqDialog({
   projectId,
@@ -333,7 +379,11 @@ function SendRfqDialog({
                   {line.description}
                 </span>
                 <span className='text-xs text-muted-foreground'>
-                  {line.quantity} {line.unit ?? ''}
+                  {isChangeEventFieldWithheld(event, 'quantity', line.id) ? (
+                    <WithheldValue reason={event.sourceWithheld?.reason} />
+                  ) : (
+                    `${line.quantity ?? ''} ${line.unit ?? ''}`
+                  )}
                 </span>
               </label>
             ))}
@@ -658,17 +708,12 @@ export function ChangeEventDialog({
     (code) => code.status === 'active'
   )
   const commitmentOptions = commitments?.items ?? []
+  const withheldReason = event?.sourceWithheld?.reason
+  const headerActivityWithheld = isChangeEventFieldWithheld(event, 'activityId')
   const totals = useMemo(() => {
-    const rom = rows.reduce(
-      (sum, row) =>
-        sum + (Number(row.quantity) || 0) * (Number(row.unitCost) || 0),
-      0
-    )
+    const rom = rows.reduce((sum, row) => sum + rowAmount(row), 0)
     const estimate = rows.reduce(
-      (sum, row) =>
-        sum +
-        (row.quotedAmount ??
-          (Number(row.quantity) || 0) * (Number(row.unitCost) || 0)),
+      (sum, row) => sum + (row.quotedAmount ?? rowAmount(row)),
       0
     )
     return { rom, estimate }
@@ -690,23 +735,37 @@ export function ChangeEventDialog({
 
   const save = async () => {
     if (!event) return false
-    const lines: ChangeEventLinePayload[] = rows.map((row) => ({
-      id: row.id,
-      description: row.description.trim(),
-      costCodeId: row.costCodeId || null,
-      activityId: row.activityId || null,
-      commitmentId: row.commitmentId || null,
-      quantity: Number(row.quantity) || 0,
-      unit: row.unit.trim() || null,
-      unitCost: Number(row.unitCost) || 0,
-    }))
+    // A field the server withheld from this member is never sent back: the
+    // server keeps the stored value (and refuses one sent, 409
+    // CHANGE_EVENT_FIELD_WITHHELD). A line whose quantity or unit cost is
+    // withheld carries its amount instead.
+    const lines: ChangeEventLinePayload[] = rows.map((row) => {
+      const given = (field: LineField) => !row.withheld.includes(field)
+      const line: ChangeEventLinePayload = {
+        id: row.id,
+        description: row.description.trim(),
+        commitmentId: row.commitmentId || null,
+      }
+      if (given('costCodeId')) line.costCodeId = row.costCodeId || null
+      if (given('activityId')) line.activityId = row.activityId || null
+      if (given('quantity')) line.quantity = Number(row.quantity) || 0
+      if (given('unit')) line.unit = row.unit.trim() || null
+      if (given('unitCost')) line.unitCost = Number(row.unitCost) || 0
+      if (!given('quantity') || !given('unitCost'))
+        line.romAmount = Number(row.romAmount) || 0
+      return line
+    })
     try {
       await update.mutateAsync({
         id: event.id,
         title: header.title.trim(),
         type: header.type,
         description: header.description.trim() || null,
-        activityId: header.activityId === NONE ? null : header.activityId,
+        ...(headerActivityWithheld
+          ? {}
+          : {
+              activityId: header.activityId === NONE ? null : header.activityId,
+            }),
         scheduleImpactDays: Number(header.scheduleImpactDays) || 0,
         romAmount: Number(header.romAmount) || 0,
         notes: header.notes.trim() || null,
@@ -792,7 +851,7 @@ export function ChangeEventDialog({
           </div>
         ) : (
           <div className='space-y-4'>
-            {(event.changeOrder || sourceLink) && (
+            {(event.changeOrder || sourceLink || event.sourceWithheld) && (
               <div className='flex flex-wrap gap-3 text-sm'>
                 {event.changeOrder && changeOrderLink && (
                   <Link
@@ -816,6 +875,15 @@ export function ChangeEventDialog({
                     Raised from {event.sourceRecordType?.replace(/_/g, ' ')}
                   </Link>
                 )}
+                {!sourceLink && event.sourceWithheld && (
+                  <span
+                    className='text-muted-foreground'
+                    data-testid='uat-change-event-source-withheld'
+                    data-reason={event.sourceWithheld.reason}
+                  >
+                    Raised from — {event.sourceWithheld.reason}
+                  </span>
+                )}
               </div>
             )}
 
@@ -826,6 +894,7 @@ export function ChangeEventDialog({
                   value={header.title}
                   onChange={(e) => setHeaderField('title', e.target.value)}
                   disabled={!editable}
+                  data-testid='uat-change-event-title'
                 />
               </div>
               <div className='space-y-1'>
@@ -853,26 +922,37 @@ export function ChangeEventDialog({
               </div>
               <div className='space-y-1'>
                 <Label>Activity</Label>
-                <Select
-                  value={header.activityId}
-                  onValueChange={(value) => setHeaderField('activityId', value)}
-                  disabled={!editable}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NONE}>— none —</SelectItem>
-                    {activities.map((activity) => (
-                      <SelectItem key={activity.id} value={activity.id}>
-                        {activity.activityCode || activity.wbsCode
-                          ? `${activity.activityCode || activity.wbsCode} · `
-                          : ''}
-                        {activity.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {headerActivityWithheld ? (
+                  <p className='flex h-9 items-center text-sm'>
+                    <WithheldValue
+                      reason={withheldReason}
+                      testId='uat-change-event-activity-withheld'
+                    />
+                  </p>
+                ) : (
+                  <Select
+                    value={header.activityId}
+                    onValueChange={(value) =>
+                      setHeaderField('activityId', value)
+                    }
+                    disabled={!editable}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>— none —</SelectItem>
+                      {activities.map((activity) => (
+                        <SelectItem key={activity.id} value={activity.id}>
+                          {activity.activityCode || activity.wbsCode
+                            ? `${activity.activityCode || activity.wbsCode} · `
+                            : ''}
+                          {activity.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               <div className='space-y-1 sm:col-span-2'>
                 <Label>Description</Label>
@@ -941,12 +1021,16 @@ export function ChangeEventDialog({
                           description: '',
                           costCodeId: '',
                           activityId:
-                            header.activityId === NONE ? '' : header.activityId,
+                            headerActivityWithheld || header.activityId === NONE
+                              ? ''
+                              : header.activityId,
                           commitmentId: '',
                           quantity: '1',
                           unit: '',
                           unitCost: '0',
+                          romAmount: '0',
                           quotedAmount: null,
+                          withheld: [],
                         },
                       ])
                       setDirty(true)
@@ -977,7 +1061,12 @@ export function ChangeEventDialog({
                   </thead>
                   <tbody data-testid='uat-change-event-lines'>
                     {rows.map((row) => (
-                      <tr key={row.key} className='border-t align-top'>
+                      <tr
+                        key={row.key}
+                        className='border-t align-top'
+                        data-testid={`uat-change-event-line-${row.key}`}
+                        data-withheld={row.withheld.join(' ') || undefined}
+                      >
                         <td className='px-2 py-1'>
                           {editable ? (
                             <Input
@@ -994,7 +1083,9 @@ export function ChangeEventDialog({
                           )}
                         </td>
                         <td className='px-2 py-1'>
-                          {editable ? (
+                          {row.withheld.includes('costCodeId') ? (
+                            <WithheldValue reason={withheldReason} />
+                          ) : editable ? (
                             <Select
                               value={row.costCodeId || NONE}
                               onValueChange={(value) =>
@@ -1026,7 +1117,9 @@ export function ChangeEventDialog({
                           )}
                         </td>
                         <td className='px-2 py-1'>
-                          {editable ? (
+                          {row.withheld.includes('activityId') ? (
+                            <WithheldValue reason={withheldReason} />
+                          ) : editable ? (
                             <Select
                               value={row.activityId || NONE}
                               onValueChange={(value) =>
@@ -1088,7 +1181,9 @@ export function ChangeEventDialog({
                           )}
                         </td>
                         <td className='px-2 py-1 text-right'>
-                          {editable ? (
+                          {row.withheld.includes('quantity') ? (
+                            <WithheldValue reason={withheldReason} />
+                          ) : editable ? (
                             <Input
                               type='number'
                               min={0}
@@ -1104,7 +1199,9 @@ export function ChangeEventDialog({
                           )}
                         </td>
                         <td className='px-2 py-1'>
-                          {editable ? (
+                          {row.withheld.includes('unit') ? (
+                            <WithheldValue reason={withheldReason} />
+                          ) : editable ? (
                             <Input
                               className='h-8 w-16'
                               value={row.unit}
@@ -1117,7 +1214,9 @@ export function ChangeEventDialog({
                           )}
                         </td>
                         <td className='px-2 py-1 text-right'>
-                          {editable ? (
+                          {row.withheld.includes('unitCost') ? (
+                            <WithheldValue reason={withheldReason} />
+                          ) : editable ? (
                             <Input
                               type='number'
                               min={0}
@@ -1132,10 +1231,26 @@ export function ChangeEventDialog({
                             money(Number(row.unitCost))
                           )}
                         </td>
-                        <td className='px-2 py-1 text-right tabular-nums'>
-                          {money(
-                            (Number(row.quantity) || 0) *
-                              (Number(row.unitCost) || 0)
+                        <td
+                          className='px-2 py-1 text-right tabular-nums'
+                          data-testid={`uat-change-event-line-amount-${row.key}`}
+                        >
+                          {editable &&
+                          (row.withheld.includes('quantity') ||
+                            row.withheld.includes('unitCost')) ? (
+                            <Input
+                              type='number'
+                              min={0}
+                              step={0.01}
+                              className='h-8 w-24 text-right'
+                              value={row.romAmount}
+                              title='The amount is priced directly: the quantity and unit cost are withheld from you'
+                              onChange={(e) =>
+                                patchRow(row.key, { romAmount: e.target.value })
+                              }
+                            />
+                          ) : (
+                            money(rowAmount(row))
                           )}
                         </td>
                         <td className='px-2 py-1 text-right tabular-nums'>

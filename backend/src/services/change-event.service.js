@@ -6,7 +6,7 @@ const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const emailService = require("./email.service");
 const { nextNumber: nextCounterNumber } = require("../utils/reference-number");
-const { changeEventPrefillProvenance } = require("../utils/boq-figures");
+const { CHANGE_EVENT_EXCEPTION_WITHHELD, changeEventPrefillProvenance, changeEventWithheldFields } = require("../utils/boq-figures");
 
 /**
  * Change events and RFQs (OCTA-COM-CE-038).
@@ -528,10 +528,38 @@ const assertEditable = (row) => {
   if ([STATUS.CONVERTED, STATUS.CLOSED, STATUS.VOID].includes(row.status)) throw new HttpError(409, "CHANGE_EVENT_LOCKED", `A ${row.status} change event cannot be edited`);
 };
 
-/** Updates the header and, when `lines` is sent, replaces the lines (quoted amounts are kept by line id). */
-const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}, actor = null }) => {
+/**
+ * PC-7b: what this caller was not given of a change event raised from a
+ * BOQ-derived exception (utils/boq-figures changeEventWithheldFields:
+ * { event: [field], lines: Map lineId → [field] }) — null for a caller who
+ * may read the BOQ, or an event raised from no BOQ-derived exception.
+ */
+const withheldForCaller = async ({ orgId, projectId, event, access }) => {
+  if (!access || access.boq === true) return null;
+  const withholding = await require("./exception.service").changeEventWithholding({ orgId, projectId, events: [event] });
+  const entry = withholding.get(event.id);
+  return entry ? changeEventWithheldFields(event, entry) : null;
+};
+const fieldWithheld = () => new HttpError(409, "CHANGE_EVENT_FIELD_WITHHELD", CHANGE_EVENT_EXCEPTION_WITHHELD);
+
+/**
+ * Updates the header and, when `lines` is sent, replaces the lines (quoted
+ * amounts are kept by line id). A caller who was not given a field (PC-7b:
+ * withheldForCaller) never writes it: sending one — even null — is refused
+ * with 409 CHANGE_EVENT_FIELD_WITHHELD and the reason, nothing written; one
+ * left out keeps the stored value.
+ */
+const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}, actor = null, access = null }) => {
   const existing = await loadEvent({ orgId, projectId, changeEventId });
   assertEditable(existing);
+  const withheld = await withheldForCaller({ orgId, projectId, event: existing, access });
+  if (withheld) {
+    if (withheld.event.some((field) => payload[field] !== undefined)) throw fieldWithheld();
+    for (const row of Array.isArray(payload.lines) ? payload.lines : []) {
+      const fields = row && row.id ? withheld.lines.get(String(row.id).trim()) : null;
+      if (fields && fields.some((field) => row[field] !== undefined)) throw fieldWithheld();
+    }
+  }
   const data = normalizeEvent(payload, existing);
   const lines = payload.lines !== undefined ? normalizeLines(payload.lines) : null;
   await assertRefs({ orgId, projectId, data, lines: lines || [] });
@@ -548,6 +576,7 @@ const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}
           // event raised from a BOQ-derived exception, utils/boq-figures
           // withheldChangeEvent) cannot reset them by saving the line.
           const kept = { ...line };
+          for (const field of (withheld && withheld.lines.get(id)) || []) kept[field] = field === "unitCost" ? round2(existingLine.unitCost) : field === "quantity" ? toNumber(existingLine.quantity, 1) : existingLine[field] ?? null;
           if (!given.quantity) kept.quantity = toNumber(existingLine.quantity, 1);
           if (!given.unit) kept.unit = existingLine.unit || null;
           if (!given.unitCost) kept.unitCost = round2(existingLine.unitCost);

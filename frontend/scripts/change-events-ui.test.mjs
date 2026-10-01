@@ -87,4 +87,22 @@ assert.match(originLabels[1], /exception: 'Project exception'/, "the 'exception'
 const raiseDialog = read('src/features/controls/exceptions/raise-change-event-dialog.tsx')
 assert.match(raiseDialog, /Origin \{changeEventOriginLabel\(proposedDraft\.origin\)\}/, 'the raise dialog names the origin by its label')
 
+// PC-7b integration fixer 2: a change event raised from a BOQ-derived
+// exception, for a member without BOQ read. The web type models what the API
+// withheld (sourceWithheld keys + reason); the dialog shows each withheld
+// field as "—" with the reason and never sends one back (the server refuses
+// one sent: 409 CHANGE_EVENT_FIELD_WITHHELD). Proven live by e2e 69.
+assert.match(hooks, /sourceWithheld\?: \{ keys: string\[\]; reason: string \}/, 'the web ChangeEvent models sourceWithheld')
+assert.match(hooks, /export const isChangeEventFieldWithheld\b/, 'one helper reads the withheld keys')
+const lineType = hooks.match(/export interface ChangeEventLine \{([^]*?)\r?\n\}/)[1]
+for (const field of ['quantity', 'unit', 'unitCost', 'activityId', 'costCodeId']) {
+  assert.match(lineType, new RegExp(`\\n  ${field}\\?: `), `the line's ${field} is optional (left out when withheld)`)
+  assert.match(dialog, new RegExp(`if \\(given\\('${field}'\\)\\) line\\.${field} =`), `a withheld ${field} is never sent`)
+  assert.match(dialog, new RegExp(`row\\.withheld\\.includes\\('${field}'\\) \\?\\s*\\(\\s*<WithheldValue`), `a withheld ${field} reads "—" with the reason`)
+}
+assert.match(dialog, /\.\.\.\(headerActivityWithheld\s*\?\s*\{\}/, 'a withheld event activity is never sent')
+assert.match(dialog, /const rowAmount = \(row: LineRow\) =>\s*row\.withheld\.includes\('quantity'\) \|\| row\.withheld\.includes\('unitCost'\)\s*\?\s*Number\(row\.romAmount\)/, 'a withheld line shows its stored amount')
+assert.doesNotMatch(dialog, /\{line\.quantity\} \{line\.unit/, "the RFQ list never prints a withheld quantity as 'undefined'")
+assert.match(service, /new HttpError\(409, "CHANGE_EVENT_FIELD_WITHHELD"/, 'the server refuses a withheld field sent back')
+
 console.log('change-events-ui: ok')

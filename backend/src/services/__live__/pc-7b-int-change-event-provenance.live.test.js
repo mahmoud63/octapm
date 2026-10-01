@@ -175,5 +175,43 @@ liveDescribe("PC-7b integration fixer: a change event's prefill provenance, per 
     expect([has(event, "activityId"), has(event.lines[0], "activityId"), has(event.lines[0], "costCodeId")]).toEqual([false, false, false]);
     expect(JSON.stringify(event)).not.toContain(ids.mapped);
     expect((await drawerEvents(ids.mapped, as(members.site_noboq))).ids).not.toContain(legacy);
+    ids.legacy = legacy;
+  });
+
+  // Item 2: what a member was not shown is never overwritten by that member's
+  // save — a withheld field sent back is refused (409, with the reason), one
+  // left out keeps the stored value; a BOQ reader saves as before.
+  it("a save by a reader without boq:read that sends a withheld field is refused, and nothing is written", async () => {
+    ok("pm void legacy", await api.post(at(`/change-events/${ids.legacy}/void`), { reason: "LiveTest void" }, pm()));
+    const raised = await api.post(at(`/controls/exceptions/${ids.exception}/raise-change-event`), {}, pm());
+    ok("raise third", raised, 201);
+    ids.third = raised.body.data.changeEvent.id;
+    ids.thirdLine = raised.body.data.changeEvent.lines[0].id;
+    const rowOf = async (id) => JSON.stringify(await prisma.changeEvent.findUnique({ where: { id }, include: { lines: { orderBy: { sortOrder: "asc" } } } }));
+    const before = await rowOf(ids.third);
+    const refusedSave = async (label, body) => {
+      const answer = await api.request("PATCH", at(`/change-events/${ids.third}`), { body, headers: as(members.qs_noboq) });
+      expect([label, answer.status, answer.body?.error?.code]).toEqual([label, 409, "CHANGE_EVENT_FIELD_WITHHELD"]);
+      expect(answer.body.error.message).toMatch(/^Part of this change event is withheld from you/);
+      expect(JSON.stringify(answer.body)).not.toContain(ids.mapped);
+    };
+    const line = { id: ids.thirdLine, description: "LiveTest QS line", romAmount: 120 };
+    await refusedSave("quantity 0 and unit null (what the web dialog sent)", { lines: [{ ...line, quantity: 0, unit: null, unitCost: 0 }] });
+    await refusedSave("the line's activity cleared", { lines: [{ ...line, activityId: null }] });
+    await refusedSave("the line's cost code cleared", { lines: [{ ...line, costCodeId: null }] });
+    await refusedSave("the event's activity cleared", { activityId: null });
+    expect(await rowOf(ids.third)).toBe(before);
+  });
+
+  it("a save that leaves the withheld fields out keeps every stored one; a BOQ reader still sets them", async () => {
+    const saved = await api.request("PATCH", at(`/change-events/${ids.third}`), { body: { title: "LiveTest QS saves", lines: [{ id: ids.thirdLine, description: "LiveTest QS line", romAmount: 120 }] }, headers: as(members.qs_noboq) });
+    ok("qs save", saved);
+    expect(saved.body.data.lines[0]).toMatchObject({ id: ids.thirdLine, description: "LiveTest QS line", romAmount: 120 });
+    const stored = await prisma.changeEvent.findUnique({ where: { id: ids.third }, include: { lines: true } });
+    expect([stored.activityId, stored.lines[0].activityId, stored.lines[0].costCodeId, stored.lines[0].quantity, stored.lines[0].unit, Number(stored.lines[0].unitCost), Number(stored.lines[0].romAmount)]).toEqual([ids.mapped, ids.mapped, ids.costCode, 5, "m", 0, 120]);
+    const pmSave = await api.request("PATCH", at(`/change-events/${ids.third}`), { body: { lines: [{ id: ids.thirdLine, description: "LiveTest PM line", activityId: ids.mapped, costCodeId: ids.costCode, quantity: 6, unit: "m", unitCost: 10 }] }, headers: pm() });
+    ok("pm save", pmSave);
+    const after = await prisma.changeEventLine.findUnique({ where: { id: ids.thirdLine } });
+    expect([after.quantity, Number(after.unitCost), Number(after.romAmount)]).toEqual([6, 10, 60]);
   });
 });
