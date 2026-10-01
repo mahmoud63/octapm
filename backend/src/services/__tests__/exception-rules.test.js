@@ -373,7 +373,12 @@ describe("money kinds", () => {
       ["project", PROJECT, "critical", 1250, 1000],
       ["budget_line", "line-1", "warning", 1100, 1000],
     ]);
-    expect(rows[1].measured.basis).toMatch(/typed forecast/);
+    expect(rows[1].measured.basis).toMatch(/entered \(typed\) forecast/);
+    // The register's DEFAULT forecast above revised is committed or actual restated: never a row of its own.
+    budgetService.listBudgetLines.mockResolvedValue({ items: [line({ id: "line-4", forecast: 1600, forecastIsManual: false, committed: 1600 })] });
+    evService.buildOfficialEvReport.mockResolvedValue({ eac: 1000, totalBudget: 1000, cpi: 1 });
+    expect(await run("forecast_over_revised")).toEqual([]);
+    evService.buildOfficialEvReport.mockResolvedValue({ eac: 1250, totalBudget: 1000, cpi: 0.8, spi: 1, eacBasis: "revised_bac_over_cpi", reporting: { cutoffLocalDate: "2026-09-30", isSnapshot: false } });
     evService.buildOfficialEvReport.mockResolvedValue({ eac: 1050, totalBudget: 1000, cpi: 0.95 });
     budgetService.listBudgetLines.mockResolvedValue({ items: [] });
     expect((await run("forecast_over_revised"))[0].severity).toBe("warning");
