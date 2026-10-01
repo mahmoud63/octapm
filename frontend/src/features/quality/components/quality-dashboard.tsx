@@ -36,6 +36,7 @@ import {
   WorkflowDecisionDialog,
   type WorkflowDecisionMode,
 } from '@/features/workflows/components/workflow-decision-dialog'
+import { RaiseChangeEventButton } from '@/features/controls/exceptions/raise-change-event-button'
 import { WorkflowRecordList } from '@/features/workflows/components/workflow-record-list'
 import {
   useApproveNcr,
@@ -565,8 +566,9 @@ export function QualityDashboard({
                 )}
               </div>
             )}
-            renderActions={(row) =>
-              row.status === 'open' ? (
+            renderActions={(row) => (
+              <>
+              {row.status === 'open' ? (
                 <>
                   {(canSubmitNcr || isMine(row)) && (
                     <Button
@@ -648,8 +650,16 @@ export function QualityDashboard({
                   <RotateCcw className='mr-2 h-4 w-4' />
                   Reopen
                 </Button>
-              ) : null
-            }
+              ) : null}
+              {/* PC-7b: a draft change event prefilled from this NCR (typed link). */}
+              <RaiseChangeEventButton
+                projectId={projectId}
+                source={{ type: 'ncr', id: row.id }}
+                testId={`uat-ncr-raise-change-event-${row.id}`}
+                className='min-h-10 w-full sm:w-auto'
+              />
+              </>
+            )}
           />
         </TabsContent>
 

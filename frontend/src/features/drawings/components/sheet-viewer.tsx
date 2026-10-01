@@ -75,6 +75,7 @@ import {
 import { renderSheetPage } from '../lib/pdf'
 import { MarkupLayer, type MarkupTool } from './markup-layer'
 import { PinCreateDialog, PinDetailDialog } from './pin-dialog'
+import { RaiseChangeEventButton } from '@/features/controls/exceptions/raise-change-event-button'
 import { RevisionCompare } from './revision-compare'
 import { SheetReferencesPanel } from './sheet-references'
 
@@ -653,6 +654,14 @@ export function SheetViewer({
             >
               <UploadCloud className='mr-2 h-4 w-4' /> New revision
             </Button>
+          )}
+          {/* PC-7b: a draft change event prefilled from the revision on screen (typed link). */}
+          {revision?.id && (
+            <RaiseChangeEventButton
+              projectId={projectId}
+              source={{ type: 'drawing_revision', id: revision.id }}
+              testId='uat-sheet-raise-change-event'
+            />
           )}
           {canManage && (
             <Button

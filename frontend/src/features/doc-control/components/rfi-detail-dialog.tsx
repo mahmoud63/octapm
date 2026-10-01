@@ -69,6 +69,7 @@ import {
   type RfiRecord,
   type RfiUpgradeFields,
 } from '../hooks/use-doc-control'
+import { RaiseChangeEventButton } from '@/features/controls/exceptions/raise-change-event-button'
 import { RfiResponseAssistant } from './rfi-ai-response'
 import { RfiPeopleList } from './rfi-people-list'
 
@@ -402,6 +403,12 @@ export function RfiDetailDialog({
                   change event
                 </Button>
               )}
+              {/* PC-7b: a draft change event prefilled from this RFI (typed link). */}
+              <RaiseChangeEventButton
+                projectId={projectId}
+                source={{ type: 'rfi', id: rfi.id }}
+                testId='uat-rfi-raise-change-event'
+              />
               {rfi.changeOrderId && (
                 <Button asChild size='sm' variant='outline'>
                   <Link

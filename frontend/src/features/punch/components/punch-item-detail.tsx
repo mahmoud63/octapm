@@ -50,6 +50,7 @@ import {
   type PunchEvent,
   type PunchItem,
 } from '../hooks/use-punch'
+import { RaiseChangeEventButton } from '@/features/controls/exceptions/raise-change-event-button'
 import { formToPayload, itemToForm, type PunchFormValue } from '../lib/form'
 import { PunchPriorityBadge, PunchStatusBadge } from './punch-badges'
 import { PunchItemForm } from './punch-item-form'
@@ -314,6 +315,12 @@ export function PunchItemDetail({
                     <Pencil className='mr-1.5 h-4 w-4' /> Edit
                   </Button>
                 )}
+                {/* PC-7b: a draft change event prefilled from this punch item or observation (typed link). */}
+                <RaiseChangeEventButton
+                  projectId={projectId}
+                  source={{ type: 'punch_item', id: item.id }}
+                  testId='uat-punch-raise-change-event'
+                />
                 {canDelete && item.status === 'draft' && (
                   <Button
                     size='sm'

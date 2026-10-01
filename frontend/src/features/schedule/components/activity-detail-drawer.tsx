@@ -27,6 +27,7 @@ import {
 } from '@/features/controls/lib/detail-format'
 import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { useActivityDetail } from '@/features/controls/hooks/use-controls-detail'
+import { RecordExceptionsSection } from '@/features/controls/exceptions/record-exceptions-section'
 import { RecordQuantities } from '@/features/controls/quantities/quantities-section'
 import { useProject } from '@/features/projects/hooks/use-projects'
 import type { ActivityDetail } from '../data/schema'
@@ -338,6 +339,14 @@ function ActivityDetailBody({
           <Withheld section={sections.changes} />
         )}
       </DetailSection>
+
+      {/* PC-7b: the exceptions the server lists on this activity. */}
+      <RecordExceptionsSection
+        projectId={projectId}
+        recordType='activity'
+        recordId={detail.id}
+        testId='activity-detail-exceptions'
+      />
 
       <DetailSection title='Procurement' testId='activity-detail-procurement'>
         {sections.procurement.allowed ? (

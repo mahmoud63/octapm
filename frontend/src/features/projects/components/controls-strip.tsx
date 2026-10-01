@@ -13,6 +13,11 @@ import { useCanPerform } from '@/lib/permissions'
 import { statusBadge, statusIcon, type StatusTone } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
+import {
+  useExceptionsSummary,
+  type ExceptionsSummary,
+} from '@/features/controls/exceptions/api'
+import { severityCountsText } from '@/features/controls/exceptions/exception-format'
 import { useCostSummary } from '@/features/cost/hooks/use-cost'
 import { eacStatement, useForecast } from '@/features/forecast/hooks/use-forecast'
 import { useProjectHealth } from '../hooks/use-project-health'
@@ -49,7 +54,35 @@ const TARGETS = {
   budget: { module: 'cost', child: 'budget' },
   forecast: { module: 'schedule', child: 'forecast' },
   critical: { module: 'schedule', child: 'critical' },
+  exceptions: { module: 'controls', child: 'exceptions' },
 } satisfies Record<string, ProjectSetupTarget>
+
+/**
+ * The open-exceptions figure (PC-7b): the server's total and its counts per
+ * severity, never summed here; withheld exceptions are said with the
+ * server's reason, never as 0.
+ */
+function openExceptionsFigure(offered: boolean, summary: ExceptionsSummary | undefined) {
+  if (!offered) return { value: '—', basis: 'exceptions not offered', tone: 'neutral' as StatusTone }
+  if (!summary) return { value: '—', basis: 'reading exceptions', tone: 'neutral' as StatusTone }
+  if (summary.state === 'not-on-server') {
+    // No project summary on this API yet: a dash, never a count made here.
+    return { value: '—', basis: 'the exceptions summary is not on this server yet', tone: 'neutral' as StatusTone }
+  }
+  const counts = severityCountsText(summary.bySeverity)
+  const withheld = summary.withheld ? `some withheld: ${summary.withheld.reason}` : ''
+  const critical = summary.bySeverity.critical ?? 0
+  const warning = summary.bySeverity.warning ?? 0
+  return {
+    // A 0 beside withheld exceptions would read as "none": a dash, and the reason below.
+    value:
+      summary.total == null || (summary.withheld && summary.total === 0)
+        ? '—'
+        : summary.total.toLocaleString(),
+    basis: [counts || (summary.withheld ? '' : 'no counts sent'), withheld].filter(Boolean).join(' · '),
+    tone: (critical > 0 ? 'blocked' : warning > 0 ? 'review' : 'neutral') as StatusTone,
+  }
+}
 
 /**
  * Which of the three truths a figure is (control model §3), said next to
@@ -282,6 +315,13 @@ export function ControlsStrip({
     projectId,
     { enabled: !permissionsSettling }
   )
+  // PC-7b: open exceptions per severity, as the server counted the ones this
+  // person may see — asked only when the Exceptions page is offered to them.
+  const exceptionsOffered = canNavigate(TARGETS.exceptions)
+  const { data: exceptionsSummary } = useExceptionsSummary(projectId, {
+    enabled: exceptionsOffered && !permissionsSettling,
+  })
+  const exceptionsFigure = openExceptionsFigure(exceptionsOffered, exceptionsSummary)
 
   if (isLoading && !readiness) {
     return (
@@ -679,7 +719,7 @@ export function ControlsStrip({
       </p>
     )}
     <section
-      className='grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8'
+      className='grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-9'
       data-testid='uat-controls-figures'
       aria-label='Project controls figures'
     >
@@ -802,6 +842,15 @@ export function ControlsStrip({
         tone={dataQuality.length > 0 ? 'review' : 'neutral'}
         testId='uat-controls-figure-data-quality'
         onClick={linkTo(TARGETS.forecast)}
+      />
+      <Figure
+        label='Open exceptions'
+        value={exceptionsFigure.value}
+        truth='derived'
+        basis={exceptionsFigure.basis}
+        tone={exceptionsFigure.tone}
+        testId='uat-controls-figure-open-exceptions'
+        onClick={linkTo(TARGETS.exceptions)}
       />
     </section>
     </div>

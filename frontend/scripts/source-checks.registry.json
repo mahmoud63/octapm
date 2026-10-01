@@ -31,6 +31,7 @@
     "drawings-ui.test.mjs",
     "earned-value-official-ui.test.mjs",
     "equipment-utilization-ui.test.mjs",
+    "exceptions-ui.test.mjs",
     "field-ux-accessibility.test.mjs",
     "financial-precision-ui.test.mjs",
     "financial-terms.test.mjs",

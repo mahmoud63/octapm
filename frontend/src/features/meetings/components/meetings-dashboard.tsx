@@ -31,6 +31,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import type { Activity } from '@/features/activities/data/schema'
 import { useActivities } from '@/features/activities/hooks/use-activities'
+import { RaiseChangeEventButton } from '@/features/controls/exceptions/raise-change-event-button'
 import {
   type MeetingActionStatus,
   type MeetingPayload,
@@ -1279,6 +1280,12 @@ export function MeetingsDashboard({
                                 {item.task.taskNumber}
                               </Badge>
                             )}
+                            {/* PC-7b: a draft change event prefilled from this action (typed link). */}
+                            <RaiseChangeEventButton
+                              projectId={projectId}
+                              source={{ type: 'meeting_action', id: item.id }}
+                              testId={`uat-meeting-action-raise-change-event-${item.id}`}
+                            />
                           </div>
                         </div>
                         {item.description && (
