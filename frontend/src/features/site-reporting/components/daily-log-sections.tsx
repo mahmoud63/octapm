@@ -1385,15 +1385,10 @@ export function QuantitiesSectionCard({
   const awaiting = entries.filter(
     (entry) => entry.status === 'submitted'
   ).length
-  const byUnit = new Map<string, { quantity: number; rows: number }>()
-  for (const entry of entries) {
-    if (entry.status === 'rejected' || entry.quantity == null) continue
-    const unit = entry.unitCode ?? entry.unit ?? entry.boqItem?.unitCode ?? '?'
-    const tally = byUnit.get(unit) ?? { quantity: 0, rows: 0 }
-    tally.quantity += Number(entry.quantity)
-    tally.rows += 1
-    byUnit.set(unit, tally)
-  }
+  // No tally: every row stands on its own, in its item's unit. Adding rows
+  // up (even per unit) would merge different BOQ items into one figure; the
+  // one place a figure is summed is the server, per item, when an approver
+  // accepts the entries, and the Progress tab draws that figure.
 
   const run = async (fn: () => Promise<unknown>, success: string) => {
     try {
@@ -1674,19 +1669,14 @@ export function QuantitiesSectionCard({
             </table>
           </div>
         )}
-        {byUnit.size > 0 && (
+        {entries.length > 0 && (
           <p
             className='px-1 text-[11px] text-muted-foreground'
-            data-testid='uat-dailylog-quantities-by-unit'
+            data-testid='uat-dailylog-quantities-note'
           >
-            This day's rows by unit (not official progress):{' '}
-            {[...byUnit.entries()].map(([unit, tally], index) => (
-              <span key={unit} data-unit={unit} data-quantity={tally.quantity}>
-                {index > 0 ? ' · ' : ''}
-                {quantityText(tally.quantity)} {unit} ({tally.rows} row
-                {tally.rows === 1 ? '' : 's'})
-              </span>
-            ))}
+            Each row stands on its own in its item's unit and is not official
+            progress: rows are never added up here. The Progress tab shows the
+            installed figure per BOQ item once an approver accepts them.
           </p>
         )}
       </div>

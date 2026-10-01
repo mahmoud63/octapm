@@ -146,37 +146,71 @@ match(
 )
 
 // ── No client-side arithmetic on figures; nothing summed across units ──
-// The quantities module and the PC-6 blocks of the progress tab draw the
-// server's figures and compute nothing from them: no `.value` in an
-// arithmetic expression, no reduce over figures, no figure added to another.
-// The block runs from its banner to the older helpers that follow it.
+// The quantities module, the PC-6 block of the progress tab and the PC-6
+// block of the daily log draw the server's figures and compute nothing from
+// them: no figure operand (value, quantity, planned, installed, pctComplete)
+// on either side of an arithmetic operator or a compound assignment, no
+// reduce over figures, no figure added to another, no tally per unit. The
+// blocks run from their banner to the older helpers that follow them (the
+// daily log's block runs to the end of the file). Comments are stripped
+// first so a prose "installed / planned" is not read as a formula.
 const pc6Block = progressTab.slice(
   progressTab.indexOf('PC-6: PROGRESS SOURCE'),
   progressTab.indexOf('const METHOD_OPTIONS')
 )
 assert.ok(pc6Block.length > 1000, 'the PC-6 block of the progress tab is found')
+const dailyLogPc6Block = dailyLogSections.slice(
+  dailyLogSections.indexOf('PC-6: the seventh section')
+)
+assert.ok(
+  dailyLogPc6Block.length > 1000,
+  'the PC-6 block of the daily log sections is found'
+)
+const stripComments = (text) =>
+  text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1')
+// Prettier spaces every binary operator, so a figure operand next to a
+// spaced operator — or a dotted operand against any operator — is a formula.
+const OPERAND =
+  '(value|quantity|planned|plannedQuantity|installedQuantity|installed|pctComplete|quantityComplete|quantityPlanned)'
 const ARITHMETIC = [
-  /\.value\s*[-+*/]\s*/,
-  /[-+*/]\s*[A-Za-z_.]+\.value\b/,
-  /\.quantity\s*[-+*/]\s*(?!=)/,
-  /[-+*/]\s*[A-Za-z_.]*\.quantity\b/,
+  new RegExp(`\\.${OPERAND}\\b\\s*[-+*/%]=?\\s`),
+  new RegExp(`\\b${OPERAND}\\b\\s+[-+*/%]=?\\s`),
+  new RegExp(`[-+*/%]=?\\s*[\\w$?.()]*\\.${OPERAND}\\b`),
+  new RegExp(`\\s[-+*/%]=?\\s+[\\w$?.()]*\\b${OPERAND}\\b`),
   /\.reduce\(/,
   /\b(installed|certified|paid|received|issued|committed)\w*\s*[-+*/]\s*(installed|certified|paid|received|issued|committed)/i,
   /\?\?\s*0\b/,
   /\|\|\s*0\b/,
+  /\btally\b|\bbyUnit\b|\bsumBy|\btotalQuantity\b/,
 ]
 for (const [name, text] of [
   ['controls/quantities/quantities-section.tsx', quantitiesSection],
   ['controls/quantities/use-record-quantities.ts', quantitiesHook],
   ['progress-tab.tsx (PC-6 block)', pc6Block],
+  ['daily-log-sections.tsx (PC-6 block)', dailyLogPc6Block],
 ]) {
+  const code = stripComments(text)
   for (const pattern of ARITHMETIC) {
     doesNotMatch(
-      text,
+      code,
       pattern,
       `${name} computes nothing from the server's figures (${pattern})`
     )
   }
+}
+// The guard has teeth: the formulas it exists to catch are caught.
+for (const formula of [
+  'tally.quantity += Number(entry.quantity)',
+  '{Number(activity.pctComplete / 100 * Number(planned?.planned)).toLocaleString(',
+  'const installed = rows.reduce((sum, row) => sum + row.quantity, 0)',
+  'planned.value * (activity.pctComplete / 100)',
+  'figure.value ?? 0',
+  'const sum = installed + certified',
+]) {
+  assert.ok(
+    ARITHMETIC.some((pattern) => pattern.test(formula)),
+    `the arithmetic guard catches: ${formula}`
+  )
 }
 match(
   quantitiesSection,
@@ -252,15 +286,17 @@ match(
   /uat-dailylog-quantities-items-unavailable/,
   'withheld or missing allocated items read as "—" with the reason'
 )
-match(
-  dailyLogSections,
-  /byUnit\.get\(unit\)/,
-  'the day’s tally is grouped by unit'
+// The day's rows are listed one by one in their item's unit and never
+// added up — not per unit, not per item, not across unknown units.
+doesNotMatch(
+  stripComments(dailyLogPc6Block),
+  /data-quantity=|byUnit|tally|\.quantity\s*\+=|\+=\s*Number\(/,
+  'the daily log draws no tally of the day’s quantity rows'
 )
 match(
   dailyLogSections,
-  /not official progress/,
-  'the tally says it is not official progress'
+  /uat-dailylog-quantities-note[\s\S]{0,400}not official[\s\S]{0,200}never added up/,
+  'the section says its rows are not official progress and are never added up'
 )
 match(
   dailyLogSections,
