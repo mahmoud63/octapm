@@ -449,6 +449,83 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     expect(changesBetween(before, await everyRow(scope))).toEqual([]);
   }, 120_000);
 
+  // ─── the forecast reads the open data-quality rows ───────────────────────
+
+  it("forecast.dataQuality lists the open data-quality rows per reader beside its own notes; every figure is byte-identical to the base code's", async () => {
+    const { execFileSync } = require("child_process");
+    const Module = require("module");
+    const path = require("path");
+    const { buildForecast } = require("../forecast.service");
+    // The forecast as the base (dfb2e77, before PC-7b dq) builds it, compiled
+    // in memory beside the real file so its requires resolve; nothing written.
+    const source = execFileSync("git", ["show", "dfb2e77:backend/src/services/forecast.service.js"], { cwd: path.resolve(__dirname, "..", "..", ".."), encoding: "utf8" });
+    const filename = path.join(__dirname, "..", "forecast.service.at-dfb2e77.in-memory.js");
+    const baseModule = new Module(filename, module);
+    baseModule.filename = filename;
+    baseModule.paths = Module._nodeModulePaths(path.dirname(filename));
+    baseModule._compile(source, filename);
+    const base = baseModule.exports;
+
+    const orgId = live.org.id;
+    const projectId = gaps.project.id;
+    const FULL = { boq: true, budget: true };
+    const COST = { boq: false, budget: true };
+    const NONE = { boq: false, budget: false };
+    const figures = (forecast) => stable({ ...forecast, dataQuality: undefined, dataQualityItems: undefined });
+
+    const before = await base.buildForecast({ orgId, projectId, asOf: NOW });
+    expect(before.available).toBe(true);
+    // No exception rows yet: the answer is the base's, notes included.
+    expect(stable(await buildForecast({ orgId, projectId, asOf: NOW, access: FULL }))).toBe(stable(before));
+
+    const exception = (kind, severity, subjectId, extra = {}) => ({
+      orgId, projectId, kind, severity, subjectType: "test", subjectId, measured: 1, limit: 0, measuredBasis: "LiveTest", limitBasis: "LiveTest", ...extra,
+    });
+    const rows = [
+      exception("progress_stale", "warning", "a"),
+      exception("forecast_without_provenance", "info", "b"),
+      exception("forecast_without_provenance", "info", "c"),
+      exception("budget_truths_disagree", "info", "d"),
+      exception("budget_truths_disagree", "warning", "e"),
+      exception("budget_truths_disagree", "info", "f"),
+      exception("period_not_locked", "warning", "g", { snoozedUntil: new Date(NOW.getTime() + 5 * DAY) }), // snoozed: not listed
+      exception("period_not_locked", "warning", "h", { resolvedAt: daysAgo(1), resolvedReason: "dismissed:LiveTest" }), // dismissed: not listed
+      exception("quantity_over_boq", "critical", "i"), // an overrun kind: never a data note
+    ];
+    await prisma.projectException.createMany({ data: rows });
+    // Another organisation's row never reaches this project's notes.
+    const otherProject = await prisma.project.create({ data: { orgId: other.org.id, name: "LiveTest PC-7b other" } });
+    await prisma.projectException.create({ data: { ...exception("progress_stale", "warning", "z"), orgId: other.org.id, projectId: otherProject.id } });
+    try {
+      const full = await buildForecast({ orgId, projectId, asOf: NOW, access: FULL });
+      expect(figures(full)).toBe(figures(before));
+      const own = before.dataQualityItems;
+      expect(full.dataQualityItems.slice(0, own.length)).toEqual(own);
+      const added = full.dataQualityItems.slice(own.length);
+      expect(added.map((item) => [item.kind, item.severity, item.subject])).toEqual([
+        ["budget_truths_disagree", "warning", ruleOf("budget_truths_disagree").label],
+        ["forecast_without_provenance", "info", ruleOf("forecast_without_provenance").label],
+        ["progress_stale", "warning", ruleOf("progress_stale").label],
+      ]);
+      expect(added.map((item) => item.message)).toEqual([ruleOf("budget_truths_disagree").note(3), ruleOf("forecast_without_provenance").note(2), ruleOf("progress_stale").note(1)]);
+      expect(full.dataQuality).toEqual(full.dataQualityItems.map((item) => item.message));
+
+      // A cost reader without the BOQ: no BOQ-derived kind, the cost kinds stay.
+      const cost = await buildForecast({ orgId, projectId, asOf: NOW, access: COST });
+      expect(figures(cost)).toBe(figures(before));
+      expect(cost.dataQualityItems.slice(own.length).map((item) => item.kind)).toEqual(["budget_truths_disagree", "progress_stale"]);
+      // A schedule reader of neither, and a caller that names no access: the progress kind only.
+      for (const access of [NONE, null, undefined]) {
+        const plain = await buildForecast({ orgId, projectId, asOf: NOW, ...(access === undefined ? {} : { access }) });
+        expect(figures(plain)).toBe(figures(before));
+        expect(plain.dataQualityItems.slice(own.length).map((item) => item.kind)).toEqual(["progress_stale"]);
+        expect(plain.dataQuality).toEqual(plain.dataQualityItems.map((item) => item.message));
+      }
+    } finally {
+      await prisma.projectException.deleteMany({ where: { orgId: { in: [orgId, other.org.id] }, subjectType: "test" } });
+    }
+  }, 120_000);
+
   // ─── the engine (after the merge) ────────────────────────────────────────
 
   engineIt("the engine's rule registry picks the data-quality kinds up", () => {
