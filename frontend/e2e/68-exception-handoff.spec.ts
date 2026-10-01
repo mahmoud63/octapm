@@ -31,14 +31,24 @@ import {
  * on the API under test, which serves only this LiveTest organisation's
  * requests) opens the rows, and the spec waits for them.
  *
+ * The API under test is a spawned one with EXCEPTIONS_ENGINE_ENABLED=true and
+ * EXCEPTIONS_SCHEDULER_ENABLED=false (and SCHEDULERS_ENABLED=false): the
+ * evaluation is event-driven, for the LiveTest project only — the nightly
+ * tick never runs against durable organisations. The routed tests answer the
+ * exceptions router themselves and never wait for the engine.
+ *
  * The real-server walks FAIL on a server without the PC-7b API — they skip
  * only when E2E_EXCEPTIONS_API_PENDING=1 says so explicitly.
  */
 
 const PENDING = process.env.E2E_EXCEPTIONS_API_PENDING === '1'
 const PENDING_REASON = 'E2E_EXCEPTIONS_API_PENDING=1: the PC-7b exceptions API is not on the server under test'
+/** The words of a change event raised from a BOQ-derived exception (exception.service GENERIC_EXCEPTION_TITLE). */
+const GENERIC_EXCEPTION_TITLE = 'Raised from a project controls exception'
 
 let org: LiveOrg | null = null
+/** The change event the walk raised from its exception (read again as the surveyor without BOQ read). */
+let raisedEventId: string | null = null
 
 test.afterAll(() => {
   if (org) dropLiveOrg(org.orgId)
@@ -101,6 +111,7 @@ type Subject = { type: string; id: string; label: string | null }
 type Exception = {
   id: string
   kind: string
+  kindLabel?: string
   severity: string
   status: string
   subject: Subject
@@ -108,6 +119,7 @@ type Exception = {
   measured: Figure
   limit: Figure
   review?: { note: string | null; reviewedBy: string | null; reviewedByName: string | null } | null
+  snooze?: { until: string; by: string | null; byName: string | null; reason: string | null } | null
   changeEvent?: { id: string; ref: string; status: string } | null
   actions: Record<string, boolean>
 }
@@ -242,14 +254,15 @@ const buildOverrun = async (): Promise<Built> => {
     let other: Exception | null = null
     for (let attempt = 0; attempt < 45 && !(exception && other); attempt += 1) {
       const current = (await listExceptions(client, projectId)).items.filter((item) => item.status === 'open')
+      // The walk's exception is the BOQ-derived overrun on 1.1 / V100: its
+      // change event must carry the generic words (commit 8589a3b).
       exception =
         current.find((item) => item.kind === 'quantity_over_allocation' && touches(item, oneIds) && !touches(item, twoIds)) ??
-        current.find((item) => touches(item, oneIds) && !touches(item, twoIds)) ??
         null
       other = current.find((item) => touches(item, twoIds) && !touches(item, oneIds)) ?? null
       if (!(exception && other)) await new Promise((resolve) => setTimeout(resolve, 2_000))
     }
-    expect(exception, 'the engine opened an exception on 1.1 / V100 within 90 s — is EXCEPTIONS_ENGINE_ENABLED=true on the API under test?').toBeTruthy()
+    expect(exception, 'the engine opened quantity_over_allocation on 1.1 / V100 within 90 s — is EXCEPTIONS_ENGINE_ENABLED=true on the API under test?').toBeTruthy()
     expect(other, 'the engine opened an exception on 1.2 / V200 within 90 s').toBeTruthy()
     return { ...fixture, exception: exception!, other: other! }
   })
@@ -328,11 +341,24 @@ test('an engine-opened exception is reviewed, raised to a prefilled DRAFT change
   await page.getByTestId(`${rowId}-raise`).click()
   const prefill = await prefillResponse
   expect(prefill.status(), 'the server prefill').toBe(200)
-  const proposed = ((await prefill.json()) as { data: { prefill: { title: string; lines?: unknown[] }; links: Record<string, string> } }).data
+  const proposed = ((await prefill.json()) as {
+    data: {
+      prefill: { title: string; description: string; origin: string; lines?: Array<{ description: string }> }
+      links: Record<string, string>
+    }
+  }).data
   expect(proposed.links.exceptionId, 'the endpoint will carry the exception link').toBe(exception.id)
   await expect(page.getByTestId('raise-change-event-dialog')).toBeVisible()
   await expect(page.getByTestId('raise-change-event-title')).toHaveValue(proposed.prefill.title)
   expect(proposed.prefill.title.length, 'the prefill has a title').toBeGreaterThan(0)
+  // A BOQ-derived kind: generic words — the kind is named only by the typed link.
+  expect(proposed.prefill.title.startsWith(GENERIC_EXCEPTION_TITLE), `generic title, got "${proposed.prefill.title}"`).toBe(true)
+  if (exception.kindLabel) expect(proposed.prefill.title).not.toContain(exception.kindLabel)
+  expect(proposed.prefill.description).toBe(`${GENERIC_EXCEPTION_TITLE}. The amount is left for the QS to price.`)
+  for (const line of proposed.prefill.lines ?? []) expect(line.description).toBe(GENERIC_EXCEPTION_TITLE)
+  expect(proposed.prefill.origin).toBe('exception')
+  await expect(page.getByTestId('raise-change-event-description')).toHaveValue(proposed.prefill.description)
+  await expect(page.getByTestId('raise-change-event-origin')).toContainText('Origin Project exception')
   for (let index = 0; index < (proposed.prefill.lines?.length ?? 0); index += 1) {
     await expect(page.getByTestId(`raise-change-event-line-amount-${index}`)).toHaveAttribute('data-amount-blank', 'true')
   }
@@ -351,9 +377,13 @@ test('an engine-opened exception is reviewed, raised to a prefilled DRAFT change
   expect(answer.changeEvent.status, 'a draft change event').toBe('open')
   expect(answer.changeEvent.changeOrderId ?? null, 'no change order').toBeNull()
   expect(answer.exception.status, 'the exception is carried by it').toBe('in_change')
+  raisedEventId = answer.changeEvent.id
   // The typed link, read back from the change event itself.
   const event = await withApi((client) => call(client, 'get', `/projects/${projectId}/change-events/${answer.changeEvent.id}`))
   expect(event.status).toBe('open')
+  expect(event.origin).toBe('exception')
+  expect(event.title).toBe(sent.title)
+  expect(Number((event.totals as { rom?: number } | undefined)?.rom ?? 0), 'the amount stays blank (0) for the QS to price').toBe(0)
   expect(event.sourceLinks as Array<{ type: string; id: string }>).toContainEqual(
     expect.objectContaining({ type: 'project_exception', id: exception.id }),
   )
@@ -390,6 +420,18 @@ test('an engine-opened exception is reviewed, raised to a prefilled DRAFT change
   await expectSectionRows(page, 'activity-detail-exceptions', current(onActivity.items))
   await expect(page.getByTestId(`activity-detail-exceptions-${other.id}`)).toHaveCount(0)
   await expect(page.getByTestId(`activity-detail-exceptions-${exception.id}`)).toHaveAttribute('data-status', 'in_change')
+
+  // The Overview figure is the API's own summary (GET …/controls/exceptions/summary): the PM's total, the one in change counted.
+  const summary = (await withApi((client) => call(client, 'get', `${exceptionsPath(projectId)}/summary`))) as {
+    total: number
+    inChange: { total: number }
+    withheld?: unknown
+  }
+  expect(summary.withheld, 'nothing is withheld from the PM').toBeUndefined()
+  expect(summary.inChange.total, 'the raised exception is counted in change').toBeGreaterThanOrEqual(1)
+  await page.goto(projectPath(projectId, 'overview'))
+  await expect(page.getByTestId('uat-controls-figure-open-exceptions-value')).toHaveText(summary.total.toLocaleString(), { timeout: 45_000 })
+  await expect(page.getByTestId('uat-controls-figure-open-exceptions-basis')).toContainText(`${summary.inChange.total.toLocaleString()} in change`)
 })
 
 test('Raise change event on an NCR creates one DRAFT change event with the NCR’s typed link — no change order', async ({ page }) => {
@@ -457,9 +499,111 @@ test('a member without BOQ read is told exceptions were withheld, with the reaso
   await expect(count).not.toContainText(/\b0\b/)
   await expect(count).not.toContainText('No exceptions')
 
-  // The Overview figure is never a 0 for them.
+  // The Overview figure is the API's summary for them: the marker reads "—" with
+  // its reason, and a total of 0 beside it is a dash, never "none".
+  const summary = (await withApi((client) => call(client, 'get', `${exceptionsPath(projectId)}/summary`, { token: qsToken }))) as {
+    total: number
+    withheld?: { reason: string }
+  }
+  expect(summary.withheld?.reason, 'the summary carries the withheld marker').toBeTruthy()
   await page.goto(projectPath(projectId, 'overview'))
-  await expect(page.getByTestId('uat-controls-figure-open-exceptions-value')).toHaveText('—', { timeout: 45_000 })
+  await expect(page.getByTestId('uat-controls-figure-open-exceptions-value')).toHaveText(
+    summary.total === 0 ? '—' : summary.total.toLocaleString(),
+    { timeout: 45_000 },
+  )
+  const basis = page.getByTestId('uat-controls-figure-open-exceptions-basis')
+  await expect(basis).toContainText(`— ${summary.withheld!.reason}`)
+  await expect(basis).not.toContainText('some withheld')
+
+  // The change event the walk raised from this BOQ-derived exception names
+  // neither the exception nor its quantity to them (commit 8589a3b).
+  expect(raisedEventId, 'the walk raised its change event first').toBeTruthy()
+  const theirs = await withApi((client) => call(client, 'get', `/projects/${projectId}/change-events/${raisedEventId}`, { token: qsToken }))
+  expect(theirs.origin).toBe('exception')
+  expect((theirs.sourceLinks as Array<{ type: string }> | undefined) ?? []).not.toContainEqual(expect.objectContaining({ type: 'project_exception' }))
+  expect(theirs.sourceRecordId ?? null).toBeNull()
+  expect((theirs.sourceWithheld as { reason?: string } | undefined)?.reason, 'said with the reason').toBeTruthy()
+  expect(JSON.stringify(theirs)).not.toContain(exception.id)
+})
+
+/**
+ * The register against the server's REAL cursor pages: the list request is
+ * passed on to the API with one row a page, so the screen must follow the
+ * API's own nextCursor to the end; and a snooze made on the screen is
+ * attributed by name, as the API records it.
+ */
+test('the register follows the API’s real cursor pages to the end, and a snooze is attributed by name', async ({ page }) => {
+  test.skip(PENDING, PENDING_REASON)
+  test.setTimeout(480_000)
+  const fixture = await buildOverrun()
+  const { projectId, other } = fixture
+
+  // The set of rows the API lists, read until it stops changing (the engine's debounced jobs may still be landing).
+  const allIds = async () =>
+    withApi(async (client) => {
+      const ids: string[] = []
+      let cursor: string | null = null
+      for (let pages = 0; pages < 60; pages += 1) {
+        const pageOf = await listExceptions(client, projectId, org!.adminToken, `?limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
+        expect(pageOf.status).toBe(200)
+        ids.push(...pageOf.items.map((item) => item.id))
+        cursor = pageOf.nextCursor
+        if (!cursor) break
+      }
+      return ids.sort()
+    })
+  let ids = await allIds()
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 3_000))
+    const again = await allIds()
+    if (JSON.stringify(again) === JSON.stringify(ids)) break
+    ids = again
+  }
+  expect(ids.length, 'more than one page at one row a page').toBeGreaterThan(1)
+  expect(ids).toContain(other.id)
+
+  const cursors: string[] = []
+  await page.route(/\/api\/v1\/projects\/[^/]+\/controls\/exceptions(\?.*)?$/, async (route) => {
+    const url = new URL(route.request().url())
+    if (route.request().method() !== 'GET' || url.searchParams.has('subjectType')) return route.continue()
+    url.searchParams.set('limit', '1')
+    const cursor = url.searchParams.get('cursor')
+    if (cursor) cursors.push(cursor)
+    return route.continue({ url: url.toString() })
+  })
+  await page.routeWebSocket(/socket\.io/, () => {})
+  await signInForm(page, org!.adminEmail)
+  await openExceptions(page, projectId)
+  const count = page.getByTestId('exceptions-count')
+  await expect(count).toHaveText('1 shown, more available', { timeout: 30_000 })
+  const more = page.getByTestId('exceptions-load-more')
+  for (let clicks = 0; clicks < 60 && (await more.count()) > 0; clicks += 1) {
+    const shown = await page.locator('[data-testid^="exception-row-"][data-kind]').count()
+    await more.click()
+    await expect(page.locator('[data-testid^="exception-row-"][data-kind]')).not.toHaveCount(shown)
+  }
+  await expect(more).toHaveCount(0)
+  await expect(count).toHaveText(`${ids.length} shown`)
+  for (const id of ids) await expect(page.getByTestId(`exception-row-${id}`)).toHaveCount(1)
+  expect(cursors.length, 'each further page was asked for with the API’s cursor').toBeGreaterThanOrEqual(ids.length - 1)
+
+  // Snooze 1.2's exception: the date and the reason as the API takes them; the line names who snoozed it.
+  const reason = `LiveTest snooze ${Date.now()}`
+  const until = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10)
+  await page.getByTestId(`exception-row-${other.id}-snooze`).click()
+  await page.getByTestId('exception-snooze-until').fill(until)
+  await page.getByTestId('exception-note').fill(reason)
+  const snoozed = page.waitForResponse((r) => isPost(r.request(), `/controls/exceptions/${other.id}/snooze`))
+  await page.getByTestId('exception-action-submit').click()
+  expect((await snoozed).status()).toBe(200)
+  const line = page.getByTestId(`exception-row-${other.id}-snoozed`)
+  await expect(line).toContainText('by pc7bweb Admin', { timeout: 30_000 })
+  await expect(line).toContainText(reason)
+  await expect(line).not.toContainText(org!.adminId)
+  const after = (await withApi((client) => listExceptions(client, projectId))).items.find((item) => item.id === other.id)
+  expect(after?.status).toBe('snoozed')
+  expect(after?.snooze?.byName).toBe('pc7bweb Admin')
+  expect(after?.snooze?.reason).toBe(reason)
 })
 
 /**
