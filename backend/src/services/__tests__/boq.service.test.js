@@ -892,6 +892,38 @@ describe("Phase 21D — integrity (the twenty-third loop's own finding)", () => 
     delete mockPrisma.activityBoqAllocation.updateMany;
   });
 
+  it("PC-6 integration: a row an IPC line, a quantity entry or a daily-log quantity row keeps is 409 BOQ_ITEM_IN_USE naming them, and a RESTRICT the list does not know (Prisma P2003) answers the same — never a 500", async () => {
+    const item = { id: "boq-1", projectId: "project-1", code: "1.1", description: "Excavation", qty: 5, unit: "m3", rate: 100, amount: 500, isManual: true, isActive: true, sortOrder: 0, createdAt: new Date("2026-09-14T07:00:00.000Z") };
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", orgId: "org-1" });
+    mockPrisma.boqRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.scheduleRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.boqItem.findFirst.mockResolvedValue(item);
+    mockPrisma.boqItem.findMany.mockResolvedValue([]);
+    mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([]);
+    mockPrisma.ipcItem = { count: jest.fn(async () => 0) };
+    mockPrisma.quantityProgressEntry = { count: jest.fn(async () => 2) };
+    mockPrisma.dailyLogQuantity = { count: jest.fn(async () => 1) };
+    const call = () => service.deleteBoqItem("project-1", "boq-1", { orgId: "org-1", userId: "pm-1", userRole: "pm" });
+    await expect(call()).rejects.toMatchObject({
+      status: 409,
+      code: "BOQ_ITEM_IN_USE",
+      message: "BOQ row 1.1 cannot be deleted: 2 quantity progress entries, 1 daily-log quantity row are linked to it. Records stay on their row; revise it through a BOQ revision instead.",
+      details: { boqItemId: "boq-1", code: "1.1", keptBy: { ipcItems: 0, quantityEntries: 2, dailyLogQuantities: 1 } },
+    });
+    expect(mockPrisma.boqItem.delete).not.toHaveBeenCalled();
+    // Nothing counted keeps it, but the database does: the constraint is named, the answer is the same 409.
+    mockPrisma.quantityProgressEntry.count.mockResolvedValue(0);
+    mockPrisma.dailyLogQuantity.count.mockResolvedValue(0);
+    mockPrisma.boqItem.delete.mockRejectedValueOnce(Object.assign(new Error("Foreign key constraint violated: `Other_boqItemId_fkey (index)`"), { code: "P2003", meta: { field_name: "Other_boqItemId_fkey (index)" } }));
+    await expect(call()).rejects.toMatchObject({ status: 409, code: "BOQ_ITEM_IN_USE", message: expect.stringMatching(/^BOQ row 1\.1 cannot be deleted: another record is linked to it\./), details: { keptBy: { ipcItems: 0, quantityEntries: 0, dailyLogQuantities: 0, constraint: "Other_boqItemId_fkey (index)" } } });
+    // Any other failure passes through unchanged.
+    mockPrisma.boqItem.delete.mockRejectedValueOnce(Object.assign(new Error("connection lost"), { code: "P1001" }));
+    await expect(call()).rejects.toMatchObject({ code: "P1001" });
+    delete mockPrisma.ipcItem;
+    delete mockPrisma.quantityProgressEntry;
+    delete mockPrisma.dailyLogQuantity;
+  });
+
   it("CX21-544: removing a BOQ link rejects the allocation and retires the activity only if the row minted it and nothing else touched it — a live activity the link pointed at keeps its schedule", async () => {
     mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", orgId: "org-1" });
     mockPrisma.boqRevision.findFirst.mockResolvedValue(null);

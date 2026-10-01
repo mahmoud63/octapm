@@ -226,6 +226,13 @@ describe("an edit never moves an entry to another activity, item or status", () 
   it("a negative correction is refused: a correction is a rejection plus a new entry", async () => {
     await expect(service.updateEntry({ orgId: "org-1", projectId: "project-1", entryId: "e-1", userId: "u-1", payload: { quantity: -1 } })).rejects.toMatchObject({ status: 400, code: "QUANTITY_NEGATIVE" });
   });
+
+  it("an edit to zero is refused (400 QUANTITY_INVALID): zero is no work, and no work is no entry — remove it instead", async () => {
+    for (const quantity of [0, "0", "0.000", 0.0004]) {
+      await expect(service.updateEntry({ orgId: "org-1", projectId: "project-1", entryId: "e-1", userId: "u-1", payload: { quantity } })).rejects.toMatchObject({ status: 400, code: "QUANTITY_INVALID", message: "A quantity must be greater than zero; record nothing for no work", details: { field: "quantity" } });
+    }
+    expect(mockPrisma.quantityProgressEntry.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("createEntries validates before it writes", () => {
@@ -234,11 +241,23 @@ describe("createEntries validates before it writes", () => {
     mockPrisma.activity.findFirst.mockResolvedValue({ id: "a-1", projectId: "project-1", isActive: true });
     mockPrisma.boqItem.findFirst.mockResolvedValue(concrete);
     mockPrisma.quantityProgressEntry.findMany.mockResolvedValue([]);
+    // The route records against an allocated item (PC-6 integration item 3).
+    mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([{ id: "al-1", quantity: 100, unitCode: "m3" }]);
+  });
+
+  it("refuses an item the activity has no approved, active allocation of — 400 QUANTITY_ITEM_NOT_ALLOCATED, the daily log's section rule — unless it is the daily log's own minting", async () => {
+    mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([]);
+    await expect(service.createEntries({ ...base, entries: [{ activityId: "a-1", boqItemId: "item-1", quantity: 5, date: "2026-09-01" }] })).rejects.toMatchObject({ status: 400, code: "QUANTITY_ITEM_NOT_ALLOCATED", details: { activityId: "a-1", boqItemId: "item-1" } });
+    expect(mockPrisma.quantityProgressEntry.create).not.toHaveBeenCalled();
+    expect(mockPrisma.activityBoqAllocation.findMany.mock.calls[0][0].where).toEqual({ projectId: "project-1", activityId: "a-1", boqItemId: "item-1", status: "approved", isActive: true });
   });
 
   it("refuses a negative quantity, a missing date, a foreign unit, a source or status outside the vocabulary, and a duplicated clientRequestId — writing nothing", async () => {
     const cases = [
       [{ entries: [{ activityId: "a-1", boqItemId: "item-1", quantity: -5, date: "2026-09-01" }] }, "QUANTITY_NEGATIVE"],
+      // Zero is no work: refused, with the three-place scale applied first (0.0004 is 0.000).
+      [{ entries: [{ activityId: "a-1", boqItemId: "item-1", quantity: 0, date: "2026-09-01" }] }, "QUANTITY_INVALID"],
+      [{ entries: [{ activityId: "a-1", boqItemId: "item-1", quantity: "0.0004", date: "2026-09-01" }] }, "QUANTITY_INVALID"],
       [{ entries: [{ activityId: "a-1", boqItemId: "item-1", quantity: 5 }] }, "QUANTITY_DATE_REQUIRED"],
       [{ entries: [{ activityId: "a-1", boqItemId: "item-1", quantity: 5, date: "2026-09-01", unit: "m2" }] }, "QUANTITY_UNIT_MISMATCH"],
       [{ entries: [{ activityId: "a-1", boqItemId: "item-1", quantity: 5, date: "2026-09-01" }], source: "mobile" }, "QUANTITY_ENTRY_SOURCE_INVALID"],

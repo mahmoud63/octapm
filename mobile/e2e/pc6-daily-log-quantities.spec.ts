@@ -7,15 +7,21 @@ import { apiBase, isWide, items, localDay } from './cert-helpers'
 /**
  * PC-6 on the field app: quantities installed, recorded from the site.
  *
+ * A member the server withholds the bill from still records: the server's
+ * picker (GET /activities/{id}/allocated-items) gives every reader of
+ * progress the item's description and unit — never its code, its allocation
+ * or the allocated quantity — and that member reads their own row back with
+ * a dash and the server's reason for the quantity, never a zero. A member
+ * who may not submit progress sees no form at all.
+ *
  * A site engineer records a quantity against an allocated BOQ item in the
  * daily log without a signal; the entry waits in the outbox, goes once when
  * the signal returns, and when the reply to that send is lost the retry
- * carries the same replay key and the server still holds one row. The
- * entry is never shown as official — it reads "awaiting approval" with
- * its source — and the web Progress tab's register (read here through the
- * API) holds it as a pending entry. A member the server withholds the bill
- * from sees a dash and the reason, never a zero; a member who may not
- * submit progress sees no form at all; the activity screen names PROGRESS
+ * carries the same replay key and the server still holds one row. The row
+ * is never shown as official — it reads "awaiting approval" with its
+ * source — and once the day is submitted from the phone the quantity
+ * register (read here through the API) holds it as a PENDING entry from the
+ * daily log; nothing official has moved. The activity screen names PROGRESS
  * SOURCE and counts what is waiting.
  *
  * Every fixture is built through the API in a throwaway "LiveTest <uuid>"
@@ -23,12 +29,10 @@ import { apiBase, isWide, items, localDay } from './cert-helpers'
  * backend/scripts/e2e/live-org.js, dropped afterwards). Nothing here signs
  * in to the demo, UAT or E2E organisations. Runs against a web export of
  * this checkout pointed at an API of its own (MOBILE_WEB_URL,
- * MOBILE_API_URL), never :8081.
- *
- * Where the server does not yet carry the quantities section of the daily
- * log (the day's answer has no `sections.quantities`), the checks that need
- * it skip with that reason; the orchestrator re-runs them after the core
- * track merges.
+ * MOBILE_API_URL), never :8081. It stands on the merged server — the daily
+ * log's quantities section, the quantity register and the quantity views —
+ * and the fixture asserts they are there: nothing here skips for a missing
+ * route.
  */
 
 const PASSWORD = 'Live-Passw0rd!9a'
@@ -81,9 +85,8 @@ interface Fixture {
   siteEmail: string
   siteToken: string
   noBoqEmail: string
+  noBoqId: string
   financeEmail: string
-  /** Whether the server's day carries the quantities section at all. */
-  sectionOnServer: boolean
 }
 
 let fx: Fixture | null = null
@@ -172,10 +175,13 @@ async function buildFixture(request: APIRequestContext, { id, orgId, adminToken 
   const login = await call(request, 'post', '/auth/login', { data: { email: site.email, password: PASSWORD } })
   expect(login.status).toBe(200)
   const siteToken = (login.body!.data!.tokens as { accessToken: string }).accessToken
+  // The merged contracts this spec stands on are all on the server: the day's quantities section, the register, the views.
   const day = (await must(request, 'get', `/projects/${projectId}/daily-logs/${localDay(new Date())}`, siteToken)) as { sections?: Record<string, unknown> }
-  const sectionOnServer = !!day.sections && 'quantities' in day.sections
+  expect(!!day.sections && 'quantities' in day.sections, 'the daily log carries the quantities section').toBe(true)
+  await must(request, 'get', `/projects/${projectId}/quantity-progress?activityId=${activity!.id}`, adminToken)
+  await must(request, 'get', `/projects/${projectId}/activities/${activity!.id}/quantities`, adminToken)
 
-  return { orgId, adminToken, projectId, activityId: activity!.id, activityName: activity!.name, boqItemId, itemDescription: 'Blockwork 200 mm to external walls', siteEmail: site.email, siteToken, noBoqEmail: noBoq.email, financeEmail: finance.email, sectionOnServer }
+  return { orgId, adminToken, projectId, activityId: activity!.id, activityName: activity!.name, boqItemId, itemDescription: 'Blockwork 200 mm to external walls', siteEmail: site.email, siteToken, noBoqEmail: noBoq.email, noBoqId: noBoq.id, financeEmail: finance.email }
 }
 
 test.afterAll(() => {
@@ -234,9 +240,65 @@ test.describe('PC-6: quantities installed, recorded from site', () => {
     test.skip(isWide(page), 'layout-independent; runs once on the phone viewport')
   })
 
-  test('captured offline, sent once when the signal returns, replayed once more after a lost reply — one row, pending, with its source', async ({ page, context, request }) => {
+  test('a member the server withholds the bill from still records — by the item’s description and unit, never its code — and reads the row back with a dash and the reason; a member without progress submit sees no form', async ({ page, request }) => {
     test.setTimeout(180_000)
-    test.skip(!fx!.sectionOnServer, 'the daily log on this server does not carry the quantities section yet (PC-6 core not merged)')
+    await signIn(page, fx!.noBoqEmail)
+    await page.goto('/site')
+    await expect(page.getByTestId('screen-daily-log')).toBeVisible()
+    await page.getByTestId('daily-log-add-quantities').click()
+    await page.getByTestId('entry-activity').click()
+    // The server's own picker, admitted on reading progress: this member is answered, not refused.
+    const picker = page.waitForResponse((r) => r.url().includes(`/activities/${fx!.activityId}/allocated-items`) && r.request().method() === 'GET')
+    await page.getByTestId(`entry-activity-option-${fx!.activityId}`).click()
+    const answered = await picker
+    expect(answered.status(), 'the picker answers a member who may not read the BOQ').toBe(200)
+    const served = ((await answered.json()) as { data: { items: Record<string, unknown>[]; boqWithheld?: { keys: string[]; reason: string } } }).data
+    expect(served.items).toHaveLength(1)
+    expect(Object.keys(served.items[0]!).sort(), 'the id, the description and the unit — nothing of the bill’s figures').toEqual(['description', 'id', 'unit', 'unitCode'])
+    expect(served.boqWithheld?.keys).toEqual(['code', 'allocationId', 'allocationIds', 'allocatedQuantity'])
+    await expect(page.getByTestId('entry-item-withheld')).toHaveCount(0)
+    await page.getByTestId('entry-item').click()
+    const option = page.getByTestId(`entry-item-option-${fx!.boqItemId}`)
+    await expect(option).toContainText(fx!.itemDescription)
+    await expect(option).toContainText('m2')
+    await expect(option, 'the code is the bill’s').not.toContainText('BW-100')
+    await expect(option, 'the allocated quantity is the bill’s').not.toContainText('480')
+    await option.click()
+    await page.getByTestId('entry-quantity').fill('10')
+    const saved = page.waitForResponse((r) => r.url().endsWith('/entries/quantities') && r.request().method() === 'POST')
+    await page.getByTestId('entry-save').click()
+    const response = await saved
+    expect(response.status(), await response.text()).toBe(201)
+    expect(response.request().postDataJSON()).toMatchObject({ activityId: fx!.activityId, boqItemId: fx!.boqItemId, unitCode: 'm2', quantity: 10 })
+
+    // Their own row, read back: the description stays, the quantity is a dash with the server's reason — never a zero, never the figure.
+    const line = page.getByTestId('daily-log-section-quantities').locator('[data-testid^="daily-log-entry-"]').filter({ hasText: fx!.itemDescription })
+    await expect(line).toHaveCount(1)
+    await expect(line).toContainText('—')
+    await expect(line).toContainText('may read the BOQ')
+    await expect(line).toContainText('awaiting approval · source daily log')
+    await expect(line).not.toContainText('10 m2')
+    await expect(line).not.toContainText(/(^|\s)0(\s|$)/)
+    // The server holds the row as recorded, by that member — a BOQ reader sees the figure.
+    const day = (await must(request, 'get', `/projects/${fx!.projectId}/daily-logs/${localDay(new Date())}`, fx!.adminToken)) as { sections: { quantities: { quantity: number; unitCode: string; createdBy: string; boqItemId: string }[] } }
+    expect(day.sections.quantities).toHaveLength(1)
+    expect(day.sections.quantities[0]).toMatchObject({ unitCode: 'm2', createdBy: fx!.noBoqId, boqItemId: fx!.boqItemId })
+    expect(Number(day.sections.quantities[0]!.quantity)).toBe(10)
+
+    // Sign out, then a reader without progress submit: no Add on any section, no form.
+    await page.goto('/more')
+    await page.getByTestId('sign-out').click()
+    await expect(page.getByTestId('sign-in-submit')).toBeVisible()
+    await signIn(page, fx!.financeEmail)
+    await page.goto('/site')
+    await expect(page.getByTestId('screen-daily-log')).toBeVisible()
+    await expect(page.getByTestId('daily-log-add-quantities')).toHaveCount(0)
+    await expect(page.getByTestId('daily-log-add-manpower')).toHaveCount(0)
+    await expect(page.getByTestId('site-continue')).toHaveCount(0)
+  })
+
+  test('captured offline, sent once when the signal returns, replayed once more after a lost reply — one row; the day submitted from the phone makes it a pending entry with its source, and nothing official', async ({ page, context, request }) => {
+    test.setTimeout(180_000)
     await signIn(page, fx!.siteEmail)
     await page.goto('/site')
     await expect(page.getByTestId('screen-daily-log')).toBeVisible()
@@ -246,11 +308,13 @@ test.describe('PC-6: quantities installed, recorded from site', () => {
     await page.getByTestId('daily-log-add-quantities').click()
     await expect(page.getByTestId('entry-sheet-quantities')).toBeVisible()
     await page.getByTestId('entry-activity').click()
-    const allocations = page.waitForResponse((r) => r.url().includes('/activity-boq-allocations') && r.request().method() === 'GET')
+    const allocated = page.waitForResponse((r) => r.url().includes(`/activities/${fx!.activityId}/allocated-items`) && r.request().method() === 'GET')
     await page.getByTestId(`entry-activity-option-${fx!.activityId}`).click()
-    expect((await allocations).status()).toBe(200)
+    expect((await allocated).status()).toBe(200)
     await page.getByTestId('entry-item').click()
     await expect(page.getByTestId(`entry-item-option-${fx!.boqItemId}`)).toContainText(fx!.itemDescription)
+    // A BOQ reader's picker carries the code beside the unit.
+    await expect(page.getByTestId(`entry-item-option-${fx!.boqItemId}`)).toContainText('BW-100')
     await expect(page.getByTestId(`entry-item-option-${fx!.boqItemId}`)).toContainText('m2')
     await page.getByTestId('entry-item-done').click()
     await page.getByTestId('entry-cancel').click()
@@ -263,6 +327,9 @@ test.describe('PC-6: quantities installed, recorded from site', () => {
     await page.getByTestId(`entry-activity-option-${fx!.activityId}`).click()
     await page.getByTestId('entry-item').click()
     await page.getByTestId(`entry-item-option-${fx!.boqItemId}`).click()
+    // Zero is no work: the form does not offer it (the server refuses it, QUANTITY_INVALID).
+    await page.getByTestId('entry-quantity').fill('0')
+    await expect(page.getByTestId('entry-save')).toBeDisabled()
     await page.getByTestId('entry-quantity').fill('25')
     await page.getByTestId('entry-notes').fill('East elevation, grid 1-4')
     await page.getByTestId('entry-save').click()
@@ -307,34 +374,44 @@ test.describe('PC-6: quantities installed, recorded from site', () => {
     await page.goto('/outbox')
     await expect(page.locator('[data-testid^="outbox-item-"]').filter({ hasText: 'Quantities entry' })).toContainText('Sent')
     await page.goto('/site')
-    const line = page.getByTestId('daily-log-section-quantities').locator('[data-testid^="daily-log-entry-"]').filter({ hasText: fx!.itemDescription })
+    const line = page.getByTestId('daily-log-section-quantities').locator('[data-testid^="daily-log-entry-"]').filter({ hasText: '25 m2' })
     await expect(line).toHaveCount(1)
-    await expect(line).toContainText('25 m2')
+    await expect(line).toContainText(fx!.itemDescription)
     await expect(line).toContainText('awaiting approval · source daily log')
     await expect(line).not.toContainText('Approved')
 
-    // The web Progress tab's register, read through the API: the entry is there, pending, from the daily log —
-    // and nothing is official: the activity's approved figure is untouched.
-    const register = await call(request, 'get', `/projects/${fx!.projectId}/quantity-progress?activityId=${fx!.activityId}`, { token: fx!.adminToken })
-    if (register.status === 404) {
-      test.info().annotations.push({ type: 'skipped-assertion', description: 'GET /quantity-progress is not on this server yet (PC-6 core not merged); the register assertion is left to the re-run' })
-    } else {
+    // A row is a site record until the day is submitted: the register holds nothing for it yet.
+    const registerOf = async () => {
+      const register = await call(request, 'get', `/projects/${fx!.projectId}/quantity-progress?activityId=${fx!.activityId}`, { token: fx!.adminToken })
       expect(register.status).toBe(200)
-      const entries = items(register.body!.data as unknown as { items?: Record<string, unknown>[] } | Record<string, unknown>[])
-      const mine = entries.filter((e) => e.activityId === fx!.activityId && e.boqItemId === fx!.boqItemId)
-      expect(mine.length, 'exactly one pending entry for the one row').toBe(1)
-      expect(mine[0]).toMatchObject({ source: 'daily_log', status: 'submitted' })
-      expect(Number(mine[0]!.quantity)).toBe(25)
+      return items(register.body!.data as unknown as { items?: Record<string, unknown>[] } | Record<string, unknown>[])
     }
+    expect(await registerOf(), 'no pending entry before the day is submitted').toHaveLength(0)
+
+    // Submit the day from the phone: every counted row becomes one PENDING entry from the daily log.
+    const submitted = page.waitForResponse((r) => /\/daily-logs\/[^/]+\/submit$/.test(r.url()) && r.request().method() === 'POST')
+    await page.getByTestId('daily-log-submit').click()
+    expect((await submitted).status()).toBe(200)
+    await expect(page.getByText(/Submitted.*waiting for approval/)).toBeVisible()
+    const entries = await registerOf()
+    // The day's two rows: this one and the row the member without the BOQ recorded.
+    expect(entries).toHaveLength(2)
+    for (const entry of entries) expect(entry).toMatchObject({ source: 'daily_log', status: 'submitted', activityId: fx!.activityId, boqItemId: fx!.boqItemId })
+    const mine = entries.filter((e) => (e.provenance as { dailyLogQuantityId?: string } | undefined)?.dailyLogQuantityId === rows[0]!.id)
+    expect(mine.length, 'exactly one pending entry for the one row').toBe(1)
+    expect(Number(mine[0]!.quantity)).toBe(25)
+    expect(mine[0]!.provenance).toMatchObject({ source: 'daily_log', official: false })
+
     // The server answers pctComplete 0 for an activity with no approved
     // ActivityProgress at all (activity.service sanitizeActivity), so a 0 %
     // cannot tell "no approved row" from "an approved 0 %": the approved
     // row's own stamp and source say whether one exists, and the approval
     // status must not read approved.
-    const activity = (await must(request, 'get', `/projects/${fx!.projectId}/activities/${fx!.activityId}`, fx!.adminToken)) as { pctComplete: number | null; approvedProgressUpdatedAt: string | null; approvedProgressSource: string | null; progressApprovalStatus: string | null }
+    const activity = (await must(request, 'get', `/projects/${fx!.projectId}/activities/${fx!.activityId}`, fx!.adminToken)) as { pctComplete: number | null; approvedProgressUpdatedAt: string | null; approvedProgressSource: string | null; progressApprovalStatus: string | null; pendingQuantityEntries?: unknown[] }
     expect(activity.approvedProgressUpdatedAt, 'no ActivityProgress row was approved by the capture').toBeNull()
     expect(activity.approvedProgressSource).toBeNull()
     expect(activity.progressApprovalStatus).not.toBe('approved')
+    expect(activity.pendingQuantityEntries, 'the register lists both as pending, not yet put forward').toHaveLength(2)
   })
 
   test('the activity screen names PROGRESS SOURCE and counts the quantities awaiting approval', async ({ page, request }) => {
@@ -343,13 +420,10 @@ test.describe('PC-6: quantities installed, recorded from site', () => {
     await expect(page.getByTestId('screen-activity')).toBeVisible()
     await expect(page.getByTestId('activity-progress-source')).toContainText('No approved progress yet')
     const register = await call(request, 'get', `/projects/${fx!.projectId}/quantity-progress?activityId=${fx!.activityId}&status=submitted`, { token: fx!.adminToken })
-    if (register.status === 404) {
-      await expect(page.getByTestId('activity-pending-quantities')).toHaveCount(0)
-      test.info().annotations.push({ type: 'skipped-assertion', description: 'no quantity register on this server yet: the pending count is (rightly) absent' })
-    } else {
-      const count = items(register.body!.data as unknown as { items?: unknown[] } | unknown[]).length
-      await expect(page.getByTestId('activity-pending-quantities')).toContainText(`${count} quantit${count === 1 ? 'y' : 'ies'} awaiting approval`)
-    }
+    expect(register.status).toBe(200)
+    const count = items(register.body!.data as unknown as { items?: unknown[] } | unknown[]).length
+    expect(count, 'the two rows of the submitted day').toBe(2)
+    await expect(page.getByTestId('activity-pending-quantities')).toContainText(`${count} quantities awaiting approval`)
 
     // The five figures and the committed one, line by line against the
     // server's own answer (views: the figures sit under `figures`): a figure
@@ -357,63 +431,24 @@ test.describe('PC-6: quantities installed, recorded from site', () => {
     // one it did not carries a dash and the server's reason, never the
     // app's own sentence and never a zero.
     const figuresAnswer = await call(request, 'get', `/projects/${fx!.projectId}/activities/${fx!.activityId}/quantities`, { token: fx!.siteToken })
-    if (figuresAnswer.status === 404) {
-      await expect(page.getByTestId('activity-quantities')).toHaveCount(0)
-      test.info().annotations.push({ type: 'skipped-assertion', description: 'no quantity views on this server yet: the figures card is (rightly) absent' })
-    } else {
-      expect(figuresAnswer.status).toBe(200)
-      const served = figuresAnswer.body!.data as { figures?: Record<string, Figure | null>; withheld?: boolean; reason?: string }
-      expect(served.withheld, 'the site engineer may read the BOQ').toBeFalsy()
-      expect(served.figures, 'the server folds the figures under `figures`').toBeTruthy()
-      await expectFigureLines(page, served.figures!, null)
-    }
+    expect(figuresAnswer.status).toBe(200)
+    const served = figuresAnswer.body!.data as { figures?: Record<string, Figure | null>; withheld?: boolean; reason?: string }
+    expect(served.withheld, 'the site engineer may read the BOQ').toBeFalsy()
+    expect(served.figures, 'the server folds the figures under `figures`').toBeTruthy()
+    await expectFigureLines(page, served.figures!, null)
 
     // A member the server withholds the bill from: every line a dash with the server's reason.
-    if (figuresAnswer.status !== 404) {
-      await page.goto('/more')
-      await page.getByTestId('sign-out').click()
-      await expect(page.getByTestId('sign-in-submit')).toBeVisible()
-      await signIn(page, fx!.noBoqEmail)
-      await page.goto(`/activities/${fx!.activityId}`)
-      await expect(page.getByTestId('screen-activity')).toBeVisible()
-      const noBoqLogin = await call(request, 'post', '/auth/login', { data: { email: fx!.noBoqEmail, password: PASSWORD } })
-      const noBoqToken = (noBoqLogin.body!.data!.tokens as { accessToken: string }).accessToken
-      const withheld = (await must(request, 'get', `/projects/${fx!.projectId}/activities/${fx!.activityId}/quantities`, noBoqToken)) as { figures?: Record<string, Figure | null>; withheld?: boolean; reason?: string }
-      expect(withheld.withheld, 'the server withholds the bill from this member').toBe(true)
-      expect(withheld.reason).toBeTruthy()
-      await expectFigureLines(page, withheld.figures ?? {}, withheld.reason!)
-    }
-  })
-
-  test('a member the server withholds the bill from sees a dash and the reason, never a zero; a member without progress submit sees no form', async ({ page }) => {
-    test.skip(!fx!.sectionOnServer, 'the daily log on this server does not carry the quantities section yet (PC-6 core not merged)')
-    await signIn(page, fx!.noBoqEmail)
-    await page.goto('/site')
-    await expect(page.getByTestId('screen-daily-log')).toBeVisible()
-    await page.getByTestId('daily-log-add-quantities').click()
-    await page.getByTestId('entry-activity').click()
-    const refused = page.waitForResponse((r) => r.url().includes('/activity-boq-allocations') && r.request().method() === 'GET')
-    await page.getByTestId(`entry-activity-option-${fx!.activityId}`).click()
-    expect((await refused).status(), 'the server withholds the bill').toBe(403)
-    const withheld = page.getByTestId('entry-item-withheld')
-    await expect(withheld).toBeVisible()
-    await expect(withheld).toContainText('—')
-    await expect(withheld).toContainText(/permission|role does not allow/i)
-    await expect(page.getByTestId('entry-item')).toHaveCount(0)
-    await page.getByTestId('entry-quantity').fill('25')
-    await expect(page.getByTestId('entry-save')).toBeDisabled()
-    await expect(withheld).not.toContainText('0')
-    await page.getByTestId('entry-cancel').click()
-
-    // Sign out, then a reader without progress submit: no Add on any section, no form.
     await page.goto('/more')
     await page.getByTestId('sign-out').click()
     await expect(page.getByTestId('sign-in-submit')).toBeVisible()
-    await signIn(page, fx!.financeEmail)
-    await page.goto('/site')
-    await expect(page.getByTestId('screen-daily-log')).toBeVisible()
-    await expect(page.getByTestId('daily-log-add-quantities')).toHaveCount(0)
-    await expect(page.getByTestId('daily-log-add-manpower')).toHaveCount(0)
-    await expect(page.getByTestId('site-continue')).toHaveCount(0)
+    await signIn(page, fx!.noBoqEmail)
+    await page.goto(`/activities/${fx!.activityId}`)
+    await expect(page.getByTestId('screen-activity')).toBeVisible()
+    const noBoqLogin = await call(request, 'post', '/auth/login', { data: { email: fx!.noBoqEmail, password: PASSWORD } })
+    const noBoqToken = (noBoqLogin.body!.data!.tokens as { accessToken: string }).accessToken
+    const withheld = (await must(request, 'get', `/projects/${fx!.projectId}/activities/${fx!.activityId}/quantities`, noBoqToken)) as { figures?: Record<string, Figure | null>; withheld?: boolean; reason?: string }
+    expect(withheld.withheld, 'the server withholds the bill from this member').toBe(true)
+    expect(withheld.reason).toBeTruthy()
+    await expectFigureLines(page, withheld.figures ?? {}, withheld.reason!)
   })
 })

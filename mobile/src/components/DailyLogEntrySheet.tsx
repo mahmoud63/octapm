@@ -62,7 +62,7 @@ export const ENTRY_FIELDS: Record<DailyLogSection, FieldSpec[]> = {
   notes: [{ key: 'text', label: 'Note', kind: 'multiline', required: true }],
   // PC-6: a quantity installed, in the allocated item's own unit. The item
   // and the activity are chosen below; the unit is the item's, never typed.
-  quantities: [{ key: 'quantity', label: 'Quantity installed', kind: 'number', required: true, placeholder: '0 or more' }],
+  quantities: [{ key: 'quantity', label: 'Quantity installed', kind: 'number', required: true, placeholder: 'More than zero' }],
 }
 
 const CHOICE_FIELDS: Partial<Record<DailyLogSection, { key: string; label: string; options: readonly string[] }>> = {
@@ -127,10 +127,11 @@ export function DailyLogEntrySheet({ visible, projectId, section, busy, error, o
 
   const missing = fields.filter((f) => f.required && !values[f.key]?.trim()).map((f) => f.label)
   const missingChoice = choiceField && !choice ? [choiceField.label] : []
-  // A quantity is a number of zero or more in the item's unit; a correction is
-  // never a negative line (§3), and both the activity and the item are required.
+  // A quantity is a number greater than zero in the item's unit — zero is no
+  // work, and the server refuses it; a correction is never a negative line
+  // (§3) — and both the activity and the item are required.
   const quantityNumber = Number(values.quantity ?? '')
-  const quantityOk = section !== 'quantities' || (values.quantity?.trim() !== '' && Number.isFinite(quantityNumber) && quantityNumber >= 0)
+  const quantityOk = section !== 'quantities' || (values.quantity?.trim() !== '' && Number.isFinite(quantityNumber) && quantityNumber > 0)
   const missingLinks = section === 'quantities' ? [...(activityId ? [] : ['Activity']), ...(chosenItem ? [] : ['Item'])] : []
   const ready = missing.length === 0 && missingChoice.length === 0 && missingLinks.length === 0 && quantityOk
 
@@ -225,7 +226,7 @@ export function DailyLogEntrySheet({ visible, projectId, section, busy, error, o
           {section !== 'notes' ? <Input label="Notes" value={notes} onChangeText={setNotes} multiline testID="entry-notes" /> : null}
           {!ready ? (
             <Text variant="caption" tone="muted">
-              Still needed: {[...missingChoice, ...missingLinks, ...missing, ...(section === 'quantities' && !quantityOk && values.quantity?.trim() ? ['a quantity of 0 or more'] : [])].join(', ')}
+              Still needed: {[...missingChoice, ...missingLinks, ...missing, ...(section === 'quantities' && !quantityOk && values.quantity?.trim() ? ['a quantity greater than zero'] : [])].join(', ')}
             </Text>
           ) : null}
           {error ? (

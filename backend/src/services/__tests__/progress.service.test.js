@@ -14,7 +14,11 @@ const mockPrisma = {
   },
   activityProgress: {
     create: jest.fn(),
+    findFirst: jest.fn(async () => null),
   },
+  // PC-6 integration: a typed quantity submission mints one entry at approval.
+  quantityProgressEntry: { count: jest.fn(async () => 0), findMany: jest.fn(async () => []), create: jest.fn(async ({ data }) => ({ id: 'entry-minted', ...data })), updateMany: jest.fn() },
+  activityBoqAllocation: { findMany: jest.fn(async () => []) },
 };
 const mockAuditService = {
   ACTIONS: { APPROVED: 'approved', CREATED: 'created', REJECTED: 'rejected' },
@@ -269,5 +273,116 @@ describe('progress service', () => {
         attachments: [expect.objectContaining({ url: 'https://example.test/photo.jpg' })],
       }),
     );
+  });
+
+  describe('the milestone method is respected like quantity', () => {
+    const milestoneConfig = {
+      id: 'config-1',
+      projectId: 'project-1',
+      activityId: 'activity-1',
+      method: 'weighted_milestone',
+      evidenceRequired: false,
+      inspectionRequired: false,
+      plannedQuantity: null,
+      quantityUnit: null,
+      milestoneWeightsJson: [
+        { id: 'formwork', name: 'Formwork', weight: 40 },
+        { id: 'pour', name: 'Pour', weight: 60 },
+      ],
+    };
+    const submit = (payload) =>
+      progressService.createProgressSubmission({ orgId: 'org-1', projectId: 'project-1', activityId: 'activity-1', userId: 'pm-1', userRole: 'pm', payload });
+
+    beforeEach(() => {
+      mockPrisma.activityProgressMethod.findFirst.mockResolvedValue(milestoneConfig);
+      mockPrisma.progressSubmission.create.mockImplementation(async ({ data }) => ({ id: 'submission-m', ...data }));
+    });
+
+    it('a percentage with no milestone state is refused 400 MILESTONES_REQUIRED — named or not, a draft too — never recorded at a figure worked from the configuration', async () => {
+      for (const payload of [{ pctComplete: 60 }, { method: 'weighted_milestone', pctComplete: 60 }, { pctComplete: 60, status: 'draft' }, { method: 'weighted_milestone', milestones: [] }]) {
+        await expect(submit(payload)).rejects.toMatchObject({
+          status: 400,
+          code: 'MILESTONES_REQUIRED',
+          details: { activityId: 'activity-1', method: 'weighted_milestone', milestones: [{ id: 'formwork', name: 'Formwork' }, { id: 'pour', name: 'Pour' }] },
+        });
+      }
+      expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
+    });
+
+    it('a milestone the activity does not configure is no milestone state: a percentage beside it is refused 400 MILESTONES_REQUIRED naming the unknown ids, never recorded at the client percentage', async () => {
+      const configured = [{ id: 'formwork', name: 'Formwork' }, { id: 'pour', name: 'Pour' }];
+      for (const [payload, unknownMilestones] of [
+        [{ method: 'weighted_milestone', pctComplete: 60, milestones: [{ id: 'bogus', complete: true }] }, ['bogus']],
+        [{ pctComplete: 60, milestoneProgressJson: [{ id: 'nope' }] }, ['nope']],
+        [{ pctComplete: 60, milestones: [{ id: 'formwork', complete: true }, { id: 'bogus', complete: true }] }, ['bogus']],
+      ]) {
+        await expect(submit(payload)).rejects.toMatchObject({
+          status: 400,
+          code: 'MILESTONES_REQUIRED',
+          details: { activityId: 'activity-1', method: 'weighted_milestone', milestones: configured, unknownMilestones },
+        });
+      }
+      // Stated rows that match no configured weight leave nothing to weigh: refused the same way.
+      await expect(submit({ pctComplete: 60, milestones: [{ id: 'formwork', weight: 0, complete: true }, { id: 'pour', weight: 0 }] })).rejects.toMatchObject({
+        status: 400,
+        code: 'MILESTONES_REQUIRED',
+        message: expect.stringMatching(/carry no configured weight/),
+      });
+      expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
+    });
+
+    it('the writer refuses a queued milestone submission naming only an unknown milestone; nothing official is written', async () => {
+      mockPrisma.progressSubmission.findFirst.mockResolvedValue({
+        id: 'submission-bogus',
+        projectId: 'project-1',
+        activityId: 'activity-1',
+        method: 'weighted_milestone',
+        source: 'manual',
+        pctComplete: 60,
+        milestoneProgressJson: [{ id: 'bogus', complete: true }],
+        evidenceJson: null,
+        status: 'submitted',
+        quantityEntries: [],
+        activity,
+      });
+      await expect(
+        progressService.approveProgressSubmission({ orgId: 'org-1', projectId: 'project-1', activityId: 'activity-1', submissionId: 'submission-bogus', userId: 'reviewer-1' }),
+      ).rejects.toMatchObject({ status: 400, code: 'MILESTONES_REQUIRED', details: { submissionId: 'submission-bogus', unknownMilestones: ['bogus'] } });
+      expect(mockPrisma.activityProgress.create).not.toHaveBeenCalled();
+    });
+
+    it('a submission stating its milestones is recorded at their weighted figure', async () => {
+      const row = await submit({ milestones: [{ id: 'formwork', complete: true }, { id: 'pour', pctComplete: 50 }] });
+      expect(row).toMatchObject({ method: 'weighted_milestone', pctComplete: 70 });
+    });
+
+    it('a configuration with no weighted milestone, and an activity with no configured method, take the percentage as before', async () => {
+      mockPrisma.activityProgressMethod.findFirst.mockResolvedValue({ ...milestoneConfig, milestoneWeightsJson: [] });
+      expect(await submit({ pctComplete: 35 })).toMatchObject({ method: 'weighted_milestone', pctComplete: 35 });
+      mockPrisma.activityProgressMethod.findFirst.mockResolvedValue(null);
+      expect(await submit({ method: 'weighted_milestone', pctComplete: 45 })).toMatchObject({ method: 'weighted_milestone', pctComplete: 45 });
+    });
+
+    it('the writer refuses a milestone submission in the queue that states no milestone; nothing official is written', async () => {
+      const pending = {
+        id: 'submission-old',
+        projectId: 'project-1',
+        activityId: 'activity-1',
+        method: 'weighted_milestone',
+        source: 'manual',
+        pctComplete: 0,
+        milestoneProgressJson: null,
+        evidenceJson: null,
+        status: 'submitted',
+        quantityEntries: [],
+        activity,
+      };
+      mockPrisma.progressSubmission.findFirst.mockResolvedValue(pending);
+      await expect(
+        progressService.approveProgressSubmission({ orgId: 'org-1', projectId: 'project-1', activityId: 'activity-1', submissionId: 'submission-old', userId: 'reviewer-1' }),
+      ).rejects.toMatchObject({ status: 400, code: 'MILESTONES_REQUIRED', details: { submissionId: 'submission-old' } });
+      expect(mockPrisma.progressSubmission.update).not.toHaveBeenCalled();
+      expect(mockPrisma.activityProgress.create).not.toHaveBeenCalled();
+    });
   });
 });

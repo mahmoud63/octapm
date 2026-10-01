@@ -97,6 +97,8 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
     for (const [key, role, template] of [
       ["site", "site_engineer", false],
       ["noBoq", "site_engineer", true],
+      // May export progress (the PDF) but not read the BOQ: the restricted PDF viewer.
+      ["costNoBoq", "cost_controller", true],
     ]) {
       const member = await createLiveUser(prisma, { orgId: live.org.id, name: `LiveTest ${key}`, email: `live-dlq-${key.toLowerCase()}-${tag}@octapm-live.test`, role });
       member.token = mintAccessToken(member);
@@ -177,6 +179,10 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
 
   it("rows are recorded against an allocated item, in its unit or an alias, under the recorder's assignment rule — and are site records: no entry exists", async () => {
     refused(await addRow({ activityId: pour.id, boqItemId: blocks.id, quantity: 5 }), 400, "DAILY_LOG_QUANTITY_NOT_ALLOCATED");
+    // Zero is no work, and no work is no row (integration item 7): the section refuses it as the entries service does.
+    const zero = await addRow({ activityId: pour.id, boqItemId: concrete.id, quantity: 0, unitCode: "m3" });
+    refused(zero, 400, "QUANTITY_INVALID");
+    expect(zero.body.error.message).toBe("A quantity must be greater than zero; record nothing for no work");
     refused(await addRow({ activityId: pour.id, boqItemId: concrete.id, quantity: 5, unit: "t" }), 400, "QUANTITY_UNIT_MISMATCH");
     refused(await addRow({ activityId: pour.id, boqItemId: concrete.id, quantity: -1 }), 400, "VALIDATION_ERROR");
     refused(await addRow({ activityId: pour.id, boqItemId: concrete.id, quantity: 5, allocationId: "00000000-0000-4000-8000-000000000000" }), 400, "QUANTITY_ALLOCATION_MISMATCH");
@@ -464,27 +470,91 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
     refused(await submitProgress(pour.id, { bundleSubmittedThrough: "2026-09-30" }), 400, "QUANTITY_NO_ENTRIES_TO_BUNDLE");
   });
 
-  it("a member who may not read the BOQ records against the picker and reads the log without the item's code or allocation", async () => {
+  it("a member who may not read the BOQ records against the picker and reads the log under the ledger's rule: the item's description and unit, never its quantity, item, allocation or the per-unit totals — on the read, every write answer, the list, the PDF and the distributed document", async () => {
+    const WITHHELD_KEYS = ["quantity", "unitCode", "boqItemId", "allocationId", "boqItem.id", "boqItem.code"];
+    const withheldRow = (row) => {
+      expect(row).toMatchObject({ boqItem: { description: "Concrete in foundations", unit: "Cu.M", unitCode: "m3" }, activity: { name: "Pour foundations" }, createdBy: members.noBoq.id, progressEntry: { status: "submitted", official: false, source: "daily_log", recordedBy: members.noBoq.id }, boqWithheld: { keys: WITHHELD_KEYS, reason: expect.stringContaining("may read the BOQ") } });
+      for (const key of ["quantity", "unitCode", "boqItemId", "allocationId"]) expect(row).not.toHaveProperty(key);
+      for (const key of ["id", "code"]) expect(row.boqItem).not.toHaveProperty(key);
+      expect(row.progressEntry).not.toHaveProperty("quantity");
+    };
+    const withheldTotals = (totals) => {
+      expect(totals).not.toHaveProperty("quantities");
+      expect(totals).toMatchObject({ quantityRows: expect.any(Number), boqWithheld: { keys: ["quantities"], reason: expect.stringContaining("may read the BOQ") } });
+    };
+    // The write answer: the day is already submitted, so the row is pending the moment it is recorded — by its author — and the answer is withheld like the read.
     const added = await addRow({ activityId: pour.id, boqItemId: concrete.id, quantity: 8, unitCode: "m3", clientRequestId: "dlq-row-6" }, members.noBoq.token);
     ok(added, 201);
     ids.row6 = added.body.data.entryId;
-    const row = rowOf(added.body.data, ids.row6);
-    // The day is already submitted, so the row is pending the moment it is recorded — by its author, with no quantity on the entry block.
-    expect(row).toMatchObject({ quantity: 8, unitCode: "m3", boqItemId: concrete.id, boqItem: { id: concrete.id, description: "Concrete in foundations", unit: "Cu.M", unitCode: "m3" }, activity: { name: "Pour foundations" }, createdBy: members.noBoq.id, progressEntry: { status: "submitted", official: false, source: "daily_log", recordedBy: members.noBoq.id }, boqWithheld: { keys: ["allocationId", "boqItem.code"], reason: expect.stringContaining("may read the BOQ") } });
-    expect(row.progressEntry).not.toHaveProperty("quantity");
-    expect(row).not.toHaveProperty("allocationId");
-    expect(row.boqItem).not.toHaveProperty("code");
-    expect(added.body.data.totals.quantities).toEqual(expect.arrayContaining([{ unitCode: "m3", quantity: 8, rows: 1 }]));
-    // The same log to a BOQ reader carries the code and the allocation; the row's allocation was resolved by the server.
-    const full = rowOf(await getLog(), ids.row6);
-    expect(full).toMatchObject({ allocationId: ids.pourAllocation, boqItem: { code: "1.1" } });
-    expect(full.boqWithheld).toBeUndefined();
-    // The list of days carries the per-unit tally for everyone who may read progress.
+    withheldRow(rowOf(added.body.data, ids.row6));
+    withheldTotals(added.body.data.totals);
+    expect(JSON.stringify(added.body.data)).not.toMatch(/"quantity":\s*8\b|"code":\s*"1\.1"/);
+    // The read, the edit's answer, and the list of days: the same.
+    const read = await getLog(members.noBoq.token);
+    withheldRow(rowOf(read, ids.row6));
+    withheldTotals(read.totals);
+    expect(JSON.stringify(read)).not.toMatch(/"quantity":\s*\d|"code":\s*"1\.1"/);
+    const edited = await api.request("PATCH", at(`/daily-logs/${DAY}/entries/quantities/${ids.row6}`), { body: { notes: "bay 6" }, headers: bearer(members.noBoq.token) });
+    ok(edited);
+    withheldRow(rowOf(edited.body.data, ids.row6));
+    withheldTotals(edited.body.data.totals);
     const days = await api.get(at(`/daily-logs?from=${DAY}&to=${DAY}`), bearer(members.noBoq.token));
     ok(days);
-    expect(days.body.data.items[0].totals.quantities).toEqual(expect.arrayContaining([{ unitCode: "m3", quantity: 8, rows: 1 }]));
-    const pdf = await api.request("GET", at(`/daily-logs/${DAY}/export.pdf`), { headers: bearer(live.token) });
-    expect(pdf.status).toBe(200);
+    withheldTotals(days.body.data.items[0].totals);
+    // The same log to a BOQ reader carries everything; the row's allocation was resolved by the server.
+    const full = rowOf(await getLog(), ids.row6);
+    expect(full).toMatchObject({ quantity: 8, unitCode: "m3", boqItemId: concrete.id, allocationId: ids.pourAllocation, boqItem: { id: concrete.id, code: "1.1" } });
+    expect(full.boqWithheld).toBeUndefined();
+    const fullDays = await api.get(at(`/daily-logs?from=${DAY}&to=${DAY}`), bearer(live.token));
+    ok(fullDays);
+    expect(fullDays.body.data.items[0].totals.quantities).toEqual(expect.arrayContaining([{ unitCode: "m3", quantity: 8, rows: 1 }]));
+    // The PDF: a BOQ reader's carries the code and the figures; a viewer without the BOQ gets a dash per row and no per-unit total.
+    const pdfText = async (token) => {
+      const response = await fetch(`${api.base}${at(`/daily-logs/${DAY}/export.pdf`)}`, { headers: bearer(token) });
+      expect(response.status).toBe(200);
+      return Buffer.from(await response.arrayBuffer()).toString("latin1");
+    };
+    const fullPdf = await pdfText(live.token);
+    expect(fullPdf).toContain("1.1 Concrete in foundations");
+    expect(fullPdf).toContain("8 m3");
+    const restrictedPdf = await pdfText(members.costNoBoq.token);
+    expect(restrictedPdf).toContain("Concrete in foundations");
+    expect(restrictedPdf).not.toContain("1.1 Concrete");
+    expect(restrictedPdf).not.toMatch(/\b8 m3\b|installed 8/);
+    expect(restrictedPdf).toContain("Quantities per BOQ item are shown to members who may read the BOQ");
+    // The distributed document is one file for the project: rendered as the most restricted reader sees it.
+    const distributed = await api.post(at(`/daily-logs/${DAY}/distribute`), { roles: ["pm"], emails: [] }, bearer(live.token));
+    ok(distributed);
+    const document = await prisma.projectDocument.findUnique({ where: { id: distributed.body.data.document.id } });
+    expect(document).toMatchObject({ projectId: project.id, mimeType: "application/pdf" });
+    const stored = await require("../file-storage.service").getProjectDocumentFile({ orgId: live.org.id, projectId: project.id, key: document.id, documentType: document.documentType });
+    const storedText = require("fs").readFileSync(stored.path).toString("latin1");
+    expect(storedText).toContain("Concrete in foundations");
+    expect(storedText).not.toContain("1.1 Concrete");
+    expect(storedText).not.toMatch(/\b8 m3\b|installed 8/);
+    // The activity register for the same member (integration item 8): installed and planned are a withheld marker with the
+    // reason — never a figure, never a zero — and each pending entry is under the ledger's rule; a BOQ reader gets the figures.
+    const mine = await api.get(at(`/activities/${pour.id}`), bearer(members.noBoq.token));
+    ok(mine);
+    const reason = { withheld: { reason: expect.stringContaining("may read the BOQ") } };
+    expect(mine.body.data).toMatchObject({ installedQuantity: reason, plannedQuantity: reason });
+    expect(Object.keys(mine.body.data.installedQuantity)).toEqual(["withheld"]);
+    expect(mine.body.data.pendingQuantityEntries.length).toBeGreaterThan(0);
+    for (const entry of mine.body.data.pendingQuantityEntries) {
+      expect(entry).toMatchObject({ status: "submitted", provenance: expect.any(Object), boqWithheld: { keys: expect.arrayContaining(["quantity", "unitCode", "boqItemId"]) } });
+      for (const key of ["quantity", "unitCode", "boqItemId", "boqItem", "allocationId"]) expect(entry).not.toHaveProperty(key);
+    }
+    expect(mine.body.data.pendingQuantityEntries.map((entry) => entry.provenance.dailyLogQuantityId)).toContain(ids.row6);
+    const listed = await api.get(at("/activities"), bearer(members.noBoq.token));
+    ok(listed);
+    expect(listed.body.data.find((row) => row.id === pour.id)).toMatchObject({ installedQuantity: reason, plannedQuantity: reason });
+    expect(JSON.stringify(listed.body.data)).not.toMatch(/"installed":\s*\[|"planned":\s*\d/);
+    const theirs = await api.get(at(`/activities/${pour.id}`), bearer(live.token));
+    ok(theirs);
+    expect(theirs.body.data).toMatchObject({ installedQuantity: { installed: expect.any(Array), basis: expect.any(String) }, plannedQuantity: { planned: 100, unitCode: "m3", basis: "approved_allocations" } });
+    expect(theirs.body.data.pendingQuantityEntries.find((entry) => entry.provenance.dailyLogQuantityId === ids.row6)).toMatchObject({ quantity: 8, unitCode: "m3", source: "daily_log", boqItem: { code: "1.1" } });
+    // The distribute answer to the PM is the PM's view; the row count and provenance are everyone's.
+    expect(rowOf(distributed.body.data, ids.row6)).toMatchObject({ quantity: 8, boqItem: { code: "1.1" } });
   });
 
   it("PROGRESS SOURCE links are the server's: a client-sent submissionId or dailyLogId on a direct entry is ignored", async () => {
@@ -511,5 +581,69 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
     const after = (await api.get(at("/reports/ev"), bearer(live.token))).body.data.activityBreakdown;
     const strip = (rows) => JSON.stringify(rows.filter((row) => row.activityId !== "A100"));
     expect(strip(after)).toBe(strip(JSON.parse(evBefore)));
+  });
+
+  // Verification finding (blocker): GET /activities/{id}/detail handed a member without boq:read the BOQ item's code and
+  // id, the allocation id and the per-entry installed quantity (the bundled entries, whole, on each listed submission),
+  // and the frozen quantityComplete / quantityPlanned / quantityUnit of every submission and approved-history row.
+  it("the activity detail for a member who may not read the BOQ: its submissions go through the submission rule (no quantity figures, each bundled entry under the ledger rule) and its approved history carries no frozen quantity — with a pending and an approved bundle", async () => {
+    // Distinctive figures: a typed planned quantity and an entry no other case uses.
+    const entry = await api.post(at("/quantity-progress"), { activityId: pour.id, boqItemId: concrete.id, quantity: 7.125, date: DAY, status: "submitted", clientRequestId: "dlq-detail-1" }, bearer(live.token));
+    ok(entry, 201);
+    const entryId = entry.body.data.entry.id;
+    const bundle = await api.post(at(`/activities/${pour.id}/progress`), { entryIds: [entryId] }, bearer(live.token));
+    ok(bundle, 200);
+    const submissionId = bundle.body.data.submission.id;
+    const detailFor = async (token) => {
+      const answer = await api.get(at(`/activities/${pour.id}/detail`), bearer(token));
+      ok(answer);
+      return answer;
+    };
+    const SUBMISSION_KEYS = ["quantityComplete", "quantityPlanned", "quantityUnit", "quantity"];
+    const ENTRY_KEYS = ["quantity", "unitCode", "boqItemId", "boqItem", "allocationId"];
+    const assertWithheld = (answer, { approvedRows }) => {
+      const progress = answer.body.data.sections.progress;
+      expect(progress.allowed).toBe(true);
+      // The percentage, the method and the provenance are progress data and stay.
+      expect(progress.method).toMatchObject({ method: "quantity" });
+      expect(progress.pctComplete.value).toEqual(expect.any(Number));
+      expect(progress.installedQuantity).toMatchObject({ value: null, withheld: true });
+      const mine = progress.submissions.items.find((row) => row.id === submissionId);
+      expect(mine).toMatchObject({ method: "quantity", pctComplete: expect.any(Number), quantityEntryIds: [entryId], progressSource: { entries: 1 }, boqWithheld: { keys: expect.arrayContaining(["quantityComplete", "quantityPlanned", "quantityUnit"]), reason: expect.stringContaining("may read the BOQ") } });
+      expect(progress.submissions.items.length).toBeGreaterThanOrEqual(3);
+      for (const row of progress.submissions.items) {
+        for (const key of SUBMISSION_KEYS) expect(row).not.toHaveProperty(key);
+        for (const bundled of row.quantityEntries || []) {
+          for (const key of ENTRY_KEYS) expect(bundled).not.toHaveProperty(key);
+          expect(bundled).toMatchObject({ id: expect.any(String), status: expect.any(String), provenance: expect.any(Object), boqWithheld: { keys: expect.arrayContaining(["quantity", "boqItemId"]) } });
+        }
+      }
+      expect(mine.quantityEntries).toHaveLength(1);
+      expect(progress.approvedHistory.items).toHaveLength(approvedRows);
+      expect(progress.approvedHistory.total).toBe(approvedRows);
+      for (const row of progress.approvedHistory.items) {
+        for (const key of ["quantityComplete", "quantityPlanned", "quantityUnit"]) expect(row).not.toHaveProperty(key);
+        expect(row).toMatchObject({ id: expect.any(String), pctComplete: expect.any(Number), progressMethod: "quantity", approvedAt: expect.any(String), boqWithheld: { keys: ["quantityComplete", "quantityPlanned", "quantityUnit"], reason: expect.stringContaining("may read the BOQ") } });
+      }
+      // Nothing of the bill anywhere in the answer: the item's id and code, the allocation, a quantity or its unit code
+      // (the percentage is progress data — 60 + 7.125 of 100 reads 67.125% — so a figure is looked for by its key).
+      const body = JSON.stringify(answer.body.data);
+      const found = [concrete.id, ids.pourAllocation, '"code":"1.1"', '"quantity":', '"quantityComplete":', '"quantityPlanned":', '"unitCode":"m3"'].filter((needle) => body.includes(needle));
+      expect(found).toEqual([]);
+    };
+    const approvedBefore = await prisma.activityProgress.count({ where: { activityId: pour.id, status: "approved" } });
+    // The pending bundle: the site engineer and the cost controller on a boq:none template.
+    assertWithheld(await detailFor(members.noBoq.token), { approvedRows: approvedBefore });
+    assertWithheld(await detailFor(members.costNoBoq.token), { approvedRows: approvedBefore });
+    // A BOQ reader's detail carries them: the entries whole, the frozen quantities.
+    const full = (await detailFor(live.token)).body.data.sections.progress;
+    expect(full.submissions.items.find((row) => row.id === submissionId)).toMatchObject({ quantityPlanned: 100, quantityUnit: "m3", quantityEntries: [{ id: entryId, quantity: 7.125, unitCode: "m3", boqItemId: concrete.id, boqItem: { code: "1.1" } }] });
+    expect(full.submissions.items.find((row) => row.id === submissionId).boqWithheld).toBeUndefined();
+    expect(full.approvedHistory.items[0]).toMatchObject({ quantityComplete: expect.any(Number), quantityPlanned: 100, quantityUnit: "m3" });
+    expect(full.approvedHistory.items[0].boqWithheld).toBeUndefined();
+    // Approved: the same member, the same rule, one more history row.
+    ok(await api.post(at(`/activities/${pour.id}/progress-submissions/${submissionId}/approve`), {}, bearer(live.token)));
+    assertWithheld(await detailFor(members.noBoq.token), { approvedRows: approvedBefore + 1 });
+    assertWithheld(await detailFor(members.costNoBoq.token), { approvedRows: approvedBefore + 1 });
   });
 });

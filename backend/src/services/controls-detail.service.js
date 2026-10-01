@@ -369,10 +369,11 @@ const getBoqItemDetail = async ({ orgId, projectId, itemId, can, partyScoped = f
     ]);
     sections.certification = {
       allowed: true,
+      // One truth, one basis for one figure: the same rows the quantities
+      // section's certified figure sums (quantity-views TRUTH/BASIS — a Σ
+      // over IpcItem rows is derived; integration item 5).
       certifiedQuantity: summaryItem
-        ? fig(certifiedRows.reduce((sum, entry) => sum + toNumber(entry.qty), 0), "derived", `Σ IpcItem.qty for this item on ${CERTIFIED_BASIS}: the rows the certified amount sums`, [
-            CERTIFIED_ROWS,
-          ])
+        ? fig(certifiedRows.reduce((sum, entry) => sum + toNumber(entry.qty), 0), quantityViews.TRUTH.certified, quantityViews.BASIS.certified, [CERTIFIED_ROWS])
         : null,
       certifiedAmount: summaryItem
         ? fig(summaryItem.certifiedValue, "derived", `Σ IpcItem.currentCert for this item on ${CERTIFIED_BASIS} (allocation summary certifiedValue)`, [

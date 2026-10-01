@@ -1,6 +1,6 @@
 jest.mock("../../middleware/rbac", () => ({ hasPermission: jest.fn() }));
 
-const { QUANTITY_ENTRY_BOQ_KEYS, QUANTITY_ENTRY_WITHHELD, withheldQuantityEntries, withheldQuantityEntry, withheldQuantityEntryResult, withheldProgressSubmission, withheldProgressSubmissions, withheldActivity, withheldDailyLog, withheldDailyLogQuantity, withheldAllocatedItems, DAILY_LOG_QUANTITY_WITHHELD, ALLOCATED_ITEM_WITHHELD } = require("../boq-figures");
+const { QUANTITY_ENTRY_BOQ_KEYS, QUANTITY_ENTRY_WITHHELD, withheldQuantityEntries, withheldQuantityEntry, withheldQuantityEntryResult, withheldProgressSubmission, withheldProgressSubmissions, withheldActivity, withheldDailyLog, withheldDailyLogQuantity, withheldAllocatedItems, DAILY_LOG_QUANTITY_WITHHELD, DAILY_LOG_TOTALS_WITHHELD, ALLOCATED_ITEM_WITHHELD, ACTIVITY_QUANTITY_WITHHELD, ACTIVITY_QUANTITY_FIGURE_KEYS } = require("../boq-figures");
 
 // An entry as quantity-progress.service builds it.
 const entry = (id) => ({
@@ -116,6 +116,29 @@ describe("PC-6: a progress submission's quantity figures (installed from the ent
     expect(answer.pendingProgress).toMatchObject({ pctComplete: 37.5, boqWithheld: expect.any(Object) });
     expect(withheldActivity(activity, BOQ)).toBe(activity);
   });
+
+  it("the register's quantity figures (PC-6 integration): installed and planned are answered as a withheld marker with the reason — no value, never a zero; pending and bundled entries go through the ledger's rule", () => {
+    const entry = { id: "e-1", activityId: "a-1", status: "submitted", date: "2026-09-05", quantity: 15, unitCode: "m3", boqItemId: "item-1", boqItem: { id: "item-1", code: "1.1" }, allocationId: "al-1", provenance: { source: "daily_log", recordedBy: "u-1" } };
+    const activity = {
+      id: "a-1",
+      pctComplete: 75,
+      installedQuantity: { installed: [{ boqItemId: "item-1", code: "1.1", description: "Blockwork", unitCode: "m3", quantity: 15, entries: 1 }], asOf: "2026-10-01T00:00:00.000Z", basis: "Σ approved entries" },
+      plannedQuantity: { planned: 20, unitCode: "m3", basis: "approved_allocations" },
+      pendingQuantityEntries: [entry],
+      pendingProgress: { ...submission, quantityEntries: [entry] },
+    };
+    const answer = withheldActivity(activity, COST);
+    for (const key of ACTIVITY_QUANTITY_FIGURE_KEYS) expect(answer[key]).toEqual({ withheld: { reason: ACTIVITY_QUANTITY_WITHHELD } });
+    expect(answer.pctComplete).toBe(75);
+    for (const row of [answer.pendingQuantityEntries[0], answer.pendingProgress.quantityEntries[0]]) {
+      expect(row).toMatchObject({ id: "e-1", status: "submitted", date: "2026-09-05", provenance: { source: "daily_log" }, boqWithheld: { keys: ["quantity", "unitCode", "boqItemId", "boqItem", "allocationId"], reason: QUANTITY_ENTRY_WITHHELD } });
+      for (const key of QUANTITY_ENTRY_BOQ_KEYS) expect(row).not.toHaveProperty(key);
+    }
+    expect(JSON.stringify(answer)).not.toMatch(/"quantity":\s*(15|20)|"planned":\s*20|"1\.1"/);
+    // A BOQ reader's activity is the same object; an activity without the figures gains none.
+    expect(withheldActivity(activity, BOQ)).toBe(activity);
+    expect(withheldActivity({ id: "a-2", pctComplete: 10 }, COST)).toEqual({ id: "a-2", pctComplete: 10 });
+  });
 });
 
 // ─── PC-6 §4: the daily log's quantities section and the allocated-items picker ───
@@ -138,23 +161,25 @@ describe("the daily log's quantities section", () => {
   });
   const log = () => ({ id: "log-1", date: "2026-09-05", status: "submitted", sections: { manpower: [{ id: "mp-1" }], quantities: [row()] }, totals: { quantities: [{ unitCode: "m3", quantity: 12.5, rows: 1 }], entries: 2 } });
 
-  it("a reader who may not read the BOQ keeps the description, unit, quantity, activity and the entry's state; loses the item's code and the allocation", () => {
+  it("a reader who may not read the BOQ keeps the item's description and unit name, the activity, the notes and the entry's state; loses the quantity, its unit code, the item's id and code and the allocation — the ledger's rule", () => {
     const withheld = withheldDailyLogQuantity(row(), COST);
-    expect(withheld).toMatchObject({ id: "q-1", quantity: 12.5, unitCode: "m3", boqItemId: "item-1", boqItem: { id: "item-1", description: "Concrete in footings", unit: "m3", unitCode: "m3" }, activity: { name: "Pour" }, notes: "bay 3", progressEntry: { id: "e-1", status: "submitted", official: false } });
-    expect(withheld).not.toHaveProperty("allocationId");
-    expect(withheld.boqItem).not.toHaveProperty("code");
-    expect(withheld.boqWithheld).toEqual({ keys: ["allocationId", "boqItem.code"], reason: DAILY_LOG_QUANTITY_WITHHELD });
+    expect(withheld).toMatchObject({ id: "q-1", boqItem: { description: "Concrete in footings", unit: "m3", unitCode: "m3" }, activity: { name: "Pour" }, notes: "bay 3", progressEntry: { id: "e-1", status: "submitted", official: false } });
+    for (const key of ["quantity", "unitCode", "boqItemId", "allocationId"]) expect(withheld).not.toHaveProperty(key);
+    for (const key of ["id", "code"]) expect(withheld.boqItem).not.toHaveProperty(key);
+    expect(withheld.boqWithheld).toEqual({ keys: ["quantity", "unitCode", "boqItemId", "allocationId", "boqItem.id", "boqItem.code"], reason: DAILY_LOG_QUANTITY_WITHHELD });
+    expect(JSON.stringify(withheld)).not.toContain("12.5");
     expect(withheldDailyLogQuantity(row(), BOQ)).toEqual(row());
   });
 
-  it("withheldDailyLog maps the quantities section only and leaves the other sections and the per-unit totals", () => {
+  it("withheldDailyLog maps the quantities section and withholds the per-unit totals (never zeroed), leaving the other sections and the row count", () => {
     const answer = withheldDailyLog(log(), COST);
     expect(answer.sections.manpower).toEqual([{ id: "mp-1" }]);
-    expect(answer.sections.quantities[0].boqWithheld.keys).toEqual(["allocationId", "boqItem.code"]);
-    expect(answer.totals).toEqual(log().totals);
+    expect(answer.sections.quantities[0].boqWithheld.keys).toEqual(["quantity", "unitCode", "boqItemId", "allocationId", "boqItem.id", "boqItem.code"]);
+    expect(answer.totals).toEqual({ entries: 2, boqWithheld: { keys: ["quantities"], reason: DAILY_LOG_TOTALS_WITHHELD } });
+    expect(JSON.stringify(answer)).not.toContain("12.5");
     expect(withheldDailyLog(log(), BOQ)).toEqual(log());
-    const empty = { id: null, exists: false, sections: { quantities: [] }, totals: {} };
-    expect(withheldDailyLog(empty, COST)).toEqual({ ...empty, sections: { quantities: [] } });
+    const empty = { id: null, exists: false, sections: { quantities: [] }, totals: { quantityRows: 0, quantities: [] } };
+    expect(withheldDailyLog(empty, COST)).toEqual({ ...empty, sections: { quantities: [] }, totals: { quantityRows: 0, boqWithheld: { keys: ["quantities"], reason: DAILY_LOG_TOTALS_WITHHELD } } });
     expect(withheldDailyLog(null, COST)).toBeNull();
   });
 
@@ -165,5 +190,75 @@ describe("the daily log's quantities section", () => {
     expect(answer.boqWithheld).toEqual({ keys: ["code", "allocationId", "allocationIds", "allocatedQuantity"], reason: ALLOCATED_ITEM_WITHHELD });
     expect(answer.activity).toEqual(result.activity);
     expect(withheldAllocatedItems(result, BOQ)).toBe(result);
+  });
+});
+
+describe("the activity detail's progress section for a member who may not read the BOQ (verification finding: the entries whole and the frozen quantities were handed over)", () => {
+  const { withheldActivityDetail, withheldApprovedProgress, DETAIL_ALL_ROWS, APPROVED_PROGRESS_WITHHELD, PROGRESS_SUBMISSION_WITHHELD, QUANTITY_FIGURES_WITHHELD } = require("../boq-figures");
+  const submissionRow = (id, status) => ({
+    id,
+    activityId: "a-1",
+    method: "quantity",
+    status,
+    pctComplete: 37.5,
+    quantityComplete: 60,
+    quantityPlanned: 160,
+    quantityUnit: "m3",
+    quantityEntryIds: ["e-1"],
+    quantityEntries: [entry("e-1")],
+    progressSource: { source: "daily_log", submissionId: id, entries: 1 },
+  });
+  const historyRow = (id) => ({ id, submissionId: "s-2", pctComplete: 37.5, quantityComplete: 60, quantityPlanned: 160, quantityUnit: "m3", progressMethod: "quantity", source: "daily_log", approvedAt: "2026-09-02T10:00:00.000Z", approvedBy: "pm-1" });
+  const capped = (rows) => ({ items: rows, total: rows.length, viewAll: "/x", [DETAIL_ALL_ROWS]: rows });
+  const detail = () => ({
+    kind: "activity",
+    id: "a-1",
+    sections: {
+      progress: {
+        allowed: true,
+        method: { method: "quantity", quantityUnit: "m3" },
+        pctComplete: { value: 37.5, truth: "source", basis: "x", derivedFrom: [] },
+        progressSource: "daily_log",
+        installedQuantity: { value: 60, truth: "derived", unitCode: "m3", unitMatch: true },
+        approvedHistory: capped([historyRow("p-1"), { ...historyRow("p-0"), progressMethod: "percent", quantityComplete: null, quantityPlanned: null, quantityUnit: null }]),
+        submissions: capped([submissionRow("s-1", "submitted"), submissionRow("s-2", "approved")]),
+      },
+    },
+  });
+
+  it("a BOQ reader's detail is the same object", () => {
+    const built = detail();
+    expect(withheldActivityDetail(built, BOQ)).toBe(built);
+  });
+
+  it("every listed submission goes through the submission rule and each bundled entry through the ledger's; every approved row loses its frozen quantities; the percentage, method and provenance stay", () => {
+    const { progress } = withheldActivityDetail(detail(), COST).sections;
+    expect(progress.installedQuantity).toMatchObject({ value: null, withheld: true, notAvailable: { reason: QUANTITY_FIGURES_WITHHELD } });
+    expect(progress.pctComplete.value).toBe(37.5);
+    expect(progress.method).toEqual({ method: "quantity", quantityUnit: "m3" });
+    expect(progress.submissions).toMatchObject({ total: 2, viewAll: "/x" });
+    for (const row of progress.submissions.items) {
+      for (const key of ["quantityComplete", "quantityPlanned", "quantityUnit", "quantity"]) expect(row).not.toHaveProperty(key);
+      expect(row).toMatchObject({ method: "quantity", pctComplete: 37.5, quantityEntryIds: ["e-1"], progressSource: { entries: 1 }, boqWithheld: { keys: ["quantityComplete", "quantityPlanned", "quantityUnit"], reason: PROGRESS_SUBMISSION_WITHHELD } });
+      expect(row.quantityEntries).toHaveLength(1);
+      for (const key of QUANTITY_ENTRY_BOQ_KEYS) expect(row.quantityEntries[0]).not.toHaveProperty(key);
+      expect(row.quantityEntries[0]).toMatchObject({ id: "e-1", status: "submitted", provenance: { source: "daily_log" }, boqWithheld: { reason: QUANTITY_ENTRY_WITHHELD } });
+    }
+    expect(progress.approvedHistory).toMatchObject({ total: 2 });
+    for (const row of progress.approvedHistory.items) {
+      for (const key of ["quantityComplete", "quantityPlanned", "quantityUnit"]) expect(row).not.toHaveProperty(key);
+      expect(row).toMatchObject({ pctComplete: 37.5, approvedBy: "pm-1", boqWithheld: { keys: ["quantityComplete", "quantityPlanned", "quantityUnit"], reason: APPROVED_PROGRESS_WITHHELD } });
+    }
+    // The full set the page was cut from goes nowhere, and nothing of the bill is left in what is sent.
+    expect(progress.submissions[DETAIL_ALL_ROWS]).toBeUndefined();
+    expect(progress.approvedHistory[DETAIL_ALL_ROWS]).toBeUndefined();
+    expect(JSON.stringify({ approvedHistory: progress.approvedHistory, submissions: progress.submissions })).not.toMatch(/item-1|al-1|12\.5|"1\.1"|\b160\b|"quantity(Complete|Planned|Unit)?":/);
+  });
+
+  it("an approved row with no quantity key is left as it is; a section the caller may not read is untouched", () => {
+    const plain = { id: "p-9", pctComplete: 10 };
+    expect(withheldApprovedProgress(plain, COST)).toBe(plain);
+    const denied = { kind: "activity", id: "a-1", sections: { progress: { allowed: false, module: "progress", reason: "no" } } };
+    expect(withheldActivityDetail(denied, COST).sections.progress).toEqual({ allowed: false, module: "progress", reason: "no" });
   });
 });

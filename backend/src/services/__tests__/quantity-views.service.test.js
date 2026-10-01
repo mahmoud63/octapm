@@ -69,6 +69,8 @@ const filterIpc = (where) => {
 
 const mockPrisma = {
   project: { findFirst: jest.fn(async ({ where }) => rows.projects.find((row) => row.id === where.id && row.orgId === where.orgId) || null) },
+  // The reporting zone: Project.timezone → Organisation.defaultTimezone → UTC.
+  organisation: { findUnique: jest.fn(async () => ({ defaultTimezone: null })) },
   boqItem: {
     findFirst: jest.fn(async ({ where }) => rows.items.find((row) => row.id === where.id && row.projectId === where.projectId) || null),
     findMany: jest.fn(async ({ where }) => rows.items.filter((row) => where.id.in.includes(row.id) && row.projectId === where.projectId)),
@@ -109,10 +111,13 @@ jest.mock("../activity-boq-allocation.service", () => ({
 jest.mock("../commitment.service", () => ({ POSTING_STATUSES: Object.freeze(["executed", "closed"]) }));
 jest.mock("../progress.service", () => ({
   normalizeMethod: (method) => ({ percent_complete: "percent", milestone: "weighted_milestone" }[String(method || "percent").toLowerCase()] || String(method || "percent").toLowerCase()),
+  // PROGRESS SOURCE is the writer's own reading of a row (the legacy floor is
+  // named there): the real one, never a stand-in.
+  serializeProgressSource: (progress) => jest.requireActual("../progress.service").serializeProgressSource(progress),
 }));
 
 const service = require("../quantity-views.service");
-const { withheldActivityQuantities, withheldBoqItemQuantities, withheldActivityDetail, QUANTITY_FIGURES_WITHHELD } = require("../../utils/boq-figures");
+const { withheldActivity, withheldActivityQuantities, withheldBoqItemQuantities, withheldActivityDetail, QUANTITY_FIGURES_WITHHELD } = require("../../utils/boq-figures");
 
 // A stand-in for the core track's contract: Σ approved entries, as the live
 // test seeds them. The service never sums entries itself.
@@ -161,7 +166,10 @@ describe("quantity views (PC-6)", () => {
     // installed: Σ approved entries only (25 + 10; the submitted 500 never counts)
     expect(figures.installed).toMatchObject({ value: 35, truth: "derived", unitCode: "m3", unitMatch: true, entries: 2 });
     // certified: the two lines on the certified basis (30 + 10); draft, unallocated and rejected-allocation lines are not counted
-    expect(figures.certified).toMatchObject({ value: 40, truth: "source", unitCode: "m3", unitMatch: true, rows: 2 });
+    // A Σ over IpcItem rows is derived — the one label the certification section gives the same rows.
+    expect(figures.certified).toMatchObject({ value: 40, truth: "derived", unitCode: "m3", unitMatch: true, rows: 2 });
+    expect(service.TRUTH.certified).toBe("derived");
+    expect(figures.paid.basis).toMatch(/share of the certificate's net payable that has been paid .*capped at 1.*a fully paid certificate projects paid = certified/);
     expect(figures.certified.subcontract).toMatchObject({ value: null, notAvailable: { reason: service.SUBCONTRACT_CERTIFIED_REASON } });
     // paid: per certificate — 30 × (250 ÷ 1000) + 10 × (500 ÷ 500) = 7.5 + 10
     expect(figures.paid).toMatchObject({ value: 17.5, truth: "projection", unitCode: "m3", unitMatch: true });
@@ -248,6 +256,144 @@ describe("quantity views (PC-6)", () => {
     expect(view.items.map((block) => block.boqItemId)).toEqual([ITEM, ITEM_2]);
   });
 
+  describe("the installed view names a legacy floor", () => {
+    // The official row of a floored approval, as the one writer leaves it:
+    // 75 of 100 (a typed 60 carried as the floor + 15 entered), the floor's
+    // trace in its note. Σ approved entries (ENTRIES) is 35.
+    const FLOOR_NOTE = "Legacy typed quantity carried as the floor of the installed figure (PC-6)";
+    const floored = { id: "ap-floor", activityId: ACT, status: "approved", pctComplete: 75, progressMethod: "quantity", source: "manual", quantityComplete: 75, quantityPlanned: 100, quantityUnit: "m3", notes: FLOOR_NOTE, approvedAt: new Date("2026-10-01T10:00:00Z") };
+    const OFFICIAL = { value: 75, unitCode: "m3", basis: "official figure of the latest approved progress, carrying a legacy typed quantity as its floor" };
+    const original = rows.progress[0];
+    afterEach(() => {
+      rows.progress[0] = original;
+    });
+
+    it("keeps Σ approved entries, says why it is below the official installed figure, and carries that figure beside it — on the activity view and the detail's figure", async () => {
+      const plain = await service.getActivityQuantities({ orgId: ORG, projectId: PROJECT, activityId: ACT, can: allow, core: coreWith(ENTRIES) });
+      expect(plain.figures.installed.officialInstalled).toBeUndefined();
+      expect(plain.figures.installed.basis).toBe(service.BASIS.installed);
+
+      rows.progress[0] = floored;
+      const view = await service.getActivityQuantities({ orgId: ORG, projectId: PROJECT, activityId: ACT, can: allow, core: coreWith(ENTRIES) });
+      // Neither figure moved: Σ approved entries is 35 as before, the official % is the row's.
+      expect(view.figures.installed).toMatchObject({ value: 35, unitCode: "m3", unitMatch: true, truth: "derived" });
+      expect(view.figures.installed.byItem).toEqual(plain.figures.installed.byItem);
+      expect(view.progress.pctComplete.value).toBe(75);
+      expect(view.figures.installed.officialInstalled).toEqual({ ...OFFICIAL, installedBasis: "legacy_typed_floor", truth: "source", derivedFrom: [{ type: "activity_progress", id: "ap-floor" }], approvedAt: "2026-10-01T10:00:00.000Z" });
+      expect(view.figures.installed.basis).toBe(`${service.BASIS.installed}. ${service.LEGACY_FLOOR_INSTALLED_NOTE}`);
+      expect(view.figures.installed.basis).toMatch(/below the official installed figure .* because earlier progress was typed, not entered/);
+      expect(service.OFFICIAL_INSTALLED_BASIS).toBe(OFFICIAL.basis);
+      // Everything else of the view is what it was.
+      const { installed: flooredInstalled, ...flooredRest } = view.figures;
+      const { installed: plainInstalled, ...plainRest } = plain.figures;
+      expect(flooredRest).toEqual(plainRest);
+      expect(view.items).toEqual(plain.items);
+      // The comparison takes the higher of Σ approved entries (35) and the official figure (75), and says which.
+      expect(plain.comparisons.certifiedOverInstalled).toMatchObject({ flag: true, certified: 40, installed: 35, installedFigure: "approved_entries", basis: expect.stringContaining("here Σ approved entries") });
+      expect(view.comparisons.certifiedOverInstalled).toMatchObject({ flag: false, certified: 40, installed: 75, installedFigure: "official_installed", unitCode: "m3", basis: expect.stringContaining("here the official installed figure (officialInstalled)") });
+
+      const detailFigure = await service.installedForActivity({ orgId: ORG, projectId: PROJECT, activityId: ACT, method: "quantity", core: coreWith(ENTRIES) });
+      expect(detailFigure).toMatchObject({ value: 35, unitCode: "m3", officialInstalled: OFFICIAL });
+      expect(detailFigure.basis).toContain(service.LEGACY_FLOOR_INSTALLED_NOTE);
+      // No approved entry at all behind the official figure: 0, and the official figure beside it.
+      const none = await service.installedForActivity({ orgId: ORG, projectId: PROJECT, activityId: ACT, method: "quantity", core: coreWith([]) });
+      expect(none).toMatchObject({ value: 0, byItem: [], officialInstalled: OFFICIAL });
+    });
+
+    it("the register's installed quantity carries the same note, its lines untouched", () => {
+      const register = { installed: [{ boqItemId: ITEM, code: "1.1", description: "Concrete", unitCode: "m3", quantity: 35, entries: 2 }], asOf: "2026-10-01T10:00:00.000Z", lastApprovedAt: "2026-10-01T10:00:00.000Z", basis: "Σ approved quantity progress entries per BOQ item (only approval counts)" };
+      const answer = service.withOfficialInstalled(register, floored);
+      expect(answer).toMatchObject({ installed: register.installed, asOf: register.asOf, lastApprovedAt: register.lastApprovedAt, officialInstalled: OFFICIAL });
+      expect(answer.basis).toBe(`${register.basis}. ${service.LEGACY_FLOOR_INSTALLED_NOTE}`);
+      expect(register.officialInstalled).toBeUndefined();
+      // An empty list (nothing approved) under a floored row: the official figure still stands beside it.
+      expect(service.withOfficialInstalled({ ...register, installed: [] }, floored)).toMatchObject({ installed: [], officialInstalled: OFFICIAL });
+    });
+
+    it("says nothing where there is no floor, no difference to explain, or no figure to stand beside", async () => {
+      const figure = { value: 35, unitCode: "m3", basis: "B", truth: "derived" };
+      // No official row; a row approved from entries (its submission bundled entered ones); another method.
+      // (A typed row with no floor note is a typed official figure: see the next block.)
+      const fromEntries = { ...floored, notes: null, submission: { id: "s-bundle", quantityEntries: [{ id: "e-1", source: "manual" }, { id: "e-2", source: "daily_log" }] } };
+      expect(service.withOfficialInstalled(figure, null)).toBe(figure);
+      expect(service.withOfficialInstalled(figure, fromEntries)).toBe(figure);
+      expect(service.withOfficialInstalled(figure, { ...fromEntries, notes: "poured the north bay" })).toBe(figure);
+      expect(service.withOfficialInstalled(figure, { ...floored, progressMethod: "percent" })).toBe(figure);
+      expect(service.withOfficialInstalled(figure, { ...floored, quantityComplete: null })).toBe(figure);
+      // Σ approved entries is not below the official figure: nothing to explain.
+      expect(service.withOfficialInstalled({ ...figure, value: 75 }, floored).officialInstalled).toBeUndefined();
+      expect(service.withOfficialInstalled({ installed: [{ quantity: 40, unitCode: "m3" }, { quantity: 40, unitCode: "M3" }], basis: "R" }, floored).officialInstalled).toBeUndefined();
+      // Lines in two units are not one figure: the official figure is stated beside them.
+      expect(service.withOfficialInstalled({ installed: [{ quantity: 400, unitCode: "kg" }, { quantity: 40, unitCode: "m3" }], basis: "R" }, floored).officialInstalled).toMatchObject(OFFICIAL);
+      expect(service.withOfficialInstalled(null, floored)).toBeNull();
+      expect(service.officialInstalledOf(original)).toBeNull();
+
+      rows.progress[0] = floored;
+      // Not measured by quantity: the dash stays a dash.
+      rows.methods[0].method = "percent";
+      const percent = await service.getActivityQuantities({ orgId: ORG, projectId: PROJECT, activityId: ACT, can: allow, core: coreWith(ENTRIES) });
+      expect(percent.figures.installed).toMatchObject({ value: null, notAvailable: { reason: service.PERCENT_METHOD_REASON } });
+      expect(percent.figures.installed.officialInstalled).toBeUndefined();
+      rows.methods[0].method = "quantity";
+      // A member who may not read progress is not given the official figure either.
+      const noProgress = await service.getActivityQuantities({ orgId: ORG, projectId: PROJECT, activityId: ACT, can: only("ipc", "inventory", "commitment"), core: coreWith(ENTRIES) });
+      expect(noProgress.progress).toMatchObject({ allowed: false });
+      expect(noProgress.figures.installed).toMatchObject({ value: 35 });
+      expect(noProgress.figures.installed.officialInstalled).toBeUndefined();
+      expect(noProgress.figures.installed.basis).toBe(service.BASIS.installed);
+    });
+
+    it("names a typed official figure above the entries (installedBasis client — typed, no entry minted behind the difference) with its own basis sentence; equal or below says nothing; a minted typed figure is the entries' own", async () => {
+      // Typed 60, nothing minted (no submission, or one whose mint was skipped); Σ approved entries 35.
+      const typed = { id: "ap-typed", activityId: ACT, status: "approved", pctComplete: 60, progressMethod: "quantity", source: "mobile", quantityComplete: 60, quantityPlanned: 100, quantityUnit: "m3", notes: null, approvedAt: new Date("2026-10-01T11:00:00Z") };
+      const TYPED = { value: 60, unitCode: "m3", basis: "official figure of the latest approved progress, typed rather than entered", installedBasis: "client" };
+      expect(service.OFFICIAL_TYPED_BASIS).toBe(TYPED.basis);
+      expect(service.officialInstalledOf(typed)).toEqual({ ...TYPED, truth: "source", derivedFrom: [{ type: "activity_progress", id: "ap-typed" }], approvedAt: "2026-10-01T11:00:00.000Z" });
+      expect(service.officialInstalledOf({ ...typed, submission: { id: "s-typed", quantityEntries: [] } })).toMatchObject(TYPED);
+      rows.progress[0] = typed;
+      const view = await service.getActivityQuantities({ orgId: ORG, projectId: PROJECT, activityId: ACT, can: allow, core: coreWith(ENTRIES) });
+      expect(view.figures.installed).toMatchObject({ value: 35, unitCode: "m3", officialInstalled: TYPED });
+      expect(view.figures.installed.basis).toBe(`${service.BASIS.installed}. ${service.TYPED_INSTALLED_NOTE}`);
+      expect(view.figures.installed.basis).toMatch(/typed rather than entered: no entry stands behind the difference/);
+      expect(view.figures.installed.basis).not.toContain(service.LEGACY_FLOOR_INSTALLED_NOTE);
+      expect(view.comparisons.certifiedOverInstalled).toMatchObject({ flag: false, certified: 40, installed: 60, installedFigure: "official_installed" });
+      const detailFigure = await service.installedForActivity({ orgId: ORG, projectId: PROJECT, activityId: ACT, method: "quantity", core: coreWith(ENTRIES) });
+      expect(detailFigure).toMatchObject({ value: 35, officialInstalled: TYPED });
+      // Not above the entries (a typed 30 under Σ 35, or a figure whose mint brought the entries up to it): nothing to explain, the entries compared.
+      const figure = { value: 35, unitCode: "m3", basis: "B", truth: "derived" };
+      expect(service.withOfficialInstalled(figure, { ...typed, quantityComplete: 30 })).toBe(figure);
+      expect(service.withOfficialInstalled(figure, { ...typed, quantityComplete: 35 })).toBe(figure);
+      expect(service.comparisonsOf({ installed: { ...figure, officialInstalled: { ...TYPED, value: 30 } }, certified: { value: 32, unitCode: "m3" } }).certifiedOverInstalled).toMatchObject({ flag: false, installed: 35, installedFigure: "approved_entries" });
+      // In another unit the official figure is stated beside, never compared.
+      expect(service.comparisonsOf({ installed: { ...figure, officialInstalled: { ...TYPED, unitCode: "t" } }, certified: { value: 40, unitCode: "m3" } }).certifiedOverInstalled).toMatchObject({ flag: true, installed: 35, installedFigure: "approved_entries" });
+    });
+
+    it("is withheld with the figure from a member who may not read the BOQ — the view, the detail's figure and the register", async () => {
+      rows.progress[0] = floored;
+      const noBoq = { boq: false, budget: true };
+      const view = await service.getActivityQuantities({ orgId: ORG, projectId: PROJECT, activityId: ACT, can: allow, core: coreWith(ENTRIES) });
+      expect(view.figures.installed.officialInstalled).toMatchObject(OFFICIAL);
+      const withheldView = withheldActivityQuantities(view, noBoq);
+      expect(withheldView.figures.installed).toEqual({ value: null, truth: null, basis: QUANTITY_FIGURES_WITHHELD, unitCode: null, unitMatch: null, derivedFrom: [], withheld: true, notAvailable: { reason: QUANTITY_FIGURES_WITHHELD } });
+      expect(withheldView.progress.pctComplete.value).toBe(75);
+      expect(JSON.stringify(withheldView)).not.toMatch(/officialInstalled|typed, not entered|legacy typed quantity as its floor/);
+
+      const detail = { kind: "activity", id: ACT, sections: { progress: { allowed: true, pctComplete: { value: 75, truth: "source", basis: "x", derivedFrom: [] }, installedQuantity: await service.installedForActivity({ orgId: ORG, projectId: PROJECT, activityId: ACT, method: "quantity", core: coreWith(ENTRIES) }) } } };
+      expect(detail.sections.progress.installedQuantity.officialInstalled).toMatchObject(OFFICIAL);
+      const withheldDetail = withheldActivityDetail(detail, noBoq);
+      expect(withheldDetail.sections.progress.pctComplete.value).toBe(75);
+      expect(JSON.stringify(withheldDetail)).not.toMatch(/officialInstalled|typed, not entered|"value":35/);
+
+      const row = { id: ACT, pctComplete: 75, installedQuantity: service.withOfficialInstalled({ installed: [{ boqItemId: ITEM, unitCode: "m3", quantity: 35, entries: 2 }], basis: "R" }, floored), plannedQuantity: { planned: 100, unitCode: "m3", basis: "approved_allocations" } };
+      expect(row.installedQuantity.officialInstalled).toMatchObject(OFFICIAL);
+      const withheldRow = withheldActivity(row, noBoq);
+      expect(withheldRow.pctComplete).toBe(75);
+      expect(withheldRow.installedQuantity).toEqual({ withheld: { reason: expect.stringContaining("may read the BOQ") } });
+      expect(JSON.stringify(withheldRow)).not.toMatch(/officialInstalled|typed, not entered/);
+      expect(withheldActivity(row, { boq: true, budget: true })).toBe(row);
+    });
+  });
+
   it("a figure whose module the viewer may not read says so; a party-scoped member gets no committed quantity", async () => {
     const view = await service.getBoqItemQuantities({ orgId: ORG, projectId: PROJECT, itemId: ITEM, can: only("inventory"), core: coreWith(ENTRIES) });
     expect(view.figures.certified).toMatchObject({ value: null, notAvailable: { reason: expect.stringMatching(/ipc module/) }, module: "ipc" });
@@ -270,10 +416,19 @@ describe("quantity views (PC-6)", () => {
     await expect(service.getBoqItemQuantities({ orgId: ORG, projectId: PROJECT, itemId: ITEM, cutoffDate: "not-a-date", can: allow })).rejects.toMatchObject({ status: 400, code: "VALIDATION_ERROR" });
   });
 
-  it("passes the cutoff to installed, certified and the stock movements", async () => {
+  it("passes THE reporting cutoff — the end of that date in the project's zone, not the start of the day in UTC — to installed, certified and the stock movements", async () => {
     const core = coreWith(ENTRIES);
-    await service.getBoqItemQuantities({ orgId: ORG, projectId: PROJECT, itemId: ITEM, can: allow, cutoffDate: "2026-02-28", core });
-    const cutoff = new Date("2026-02-28");
+    // No zone configured: UTC, the end of the 28th.
+    const utc = await service.getBoqItemQuantities({ orgId: ORG, projectId: PROJECT, itemId: ITEM, can: allow, cutoffDate: "2026-02-28", core });
+    expect(utc.cutoffDate).toBe("2026-02-28T23:59:59.999Z");
+    expect(utc.reportingCutoff).toMatchObject({ localDate: "2026-02-28", timeZone: "UTC", timeZoneSource: "utc" });
+    // The project's zone decides: the end of the 28th in Chicago is 05:59:59.999Z on 1 March.
+    rows.projects[0].timezone = "America/Chicago";
+    const view = await service.getBoqItemQuantities({ orgId: ORG, projectId: PROJECT, itemId: ITEM, can: allow, cutoffDate: "2026-02-28", core });
+    delete rows.projects[0].timezone;
+    expect(view.cutoffDate).toBe("2026-03-01T05:59:59.999Z");
+    expect(view.reportingCutoff).toEqual({ localDate: "2026-02-28", timeZone: "America/Chicago", timeZoneSource: "project", timeZoneNote: null, endOfLocalDay: "2026-03-01T05:59:59.999Z" });
+    const cutoff = new Date("2026-03-01T05:59:59.999Z");
     expect(core.installedByBoqItem).toHaveBeenCalledWith(expect.objectContaining({ cutoffDate: cutoff }));
     expect(mockPrisma.ipcItem.findMany.mock.calls.at(-1)[0].where.AND[0]).toMatchObject({ OR: [{ certDate: { lte: cutoff } }, expect.objectContaining({ certDate: null })] });
     expect(mockPrisma.stockTransaction.findMany.mock.calls.at(-1)[0].where).toMatchObject({ occurredAt: { lte: cutoff } });

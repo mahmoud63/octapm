@@ -28,6 +28,10 @@ const quantitiesSection = read(
 const quantitiesHook = read(
   'src/features/controls/quantities/use-record-quantities.ts'
 )
+const officialInstalled = read(
+  'src/features/controls/quantities/official-installed.tsx'
+)
+const detailParts = read('src/features/controls/components/detail-parts.tsx')
 const boqDrawer = read('src/features/boq/components/boq-detail-drawer.tsx')
 const activityDrawer = read(
   'src/features/schedule/components/activity-detail-drawer.tsx'
@@ -145,6 +149,141 @@ match(
   'the bulk list names the source beside each approved figure'
 )
 
+// ── Bulk progress: a percentage is never offered against an activity measured
+// by quantity. The server refuses such a batch whole (nothing written), so
+// the screen lists the activity disabled with the reason and the way to the
+// Progress tab, reads the method from the register (the schedule payload
+// does not carry it), never assumes an unread method is percent, and — when
+// the server still refuses — names the activity and shows nothing as saved.
+const registerProgress = read('src/features/schedule/lib/register-progress.ts')
+match(
+  registerProgress,
+  /'progressMethod',\s*'progressMethodConfig',/,
+  'the register merge carries the progress method and its configuration'
+)
+match(
+  progressTab,
+  /withRegisterProgress\(scheduled, registerQuery\.data\)/,
+  'the Progress tab still merges the register over the schedule rows'
+)
+match(
+  bulkProgress,
+  /get\(`\/projects\/\$\{projectId\}\/activities`\)[\s\S]{0,400}withRegisterProgress\(scheduled, registerQuery\.data\)/,
+  'the bulk list reads the progress method from the register'
+)
+match(
+  bulkProgress,
+  /activity\.progressMethodConfig\?\.method \|\| activity\.progressMethod \|\| null/,
+  "the effective method is the activity's configured method, else the register's"
+)
+match(
+  bulkProgress,
+  /if \(method === 'quantity'\) return QUANTITY_METHOD_REASON/,
+  'an activity measured by quantity takes no percentage update'
+)
+match(
+  bulkProgress,
+  /if \(!method\) return METHOD_NOT_READ_REASON/,
+  'an activity whose method has not been read is not assumed to be percent'
+)
+// The milestone method is respected like quantity (2026-10-01): a percentage
+// is offered for percent and manual only; every other method is refused here
+// with its own reason, and the refusal comes before any fall-through.
+match(
+  bulkProgress,
+  /const PERCENTAGE_METHODS = new Set\(\['percent', 'manual'\]\)/,
+  'a percentage is offered for percent and manual only'
+)
+{
+  const body = bulkProgress.slice(
+    bulkProgress.indexOf('const percentageRefusalOf'),
+    bulkProgress.indexOf('const activityLabel')
+  )
+  match(
+    body,
+    /if \(PERCENTAGE_METHODS\.has\(method\)\) return null[\s\S]*if \(method === 'weighted_milestone'\) return MILESTONE_METHOD_REASON[\s\S]*if \(method === 'inspection'\) return INSPECTION_METHOD_REASON[\s\S]*return `Measured by \$\{method\} — not offered for a percentage update`\s*\}/,
+    'milestone, inspection and any other method are refused a percentage, each with its reason'
+  )
+  doesNotMatch(
+    body,
+    /return null\s*\}\s*$/,
+    'the refusal does not fall through to offering a percentage'
+  )
+}
+match(
+  bulkProgress,
+  /'Measured by weighted milestones — mark the milestones complete in the Progress tab'/,
+  'the milestone row says why, and where milestones are marked'
+)
+match(
+  bulkProgress,
+  /'Measured by quantity — record installed quantities in the daily log or the Progress tab'/,
+  'the disabled row says why, and where quantities are recorded'
+)
+match(
+  bulkProgress,
+  /\.filter\(\(activity\) => percentageRefusalOf\(activity\) === null\)/,
+  'the selectable set leaves out every activity a percentage is refused for'
+)
+match(
+  bulkProgress,
+  /disabled=\{notOffered !== null\}/,
+  'the checkbox of an activity not offered is disabled'
+)
+match(
+  bulkProgress,
+  /checked=\{\s*notOffered === null && selectedIds\.includes\(activity\.id\)\s*\}/,
+  'an activity not offered is never drawn as selected'
+)
+match(
+  bulkProgress,
+  /updates: selectedSelectableIds\.map\(/,
+  'only selectable activities are sent'
+)
+match(
+  bulkProgress,
+  /workspaceLink\(\s*`\/projects\/\$\{projectId\}\/schedule\/progress`\s*\)/,
+  'the disabled row links to the Progress tab'
+)
+match(
+  bulkProgress,
+  /uat-bulk-progress-disabled-\$\{activity\.id\}[\s\S]{0,900}uat-bulk-progress-open-progress-tab-\$\{activity\.id\}/,
+  'the reason and the link sit on the disabled row'
+)
+match(
+  bulkProgress,
+  /\?\.response\?\.data\?\.error\?\.details\?\.batch/,
+  "a refusal's details.batch is read"
+)
+match(
+  bulkProgress,
+  /activities\.find\(\s*\(activity\) => activity\.id === batch\.activityId\s*\)/,
+  'the refusal names the activity the server refused'
+)
+match(
+  bulkProgress,
+  /uat-bulk-progress-refusal/,
+  'the refusal stays on the screen, not only in a toast'
+)
+{
+  const refusalPath = bulkProgress.slice(
+    bulkProgress.indexOf('} catch (error) {'),
+    bulkProgress.indexOf('} finally {')
+  )
+  assert.ok(refusalPath.length > 500, 'the refusal path of the bulk submit is found')
+  match(refusalPath, /'Nothing was saved\.'/, 'a refused batch says nothing was saved')
+  doesNotMatch(
+    refusalPath,
+    /toast\.success|setSelectedIds\(\[\]\)/,
+    'a refused batch shows nothing as saved'
+  )
+  match(
+    refusalPath,
+    /invalidateQueries\(\{\s*queryKey: \['activities', projectId\],?\s*\}\)/,
+    'a refusal reads the register again'
+  )
+}
+
 // ── No client-side arithmetic on figures; nothing summed across units ──
 // The quantities module, the PC-6 block of the progress tab and the PC-6
 // block of the daily log draw the server's figures and compute nothing from
@@ -186,6 +325,7 @@ const ARITHMETIC = [
 for (const [name, text] of [
   ['controls/quantities/quantities-section.tsx', quantitiesSection],
   ['controls/quantities/use-record-quantities.ts', quantitiesHook],
+  ['controls/quantities/official-installed.tsx', officialInstalled],
   ['progress-tab.tsx (PC-6 block)', pc6Block],
   ['daily-log-sections.tsx (PC-6 block)', dailyLogPc6Block],
 ]) {
@@ -241,6 +381,85 @@ match(
   quantitiesHook,
   /status === 403[\s\S]*withheld/,
   'a refused read is withheld with the server reason'
+)
+
+// ── The installed figure names a legacy floor: where the latest approved
+// progress carries a legacy typed quantity as its floor, the server states the
+// official installed figure beside Σ approved entries and says why they
+// differ; the web draws that figure as sent in every place installed is
+// drawn — the Progress tab, the drawer's quantities and the drawer's
+// progress section — and computes nothing from the two.
+match(
+  boqSchema,
+  /OfficialInstalledSchema = z\s*\.object\(\{\s*value: z\.number\(\)\.nullable\(\)\.optional\(\),\s*unitCode:[^}]*basis:/,
+  'the official installed note is typed: value, unitCode, basis'
+)
+match(
+  boqSchema,
+  /QuantityFigureSchema = z[\s\S]{0,1400}officialInstalled: OfficialInstalledSchema\.nullable\(\)\.optional\(\)/,
+  'a quantity figure may carry the official installed figure'
+)
+match(
+  boqSchema,
+  /ControlsFigureSchema = z\.object\(\{[\s\S]{0,1400}officialInstalled: OfficialInstalledSchema\.nullable\(\)\.optional\(\)/,
+  "the activity detail's installed quantity may carry it (a strict schema would strip it)"
+)
+match(
+  scheduleSchema,
+  /activityInstalledQuantitySchema = z[\s\S]{0,1200}officialInstalled: OfficialInstalledSchema\.nullable\(\)\.optional\(\)/,
+  "the register's installed quantity may carry it"
+)
+match(
+  officialInstalled,
+  /if \(!official \|\| official\.value == null\) return null/,
+  'no official figure sent, nothing drawn'
+)
+match(
+  officialInstalled,
+  /data-official-installed=\{official\.value\}[\s\S]{0,120}data-official-unit=\{unit\}/,
+  'the official figure is drawn as sent, in its unit'
+)
+match(
+  officialInstalled,
+  /earlier progress was typed, not entered/,
+  'the note says why the entries add up to less'
+)
+match(
+  progressTab,
+  /<OfficialInstalledNote\s+official=\{installed\?\.officialInstalled\}\s+testId=\{`uat-progress-official-installed-\$\{activity\.id\}`\}/,
+  'the Progress tab draws the official installed figure beside the lines'
+)
+match(
+  quantitiesSection,
+  /<OfficialInstalledNote\s+official=\{figure\?\.officialInstalled\}/,
+  "the drawer's quantities draw it under the installed figure"
+)
+match(
+  detailParts,
+  /<OfficialInstalledNote\s+official=\{figure\?\.officialInstalled\}/,
+  "the drawer's progress section draws it under the installed quantity"
+)
+// A typed official figure above the entries (installedBasis 'client',
+// 2026-10-01) is explained as typed, never as a legacy floor.
+match(
+  officialInstalled,
+  /official\.installedBasis === 'client'\s*\?\s*OFFICIAL_REASON_TYPED\s*:\s*OFFICIAL_REASON_LEGACY_FLOOR/,
+  "the note's reason follows the server's installedBasis"
+)
+match(
+  officialInstalled,
+  /'the latest approved progress was typed rather than entered'/,
+  'a typed official figure says it was typed rather than entered'
+)
+match(
+  officialInstalled,
+  /up to less because \{reason\}\./,
+  'the reason drawn is the one chosen, not a fixed sentence'
+)
+match(
+  boqSchema,
+  /OfficialInstalledSchema = z[\s\S]{0,300}installedBasis: z\.string\(\)\.nullable\(\)\.optional\(\)/,
+  "the official figure's installedBasis is read"
 )
 
 // ── The two drawers embed the block; the approved percentage stays ──

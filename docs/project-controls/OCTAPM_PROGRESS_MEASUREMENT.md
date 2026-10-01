@@ -89,11 +89,28 @@ siblings (`daily-log.service` drives it).
 - **Replay**: `clientRequestId` is unique per project (`@@unique([projectId, clientRequestId])`). The service answers
   a seen key with the entry it made (`replayed: true`); a race that reaches the index is a P2002 answered by running
   once more, which finds the winner's row. A batch's top-level key is suffixed `:<index>` per entry.
-- **Quantities are Decimal(18,3)**: parsed, summed and compared as `Prisma.Decimal` at three places; `quantity >= 0`
-  is refused in code (400 `QUANTITY_NEGATIVE`) before the CHECK constraint sees it.
+- **Quantities are Decimal(18,3)**: parsed, summed and compared as `Prisma.Decimal` at three places; a negative
+  quantity is refused in code (400 `QUANTITY_NEGATIVE`) before the CHECK constraint sees it. **A zero quantity is
+  refused too** (integration decision, 2026-10-01, reported to the owner): 400 `QUANTITY_INVALID` — "A quantity must
+  be greater than zero; record nothing for no work" — on create and on edit (`assertPositiveQuantity`, after the
+  three-place scale, so 0.0004 is zero), and in the daily log's quantities section. The CHECK still admits 0 (no
+  migration in this wave): the rule is the service's, and the daily log's own minting carries a row recorded before
+  it. A zero entry would otherwise be approved, counted among the entries behind an official figure and printed as a
+  quantity installed. Proven live in both suites and mutation-proven.
 - **Over-allocation is a warning, never a block**: the write answers `warnings[]` with `QUANTITY_OVER_ALLOCATION`
   (approved installed + this entry > Σ approved, active allocation quantity of the item on the activity — the raw
-  comparison, with the figures) or `QUANTITY_NO_APPROVED_ALLOCATION`. No `ProjectException` row (PC-7b).
+  comparison, with the figures). No `ProjectException` row (PC-7b). **An unmapped pairing is refused** (integration
+  fix, 2026-10-01): the route records against an item the activity has an approved, active allocation of — the
+  daily log's section rule — else 400 `QUANTITY_ITEM_NOT_ALLOCATED` (the finding: a pending manual entry on an item
+  with no approved allocation to the activity was accepted and reached the approver with no planned figure behind
+  it). `QUANTITY_NO_APPROVED_ALLOCATION` remains a warning only for an entry whose mapping was retired after it was
+  recorded (an edit, the daily log's own minting). Proven live (`pc-6-quantity-entries`), mutation-proven.
+- **A row the entries name is kept** (integration fix, 2026-10-01): `DELETE /boq/items/{id}` counts its keepers —
+  `BOQ_ITEM_KEEPERS` in `boq.service`: IPC lines, quantity progress entries, daily-log quantity rows (the three
+  RESTRICT relations) — and answers 409 `BOQ_ITEM_IN_USE` naming them, before the delete and under the row's lock;
+  a RESTRICT the list does not know (Prisma P2003) is answered the same with the constraint's name, never a 500 with
+  the invocation text. `activity.service ACTIVITY_KEEPERS` counts `QuantityProgressEntry` and `DailyLogQuantity`
+  too (409 `ACTIVITY_IN_USE`). Proven live and by unit (`boq.service.test`, `activity-delete.service.test`).
 - **Patch / delete** (progress `submission.submit`): a draft or submitted entry's quantity, unit, date, location,
   allocation or note, by its creator or by anyone holding `submission.approve` (403 `QUANTITY_ENTRY_FORBIDDEN`).
   An approved or rejected entry is history (409 `QUANTITY_ENTRY_LOCKED`); an entry bundled into a submission that is
@@ -179,6 +196,158 @@ bundles entries, and approving it is what approves them:
   its official figure beside `approvedProgressSource` (the `ActivityProgress` row plus the submission it came
   from). `importDocumentId` is carried for the shape and is null: no column links a submission to the import
   document (the import names itself in `source` and `notes`).
+- **The legacy typed-quantity floor** (integration fix, 2026-10-01; owner rule: an official figure never regresses by the
+  act of deriving). Finding: on an activity approved the legacy way — a typed `quantityComplete`, no entries behind it
+  — the first bundle approved after PC-6 derived installed = Σ approved entries + the bundle and discarded the official
+  figure (60% → 10%). Now a bundle derives installed = **max(Σ approved entries, the latest official installed
+  figure)** + the bundle (`legacyInstalledFloor`: the latest approved `ActivityProgress.quantityComplete`; one in
+  another unit is not a floor — reported `legacyFloorSkipped`, nothing converted). When the floor applied the basis is
+  `legacy_typed_floor` with `legacyFloor { quantity, unitCode, progressId, approvedAt, note }`, the new official row
+  carries the sentence "Legacy typed quantity carried as the floor of the installed figure (PC-6)" as its note (a
+  sentence, no figure — a note is progress data every reader sees), and `progressSource.installedBasis` /
+  `legacyFloor: true` read it from the row. In the ordinary case Σ approved entries ≥ the latest official figure and
+  the rule is the one shipped. Decision for the owner: the frozen basis lives in the row's `notes` (no column records
+  a derivation basis; the audit `approved` event carries the full `legacyFloor` block).
+- **A typed quantityComplete is still accepted — once** (the legacy shape; what the mobile ProgressSheet sends):
+  while the activity has **no quantity entry at all**. Its approval mints ONE approved `QuantityProgressEntry`
+  (`source 'submission'`, `clientRequestId 'submission:<id>'`, recorded by the submitter, approved by the approver at
+  the row's instant, the typed figure as a **delta over the official floor** — `mintTypedQuantityEntry`) when the
+  activity has a single allocated BOQ item in that unit, so the activity has one truth of installed quantity from
+  then on and the next bundle adds to it (`quantity.mintedEntry`). Nothing is minted when the delta is zero or
+  negative (the approved row stands as approved; the floor rule keeps the figure from regressing by derivation),
+  when the activity has several allocated items or none (an entry names one item; an activity-level figure cannot
+  be attributed — `quantity.mintSkipped` says so and the floor carries it) or when the typed unit is not the
+  item's. Once entries exist a typed figure is 409 `QUANTITY_ENTRIES_REQUIRED` `{ activityId, entries }` — the
+  unsafe case shown: a typed activity-level figure beside per-item entries would be a second truth. Proven live
+  (`pc-6-method-authority`: the seeded 60-of-100 legacy row + a 10 bundle → 70, the next → 75, the legacy row
+  byte-identical, the note and PROGRESS SOURCE; the kerb's typed 20 minted as one approved entry in the ledger with
+  its provenance and the activity's installed figure reading it, then 409; a typed 50 below an official 60 minting
+  nothing and standing as the next floor) and mutation-proven (the floor removed → the regression reproduces; the
+  minting removed → fails).
+- **The submission's method is the activity's** (integration fix, 2026-10-01; owner rule: respect the activity's progress
+  method). `progress.service resolveSubmissionMethod`, in `buildSubmissionData`, so every path — `POST
+  /activities/{id}/progress`, `bulk-progress`, the daily report's legacy linked progress and the import — is under it:
+  with a configured `ActivityProgressMethod` row the submission takes that method; a client naming another (an alias
+  normalised first) is 409 `PROGRESS_METHOD_MISMATCH` with `{ activityId, effectiveMethod, effectiveMethodBasis:
+  'method_config', requestedMethod }` — never silently coerced, so a `{ method: 'percent', pctComplete: 90 }` typed
+  against a quantity-measured activity cannot bypass the derivation and reach the approver as a 90% row with zero
+  entries behind it (the review finding). Without a configured row the client's method is accepted as before
+  (default `percent`), which is also why the daily report's percent path still serves an unconfigured activity.
+  Proven live (`pc-6-method-authority.live.test.js`: every path refused, footprint and EV byte-identical; no method
+  named → the activity's, derived; the unconfigured wall takes the client's) and mutation-proven (coercing silently
+  and accepting the client's method each fail the suite).
+- **A quantity submission states a quantity** (verification fix, 2026-10-01). On an activity measured by quantity a
+  submission that bundled no entry and typed no `quantityComplete` — `{ pctComplete: 90 }`, with or without the
+  method named — was recorded as a quantity submission at **0%** (the client's percentage silently replaced), and its
+  approval wrote an official 0% row with nothing behind it: 25% → 0%. `assertQuantityFigureStated` refuses it where
+  it is made (`POST /activities/{id}/progress`, `bulk-progress`, a draft too) and — for one already in the queue —
+  in the writer: 409 `QUANTITY_ENTRIES_REQUIRED` `{ activityId, entries }` once the activity has entries (bundle
+  them), else 400 `QUANTITY_NO_ENTRIES_TO_BUNDLE`; at approval the details name the `submissionId`. A typed
+  `quantityComplete` of 0 was then a stated quantity and still recorded — superseded the same day (next bullet). The
+  web forms relay the server's sentence.
+  Proven live (`pc-6-method-authority`, the screed: every shape refused with the footprint and EV byte-identical,
+  the official 25% standing, a hollow submission seeded in the queue refused by the writer) and mutation-proven (the
+  check removed where the submission is made, and in the writer, each fail).
+- **A typed zero is no installed quantity; a lower typed figure is approved, never silently** (integration decision,
+  2026-10-01, for consistency with the entries' rule "record nothing for no work", §3.1). A typed `quantityComplete`
+  of 0 on a quantity-measured activity with no entries was accepted and its approval wrote an official 0% row.
+  `assertTypedQuantityPositive` refuses it — 400 `QUANTITY_INVALID` `{ field: 'quantityComplete', activityId }`, the
+  figure read at the entries' scale (0.0004 is zero) — where the submission is made (every path: the activity route,
+  `bulk-progress`, the daily report's linked progress; a draft too) and, for one already in the queue, in the writer
+  (`submissionId` named). The route validators keep "zero or more" exactly as the entries' routes do (a negative is a
+  `VALIDATION_ERROR` there); the service is the one place that says zero is no figure. The mobile ProgressSheet offers
+  a typed quantity only above zero. A typed figure **above zero but below** the official installed figure (max(Σ
+  approved entries, the latest official typed figure in the same unit) — the writer's floor) stays allowed: the
+  approver's approval of a lower figure is explicit and writes a new official row (no earlier row or entry changes,
+  nothing is minted). It is never silent: the submission's answer and the approval's answer carry `warnings: [{ code:
+  'QUANTITY_BELOW_OFFICIAL', officialInstalled, typed, message }]`, withheld from a member who may not read the BOQ
+  like the figures (the code stays; `utils/boq-figures.js withheldProgressWarning`). The mint's skip reason no longer
+  says the official figure is not lowered when the approval lowers it: equal → "nothing is minted and the official
+  figure is unchanged"; below → "nothing is minted, and this approval lowers the official installed figure to the
+  typed one". Proven live (`pc-6-method-authority`: the zero pour — 0, "0" and 0.0004 refused on every path with the
+  footprint and EV byte-identical, a queued zero refused by the writer; a typed 40 under an official 70 approved by a
+  PM on a `boq: none` template with the warning's code only; the slab's typed 50 under 60 warned on both answers),
+  by unit (`progress.service.quantity-bundle`, `boq-figures.progress-warnings`, mobile `progress-sheet`) and
+  mutation-proven (each check removed fails).
+- **The milestone method is respected like quantity** (integration decision, 2026-10-01, under the owner rule "the
+  activity's progress method is respected"). On an activity configured `weighted_milestone` with weighted milestones a
+  submission carrying no milestone state — `{ pctComplete: 60 }`, with or without the method named — was recorded as a
+  milestone submission whose percentage `calculateProgressPercent` worked from the configured milestones alone (0% when
+  none is marked complete): the client's percentage silently replaced, and its approval made that official.
+  `assertMilestoneStateStated` refuses it where it is made (`buildSubmissionData` — every path, a draft too, bulk
+  included) and, for one already in the queue, in the writer: 400 `MILESTONES_REQUIRED` `{ activityId, method,
+  milestones: [{ id, name }] }` (+ `submissionId` at approval). A configuration with no weighted milestone, and an
+  activity with no configured method, take the percentage as before. The inspection method was read for the same
+  silent replacement and has none (no result sent → the typed percentage; `failed` → 0 is a stated result), so it is
+  unchanged; `inspectionRequired` on the configuration is stored and served but enforced nowhere (owner finding). The
+  web's Progress tab and the mobile ProgressSheet always send every configured milestone with its state, so neither
+  is refused; the web's bulk screen offers a percentage only for an activity measured by percent or manual (milestone,
+  inspection and any other method listed disabled with its reason and the Progress tab link). Proven live
+  (`pc-6-method-authority`: every shape refused, bulk named, footprint and EV byte-identical, a queued one refused by
+  the writer, a stated one approved at 70%), by unit (`progress.service.test.js`) and the source check
+  (`quantity-progress-ui.test.mjs`); mutation-proven (the rule removed where the submission is made, in the writer,
+  and the screen's guard — each fails).
+  A non-empty milestone list was not enough (verification fix, 2026-10-01): `{ pctComplete: 60, milestones: [{ id:
+  'bogus', complete: true }] }` passed the rule, the unknown row weighed 0, the total weight was 0 and
+  `calculateProgressPercent` fell back to the client's 60% — recorded and approved under `weighted_milestone`.
+  `assertMilestoneStateStated` (submission and writer) now merges the stated rows onto the configured ones the way the
+  figure is worked (keyed by id, else name, else index) and refuses with the same 400 `MILESTONES_REQUIRED` when any
+  stated milestone is not configured (`details.unknownMilestones` lists those ids beside the configured `{ id, name }`)
+  or when the stated rows carry no weight. The web writes every configured row with an id and sends it back, and the
+  mobile sends the configured ids, so neither is refused. A configuration written straight to the API with name-only
+  rows (no id) is matched by name; the mobile ProgressSheet sends only `id`, so on such a configuration it is now
+  refused where it was silently worked at the client's percentage before (owner finding). Proven live
+  (`pc-6-method-authority`: three unknown-id shapes, bulk, a queued one refused by the writer) and by unit
+  (`progress.service.test.js`); mutation-proven (the old non-empty check restored — unit and live fail).
+- **A refused batch writes nothing** (verification fix, 2026-10-01). `POST /activities/bulk-progress` made its
+  submissions one at a time, each in its own transaction; with the refusals above an ordinary batch (one activity
+  measured by quantity among percent ones) answered 409 for the whole call after the earlier updates were written,
+  and a retry duplicated them. `activity.service bulkUpdateProgress` is one transaction now (`createProgressSubmission`
+  on the batch's `tx`): every update is written or none is, and the refusal's details carry `batch { index,
+  activityId, updates, written: 0 }`. Proven live (`pc-6-method-authority`: a mixed batch and its retry leave the
+  footprint byte-identical; a clean batch writes both) and mutation-proven (the submissions made outside the batch's
+  transaction → the wall's submission is written despite the refusal). **An unknown activity is not skipped**
+  (integration fix, 2026-10-01): an update naming an activity that is not in the project used to be dropped inside the
+  batch (`if (!activity) continue`) and the call answered 200 with one update fewer; it is now refused before the
+  transaction — 404 `ACTIVITY_NOT_FOUND` with the same `details.batch` — and nothing is written (live:
+  `pc-6-method-authority`, a random id second in the batch; mutation: the skip restored fails it).
+- **The web's bulk screen offers no percentage for an activity measured by quantity** (integration, 2026-10-01).
+  `frontend/src/features/schedule/components/bulk-progress-update.tsx` sends one percentage for every selected
+  activity (`{ activityId, pctComplete }`, no method), so after the refusals above a selection that included a
+  quantity-measured activity could only be refused whole. The component now reads the method from the register
+  (`GET /activities` — `progressMethodConfig.method`, else `progressMethod`: the server's effective method; the
+  schedule payload does not carry it, `lib/register-progress.ts withRegisterProgress` is the Progress tab's own
+  merge): an activity measured by quantity is listed with its checkbox disabled, the reason ("Measured by quantity —
+  record installed quantities in the daily log or the Progress tab") and a link to the Progress tab; one whose method
+  has not been read is not offered either (never assumed to be percent); only offered activities are sent. If the
+  server still refuses (the method changed under the screen) the refusal stays on the screen, says nothing was saved
+  and names the activity from `details.batch`; no success is shown, the selection stays, and the register is read
+  again. No server change. **The component is not mounted anywhere**: its only parent, `ev-dashboard.tsx`, left the
+  schedule's Earned Value tab on 2026-06-10 (the official EV report replaced the prototype maths) and a source check
+  forbids mounting it there again — so no user reaches the bulk screen on the web today, and whether it returns (and
+  where) is the owner's decision. Proof: the source check `frontend/scripts/quantity-progress-ui.test.mjs` (the
+  guard, the reason, the link, the register read, the refusal path — mutation: the guard removed fails it);
+  `frontend/e2e/55-quantity-progress.spec.ts` third case, through the API (a forced mixed batch is 409
+  PROGRESS_METHOD_MISMATCH naming V100 in `details.batch`, the method-less batch the screen used to send is refused
+  the same way, no submission is written and no official figure moves; a percent-only batch writes one pending
+  submission — mutation: the batch made outside its transaction fails it); and, once, in a browser with the
+  component mounted temporarily on the Progress tab (not committed): V100 disabled with the reason and the link,
+  V200 updated alone, a raced refusal naming "Blockwork" with "Nothing was saved." — the guard removed failed that
+  run.
+- **The rule holds in the one writer too** (verification fix, 2026-10-01). Asked only when a submission is made, the
+  rule could be passed by ordering: a percent submission put forward while the activity was unconfigured stayed
+  approvable after the planner configured it as quantity (the method lock below reads approved progress only), the
+  approver made a 90% row with zero entries official, and the first bundle afterwards derived from its entries — the
+  official figure regressed 90% → 10% by the act of deriving. `approveProgressSubmissionWithClient` now asks again
+  (`assertSubmissionMethodStands`): a submission whose method is not the activity's **configured** method is 409
+  `PROGRESS_METHOD_MISMATCH` with `{ activityId, effectiveMethod, effectiveMethodBasis, requestedMethod,
+  submissionId }`, nothing written; the approver rejects it and the site records it the activity's way. This also
+  covers any submission already pending on a configured activity when the rule shipped. Without a configured row
+  nothing is asked. Configuring a method while a submission of another method waits is still allowed (decision for
+  the owner: the refusal is at the approval, where the figure would become official, not at the configuration).
+  Proven live (`pc-6-method-authority`: the late pour — footprint and EV byte-identical on the refusal, then
+  rejected, entries bundled, the only official row the derived 10%) and mutation-proven (the check removed → the
+  90% row is approved).
 - **The method lock** (`PUT /activities/{id}/progress-method`): an activity with approved progress keeps the
   method it is measured by — its configured method, else the method its latest official figure was approved under
   (aliases normalised), else `percent` — and naming another is 409 `PROGRESS_METHOD_LOCKED` with
@@ -197,6 +366,45 @@ bundles entries, and approving it is what approves them:
   bundle; the typed method-configuration basis; a client-planned bundle on an activity with nothing typed and
   nothing mapped approved with its frozen figure; the method lock both ways with readiness; the tenant 404) and
   `__tests__/progress.service.quantity-bundle.test.js`.
+
+### 3.3 The activity register and the Progress screen, as integrated (2026-10-01) [C]
+
+The web Progress tab and its spec were written against contracts the merged server did not send: installed and
+planned quantity on the activity register, the entries a pending submission bundles, a withheld views answer, and a
+submission appearing in the approval queue the moment a day is submitted. The merged contract (§4.1) is different —
+submitting the day mints **pending entries**, and nothing reaches the queue until someone bundles them — and the web
+had no way to do that, so daily-log quantities could not be approved from the web at all. Closed at the source:
+
+- **The register carries the figures** (`GET /activities`, `GET /activities/{id}`; `activity.service
+  quantityFiguresFor` → `quantity-progress.service activityQuantityFigures`, a fixed number of queries for any number
+  of activities, only for activities configured to be measured by quantity): `installedQuantity { installed: [{
+  boqItemId, code, description, unitCode, quantity, entries }], asOf, lastApprovedAt, basis }` (Σ approved entries per
+  BOQ item — never one figure across items or units; an empty list when nothing is approved), `plannedQuantity {
+  planned, unitCode, basis, reason? }` (`plannedFrom`, the rule of `plannedQuantityFor` on rows already read) and
+  `pendingQuantityEntries` (the submitted entries no open submission holds). Read-only: nothing is written, nothing
+  is official, EV is untouched.
+- **A submission carries the entries it bundles, whole** (`quantityEntries`, beside `quantityEntryIds`) wherever it is
+  serialised — the queue, the activity's `pendingProgress`, the submit / approve / reject answers — and
+  `progressSource` adds `dailyLogDate` / `dailyLogDates` (the day(s) of the daily log(s) its entries came through)
+  and `entryCount`.
+- **BOQ withholding** (`utils/boq-figures withheldActivity`, `withheldProgressSubmission`): for a member who may not
+  read the BOQ, `installedQuantity` and `plannedQuantity` are answered as `{ withheld: { reason } }` — no figure,
+  never a zero — and every pending or bundled entry goes through the ledger's rule (`withheldQuantityEntry`).
+- **The web** (`progress-tab.tsx`): the pending entries are listed under their activity as "awaiting approval — not
+  official" with their source and day, and **Put forward for approval** sends `{ bundleSubmittedThrough: <the latest
+  day shown> }` — the day, never a figure — to `POST /activities/{id}/progress`; the bundle then stands in the queue
+  with its entries and is approved there. A figure that came through a daily log is headed "Daily log <date>"
+  whoever put it forward. The drawer (`use-record-quantities`, `quantities-section`) reads the views' real answer: a
+  record-level `withheld: true` is the withheld state with the server's reason, `items` may be the withheld marker,
+  and an item's figures are under `figures`.
+- **Proof**: live — `pc-6-quantity-approval` (the register case: both readers' figures, the fixing's typed planned
+  figure, an unconfigured activity carrying none of the three, a bundle's entries on the activity and in the queue)
+  and `pc-6-daily-log-quantities` (the member without BOQ read: the withheld markers and entries, single and list);
+  browser — `frontend/e2e/55-quantity-progress.spec.ts`, no skip gate, green twice against its own API and Vite
+  (the walk: daily log → pending entry on the tab → put forward → the queue's bundle → approve → official 75 % with
+  the daily log as its source; the surveyor without BOQ read sees "—" with the reason). Mutation-proven: the
+  register's figures not withheld (live), the drawer ignoring the withheld marker and the register carrying no
+  figures (browser) each fail.
 
 ## 4. Daily-report contribution (§81) [D]
 
@@ -225,7 +433,44 @@ and lists the two in its org-side set; until then it reports them as pending) an
 `tenant-constraint-teeth.live.test.js` PC-6 case runs its raw-SQL assertions (until then it reports itself as not yet
 applicable). The financial snapshot and reconciliation delta must read 0.00 — the migration writes no row.
 
-Mobile: the daily log form gets a "Quantities installed" section using the existing activity + location pickers; offline via the outbox with `clientRequestId` (already the pattern for the six sections).
+Mobile: the daily log form gets a "Quantities installed" section using the existing activity + location pickers; offline via the outbox with `clientRequestId` (already the pattern for the six sections). **As integrated (2026-10-01):** the item picker reads the server's own list — `GET /activities/{id}/allocated-items` (§4.1), admitted on reading progress — not the allocation register (`/activity-boq-allocations`, gated on reading the BOQ), which had left a site engineer without BOQ read unable to record at all, against the owner's decision. Such a member picks by the item's description and unit (no code, no allocation, no allocated quantity — none is invented; the server resolves the single approved allocation), records, and reads their own row back with a dash and the server's reason for the quantity. The form no longer offers zero (the server refuses it, §3.1). `mobile/e2e/pc6-daily-log-quantities.spec.ts` runs without a skip gate: the withheld picker and the recorded row; offline capture → outbox → a lost reply → the retry and one more replay → one row; the day submitted from the phone → one pending entry per row in the register (`source daily_log`, `submitted`), nothing official; the activity screen's count and its six figure lines against the server's `/quantities` answer for both members.
+**The legacy daily report under the BOQ-access rule (integration fix, 2026-10-01).** Every `/daily-reports` answer —
+list, get, create, update, submit, approve, reject and review — carries the progress submissions linked to the report,
+serialised whole by the progress service, and was handed out unwithheld: a member without `boq:read` received the
+typed `quantityComplete`, the `quantityPlanned` (Σ approved allocations — a figure of the bill) and the `quantityUnit`
+that `GET /activities/{id}/progress-submissions` withholds from them. Every answer now goes through
+`withheldDailyReport` / `withheldDailyReports` in `utils/boq-figures.js`, which map each linked submission through
+`withheldProgressSubmission`: the percentage, method, status, source and provenance stay; the quantities and the
+quantity basis are omitted (never zeroed) and named in `boqWithheld`. The report's own lines (manpower, materials
+delivered, equipment, issues, photos) are site records and stay. The daily report has no PDF or export and raises no
+notification of its own. Proven live: `pc-6-daily-report-withholding` (a site engineer and a PM, each on a `boq: none`
+template, on every route; each answer swept for every quantity key, the unit code and every seeded figure; the BOQ
+reader is given them all).
+
+**The daily report's answers carry `QUANTITY_BELOW_OFFICIAL` (verification fix, 2026-10-01).** The warning a typed
+figure below the official installed one carries (§3.2: the approval lowers the official figure, and so EV) is
+transient — on the submission the progress service answers with — and the daily report's answers are read again from
+the database, so `createDailyReport` dropped `createLinkedProgress`'s warnings and `approveDailyReport` (approve and
+review) ignored the writer's answer: a report typing 40 under an official 70, approved, lowered the figure 46.67% →
+26.67% with no warning on either answer while the activity route and bulk warned. Each of create, submit and
+approve/review now collects the warnings of the submission it makes or approves and carries them on the matching
+`progressSubmissions[i].warnings` of its answer; `withheldDailyReport → withheldProgressSubmission` keeps the code alone
+for a member without `boq:read`. Proven live (`pc-6-daily-report-withholding`: walls with two allocated items, typed 300
+then 120 by the BOQ reader — both answers warn with the figures — then 80 by a `boq: none` site engineer reviewed by a
+`boq: none` PM — both answers carry the code only, no compared figure) and by unit
+(`daily-report.service.warnings.test.js`); mutation-proven (the approval's warnings dropped, the create's dropped, the
+carrier a no-op, the warning withholding removed — each fails).
+
+**The daily-log assistant's evidence (integration fix, 2026-10-01).** `POST /daily-logs/{date}/ai/draft` (admitted on
+`assistant:read` + `progress:update`) read the day's progress submissions whole and printed each one's typed quantity,
+unit and planned quantity into the evidence shown to the model — and stored as the run's prompt, served back to its
+author — whatever the caller may read. The route now passes the caller's `boqFigureAccess`; without `boq` the
+progress line states the percentage, the method and the status only (`→ 45% by quantity · submitted`), and with no
+access given nothing of the bill is shown. A draft whose evidence showed a quantity is a BOQ-bearing run
+(`assistant.service` `BOQ_BEARING_KINDS` gains `daily_log_draft`: served back only while its author may read the BOQ);
+one that showed none is marked `builtWithoutBoq`. The evidence does not include the day's quantities section. No
+other assistant or AI evidence builder reads `ProgressSubmission`, `QuantityProgressEntry` or `DailyLogQuantity`.
+Proven by `daily-log-assistant.service.test.js` (the evidence block for a reader and a non-reader; no live model).
 
 ### 4.1 The quantities section, as shipped (PC-6 core, 2026-10-01) [C]
 
@@ -259,12 +504,22 @@ totals. What is specific to it:
   the owner asked for exactly that so a site engineer can record without reading the bill. Nothing of the bill's
   quantities, values or counts beyond the lines themselves is given.
 - **What a member without boq:read sees of the section** (`utils/boq-figures.withheldDailyLog`, applied by every
-  daily-log route): the row as the site recorded it — the item's **description and unit, the quantity typed, the
-  activity, the location, the notes, the row's review state** and the state and provenance of the entry it
-  minted (`progressEntry`, which carries no quantity) — **minus the item's `code` and the `allocationId`**, named
-  in `boqWithheld`. The section's per-unit totals are the log's own tally of what was typed (like its man-hours)
-  and stay. The PDF export (`progress:export`) omits the code for such a member; the distribution digest, which
-  reaches external addresses, never carries it.
+  daily-log route and, for the list of days, `withheldDailyLogList`): **the quantity ledger's rule** (integration
+  fix, 2026-10-01 — decision taken and reported to the owner; before it the same installed-quantity-per-BOQ-item
+  figure the ledger withheld on `GET /quantity-progress` was handed to the same member on `GET /daily-logs/{date}`,
+  on every write answer, on the PDF and in the per-unit totals). The row keeps the item's **description and unit
+  name** (so the member can see what they recorded), the activity, the location, the notes, the row's review state
+  and the state and provenance of the entry it minted (`progressEntry`, which carries no quantity); it loses
+  `quantity`, `unitCode`, `boqItemId`, `allocationId`, `boqItem.id` and `boqItem.code`, named in `boqWithheld
+  { keys, reason }`. The section's per-unit `totals.quantities` are per-item quantities summed and are withheld the
+  same way (`totals.boqWithheld`; `quantityRows` stays). Omitted, never zeroed: the web table and the mobile line
+  show "—" with the server's reason. The PDF (`GET /:date/export.pdf`, `progress:export`) renders for its viewer:
+  a BOQ reader's carries the code and the figures, anyone else's a dash per row, no per-unit total and the note
+  "Quantities per BOQ item are shown to members who may read the BOQ."; **the distributed document and the digest
+  are rendered as the most restricted reader would see them** — one stored file for the project, a digest that
+  reaches external addresses — so neither carries a code or a per-item quantity. Proven live
+  (`pc-6-daily-log-quantities`: the write answer, the read, the edit, the list, both PDFs and the stored document)
+  and mutation-proven (the withholding dropped on the read, on the write answer and on the PDF each fail it).
 - **Minting (`POST /daily-logs/{date}/submit`).** Every row that counts (not draft, not rejected by the site team)
   becomes one `QuantityProgressEntry`: `source 'daily_log'`, `status 'submitted'`, the log's date, `dailyLogId`
   + `dailyLogQuantityId`, the row's allocation, location, unit, quantity and notes, `createdBy` the row's author,
@@ -339,8 +594,8 @@ Per BOQ item (and per activity, location, WBS group), three quantity columns wit
 | Column | Truth | Source of the figure | Money twin |
 |---|---|---|---|
 | **Installed** | derived | Σ approved `QuantityProgressEntry` | earned value (approved allocation × pct) — note: for `percent` activities installed quantity is *not* available and the column shows "—", never pct × qty |
-| **Certified** | source | Σ `IpcItemProgressLink.certifiedQuantity` on certified/paid certificates (`ipc.service.js:1226-1400`) — client side; Σ `SubPayAppLine.thisPeriodQty` cumulative on certified pay apps — subcontractor side | certified value (IPC) / subcontract cost (ledger, `sub-pay-app.service.js:650-705`) |
-| **Paid** | projection | certified quantity × (Σ `IpcPayment` ÷ certificate total) pro-rata per certificate; subcontractor side likewise from `SubPayAppPayment` | paid amount (cash flow, `cash-flow.service.js:93-195`) |
+| **Certified** | derived | Σ `IpcItem.qty` on certified/paid certificates on the allocation summary's certified basis — client side (a Σ over rows is **derived**, not source: corrected at integration, 2026-10-01 — the figure is unchanged, the label was wrong, and one payload carried both); the subcontractor side carries no quantity as built (§5.1) | certified value (IPC) / subcontract cost (ledger, `sub-pay-app.service.js:650-705`) |
+| **Paid** | projection | certified quantity × the **share of the certificate's net payable that has been paid** (`IpcCertificate.amountPaid ÷ netPayable`, capped at 1), pro-rata per certificate; a fully paid certificate projects paid = certified | paid amount (cash flow, `cash-flow.service.js:93-195`) |
 
 Rule: installed ≥ certified is expected; certified > installed is an exception (over-certification — already tracked as `overCertificationAmount` on the certificate [C], now also visible in quantity).
 
@@ -365,8 +620,8 @@ truths, from five owners, and no sixth that nets two of them:
 | Figure | Truth | Read from | Not available when |
 |---|---|---|---|
 | installed | derived | the core track's `quantity-progress.service installedByBoqItem` / `installedByActivity` (Σ **approved** `QuantityProgressEntry`; only approval counts), behind an adapter | the module is absent (`"PC-6 core pending"`); the activity is not measured by quantity (never % × quantity — approved entries on a percent activity notwithstanding) |
-| certified | source | Σ `IpcItem.qty` on the allocation summary's certified basis (`activity-boq-allocation certifiedIpcItemWhere`: status ∈ {certified, paid} on an approved, active allocation — the rows `certifiedValue` sums); `certified.subcontract` is "—" (`SubPayAppLine` has no quantity) | the viewer may not read `ipc` |
-| paid | projection | certified quantity × the certificate's paid share — `IpcCertificate.amountPaid ÷ netPayable`, capped at 1, the payment state `ipc.service syncPaymentState` keeps — pro-rata per certificate (`paid.certificates` lists each); money is paid per certificate, never per line | the viewer may not read `ipc` |
+| certified | derived | Σ `IpcItem.qty` on the allocation summary's certified basis (`activity-boq-allocation certifiedIpcItemWhere`: status ∈ {certified, paid} on an approved, active allocation — the rows `certifiedValue` sums); `certified.subcontract` is "—" (`SubPayAppLine` has no quantity) | the viewer may not read `ipc` |
+| paid | projection | certified quantity × the share of the certificate's net payable that has been paid — `IpcCertificate.amountPaid ÷ netPayable`, capped at 1, the payment state `ipc.service syncPaymentState` keeps; a fully paid certificate projects paid = certified — pro-rata per certificate (`paid.certificates` lists each); money is paid per certificate, never per line | the viewer may not read `ipc` |
 | received | derived | Σ `StockTransaction` receipts naming the item, in the **inventory item's** unit | the viewer may not read `inventory`; the rows are in more than one unit |
 | issued | derived | Σ issues net of returns (the sign the inventory ledger gives each, `CONSUMPTION_SIGN`), `components { issued, returned }` | as received |
 | committed | derived | Σ `CommitmentSovLine.qty` on `commitment.service POSTING_STATUSES` (executed, closed), **"Committed quantity (excludes variations)"** — approved commitment change orders carry no quantity and no BOQ item (critic's correction of the rule in §6) | the viewer may not read `commitment`; a party-scoped member; mixed units |
@@ -380,14 +635,103 @@ unit (`flag`, `certified`, `installed`, `unitCode`; `null` with the reason when 
 units differ) — the reviewed exception and the Change Event are PC-7b; the view writes no `ProjectException`,
 no change order, no budget or schedule change. `cutoffDate` bounds installed (`approvedAt`), certified
 (`certDate`, else the certificate's `certifiedAt`), the stock movements (`occurredAt`) and the activity's approved
-% complete; paid and committed are as of now and say so. One query per source for any number of items.
+% complete; paid and committed are as of now and say so. **It is THE reporting cutoff** (integration fix,
+2026-10-01): `resolveViewCutoff` reads a calendar date through `utils/reporting-cutoff` — the END of that date in
+`Project.timezone` → `Organisation.defaultTimezone` → UTC, the one instant EV and the core's `installedBy*` select
+against (the views used to read it as the start of the day in UTC, so the same date gave the view and the core two
+different installed figures); the answer carries the instant as `cutoffDate` and how it was read as
+`reportingCutoff { localDate, timeZone, timeZoneSource, timeZoneNote, endOfLocalDay }`. Proven live with the
+project in America/Chicago (an entry approved at 03:00Z on the 5th counts at the cutoff date of the 4th, in the
+view and in the core alike) and mutation-proven. The certified quantity is one figure with one truth label and one
+basis wherever the payload states it (`quantities.certifiedQuantity` and `certification.certifiedQuantity`: both
+`derived`, the same basis text). A planned quantity the core cannot state says the core's own reason (allocations in
+more than one unit are never summed: "type the planned quantity on the method configuration"), not "no approved
+allocation". One query per source for any number of items.
 
 BOQ access: `utils/boq-figures` (`QUANTITY_FIGURES_WITHHELD`, `withheldBoqItemQuantities`,
 `withheldActivityQuantities`, and the activity detail's `progress.installedQuantity`) withholds every per-item
 quantity — installed, certified, paid, received, issued, committed, the planned quantity and the comparison — from
 a member who may not read the BOQ; cost, IPC, inventory or commitment read does not unlock them. The answer is a
 dash with the reason, never zero; the activity's approved % complete and method are progress data and follow
-progress:read. Proof: `backend/src/services/__live__/pc-6-quantity-views.live.test.js` (LiveTest org; the
+progress:read. **The activity detail's progress section is under the same rule** (verification fix, 2026-10-01 —
+a blocker: `GET /activities/{id}/detail` lists the activity's submissions through `listProgressSubmissions`, which
+reads the bundled entries whole, and `withheldActivityDetail` withheld only `installedQuantity`, so a member
+without boq:read was handed the BOQ item's code and id, the allocation id, each entry's quantity and the frozen
+`quantityComplete / quantityPlanned / quantityUnit` of every submission and approved-history row): each listed
+submission now goes through `withheldProgressSubmission` (its quantity figures out, each bundled entry under the
+ledger's rule) and each approved-history row through `withheldApprovedProgress` (`boqWithheld { keys, reason }`);
+the percentage, method, source, who approved it when and PROGRESS SOURCE stay. The typed method configuration
+(`ActivityProgressMethod.plannedQuantity`, `quantityUnit`) is the progress module's own typed figure and is shown to
+progress readers there as on `GET /activities/{id}/progress-method` (reported to the owner). Proven live
+(`pc-6-daily-log-quantities`: a site engineer and a cost controller on a boq:none template, with a pending and an
+approved bundle; a BOQ reader still gets the figures) and mutation-proven (either mapping dropped fails).
+**The history is under the same rule** (verification fix, 2026-10-01). `GET /audit` (audit:read, every role)
+handed a member without boq:read what the ledger withholds: a `quantity_progress_entry` event's `boqItemId`,
+`quantity` and `unitCode` (created, updated, submitted, approved, rejected, the daily log's sync and retire), the
+mint event's `typed` and `officialBefore`, and a `progress_submission` event's `quantityInstalled`,
+`quantityPlanned`, `quantityUnit`, the `legacyFloor { quantity, … }` block of a floored approval and the figures a
+skipped mint compared. `utils/boq-figures withheldAuditHistory` (`withheldQuantityEvent`) leaves those keys out of
+each summary for such a caller — the entry events also lose `allocationId` — answers a skipped mint as
+`mintSkipped: { withheld: true }` and names what was left out in `boqWithheld { keys, reason }`; who, when, the
+transition, status, source, activity, the submission and daily-log links, the percentage, the method, the bases
+(`plannedBasis`, `installedBasis`), the entry count and `approvedProgressId` stay. The stored events are not
+changed; a BOQ reader's history is the same object. Proven live (`pc-6-method-authority`: a cost controller on a
+boq:none template reads every entry and submission event of the suite — the typed mint, both floored approvals,
+the skipped mint — against the PM's whole history) and by unit (`boq-figures.quantity-audit-history.test.js`);
+mutation-proven five ways (entry events not stripped; submission events not stripped; `legacyFloor` kept;
+`mintSkipped` kept; `typed` / `officialBefore` kept).
+**The installed view names a legacy floor** (integration, 2026-10-01; verification finding). After a floored approval
+(§3.2) the official row says 75 of 100 while the installed view and the register's `installedQuantity` say 15 —
+Σ approved entries — with nothing linking the two. Both figures are right and neither is changed; the reader is now
+shown both and why they differ. `quantity-views.service withOfficialInstalled` (the one helper): when the activity's
+latest official `ActivityProgress` carries the floor — read where §3.2 records it, `serializeProgressSource(row)
+.installedBasis === 'legacy_typed_floor'` — and Σ approved entries (in the official figure's unit) is below that
+row's `quantityComplete`, the installed answer keeps its value, lines and truth, its `basis` gains "Σ approved
+entries is below the official installed figure (officialInstalled) because earlier progress was typed, not entered:
+the latest approved progress carries that legacy typed quantity as its floor", and it carries
+
+```
+officialInstalled: { value, unitCode, basis: 'official figure of the latest approved progress, carrying a legacy typed quantity as its floor',
+                     truth: 'source', derivedFrom: [{ type: 'activity_progress', id }], approvedAt }
+```
+
+On the three reads that state an activity's installed figure: `GET /activities/{id}/quantities` (`figures.installed`
+— the latest official row on or before the cutoff; progress readers only, as the percentage beside it), the activity
+detail's `progress.installedQuantity` (`installedForActivity`) and the register's `installedQuantity`
+(`activity.service withQuantityFigures`, on the row's own latest official progress). The per-item figures
+(`items[].figures.installed`, `GET /boq/items/{id}/quantities`) are untouched: the floor is the activity's and
+cannot be attributed to an item. The note sits inside the installed figure, so `utils/boq-figures` withholds it with
+the figure — a member without boq:read is given neither figure nor the sentence, on any of the three. The web draws
+it as sent (`controls/quantities/official-installed.tsx`: the Progress tab under the per-item lines, the drawer's
+quantities and the drawer's progress section — "Official installed: 75 m3 — …", nothing computed from the two); the
+mobile activity screen prints the same line under Installed. Proven live (`pc-6-method-authority`: the slab — view,
+register single and list, detail — 15 and 75 with the sentence; the kerb and the pour say nothing of a floor; the
+cost controller on a boq:none template gets none of it on the four reads; every `ActivityProgress` row, every entry
+and the EV report byte-identical), by unit (`quantity-views.service.test.js`, on the writer's own
+`serializeProgressSource`), in the browser against the contract (`55-quantity-progress.spec.ts`, routed: both
+figures drawn in the drawer and on the Progress tab) and on the mobile screen (`activity-quantities.test.tsx`);
+mutation-proven (the note dropped → unit and live fail; the register's figure not withheld → unit and live fail; the
+web not drawing the figure it was sent → the source check and the browser case fail).
+**The official figure above the entries, not only a floor** (integration fix, 2026-10-01, closing the gap reported
+above). An official row typed with no floor and no entry minted behind the difference — legacy typed progress from
+before PC-6, or a typed figure whose mint was skipped (several allocated items, another unit, a figure approved below
+the official one) — stands above Σ approved entries too; its PROGRESS SOURCE says `installedBasis: client`.
+`officialInstalledOf` now states it as well, with its own basis ("official figure of the latest approved progress,
+typed rather than entered") and `installedBasis: 'client'` (the floor's carries `'legacy_typed_floor'`), and the
+installed basis gains "Σ approved entries is below the official installed figure (officialInstalled) because the
+latest approved progress was typed rather than entered: no entry stands behind the difference" — same three reads,
+same withholding, nothing moved. To tell a typed figure from one derived from entries the views read the official
+row's submission entries (the register already did): a row approved from entered entries says nothing; a typed
+figure whose mint brought the entries up to it says nothing (no difference). `comparisons.certifiedOverInstalled`
+now compares the certified figure with the **higher** of Σ approved entries and the official installed figure (in
+one unit; another unit is never compared) and says which — `installedFigure: 'approved_entries' |
+'official_installed'`, and the basis ("… — here the official installed figure (officialInstalled) …"). Per-item
+comparisons are unchanged (the official figure is the activity's). The web note and the mobile line pick their
+reason from `installedBasis`. Proven live (`pc-6-method-authority`: the zero pour's typed 40 over Σ 0 on the view,
+the register and the detail with the comparison against 40; the kerb says nothing; the boq:none cost controller
+gets none of it; rows, entries and EV byte-identical), by unit (`quantity-views.service.test.js`), the source check
+and the mobile screen test; mutation-proven.
+Proof of the views: `backend/src/services/__live__/pc-6-quantity-views.live.test.js` (LiveTest org; the
 seeded entries, the two certificates — one a quarter paid —, the receipt/issue/return, rebar in kg against tonnes,
 the draft commitment, the percent-method activity, the member without BOQ read, tenant 404s) and
 `pc-6-quantity-views-showcase.differential.live.test.js` (Marina Bay, read-only: every item's and activity's
@@ -415,9 +759,22 @@ Certified EV selection (`approvedAt ≤ cutoff`), AC from `CostRecord.actual ≤
 
 - Every matched percentage is a `ProgressSubmission` (`source 'import'`, `method 'percent'`) made through `progress.service createProgressSubmission`, in the importer's name. The writer's assignment rule applies (an unassigned site engineer's row is `refused` with `ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED`); a row on an activity that requires evidence is kept as a `draft` (the writer's own allowance), never submitted without it.
 - **Authority is the importer's own**, decided by `hasPermission(req, 'progress', 'approve', { transition: 'submission.approve' })` — the same engine and the same answer as the approve route (template, project role, party profile, API-key scope). Without it every row is `submitted` and nothing is official (`authority.outcome = 'submitted'`). With it each row is submitted and then approved through `approveProgressSubmissionWithClient`, so the evidence gate, the open ITP hold points, the audit trail (`created` + `approved`, actor = importer) and the domain event are the ordinary ones; a row a gate refuses stays pending with the gate's reason (`status 'pending'`, `reason { code, message }`) and never fails the file.
-- Nothing in the import writes `ActivityProgress`; an approved row is never rewritten — a later approval is a new row, exactly as the writer does. The file's figure is a percentage, so the submission names `percent`; on an activity measured another way the writer records the method the submission names (it does not refuse), and the row carries `methodMismatch: true` for the reviewer.
+- Nothing in the import writes `ActivityProgress`; an approved row is never rewritten — a later approval is a new row, exactly as the writer does. The file's figure is a percentage, so the submission names `percent`; on an activity **configured** to be measured another way the writer refuses it (§3.2, 409 `PROGRESS_METHOD_MISMATCH` — the submission's method is the activity's, never the file's), and the row is `refused` with that reason, previewed as `refuse` by the dry run (integration fix, 2026-10-01; before it the row was written as a percent submission flagged `methodMismatch: true`, and an approver's import approved a percentage with no entries behind it). A 0% row on such an activity with no approved progress is still `unchanged`, never refused. Proven live: `pc-6-import-authority` P600 for the site engineer and the PM alike.
 - **Only a figure that moves the official figure is written** (review finding, 2026-09-30). The current official figure is the latest approved `ActivityProgress` percentage, and **0 for an activity with no approved progress**; a row at that figure is `unchanged` and creates nothing — so a full-programme P6 export, which names every activity, does not put one 0% submission per unstarted activity in the approval queue (nor, for a PM, one approved 0% row plus two audit events per activity). A row the file names **without a percentage** (empty `phys_complete_pct`; no `PhysicalPercentComplete`/`PercentComplete` in P6 XML — a P6 status is not a percentage) is `skipped` with `PROGRESS_PERCENT_MISSING`, never a submission; the parsers say whether one was stated (`physCompleteStated`) and the schedule import still reads such a row as 0. The dry run classifies the same way, and the answer counts `unchanged` and `skipped`.
 - A figure already waiting in an open import submission: for a submit-only person, or when the open row is a `draft` (it waits for evidence, not approval), the row is `already_pending` (`waitingStatus` says where it waits; the reason says the same) and nothing is written. **An importer with approval authority whose figure already waits in someone else's `submitted` import submission approves that submission** through `approveProgressSubmissionWithClient` with its gates — the same figure under the approver's own authority — so the submission's own row becomes `approved`, one `ActivityProgress` row is written with its id, and the audit `approved` event names the approver (the `created` event keeps its submitter); the row answers `approvesPending: true` with that `submissionId`. A gate still applies: an open ITP hold point or missing evidence leaves it `pending` with the reason, no second submission. When the approver's figure **differs** from a pending `submitted` import row, the import creates and approves a new submission as for any row. Either way, **every** other older `submitted` import row on the activity at another figure — there may be several (a site engineer's 30 then 32) — is left exactly as the writer leaves a superseded manual submission — untouched, still in the queue (the activity's `progressApprovalStatus` still says `submitted`); the written row carries `superseded [{ submissionId, pctComplete }, …]` (newest first; also on a row that approved an already-pending submission, since the approver is the one person the report exists for) and the answer lists each as a `supersededPendingSubmissions` entry (`supersededPending` counts submissions, not rows; "superseded pending" in the message) so the approver can reject them from the queue (follow-up review findings, 2026-09-30: the approving row said nothing and only the newest older row was named). The import never rejects or deletes a submission. The writer keeps no idempotency key, so any other figure is written again.
+- **A manual pending submission is treated exactly like an import one** (integration fix, 2026-10-01). The
+  pending-row logic used to read only `source 'import'` open submissions, so a MANUAL pending submission at the same
+  figure was neither approved by an approver's import nor reported — the import created and approved a second,
+  identical submission and the manual one kept waiting. It now reads every open submission of the activity (the web
+  form's, the site app's, a daily report's): at the **same** figure a submit-only import is `already_pending` (the
+  reason names what waits: "A manual submission at 72% is already awaiting approval; no second submission") and an
+  approver's import approves THAT submission through `approveProgressSubmissionWithClient` with its gates
+  (`approvesPending: true`; the submission keeps its submitter and its `source`, the official row its `source
+  'manual'`); at a **different** figure it is reported as superseded pending like an import one (`superseded`,
+  `supersededPendingSubmissions`; the message says "older pending submission(s)" when any of them is not an
+  import's, "older pending import submission(s)" when all are). The import still never rejects or deletes.
+  Proven live (`pc-6-import-authority`, the manual 72 / 74 on P100 beside the older import 65) and
+  mutation-proven (the import-only filter restored fails the case).
 - `?dryRun=true` reports the per-row outcome for this person and stores nothing — no document, no submission. The outcome is read from the writer's own rules, not assumed: the assignment assertion the writer runs, the activity's evidence requirement, and (for an approver) the ITP hold points the approval gate reads. A row those would refuse is previewed `refuse`, one a gate would hold `hold` (kept as a draft for a submit-only person, left pending for an approver), each with the reason; `wouldSubmit` / `wouldApprove` count only rows that will be written that way, `wouldHold` / `wouldRefuse` the rest. The import itself still trusts the writer for every row. The web dialog previews first and repeats the server's headline; its headline counts only what is in an approver's queue as "submitted for approval" and says drafts, refusals and skipped rows separately; the grid shows the unchanged, skipped and superseded-pending counts, a note names the older pending figures left in the queue, and a row approved as it already stood in the queue says so; unchanged rows are counted, not listed. After a real import it refreshes the same queries the progress tab does after an approval (EV report, audit history, readiness). Mobile does not call this endpoint.
 - OpenAPI: `ProgressImportResponse` / `ProgressImportRow` (`skipped`, `supersededPending`, `supersededPendingSubmissions`, `approvesPending`, `superseded`; `pctComplete` null on a skipped row). Live proof: `backend/src/services/__live__/pc-6-import-authority.live.test.js` — including the full-programme 0% file that writes nothing for either person and leaves the EV report byte-identical, the skipped row, the approver approving the site engineer's own pending row (and the hold point still holding it), the differing figure that leaves the older row byte-identical and reported, the approver's identical figure that approves the pending row and still names the other older figure in the queue, and an activity with three older figures waiting (40, 85, 90) all reported one entry each by the site engineer's and the PM's imports.
 

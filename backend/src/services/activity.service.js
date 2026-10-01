@@ -83,7 +83,7 @@ const activityInclude = {
           reviewedBy: true,
           reviewedAt: true,
           dailyReportId: true,
-          quantityEntries: { select: { id: true, status: true, dailyLogId: true } },
+          quantityEntries: { select: { id: true, status: true, source: true, dailyLogId: true, date: true } },
         },
       },
     },
@@ -128,7 +128,9 @@ const activityInclude = {
     where: { status: { in: ['draft', 'submitted'] } },
     orderBy: { updatedAt: 'desc' },
     take: 1,
-    include: { quantityEntries: { select: { id: true, status: true, dailyLogId: true } } },
+    // The pending submission carries the entries it bundles, whole: what the
+    // approver is asked to approve (serializeSubmission.quantityEntries).
+    include: { quantityEntries: { select: progressService.BUNDLED_ENTRY_SELECT, orderBy: [{ date: 'asc' }, { createdAt: 'asc' }] } },
   },
 };
 
@@ -260,6 +262,43 @@ const sanitizeActivity = (activity, allocationTotals = null, project = null) => 
   };
 };
 
+// PC-6 (integration): what the register carries of a quantity-measured
+// activity — installed per BOQ item (Σ approved entries), the planned
+// quantity with its basis, and the submitted entries nobody has put forward
+// yet — read from the entries service in a fixed number of queries. Only
+// for activities configured to be measured by quantity; the routes withhold
+// all three from a member who may not read the BOQ. Required lazily:
+// quantity-progress.service requires progress.service, as this file does.
+const isQuantityMeasured = (activity) => {
+  try {
+    return progressService.normalizeMethod(activity.progressMethod?.method) === 'quantity' && Boolean(activity.progressMethod);
+  } catch {
+    return false;
+  }
+};
+
+const quantityFiguresFor = async ({ orgId, projectId, activities }) => {
+  const activityIds = activities.filter(isQuantityMeasured).map((activity) => activity.id);
+  if (!activityIds.length) return new Map();
+  return require('./quantity-progress.service').activityQuantityFigures({ orgId, projectId, activityIds });
+};
+
+// The register's installed figure names a legacy floor: when the activity's
+// latest official row carries a legacy typed quantity as its floor, Σ
+// approved entries is below the official installed figure, and
+// `installedQuantity` says so and carries that figure beside it
+// (quantity-views.service withOfficialInstalled; neither figure is changed,
+// and the note is withheld with the figure). Required lazily, as above.
+const withQuantityFigures = (sanitized, figures, latestProgress = null) => {
+  const own = figures.get(sanitized.id);
+  if (!own) return sanitized;
+  return {
+    ...sanitized,
+    ...own,
+    installedQuantity: require('./quantity-views.service').withOfficialInstalled(own.installedQuantity, latestProgress),
+  };
+};
+
 const ensureProject = async (orgId, projectId) => {
   const project = await prisma.project.findFirst({
     where: { id: projectId, orgId },
@@ -317,8 +356,9 @@ const listActivities = async ({ orgId, projectId }) => {
     getApprovedActivityAllocationTotals({ projectId }),
   ]);
 
+  const quantityFigures = await quantityFiguresFor({ orgId, projectId, activities });
   return activities.map((activity) =>
-    sanitizeActivity(activity, allocationTotals.get(activity.id), project),
+    withQuantityFigures(sanitizeActivity(activity, allocationTotals.get(activity.id), project), quantityFigures, activity.progress?.[0] ?? null),
   );
 };
 
@@ -433,7 +473,8 @@ const getActivityById = async ({ orgId, projectId, activityId }) => {
     ensureActivity(projectId, activityId),
     getApprovedActivityAllocationTotals({ projectId }),
   ]);
-  return sanitizeActivity(activity, allocationTotals.get(activity.id), project);
+  const quantityFigures = await quantityFiguresFor({ orgId, projectId, activities: [activity] });
+  return withQuantityFigures(sanitizeActivity(activity, allocationTotals.get(activity.id), project), quantityFigures, activity.progress?.[0] ?? null);
 };
 
 const updateActivity = async ({ orgId, projectId, activityId, payload }) => {
@@ -578,9 +619,13 @@ const ACTIVITY_KEEPERS = [
   { key: 'costRecords', model: 'costRecord', noun: 'cost record' },
   { key: 'progress', model: 'activityProgress', noun: 'progress record' },
   { key: 'dailyReports', model: 'dailyReport', noun: 'daily report' },
+  // PC-6: installed quantities recorded against the activity, source data
+  // for an official figure (RESTRICT, like ActivityProgress).
+  { key: 'quantityEntries', model: 'quantityProgressEntry', noun: 'quantity progress entry' },
+  { key: 'dailyLogQuantities', model: 'dailyLogQuantity', noun: 'daily-log quantity row' },
 ];
 
-const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+const plural = (count, noun) => `${count} ${count === 1 ? noun : noun.endsWith('y') ? `${noun.slice(0, -1)}ies` : `${noun}s`}`;
 
 // The activity's code, or the P6 id an import gave it, or its name.
 const activityLabel = (activity) =>
@@ -666,6 +711,19 @@ const updateProgress = async ({
   };
 };
 
+// A batch is long enough to outlive Prisma's default interactive window.
+const BULK_PROGRESS_TRANSACTION = { maxWait: 10_000, timeout: 60_000 };
+
+/**
+ * POST /activities/bulk-progress: every update of the batch is written, or
+ * none is. The submissions used to be made one at a time, each in its own
+ * transaction, so a batch whose third update the writer refused (a method
+ * that is not the activity's, a quantity submission that states no quantity,
+ * missing evidence) answered the refusal for the whole call after the first
+ * two were written — and a client that retried the batch duplicated them.
+ * The batch is one transaction now; the refusal names the update it came
+ * from (`details.batch`), and says that nothing was written.
+ */
 const bulkUpdateProgress = async ({
   orgId,
   projectId,
@@ -683,6 +741,17 @@ const bulkUpdateProgress = async ({
   const activityMap = new Map(
     activities.map((activity) => [activity.id, activity]),
   );
+  const list = updates || [];
+  // An update naming an activity that is not in the project used to be
+  // skipped silently inside the batch — the caller was answered 200 with one
+  // update fewer than it sent. It is refused before anything is written, and
+  // the refusal names the update, as the writer's refusals do.
+  const unknown = list.findIndex((update) => !activityMap.has(update.activityId));
+  if (unknown !== -1) {
+    throw new HttpError(404, 'ACTIVITY_NOT_FOUND', `Update ${unknown + 1} of ${list.length} names an activity that is not in this project; nothing was written`, {
+      batch: { index: unknown, activityId: list[unknown].activityId, updates: list.length, written: 0 },
+    });
+  }
   await progressService.assertProgressSubmitAllowed({
     projectId,
     activityIds: activities.map((activity) => activity.id),
@@ -690,21 +759,35 @@ const bulkUpdateProgress = async ({
     userRole,
   });
 
-  const submissions = [];
-  for (const update of updates || []) {
-    const activity = activityMap.get(update.activityId);
-    if (!activity) continue;
-
-    const submission = await progressService.createProgressSubmission({
-      orgId,
-      projectId,
-      activityId: update.activityId,
-      userId,
-      userRole,
-      payload: update,
-    });
-    submissions.push(submission);
-  }
+  const submissions = await prisma.$transaction(async (tx) => {
+    const written = [];
+    for (const [index, update] of list.entries()) {
+      try {
+        written.push(
+          await progressService.createProgressSubmission({
+            orgId,
+            projectId,
+            activityId: update.activityId,
+            userId,
+            userRole,
+            payload: update,
+            tx,
+          }),
+        );
+      } catch (error) {
+        // The writer's refusal, with the update it came from. Throwing rolls
+        // the whole batch back: nothing of it is written.
+        if (error instanceof HttpError) {
+          error.details = {
+            ...(error.details && typeof error.details === 'object' ? error.details : {}),
+            batch: { index, activityId: update.activityId, updates: list.length, written: 0 },
+          };
+        }
+        throw error;
+      }
+    }
+    return written;
+  }, BULK_PROGRESS_TRANSACTION);
 
   return { submitted: submissions.length, submissions };
 };

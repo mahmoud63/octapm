@@ -925,6 +925,8 @@ export type DailyLogQuantityEntry = DailyLogEntry & {
   allocationId?: string | null
   unitCode?: string | null
   withheld?: { reason: string } | boolean | null
+  /** The server's withholding (utils/boq-figures): the keys omitted and why — a member who may not read the BOQ gets no quantity. */
+  boqWithheld?: { keys?: string[]; reason: string } | null
 }
 
 const dailyLogKey = (projectId: string) => ['daily-log', projectId] as const
@@ -1129,7 +1131,8 @@ function QuantityEntryForm({
   const canSave =
     Boolean(activityId && boqItemId && unit) &&
     Number.isFinite(quantityNumber) &&
-    quantityNumber >= 0
+    // Zero is no work, and no work is no row: the server refuses it (QUANTITY_INVALID).
+    quantityNumber > 0
   return (
     <form
       className='grid gap-2 rounded-md border bg-muted/20 p-2 sm:grid-cols-4'
@@ -1489,7 +1492,9 @@ export function QuantitiesSectionCard({
                       ? entry.withheld.reason
                       : entry.withheld
                         ? 'Withheld by the server'
-                        : null
+                        : entry.boqWithheld?.keys?.includes('quantity')
+                          ? entry.boqWithheld.reason
+                          : null
                   const unit =
                     entry.unitCode ??
                     entry.unit ??

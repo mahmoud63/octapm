@@ -127,7 +127,7 @@ export function ImportProgressDialog({ projectId, open, onOpenChange }: Props) {
 
   const shown = result ?? preview
   // What a reviewer reads: rows a gate or the writer said something about,
-  // rows measured another way, rows approved as they already stood in the
+  // rows approved as they already stood in the
   // queue, and rows that left an older pending figure behind. A row that
   // was skipped or is already official carries its reason and is listed
   // too; a plain unchanged 0% row from a full-programme export is not.
@@ -135,7 +135,6 @@ export function ImportProgressDialog({ projectId, open, onOpenChange }: Props) {
     ? shown.rows.filter(
         (row) =>
           (row.reason && row.status !== 'unchanged') ||
-          row.methodMismatch ||
           row.approvesPending ||
           (row.superseded?.length ?? 0) > 0
       )
@@ -259,12 +258,6 @@ export function ImportProgressDialog({ projectId, open, onOpenChange }: Props) {
                     {row.reason && (
                       <span className='text-muted-foreground'>
                         {row.reason.message}
-                      </span>
-                    )}
-                    {row.methodMismatch && (
-                      <span className='text-muted-foreground'>
-                        Measured by {row.activityMethod}; the file gives a
-                        percentage, recorded as a percent submission.
                       </span>
                     )}
                     {(row.superseded?.length ?? 0) > 0 && (

@@ -7,6 +7,11 @@ const { getEffectiveRole, requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const { moneyBody } = require('../utils/money');
 const dailyReportService = require('../services/daily-report.service');
+const {
+  boqFigureAccess,
+  withheldDailyReport,
+  withheldDailyReports,
+} = require('../utils/boq-figures');
 
 const CREATE_STATUSES = ['draft', 'submitted'];
 const SHIFT_VALUES = ['day', 'night', 'swing'];
@@ -120,7 +125,7 @@ router.get(
       from: req.query.from || null,
       to: req.query.to || null,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldDailyReports(result, boqFigureAccess(req)));
   }),
 );
 
@@ -138,7 +143,7 @@ router.post(
       userRole: getEffectiveRole(req),
       payload: req.body,
     });
-    return sendSuccess(res, result, 201);
+    return sendSuccess(res, withheldDailyReport(result, boqFigureAccess(req)), 201);
   }),
 );
 
@@ -152,7 +157,7 @@ router.get(
       projectId: req.params.projectId,
       reportId: req.params.reportId,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldDailyReport(result, boqFigureAccess(req)));
   }),
 );
 
@@ -170,7 +175,7 @@ router.patch(
       userId: req.user.id,
       payload: req.body,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldDailyReport(result, boqFigureAccess(req)));
   }),
 );
 
@@ -188,7 +193,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldDailyReport(result, boqFigureAccess(req)));
   }),
 );
 
@@ -206,7 +211,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldDailyReport(result, boqFigureAccess(req)));
   }),
 );
 
@@ -229,7 +234,7 @@ router.post(
       userRole: getEffectiveRole(req),
       reason: req.body.reason,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldDailyReport(result, boqFigureAccess(req)));
   }),
 );
 
@@ -247,7 +252,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldDailyReport(result, boqFigureAccess(req)));
   }),
 );
 

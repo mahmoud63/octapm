@@ -867,6 +867,13 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "validation",
     message: "No submitted quantity entry of this activity is free to bundle",
   },
+  // PC-6 (integration): the milestone method is respected like quantity — a
+  // submission against configured weighted milestones states their state.
+  MILESTONES_REQUIRED: {
+    status: 400,
+    category: "validation",
+    message: "This activity is measured by weighted milestones; a submission states which milestones are complete",
+  },
   QUANTITY_BUNDLE_METHOD_MISMATCH: {
     status: 400,
     category: "validation",

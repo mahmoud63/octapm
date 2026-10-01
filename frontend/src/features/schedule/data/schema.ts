@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  OfficialInstalledSchema,
   ControlsFigureSchema,
   ControlsSectionDeniedSchema,
   ControlsStructureSchema,
@@ -632,6 +633,11 @@ export const progressSourceSchema = z
     dailyLogIds: z.array(z.string()).nullable().optional(),
     dailyLogDates: z.array(z.string()).nullable().optional(),
     entryCount: z.number().nullable().optional(),
+    // The server's own count of the entries behind the figure (the same number).
+    entries: z.number().nullable().optional(),
+    // approved_entries | client | legacy_typed_floor (quantity method), else null.
+    installedBasis: z.string().nullable().optional(),
+    legacyFloor: z.boolean().nullable().optional(),
   })
   .passthrough()
 
@@ -666,6 +672,12 @@ export const quantityProgressEntrySchema = z
     // Withheld from a member who may not read the BOQ: absent, with the reason.
     quantity: z.number().nullable().optional(),
     withheld: withheldNote,
+    // utils/boq-figures withheldQuantityEntry: the keys omitted and why.
+    boqWithheld: z
+      .object({ keys: z.array(z.string()).optional(), reason: z.string() })
+      .passthrough()
+      .nullable()
+      .optional(),
     date: z.string().nullable().optional(),
     source: z.string().nullable().optional(),
     status: z.string().nullable().optional(),
@@ -727,6 +739,10 @@ export const activityInstalledQuantitySchema = z
     asOf: z.string().nullable().optional(),
     basis: z.string().nullable().optional(),
     truth: z.string().nullable().optional(),
+    // The official installed figure, when the latest approved progress
+    // carries a legacy typed quantity as its floor (the basis says why the
+    // lines add up to less).
+    officialInstalled: OfficialInstalledSchema.nullable().optional(),
     withheld: withheldNote,
     notAvailable: withheldNote,
   })

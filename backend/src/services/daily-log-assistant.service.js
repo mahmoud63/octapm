@@ -104,8 +104,23 @@ const collectEvidence = async ({ orgId, projectId, date, viewer = null, photoIds
 
 const num = (value) => (value === null || value === undefined ? "—" : String(value));
 
+// The BOQ-access rule (utils/boq-figures.js): a progress submission's typed
+// installed quantity, its planned quantity (Σ approved allocations) and its
+// unit are figures of the bill, withheld from a member who may not read the
+// BOQ on the project. The evidence is what the model is shown and what the
+// stored run keeps, served back to its author, so it carries those figures
+// only for a BOQ reader; anyone else's evidence states the percentage, the
+// method and the status. The caller says which (`access`, boqFigureAccess);
+// without it nothing of the bill is shown.
+const NO_BOQ_ACCESS = Object.freeze({ boq: false, budget: false });
+const hasQuantity = (row) => row.quantityComplete !== null && row.quantityComplete !== undefined;
+const quantityNote = (row) =>
+  hasQuantity(row) ? ` (${row.quantityComplete}${row.quantityUnit ? ` ${row.quantityUnit}` : ""}${row.quantityPlanned !== null && row.quantityPlanned !== undefined ? ` of ${row.quantityPlanned}` : ""})` : "";
+const progressLine = (row, access) =>
+  `- progress:${row.id} · ${row.activity?.name || "activity"} → ${row.pctComplete}%${row.method ? ` by ${row.method}` : ""}${access?.boq ? quantityNote(row) : ""} · ${row.status}${row.notes ? ` · ${row.notes}` : ""}`;
+
 /** Everything the model may use, as text; photos are listed here and attached as images separately. */
-const evidenceBlock = ({ project, key, log, photos, progress, inspections, punch, safety, notes }) => {
+const evidenceBlock = ({ project, key, log, photos, progress, inspections, punch, safety, notes, access = NO_BOQ_ACCESS }) => {
   const rows = (items, render) => (items.length ? items.map(render) : ["- none"]);
   const weather = log.weather;
   const s = log.sections;
@@ -122,7 +137,7 @@ const evidenceBlock = ({ project, key, log, photos, progress, inspections, punch
   lines.push("", "Visitors logged:", ...rows(s.visitors, (row) => `- ${row.name}${row.company ? ` (${row.company})` : ""}${row.purpose ? ` · ${row.purpose}` : ""}`));
   lines.push("", "Delays logged:", ...rows(s.delays, (row) => `- ${row.type}: ${row.description} · ${row.hoursLost} h lost${row.suggested ? " (suggested by the weather feed, not confirmed)" : ""}`));
   lines.push("", "Notes logged:", ...rows(s.notes, (row) => `- [${row.kind}] ${row.text}`));
-  lines.push("", "Progress updates today:", ...rows(progress, (row) => `- progress:${row.id} · ${row.activity?.name || "activity"} → ${row.pctComplete}%${row.quantityComplete !== null && row.quantityComplete !== undefined ? ` (${row.quantityComplete}${row.quantityUnit ? ` ${row.quantityUnit}` : ""}${row.quantityPlanned !== null && row.quantityPlanned !== undefined ? ` of ${row.quantityPlanned}` : ""})` : ""} · ${row.status}${row.notes ? ` · ${row.notes}` : ""}`));
+  lines.push("", "Progress updates today:", ...rows(progress, (row) => progressLine(row, access)));
   lines.push("", "Inspections today:", ...rows(inspections, (row) => `- ${row.ref} ${row.title} (${row.type}) · ${row.status}${row.outcome ? ` · ${row.outcome}` : ""}`));
   lines.push("", "Punch items / observations raised today:", ...rows(punch, (row) => `- ${row.ref} ${row.title} · ${row.kind}${row.observationType ? ` (${row.observationType})` : ""} · ${row.priority}${row.trade ? ` · ${row.trade}` : ""}${row.locationText ? ` · ${row.locationText}` : ""}`));
   lines.push("", "Safety incidents today:", ...rows(safety, (row) => `- ${row.ref} ${row.title} · ${row.incidentType}${row.severity ? ` · ${row.severity}` : ""} · ${row.status}`));
@@ -247,11 +262,18 @@ const runMessage = (stored) => (stored?.message ? { id: stored.message.id, provi
  * Drafts the day. `payload.notes` is the dictated / typed text,
  * `payload.includePhotos` (default true) attaches the day's photos as images
  * when the provider reads them, `payload.photoIds` limits the photos.
+ * `access` is the caller's boqFigureAccess: without `access.boq` the
+ * evidence carries no quantity of the bill (see progressLine).
  */
-const draftReport = async ({ orgId, projectId, date, payload = {}, user, viewer = null, transport = null, fetchImpl = null }) => {
+const draftReport = async ({ orgId, projectId, date, payload = {}, user, viewer = null, access = NO_BOQ_ACCESS, transport = null, fetchImpl = null }) => {
   const notes = clip(payload.notes, 8000);
   const evidence = await collectEvidence({ orgId, projectId, date, viewer, photoIds: Array.isArray(payload.photoIds) && payload.photoIds.length ? payload.photoIds : null });
-  const text = evidenceBlock({ ...evidence, notes });
+  const text = evidenceBlock({ ...evidence, notes, access });
+  // The stored run keeps the evidence as its prompt: a run that shows a
+  // quantity is BOQ-bearing (assistant.service BOQ_BEARING_KINDS) and is
+  // served back only while its author may read the BOQ; one that shows none
+  // says so.
+  const builtWithoutBoq = !access?.boq || !evidence.progress.some(hasQuantity);
   const provider = aiProvider.describe();
   const counts = { photos: evidence.photos.length, progress: evidence.progress.length, inspections: evidence.inspections.length, punch: evidence.punch.length, safety: evidence.safety.length, entries: evidence.log.totals.entries, notes: Boolean(notes) };
   const degraded = (reason) => ({ degraded: true, reason, date: evidence.key, draft: deterministicDraft(evidence, notes), evidence: { photos: photoOut({ projectId, photos: evidence.photos, included: new Set() }), counts, includedImages: 0 }, message: null });
@@ -263,7 +285,7 @@ const draftReport = async ({ orgId, projectId, date, payload = {}, user, viewer 
   const { completion, parsed, error } = await complete({ system: DRAFT_PROMPT, messages: [{ role: "user", content }], transport, maxTokens: 2500 });
   if (!completion) return degraded(`${error?.message || "The AI provider did not answer."} This draft was built from the day's records only.`);
   const draft = normalizeDraft(parsed, { photos: evidence.photos, fallback: deterministicDraft(evidence, notes) });
-  const stored = await assistant.storeRun({ orgId, user, projectId, kind: KIND, recordType: "daily_log", recordId: evidence.log.id || null, title: `Daily report draft ${evidence.key}`, prompt: text, answer: JSON.stringify(draft), usage: completion.usage || null, provider: completion.provider || null, model: completion.model || null }).catch(() => null);
+  const stored = await assistant.storeRun({ orgId, user, projectId, kind: KIND, recordType: "daily_log", recordId: evidence.log.id || null, title: `Daily report draft ${evidence.key}`, prompt: text, answer: JSON.stringify(draft), usage: completion.usage || null, provider: completion.provider || null, model: completion.model || null, builtWithoutBoq }).catch(() => null);
   return { degraded: false, date: evidence.key, draft, evidence: { photos: photoOut({ projectId, photos: evidence.photos, included }), counts, includedImages: included.size }, message: runMessage(stored) };
 };
 
@@ -317,4 +339,4 @@ const transcribe = ({ file, language = null, fetchImpl = null }) => {
   return aiProvider.transcribeAudio({ buffer: file.buffer, mimeType: file.mimetype || "audio/webm", fileName: file.originalname || "audio.webm", language, fetchImpl });
 };
 
-module.exports = { KIND, DRAFT_PROMPT, dayWindow, collectEvidence, evidenceBlock, deterministicDraft, normalizeDraft, draftReport, applyDraft, status, transcribe };
+module.exports = { KIND, DRAFT_PROMPT, NO_BOQ_ACCESS, dayWindow, collectEvidence, evidenceBlock, progressLine, deterministicDraft, normalizeDraft, draftReport, applyDraft, status, transcribe };

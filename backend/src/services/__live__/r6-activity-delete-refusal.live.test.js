@@ -24,6 +24,10 @@
  *   before.
  * - A manually created activity with a daily report: 409 ACTIVITY_IN_USE
  *   naming the daily report; the report stays.
+ * - PC-6: a manually created activity with an installed quantity recorded
+ *   against it — a quantity progress entry and a daily-log quantity row, both
+ *   ON DELETE RESTRICT — is 409 ACTIVITY_IN_USE naming both (keptBy carries
+ *   every keeper of activity.service ACTIVITY_KEEPERS); the rows stay.
  *
  *   npm run test:live -- src/services/__live__/r6-activity-delete-refusal.live.test.js
  */
@@ -133,7 +137,7 @@ liveDescribe("DELETE /activities/:id answers a structured refusal, never 500, fo
       409,
       CODE,
       message,
-      { activityId: excavate.id, activityCode: "G100", partOfActiveSchedule: true, keptBy: { costRecords: 1, progress: 0, dailyReports: 0 } },
+      { activityId: excavate.id, activityCode: "G100", partOfActiveSchedule: true, keptBy: { costRecords: 1, progress: 0, dailyReports: 0, quantityEntries: 0, dailyLogQuantities: 0 } },
     ]);
     expect(await footprint(excavate.id)).toBe(before);
     expect(await prisma.activity.count({ where: { projectId: project.id, isActive: true } })).toBe(2);
@@ -165,9 +169,45 @@ liveDescribe("DELETE /activities/:id answers a structured refusal, never 500, fo
     expect([refused.status, error.code, error.details]).toEqual([
       409,
       CODE,
-      { activityId: kept, activityCode: "M200", partOfActiveSchedule: true, keptBy: { costRecords: 0, progress: 0, dailyReports: 1 } },
+      { activityId: kept, activityCode: "M200", partOfActiveSchedule: true, keptBy: { costRecords: 0, progress: 0, dailyReports: 1, quantityEntries: 0, dailyLogQuantities: 0 } },
     ]);
     expect(error.message).toBe("Activity M200 cannot be deleted: 1 daily report is linked to it. Records stay on their activity; take it out of the programme through a schedule revision instead.");
     expect(await footprint(kept)).toBe(before);
+  });
+
+  it("PC-6: an activity with a quantity progress entry and a daily-log quantity row is refused naming both; the rows stay and no constraint text reaches the client", async () => {
+    const created = await api.post(at("/activities"), { engineerIds: [live.user.id], name: "Blinding", activityCode: "M300", duration: 2, startDate: "2026-03-04", endDate: "2026-03-05" }, auth());
+    ok(created, 201);
+    const activityId = created.body.data.id;
+    const item = await api.post(at("/boq/items"), { code: "9.1", description: "Sand blinding", quantity: 100, unit: "m3", rate: 20 }, auth());
+    ok(item, 201);
+    const boqItemId = item.body.data.item.id;
+    const allocation = await api.post(at("/activity-boq-allocations"), { boqItemId, activityId, quantity: 40 }, auth());
+    ok(allocation, 201);
+    for (const step of ["submit", "approve"]) ok(await api.post(at(`/activity-boq-allocations/${allocation.body.data.id}/${step}`), {}, auth()));
+    ok(await api.post(at("/quantity-progress"), { activityId, boqItemId, quantity: 5, date: "2026-03-04", status: "submitted", clientRequestId: "del-keep-1" }, auth()), 201);
+    ok(await api.post(at("/daily-logs/2026-03-04/entries/quantities"), { activityId, boqItemId, quantity: 3, unitCode: "m3", clientRequestId: "del-keep-2" }, auth()), 201);
+    const rows = async () =>
+      JSON.stringify({
+        entries: await prisma.quantityProgressEntry.findMany({ where: { activityId }, orderBy: { id: "asc" } }),
+        logRows: await prisma.dailyLogQuantity.findMany({ where: { activityId }, orderBy: { id: "asc" } }),
+      });
+    const before = await footprint(activityId);
+    const keptRows = await rows();
+    const message = "Activity M300 cannot be deleted: 1 quantity progress entry, 1 daily-log quantity row are linked to it. Records stay on their activity; take it out of the programme through a schedule revision instead.";
+    const refused = await remove(activityId, dev);
+    expect([refused.status, refused.body?.error?.code, refused.body?.error?.message, refused.body?.error?.details]).toEqual([
+      409,
+      CODE,
+      message,
+      { activityId, activityCode: "M300", partOfActiveSchedule: true, keptBy: { costRecords: 0, progress: 0, dailyReports: 0, quantityEntries: 1, dailyLogQuantities: 1 } },
+    ]);
+    const production = await remove(activityId);
+    const { requestId, ...error } = production.body?.error || {};
+    expect([production.status, error]).toEqual([409, { code: CODE, message }]);
+    expect(production.text).not.toMatch(/prisma|P2003|constraint/i);
+    expect(api.proc.output()).not.toMatch(/P2003|INTERNAL_ERROR/);
+    expect(await footprint(activityId)).toBe(before);
+    expect(await rows()).toBe(keptRows);
   });
 });

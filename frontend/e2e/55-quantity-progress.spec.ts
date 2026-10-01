@@ -20,29 +20,43 @@ import {
  * with an approved 40 % and a pending 60 %, and a quantity surveyor whose
  * template takes the BOQ away.
  *
- * Test 1 runs on any server (this branch alone included): the Progress tab
- * names the PROGRESS SOURCE of V200's official and pending figures from the
- * source string, shows installed / planned for V100 (planned typed on the
- * method, installed "—" with a reason until the server reports it), the
- * activity drawer draws the six quantity labels with "—" and one reason
- * when the views are not on the server or are withheld — never a zero —
+ * Both tests run against the merged server (core, views, the daily log's
+ * section and the register's quantity figures): build() asserts the three
+ * routes are there — nothing here skips.
+ *
+ * Test 1: the Progress tab names the PROGRESS SOURCE of V200's official and
+ * pending figures, shows installed / planned for V100 (planned Σ the
+ * approved allocations, installed "—" with the reason while nothing is
+ * approved), the activity drawer draws the six quantity labels from the
+ * views — "—" with the reason for a figure not available, never a zero —
  * and the daily log has its seventh section with the unit never typed. The
  * surveyor without BOQ read sees the approved percentage and "—" with the
- * server's reason for every per-item quantity. Three routed checks prove
- * the renderers against the contracts on any server: the views contract
- * in the drawer (a bare `value: null` is "—", a unit mismatch is warned),
- * core's register fields on the Progress tab (installed is the server's
- * per-item figure, never the percentage × planned) and core's quantities
- * section in the daily log (rows of different items sharing a unit are
- * never added up, a unit-less row is never bucketed).
+ * server's reason for every per-item quantity, on the tab and in the drawer
+ * (the whole views read is withheld inside a 200 answer). Three routed
+ * checks prove the renderers against the contracts: the views contract in
+ * the drawer (a bare `value: null` is "—", a unit mismatch is warned), the
+ * register fields on the Progress tab (installed is the server's per-item
+ * figure, never the percentage × planned) and the quantities section in the
+ * daily log (rows of different items sharing a unit are never added up, a
+ * unit-less row is never bucketed). The first two also carry the official
+ * installed figure a legacy floor leaves above Σ approved entries: both
+ * figures are drawn, with the server's reason, and nothing is added up.
  *
- * Test 2 is the full walk — daily log → Progress tab pending with the
- * bundled entry → approve → official with the daily log as its source —
- * and skips with its reason when the core endpoints (the activity's
- * allocated items, the daily log's quantities section) are not on this
- * server yet; the orchestrator re-runs it after the merge. It assumes that
- * submitting a day with quantity rows puts one submission bundling them in
- * the approval queue (core's contract).
+ * Test 2 is the full walk on the real contract: a quantity row on the daily
+ * log → the day submitted mints a PENDING entry (nothing official, nothing
+ * in the queue yet) → the Progress tab lists it under the activity, not
+ * official, with its source → "Put forward for approval" bundles it into a
+ * submission → the queue shows the bundle with its entry → approve →
+ * official at installed ÷ planned with the daily log as its source.
+ *
+ * Test 3 is bulk progress on the real contract, through the API: a batch
+ * that includes V100 (measured by quantity) is refused whole — 409 naming
+ * V100 in details.batch, no submission written, no official figure moved —
+ * with the percentage named and as a percentage-only screen sends it; a
+ * percent-only batch writes one pending submission. The web's bulk screen
+ * (bulk-progress-update.tsx: V100 listed disabled with the reason) is not
+ * mounted on any page, so it is covered by the source check
+ * scripts/quantity-progress-ui.test.mjs, not driven here.
  */
 
 let org: LiveOrg | null = null
@@ -120,12 +134,6 @@ type Built = {
   boqItemId: string
   qsEmail: string
   qsToken: string
-  /**
-   * Which PC-6 routes this server has: allocatedItems and dailyLogSection
-   * are core's, quantitiesView is views' (the two merge separately, so the
-   * drawer's expectations are gated on the route the drawer reads).
-   */
-  pc6: { allocatedItems: number; dailyLogSection: boolean; quantitiesView: number }
 }
 
 let built: Built | null = null
@@ -166,22 +174,23 @@ const build = async () => {
     for (const step of ['submit', 'approve']) {
       await call(client, 'post', `/projects/${projectId}/activity-boq-allocations/${allocation.id as string}/${step}`)
     }
-    // V100 is measured by quantity: 20 m3 planned (the figure typed on the
-    // method; a server with PC-6 core derives it from the allocation).
+    // V100 is measured by quantity; nothing is typed on the method, so the
+    // planned quantity is Σ its approved allocations: 20 m3.
     await call(client, 'put', `/projects/${projectId}/activities/${v100.id}/progress-method`, {
-      data: { method: 'quantity', plannedQuantity: 20, quantityUnit: 'm3', evidenceRequired: false },
+      data: { method: 'quantity', quantityUnit: 'm3', evidenceRequired: false },
     })
     // V200 by percent: an approved 40 % and a pending 60 %.
     const first = await call(client, 'post', `/projects/${projectId}/activities/${v200.id}/progress`, { data: { pctComplete: 40 } })
     await call(client, 'post', `/projects/${projectId}/activities/${v200.id}/progress-submissions/${(first.submission as { id: string }).id}/approve`)
     await call(client, 'post', `/projects/${projectId}/activities/${v200.id}/progress`, { data: { pctComplete: 60 } })
 
-    // Which PC-6 core endpoints does this server have?
+    // The merged contracts this spec stands on: all three are on the server.
     const allocatedItems = (await apiJson(client, 'get', `/projects/${projectId}/activities/${v100.id}/allocated-items`, { token: org.adminToken })).status
     const probe = await apiJson(client, 'get', `/projects/${projectId}/daily-logs/${today()}`, { token: org.adminToken })
     expect(probe.status).toBe(200)
     const dailyLogSection = Boolean((probe.body!.data!.sections as Record<string, unknown>).quantities)
     const quantitiesView = (await apiJson(client, 'get', `/projects/${projectId}/activities/${v100.id}/quantities`, { token: org.adminToken })).status
+    expect([allocatedItems, dailyLogSection, quantitiesView], 'allocated-items, the daily log quantities section and the quantity views').toEqual([200, true, 200])
 
     return {
       projectId,
@@ -190,7 +199,6 @@ const build = async () => {
       boqItemId,
       qsEmail,
       qsToken: await workspaceToken(client, qsEmail, org.orgId),
-      pc6: { allocatedItems, dailyLogSection, quantitiesView },
     }
   })
   return built
@@ -233,7 +241,7 @@ const expectHonestQuantities = async (page: Page, testId: string) => {
   return state
 }
 
-test('the Progress tab names every figure’s source, the drawer and the daily log say what the server does not give — on any server', async ({
+test('the Progress tab names every figure’s source; the drawer and the daily log say what the server does not give, with its reason', async ({
   page,
   browser,
 }) => {
@@ -265,22 +273,35 @@ test('the Progress tab names every figure’s source, the drawer and the daily l
   const planned = page.getByTestId(`uat-progress-planned-${v100}`)
   await expect(planned).toContainText('20')
   await expect(planned).toContainText('m3')
-  const plannedBasis = await planned.getAttribute('data-planned-basis')
-  expect(['method_config', 'approved_allocations']).toContain(plannedBasis)
+  // Nothing typed on the method: the planned quantity is Σ the approved allocations.
+  await expect(planned).toHaveAttribute('data-planned-quantity', '20')
+  await expect(planned).toHaveAttribute('data-planned-basis', 'approved_allocations')
   const installed = page.getByTestId(`uat-progress-installed-${v100}`)
   await expect(installed).toBeVisible()
-  if ((await installed.getAttribute('data-absent')) === 'true') {
-    // Nothing installed yet, or a server that does not report it: a dash and why.
-    await expect(installed).toContainText('—')
-  }
+  // Nothing approved yet: a dash and why — the server reported an empty list, not silence.
+  await expect(installed).toHaveAttribute('data-absent', 'true')
+  await expect(installed).toContainText('—')
+  await expect(installed).toContainText('No approved quantity entry yet')
+  // No pending entries yet either: no block, no action.
+  await expect(page.getByTestId(`uat-progress-pending-entries-${v100}`)).toHaveCount(0)
   // Never a zero drawn as installed.
   await expect(installed.locator('[data-installed-quantity="0"]')).toHaveCount(0)
+  // No legacy floor on this activity: no official installed figure beside it.
+  await expect(page.getByTestId(`uat-progress-official-installed-${v100}`)).toHaveCount(0)
 
   // ── The activity drawer: six labels, honest absence.
   await openActivityDrawer(page, projectId, v100)
-  await expectHonestQuantities(page, 'activity-detail-quantities-pc6')
+  // The views answer: the read is data (ok); installed is 0 m3 from no approved
+  // entry — the server's own figure — and what has no rows says so.
+  expect(await expectHonestQuantities(page, 'activity-detail-quantities-pc6')).toBe('ok')
+  // The item's own block draws the server's figures, not six "not sent" dashes.
+  const itemBlock = page.getByTestId(`activity-detail-quantities-pc6-item-${boqItemId}`)
+  await expect(itemBlock).toBeVisible()
+  await expect(itemBlock).toContainText('1.1')
+  await expect(itemBlock).not.toContainText('Not sent by the server')
   await expect(page.getByTestId('activity-detail-pct')).toBeVisible()
   await expect(page.getByTestId('activity-detail-progress-source')).toContainText('No approved progress yet')
+  await expect(page.locator('[data-official-installed]')).toHaveCount(0)
 
   // ── The renderer against the views contract itself: a server answering
   // the contract (routed here, so it is proven on any server) draws each
@@ -290,8 +311,17 @@ test('the Progress tab names every figure’s source, the drawer and the daily l
     kind: 'activity',
     id: v100,
     asOf: '2026-09-30T12:00:00.000Z',
-    installed: { value: 15, truth: 'derived', basis: 'Σ approved quantity progress entries', unitCode: 'm3', unitMatch: true },
-    certified: { value: null, truth: 'source', basis: 'Σ IpcItem.qty on certified or paid certificates', unitCode: 'm3', unitMatch: true, notAvailable: { reason: 'No certified certificate names this item' } },
+    // Σ approved entries below the official figure (a legacy typed quantity
+    // carried as its floor): the server states both, and why.
+    installed: {
+      value: 15,
+      truth: 'derived',
+      basis: 'Σ approved quantity progress entries. Σ approved entries is below the official installed figure (officialInstalled) because earlier progress was typed, not entered',
+      unitCode: 'm3',
+      unitMatch: true,
+      officialInstalled: { value: 75, unitCode: 'm3', basis: 'official figure of the latest approved progress, carrying a legacy typed quantity as its floor' },
+    },
+    certified: { value: null, truth: 'derived', basis: 'Σ IpcItem.qty on certified or paid certificates', unitCode: 'm3', unitMatch: true, notAvailable: { reason: 'No certified certificate names this item' } },
     paid: { value: 7.5, truth: 'projection', basis: 'certified × amountPaid ÷ totalCert', unitCode: 'm3', unitMatch: true },
     received: { value: 12, truth: 'derived', basis: 'Σ stock receipts', unitCode: 't', unitMatch: false },
     // A bare null — a truth, a basis and no note: still "—", never drawn as a value.
@@ -307,6 +337,16 @@ test('the Progress tab names every figure’s source, the drawer and the daily l
   await expect(block.locator('[data-figure="installed"] [data-value]')).toHaveAttribute('data-value', '15')
   await expect(block.locator('[data-figure="installed"] [data-unit]')).toHaveAttribute('data-unit', 'm3')
   await expect(block.locator('[data-figure="installed"] [data-truth]')).toHaveAttribute('data-truth', 'derived')
+  // Both figures and the reason: installed stays 15, the official 75 stands beside it — never one replacing the other, never a sum.
+  const drawerOfficial = block.getByTestId('activity-detail-quantities-pc6-installed-official')
+  await expect(drawerOfficial).toHaveAttribute('data-official-installed', '75')
+  await expect(drawerOfficial).toHaveAttribute('data-official-unit', 'm3')
+  await expect(drawerOfficial).toContainText('Official installed: 75 m3')
+  await expect(drawerOfficial).toContainText('carrying a legacy typed quantity as its floor')
+  await expect(drawerOfficial).toContainText('earlier progress was typed, not entered')
+  await expect(block.locator('[data-figure="installed"]')).toContainText('Σ approved entries is below the official installed figure')
+  await expect(block.locator('[data-official-installed]')).toHaveCount(1)
+  await expect(block.locator('[data-figure="installed"] [data-value]')).toHaveCount(1)
   await expect(block.locator('[data-figure="paid"] [data-truth]')).toHaveAttribute('data-truth', 'projection')
   await expect(block.locator('[data-figure="paid"]')).toContainText('Paid (pro-rata)')
   await expect(block.locator('[data-figure="received"] [data-unit-mismatch]')).toBeVisible()
@@ -344,6 +384,7 @@ test('the Progress tab names every figure’s source, the drawer and the daily l
         installed: [{ boqItemId, code: '1.1', description: 'Blockwork', unitCode: 'm3', quantity: 7, entries: 1 }],
         asOf: '2026-09-30T12:00:00.000Z',
         basis: 'Σ approved quantity progress entries per BOQ item',
+        officialInstalled: { value: 12, unitCode: 'm3', basis: 'official figure of the latest approved progress, carrying a legacy typed quantity as its floor' },
       }
       row.plannedQuantity = { planned: 20, unitCode: 'm3', basis: 'approved_allocations' }
     }
@@ -359,6 +400,13 @@ test('the Progress tab names every figure’s source, the drawer and the daily l
   await expect(routedInstalled.locator('[data-installed-quantity]')).toHaveText(/^\s*7\s+m3\s*$/)
   await expect(routedInstalled).toContainText('1.1')
   await expect(routedInstalled).not.toContainText('8')
+  // The official installed figure beside the entries' line: 12 m3 as sent, the line still 7 — not 19, not 12 alone.
+  const routedOfficial = page.getByTestId(`uat-progress-official-installed-${v100}`)
+  await expect(routedOfficial).toHaveAttribute('data-official-installed', '12')
+  await expect(routedOfficial).toHaveAttribute('data-official-unit', 'm3')
+  await expect(routedOfficial).toContainText('Official installed: 12 m3')
+  await expect(routedOfficial).toContainText('earlier progress was typed, not entered')
+  await expect(page.getByTestId(`uat-progress-installed-planned-${v100}`).locator('[data-installed-quantity]')).toHaveCount(1)
   const routedPlanned = page.getByTestId(`uat-progress-planned-${v100}`)
   await expect(routedPlanned).toHaveAttribute('data-planned-quantity', '20')
   await expect(routedPlanned).toHaveAttribute('data-planned-basis', 'approved_allocations')
@@ -384,11 +432,9 @@ test('the Progress tab names every figure’s source, the drawer and the daily l
   const unavailable = form.getByTestId('uat-dailylog-quantities-items-unavailable')
   const picker = form.getByTestId('uat-dailylog-quantities-item')
   await expect(unavailable.or(picker)).toBeVisible({ timeout: 30_000 })
-  if (await unavailable.isVisible()) {
-    await expect(unavailable).toContainText('—')
-    expect(['not-on-server', 'withheld', 'error']).toContain(await unavailable.getAttribute('data-state'))
-    await expect(form.getByTestId('uat-dailylog-save-quantities')).toBeDisabled()
-  }
+  // The admin reads the BOQ: the picker of V100's allocated items is there.
+  await expect(picker).toBeVisible()
+  await expect(unavailable).toHaveCount(0)
 
   // ── The day's rows against core's section shape (routed, so it is proven
   // on any server): two BOQ items sharing a unit and a row whose unit the
@@ -449,32 +495,32 @@ test('the Progress tab names every figure’s source, the drawer and the daily l
     await expect(qsInstalled).toHaveAttribute('data-absent', 'true')
     await expect(qsInstalled).toContainText('—')
     expect(((await qsInstalled.getAttribute('title')) ?? '').length, 'the reason is shown beside the dash').toBeGreaterThan(0)
+    expect((await qsInstalled.getAttribute('title')) ?? '').toContain('may read the BOQ')
     // A planned quantity derived from the approved allocations is BOQ-derived
-    // and withheld from them; only the figure typed on the method may show.
+    // and withheld from them: a dash with the server's reason, never the figure.
     const qsPlanned = qsPage.getByTestId(`uat-progress-planned-${v100}`)
     await expect(qsPlanned).toBeVisible()
-    expect(await qsPlanned.getAttribute('data-planned-basis')).not.toBe('approved_allocations')
+    await expect(qsPlanned).toHaveAttribute('data-absent', 'true')
+    await expect(qsPlanned).toContainText('—')
+    expect((await qsPlanned.getAttribute('title')) ?? '').toContain('may read the BOQ')
+    await expect(qsPlanned).not.toContainText('20')
     await openActivityDrawer(qsPage, projectId, v100)
+    // The views withhold the whole read from them inside a 200 answer, with the reason.
     const state = await expectHonestQuantities(qsPage, 'activity-detail-quantities-pc6')
-    // On a server with the views route, the read is withheld from them, with
-    // the reason — gated on the route the drawer reads, not on core's.
-    if (built!.pc6.quantitiesView !== 404) expect(state).toBe('withheld')
+    expect(state).toBe('withheld')
+    expect((await qsPage.getByTestId('activity-detail-quantities-pc6-withheld').getAttribute('data-reason')) ?? '').toContain('may read the BOQ')
     await expect(qsPage.getByTestId('activity-detail-quantities-pc6').locator('[data-value]')).toHaveCount(0)
   } finally {
     await qsContext.close()
   }
 })
 
-test('daily log → Progress tab pending with the bundled entry → approve → official, with the daily log as its source; the surveyor without BOQ read sees "—"', async ({
+test('daily log → a pending entry on the Progress tab → put forward → the queue’s bundle → approve → official, with the daily log as its source; the surveyor without BOQ read sees "—"', async ({
   page,
   browser,
 }) => {
   test.setTimeout(300_000)
   const { projectId, v100, qsEmail } = await build()
-  test.skip(
-    built!.pc6.allocatedItems === 404 || !built!.pc6.dailyLogSection,
-    `PC-6 core is not on this server: allocated-items answered ${built!.pc6.allocatedItems}, daily log quantities section ${built!.pc6.dailyLogSection ? 'present' : 'absent'} — re-run after the core merge`,
-  )
 
   await page.routeWebSocket(/socket\.io/, () => {})
   await signInForm(page, org!.adminEmail)
@@ -510,7 +556,8 @@ test('daily log → Progress tab pending with the bundled entry → approve → 
   const beforeSubmit = await withApi(async (client) => listActivities(client, projectId))
   expect(beforeSubmit.find((entry) => entry.id === v100)!.pctComplete).toBe(0)
 
-  // ── Submit the day: a pending entry, bundled in a submission the approvers see.
+  // ── Submit the day: the row becomes a PENDING entry — nothing official,
+  // and nothing in the approval queue until someone puts it forward.
   // A day whose only rows are quantities is a day with entries: a refusal
   // here (DAILY_LOG_EMPTY) means the server's day totals leave the seventh
   // section out — a core defect, named rather than worked around.
@@ -524,6 +571,31 @@ test('daily log → Progress tab pending with the bundled entry → approve → 
   expect(afterSubmit.find((entry) => entry.id === v100)!.pctComplete, 'official progress is unchanged by the submission').toBe(0)
 
   await openProgressTab(page, projectId)
+  // The pending entry under its activity: not official, with its source and day, 15 m3 of 1.1.
+  const pendingBlock = page.getByTestId(`uat-progress-pending-entries-${v100}`)
+  await expect(pendingBlock).toBeVisible({ timeout: 30_000 })
+  await expect(pendingBlock).toContainText('not official')
+  const pendingEntry = pendingBlock.locator('[data-testid^="uat-progress-pending-entry-"]')
+  await expect(pendingEntry).toHaveCount(1)
+  await expect(pendingEntry).toContainText('1.1')
+  await expect(pendingEntry).toContainText('Daily log')
+  await expect(pendingEntry).toContainText(today())
+  await expect(pendingEntry.locator('[data-entry-quantity]')).toHaveAttribute('data-entry-quantity', '15')
+  await expect(pendingEntry.locator('[data-entry-unit]')).toHaveAttribute('data-entry-unit', 'm3')
+  // Still nothing in the queue for it, and nothing official.
+  await expect(page.locator('[data-testid^="uat-progress-queue-"][data-activity-id]').filter({ hasText: 'Blockwork' })).toHaveCount(0)
+  await expect(page.getByTestId(`uat-progress-source-official-${v100}`)).toContainText('No approved progress yet')
+
+  // ── Put it forward: one submission bundling the entry joins the queue. The screen sends the day, never a figure.
+  const [bundled] = await Promise.all([
+    page.waitForResponse((response) => new RegExp(`/activities/${v100}/progress$`).test(response.url()) && response.request().method() === 'POST'),
+    page.getByTestId(`uat-progress-put-forward-${v100}`).click(),
+  ])
+  expect(bundled.status(), await bundled.text()).toBe(200)
+  expect(bundled.request().postDataJSON(), 'the screen sends the day to bundle through, no quantity and no percentage').toEqual({ bundleSubmittedThrough: today() })
+  const stillZero = await withApi(async (client) => listActivities(client, projectId))
+  expect(stillZero.find((entry) => entry.id === v100)!.pctComplete, 'putting entries forward approves nothing').toBe(0)
+  await expect(page.getByTestId(`uat-progress-pending-entries-${v100}`)).toHaveCount(0, { timeout: 30_000 })
   const queued = page.locator('[data-testid^="uat-progress-queue-"][data-activity-id]').filter({ hasText: 'Blockwork' }).first()
   await expect(queued).toBeVisible({ timeout: 30_000 })
   await expect(queued.locator('[data-progress-source-kind="pending"]')).toContainText('Daily log')
@@ -558,19 +630,15 @@ test('daily log → Progress tab pending with the bundled entry → approve → 
   const afterApprove = await withApi(async (client) => listActivities(client, projectId))
   expect(afterApprove.find((entry) => entry.id === v100)!.pctComplete).toBe(75)
 
-  // ── The drawer: installed 15 m3 with its truth, the rest honest — on a
-  // server with the views route (views merges separately from core).
-  const viewsOnServer = built!.pc6.quantitiesView !== 404
-  if (!viewsOnServer)
-    test.info().annotations.push({ type: 'views', description: 'the quantities views route answered 404 — the drawer figures are not asserted on this server' })
+  // ── The drawer: installed 15 m3 with its truth, at the activity and under its item; the rest honest.
   await openActivityDrawer(page, projectId, v100)
-  const drawerState = await expectHonestQuantities(page, 'activity-detail-quantities-pc6')
-  if (viewsOnServer) {
-    expect(drawerState).toBe('ok')
-    const drawerInstalled = page.getByTestId('activity-detail-quantities-pc6').locator('[data-figure="installed"]').first()
-    await expect(drawerInstalled.locator('[data-value]')).toHaveAttribute('data-value', '15')
-    await expect(drawerInstalled.locator('[data-unit]')).toHaveAttribute('data-unit', 'm3')
-  }
+  expect(await expectHonestQuantities(page, 'activity-detail-quantities-pc6')).toBe('ok')
+  const drawerInstalled = page.getByTestId('activity-detail-quantities-pc6').locator('[data-figure="installed"]').first()
+  await expect(drawerInstalled.locator('[data-value]')).toHaveAttribute('data-value', '15')
+  await expect(drawerInstalled.locator('[data-unit]')).toHaveAttribute('data-unit', 'm3')
+  await expect(drawerInstalled.locator('[data-truth]')).toHaveAttribute('data-truth', 'derived')
+  const drawerItem = page.getByTestId(`activity-detail-quantities-pc6-item-${(await build()).boqItemId}`)
+  await expect(drawerItem.locator('[data-figure="installed"] [data-value]')).toHaveAttribute('data-value', '15')
 
   // ── The surveyor without BOQ read: 75 % stays, every per-item quantity is "—" with the reason.
   const qsContext = await browser.newContext()
@@ -588,21 +656,71 @@ test('daily log → Progress tab pending with the bundled entry → approve → 
     await expect(qsInstalled.locator('[data-installed-quantity]')).toHaveCount(0)
     // The planned quantity is allocation-derived for the admin above (basis
     // approved_allocations): BOQ-derived, so withheld from them — "—" with
-    // the reason, or at most the figure typed on the method under its own
-    // basis; never the allocation figure.
+    // the server's reason, never the allocation figure.
     const qsPlanned = qsPage.getByTestId(`uat-progress-planned-${v100}`)
     await expect(qsPlanned).toBeVisible()
-    if ((await qsPlanned.getAttribute('data-absent')) === 'true') {
-      await expect(qsPlanned).toContainText('—')
-      expect(((await qsPlanned.getAttribute('title')) ?? '').length, 'the reason for the withheld planned quantity').toBeGreaterThan(0)
-    } else {
-      expect(await qsPlanned.getAttribute('data-planned-basis'), 'only the method-typed figure may show').toBe('method_config')
-    }
+    await expect(qsPlanned).toHaveAttribute('data-absent', 'true')
+    await expect(qsPlanned).toContainText('—')
+    expect((await qsPlanned.getAttribute('title')) ?? '', 'the reason for the withheld planned quantity').toContain('may read the BOQ')
     await openActivityDrawer(qsPage, projectId, v100)
     const qsState = await expectHonestQuantities(qsPage, 'activity-detail-quantities-pc6')
-    if (viewsOnServer) expect(qsState).toBe('withheld')
+    expect(qsState).toBe('withheld')
     await expect(qsPage.getByTestId('activity-detail-quantities-pc6').locator('[data-value]')).toHaveCount(0)
   } finally {
     await qsContext.close()
   }
+})
+
+test('bulk progress: a batch that includes the quantity-measured activity is refused whole — the activity named, nothing written — and a percent-only batch updates', async () => {
+  test.setTimeout(120_000)
+  const { projectId, v100, v200 } = await build()
+  await withApi(async (client) => {
+    const submissionIds = async () => {
+      const listed = (await call(client, 'get', `/projects/${projectId}/activities/progress-submissions`)) as unknown as
+        | Array<{ id: string }>
+        | { submissions?: Array<{ id: string }>; items?: Array<{ id: string }> }
+      const rows = Array.isArray(listed) ? listed : (listed.submissions ?? listed.items ?? [])
+      return rows.map((row) => row.id).sort()
+    }
+    const official = async () => {
+      const rows = await listActivities(client, projectId)
+      return [v100, v200].map((id) => rows.find((row) => row.id === id)!.pctComplete)
+    }
+    const bulk = (updates: unknown[]) =>
+      apiJson(client, 'post', `/projects/${projectId}/activities/bulk-progress`, { token: org!.adminToken, data: { updates } })
+    const before = { submissions: await submissionIds(), official: await official() }
+
+    // A forced mixed batch naming a percentage for V100: 409, V100 named, nothing written.
+    const forced = await bulk([
+      { activityId: v200, pctComplete: 65 },
+      { activityId: v100, method: 'percent', pctComplete: 50 },
+    ])
+    expect(forced.status, JSON.stringify(forced.body)).toBe(409)
+    expect(forced.body!.error!.code).toBe('PROGRESS_METHOD_MISMATCH')
+    expect(forced.body!.error!.details.batch).toEqual({ index: 1, activityId: v100, updates: 2, written: 0 })
+    expect(await submissionIds(), 'the refused batch wrote no submission — not V200’s either').toEqual(before.submissions)
+
+    // What a percentage-only screen sends (no method): refused the same way —
+    // a percentage is not a quantity — with V100 named and nothing written.
+    const unnamed = await bulk([
+      { activityId: v200, pctComplete: 65 },
+      { activityId: v100, pctComplete: 50 },
+    ])
+    expect([400, 409], JSON.stringify(unnamed.body)).toContain(unnamed.status)
+    expect(['QUANTITY_NO_ENTRIES_TO_BUNDLE', 'QUANTITY_ENTRIES_REQUIRED']).toContain(unnamed.body!.error!.code)
+    expect(unnamed.body!.error!.details.batch).toEqual({ index: 1, activityId: v100, updates: 2, written: 0 })
+    expect(await submissionIds()).toEqual(before.submissions)
+    expect(await official(), 'no official figure moved').toEqual(before.official)
+
+    // A percent-only batch is written: one pending submission, by percent.
+    const clean = await bulk([{ activityId: v200, pctComplete: 65 }])
+    expect(clean.status, JSON.stringify(clean.body)).toBe(200)
+    expect(clean.body!.data!.submitted).toBe(1)
+    const written = (clean.body!.data!.submissions as Array<Record<string, unknown>>)[0]
+    expect(written).toMatchObject({ activityId: v200, method: 'percent', pctComplete: 65, status: 'submitted' })
+    const after = await submissionIds()
+    expect(after).toHaveLength(before.submissions.length + 1)
+    expect(after).toContain(written.id as string)
+    expect(await official(), 'a submission approves nothing').toEqual(before.official)
+  })
 })

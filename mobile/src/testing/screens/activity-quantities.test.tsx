@@ -1,6 +1,6 @@
 import { screen, waitFor } from '@testing-library/react-native'
 import { useLocalSearchParams } from 'expo-router'
-import ActivityScreen, { progressSourceLine, quantityFigureLine } from '../../../app/(app)/activities/[id]'
+import ActivityScreen, { officialInstalledLine, progressSourceLine, quantityFigureLine } from '../../../app/(app)/activities/[id]'
 import { network } from '@/api/network'
 import { queryClient } from '@/api/query'
 import { readActivityQuantities } from '@/api/site-endpoints'
@@ -158,6 +158,38 @@ describe('progress source and quantities on an activity', () => {
     expect(screen.getByTestId('activity-quantity-paid')).toHaveTextContent(/Not available/)
   })
 
+  it('prints the official installed figure beside the installed one when the server states a legacy floor — both figures, the reason, no sum', async () => {
+    const OFFICIAL_BASIS = 'official figure of the latest approved progress, carrying a legacy typed quantity as its floor'
+    const floored: QuantityFigure = { value: 15, truth: 'derived', basis: 'approved_entries', unitCode: 'm3', officialInstalled: { value: 75, unitCode: 'm3', basis: OFFICIAL_BASIS } }
+    expect(officialInstalledLine(floored)).toBe(`Official installed: 75 m3 — ${OFFICIAL_BASIS}. The approved entries add up to less because earlier progress was typed, not entered.`)
+    // A typed official figure with no entry behind it (installedBasis client) says it was typed, not a legacy floor.
+    const TYPED_BASIS = 'official figure of the latest approved progress, typed rather than entered'
+    expect(officialInstalledLine({ ...floored, officialInstalled: { value: 40, unitCode: 'm3', basis: TYPED_BASIS, installedBasis: 'client' } })).toBe(`Official installed: 40 m3 — ${TYPED_BASIS}. The approved entries add up to less because the latest approved progress was typed rather than entered.`)
+    expect(officialInstalledLine({ ...floored, officialInstalled: { value: 75, unitCode: 'm3', basis: OFFICIAL_BASIS, installedBasis: 'legacy_typed_floor' } })).toContain('because earlier progress was typed, not entered.')
+    // The installed figure itself is what it was.
+    expect(quantityFigureLine(floored, null).value).toBe('15 m3')
+    // No floor stated, a withheld figure, no figure: nothing is printed.
+    expect(officialInstalledLine(figures.installed)).toBeNull()
+    expect(officialInstalledLine(withheldFigure)).toBeNull()
+    expect(officialInstalledLine({ ...floored, officialInstalled: { value: null } })).toBeNull()
+    expect(officialInstalledLine(null)).toBeNull()
+
+    serve({ figures: () => ({ status: 200, body: envelope({ ...answer, figures: { ...figures, installed: floored } }) }) })
+    await renderScreen(<ActivityScreen />)
+    await screen.findByTestId('activity-quantities')
+    expect(screen.getByTestId('activity-quantity-installed')).toHaveTextContent(/15 m3/)
+    expect(screen.getByTestId('activity-quantity-installed-official')).toHaveTextContent(/Official installed: 75 m3 — official figure of the latest approved progress, carrying a legacy typed quantity as its floor\. The approved entries add up to less because earlier progress was typed, not entered\./)
+    expect(screen.getByTestId('activity-quantity-installed')).not.toHaveTextContent(/\b90\b/)
+  })
+
+  it('prints no official installed figure when the server states none, or withholds the bill', async () => {
+    serve()
+    await renderScreen(<ActivityScreen />)
+    await screen.findByTestId('activity-quantities')
+    expect(screen.getByTestId('activity-quantity-installed')).toHaveTextContent(/120 m3/)
+    expect(screen.queryByTestId('activity-quantity-installed-official')).toBeNull()
+  })
+
   it("shows a dash and the server's reason on every figure for a member the server withholds the bill from — never a zero", async () => {
     serve({ figures: () => ({ status: 200, body: envelope(withheldAnswer) }) })
     await renderScreen(<ActivityScreen />)
@@ -168,6 +200,7 @@ describe('progress source and quantities on an activity', () => {
       expect(line).toHaveTextContent(/available only to members who may read the BOQ/)
       expect(line).not.toHaveTextContent(/\b0\b/)
     }
+    expect(screen.queryByTestId('activity-quantity-installed-official')).toBeNull()
   })
 
   it('leaves the count and the figures out on a server without the quantity register, and keeps the source line', async () => {

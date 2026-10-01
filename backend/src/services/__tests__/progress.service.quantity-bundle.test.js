@@ -16,7 +16,7 @@ const mockPrisma = {
   activityBoqAllocation: { findMany: jest.fn() },
   progressSubmission: { create: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
   activityProgress: { create: jest.fn(), count: jest.fn(), findFirst: jest.fn() },
-  quantityProgressEntry: { findMany: jest.fn(), updateMany: jest.fn() },
+  quantityProgressEntry: { findMany: jest.fn(), updateMany: jest.fn(), count: jest.fn(async () => 0), create: jest.fn(async ({ data }) => ({ id: "entry-minted", createdAt: new Date(), ...data })) },
   organisation: { findUnique: jest.fn() },
 };
 const mockAuditService = {
@@ -104,6 +104,27 @@ describe("PC-6 quantity bundles in the one writer", () => {
     await expect(create({ method: "quantity", quantityComplete: 30 })).rejects.toMatchObject({ code: "PLANNED_QUANTITY_REQUIRED" });
   });
 
+  it("the submission's method is the activity's: a client naming another method on a configured activity is 409 PROGRESS_METHOD_MISMATCH, never coerced; the configured method applies when none is named; without a row the client's method stands", async () => {
+    // Configured quantity: a percent submission is refused, naming both methods.
+    await expect(create({ method: "percent", pctComplete: 90 })).rejects.toMatchObject({
+      status: 409,
+      code: "PROGRESS_METHOD_MISMATCH",
+      details: { activityId: "activity-1", effectiveMethod: "quantity", effectiveMethodBasis: "method_config", requestedMethod: "percent" },
+    });
+    await expect(create({ progressMethod: "milestone", pctComplete: 90 })).rejects.toMatchObject({ code: "PROGRESS_METHOD_MISMATCH", details: { requestedMethod: "weighted_milestone" } });
+    expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
+    // No method named: the activity's applies (quantity → derived).
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([entry("e-1", 16)]).mockResolvedValueOnce([]);
+    expect(await create({ entryIds: ["e-1"], pctComplete: 90 })).toMatchObject({ method: "quantity", pctComplete: 10, quantityComplete: 16 });
+    // An alias of the configured method is that method.
+    mockPrisma.activityProgressMethod.findFirst.mockResolvedValue({ method: "percent", plannedQuantity: null, quantityUnit: null, evidenceRequired: false });
+    expect(await create({ method: "physical_percent", pctComplete: 40 })).toMatchObject({ method: "percent", pctComplete: 40 });
+    // Without a configured row the client's method is accepted as before.
+    mockPrisma.activityProgressMethod.findFirst.mockResolvedValue(null);
+    expect(await create({ method: "percent", pctComplete: 90 })).toMatchObject({ method: "percent", pctComplete: 90 });
+    expect(await create({ pctComplete: 20 })).toMatchObject({ method: "percent", pctComplete: 20 });
+  });
+
   it("refuses an entry of another activity, an approved one, one held by an open submission, a foreign unit, and a bundle on a percent submission", async () => {
     mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([entry("e-1", 1, { activityId: "activity-9" })]);
     await expect(create({ method: "quantity", entryIds: ["e-1"] })).rejects.toMatchObject({ status: 400, code: "QUANTITY_ENTRY_ACTIVITY_MISMATCH" });
@@ -165,6 +186,49 @@ describe("PC-6 quantity bundles in the one writer", () => {
     expect(mockPrisma.progressSubmission.findFirst.mock.invocationCallOrder[1]).toBeGreaterThan(mockPrisma.$queryRaw.mock.invocationCallOrder[0]);
   });
 
+  it("the writer asks the method rule again: a percent submission on an activity configured quantity is 409 PROGRESS_METHOD_MISMATCH at approval and nothing is written; without a configured row it is approved as before", async () => {
+    const stale = { ...submitted([]), method: "percent", pctComplete: 90, quantityComplete: null, quantityPlanned: null, quantityUnit: null };
+    mockPrisma.progressSubmission.findFirst.mockResolvedValue(stale);
+    await expect(progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" })).rejects.toMatchObject({
+      status: 409,
+      code: "PROGRESS_METHOD_MISMATCH",
+      details: { activityId: "activity-1", effectiveMethod: "quantity", effectiveMethodBasis: "method_config", requestedMethod: "percent", submissionId: "sub-1" },
+    });
+    expect(mockPrisma.progressSubmission.update).not.toHaveBeenCalled();
+    expect(mockPrisma.activityProgress.create).not.toHaveBeenCalled();
+    expect(mockAuditService.recordEvent).not.toHaveBeenCalled();
+    // An alias stored on the configuration is the same method: no refusal.
+    mockPrisma.activityProgressMethod.findFirst.mockResolvedValue({ method: "physical_percent", evidenceRequired: false });
+    mockPrisma.progressSubmission.update.mockImplementation(({ data }) => Promise.resolve({ ...stale, ...data }));
+    mockPrisma.activityProgress.create.mockResolvedValue({ id: "progress-1" });
+    await expect(progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" })).resolves.toMatchObject({ status: "approved", method: "percent", pctComplete: 90 });
+    // No configured row: nothing is asked.
+    mockPrisma.activityProgressMethod.findFirst.mockResolvedValue(null);
+    await expect(progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" })).resolves.toMatchObject({ status: "approved", method: "percent" });
+    expect(mockPrisma.activityProgress.create).toHaveBeenCalledTimes(2);
+  });
+  it("a quantity submission states a quantity: no entry bundled and no figure typed is 400 QUANTITY_NO_ENTRIES_TO_BUNDLE (409 QUANTITY_ENTRIES_REQUIRED once entries exist), never a 0% row — when it is made and when one in the queue would be approved", async () => {
+    for (const payload of [{ pctComplete: 90 }, { method: "quantity", pctComplete: 90 }, { pctComplete: 90, status: "draft" }, { quantityComplete: null, pctComplete: 90 }]) {
+      await expect(create(payload)).rejects.toMatchObject({ status: 400, code: "QUANTITY_NO_ENTRIES_TO_BUNDLE", details: { activityId: "activity-1" } });
+    }
+    mockPrisma.quantityProgressEntry.count.mockResolvedValueOnce(3);
+    await expect(create({ pctComplete: 90 })).rejects.toMatchObject({ status: 409, code: "QUANTITY_ENTRIES_REQUIRED", details: { activityId: "activity-1", entries: 3 } });
+    expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
+    // A typed zero is no installed quantity (2026-10-01, the entries' rule "record nothing for no work"): refused, never recorded.
+    for (const quantityComplete of [0, "0", 0.0004]) {
+      await expect(create({ quantityComplete })).rejects.toMatchObject({ status: 400, code: "QUANTITY_INVALID", details: { field: "quantityComplete", activityId: "activity-1" } });
+    }
+    expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
+    // One already in the queue with nothing behind it: the writer refuses it, naming the submission.
+    const hollow = { ...submitted([]), pctComplete: 0, quantityComplete: null };
+    mockPrisma.progressSubmission.findFirst.mockResolvedValue(hollow);
+    const approveIt = () => progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" });
+    await expect(approveIt()).rejects.toMatchObject({ status: 400, code: "QUANTITY_NO_ENTRIES_TO_BUNDLE", details: { activityId: "activity-1", submissionId: "sub-1" } });
+    mockPrisma.quantityProgressEntry.count.mockResolvedValueOnce(2);
+    await expect(approveIt()).rejects.toMatchObject({ status: 409, code: "QUANTITY_ENTRIES_REQUIRED", details: { activityId: "activity-1", entries: 2, submissionId: "sub-1" } });
+    expect(mockPrisma.progressSubmission.update).not.toHaveBeenCalled();
+    expect(mockPrisma.activityProgress.create).not.toHaveBeenCalled();
+  });
   it("a submission approved twice at once answers idempotently: the second reads 'approved' under the hold and writes nothing", async () => {
     mockPrisma.progressSubmission.findFirst.mockResolvedValueOnce(submitted([])).mockResolvedValueOnce({ ...submitted([]), status: "approved" });
     const answer = await progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" });
@@ -203,15 +267,77 @@ describe("PC-6 quantity bundles in the one writer", () => {
     expect(mockPrisma.quantityProgressEntry.findMany).not.toHaveBeenCalled();
   });
 
-  it("a quantity submission typed the old way (no entries) is approved as it stands", async () => {
+  it("a quantity submission typed the old way (no entries) is approved as it stands, and ONE approved entry is minted from it when the activity has a single allocated item (the typed figure as a delta over the official floor)", async () => {
     mockPrisma.progressSubmission.findFirst.mockResolvedValue(submitted([]));
     mockPrisma.progressSubmission.update.mockImplementation(({ data }) => Promise.resolve({ ...submitted([]), ...data }));
     mockPrisma.activityProgress.create.mockResolvedValue({ id: "progress-1" });
+    // Two allocated items: the typed 60 cannot be attributed to one — nothing minted, the answer says why.
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([]);
     const answer = await progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" });
-    expect(answer).toMatchObject({ status: "approved", pctComplete: 37.5 });
-    expect(answer.quantity).toBeUndefined();
+    expect(answer).toMatchObject({ status: "approved", pctComplete: 37.5, quantity: { installed: 60, installedBasis: "client", mintedEntry: null, mintSkipped: { reason: expect.stringMatching(/2 allocated BOQ items/), items: 2 } } });
     expect(mockPrisma.quantityProgressEntry.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.quantityProgressEntry.create).not.toHaveBeenCalled();
     expect(mockPrisma.activityProgress.create.mock.calls[0][0].data).toMatchObject({ pctComplete: 37.5, quantityComplete: 60, quantityPlanned: 160 });
+    // One allocated item, 19.5 already approved as entries: the typed 60 mints a 40.5 delta, approved, source 'submission'.
+    mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([allocations[0]]);
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([{ quantity: D("19.5") }]);
+    const minted = await progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" });
+    expect(minted.quantity).toMatchObject({ installedBasis: "client", mintedEntry: { id: "entry-minted", boqItemId: "item-1", quantity: 40.5, unitCode: "m3", officialBefore: 19.5 }, mintSkipped: null });
+    expect(mockPrisma.quantityProgressEntry.create.mock.calls[0][0].data).toMatchObject({ activityId: "activity-1", boqItemId: "item-1", allocationId: "al-1", unitCode: "m3", source: "submission", status: "approved", submissionId: "sub-1", approvedBy: "pm-1", clientRequestId: "submission:sub-1" });
+    expect(mockPrisma.quantityProgressEntry.create.mock.calls[0][0].data.quantity.toString()).toBe("40.5");
+    // Typed below the official figure: nothing minted; the approval lowers the official figure, says so, and warns.
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([{ quantity: D("80") }]);
+    const below = await progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" });
+    expect(below.quantity).toMatchObject({ mintedEntry: null, mintSkipped: { typed: 60, officialBefore: 80, reason: expect.stringMatching(/below the official installed figure; nothing is minted, and this approval lowers the official installed figure to the typed one/) } });
+    expect(below.quantity.mintSkipped.reason).not.toMatch(/not lowered/);
+    expect(below.warnings).toEqual([{ code: "QUANTITY_BELOW_OFFICIAL", officialInstalled: 80, typed: 60, message: expect.stringContaining("approving it lowers the official installed figure to the typed one") }]);
+    expect(mockPrisma.quantityProgressEntry.create).toHaveBeenCalledTimes(1);
+    // Equal: nothing minted, nothing lowered, no warning.
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([{ quantity: D("60") }]);
+    const equal = await progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" });
+    expect(equal.quantity.mintSkipped.reason).toMatch(/equals the official installed figure; nothing is minted and the official figure is unchanged/);
+    expect(equal.warnings).toBeUndefined();
+    expect(minted.warnings).toBeUndefined();
+  });
+
+  it("a typed zero is no installed quantity: one in the queue is refused by the writer (400 QUANTITY_INVALID, naming the submission), nothing official; a typed figure below the official one is put forward with a QUANTITY_BELOW_OFFICIAL warning", async () => {
+    const zero = { ...submitted([]), pctComplete: 0, quantityComplete: 0 };
+    mockPrisma.progressSubmission.findFirst.mockResolvedValue(zero);
+    await expect(progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" })).rejects.toMatchObject({
+      status: 400,
+      code: "QUANTITY_INVALID",
+      details: { field: "quantityComplete", activityId: "activity-1", submissionId: "sub-1" },
+    });
+    expect(mockPrisma.progressSubmission.update).not.toHaveBeenCalled();
+    expect(mockPrisma.activityProgress.create).not.toHaveBeenCalled();
+    // Put forward below the official 75 (a legacy typed row): accepted, warned.
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([]); // Σ approved entries
+    mockPrisma.activityProgress.findFirst.mockResolvedValue({ id: "progress-legacy", quantityComplete: 75, quantityUnit: "m3", approvedAt: new Date() });
+    const answer = await create({ quantityComplete: 50 });
+    expect(answer).toMatchObject({ method: "quantity", quantityComplete: 50, warnings: [{ code: "QUANTITY_BELOW_OFFICIAL", officialInstalled: 75, typed: 50 }] });
+    // Above it: no warning.
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([]);
+    expect((await create({ quantityComplete: 90 })).warnings).toBeUndefined();
+    mockPrisma.activityProgress.findFirst.mockResolvedValue(null);
+  });
+
+  it("the legacy typed-quantity floor: a bundle derives from max(Σ approved entries, the latest official installed figure) + the bundle, and says so; a typed figure after entries exist is 409 QUANTITY_ENTRIES_REQUIRED", async () => {
+    // Official 60 typed the legacy way (no entries), one new entry of 10: installed 70, not 10.
+    mockPrisma.activityProgress.findFirst.mockResolvedValue({ id: "progress-legacy", quantityComplete: 60, quantityUnit: "m3", approvedAt: new Date("2026-08-01T00:00:00Z") });
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([entry("e-1", 10)]).mockResolvedValueOnce([]);
+    const answer = await create({ entryIds: ["e-1"] });
+    expect(answer).toMatchObject({ pctComplete: 43.75, quantityComplete: 70, quantityPlanned: 160, quantity: { installed: 70, approvedBefore: 0, installedBasis: "legacy_typed_floor", legacyFloor: { quantity: 60, unitCode: "m3", progressId: "progress-legacy", note: expect.stringMatching(/carried as the floor/) } } });
+    // A legacy row in another unit is not a floor: skipped with the reason, installed = Σ entries.
+    mockPrisma.activityProgress.findFirst.mockResolvedValue({ id: "progress-legacy", quantityComplete: 60, quantityUnit: "t", approvedAt: new Date("2026-08-01T00:00:00Z") });
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([entry("e-1", 10)]).mockResolvedValueOnce([]);
+    expect(await create({ entryIds: ["e-1"] })).toMatchObject({ quantityComplete: 10, quantity: { installedBasis: "approved_entries", legacyFloorSkipped: { progressId: "progress-legacy", unitCode: "t" } } });
+    // The floor never lowers: official 60 below Σ approved entries 80 → Σ entries.
+    mockPrisma.activityProgress.findFirst.mockResolvedValue({ id: "progress-legacy", quantityComplete: 60, quantityUnit: "m3", approvedAt: new Date() });
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([entry("e-1", 10)]).mockResolvedValueOnce([{ id: "e-0", quantity: D(80), unitCode: "m3" }]);
+    expect(await create({ entryIds: ["e-1"] })).toMatchObject({ quantityComplete: 90, quantity: { installedBasis: "approved_entries", approvedBefore: 80 } });
+    // A typed figure once entries exist is refused.
+    mockPrisma.quantityProgressEntry.count.mockResolvedValueOnce(3);
+    await expect(create({ quantityComplete: 95 })).rejects.toMatchObject({ status: 409, code: "QUANTITY_ENTRIES_REQUIRED", details: { activityId: "activity-1", entries: 3 } });
   });
 
   describe("the method lock", () => {

@@ -306,7 +306,7 @@ assert.equal(
       supersededPendingSubmissions: [superseded('P400', 40, 70)],
     })
   ),
-  '1 older pending import submission at another figure is still in the approval queue (P400 at 40%) — reject there if no longer wanted.'
+  '1 older pending submission at another figure is still in the approval queue (P400 at 40%) — reject there if no longer wanted.'
 )
 assert.equal(
   progressImportSupersededNote(
@@ -318,7 +318,7 @@ assert.equal(
       ],
     })
   ),
-  '2 older pending import submissions at another figure are still in the approval queue (P300 at 30%, P400 at 40%) — reject there if no longer wanted.'
+  '2 older pending submissions at another figure are still in the approval queue (P300 at 30%, P400 at 40%) — reject there if no longer wanted.'
 )
 
 // A row names every older pending figure it left behind — all of them,
@@ -336,7 +336,7 @@ assert.equal(
       superseded: [{ submissionId: 's65', pctComplete: 65 }],
     })
   ),
-  'An older import submission at 65% is still in the approval queue; reject it there if no longer wanted.'
+  'An older pending submission at 65% is still in the approval queue; reject it there if no longer wanted.'
 )
 assert.equal(
   progressImportRowSupersededNote(
@@ -347,7 +347,7 @@ assert.equal(
       ],
     })
   ),
-  '2 older import submissions (at 85%, 40%) are still in the approval queue; reject them there if no longer wanted.'
+  '2 older pending submissions (at 85%, 40%) are still in the approval queue; reject them there if no longer wanted.'
 )
 
 // Every row status the API can answer has a label.

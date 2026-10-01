@@ -16,7 +16,11 @@
  * - the same clientRequestId twice: one row (201, then 200 replayed) — and
  *   the database refuses a second row by itself (P2002);
  * - the site-engineer assignment rule; a PM records on any activity;
- * - over-allocation and no-allocation: accepted, with a raw-comparison warning;
+ * - over-allocation: accepted, with a raw-comparison warning; an item the
+ *   activity has no approved allocation of: refused (400
+ *   QUANTITY_ITEM_NOT_ALLOCATED, the daily log's section rule — integration
+ *   item 3); the BOQ row and the activity the entries name cannot be deleted
+ *   (409 BOQ_ITEM_IN_USE / ACTIVITY_IN_USE naming them, never a 500);
  * - list filters (activity, item, status, source, date range);
  * - patch / delete by the creator or an approver, never by another member,
  *   never of an approved entry; submit (draft → submitted), idempotent;
@@ -46,6 +50,7 @@ liveDescribe("PC-6: quantity progress entries are recorded, never official by th
   let pour;
   let fix;
   let allocation;
+  let fixAllocation;
   const members = {};
   const bearer = (token) => ({ authorization: `Bearer ${token}` });
   const at = (route) => `/api/v1/projects/${project.id}${route}`;
@@ -118,6 +123,11 @@ liveDescribe("PC-6: quantity progress entries are recorded, never official by th
     ok(created, 201);
     allocation = created.body.data;
     for (const step of ["submit", "approve"]) ok(await api.post(at(`/activity-boq-allocations/${allocation.id}/${step}`), {}, bearer(live.token)));
+    // The fixing is mapped to 20 t of rebar: what the PM records against below.
+    const fixing = await api.post(at("/activity-boq-allocations"), { boqItemId: rebar.id, activityId: fix.id, quantity: 20 }, bearer(live.token));
+    ok(fixing, 201);
+    fixAllocation = fixing.body.data;
+    for (const step of ["submit", "approve"]) ok(await api.post(at(`/activity-boq-allocations/${fixAllocation.id}/${step}`), {}, bearer(live.token)));
   }, 180_000);
 
   afterAll(async () => {
@@ -213,19 +223,31 @@ liveDescribe("PC-6: quantity progress entries are recorded, never official by th
     refused(await api.post(at("/quantity-progress"), { ...base, unit: "m2" }, bearer(live.token)), 400, "QUANTITY_UNIT_MISMATCH");
     refused(await api.post(at("/quantity-progress"), { ...base, unit: "litre" }, bearer(live.token)), 400, "QUANTITY_UNIT_MISMATCH");
     refused(await api.post(at("/quantity-progress"), { ...base, quantity: -1 }, bearer(live.token)), 400, "VALIDATION_ERROR");
+    // Zero is no work, and no work is no entry (integration item 7): refused by the service, on a single entry and in a batch.
+    const zero = await api.post(at("/quantity-progress"), { ...base, quantity: 0 }, bearer(live.token));
+    refused(zero, 400, "QUANTITY_INVALID");
+    expect(zero.body.error.message).toBe("A quantity must be greater than zero; record nothing for no work");
+    refused(await api.post(at("/quantity-progress"), { ...base, quantity: "0.0004" }, bearer(live.token)), 400, "QUANTITY_INVALID");
+    refused(await api.post(at("/quantity-progress"), { entries: [{ ...base, quantity: 3 }, { ...base, quantity: 0 }] }, bearer(live.token)), 400, "QUANTITY_INVALID");
     refused(await api.post(at("/quantity-progress"), { ...base, date: undefined }, bearer(live.token)), 400, "VALIDATION_ERROR");
-    refused(await api.post(at("/quantity-progress"), { ...base, boqItemId: rebar.id, allocationId: allocation.id }, bearer(live.token)), 400, "QUANTITY_ALLOCATION_MISMATCH");
+    refused(await api.post(at("/quantity-progress"), { ...base, activityId: fix.id, boqItemId: rebar.id, unit: "t", allocationId: allocation.id }, bearer(live.token)), 400, "QUANTITY_ALLOCATION_MISMATCH");
     refused(await api.post(at("/quantity-progress"), { ...base, status: "approved" }, bearer(live.token)), 400, "VALIDATION_ERROR");
     expect(await prisma.quantityProgressEntry.count({ where: { projectId: project.id } })).toBe(before);
   });
 
-  it("the site-engineer assignment rule is the progress submission's own; a PM records on any activity, warned when the activity has no approved allocation of the item", async () => {
+  it("the site-engineer assignment rule is the progress submission's own; a PM records on any activity — against an item it is mapped to: an unallocated pairing is refused (400 QUANTITY_ITEM_NOT_ALLOCATED), as the daily log's section refuses it", async () => {
     refused(await api.post(at("/quantity-progress"), { activityId: fix.id, boqItemId: rebar.id, quantity: 2, date: "2026-09-04" }, bearer(members.siteEngineer.token)), 403, "ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED");
+    const before = await prisma.quantityProgressEntry.count({ where: { projectId: project.id } });
+    const unmapped = await api.post(at("/quantity-progress"), { activityId: fix.id, boqItemId: concrete.id, quantity: 2, date: "2026-09-04" }, bearer(live.token));
+    refused(unmapped, 400, "QUANTITY_ITEM_NOT_ALLOCATED");
+    expect(unmapped.body.error.details).toEqual({ activityId: fix.id, boqItemId: concrete.id });
+    refused(await api.post(at("/quantity-progress"), { entries: [{ activityId: pour.id, boqItemId: concrete.id, quantity: 1, date: "2026-09-04" }, { activityId: pour.id, boqItemId: rebar.id, quantity: 1, date: "2026-09-04" }] }, bearer(live.token)), 400, "QUANTITY_ITEM_NOT_ALLOCATED");
+    expect(await prisma.quantityProgressEntry.count({ where: { projectId: project.id } })).toBe(before);
     const answer = await api.post(at("/quantity-progress"), { activityId: fix.id, boqItemId: rebar.id, quantity: 2, unit: "tonne", date: "2026-09-04", allocationId: null }, bearer(live.token));
     ok(answer, 201);
     ids.pmFix = answer.body.data.entry.id;
     expect(answer.body.data.entry).toMatchObject({ unitCode: "t", quantity: 2, status: "draft" });
-    expect(answer.body.data.warnings).toEqual([expect.objectContaining({ code: "QUANTITY_NO_APPROVED_ALLOCATION", activityId: fix.id, boqItemId: rebar.id, entryId: ids.pmFix })]);
+    expect(answer.body.data.warnings).toEqual([]);
   });
 
   it("an entry past the approved allocation is accepted with a raw comparison — no block, no exception row", async () => {
@@ -261,6 +283,10 @@ liveDescribe("PC-6: quantity progress entries are recorded, never official by th
   it("patch and delete are the creator's or an approver's; an approved entry is history", async () => {
     const [submittedA] = ids.batch;
     // The site engineer edits their own submitted entry.
+    // An edit to zero is refused: remove the entry instead.
+    const beforeZero = JSON.stringify(await prisma.quantityProgressEntry.findUnique({ where: { id: submittedA } }));
+    refused(await api.request("PATCH", at(`/quantity-progress/${submittedA}`), { body: { quantity: 0 }, headers: bearer(members.siteEngineer.token) }), 400, "QUANTITY_INVALID");
+    expect(JSON.stringify(await prisma.quantityProgressEntry.findUnique({ where: { id: submittedA } }))).toBe(beforeZero);
     const mine = await api.request("PATCH", at(`/quantity-progress/${submittedA}`), { body: { quantity: 12, note: "re-measured" }, headers: bearer(members.siteEngineer.token) });
     ok(mine);
     expect(mine.body.data.entry).toMatchObject({ id: submittedA, quantity: 12, note: "re-measured", status: "submitted" });
@@ -365,7 +391,7 @@ liveDescribe("PC-6: quantity progress entries are recorded, never official by th
     expect((await quantityProgressService.installedByActivity({ ...args, cutoffDate: new Date("2026-09-05T11:59:59Z") })).size).toBe(0);
     // Planned: the pour's approved allocation (100 m3) until a figure is typed on the method.
     await expect(quantityProgressService.plannedQuantityFor({ ...args, activityId: pour.id })).resolves.toMatchObject({ planned: 100, unitCode: "m3", basis: "approved_allocations", allocationIds: [allocation.id] });
-    await expect(quantityProgressService.plannedQuantityFor({ ...args, activityId: fix.id })).resolves.toMatchObject({ planned: null, basis: "none" });
+    await expect(quantityProgressService.plannedQuantityFor({ ...args, activityId: fix.id })).resolves.toMatchObject({ planned: 20, unitCode: "t", basis: "approved_allocations", allocationIds: [fixAllocation.id] });
     ok(await api.request("PUT", at(`/activities/${pour.id}/progress-method`), { body: { method: "quantity", plannedQuantity: 250, quantityUnit: "m3" }, headers: bearer(live.token) }));
     await expect(quantityProgressService.plannedQuantityFor({ ...args, activityId: pour.id })).resolves.toEqual({ planned: 250, unitCode: "m3", basis: "method_config", method: "quantity" });
     // The method row is this test's own fixture: taken away again, the allocations decide once more
@@ -382,5 +408,24 @@ liveDescribe("PC-6: quantity progress entries are recorded, never official by th
     expect(await officialFootprint()).toBe(footprintBefore);
     expect(await officialPct(pour.id)).toEqual([0, "missing"]);
     expect(await evReport()).toBe(evBefore);
+  });
+
+  it("a BOQ row the entries name cannot be deleted: 409 BOQ_ITEM_IN_USE naming what keeps it, never a 500; the activity likewise (ACTIVITY_IN_USE)", async () => {
+    // The mapping row is replaceable; the entries are not. With the rebar's
+    // allocation retired (the fixture stands in for a superseded mapping),
+    // only the entries keep the row — the RESTRICT the raw delete used to hit.
+    await prisma.activityBoqAllocation.update({ where: { id: fixAllocation.id }, data: { isActive: false } });
+    const entries = await prisma.quantityProgressEntry.count({ where: { boqItemId: rebar.id } });
+    expect(entries).toBeGreaterThan(0);
+    const answer = await api.request("DELETE", at(`/boq/items/${rebar.id}`), { headers: bearer(live.token) });
+    refused(answer, 409, "BOQ_ITEM_IN_USE");
+    expect(answer.body.error.details).toEqual({ boqItemId: rebar.id, code: "1.2", keptBy: { ipcItems: 0, quantityEntries: entries, dailyLogQuantities: 0 } });
+    expect(answer.body.error.message).toBe(`BOQ row 1.2 cannot be deleted: ${entries} quantity progress ${entries === 1 ? "entry is" : "entries are"} linked to it. Records stay on their row; revise it through a BOQ revision instead.`);
+    expect(answer.body.error.message).not.toMatch(/prisma|invocation/i);
+    expect(await prisma.boqItem.findUnique({ where: { id: rebar.id } })).toMatchObject({ isActive: true });
+    const activity = await api.request("DELETE", at(`/activities/${fix.id}`), { headers: bearer(live.token) });
+    refused(activity, 409, "ACTIVITY_IN_USE");
+    expect(activity.body.error.details.keptBy).toMatchObject({ quantityEntries: entries, dailyLogQuantities: 0 });
+    expect(await prisma.activity.findUnique({ where: { id: fix.id } })).toMatchObject({ isActive: true });
   });
 });

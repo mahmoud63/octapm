@@ -268,6 +268,23 @@ export type UpdateBoqActivityInput = z.infer<
 // CONTROL_MODEL §3). A figure no service can prove yet is `notAvailable` and
 // names the wave that brings it; a section the viewer may not read is
 // `{ allowed: false, module, reason }` with no data — the server omits it.
+// PC-6: the official installed figure the server states beside an activity's
+// installed figure when its latest approved progress carries a legacy typed
+// quantity as its floor — Σ approved entries is then below the official
+// figure, and the installed figure's basis says why — or (2026-10-01) when
+// that latest progress is a typed figure with no entry minted behind it
+// (installedBasis 'client'). Absent otherwise, and withheld with the figure
+// itself.
+export const OfficialInstalledSchema = z
+  .object({
+    value: z.number().nullable().optional(),
+    unitCode: z.string().nullable().optional(),
+    basis: z.string().nullable().optional(),
+    installedBasis: z.string().nullable().optional(),
+  })
+  .passthrough()
+export type OfficialInstalled = z.infer<typeof OfficialInstalledSchema>
+
 export const ControlsFigureSchema = z.object({
   value: z.number().nullable(),
   truth: z.enum(['source', 'derived', 'projection']).nullable(),
@@ -284,6 +301,8 @@ export const ControlsFigureSchema = z.object({
   // BOQ (its basis is then the reason).
   forecastSource: z.enum(['entered', 'default']).nullable().optional(),
   withheld: z.boolean().optional(),
+  // The activity detail's installed quantity only (see OfficialInstalledSchema).
+  officialInstalled: OfficialInstalledSchema.nullable().optional(),
 })
 
 export const ControlsSectionDeniedSchema = z.object({
@@ -495,6 +514,8 @@ export const QuantityFigureSchema = z
     wave: z.string().nullable().optional(),
     asOf: z.string().nullable().optional(),
     derivedFrom: z.array(z.record(z.string(), z.unknown())).optional(),
+    // An activity's installed figure only (see OfficialInstalledSchema).
+    officialInstalled: OfficialInstalledSchema.nullable().optional(),
   })
   .passthrough()
 
@@ -534,7 +555,14 @@ export const BoqItemQuantitiesSchema = quantityFigureBlock
       .optional(),
     unitCode: z.string().nullable().optional(),
     unit: z.string().nullable().optional(),
+    // The views answer an item's six figures under `figures` (quantity-views
+    // quantityBlocks), with the item's own code and description beside them.
+    code: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    figures: quantityFigureBlock.passthrough().nullable().optional(),
     // Raw comparisons only (PC-6): the exceptions they may raise are PC-7b's.
+    // `comparisons.certifiedOverInstalled.flag` is the server's raw flag.
+    comparisons: z.record(z.string(), z.unknown()).nullable().optional(),
     installedOverAllocation: z.boolean().nullable().optional(),
     certifiedOverInstalled: z.boolean().nullable().optional(),
   })
@@ -551,10 +579,18 @@ export const RecordQuantitiesSchema = BoqItemQuantitiesSchema.extend({
   activityId: z.string().nullable().optional(),
   asOf: z.string().nullable().optional(),
   cutoffDate: z.string().nullable().optional(),
-  items: z.array(BoqItemQuantitiesSchema).optional(),
+  // An array of item blocks — or, for a member who may not read the BOQ, the
+  // server's withheld marker in its place ({ withheld: true, reason }).
+  items: z
+    .union([
+      z.array(BoqItemQuantitiesSchema),
+      z.object({ withheld: z.boolean().optional(), reason: z.string().optional() }).passthrough(),
+    ])
+    .optional(),
   byBoqItem: z.array(BoqItemQuantitiesSchema).optional(),
-  figures: quantityFigureBlock.passthrough().nullable().optional(),
   allowed: z.boolean().optional(),
+  // utils/boq-figures withheldActivityQuantities: the whole read is withheld.
+  withheld: z.boolean().optional(),
   module: z.string().optional(),
   reason: z.string().optional(),
 }).passthrough()

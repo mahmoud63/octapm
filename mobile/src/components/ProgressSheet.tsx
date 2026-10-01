@@ -36,8 +36,10 @@ export function ProgressSheet({ visible, method, approvedPct, busy, error, onCan
   const quantityNumber = Number(quantity)
   const planned = method?.plannedQuantity ?? null
   const derivedPct = kind === 'quantity' && planned ? Math.min(100, Math.round((quantityNumber / planned) * 100)) : null
+  // A typed installed quantity is greater than zero: the server refuses a typed 0
+  // (400 QUANTITY_INVALID — record nothing for no work), so the sheet never offers it.
   const ready =
-    kind === 'quantity' ? quantity.trim() !== '' && !Number.isNaN(quantityNumber) && quantityNumber >= 0 : kind === 'weighted_milestone' ? true : kind === 'inspection' ? inspection !== null : pct.trim() !== '' && !Number.isNaN(pctNumber) && pctNumber >= 0 && pctNumber <= 100
+    kind === 'quantity' ? quantity.trim() !== '' && !Number.isNaN(quantityNumber) && quantityNumber > 0 : kind === 'weighted_milestone' ? true : kind === 'inspection' ? inspection !== null : pct.trim() !== '' && !Number.isNaN(pctNumber) && pctNumber >= 0 && pctNumber <= 100
 
   const build = (status: 'draft' | 'submitted'): ProgressInput => {
     const base: ProgressInput = { status, source: 'mobile', progressMethod: kind, notes: notes.trim() || undefined }

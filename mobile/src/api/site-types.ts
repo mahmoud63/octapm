@@ -66,8 +66,8 @@ export interface DailyLogEntry {
   unitCode?: string | null
   /** The pending progress entry the server minted from this line (§4), when it says. Its status is progress' own, never this row's. */
   progressEntry?: { id?: string; status?: string | null; source?: string | null } | null
-  /** The server's reason when it withholds the item from this reader. */
-  boqWithheld?: { reason: string } | null
+  /** The server's withholding for this reader (utils/boq-figures): the keys omitted — the quantity among them for a member who may not read the BOQ — and why. */
+  boqWithheld?: { keys?: string[]; reason: string } | null
   // shared
   activityId?: string | null
   activity?: Named | null
@@ -79,17 +79,20 @@ export interface DailyLogEntry {
 
 /** A BOQ item as the daily log or the allocation list names it: the description and the unit, the code only when the server sent one. */
 export interface AllocatedItemRef {
-  id: string
+  /** Withheld, with the code, from a daily-log row read by a member who may not read the BOQ. */
+  id?: string
   description: string
+  unit?: string | null
   unitCode?: string | null
   code?: string | null
 }
 
 /**
  * One item the site may record a quantity against: an approved allocation
- * of the activity, read from the server's own list. The bill's figures are
- * the server's to hand over or withhold (§12): a member who may not read
- * the BOQ gets `notAvailable` with the server's reason and no item at all.
+ * of the activity, read from the server's own picker. Every reader of
+ * progress gets the item's id, description and unit; its code, allocation
+ * and allocated quantity are the server's to hand over or withhold (§12):
+ * a member who may not read the BOQ picks by description and unit alone.
  */
 export interface AllocatedItem extends AllocatedItemRef {
   boqItemId: string
@@ -138,6 +141,13 @@ export interface QuantityFigure {
   /** Set by the server on a figure it withheld from this reader (utils/boq-figures); the reason is in notAvailable. */
   withheld?: boolean
   notAvailable?: { reason: string } | null
+  /**
+   * The installed figure only: the official installed figure the server
+   * states beside Σ approved entries when the latest approved progress
+   * carries a legacy typed quantity as its floor (the basis says why the
+   * entries add up to less). Never sent with a withheld figure.
+   */
+  officialInstalled?: { value: number | null; unitCode?: string | null; basis?: string | null; installedBasis?: string | null } | null
 }
 
 export type QuantityFigureKey = 'received' | 'issued' | 'installed' | 'certified' | 'paid' | 'committed'

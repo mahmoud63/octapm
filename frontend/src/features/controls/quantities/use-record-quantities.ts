@@ -65,7 +65,9 @@ export const readRecordQuantities = async (
         reason: 'The server answered in a shape this screen does not read',
       }
     }
-    if (parsed.data.allowed === false) {
+    // The server withholds the whole read from a member who may not read the
+    // BOQ inside a 200 answer (withheld: true, the reason beside it).
+    if (parsed.data.allowed === false || parsed.data.withheld === true) {
       return {
         state: 'withheld',
         reason: parsed.data.reason ?? 'Withheld by the server',

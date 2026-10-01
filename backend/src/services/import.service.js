@@ -620,9 +620,10 @@ const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
  * rewritten — a later approval is a new row, exactly as the writer does.
  *
  * The file's figure is a percentage, so the submission names the `percent`
- * method as a manual percentage entry would; on an activity measured another
- * way the writer records the method the submission names (it does not
- * refuse), and the row is flagged `methodMismatch` for the reviewer.
+ * method as a manual percentage entry would; on an activity configured to be
+ * measured another way the writer refuses it (409 PROGRESS_METHOD_MISMATCH —
+ * the submission's method is the activity's, never the client's), and the
+ * row is 'refused' with that reason, previewed the same by the dry run.
  *
  * Only a figure that moves something is written. A row whose figure is
  * already the activity's current official figure — the latest approved
@@ -642,8 +643,15 @@ const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
  * with the pending submission's id and `approvesPending: true` (a gate that
  * refuses leaves it pending with the reason, as for any other row). When the
  * figure differs, a new submission is made and approved as for any other
- * row. Either way, every OTHER older submitted import row on the activity
- * at another figure — there may be several — is left exactly as the writer
+ * row. A MANUAL pending submission (any source: the web form, the site's
+ * app, a daily report) at the same figure is treated exactly like an import
+ * one — approved through the writer by an approver's import, reported
+ * already_pending to a submit-only person — and one at another figure is
+ * reported as superseded pending like an import one (integration item 6:
+ * the pending-row logic used to read import submissions only, so the import
+ * created and approved a second identical submission and the manual one
+ * kept waiting, unreported). Either way, every OTHER older submitted row on
+ * the activity at another figure — there may be several — is left exactly as the writer
  * leaves a superseded manual submission — untouched, still in the queue —
  * and each is reported on the row (`superseded`, newest first) and in
  * `supersededPendingSubmissions` (one entry per submission; the count is of
@@ -687,10 +695,13 @@ async function importProgress({
         take: 1,
         select: { id: true, pctComplete: true, source: true },
       },
+      // Every open submission, whatever put it forward (integration item 6):
+      // a figure already waiting from a manual entry, the site's app or a
+      // daily report is the same figure in the same queue as an import's.
       progressSubmissions: {
-        where: { status: { in: ['draft', 'submitted'] }, source: 'import' },
+        where: { status: { in: ['draft', 'submitted'] } },
         orderBy: { createdAt: 'desc' },
-        select: { id: true, pctComplete: true, status: true, evidenceJson: true },
+        select: { id: true, pctComplete: true, status: true, source: true, evidenceJson: true },
       },
     },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
@@ -714,13 +725,32 @@ async function importProgress({
     const waiting = activity.progressSubmissions.find(
       (row) => normalizePct(row.pctComplete) === pctComplete,
     );
-    // Every older submitted import row at another figure, newest first — all
-    // of them, since a queue can hold more than one (a site engineer's 30
-    // then 32): each is left there, and each is reported by a row that is
-    // written. A draft is not in the queue and is not one of them.
-    const olderPending = activity.progressSubmissions
-      .filter((row) => row.status === 'submitted' && normalizePct(row.pctComplete) !== pctComplete)
-      .map((row) => ({ submissionId: row.id, pctComplete: normalizePct(row.pctComplete) }));
+    // Every older submitted row at another figure, newest first — all of
+    // them, import or not, since a queue can hold more than one (a site
+    // engineer's 30 then 32): each is left there, and each is reported by a
+    // row that is written. A draft is not in the queue and is not one of them.
+    const olderRows = activity.progressSubmissions.filter(
+      (row) => row.status === 'submitted' && normalizePct(row.pctComplete) !== pctComplete,
+    );
+    const olderPending = olderRows.map((row) => ({ submissionId: row.id, pctComplete: normalizePct(row.pctComplete) }));
+    const sourceLabel = (source) => (source === 'import' ? 'An import' : `A ${String(source || 'manual').replace(/_/g, ' ')}`);
+    // The writer's own rule (progress.service resolveSubmissionMethod): the
+    // file's figure is a percentage, and an activity configured to be
+    // measured another way refuses a percent submission — 409
+    // PROGRESS_METHOD_MISMATCH, never a coerced row the approver would
+    // approve with nothing behind it. Asked here so the row is reported
+    // (and the dry run previews it) rather than failing in the loop.
+    let methodRefusal = null;
+    try {
+      progressService.resolveSubmissionMethod({
+        activityId: activity.id,
+        payload: { method: 'percent' },
+        configRow: activity.progressMethod,
+      });
+    } catch (error) {
+      methodRefusal = refusalOf(error);
+      if (!methodRefusal) throw error;
+    }
     const row = {
       activityId: activity.id,
       p6ActivityId: key,
@@ -728,13 +758,15 @@ async function importProgress({
       pctComplete,
       officialPctComplete: official ? officialPct : null,
       activityMethod,
-      methodMismatch: activityMethod !== 'percent',
       submissionId: null,
       progressId: null,
       waitingStatus: null,
       approvesPending: false,
       superseded: [],
       reason: null,
+      // A working field (never answered): whether every older pending row this
+      // one leaves in the queue came from an import — the message's wording.
+      supersededAllImport: olderRows.every((older) => older.source === 'import'),
     };
     if (pctComplete === null) {
       row.status = 'skipped';
@@ -750,6 +782,12 @@ async function importProgress({
           ? `Already the official figure (${pctComplete}%); nothing written`
           : `No approved progress yet, so the activity already stands at ${pctComplete}%; nothing written`,
       };
+    } else if (methodRefusal) {
+      // A figure that would be written on an activity measured another way:
+      // refused by the writer's rule, reported, and previewed the same.
+      row.status = 'refused';
+      row.reason = methodRefusal;
+      row.expected = { status: 'refuse', reason: methodRefusal };
     } else if (waiting && canApprove && waiting.status === 'submitted') {
       // The same figure, already in the queue, under this person's own
       // authority: approve that submission rather than make a second one.
@@ -773,8 +811,10 @@ async function importProgress({
         code: 'PROGRESS_ALREADY_PENDING',
         message:
           waiting.status === 'draft'
-            ? `An import submission at ${pctComplete}% is already kept as a draft awaiting evidence; no second submission`
-            : `An import submission at ${pctComplete}% is already awaiting approval; no second submission`,
+            ? waiting.source === 'import'
+              ? `An import submission at ${pctComplete}% is already kept as a draft awaiting evidence; no second submission`
+              : `${sourceLabel(waiting.source)} submission at ${pctComplete}% is already kept as a draft; no second submission`
+            : `${sourceLabel(waiting.source)} submission at ${pctComplete}% is already awaiting approval; no second submission`,
       };
     } else {
       row.status = canApprove ? 'approve' : 'submit';
@@ -867,7 +907,7 @@ async function importProgress({
     // One entry per submission left in the queue, not per row: an activity
     // may leave several behind.
     const superseded = rows.flatMap((row) => row.superseded.map((older) => ({ row, older })));
-    return {
+    const counts = {
       matched: rows.length,
       notMatched,
       submitted: count('submitted'),
@@ -888,10 +928,13 @@ async function importProgress({
         importedPctComplete: row.pctComplete,
       })),
     };
+    // The wording's own flag, kept off the answer (not enumerable).
+    Object.defineProperty(counts, 'supersededAllImport', { value: superseded.every(({ row }) => row.supersededAllImport !== false), enumerable: false });
+    return counts;
   };
   const supersededClause = (counts) =>
     counts.supersededPending
-      ? ` ${plural(counts.supersededPending, 'older pending import submission')} at another figure left in the approval queue (superseded pending) — reject ${counts.supersededPending === 1 ? 'it' : 'them'} there.`
+      ? ` ${plural(counts.supersededPending, counts.supersededAllImport ? 'older pending import submission' : 'older pending submission')} at another figure left in the approval queue (superseded pending) — reject ${counts.supersededPending === 1 ? 'it' : 'them'} there.`
       : '';
 
   // Of the rows approved (or to be approved), how many are already-pending
@@ -906,13 +949,13 @@ async function importProgress({
   };
 
   // What a row answers with: never the plan's working fields.
-  const answerRow = ({ expected, evidenceRequired, ...row }) => row;
+  const answerRow = ({ expected, evidenceRequired, supersededAllImport, ...row }) => row;
 
   if (dryRun) {
+    // The working fields stay on the rows until they are counted (the
+    // superseded wording reads one), and are taken off as each is answered.
     const previewed = settleSuperseded(
-      plan.map((row) =>
-        row.expected ? answerRow({ ...row, status: row.expected.status, reason: row.expected.reason }) : answerRow(row),
-      ),
+      plan.map((row) => (row.expected ? { ...row, status: row.expected.status, reason: row.expected.reason } : { ...row })),
     );
     const counts = summarize(previewed);
     const count = (status) => previewed.filter((row) => row.status === status).length;
@@ -931,7 +974,7 @@ async function importProgress({
       authority,
       ...counts,
       ...would,
-      rows: previewed.slice(0, PROGRESS_IMPORT_ROW_LIMIT),
+      rows: previewed.slice(0, PROGRESS_IMPORT_ROW_LIMIT).map(answerRow),
       rowLimit: PROGRESS_IMPORT_ROW_LIMIT,
       // The legacy field: how many official figures this call would change.
       updated: 0,

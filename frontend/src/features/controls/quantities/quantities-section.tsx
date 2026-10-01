@@ -10,6 +10,7 @@ import {
   type QuantityFigureKey,
 } from '@/features/boq/data/schema'
 import { formatQuantity } from '../lib/detail-format'
+import { OfficialInstalledNote } from './official-installed'
 import {
   useRecordQuantities,
   type RecordQuantitiesKind,
@@ -114,6 +115,13 @@ export function QuantityFigureRow({
             shown on its own and never added to the others
           </p>
         )}
+        {/* Σ approved entries below the official installed figure (a legacy
+            typed quantity carried as its floor): the server's two figures,
+            side by side, with its reason. */}
+        <OfficialInstalledNote
+          official={figure?.officialInstalled}
+          testId={`${testId ?? figureKey}-official`}
+        />
       </div>
       <div className='shrink-0 text-right'>
         {absence ? (
@@ -250,7 +258,25 @@ export function RecordQuantities({
     )
   }
   const { data } = read
-  const perItem = data.items ?? data.byBoqItem ?? []
+  // The views answer an item's figures under `figures`, its code and
+  // description beside them, and its raw comparison under `comparisons`:
+  // read as the block the rows draw, nothing computed.
+  const perItem: BoqItemQuantities[] = (
+    Array.isArray(data.items) ? data.items : (data.byBoqItem ?? [])
+  ).map((block) => {
+    const flag = (block.comparisons as { certifiedOverInstalled?: { flag?: boolean | null } } | null | undefined)
+      ?.certifiedOverInstalled?.flag
+    return {
+      ...block,
+      ...(block.figures ?? {}),
+      boqItem:
+        block.boqItem ??
+        (block.boqItemId
+          ? { id: block.boqItemId, code: block.code ?? null, description: block.description ?? null }
+          : null),
+      certifiedOverInstalled: block.certifiedOverInstalled ?? (flag === true ? true : null),
+    }
+  })
   const top: BoqItemQuantities | null = data.figures
     ? { ...data.figures, unitCode: data.unitCode, unit: data.unit }
     : hasTopLevelFigures(data)

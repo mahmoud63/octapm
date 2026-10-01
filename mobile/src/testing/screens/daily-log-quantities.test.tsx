@@ -8,7 +8,7 @@ import { useAuthStore } from '@/auth/store'
 import { useProjectStore } from '@/projects/store'
 import { envelope, failure, fakeServer, type Call, type Route } from '@/testing/fake-server'
 import { page, projects, user } from '@/testing/fixtures'
-import { activities, allocationsOfA1, emptyLog, financeSite, pmSite, quantityEntry, siteEngineerSite, today } from '@/testing/fixtures-site'
+import { activities, allocationsOfA1, allocationsOfA1Withheld, emptyLog, financeSite, pmSite, quantityEntry, siteEngineerSite, today } from '@/testing/fixtures-site'
 import { renderScreen } from '@/testing/render'
 
 import '@/auth/session'
@@ -38,7 +38,7 @@ const serve = (permissions = siteEngineerSite, log = dayWithQuantities(), alloca
     [`GET /projects/p1/daily-logs/${today}`]: () => ({ status: 200, body: envelope(current) }),
     'GET /projects/p1/activities': () => ({ status: 200, body: envelope(activities) }),
     'GET /projects/p1/locations': () => ({ status: 200, body: envelope({ items: [] }) }),
-    'GET /projects/p1/activity-boq-allocations': allocations,
+    'GET /projects/p1/activities/a1/allocated-items': allocations,
     'GET /projects/p1/activities/progress-submissions': () => ({ status: 200, body: envelope({ items: [] }) }),
     'GET /projects/p1/lookaheads/constraints': () => ({ status: 200, body: envelope({ items: [], summary: { open: 0, overdue: 0, dueThisWeek: 0 } }) }),
     [`POST /projects/p1/daily-logs/${today}/entries/quantities`]: (call) => {
@@ -69,6 +69,10 @@ describe('quantities installed on the daily log', () => {
     expect(describeEntry('quantities', quantityEntry({ quantity: '25.000' as unknown as number }))).toBe('25 m3 · Concrete C30 to raft — awaiting approval · source daily log')
     // A withheld item is a dash, not a name and not a figure.
     expect(describeEntry('quantities', quantityEntry({ boqItem: null, boqWithheld: { reason: 'You do not have permission to read this section' } }))).toBe('120 m3 · — — awaiting approval · source daily log')
+    // The server withholds the quantity itself from a reader without the BOQ (the ledger's rule): a dash with the reason, the description kept, never a zero.
+    const withheld = quantityEntry({ quantity: undefined, unitCode: undefined, boqItem: { description: 'Concrete C30 to raft', unit: 'm3' }, boqWithheld: { keys: ['quantity', 'unitCode', 'boqItemId', 'allocationId', 'boqItem.id', 'boqItem.code'], reason: 'BOQ figures withheld' } })
+    expect(describeEntry('quantities', withheld)).toBe('— (BOQ figures withheld) · Concrete C30 to raft — awaiting approval · source daily log')
+    expect(describeEntry('quantities', withheld)).not.toMatch(/^0\b|\b120\b/)
   })
 
   it('records a quantity against an allocated item from the server’s list, with the item’s unit and a replay key', async () => {
@@ -78,10 +82,12 @@ describe('quantities installed on the daily log', () => {
     expect(await screen.findByTestId('entry-quantities-note')).toBeTruthy()
     expect(screen.getByTestId('entry-save').props.accessibilityState?.disabled).toBe(true)
 
-    // The activity first; the items are its approved allocations.
+    // The activity first; the items are its approved allocations, from the server's own picker.
     await fireEvent.press(screen.getByTestId('entry-activity'))
     await fireEvent.press(await screen.findByTestId('entry-activity-option-a1'))
-    await waitFor(() => expect(calls.some((c) => c.path === '/projects/p1/activity-boq-allocations' && c.query.activityId === 'a1' && c.query.status === 'approved')).toBe(true))
+    await waitFor(() => expect(calls.some((c) => c.path === '/projects/p1/activities/a1/allocated-items')).toBe(true))
+    // The allocation register (gated on reading the BOQ) is not what the picker reads.
+    expect(calls.some((c) => c.path.includes('activity-boq-allocations'))).toBe(false)
     await fireEvent.press(screen.getByTestId('entry-item'))
     // Description and unit; the code only where the server sent one.
     expect(await screen.findByText('C-030 · m3')).toBeTruthy()
@@ -113,12 +119,38 @@ describe('quantities installed on the daily log', () => {
     await fireEvent.press(await screen.findByTestId('entry-item-option-b1'))
     await fireEvent.changeText(screen.getByTestId('entry-quantity'), '-5')
     expect(screen.getByTestId('entry-save').props.accessibilityState?.disabled).toBe(true)
-    expect(screen.getByText(/a quantity of 0 or more/)).toBeTruthy()
+    expect(screen.getByText(/a quantity greater than zero/)).toBeTruthy()
+    // Zero is no work: the server refuses it (QUANTITY_INVALID), so the form does not offer it.
     await fireEvent.changeText(screen.getByTestId('entry-quantity'), '0')
+    expect(screen.getByTestId('entry-save').props.accessibilityState?.disabled).toBe(true)
+    await fireEvent.changeText(screen.getByTestId('entry-quantity'), '0.5')
     expect(screen.getByTestId('entry-save').props.accessibilityState?.disabled).toBe(false)
   })
 
-  it('shows a dash and the server’s reason, and no item to choose, when the bill is withheld from this member', async () => {
+  it('a member who may not read the BOQ still records: the picker gives the description and the unit — no code, no allocation — and the entry goes with the item’s unit', async () => {
+    serve(siteEngineerSite, dayWithQuantities(), () => ({ status: 200, body: envelope(allocationsOfA1Withheld) }))
+    await renderScreen(<DailyLogScreen />)
+    await fireEvent.press(await screen.findByTestId('daily-log-add-quantities'))
+    await fireEvent.press(screen.getByTestId('entry-activity'))
+    await fireEvent.press(await screen.findByTestId('entry-activity-option-a1'))
+    await fireEvent.press(screen.getByTestId('entry-item'))
+    // The description and the unit, never the code the server did not send.
+    expect(await screen.findByTestId('entry-item-option-b1')).toBeTruthy()
+    expect(screen.queryByText('C-030 · m3')).toBeNull()
+    expect(screen.queryByText(/C-030/)).toBeNull()
+    expect(screen.queryByTestId('entry-item-withheld')).toBeNull()
+    await fireEvent.press(screen.getByTestId('entry-item-option-b1'))
+    await fireEvent.changeText(screen.getByTestId('entry-quantity'), '25')
+    expect(screen.getByTestId('entry-save').props.accessibilityState?.disabled).toBe(false)
+    await fireEvent.press(screen.getByTestId('entry-save'))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path.endsWith('/entries/quantities'))).toBe(true))
+    const sent = calls.find((c) => c.path.endsWith('/entries/quantities'))!.body as Record<string, unknown>
+    // The item and its unit; no allocation id is invented — the server resolves the single approved one.
+    expect(sent).toMatchObject({ activityId: 'a1', boqItemId: 'b1', unitCode: 'm3', quantity: 25 })
+    expect(sent.allocationId ?? null).toBeNull()
+  })
+
+  it('shows a dash and the server’s reason, and no item to choose, when the server refuses the picker itself', async () => {
     serve(siteEngineerSite, dayWithQuantities(), () => failure(403, 'FORBIDDEN', 'You do not have permission to read this section'))
     await renderScreen(<DailyLogScreen />)
     await fireEvent.press(await screen.findByTestId('daily-log-add-quantities'))

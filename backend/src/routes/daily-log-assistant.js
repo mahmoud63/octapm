@@ -9,7 +9,9 @@ const { validate } = require("../middleware/validate");
 const service = require("../services/daily-log-assistant.service");
 const dailyLog = require("../services/daily-log.service");
 // PC-6: the applied draft answers with the day's log, which carries the
-// quantities section — withheld like every other log answer (routes/daily-logs).
+// quantities section — withheld like every other log answer (routes/daily-logs);
+// the draft's evidence shows the model a submission's quantities only for a
+// caller who may read the BOQ (daily-log-assistant.service progressLine).
 const { boqFigureAccess, withheldDailyLog } = require("../utils/boq-figures");
 
 /**
@@ -63,7 +65,7 @@ router.post(
     validate,
   ],
   asyncHandler(async (req, res) =>
-    sendSuccess(res, await service.draftReport({ ...scope(req), date: req.params.date, payload: req.body, user: { ...req.user, role: getEffectiveRole(req) }, viewer: viewer(req) })),
+    sendSuccess(res, await service.draftReport({ ...scope(req), date: req.params.date, payload: req.body, user: { ...req.user, role: getEffectiveRole(req) }, viewer: viewer(req), access: boqFigureAccess(req) })),
   ),
 );
 

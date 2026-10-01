@@ -20,7 +20,7 @@ export type ProgressImportRowStatus =
   | 'skipped'
   | 'refused'
 
-/** An older pending import submission at another figure, left in the queue. */
+/** An older pending submission (an import's or anyone's manual one) at another figure, left in the queue. */
 export type ProgressImportSuperseded = {
   submissionId: string
   pctComplete: number
@@ -41,7 +41,6 @@ export type ProgressImportRow = {
   pctComplete: number | null
   officialPctComplete: number | null
   activityMethod: string
-  methodMismatch: boolean
   status: ProgressImportRowStatus
   submissionId: string | null
   progressId: string | null
@@ -144,7 +143,7 @@ export function progressImportSupersededNote(
     .map((row) => `${row.p6ActivityId} at ${row.pctComplete}%`)
     .join(', ')
   return (
-    `${count} older pending import ${count === 1 ? 'submission' : 'submissions'} at another figure ${count === 1 ? 'is' : 'are'} still in the approval queue` +
+    `${count} older pending ${count === 1 ? 'submission' : 'submissions'} at another figure ${count === 1 ? 'is' : 'are'} still in the approval queue` +
     (names ? ` (${names})` : '') +
     ' — reject there if no longer wanted.'
   )
@@ -160,8 +159,8 @@ export function progressImportRowSupersededNote(row: ProgressImportRow): string 
   if (!older.length) return ''
   const figures = older.map((entry) => `${entry.pctComplete}%`).join(', ')
   return older.length === 1
-    ? `An older import submission at ${figures} is still in the approval queue; reject it there if no longer wanted.`
-    : `${older.length} older import submissions (at ${figures}) are still in the approval queue; reject them there if no longer wanted.`
+    ? `An older pending submission at ${figures} is still in the approval queue; reject it there if no longer wanted.`
+    : `${older.length} older pending submissions (at ${figures}) are still in the approval queue; reject them there if no longer wanted.`
 }
 
 // The gates' refusal codes, in words (the row keeps the server's message).
@@ -169,6 +168,7 @@ const REASON_LABEL: Record<string, string> = {
   PROGRESS_EVIDENCE_REQUIRED: 'evidence required',
   ITP_HOLD_POINT_OPEN: 'ITP hold point open',
   ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED: 'not assigned to the activity',
+  PROGRESS_METHOD_MISMATCH: 'measured by another method',
 }
 
 const reasonsOf = (rows: ProgressImportRow[]) =>

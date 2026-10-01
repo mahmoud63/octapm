@@ -309,7 +309,7 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     if (installed.value === null) expect(installed.notAvailable).toEqual({ reason: "PC-6 core pending" });
     else expect(installed).toMatchObject({ value: 0, unitMatch: null });
     expect(detail.sections.quantities.paid).toMatchObject({ truth: "projection", unitCode: "m3" });
-    expect(detail.sections.quantities.certifiedQuantity).toMatchObject({ value: 30, truth: "source", unitCode: "m3", unitMatch: true });
+    expect(detail.sections.quantities.certifiedQuantity).toMatchObject({ value: 30, truth: "derived", unitCode: "m3", unitMatch: true });
     expect(detail.sections.quantities.committedQuantity).toMatchObject({ value: 100, truth: "derived", unitCode: "m3", label: "Committed quantity (excludes variations)" });
     expect(detail.sections.quantities.forecast).toMatchObject({ value: null, notAvailable: true, wave: "PC-7" });
     expect(detail.sections.money.amount.value).toBe(1000);
@@ -544,7 +544,7 @@ liveDescribe("PC-5 BOQ item and activity detail", () => {
     // PC-6: the quantities section names its certified and committed
     // quantities for everyone, with no value and the module for a member the
     // module does not admit.
-    expect(item.body.data.sections.quantities.certifiedQuantity).toMatchObject({ value: null, truth: "source", module: "ipc", notAvailable: { reason: expect.any(String) } });
+    expect(item.body.data.sections.quantities.certifiedQuantity).toMatchObject({ value: null, truth: "derived", module: "ipc", notAvailable: { reason: expect.any(String) } });
     expect(item.body.data.sections.quantities.paid).toMatchObject({ value: null, module: "ipc" });
     expect(item.body.data.sections.quantities.committedQuantity).toMatchObject({ value: null, module: "commitment" });
     expect(item.text.includes('"certifiedQuantity":{"value":30')).toBe(false);
