@@ -1088,6 +1088,8 @@ const withheldAuditHistory = (
       if (!access.budget && type === "schedule_revision") return withSummaries(event, withoutRevisionTotals);
       if (type === "quantity_progress_entry") return withheldQuantityEvent(event, QUANTITY_ENTRY_EVENT);
       if (type === "progress_submission") return withheldQuantityEvent(event, PROGRESS_SUBMISSION_EVENT);
+      // PC-7b: a change event raised from a BOQ-derived exception names it no more.
+      if (type === "change_event") return withheldChangeEventAuditEvent(event);
       return event;
     });
   return { ...history, events };
@@ -2020,6 +2022,88 @@ const withheldExceptionCounts = (rows, accessFor, registry = null) => {
   return { total, bySeverity };
 };
 
+// ─── PC-7b: a change event raised from a BOQ-derived exception ────────────
+//
+// A change event is the commercial module's record: every change-event reader
+// of the project reads it, with or without boq:read. One raised from an
+// exception that exists only because of the BOQ (exceptionPolicy boqDerived,
+// or a subject that is one of the bill's records) must not restate it to a
+// reader who may not read the BOQ: the link to the exception (sourceLinks'
+// project_exception entry, the sourceRecordType / sourceRecordId pair and
+// its path) and what came from it onto the lines — the quantity delta, its
+// unit, and the unit cost (with the line's amount beside it, the unit cost
+// would give the quantity back) — are withheld, with the reason. The
+// prefill's words are generic for such an exception (exception.service
+// exceptionPrefill), so nothing else on the event names the kind. A BOQ
+// reader receives the event as built. `boqExceptionIds` is the set of the
+// event's exceptions that are BOQ-derived (exception.service decides it).
+const CHANGE_EVENT_EXCEPTION_WITHHELD =
+  "This change event was raised from a project controls exception measured from the BOQ: the exception it names, and the quantity, unit and unit cost that came from it onto the lines, are available only to members who may read the BOQ";
+const CHANGE_EVENT_EXCEPTION_LINE_KEYS = Object.freeze(["quantity", "unit", "unitCost"]);
+const CHANGE_EVENT_EXCEPTION_KEYS = Object.freeze(["sourceLinks.project_exception", "sourceRecordType", "sourceRecordId", "sourcePath"]);
+const exceptionIdOfChangeEvent = (event) => {
+  if (!event || typeof event !== "object") return null;
+  const link = Array.isArray(event.sourceLinks) ? event.sourceLinks.find((entry) => entry && entry.type === "project_exception") : null;
+  if (link && link.id) return link.id;
+  return event.sourceRecordType === "project_exception" && event.sourceRecordId ? event.sourceRecordId : null;
+};
+const withheldChangeEvent = (event, access, boqExceptionIds) => {
+  if (!event || typeof event !== "object" || (access && access.boq === true)) return event;
+  const exceptionId = exceptionIdOfChangeEvent(event);
+  if (!exceptionId || !(boqExceptionIds instanceof Set) || !boqExceptionIds.has(exceptionId)) return event;
+  const out = {
+    ...event,
+    sourceLinks: (Array.isArray(event.sourceLinks) ? event.sourceLinks : []).filter((entry) => !(entry && entry.type === "project_exception")),
+    sourceRecordType: event.sourceRecordType === "project_exception" ? null : event.sourceRecordType ?? null,
+    sourceRecordId: event.sourceRecordType === "project_exception" ? null : event.sourceRecordId ?? null,
+    sourcePath: event.sourceRecordType === "project_exception" ? null : event.sourcePath ?? null,
+    sourceWithheld: { keys: [...CHANGE_EVENT_EXCEPTION_KEYS, ...(Array.isArray(event.lines) ? CHANGE_EVENT_EXCEPTION_LINE_KEYS.map((key) => `lines[].${key}`) : [])], reason: CHANGE_EVENT_EXCEPTION_WITHHELD },
+  };
+  if (Array.isArray(event.lines)) out.lines = event.lines.map((line) => withoutKeys(line, CHANGE_EVENT_EXCEPTION_LINE_KEYS));
+  return out;
+};
+/** Every change event in an answer (an event, a list's items, or { changeEvent }), as this caller may receive it. */
+const withheldChangeEventAnswer = (answer, access, boqExceptionIds) => {
+  if (!answer || typeof answer !== "object" || (access && access.boq === true)) return answer;
+  if (Array.isArray(answer)) return answer.map((entry) => withheldChangeEventAnswer(entry, access, boqExceptionIds));
+  let out = answer;
+  if (Array.isArray(answer.sourceLinks)) out = withheldChangeEvent(answer, access, boqExceptionIds);
+  if (Array.isArray(out.items)) out = { ...out, items: out.items.map((entry) => withheldChangeEvent(entry, access, boqExceptionIds)) };
+  if (out.changeEvent && typeof out.changeEvent === "object") out = { ...out, changeEvent: withheldChangeEvent(out.changeEvent, access, boqExceptionIds) };
+  return out;
+};
+/** The change events' exception ids an answer names (to ask which are BOQ-derived). */
+const changeEventExceptionIds = (answer) => {
+  const ids = new Set();
+  const visit = (value) => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) return value.forEach(visit);
+    const id = exceptionIdOfChangeEvent(value);
+    if (id) ids.add(id);
+    if (Array.isArray(value.items)) value.items.forEach(visit);
+    if (value.changeEvent) visit(value.changeEvent);
+  };
+  visit(answer);
+  return [...ids];
+};
+// A change_event audit event recorded at creation names the typed source
+// links in its summary (sourceLinks { exceptionId, … }). The exception link
+// goes for a reader without boq:read unless the event says its exception was
+// not BOQ-derived (metadata.sourceBoqDerived false; an event without it fails
+// closed).
+const withheldChangeEventAuditEvent = (event) => {
+  const meta = (event && (event.metadata || event.metadataJson)) || {};
+  if (meta.sourceBoqDerived === false) return event;
+  const strip = (summary) => {
+    if (!summary || typeof summary !== "object" || !summary.sourceLinks || typeof summary.sourceLinks !== "object" || !summary.sourceLinks.exceptionId) return summary;
+    const { exceptionId, ...links } = summary.sourceLinks;
+    return { ...summary, sourceLinks: links };
+  };
+  const touched = ["summary", "newSummary", "oldSummary"].some((key) => event && event[key] && event[key].sourceLinks && event[key].sourceLinks.exceptionId);
+  if (!touched) return event;
+  return { ...event, summary: strip(event.summary), newSummary: strip(event.newSummary), oldSummary: strip(event.oldSummary), boqWithheld: { keys: ["sourceLinks.exceptionId"], reason: CHANGE_EVENT_EXCEPTION_WITHHELD } };
+};
+
 // An exception's audit event names its kind and subject; for one the caller
 // may not read (BOQ-derived — or not marked either way — without BOQ read; a
 // money kind without the budget figures) the event goes, as the bill's own
@@ -2055,6 +2139,13 @@ module.exports = {
   withheldExceptions,
   withheldExceptionCounts,
   withheldExceptionEvent,
+  // PC-7b: a change event raised from a BOQ-derived exception.
+  CHANGE_EVENT_EXCEPTION_WITHHELD,
+  CHANGE_EVENT_EXCEPTION_LINE_KEYS,
+  changeEventExceptionIds,
+  withheldChangeEvent,
+  withheldChangeEventAnswer,
+  withheldChangeEventAuditEvent,
   // PC-6 (core): quantity progress entries.
   QUANTITY_ENTRY_BOQ_KEYS,
   QUANTITY_ENTRY_WITHHELD,

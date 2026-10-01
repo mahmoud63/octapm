@@ -4,6 +4,8 @@ const { cursorArgs, toCursorPage, normalizeListQuery } = require("../utils/list-
 const { recordWorkspacePath } = require("../utils/record-links");
 const {
   EXCEPTION_BOQ_SUBJECT_TYPES,
+  changeEventExceptionIds,
+  withheldChangeEventAnswer,
   EXCEPTION_MODULES,
   exceptionAccess,
   exceptionPolicy,
@@ -535,10 +537,13 @@ const projectCostCode = async ({ projectId, costCodeId }) => {
  * module's record, read by change-event readers who may not read the BOQ or
  * the cost module. The exception link (exceptionId) carries the rest.
  */
+// The words of a change event raised from a BOQ-derived exception: the kind
+// is named only by the typed link (withheld from a reader without boq:read).
+const GENERIC_EXCEPTION_TITLE = "Raised from a project controls exception";
 const exceptionPrefill = async (row) => {
   const projectId = row.projectId;
-  const label = kindLabel(row.kind);
   const boqDerived = isBoqDerivedException(row, policyOf(row));
+  const label = boqDerived ? GENERIC_EXCEPTION_TITLE : kindLabel(row.kind);
   const line = { description: label.slice(0, 500), quantity: 1, unit: null, unitCost: 0, romAmount: 0 };
   let activityId = row.subjectType === "activity" ? row.subjectId : row.secondarySubjectType === "activity" ? row.secondarySubjectId : null;
   let costCodeId = row.costCodeId || null;
@@ -600,7 +605,10 @@ const exceptionPrefill = async (row) => {
   const subjectWords = boqDerived ? null : (await loadSubjectLabels({ projectId, rows: [row] })).get(`${row.subjectType}:${row.subjectId}`) || null;
   return {
     title: (subjectWords ? `${label}: ${subjectWords}` : label).slice(0, 200),
-    description: `Raised from a project exception (${label}) detected ${toIso(row.detectedAt)?.slice(0, 10) || ""}. The amount is left for the QS to price.`.slice(0, 8000),
+    description: (boqDerived
+      ? `${GENERIC_EXCEPTION_TITLE}. The amount is left for the QS to price.`
+      : `Raised from a project exception (${label}) detected ${toIso(row.detectedAt)?.slice(0, 10) || ""}. The amount is left for the QS to price.`
+    ).slice(0, 8000),
     type: "other",
     origin: "exception",
     activityId,
@@ -633,7 +641,7 @@ const raiseFromException = async ({ orgId, projectId, exceptionId, access, may, 
   if (!["open", "snoozed"].includes(status)) throw notOpen(status);
   const draft = changeEventService.draftOverPrefill(await exceptionPrefill(row), payload);
   draft.origin = "exception";
-  const changeEvent = await changeEventService.createChangeEvent({ orgId, projectId, payload: draft, actor, links: { exceptionId: row.id } });
+  const changeEvent = await changeEventService.createChangeEvent({ orgId, projectId, payload: draft, actor, links: { exceptionId: row.id }, auditMetadata: { sourceBoqDerived: isBoqDerivedException(row, policyOf(row)) } });
   await auditExceptionEvent({ row, actor, action: auditService.ACTIONS.STATUS_CHANGED, oldStatus: status, newStatus: "in_change", summary: { changeEventId: changeEvent.id, changeEventRef: changeEvent.ref, handoff: "raised" } });
   return { exception: await reread({ orgId, projectId, exceptionId, access, may }), changeEvent };
 };
@@ -655,6 +663,32 @@ const associateChangeEvent = async ({ orgId, projectId, exceptionId, access, may
   if (updated.count !== 1) throw notOpen("in_change");
   await auditExceptionEvent({ row, actor, action: auditService.ACTIONS.STATUS_CHANGED, oldStatus: status, newStatus: "in_change", summary: { changeEventId: event.id, changeEventRef: event.ref, handoff: "associated" } });
   return reread({ orgId, projectId, exceptionId, access, may });
+};
+
+// ─── Change events raised from a BOQ-derived exception ───────────────────
+
+/** Of these exception ids (of this project and organisation), the BOQ-derived ones. */
+const boqDerivedExceptionIds = async ({ orgId, projectId, ids }) => {
+  const wanted = [...new Set((ids || []).filter(Boolean))];
+  if (!wanted.length) return new Set();
+  const rows = await prisma.projectException.findMany({ where: { orgId, projectId, id: { in: wanted } }, select: { id: true, kind: true, subjectType: true, secondarySubjectType: true } });
+  const found = new Set(rows.map((row) => row.id));
+  // An id that names no exception of the project (it cannot be told) is
+  // treated as BOQ-derived: withholding too much is safe, leaking is not.
+  return new Set([...rows.filter((row) => isBoqDerivedException(row, policyOf(row))).map((row) => row.id), ...wanted.filter((id) => !found.has(id))]);
+};
+
+/**
+ * A change-event answer (an event, a list, or { changeEvent }) as this caller
+ * may receive it: an event raised from a BOQ-derived exception names neither
+ * the exception nor what came from it to a reader without boq:read
+ * (utils/boq-figures withheldChangeEventAnswer).
+ */
+const changeEventAnswerFor = async ({ orgId, projectId, access, answer }) => {
+  if (!access || access.boq === true) return answer;
+  const ids = changeEventExceptionIds(answer);
+  if (!ids.length) return answer;
+  return withheldChangeEventAnswer(answer, access, await boqDerivedExceptionIds({ orgId, projectId, ids }));
 };
 
 // ─── The workspace dashboard's open-exceptions figure ─────────────────────
@@ -885,6 +919,9 @@ module.exports = {
   notifyOpened,
   exceptionAccessForView,
   registerExceptionNotifier,
+  boqDerivedExceptionIds,
+  changeEventAnswerFor,
+  GENERIC_EXCEPTION_TITLE,
   // for tests
   _evaluationListener: evaluationListener,
   _exceptionPrefill: exceptionPrefill,

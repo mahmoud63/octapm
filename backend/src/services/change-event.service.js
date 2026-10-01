@@ -310,7 +310,8 @@ const normalizeLines = (rows) => {
     const quantity = toNumber(row.quantity, 1);
     const unitCost = round2(row.unitCost);
     const romAmount = row.romAmount !== undefined && row.romAmount !== null && row.romAmount !== "" ? round2(row.romAmount) : round2(quantity * unitCost);
-    return { id: trimOrNull(row.id), description: description.slice(0, 500), costCodeId: trimOrNull(row.costCodeId), budgetLineId: trimOrNull(row.budgetLineId), activityId: trimOrNull(row.activityId), commitmentId: trimOrNull(row.commitmentId), quantity, unit: trimOrNull(row.unit)?.slice(0, 20) || null, unitCost, romAmount, notes: trimOrNull(row.notes)?.slice(0, 1000) || null, sortOrder: index };
+    const given = { quantity: row.quantity !== undefined, unit: row.unit !== undefined, unitCost: row.unitCost !== undefined && row.unitCost !== null, romAmount: row.romAmount !== undefined && row.romAmount !== null && row.romAmount !== "" };
+    return { id: trimOrNull(row.id), description: description.slice(0, 500), costCodeId: trimOrNull(row.costCodeId), budgetLineId: trimOrNull(row.budgetLineId), activityId: trimOrNull(row.activityId), commitmentId: trimOrNull(row.commitmentId), quantity, unit: trimOrNull(row.unit)?.slice(0, 20) || null, unitCost, romAmount, notes: trimOrNull(row.notes)?.slice(0, 1000) || null, sortOrder: index, given };
   });
 };
 
@@ -356,7 +357,7 @@ const nextNumber = async (tx, projectId) => {
  * already carried by a live change event (one void or closed may be
  * replaced), else 409 EXCEPTION_IN_CHANGE and nothing is written.
  */
-const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null, links = null }) => {
+const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null, links = null, auditMetadata = null }) => {
   await ensureProject({ orgId, projectId });
   const data = normalizeEvent(payload);
   const lines = normalizeLines(payload.lines);
@@ -366,7 +367,7 @@ const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null,
   const created = await prisma.$transaction(async (tx) => {
     const number = await nextNumber(tx, projectId);
     const row = await tx.changeEvent.create({ data: { ...data, ...(sourcePairOf(typed) || {}), ...typed, orgId, projectId, number, ref: `CE-${String(number).padStart(3, "0")}`, status: STATUS.OPEN, createdBy: actor?.id || null, updatedBy: actor?.id || null } });
-    if (lines.length) await tx.changeEventLine.createMany({ data: lines.map(({ id, ...line }) => ({ ...line, orgId, projectId, changeEventId: row.id })) });
+    if (lines.length) await tx.changeEventLine.createMany({ data: lines.map(({ id, given, ...line }) => ({ ...line, orgId, projectId, changeEventId: row.id })) });
     if (typed.exceptionId) {
       const claimed = await tx.projectException.updateMany({
         where: {
@@ -382,7 +383,7 @@ const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null,
     }
     return loadEvent({ orgId, projectId, changeEventId: row.id, tx });
   });
-  await auditService.recordEvent({ orgId, projectId, entityType: "change_event", entityId: created.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, summary: { ref: created.ref, title: created.title, type: created.type, origin: created.origin, rom: estimateOf(created).rom, ...(Object.keys(typed).length ? { sourceLinks: typed } : {}) } }).catch(() => null);
+  await auditService.recordEvent({ orgId, projectId, entityType: "change_event", entityId: created.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, summary: { ref: created.ref, title: created.title, type: created.type, origin: created.origin, rom: estimateOf(created).rom, ...(Object.keys(typed).length ? { sourceLinks: typed } : {}) }, ...(auditMetadata ? { metadata: auditMetadata } : {}) }).catch(() => null);
   return eventOut(created, { detail: true });
 };
 
@@ -529,10 +530,20 @@ const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}
     if (lines) {
       const keep = uniqueIds(lines.map((line) => line.id));
       await tx.changeEventLine.deleteMany({ where: { changeEventId, id: { notIn: keep.length ? keep : ["__none__"] } } });
-      for (const { id, ...line } of lines) {
+      for (const { id, given, ...line } of lines) {
         const existingLine = id ? existing.lines.find((row) => row.id === id) : null;
-        if (existingLine) await tx.changeEventLine.update({ where: { id }, data: line });
-        else await tx.changeEventLine.create({ data: { ...line, orgId, projectId, changeEventId } });
+        if (existingLine) {
+          // A kept line whose quantity, unit or unit cost the body leaves out
+          // keeps the stored one — a reader who was not given them (a change
+          // event raised from a BOQ-derived exception, utils/boq-figures
+          // withheldChangeEvent) cannot reset them by saving the line.
+          const kept = { ...line };
+          if (!given.quantity) kept.quantity = toNumber(existingLine.quantity, 1);
+          if (!given.unit) kept.unit = existingLine.unit || null;
+          if (!given.unitCost) kept.unitCost = round2(existingLine.unitCost);
+          if (!given.romAmount) kept.romAmount = round2(kept.quantity * kept.unitCost);
+          await tx.changeEventLine.update({ where: { id }, data: kept });
+        } else await tx.changeEventLine.create({ data: { ...line, orgId, projectId, changeEventId } });
       }
     }
     return loadEvent({ orgId, projectId, changeEventId, tx });
