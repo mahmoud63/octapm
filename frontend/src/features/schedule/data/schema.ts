@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  OfficialInstalledSchema,
   ControlsFigureSchema,
   ControlsSectionDeniedSchema,
   ControlsStructureSchema,
@@ -738,6 +739,10 @@ export const activityInstalledQuantitySchema = z
     asOf: z.string().nullable().optional(),
     basis: z.string().nullable().optional(),
     truth: z.string().nullable().optional(),
+    // The official installed figure, when the latest approved progress
+    // carries a legacy typed quantity as its floor (the basis says why the
+    // lines add up to less).
+    officialInstalled: OfficialInstalledSchema.nullable().optional(),
     withheld: withheldNote,
     notAvailable: withheldNote,
   })

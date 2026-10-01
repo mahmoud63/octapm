@@ -38,7 +38,9 @@ import {
  * register fields on the Progress tab (installed is the server's per-item
  * figure, never the percentage × planned) and the quantities section in the
  * daily log (rows of different items sharing a unit are never added up, a
- * unit-less row is never bucketed).
+ * unit-less row is never bucketed). The first two also carry the official
+ * installed figure a legacy floor leaves above Σ approved entries: both
+ * figures are drawn, with the server's reason, and nothing is added up.
  *
  * Test 2 is the full walk on the real contract: a quantity row on the daily
  * log → the day submitted mints a PENDING entry (nothing official, nothing
@@ -284,6 +286,8 @@ test('the Progress tab names every figure’s source; the drawer and the daily l
   await expect(page.getByTestId(`uat-progress-pending-entries-${v100}`)).toHaveCount(0)
   // Never a zero drawn as installed.
   await expect(installed.locator('[data-installed-quantity="0"]')).toHaveCount(0)
+  // No legacy floor on this activity: no official installed figure beside it.
+  await expect(page.getByTestId(`uat-progress-official-installed-${v100}`)).toHaveCount(0)
 
   // ── The activity drawer: six labels, honest absence.
   await openActivityDrawer(page, projectId, v100)
@@ -297,6 +301,7 @@ test('the Progress tab names every figure’s source; the drawer and the daily l
   await expect(itemBlock).not.toContainText('Not sent by the server')
   await expect(page.getByTestId('activity-detail-pct')).toBeVisible()
   await expect(page.getByTestId('activity-detail-progress-source')).toContainText('No approved progress yet')
+  await expect(page.locator('[data-official-installed]')).toHaveCount(0)
 
   // ── The renderer against the views contract itself: a server answering
   // the contract (routed here, so it is proven on any server) draws each
@@ -306,7 +311,16 @@ test('the Progress tab names every figure’s source; the drawer and the daily l
     kind: 'activity',
     id: v100,
     asOf: '2026-09-30T12:00:00.000Z',
-    installed: { value: 15, truth: 'derived', basis: 'Σ approved quantity progress entries', unitCode: 'm3', unitMatch: true },
+    // Σ approved entries below the official figure (a legacy typed quantity
+    // carried as its floor): the server states both, and why.
+    installed: {
+      value: 15,
+      truth: 'derived',
+      basis: 'Σ approved quantity progress entries. Σ approved entries is below the official installed figure (officialInstalled) because earlier progress was typed, not entered',
+      unitCode: 'm3',
+      unitMatch: true,
+      officialInstalled: { value: 75, unitCode: 'm3', basis: 'official figure of the latest approved progress, carrying a legacy typed quantity as its floor' },
+    },
     certified: { value: null, truth: 'derived', basis: 'Σ IpcItem.qty on certified or paid certificates', unitCode: 'm3', unitMatch: true, notAvailable: { reason: 'No certified certificate names this item' } },
     paid: { value: 7.5, truth: 'projection', basis: 'certified × amountPaid ÷ totalCert', unitCode: 'm3', unitMatch: true },
     received: { value: 12, truth: 'derived', basis: 'Σ stock receipts', unitCode: 't', unitMatch: false },
@@ -323,6 +337,16 @@ test('the Progress tab names every figure’s source; the drawer and the daily l
   await expect(block.locator('[data-figure="installed"] [data-value]')).toHaveAttribute('data-value', '15')
   await expect(block.locator('[data-figure="installed"] [data-unit]')).toHaveAttribute('data-unit', 'm3')
   await expect(block.locator('[data-figure="installed"] [data-truth]')).toHaveAttribute('data-truth', 'derived')
+  // Both figures and the reason: installed stays 15, the official 75 stands beside it — never one replacing the other, never a sum.
+  const drawerOfficial = block.getByTestId('activity-detail-quantities-pc6-installed-official')
+  await expect(drawerOfficial).toHaveAttribute('data-official-installed', '75')
+  await expect(drawerOfficial).toHaveAttribute('data-official-unit', 'm3')
+  await expect(drawerOfficial).toContainText('Official installed: 75 m3')
+  await expect(drawerOfficial).toContainText('carrying a legacy typed quantity as its floor')
+  await expect(drawerOfficial).toContainText('earlier progress was typed, not entered')
+  await expect(block.locator('[data-figure="installed"]')).toContainText('Σ approved entries is below the official installed figure')
+  await expect(block.locator('[data-official-installed]')).toHaveCount(1)
+  await expect(block.locator('[data-figure="installed"] [data-value]')).toHaveCount(1)
   await expect(block.locator('[data-figure="paid"] [data-truth]')).toHaveAttribute('data-truth', 'projection')
   await expect(block.locator('[data-figure="paid"]')).toContainText('Paid (pro-rata)')
   await expect(block.locator('[data-figure="received"] [data-unit-mismatch]')).toBeVisible()
@@ -360,6 +384,7 @@ test('the Progress tab names every figure’s source; the drawer and the daily l
         installed: [{ boqItemId, code: '1.1', description: 'Blockwork', unitCode: 'm3', quantity: 7, entries: 1 }],
         asOf: '2026-09-30T12:00:00.000Z',
         basis: 'Σ approved quantity progress entries per BOQ item',
+        officialInstalled: { value: 12, unitCode: 'm3', basis: 'official figure of the latest approved progress, carrying a legacy typed quantity as its floor' },
       }
       row.plannedQuantity = { planned: 20, unitCode: 'm3', basis: 'approved_allocations' }
     }
@@ -375,6 +400,13 @@ test('the Progress tab names every figure’s source; the drawer and the daily l
   await expect(routedInstalled.locator('[data-installed-quantity]')).toHaveText(/^\s*7\s+m3\s*$/)
   await expect(routedInstalled).toContainText('1.1')
   await expect(routedInstalled).not.toContainText('8')
+  // The official installed figure beside the entries' line: 12 m3 as sent, the line still 7 — not 19, not 12 alone.
+  const routedOfficial = page.getByTestId(`uat-progress-official-installed-${v100}`)
+  await expect(routedOfficial).toHaveAttribute('data-official-installed', '12')
+  await expect(routedOfficial).toHaveAttribute('data-official-unit', 'm3')
+  await expect(routedOfficial).toContainText('Official installed: 12 m3')
+  await expect(routedOfficial).toContainText('earlier progress was typed, not entered')
+  await expect(page.getByTestId(`uat-progress-installed-planned-${v100}`).locator('[data-installed-quantity]')).toHaveCount(1)
   const routedPlanned = page.getByTestId(`uat-progress-planned-${v100}`)
   await expect(routedPlanned).toHaveAttribute('data-planned-quantity', '20')
   await expect(routedPlanned).toHaveAttribute('data-planned-basis', 'approved_allocations')

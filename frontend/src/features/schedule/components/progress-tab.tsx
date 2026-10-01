@@ -33,6 +33,7 @@ import {
   useProjectSetupReadiness,
 } from '@/features/projects/hooks/use-projects'
 import { QUANTITY_TERMS } from '@/lib/financial-terms'
+import { OfficialInstalledNote } from '@/features/controls/quantities/official-installed'
 import { withRegisterProgress } from '../lib/register-progress'
 import {
   quantityEntriesOf,
@@ -461,6 +462,13 @@ function InstalledPlanned({ activity }: { activity: ScheduleActivity }) {
             })}
           </ul>
         )}
+        {/* The official installed figure beside the entries' lines, when the
+            latest approved progress carries a legacy typed quantity as its
+            floor: both figures, and the server's reason, never a sum. */}
+        <OfficialInstalledNote
+          official={installed?.officialInstalled}
+          testId={`uat-progress-official-installed-${activity.id}`}
+        />
         {installed?.asOf && (
           <p className='text-[10px] text-muted-foreground/80'>
             As of {when(installed.asOf)}

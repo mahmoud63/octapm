@@ -141,6 +141,13 @@ export interface QuantityFigure {
   /** Set by the server on a figure it withheld from this reader (utils/boq-figures); the reason is in notAvailable. */
   withheld?: boolean
   notAvailable?: { reason: string } | null
+  /**
+   * The installed figure only: the official installed figure the server
+   * states beside Σ approved entries when the latest approved progress
+   * carries a legacy typed quantity as its floor (the basis says why the
+   * entries add up to less). Never sent with a withheld figure.
+   */
+  officialInstalled?: { value: number | null; unitCode?: string | null; basis?: string | null } | null
 }
 
 export type QuantityFigureKey = 'received' | 'issued' | 'installed' | 'certified' | 'paid' | 'committed'

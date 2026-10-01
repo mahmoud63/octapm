@@ -268,6 +268,20 @@ export type UpdateBoqActivityInput = z.infer<
 // CONTROL_MODEL §3). A figure no service can prove yet is `notAvailable` and
 // names the wave that brings it; a section the viewer may not read is
 // `{ allowed: false, module, reason }` with no data — the server omits it.
+// PC-6: the official installed figure the server states beside an activity's
+// installed figure when its latest approved progress carries a legacy typed
+// quantity as its floor — Σ approved entries is then below the official
+// figure, and the installed figure's basis says why. Absent otherwise, and
+// withheld with the figure itself.
+export const OfficialInstalledSchema = z
+  .object({
+    value: z.number().nullable().optional(),
+    unitCode: z.string().nullable().optional(),
+    basis: z.string().nullable().optional(),
+  })
+  .passthrough()
+export type OfficialInstalled = z.infer<typeof OfficialInstalledSchema>
+
 export const ControlsFigureSchema = z.object({
   value: z.number().nullable(),
   truth: z.enum(['source', 'derived', 'projection']).nullable(),
@@ -284,6 +298,8 @@ export const ControlsFigureSchema = z.object({
   // BOQ (its basis is then the reason).
   forecastSource: z.enum(['entered', 'default']).nullable().optional(),
   withheld: z.boolean().optional(),
+  // The activity detail's installed quantity only (see OfficialInstalledSchema).
+  officialInstalled: OfficialInstalledSchema.nullable().optional(),
 })
 
 export const ControlsSectionDeniedSchema = z.object({
@@ -495,6 +511,8 @@ export const QuantityFigureSchema = z
     wave: z.string().nullable().optional(),
     asOf: z.string().nullable().optional(),
     derivedFrom: z.array(z.record(z.string(), z.unknown())).optional(),
+    // An activity's installed figure only (see OfficialInstalledSchema).
+    officialInstalled: OfficialInstalledSchema.nullable().optional(),
   })
   .passthrough()
 

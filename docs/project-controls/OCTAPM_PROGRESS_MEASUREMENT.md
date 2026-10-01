@@ -587,6 +587,41 @@ boq:none template reads every entry and submission event of the suite — the ty
 the skipped mint — against the PM's whole history) and by unit (`boq-figures.quantity-audit-history.test.js`);
 mutation-proven five ways (entry events not stripped; submission events not stripped; `legacyFloor` kept;
 `mintSkipped` kept; `typed` / `officialBefore` kept).
+**The installed view names a legacy floor** (integration, 2026-10-01; verification finding). After a floored approval
+(§3.2) the official row says 75 of 100 while the installed view and the register's `installedQuantity` say 15 —
+Σ approved entries — with nothing linking the two. Both figures are right and neither is changed; the reader is now
+shown both and why they differ. `quantity-views.service withOfficialInstalled` (the one helper): when the activity's
+latest official `ActivityProgress` carries the floor — read where §3.2 records it, `serializeProgressSource(row)
+.installedBasis === 'legacy_typed_floor'` — and Σ approved entries (in the official figure's unit) is below that
+row's `quantityComplete`, the installed answer keeps its value, lines and truth, its `basis` gains "Σ approved
+entries is below the official installed figure (officialInstalled) because earlier progress was typed, not entered:
+the latest approved progress carries that legacy typed quantity as its floor", and it carries
+
+```
+officialInstalled: { value, unitCode, basis: 'official figure of the latest approved progress, carrying a legacy typed quantity as its floor',
+                     truth: 'source', derivedFrom: [{ type: 'activity_progress', id }], approvedAt }
+```
+
+On the three reads that state an activity's installed figure: `GET /activities/{id}/quantities` (`figures.installed`
+— the latest official row on or before the cutoff; progress readers only, as the percentage beside it), the activity
+detail's `progress.installedQuantity` (`installedForActivity`) and the register's `installedQuantity`
+(`activity.service withQuantityFigures`, on the row's own latest official progress). The per-item figures
+(`items[].figures.installed`, `GET /boq/items/{id}/quantities`) are untouched: the floor is the activity's and
+cannot be attributed to an item. The note sits inside the installed figure, so `utils/boq-figures` withholds it with
+the figure — a member without boq:read is given neither figure nor the sentence, on any of the three. The web draws
+it as sent (`controls/quantities/official-installed.tsx`: the Progress tab under the per-item lines, the drawer's
+quantities and the drawer's progress section — "Official installed: 75 m3 — …", nothing computed from the two); the
+mobile activity screen prints the same line under Installed. Proven live (`pc-6-method-authority`: the slab — view,
+register single and list, detail — 15 and 75 with the sentence; the kerb and the pour say nothing of a floor; the
+cost controller on a boq:none template gets none of it on the four reads; every `ActivityProgress` row, every entry
+and the EV report byte-identical), by unit (`quantity-views.service.test.js`, on the writer's own
+`serializeProgressSource`), in the browser against the contract (`55-quantity-progress.spec.ts`, routed: both
+figures drawn in the drawer and on the Progress tab) and on the mobile screen (`activity-quantities.test.tsx`);
+mutation-proven (the note dropped → unit and live fail; the register's figure not withheld → unit and live fail; the
+web not drawing the figure it was sent → the source check and the browser case fail).
+Not covered, reported to the owner: an official row typed with **no** floor and no minted entry (a typed figure on
+an activity with several allocated items, or one not above the official figure) also stands above Σ approved
+entries; its PROGRESS SOURCE says `installedBasis: client`, and the installed view says nothing about it yet.
 Proof of the views: `backend/src/services/__live__/pc-6-quantity-views.live.test.js` (LiveTest org; the
 seeded entries, the two certificates — one a quarter paid —, the receipt/issue/return, rebar in kg against tonnes,
 the draft commitment, the percent-method activity, the member without BOQ read, tenant 404s) and

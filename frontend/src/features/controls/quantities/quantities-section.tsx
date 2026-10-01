@@ -10,6 +10,7 @@ import {
   type QuantityFigureKey,
 } from '@/features/boq/data/schema'
 import { formatQuantity } from '../lib/detail-format'
+import { OfficialInstalledNote } from './official-installed'
 import {
   useRecordQuantities,
   type RecordQuantitiesKind,
@@ -114,6 +115,13 @@ export function QuantityFigureRow({
             shown on its own and never added to the others
           </p>
         )}
+        {/* Σ approved entries below the official installed figure (a legacy
+            typed quantity carried as its floor): the server's two figures,
+            side by side, with its reason. */}
+        <OfficialInstalledNote
+          official={figure?.officialInstalled}
+          testId={`${testId ?? figureKey}-official`}
+        />
       </div>
       <div className='shrink-0 text-right'>
         {absence ? (

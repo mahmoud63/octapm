@@ -40,6 +40,15 @@
  *   (the approved row stands as approved) and is the floor of the next
  *   bundle.
  *
+ * The installed view names the floor (verification finding: "after a
+ * floored approval the official row says 75 of 100 while the quantity views
+ * and the register's installedQuantity say 15 — Σ approved entries — with
+ * nothing linking them"): on the slab the quantity view, the register and
+ * the activity detail keep installed at 15 and state the official installed
+ * figure (75 m3, officialInstalled) with why they differ; an activity with
+ * no floor says nothing of one; a member without boq:read is given neither
+ * figure nor the sentence; no row and no EV figure moves.
+ *
  * The rule holds in the one writer too (verification finding: "the method
  * bypass still works by ordering — a percent submission put forward while
  * the activity is unconfigured stays approvable after the planner
@@ -359,6 +368,91 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     const bundle = await submit(slab2.id, { entryIds: [ids.r1] }, site.token);
     ok(bundle, 200);
     expect(bundle.body.data.submission).toMatchObject({ pctComplete: 60, quantityComplete: 60, quantity: { approvedBefore: 0, installedBasis: "legacy_typed_floor", legacyFloor: { quantity: 50 } } });
+  });
+
+  it("the installed view names the legacy floor: Σ approved entries (15) and the official installed figure (75) are both stated, with why they differ — on the quantity view, the register and the activity detail; neither figure moves, and a member without boq:read is given neither", async () => {
+    const OFFICIAL = { value: 75, unitCode: "m3", basis: "official figure of the latest approved progress, carrying a legacy typed quantity as its floor" };
+    const WHY = /Σ approved entries is below the official installed figure \(officialInstalled\) because earlier progress was typed, not entered/;
+    const NOTE = /officialInstalled|typed, not entered|legacy typed quantity as its floor/;
+    const REGISTER_BASIS = "Σ approved quantity progress entries per BOQ item (only approval counts)";
+    const frozen = async () =>
+      JSON.stringify({
+        progress: await prisma.activityProgress.findMany({ where: { activity: { projectId: project.id } }, orderBy: { updatedAt: "asc" } }),
+        entries: await prisma.quantityProgressEntry.findMany({ where: { projectId: project.id }, orderBy: { createdAt: "asc" } }),
+      });
+    const before = await frozen();
+    const evBefore = await evReport();
+    const official = (await progressRows(slab.id)).at(-1);
+    expect(official).toMatchObject({ pctComplete: 75, quantityComplete: 75, quantityUnit: "m3", notes: "Legacy typed quantity carried as the floor of the installed figure (PC-6)" });
+
+    // The quantity view: installed is still Σ approved entries — 15 — and it now states the official figure and why they differ.
+    const view = await api.get(at(`/activities/${slab.id}/quantities`), bearer(live.token));
+    ok(view);
+    expect(view.body.data.progress.pctComplete.value).toBe(75);
+    expect(view.body.data.figures.installed).toMatchObject({ value: 15, unitCode: "m3", truth: "derived", officialInstalled: { ...OFFICIAL, derivedFrom: [{ type: "activity_progress", id: official.id }], approvedAt: official.approvedAt.toISOString() } });
+    expect(view.body.data.figures.installed.basis).toMatch(WHY);
+    // The floor is the activity's: the item's own figure is Σ its approved entries, as it was.
+    const [itemBlock] = view.body.data.items;
+    expect(itemBlock.figures.installed).toMatchObject({ value: 15, unitCode: "m3" });
+    expect(itemBlock.figures.installed.officialInstalled).toBeUndefined();
+    const itemView = await api.get(at(`/boq/items/${concrete.id}/quantities`), bearer(live.token));
+    ok(itemView);
+    expect(JSON.stringify(itemView.body.data)).not.toMatch(NOTE);
+
+    // The register, one activity and the list: the per-item lines as they were, the official figure beside them.
+    const single = await activityPayload(slab.id);
+    expect(single).toMatchObject({
+      pctComplete: 75,
+      progressSource: { installedBasis: "legacy_typed_floor", legacyFloor: true },
+      installedQuantity: { installed: [{ boqItemId: concrete.id, unitCode: "m3", quantity: 15, entries: 2 }], officialInstalled: OFFICIAL },
+    });
+    expect(single.installedQuantity.basis).toBe(
+      `${REGISTER_BASIS}. Σ approved entries is below the official installed figure (officialInstalled) because earlier progress was typed, not entered: the latest approved progress carries that legacy typed quantity as its floor`,
+    );
+    const list = await api.get(at("/activities"), bearer(live.token));
+    ok(list);
+    const listed = new Map(list.body.data.map((row) => [row.id, row]));
+    expect(listed.get(slab.id).installedQuantity).toMatchObject({ installed: [{ quantity: 15, unitCode: "m3" }], officialInstalled: OFFICIAL, basis: single.installedQuantity.basis });
+
+    // The activity detail's progress section: the same figure, the same note.
+    const detail = await api.get(at(`/activities/${slab.id}/detail`), bearer(live.token));
+    ok(detail);
+    expect(detail.body.data.sections.progress.pctComplete.value).toBe(75);
+    expect(detail.body.data.sections.progress.installedQuantity).toMatchObject({ value: 15, unitCode: "m3", officialInstalled: OFFICIAL });
+    expect(detail.body.data.sections.progress.installedQuantity.basis).toMatch(WHY);
+
+    // An activity whose official figure is its entries (the kerb: 20 typed once and minted) says nothing of a floor.
+    const kerbView = await api.get(at(`/activities/${kerb.id}/quantities`), bearer(live.token));
+    ok(kerbView);
+    expect(kerbView.body.data.figures.installed).toMatchObject({ value: 20, unitCode: "m3" });
+    expect(JSON.stringify(kerbView.body.data)).not.toMatch(NOTE);
+    expect(listed.get(kerb.id).installedQuantity).toMatchObject({ installed: [{ quantity: 20 }], basis: REGISTER_BASIS });
+    expect(JSON.stringify(listed.get(kerb.id))).not.toMatch(NOTE);
+    expect(JSON.stringify(listed.get(pour.id))).not.toMatch(NOTE);
+
+    // The member who may not read the BOQ: the official percentage and its source stay; the installed figure, the
+    // official installed figure and the sentence linking them are withheld together — on every one of the reads.
+    const hiddenView = await api.get(at(`/activities/${slab.id}/quantities`), bearer(auditor.token));
+    ok(hiddenView);
+    expect(hiddenView.body.data).toMatchObject({ withheld: true, figures: { installed: { value: null, withheld: true, notAvailable: { reason: expect.stringContaining("may read the BOQ") } } } });
+    const hiddenSingle = await api.get(at(`/activities/${slab.id}`), bearer(auditor.token));
+    ok(hiddenSingle);
+    expect(hiddenSingle.body.data).toMatchObject({ pctComplete: 75, progressSource: { installedBasis: "legacy_typed_floor", legacyFloor: true }, installedQuantity: { withheld: { reason: expect.stringContaining("may read the BOQ") } } });
+    expect(Object.keys(hiddenSingle.body.data.installedQuantity)).toEqual(["withheld"]);
+    const hiddenList = await api.get(at("/activities"), bearer(auditor.token));
+    ok(hiddenList);
+    expect(hiddenList.body.data.find((row) => row.id === slab.id).installedQuantity).toEqual(hiddenSingle.body.data.installedQuantity);
+    const hiddenDetail = await api.get(at(`/activities/${slab.id}/detail`), bearer(auditor.token));
+    ok(hiddenDetail);
+    for (const answer of [hiddenView, hiddenSingle, hiddenList, hiddenDetail]) expect(JSON.stringify(answer.body.data)).not.toMatch(NOTE);
+    if (hiddenDetail.body.data.sections.progress.allowed) {
+      expect(hiddenDetail.body.data.sections.progress.installedQuantity).toMatchObject({ value: null, withheld: true });
+      expect(hiddenDetail.body.data.sections.progress.installedQuantity.officialInstalled).toBeUndefined();
+    }
+
+    // Reads only: no official row, no entry and no EV figure moved.
+    expect(await frozen()).toBe(before);
+    expect(await evReport()).toBe(evBefore);
   });
 
   it("the one writer holds the method rule: a percent submission pending from before the activity was configured quantity is 409 PROGRESS_METHOD_MISMATCH at approval — nothing official, EV byte-identical; rejected, the site records entries", async () => {

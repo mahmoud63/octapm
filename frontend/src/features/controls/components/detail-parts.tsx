@@ -8,6 +8,7 @@ import type {
   ControlsSectionDenied,
 } from '@/features/boq/data/schema'
 import { formatMoney, formatQuantity } from '../lib/detail-format'
+import { OfficialInstalledNote } from '../quantities/official-installed'
 
 /**
  * The pieces both detail drawers (PC-5) are drawn from, so a BOQ item and an
@@ -119,6 +120,13 @@ export function FigureRow({
         {figure && (
           <p className='text-[11px] leading-snug text-muted-foreground/80'>{figure.basis}</p>
         )}
+        {/* PC-6: the official installed figure beside Σ approved entries,
+            when the server states one (a legacy typed quantity carried as
+            the floor) — never sent with a withheld figure. */}
+        <OfficialInstalledNote
+          official={figure?.officialInstalled}
+          testId={`${testId ?? 'figure'}-official`}
+        />
       </div>
       <div className='shrink-0 text-right'>{body}</div>
     </div>

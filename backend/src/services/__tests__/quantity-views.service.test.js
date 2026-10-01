@@ -111,10 +111,13 @@ jest.mock("../activity-boq-allocation.service", () => ({
 jest.mock("../commitment.service", () => ({ POSTING_STATUSES: Object.freeze(["executed", "closed"]) }));
 jest.mock("../progress.service", () => ({
   normalizeMethod: (method) => ({ percent_complete: "percent", milestone: "weighted_milestone" }[String(method || "percent").toLowerCase()] || String(method || "percent").toLowerCase()),
+  // PROGRESS SOURCE is the writer's own reading of a row (the legacy floor is
+  // named there): the real one, never a stand-in.
+  serializeProgressSource: (progress) => jest.requireActual("../progress.service").serializeProgressSource(progress),
 }));
 
 const service = require("../quantity-views.service");
-const { withheldActivityQuantities, withheldBoqItemQuantities, withheldActivityDetail, QUANTITY_FIGURES_WITHHELD } = require("../../utils/boq-figures");
+const { withheldActivity, withheldActivityQuantities, withheldBoqItemQuantities, withheldActivityDetail, QUANTITY_FIGURES_WITHHELD } = require("../../utils/boq-figures");
 
 // A stand-in for the core track's contract: Σ approved entries, as the live
 // test seeds them. The service never sums entries itself.
@@ -251,6 +254,115 @@ describe("quantity views (PC-6)", () => {
     expect(view.comparisons.certifiedOverInstalled).toMatchObject({ flag: true, certified: 40, installed: 35 });
     expect(core.installedByActivity).toHaveBeenCalledTimes(1);
     expect(view.items.map((block) => block.boqItemId)).toEqual([ITEM, ITEM_2]);
+  });
+
+  describe("the installed view names a legacy floor", () => {
+    // The official row of a floored approval, as the one writer leaves it:
+    // 75 of 100 (a typed 60 carried as the floor + 15 entered), the floor's
+    // trace in its note. Σ approved entries (ENTRIES) is 35.
+    const FLOOR_NOTE = "Legacy typed quantity carried as the floor of the installed figure (PC-6)";
+    const floored = { id: "ap-floor", activityId: ACT, status: "approved", pctComplete: 75, progressMethod: "quantity", source: "manual", quantityComplete: 75, quantityPlanned: 100, quantityUnit: "m3", notes: FLOOR_NOTE, approvedAt: new Date("2026-10-01T10:00:00Z") };
+    const OFFICIAL = { value: 75, unitCode: "m3", basis: "official figure of the latest approved progress, carrying a legacy typed quantity as its floor" };
+    const original = rows.progress[0];
+    afterEach(() => {
+      rows.progress[0] = original;
+    });
+
+    it("keeps Σ approved entries, says why it is below the official installed figure, and carries that figure beside it — on the activity view and the detail's figure", async () => {
+      const plain = await service.getActivityQuantities({ orgId: ORG, projectId: PROJECT, activityId: ACT, can: allow, core: coreWith(ENTRIES) });
+      expect(plain.figures.installed.officialInstalled).toBeUndefined();
+      expect(plain.figures.installed.basis).toBe(service.BASIS.installed);
+
+      rows.progress[0] = floored;
+      const view = await service.getActivityQuantities({ orgId: ORG, projectId: PROJECT, activityId: ACT, can: allow, core: coreWith(ENTRIES) });
+      // Neither figure moved: Σ approved entries is 35 as before, the official % is the row's.
+      expect(view.figures.installed).toMatchObject({ value: 35, unitCode: "m3", unitMatch: true, truth: "derived" });
+      expect(view.figures.installed.byItem).toEqual(plain.figures.installed.byItem);
+      expect(view.progress.pctComplete.value).toBe(75);
+      expect(view.figures.installed.officialInstalled).toEqual({ ...OFFICIAL, truth: "source", derivedFrom: [{ type: "activity_progress", id: "ap-floor" }], approvedAt: "2026-10-01T10:00:00.000Z" });
+      expect(view.figures.installed.basis).toBe(`${service.BASIS.installed}. ${service.LEGACY_FLOOR_INSTALLED_NOTE}`);
+      expect(view.figures.installed.basis).toMatch(/below the official installed figure .* because earlier progress was typed, not entered/);
+      expect(service.OFFICIAL_INSTALLED_BASIS).toBe(OFFICIAL.basis);
+      // Everything else of the view is what it was.
+      const { installed: flooredInstalled, ...flooredRest } = view.figures;
+      const { installed: plainInstalled, ...plainRest } = plain.figures;
+      expect(flooredRest).toEqual(plainRest);
+      expect(view.comparisons).toEqual(plain.comparisons);
+      expect(view.items).toEqual(plain.items);
+
+      const detailFigure = await service.installedForActivity({ orgId: ORG, projectId: PROJECT, activityId: ACT, method: "quantity", core: coreWith(ENTRIES) });
+      expect(detailFigure).toMatchObject({ value: 35, unitCode: "m3", officialInstalled: OFFICIAL });
+      expect(detailFigure.basis).toContain(service.LEGACY_FLOOR_INSTALLED_NOTE);
+      // No approved entry at all behind the official figure: 0, and the official figure beside it.
+      const none = await service.installedForActivity({ orgId: ORG, projectId: PROJECT, activityId: ACT, method: "quantity", core: coreWith([]) });
+      expect(none).toMatchObject({ value: 0, byItem: [], officialInstalled: OFFICIAL });
+    });
+
+    it("the register's installed quantity carries the same note, its lines untouched", () => {
+      const register = { installed: [{ boqItemId: ITEM, code: "1.1", description: "Concrete", unitCode: "m3", quantity: 35, entries: 2 }], asOf: "2026-10-01T10:00:00.000Z", lastApprovedAt: "2026-10-01T10:00:00.000Z", basis: "Σ approved quantity progress entries per BOQ item (only approval counts)" };
+      const answer = service.withOfficialInstalled(register, floored);
+      expect(answer).toMatchObject({ installed: register.installed, asOf: register.asOf, lastApprovedAt: register.lastApprovedAt, officialInstalled: OFFICIAL });
+      expect(answer.basis).toBe(`${register.basis}. ${service.LEGACY_FLOOR_INSTALLED_NOTE}`);
+      expect(register.officialInstalled).toBeUndefined();
+      // An empty list (nothing approved) under a floored row: the official figure still stands beside it.
+      expect(service.withOfficialInstalled({ ...register, installed: [] }, floored)).toMatchObject({ installed: [], officialInstalled: OFFICIAL });
+    });
+
+    it("says nothing where there is no floor, no difference to explain, or no figure to stand beside", async () => {
+      const figure = { value: 35, unitCode: "m3", basis: "B", truth: "derived" };
+      // No official row; a row approved from entries; a typed row (no floor note); another method.
+      expect(service.withOfficialInstalled(figure, null)).toBe(figure);
+      expect(service.withOfficialInstalled(figure, { ...floored, notes: null })).toBe(figure);
+      expect(service.withOfficialInstalled(figure, { ...floored, notes: "poured the north bay" })).toBe(figure);
+      expect(service.withOfficialInstalled(figure, { ...floored, progressMethod: "percent" })).toBe(figure);
+      expect(service.withOfficialInstalled(figure, { ...floored, quantityComplete: null })).toBe(figure);
+      // Σ approved entries is not below the official figure: nothing to explain.
+      expect(service.withOfficialInstalled({ ...figure, value: 75 }, floored).officialInstalled).toBeUndefined();
+      expect(service.withOfficialInstalled({ installed: [{ quantity: 40, unitCode: "m3" }, { quantity: 40, unitCode: "M3" }], basis: "R" }, floored).officialInstalled).toBeUndefined();
+      // Lines in two units are not one figure: the official figure is stated beside them.
+      expect(service.withOfficialInstalled({ installed: [{ quantity: 400, unitCode: "kg" }, { quantity: 40, unitCode: "m3" }], basis: "R" }, floored).officialInstalled).toMatchObject(OFFICIAL);
+      expect(service.withOfficialInstalled(null, floored)).toBeNull();
+      expect(service.officialInstalledOf(original)).toBeNull();
+
+      rows.progress[0] = floored;
+      // Not measured by quantity: the dash stays a dash.
+      rows.methods[0].method = "percent";
+      const percent = await service.getActivityQuantities({ orgId: ORG, projectId: PROJECT, activityId: ACT, can: allow, core: coreWith(ENTRIES) });
+      expect(percent.figures.installed).toMatchObject({ value: null, notAvailable: { reason: service.PERCENT_METHOD_REASON } });
+      expect(percent.figures.installed.officialInstalled).toBeUndefined();
+      rows.methods[0].method = "quantity";
+      // A member who may not read progress is not given the official figure either.
+      const noProgress = await service.getActivityQuantities({ orgId: ORG, projectId: PROJECT, activityId: ACT, can: only("ipc", "inventory", "commitment"), core: coreWith(ENTRIES) });
+      expect(noProgress.progress).toMatchObject({ allowed: false });
+      expect(noProgress.figures.installed).toMatchObject({ value: 35 });
+      expect(noProgress.figures.installed.officialInstalled).toBeUndefined();
+      expect(noProgress.figures.installed.basis).toBe(service.BASIS.installed);
+    });
+
+    it("is withheld with the figure from a member who may not read the BOQ — the view, the detail's figure and the register", async () => {
+      rows.progress[0] = floored;
+      const noBoq = { boq: false, budget: true };
+      const view = await service.getActivityQuantities({ orgId: ORG, projectId: PROJECT, activityId: ACT, can: allow, core: coreWith(ENTRIES) });
+      expect(view.figures.installed.officialInstalled).toMatchObject(OFFICIAL);
+      const withheldView = withheldActivityQuantities(view, noBoq);
+      expect(withheldView.figures.installed).toEqual({ value: null, truth: null, basis: QUANTITY_FIGURES_WITHHELD, unitCode: null, unitMatch: null, derivedFrom: [], withheld: true, notAvailable: { reason: QUANTITY_FIGURES_WITHHELD } });
+      expect(withheldView.progress.pctComplete.value).toBe(75);
+      expect(JSON.stringify(withheldView)).not.toMatch(/officialInstalled|typed, not entered|legacy typed quantity as its floor/);
+
+      const detail = { kind: "activity", id: ACT, sections: { progress: { allowed: true, pctComplete: { value: 75, truth: "source", basis: "x", derivedFrom: [] }, installedQuantity: await service.installedForActivity({ orgId: ORG, projectId: PROJECT, activityId: ACT, method: "quantity", core: coreWith(ENTRIES) }) } } };
+      expect(detail.sections.progress.installedQuantity.officialInstalled).toMatchObject(OFFICIAL);
+      const withheldDetail = withheldActivityDetail(detail, noBoq);
+      expect(withheldDetail.sections.progress.pctComplete.value).toBe(75);
+      expect(JSON.stringify(withheldDetail)).not.toMatch(/officialInstalled|typed, not entered|"value":35/);
+
+      const row = { id: ACT, pctComplete: 75, installedQuantity: service.withOfficialInstalled({ installed: [{ boqItemId: ITEM, unitCode: "m3", quantity: 35, entries: 2 }], basis: "R" }, floored), plannedQuantity: { planned: 100, unitCode: "m3", basis: "approved_allocations" } };
+      expect(row.installedQuantity.officialInstalled).toMatchObject(OFFICIAL);
+      const withheldRow = withheldActivity(row, noBoq);
+      expect(withheldRow.pctComplete).toBe(75);
+      expect(withheldRow.installedQuantity).toEqual({ withheld: { reason: expect.stringContaining("may read the BOQ") } });
+      expect(JSON.stringify(withheldRow)).not.toMatch(/officialInstalled|typed, not entered/);
+      expect(withheldActivity(row, { boq: true, budget: true })).toBe(row);
+    });
   });
 
   it("a figure whose module the viewer may not read says so; a party-scoped member gets no committed quantity", async () => {

@@ -283,9 +283,20 @@ const quantityFiguresFor = async ({ orgId, projectId, activities }) => {
   return require('./quantity-progress.service').activityQuantityFigures({ orgId, projectId, activityIds });
 };
 
-const withQuantityFigures = (sanitized, figures) => {
+// The register's installed figure names a legacy floor: when the activity's
+// latest official row carries a legacy typed quantity as its floor, Σ
+// approved entries is below the official installed figure, and
+// `installedQuantity` says so and carries that figure beside it
+// (quantity-views.service withOfficialInstalled; neither figure is changed,
+// and the note is withheld with the figure). Required lazily, as above.
+const withQuantityFigures = (sanitized, figures, latestProgress = null) => {
   const own = figures.get(sanitized.id);
-  return own ? { ...sanitized, ...own } : sanitized;
+  if (!own) return sanitized;
+  return {
+    ...sanitized,
+    ...own,
+    installedQuantity: require('./quantity-views.service').withOfficialInstalled(own.installedQuantity, latestProgress),
+  };
 };
 
 const ensureProject = async (orgId, projectId) => {
@@ -347,7 +358,7 @@ const listActivities = async ({ orgId, projectId }) => {
 
   const quantityFigures = await quantityFiguresFor({ orgId, projectId, activities });
   return activities.map((activity) =>
-    withQuantityFigures(sanitizeActivity(activity, allocationTotals.get(activity.id), project), quantityFigures),
+    withQuantityFigures(sanitizeActivity(activity, allocationTotals.get(activity.id), project), quantityFigures, activity.progress?.[0] ?? null),
   );
 };
 
@@ -463,7 +474,7 @@ const getActivityById = async ({ orgId, projectId, activityId }) => {
     getApprovedActivityAllocationTotals({ projectId }),
   ]);
   const quantityFigures = await quantityFiguresFor({ orgId, projectId, activities: [activity] });
-  return withQuantityFigures(sanitizeActivity(activity, allocationTotals.get(activity.id), project), quantityFigures);
+  return withQuantityFigures(sanitizeActivity(activity, allocationTotals.get(activity.id), project), quantityFigures, activity.progress?.[0] ?? null);
 };
 
 const updateActivity = async ({ orgId, projectId, activityId, payload }) => {

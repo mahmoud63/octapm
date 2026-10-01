@@ -28,6 +28,10 @@ const quantitiesSection = read(
 const quantitiesHook = read(
   'src/features/controls/quantities/use-record-quantities.ts'
 )
+const officialInstalled = read(
+  'src/features/controls/quantities/official-installed.tsx'
+)
+const detailParts = read('src/features/controls/components/detail-parts.tsx')
 const boqDrawer = read('src/features/boq/components/boq-detail-drawer.tsx')
 const activityDrawer = read(
   'src/features/schedule/components/activity-detail-drawer.tsx'
@@ -292,6 +296,7 @@ const ARITHMETIC = [
 for (const [name, text] of [
   ['controls/quantities/quantities-section.tsx', quantitiesSection],
   ['controls/quantities/use-record-quantities.ts', quantitiesHook],
+  ['controls/quantities/official-installed.tsx', officialInstalled],
   ['progress-tab.tsx (PC-6 block)', pc6Block],
   ['daily-log-sections.tsx (PC-6 block)', dailyLogPc6Block],
 ]) {
@@ -347,6 +352,63 @@ match(
   quantitiesHook,
   /status === 403[\s\S]*withheld/,
   'a refused read is withheld with the server reason'
+)
+
+// ── The installed figure names a legacy floor: where the latest approved
+// progress carries a legacy typed quantity as its floor, the server states the
+// official installed figure beside Σ approved entries and says why they
+// differ; the web draws that figure as sent in every place installed is
+// drawn — the Progress tab, the drawer's quantities and the drawer's
+// progress section — and computes nothing from the two.
+match(
+  boqSchema,
+  /OfficialInstalledSchema = z\s*\.object\(\{\s*value: z\.number\(\)\.nullable\(\)\.optional\(\),\s*unitCode:[^}]*basis:/,
+  'the official installed note is typed: value, unitCode, basis'
+)
+match(
+  boqSchema,
+  /QuantityFigureSchema = z[\s\S]{0,1400}officialInstalled: OfficialInstalledSchema\.nullable\(\)\.optional\(\)/,
+  'a quantity figure may carry the official installed figure'
+)
+match(
+  boqSchema,
+  /ControlsFigureSchema = z\.object\(\{[\s\S]{0,1400}officialInstalled: OfficialInstalledSchema\.nullable\(\)\.optional\(\)/,
+  "the activity detail's installed quantity may carry it (a strict schema would strip it)"
+)
+match(
+  scheduleSchema,
+  /activityInstalledQuantitySchema = z[\s\S]{0,1200}officialInstalled: OfficialInstalledSchema\.nullable\(\)\.optional\(\)/,
+  "the register's installed quantity may carry it"
+)
+match(
+  officialInstalled,
+  /if \(!official \|\| official\.value == null\) return null/,
+  'no official figure sent, nothing drawn'
+)
+match(
+  officialInstalled,
+  /data-official-installed=\{official\.value\}[\s\S]{0,120}data-official-unit=\{unit\}/,
+  'the official figure is drawn as sent, in its unit'
+)
+match(
+  officialInstalled,
+  /earlier progress was typed, not entered/,
+  'the note says why the entries add up to less'
+)
+match(
+  progressTab,
+  /<OfficialInstalledNote\s+official=\{installed\?\.officialInstalled\}\s+testId=\{`uat-progress-official-installed-\$\{activity\.id\}`\}/,
+  'the Progress tab draws the official installed figure beside the lines'
+)
+match(
+  quantitiesSection,
+  /<OfficialInstalledNote\s+official=\{figure\?\.officialInstalled\}/,
+  "the drawer's quantities draw it under the installed figure"
+)
+match(
+  detailParts,
+  /<OfficialInstalledNote\s+official=\{figure\?\.officialInstalled\}/,
+  "the drawer's progress section draws it under the installed quantity"
 )
 
 // ── The two drawers embed the block; the approved percentage stays ──

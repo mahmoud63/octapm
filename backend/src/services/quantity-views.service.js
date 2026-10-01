@@ -34,6 +34,13 @@
  * certified > installed is exposed as a raw comparison flag only — the
  * reviewed exception and the Change Event handoff are PC-7b.
  *
+ * An activity's installed figure names a legacy floor: when the latest
+ * official ActivityProgress carries a legacy typed quantity as its floor
+ * (progressSource.installedBasis 'legacy_typed_floor'), Σ approved entries is
+ * below the official installed figure — earlier progress was typed, not
+ * entered — and the installed figure says so and carries that official
+ * figure beside it (`officialInstalled`). Neither figure is changed.
+ *
  * The core track's helpers (installedByBoqItem, installedByActivity,
  * plannedQuantityFor) are reached through a small adapter: while the module
  * is absent every installed figure is not available with CORE_PENDING_REASON,
@@ -65,6 +72,13 @@ const PERCENT_METHOD_REASON =
 const SUBCONTRACT_CERTIFIED_REASON =
   "SubPayAppLine carries no quantity: the subcontractor-side certified quantity is not recorded";
 const MIXED_UNITS_REASON = "The rows are in more than one unit: the figure is not summed across units (see byUnit)";
+// The legacy typed-quantity floor (progress.service deriveQuantityFigures), as PROGRESS SOURCE names it.
+const LEGACY_FLOOR_BASIS = "legacy_typed_floor";
+const OFFICIAL_INSTALLED_BASIS = "official figure of the latest approved progress, carrying a legacy typed quantity as its floor";
+const LEGACY_FLOOR_INSTALLED_NOTE =
+  "Σ approved entries is below the official installed figure (officialInstalled) because earlier progress was typed, not entered: the latest approved progress carries that legacy typed quantity as its floor";
+// What officialInstalledOf reads of an approved ActivityProgress row.
+const OFFICIAL_PROGRESS_SELECT = Object.freeze({ id: true, notes: true, progressMethod: true, quantityComplete: true, quantityUnit: true, approvedAt: true });
 
 const TRUTH = Object.freeze({
   installed: "derived",
@@ -519,6 +533,73 @@ const quantityBlocks = async ({
   return { blocks, cutoff, core: adapter.present, units };
 };
 
+// ─── the official installed figure beside Σ approved entries (the legacy floor) ───
+
+/**
+ * The official installed figure of an approved ActivityProgress row that
+ * carries the legacy floor — { value, unitCode, basis, … } — else null. The
+ * floor is read where part 3 records it: the row's PROGRESS SOURCE
+ * (progress.service serializeProgressSource → installedBasis
+ * 'legacy_typed_floor').
+ */
+const officialInstalledOf = (progress) => {
+  if (!progress || progress.quantityComplete == null) return null;
+  if (progressService.serializeProgressSource(progress)?.installedBasis !== LEGACY_FLOOR_BASIS) return null;
+  const unit = progress.quantityUnit == null ? "" : String(progress.quantityUnit).trim();
+  return {
+    value: round3(progress.quantityComplete),
+    unitCode: unit || null,
+    basis: OFFICIAL_INSTALLED_BASIS,
+    truth: "source",
+    derivedFrom: [{ type: "activity_progress", id: progress.id }],
+    approvedAt: iso(progress.approvedAt),
+  };
+};
+
+// Σ approved entries of an installed answer when it is stated in one unit:
+// the folded figure's value (the views), or the register's per-item lines
+// when they share a unit. null when it is not one figure in one unit.
+const entriesSumOf = (installed) => {
+  if (typeof installed.value === "number") return { value: installed.value, unitCode: installed.unitCode || null };
+  if (!Array.isArray(installed.installed)) return null;
+  const lines = installed.installed;
+  if (lines.some((line) => typeof line.quantity !== "number")) return null;
+  const units = [...new Set(lines.map((line) => (line.unitCode ? uomService.unitKey(line.unitCode) : null)))];
+  if (units.length > 1) return null;
+  return { value: lines.reduce((sum, line) => sum + line.quantity, 0), unitCode: lines[0]?.unitCode || null };
+};
+
+/**
+ * An activity's installed answer — the views' figure or the register's
+ * `installedQuantity` — with the official installed figure beside it when
+ * the activity's latest official progress carries the legacy floor
+ * (verification finding: the official row said 75 of 100 while the installed
+ * view said 15, Σ approved entries, with nothing linking them). Neither
+ * figure moves: the value, the lines and the truth are as they were; the
+ * basis says why Σ approved entries is below the official figure, and
+ * `officialInstalled { value, unitCode, basis }` states that figure. Where
+ * Σ approved entries, in the official figure's unit, is not below it there
+ * is no difference to explain and nothing is added. The note sits inside
+ * the installed figure, so utils/boq-figures withholds it with the figure.
+ */
+const withOfficialInstalled = (installed, latestProgress) => {
+  if (!installed || typeof installed !== "object") return installed;
+  const official = officialInstalledOf(latestProgress);
+  if (!official) return installed;
+  const sum = entriesSumOf(installed);
+  const oneUnit = sum && (!sum.unitCode || !official.unitCode || uomService.unitKey(sum.unitCode) === uomService.unitKey(official.unitCode));
+  if (oneUnit && sum.value >= official.value) return installed;
+  return { ...installed, basis: `${installed.basis}. ${LEGACY_FLOOR_INSTALLED_NOTE}`, officialInstalled: official };
+};
+
+// The latest official progress row of an activity, as the one writer orders them.
+const readLatestOfficialProgress = ({ activityId, cutoff = null }) =>
+  prisma.activityProgress.findFirst({
+    where: { activityId, status: "approved", ...(cutoff ? { approvedAt: { lte: cutoff } } : {}) },
+    orderBy: [{ approvedAt: "desc" }, { updatedAt: "desc" }],
+    select: OFFICIAL_PROGRESS_SELECT,
+  });
+
 // ─── the two views ────────────────────────────────────────────────────────
 
 const ensureProject = async ({ orgId, projectId }) => {
@@ -636,7 +717,7 @@ const getActivityQuantities = async ({ orgId, projectId, activityId, can = () =>
       ? prisma.activityProgress.findFirst({
           where: { activityId, status: "approved", ...(cutoff ? { approvedAt: { lte: cutoff } } : {}) },
           orderBy: [{ approvedAt: "desc" }, { updatedAt: "desc" }],
-          select: { id: true, pctComplete: true, approvedAt: true, source: true, progressMethod: true },
+          select: { ...OFFICIAL_PROGRESS_SELECT, pctComplete: true, source: true },
         })
       : null,
   ]);
@@ -686,6 +767,10 @@ const getActivityQuantities = async ({ orgId, projectId, activityId, can = () =>
   for (const key of QUANTITY_KEYS) figures[key] = foldActivityFigure({ key, blocks: blockList, label: key === "committed" ? COMMITTED_LABEL : null });
   if (!quantityMethod) figures.installed = { ...unavailable({ key: "installed", reason: PERCENT_METHOD_REASON, method }), byItem: figures.installed.byItem };
   else if (!adapter.present) figures.installed = { ...unavailable({ key: "installed", reason: CORE_PENDING_REASON }), byItem: figures.installed.byItem };
+  // The official installed figure beside Σ approved entries, when the latest
+  // official progress (on or before the cutoff; progress readers only)
+  // carries the legacy floor.
+  else figures.installed = withOfficialInstalled(figures.installed, latest);
 
   let planned;
   if (!canProgress) planned = null;
@@ -740,10 +825,13 @@ const installedForActivity = async ({ orgId, projectId, activityId, method, core
   if (normalised !== "quantity") return unavailable({ key: "installed", reason: PERCENT_METHOD_REASON, method: normalised });
   const adapter = coreOf(core);
   if (!adapter.present) return unavailable({ key: "installed", reason: CORE_PENDING_REASON });
-  const installedMap = await adapter.module.installedByActivity({ orgId, projectId, activityIds: [activityId] });
+  const [installedMap, latest] = await Promise.all([
+    adapter.module.installedByActivity({ orgId, projectId, activityIds: [activityId] }),
+    readLatestOfficialProgress({ activityId }),
+  ]);
   const entries = installedMap.get(activityId)?.installed || [];
   const itemIds = [...new Set(entries.map((entry) => entry.boqItemId).filter(Boolean))];
-  if (!itemIds.length) return { ...figure({ key: "installed", value: 0, unitCode: null, unitMatch: null, entries: 0 }), byItem: [] };
+  if (!itemIds.length) return withOfficialInstalled({ ...figure({ key: "installed", value: 0, unitCode: null, unitMatch: null, entries: 0 }), byItem: [] }, latest);
   const items = await prisma.boqItem.findMany({ where: { id: { in: itemIds }, projectId }, select: { id: true, unit: true, unitCode: true } });
   const { blocks } = await quantityBlocks({
     orgId,
@@ -754,7 +842,7 @@ const installedForActivity = async ({ orgId, projectId, activityId, method, core
     core: adapter.module,
     preread: { installedMap, certifiedLines: [], stockRows: [], sovLines: [] },
   });
-  return foldActivityFigure({ key: "installed", blocks: [...blocks.values()] });
+  return withOfficialInstalled(foldActivityFigure({ key: "installed", blocks: [...blocks.values()] }), latest);
 };
 
 module.exports = {
@@ -764,6 +852,10 @@ module.exports = {
   MIXED_UNITS_REASON,
   PERCENT_METHOD_REASON,
   SUBCONTRACT_CERTIFIED_REASON,
+  LEGACY_FLOOR_INSTALLED_NOTE,
+  OFFICIAL_INSTALLED_BASIS,
+  officialInstalledOf,
+  withOfficialInstalled,
   QUANTITY_KEYS,
   STOCK_TYPES,
   TRUTH,
