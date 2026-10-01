@@ -46,6 +46,15 @@ import {
  * official, with its source → "Put forward for approval" bundles it into a
  * submission → the queue shows the bundle with its entry → approve →
  * official at installed ÷ planned with the daily log as its source.
+ *
+ * Test 3 is bulk progress on the real contract, through the API: a batch
+ * that includes V100 (measured by quantity) is refused whole — 409 naming
+ * V100 in details.batch, no submission written, no official figure moved —
+ * with the percentage named and as a percentage-only screen sends it; a
+ * percent-only batch writes one pending submission. The web's bulk screen
+ * (bulk-progress-update.tsx: V100 listed disabled with the reason) is not
+ * mounted on any page, so it is covered by the source check
+ * scripts/quantity-progress-ui.test.mjs, not driven here.
  */
 
 let org: LiveOrg | null = null
@@ -628,4 +637,58 @@ test('daily log → a pending entry on the Progress tab → put forward → the 
   } finally {
     await qsContext.close()
   }
+})
+
+test('bulk progress: a batch that includes the quantity-measured activity is refused whole — the activity named, nothing written — and a percent-only batch updates', async () => {
+  test.setTimeout(120_000)
+  const { projectId, v100, v200 } = await build()
+  await withApi(async (client) => {
+    const submissionIds = async () => {
+      const listed = (await call(client, 'get', `/projects/${projectId}/activities/progress-submissions`)) as unknown as
+        | Array<{ id: string }>
+        | { submissions?: Array<{ id: string }>; items?: Array<{ id: string }> }
+      const rows = Array.isArray(listed) ? listed : (listed.submissions ?? listed.items ?? [])
+      return rows.map((row) => row.id).sort()
+    }
+    const official = async () => {
+      const rows = await listActivities(client, projectId)
+      return [v100, v200].map((id) => rows.find((row) => row.id === id)!.pctComplete)
+    }
+    const bulk = (updates: unknown[]) =>
+      apiJson(client, 'post', `/projects/${projectId}/activities/bulk-progress`, { token: org!.adminToken, data: { updates } })
+    const before = { submissions: await submissionIds(), official: await official() }
+
+    // A forced mixed batch naming a percentage for V100: 409, V100 named, nothing written.
+    const forced = await bulk([
+      { activityId: v200, pctComplete: 65 },
+      { activityId: v100, method: 'percent', pctComplete: 50 },
+    ])
+    expect(forced.status, JSON.stringify(forced.body)).toBe(409)
+    expect(forced.body!.error!.code).toBe('PROGRESS_METHOD_MISMATCH')
+    expect(forced.body!.error!.details.batch).toEqual({ index: 1, activityId: v100, updates: 2, written: 0 })
+    expect(await submissionIds(), 'the refused batch wrote no submission — not V200’s either').toEqual(before.submissions)
+
+    // What a percentage-only screen sends (no method): refused the same way —
+    // a percentage is not a quantity — with V100 named and nothing written.
+    const unnamed = await bulk([
+      { activityId: v200, pctComplete: 65 },
+      { activityId: v100, pctComplete: 50 },
+    ])
+    expect([400, 409], JSON.stringify(unnamed.body)).toContain(unnamed.status)
+    expect(['QUANTITY_NO_ENTRIES_TO_BUNDLE', 'QUANTITY_ENTRIES_REQUIRED']).toContain(unnamed.body!.error!.code)
+    expect(unnamed.body!.error!.details.batch).toEqual({ index: 1, activityId: v100, updates: 2, written: 0 })
+    expect(await submissionIds()).toEqual(before.submissions)
+    expect(await official(), 'no official figure moved').toEqual(before.official)
+
+    // A percent-only batch is written: one pending submission, by percent.
+    const clean = await bulk([{ activityId: v200, pctComplete: 65 }])
+    expect(clean.status, JSON.stringify(clean.body)).toBe(200)
+    expect(clean.body!.data!.submitted).toBe(1)
+    const written = (clean.body!.data!.submissions as Array<Record<string, unknown>>)[0]
+    expect(written).toMatchObject({ activityId: v200, method: 'percent', pctComplete: 65, status: 'submitted' })
+    const after = await submissionIds()
+    expect(after).toHaveLength(before.submissions.length + 1)
+    expect(after).toContain(written.id as string)
+    expect(await official(), 'a submission approves nothing').toEqual(before.official)
+  })
 })

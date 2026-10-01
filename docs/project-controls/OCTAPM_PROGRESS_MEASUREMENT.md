@@ -255,6 +255,29 @@ bundles entries, and approving it is what approves them:
   activityId, updates, written: 0 }`. Proven live (`pc-6-method-authority`: a mixed batch and its retry leave the
   footprint byte-identical; a clean batch writes both) and mutation-proven (the submissions made outside the batch's
   transaction → the wall's submission is written despite the refusal).
+- **The web's bulk screen offers no percentage for an activity measured by quantity** (integration, 2026-10-01).
+  `frontend/src/features/schedule/components/bulk-progress-update.tsx` sends one percentage for every selected
+  activity (`{ activityId, pctComplete }`, no method), so after the refusals above a selection that included a
+  quantity-measured activity could only be refused whole. The component now reads the method from the register
+  (`GET /activities` — `progressMethodConfig.method`, else `progressMethod`: the server's effective method; the
+  schedule payload does not carry it, `lib/register-progress.ts withRegisterProgress` is the Progress tab's own
+  merge): an activity measured by quantity is listed with its checkbox disabled, the reason ("Measured by quantity —
+  record installed quantities in the daily log or the Progress tab") and a link to the Progress tab; one whose method
+  has not been read is not offered either (never assumed to be percent); only offered activities are sent. If the
+  server still refuses (the method changed under the screen) the refusal stays on the screen, says nothing was saved
+  and names the activity from `details.batch`; no success is shown, the selection stays, and the register is read
+  again. No server change. **The component is not mounted anywhere**: its only parent, `ev-dashboard.tsx`, left the
+  schedule's Earned Value tab on 2026-06-10 (the official EV report replaced the prototype maths) and a source check
+  forbids mounting it there again — so no user reaches the bulk screen on the web today, and whether it returns (and
+  where) is the owner's decision. Proof: the source check `frontend/scripts/quantity-progress-ui.test.mjs` (the
+  guard, the reason, the link, the register read, the refusal path — mutation: the guard removed fails it);
+  `frontend/e2e/55-quantity-progress.spec.ts` third case, through the API (a forced mixed batch is 409
+  PROGRESS_METHOD_MISMATCH naming V100 in `details.batch`, the method-less batch the screen used to send is refused
+  the same way, no submission is written and no official figure moves; a percent-only batch writes one pending
+  submission — mutation: the batch made outside its transaction fails it); and, once, in a browser with the
+  component mounted temporarily on the Progress tab (not committed): V100 disabled with the reason and the link,
+  V200 updated alone, a raced refusal naming "Blockwork" with "Nothing was saved." — the guard removed failed that
+  run.
 - **The rule holds in the one writer too** (verification fix, 2026-10-01). Asked only when a submission is made, the
   rule could be passed by ordering: a percent submission put forward while the activity was unconfigured stayed
   approvable after the planner configured it as quantity (the method lock below reads approved progress only), the
