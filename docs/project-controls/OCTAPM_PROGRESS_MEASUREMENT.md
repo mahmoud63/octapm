@@ -24,7 +24,7 @@ The five methods stay. What changes is **where quantity comes from** for the `qu
 | inspection | passed 100 / failed 0 | none | unchanged; ITP hold points as today |
 | manual | typed pct with reason | none | unchanged |
 
-A method change on an activity with approved progress is refused (existing rule) — the frozen `pctComplete` history is source data.
+A method change on an activity with approved progress is refused — the frozen `pctComplete` history is source data. As built (§3.2): 409 `PROGRESS_METHOD_LOCKED`, except a row naming the method the activity is already measured by, which readiness needs.
 
 ## 3. Quantity progress and the authority rule (§79) [D]
 
@@ -126,6 +126,64 @@ siblings (`daily-log.service` drives it).
   `__tests__/quantity-progress.service.test.js`, `utils/__tests__/boq-figures.quantity-entries.test.js`.
   Mutation-proven: the replay handling, the unit rule, the withholding, the tenant scope and the assignment rule
   each dropped in turn fail the suite.
+
+### 3.2 Approval bundling in the one writer, as shipped (PC-6 core, 2026-09-30) [C]
+
+`progress.service.js` is still the one writer of `ActivityProgress`; a quantity-method `ProgressSubmission` now
+bundles entries, and approving it is what approves them:
+
+- **Bundling** (`POST /activities/{id}/progress`, also `bulk-progress`): `entryIds[]` names entries, each on this
+  activity (400 `QUANTITY_ENTRY_ACTIVITY_MISMATCH`), draft or submitted (409 `QUANTITY_ENTRY_LOCKED`), held by no
+  open submission (409 `QUANTITY_ENTRY_BUNDLED` — an entry belongs to at most one draft/submitted submission);
+  `bundleSubmittedThrough` (a day) adds every submitted entry of the activity dated on or before it that no open
+  submission holds. Either with nothing free is 400 `QUANTITY_NO_ENTRIES_TO_BUNDLE`; either on a percent,
+  milestone, inspection or manual submission is 400 `QUANTITY_BUNDLE_METHOD_MISMATCH` (those methods are
+  untouched). The entries take the submission's id and, unless the submission is a draft, `status 'submitted'`.
+- **Derived figures, never typed over the mapping.** For every quantity submission: planned = the typed
+  `ActivityProgressMethod.plannedQuantity` (basis `method_config`), else Σ approved, active allocation quantity of
+  the activity (basis `approved_allocations`; `plannedQuantityFor`), else — only then — the client's
+  `quantityPlanned` (basis `client`, the pre-PC-6 shape; without one 400 `PLANNED_QUANTITY_REQUIRED` as before).
+  A client-sent `quantityPlanned` never overrides a typed or allocation-derived figure; the answer's transient
+  `quantity` block says which basis applied and `clientQuantityPlannedIgnored`. With a bundle, installed = Σ the
+  bundled entries + Σ entries already approved on the activity (basis `approved_entries`), in one unit — the
+  planned figure's (400 `QUANTITY_UNIT_MISMATCH` otherwise; nothing is converted or summed across units); without
+  one, the client's typed `quantityComplete` (basis `client`). `pctComplete = installed ÷ planned`, clamped 0..100.
+  The columns `quantityComplete / quantityPlanned / quantityUnit` hold the frozen values.
+- **Approve** (`approveProgressSubmissionWithClient`; gates unchanged — evidence, open ITP hold points, the
+  review authority, D1 `approvedAt`): the figures are read again at this instant (another bundle may have been
+  approved, a planned quantity typed, since the submission was made), the bundled entries are set `approved`
+  (`approvedBy/approvedAt` = the row's) in the same transaction, the submission's frozen columns are updated to
+  what was approved, and exactly ONE new `ActivityProgress` row is written; no earlier approved row is touched
+  (proven byte-identical). A quantity submission typed the old way (no entries) is approved as it stands. Audit:
+  the submission's `approved` event carries `quantityInstalled, quantityPlanned, plannedBasis, installedBasis,
+  quantityEntries, approvedProgressId`; each entry gets its own `approved` event (`entityType
+  quantity_progress_entry`), all through `audit.service.recordEvent` — the existing record.changed path, no new
+  event constant.
+- **Reject**: the bundled entries are set `rejected` (`rejectedBy/rejectedAt/rejectionReason` = the submission's
+  reason) with their own `rejected` events; nothing official is written; a rejected entry is history (a
+  correction is a new entry).
+- **PROGRESS SOURCE provenance**, additive beside the string fields: every serialised submission carries
+  `quantityEntryIds[]` and `progressSource { source, submissionId, dailyLogId, dailyReportId, importDocumentId,
+  submittedBy, submittedAt, approvedBy, approvedAt, entries }`; the activity payload carries `progressSource` for
+  its official figure beside `approvedProgressSource` (the `ActivityProgress` row plus the submission it came
+  from). `importDocumentId` is carried for the shape and is null: no column links a submission to the import
+  document (the import names itself in `source` and `notes`).
+- **The method lock** (`PUT /activities/{id}/progress-method`): an activity with approved progress keeps the
+  method it is measured by — its configured method, else the method its latest official figure was approved under
+  (aliases normalised), else `percent` — and naming another is 409 `PROGRESS_METHOD_LOCKED` with
+  `{ effectiveMethod, effectiveMethodBasis, requestedMethod, approvedProgressCount }`. A row naming that same
+  method is still written (its planned quantity, unit and flags with it), which is how an activity measured under
+  the default clears `PROGRESS_METHODS_INCOMPLETE` in setup readiness (proven live both ways).
+- **BOQ withholding** (binding rule): a submission's `quantityComplete / quantityPlanned / quantityUnit` and the
+  transient `quantity` block are allocation- and item-derived, so `utils/boq-figures withheldProgressSubmission(s)`
+  omits them for a caller who may not read the BOQ (`boqWithheld`) on every submission answer (submit, approve,
+  reject, the two lists, the activity's `pendingProgress`); the percentage, status, method and provenance stay.
+- **Proof**: `backend/src/services/__live__/pc-6-quantity-approval.live.test.js` (derived figures with the client's
+  ignored; the bundle's refusals; a submit-only person's 403; approve → one row at installed ÷ planned, entries
+  approved in the same transaction, provenance on the submission, the activity and the EV report's row; a second
+  bundle by date leaving the first row byte-identical; reject; the evidence gate holding a bundle; the typed
+  method-configuration basis; the method lock both ways with readiness; the tenant 404) and
+  `__tests__/progress.service.quantity-bundle.test.js`.
 
 ## 4. Daily-report contribution (§81) [D]
 
