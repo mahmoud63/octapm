@@ -22,6 +22,7 @@ const { applyCpmToProject, dateToWorkingDay } = require('./cpm.service');
 // the counts are complete, the rows are a sample to review.
 const DRY_RUN_ROW_LIMIT = 50;
 const { runPostImportSeeding } = require('./post-import.service');
+const progressService = require('./progress.service');
 
 const REVISION_STATUS = Object.freeze({
   DRAFT: 'draft',
@@ -563,75 +564,473 @@ async function importScheduleXlsx({
   return { ...result, issues: parsed.issues, issueCount: parsed.issues.length };
 }
 
-async function importProgress({ projectId, orgId, format, content }) {
-  await ensureProject(orgId, projectId);
+// How many per-row outcomes a progress import answers with; the counts are
+// complete, the rows are what a reviewer reads first.
+const PROGRESS_IMPORT_ROW_LIMIT = 500;
 
+/**
+ * The percentages a progress file carries, keyed by P6 activity id — null
+ * for an activity the file names without stating a percentage (the parsers'
+ * `physCompleteStated`); a schedule reads such a row as 0, a progress import
+ * skips it.
+ */
+async function parseProgressFile({ format, content }) {
   const normalized = String(format || '').toLowerCase();
-  let progressMap = new Map();
-
+  let activities;
   if (normalized === 'xer') {
-    const tables = parseXer(content);
-    const parsed = extractXerActivities(tables);
-    progressMap = new Map(
-      parsed.activities
-        .filter((a) => a.p6ActivityId)
-        .map((a) => [String(a.p6ActivityId), normalizePct(a.physComplete)]),
-    );
+    activities = extractXerActivities(parseXer(content)).activities;
   } else if (normalized === 'p6xml') {
-    const parsed = await parseP6Xml(content);
-    progressMap = new Map(
-      parsed.activities
-        .filter((a) => a.p6ActivityId)
-        .map((a) => [String(a.p6ActivityId), normalizePct(a.physComplete)]),
-    );
+    activities = (await parseP6Xml(content)).activities;
   } else {
     throw new HttpError(400, 'INVALID_FORMAT', 'format must be xer or p6xml');
   }
+  return new Map(
+    activities
+      .filter((a) => a.p6ActivityId)
+      .map((a) => [
+        String(a.p6ActivityId),
+        a.physCompleteStated === false ? null : normalizePct(a.physComplete),
+      ]),
+  );
+}
+
+// A structured refusal (an HttpError, or anything shaped like one) is a
+// row's outcome; anything else is a fault and fails the request.
+const refusalOf = (error) =>
+  error && error.code && error.status
+    ? { code: error.code, message: error.message }
+    : null;
+
+const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+
+/**
+ * POST /projects/:id/import/progress — the percentages in a P6 file become
+ * progress the way progress is made everywhere else in the product: a
+ * ProgressSubmission per activity, official only when the approval writer
+ * (progress.service approveProgressSubmissionWithClient: evidence gate, ITP
+ * hold points, audit, ActivityProgress row) says so.
+ *
+ * Authority is the importer's own (PC-6, owner decision). `canApprove` is the
+ * permission engine's answer to progress `submission.approve` on this
+ * project for this person — the same answer the approve route gets. Without
+ * it every matched row is a 'submitted' submission and nothing is official.
+ * With it each row is submitted and then approved through the writer; a row
+ * a gate refuses stays pending with the gate's reason and never fails the
+ * file. Nothing here writes ActivityProgress and no approved row is ever
+ * rewritten — a later approval is a new row, exactly as the writer does.
+ *
+ * The file's figure is a percentage, so the submission names the `percent`
+ * method as a manual percentage entry would; on an activity measured another
+ * way the writer records the method the submission names (it does not
+ * refuse), and the row is flagged `methodMismatch` for the reviewer.
+ *
+ * Only a figure that moves something is written. A row whose figure is
+ * already the activity's current official figure — the latest approved
+ * ActivityProgress percentage, and 0 for an activity with no approved
+ * progress at all — is 'unchanged' and creates nothing, so a full-programme
+ * export does not put one 0% row per unstarted activity in the approval
+ * queue. A row the file names without stating a percentage is 'skipped',
+ * with its reason, never a submission.
+ *
+ * A figure that already waits in an open import submission: for a
+ * submit-only person, or when the open row is a draft (it waits for
+ * evidence, not for approval), the row is 'already_pending' — no second
+ * submission; `waitingStatus` says where it waits. For a person with
+ * approval authority and a 'submitted' import row at the same figure, the
+ * import approves THAT submission through the writer and its gates — it is
+ * the same figure under this person's own authority — so the row answers
+ * with the pending submission's id and `approvesPending: true` (a gate that
+ * refuses leaves it pending with the reason, as for any other row). When the
+ * figure differs, a new submission is made and approved as for any other
+ * row. Either way, every OTHER older submitted import row on the activity
+ * at another figure — there may be several — is left exactly as the writer
+ * leaves a superseded manual submission — untouched, still in the queue —
+ * and each is reported on the row (`superseded`, newest first) and in
+ * `supersededPendingSubmissions` (one entry per submission; the count is of
+ * submissions, not rows) so the approver can reject them from the queue.
+ * Nothing here rejects or deletes a submission. Any other figure is written
+ * again — the writer keeps no idempotency key of its own.
+ *
+ * `dryRun` answers the per-row plan for this person without writing, and the
+ * plan is read from the writer's own rules, not assumed: the assignment
+ * assertion the writer runs (assertProgressSubmitAllowed), the activity's
+ * evidence requirement, and — for an approver — the ITP hold points the
+ * approval gate checks (form.service.openHoldPoints). A row those rules would
+ * refuse is previewed as 'refuse'; one a gate would hold (kept as a draft for
+ * a submit-only person, left pending for an approver) as 'hold'. The import
+ * itself still trusts the writer for every row; the preview only stops
+ * promising rows the writer will not write.
+ */
+async function importProgress({
+  projectId,
+  orgId,
+  format,
+  content,
+  userId = null,
+  userRole = null,
+  canApprove = false,
+  dryRun = false,
+}) {
+  await ensureProject(orgId, projectId);
+  const progressMap = await parseProgressFile({ format, content });
 
   const dbActivities = await prisma.activity.findMany({
-    where: {
-      projectId,
-      isActive: true,
-      p6ActivityId: { not: null },
-    },
+    where: { projectId, isActive: true, p6ActivityId: { not: null } },
     select: {
       id: true,
+      name: true,
       p6ActivityId: true,
-      budget: true,
+      progressMethod: { select: { method: true, evidenceRequired: true } },
+      progress: {
+        where: { status: 'approved' },
+        orderBy: { updatedAt: 'desc' },
+        take: 1,
+        select: { id: true, pctComplete: true, source: true },
+      },
+      progressSubmissions: {
+        where: { status: { in: ['draft', 'submitted'] }, source: 'import' },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, pctComplete: true, status: true, evidenceJson: true },
+      },
     },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
   });
-  const updates = [];
-  const matched = new Set();
 
+  const matchedKeys = new Set();
+  const plan = [];
   for (const activity of dbActivities) {
     const key = String(activity.p6ActivityId || '');
     if (!progressMap.has(key)) continue;
-
-    const pct = normalizePct(progressMap.get(key));
-
-    updates.push({
+    matchedKeys.add(key);
+    const stated = progressMap.get(key);
+    const pctComplete = stated === null ? null : normalizePct(stated);
+    const activityMethod = progressService.normalizeMethod(
+      activity.progressMethod?.method || 'percent',
+    );
+    const official = activity.progress[0] || null;
+    // The current official figure: an activity with no approved progress
+    // stands at 0%, so a 0% row for an unstarted activity changes nothing.
+    const officialPct = official ? normalizePct(official.pctComplete) : 0;
+    const waiting = activity.progressSubmissions.find(
+      (row) => normalizePct(row.pctComplete) === pctComplete,
+    );
+    // Every older submitted import row at another figure, newest first — all
+    // of them, since a queue can hold more than one (a site engineer's 30
+    // then 32): each is left there, and each is reported by a row that is
+    // written. A draft is not in the queue and is not one of them.
+    const olderPending = activity.progressSubmissions
+      .filter((row) => row.status === 'submitted' && normalizePct(row.pctComplete) !== pctComplete)
+      .map((row) => ({ submissionId: row.id, pctComplete: normalizePct(row.pctComplete) }));
+    const row = {
       activityId: activity.id,
-      pctComplete: pct,
-      actualCost: null,
-      progressMethod: 'percent_complete',
-      source: 'import',
-      status: 'approved',
-      approvedBy: 'import',
-      approvedAt: new Date(),
-      notes: 'Imported from progress file',
-      updatedBy: 'import',
-    });
-    matched.add(key);
+      p6ActivityId: key,
+      name: activity.name,
+      pctComplete,
+      officialPctComplete: official ? officialPct : null,
+      activityMethod,
+      methodMismatch: activityMethod !== 'percent',
+      submissionId: null,
+      progressId: null,
+      waitingStatus: null,
+      approvesPending: false,
+      superseded: [],
+      reason: null,
+    };
+    if (pctComplete === null) {
+      row.status = 'skipped';
+      row.reason = {
+        code: 'PROGRESS_PERCENT_MISSING',
+        message: 'The file names this activity without a percentage; nothing written',
+      };
+    } else if (officialPct === pctComplete) {
+      row.status = 'unchanged';
+      row.reason = {
+        code: 'PROGRESS_ALREADY_OFFICIAL',
+        message: official
+          ? `Already the official figure (${pctComplete}%); nothing written`
+          : `No approved progress yet, so the activity already stands at ${pctComplete}%; nothing written`,
+      };
+    } else if (waiting && canApprove && waiting.status === 'submitted') {
+      // The same figure, already in the queue, under this person's own
+      // authority: approve that submission rather than make a second one.
+      row.status = 'approve';
+      row.submissionId = waiting.id;
+      row.waitingStatus = waiting.status;
+      row.approvesPending = true;
+      row.evidenceRequired =
+        Boolean(activity.progressMethod?.evidenceRequired) &&
+        !progressService.hasEvidence(waiting.evidenceJson);
+      // The other older rows at other figures are left in the queue just
+      // the same, and this person — the one the report exists for — is told.
+      row.superseded = olderPending;
+    } else if (waiting) {
+      // A draft is not in any approver's queue: it waits for evidence, and
+      // the reason says so rather than calling it "awaiting approval".
+      row.status = 'already_pending';
+      row.submissionId = waiting.id;
+      row.waitingStatus = waiting.status;
+      row.reason = {
+        code: 'PROGRESS_ALREADY_PENDING',
+        message:
+          waiting.status === 'draft'
+            ? `An import submission at ${pctComplete}% is already kept as a draft awaiting evidence; no second submission`
+            : `An import submission at ${pctComplete}% is already awaiting approval; no second submission`,
+      };
+    } else {
+      row.status = canApprove ? 'approve' : 'submit';
+      row.evidenceRequired = Boolean(activity.progressMethod?.evidenceRequired);
+      // Left in the queue, as the writer leaves a superseded manual
+      // submission; the approver is told so they can reject them.
+      row.superseded = olderPending;
+    }
+    plan.push(row);
   }
 
-  if (updates.length > 0) {
-    await prisma.activityProgress.createMany({ data: updates });
+  // The preview: what the writer's own rules say about each row this person
+  // would write. Assignment first (the writer's assertion, run once for every
+  // row; its refusal names the activities it would refuse), then the evidence
+  // requirement, then — for an approver — the hold points the approval gate
+  // reads. Stored beside the row; the import loop never consults it. A row
+  // that approves an already-pending submission makes no submission of its
+  // own, so the assignment rule (a submitter's) is not asked about it.
+  const toWrite = plan.filter((row) => row.status === 'approve' || row.status === 'submit');
+  const toSubmit = toWrite.filter((row) => !row.approvesPending);
+  let unassigned = new Set();
+  let assignmentRefusal = null;
+  try {
+    await progressService.assertProgressSubmitAllowed({
+      projectId,
+      activityIds: toSubmit.map((row) => row.activityId),
+      userId,
+      userRole,
+    });
+  } catch (error) {
+    if (error?.code !== 'ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED') throw error;
+    unassigned = new Set(error.details?.activityIds || toSubmit.map((row) => row.activityId));
+    assignmentRefusal = refusalOf(error);
   }
+  // Required lazily, as progress.service does, to keep clear of a service cycle.
+  const { openHoldPoints } = require('./form.service');
+  for (const row of toWrite) {
+    if (unassigned.has(row.activityId)) {
+      row.expected = { status: 'refuse', reason: assignmentRefusal };
+      continue;
+    }
+    if (row.evidenceRequired) {
+      row.expected = {
+        status: 'hold',
+        reason: {
+          code: 'PROGRESS_EVIDENCE_REQUIRED',
+          message: canApprove
+            ? 'This activity requires evidence before progress can be approved; the row would be left pending'
+            : 'This activity requires evidence before progress can be submitted; the row would be kept as a draft',
+        },
+      };
+      continue;
+    }
+    if (canApprove) {
+      const holdPoints = await openHoldPoints({ projectId, activityId: row.activityId });
+      if (holdPoints.length) {
+        const first = holdPoints[0];
+        row.expected = {
+          status: 'hold',
+          reason: {
+            code: 'ITP_HOLD_POINT_OPEN',
+            message: `${holdPoints.length} ITP hold point${holdPoints.length === 1 ? '' : 's'} on this activity ${holdPoints.length === 1 ? 'has' : 'have'} not passed (${first.ref}: ${first.label} — ${first.state}); the row would be left pending`,
+          },
+        };
+        continue;
+      }
+    }
+    row.expected = { status: row.status, reason: null };
+  }
+
+  const notMatched = Math.max(0, progressMap.size - matchedKeys.size);
+  const authority = {
+    canApprove: Boolean(canApprove),
+    basis: 'progress submission.approve on this project',
+    outcome: canApprove ? 'approved' : 'submitted',
+  };
+  // An older pending import row at another figure is superseded only by a
+  // row that was (or would be) written — including one that approves an
+  // already-pending submission; a refused or skipped row leaves it as the
+  // only figure in the queue, and it is not reported.
+  const WRITTEN = new Set(['approve', 'submit', 'hold', 'approved', 'pending', 'submitted', 'draft']);
+  const settleSuperseded = (rows) => {
+    for (const row of rows) {
+      if (row.superseded.length && !WRITTEN.has(row.status)) row.superseded = [];
+    }
+    return rows;
+  };
+  const summarize = (rows) => {
+    const count = (status) => rows.filter((row) => row.status === status).length;
+    // One entry per submission left in the queue, not per row: an activity
+    // may leave several behind.
+    const superseded = rows.flatMap((row) => row.superseded.map((older) => ({ row, older })));
+    return {
+      matched: rows.length,
+      notMatched,
+      submitted: count('submitted'),
+      draft: count('draft'),
+      approved: count('approved'),
+      pending: count('pending'),
+      unchanged: count('unchanged'),
+      alreadyPending: count('already_pending'),
+      skipped: count('skipped'),
+      refused: count('refused'),
+      supersededPending: superseded.length,
+      supersededPendingSubmissions: superseded.map(({ row, older }) => ({
+        activityId: row.activityId,
+        p6ActivityId: row.p6ActivityId,
+        name: row.name,
+        submissionId: older.submissionId,
+        pctComplete: older.pctComplete,
+        importedPctComplete: row.pctComplete,
+      })),
+    };
+  };
+  const supersededClause = (counts) =>
+    counts.supersededPending
+      ? ` ${plural(counts.supersededPending, 'older pending import submission')} at another figure left in the approval queue (superseded pending) — reject ${counts.supersededPending === 1 ? 'it' : 'them'} there.`
+      : '';
+
+  // Of the rows approved (or to be approved), how many are already-pending
+  // submissions at the same figure taken into this person's authority.
+  const approvesPendingClause = (rows, { preview = false } = {}) => {
+    const count = rows.filter((row) => row.approvesPending).length;
+    if (!count) return '';
+    const stood = preview
+      ? `to be approved as ${count === 1 ? 'it stands' : 'they stand'}`
+      : `approved as ${count === 1 ? 'it stood' : 'they stood'}`;
+    return ` (${count} of them already pending at the same figure, ${stood})`;
+  };
+
+  // What a row answers with: never the plan's working fields.
+  const answerRow = ({ expected, evidenceRequired, ...row }) => row;
+
+  if (dryRun) {
+    const previewed = settleSuperseded(
+      plan.map((row) =>
+        row.expected ? answerRow({ ...row, status: row.expected.status, reason: row.expected.reason }) : answerRow(row),
+      ),
+    );
+    const counts = summarize(previewed);
+    const count = (status) => previewed.filter((row) => row.status === status).length;
+    const would = {
+      wouldSubmit: count('submit'),
+      wouldApprove: count('approve'),
+      wouldHold: count('hold'),
+      wouldRefuse: count('refuse'),
+    };
+    const held = previewed.filter((row) => row.status === 'hold');
+    const holdReasons = [...new Set(held.map((row) => row.reason.code))]
+      .map((code) => (code === 'PROGRESS_EVIDENCE_REQUIRED' ? 'evidence required' : code === 'ITP_HOLD_POINT_OPEN' ? 'ITP hold point open' : code))
+      .join(', ');
+    return {
+      dryRun: true,
+      authority,
+      ...counts,
+      ...would,
+      rows: previewed.slice(0, PROGRESS_IMPORT_ROW_LIMIT),
+      rowLimit: PROGRESS_IMPORT_ROW_LIMIT,
+      // The legacy field: how many official figures this call would change.
+      updated: 0,
+      message:
+        (canApprove
+          ? `Dry run: nothing was written. For you ${plural(would.wouldApprove, 'row')} would be submitted and approved through the progress approval gates${approvesPendingClause(previewed.filter((row) => row.status === 'approve'), { preview: true })}; ${would.wouldHold} would be left pending${held.length ? ` (${holdReasons})` : ''}, ${would.wouldRefuse} would be refused, ${counts.unchanged} already official, ${counts.alreadyPending} already pending, ${counts.skipped} skipped (no percentage), ${notMatched} not matched.`
+          : `Dry run: nothing was written. For you ${plural(would.wouldSubmit, 'row')} would be submitted for approval — not official until an approver approves them; ${would.wouldHold} would be kept as draft (evidence required), ${would.wouldRefuse} would be refused, ${counts.unchanged} already official, ${counts.alreadyPending} already pending, ${counts.skipped} skipped (no percentage), ${notMatched} not matched.`) +
+        supersededClause(counts),
+    };
+  }
+
+  const notes = `Imported from progress file (${String(format).toLowerCase()})`;
+  for (const row of plan) {
+    if (row.status !== 'approve' && row.status !== 'submit') continue;
+    const submit = (status) =>
+      progressService.createProgressSubmission({
+        orgId,
+        projectId,
+        activityId: row.activityId,
+        userId,
+        userRole,
+        payload: { pctComplete: row.pctComplete, method: 'percent', source: 'import', status, notes },
+      });
+    let submissionId = null;
+    if (row.approvesPending) {
+      // The same figure already waits in the queue: no second submission —
+      // that one is approved, under this person's authority, below.
+      submissionId = row.submissionId;
+      row.status = row.waitingStatus;
+    } else {
+      let submission;
+      try {
+        submission = await submit('submitted');
+      } catch (error) {
+        // The writer's own allowance: a row without the evidence the activity
+        // demands may still be kept as a draft, for someone to attach it to.
+        if (error?.code !== 'PROGRESS_EVIDENCE_REQUIRED') {
+          const reason = refusalOf(error);
+          if (!reason) throw error;
+          row.status = 'refused';
+          row.reason = reason;
+          continue;
+        }
+        try {
+          submission = await submit('draft');
+        } catch (draftError) {
+          const reason = refusalOf(draftError);
+          if (!reason) throw draftError;
+          row.status = 'refused';
+          row.reason = reason;
+          continue;
+        }
+        row.reason = refusalOf(error);
+      }
+      submissionId = submission.id;
+      row.submissionId = submission.id;
+      row.status = submission.status;
+    }
+    if (!canApprove) continue;
+
+    try {
+      const approved = await progressService.approveProgressSubmission({
+        orgId,
+        projectId,
+        activityId: row.activityId,
+        submissionId,
+        userId,
+      });
+      row.status = 'approved';
+      row.reason = null;
+      const progress = await prisma.activityProgress.findUnique({
+        where: { submissionId: approved.id },
+        select: { id: true },
+      });
+      row.progressId = progress?.id || null;
+    } catch (error) {
+      const reason = refusalOf(error);
+      if (!reason) throw error;
+      row.status = 'pending';
+      row.reason = reason;
+    }
+  }
+
+  const counts = summarize(settleSuperseded(plan));
+  const message =
+    (canApprove
+      ? `${plural(counts.approved, 'row')} approved through the progress approval gates${approvesPendingClause(plan.filter((row) => row.status === 'approved'))}, ${counts.pending} left pending (a gate refused), ${counts.refused} refused, ${counts.unchanged} already official, ${counts.alreadyPending} already pending, ${counts.skipped} skipped (no percentage), ${notMatched} not matched.`
+      : `${plural(counts.submitted, 'row')} submitted for approval — not official until approved; ${counts.draft} kept as draft (evidence required), ${counts.refused} refused, ${counts.unchanged} already official, ${counts.alreadyPending} already pending, ${counts.skipped} skipped (no percentage), ${notMatched} not matched.`) +
+    supersededClause(counts);
 
   return {
-    updated: updates.length,
-    notMatched: Math.max(0, progressMap.size - matched.size),
-    message: `Updated progress for ${updates.length} activities`,
+    dryRun: false,
+    authority,
+    ...counts,
+    rows: plan.slice(0, PROGRESS_IMPORT_ROW_LIMIT).map(answerRow),
+    rowLimit: PROGRESS_IMPORT_ROW_LIMIT,
+    // The legacy field: how many official figures this call changed.
+    updated: counts.approved,
+    message,
   };
 }
 
