@@ -1898,7 +1898,6 @@ const EXCEPTION_KIND_POLICY = Object.freeze({
   progress_stale: Object.freeze({ module: "progress", boqDerived: false }),
   period_not_locked: Object.freeze({ module: "cost", boqDerived: false }),
   ev_basis_divergence: Object.freeze({ module: "cost", boqDerived: true }),
-  committed_definition_mixed: Object.freeze({ module: "cost", boqDerived: false }),
   equipment_cost_unposted: Object.freeze({ module: "cost", boqDerived: false }),
   // Read under the module of the record they name: change orders (PC-7b
   // integration J — the links are mixed, change_order is what they share).

@@ -109,7 +109,6 @@ describe("the registry", () => {
     budget_truths_disagree: ["data-quality.js", "cost", false],
     forecast_without_provenance: ["data-quality.js", "cost", true],
     activity_budget_mismatch: ["data-quality.js", "cost", true],
-    committed_definition_mixed: ["data-quality.js", "cost", false],
     equipment_cost_unposted: ["data-quality.js", "cost", false],
     unit_unresolved: ["data-quality.js", "boq", true],
     unit_mismatch: ["data-quality.js", "boq", true],
@@ -130,6 +129,8 @@ describe("the registry", () => {
     for (const [kind, [file, module, boqDerived]] of Object.entries(expected)) {
       expect([kind, files[kind], meta[kind].module, meta[kind].boqDerived]).toEqual([kind, file, module, boqDerived]);
     }
+    // committed_definition_mixed is gone (PC-7b integration K): its evidence no longer exists.
+    expect(meta).not.toHaveProperty("committed_definition_mixed");
     // The data-quality file states exactly the §7 kinds (its own list agrees).
     expect([...require("../exception-rules/data-quality").DATA_QUALITY_KINDS].sort()).toEqual(Object.keys(DATA_QUALITY_KINDS).sort());
   });

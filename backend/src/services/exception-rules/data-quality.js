@@ -7,7 +7,7 @@
  * — it writes nothing, anywhere — and reads every figure through the service
  * that owns it (the budget register, the earned-value report, the allocation
  * summary, the setup readiness, the quantity views, the cost ledger, the
- * purchase-order register). No rule computes money: a figure is either handed
+ * change-order register). No rule computes money: a figure is either handed
  * over as its owner built it or compared with another one, and every row says
  * where its two figures came from (measured.basis / limit.basis). Nothing here
  * feeds CostRecord.forecast, BudgetLine.forecast or an EAC, and nothing here
@@ -37,8 +37,7 @@
  *   - a count, a number of days or a group size rises as the gap grows;
  *   - a comparison of two owner figures (budget_truths_disagree,
  *     forecast_without_provenance, activity_budget_mismatch,
- *     committed_definition_mixed, equipment_cost_unposted,
- *     ev_basis_divergence) measures the GAP between them, |a − b|, against
+ *     equipment_cost_unposted, ev_basis_divergence) measures the GAP between them, |a − b|, against
  *     the cent tolerance (`comparison` below). Either figure may be the larger
  *     and either may move, so neither is put in `measured` on its own — a
  *     widening on the side held in `limit` would leave a dismissed row
@@ -283,36 +282,12 @@ const activityBudgets = async ({ orgId, projectId, ctx }) => {
   return rows;
 };
 
-// ─── committed_definition_mixed ───────────────────────────────────────────
-// Evidence: purchase-order.service.js:346-350 — the purchase-order register's
-// summary still answers `committed`, a deprecated alias of orderValue ("Order
-// value — not committed cost"), beside the budget register's committed cost
-// (budget.service.js:134 deriveLine: executed commitments, or the manual
-// figure while nothing is committed). Two figures named "committed" on one
-// project that differ.
-
-const committedDefinitions = async ({ orgId, projectId, ctx }) => {
-  const [orders, register] = await Promise.all([
-    require("../purchase-order.service").listOrders({ orgId, projectId }),
-    budgetRegister(ctx, { orgId, projectId }),
-  ]);
-  if (!orders.items.length || !Object.prototype.hasOwnProperty.call(orders.summary, "committed")) return [];
-  const poCommitted = toMoneyNumber(orders.summary.committed);
-  const registerCommitted = toMoneyNumber(register.summary.totals.committed);
-  if (!differs(poCommitted, registerCommitted)) return [];
-  const { measured, limit, figures, higher } = comparison(
-    ["purchaseOrderCommitted", { value: poCommitted, basis: "Purchase-order summary `committed`: a deprecated alias of orderValue — the value of orders neither planned nor cancelled, NOT committed cost (purchase-order.service listOrders)" }],
-    ["registerCommitted", { value: registerCommitted, basis: "Budget register committed: executed commitments + approved commitment change orders, or the manual figure while nothing is committed (budget.service listBudgetLines summary.totals.committed)" }],
-    { limitBasis: "two figures both named `committed` on one project are expected to agree, or to be read as different figures" },
-  );
-  return [{
-    subjectType: "project",
-    subjectId: projectId,
-    measured,
-    limit,
-    data: { orders: orders.items.length, field: "summary.committed", alias: "orderValue", figures, higher },
-  }];
-};
+// committed_definition_mixed was removed (PC-7b integration K): its evidence —
+// the purchase-order summary's deprecated `committed` alias shown next to the
+// budget register's committed cost — no longer exists: no web or mobile screen
+// reads purchase-order summary.committed (the web shows orderValue as "PO
+// value"; the type keeps the alias for older mobile builds only), so the two
+// figures are never shown side by side. OCTAPM_CHANGE_INTELLIGENCE.md §7.
 
 // ─── equipment_cost_unposted ──────────────────────────────────────────────
 // Evidence: cost-ledger.service.js:32 SOURCE_TYPES lists 'equipment'; its
@@ -822,16 +797,6 @@ const RULES = [
     label: "Activity budgets",
     note: (count) => `${plural(count, "activity", "activities")} carr${count === 1 ? "ies" : "y"} a stored budget that differs from the approved allocations.`,
     evaluate: activityBudgets,
-  },
-  {
-    kind: "committed_definition_mixed",
-    severity: "info",
-    subjectType: "project",
-    module: "cost",
-    boqDerived: false,
-    label: "Committed cost",
-    note: () => "The purchase-order register's `committed` (order value) differs from the budget register's committed cost; they are different figures.",
-    evaluate: committedDefinitions,
   },
   {
     kind: "equipment_cost_unposted",

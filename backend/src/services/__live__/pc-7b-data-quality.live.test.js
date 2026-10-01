@@ -73,13 +73,13 @@ const DAY = 86_400_000;
 const daysAgo = (days) => new Date(NOW.getTime() - days * DAY);
 // What the standalone tests assert, rule by rule, on the gaps project.
 const EXPECTED_GAPS = Object.freeze({
-  budget_truths_disagree: 3, forecast_without_provenance: 2, activity_budget_mismatch: 2, committed_definition_mixed: 1, equipment_cost_unposted: 2,
+  budget_truths_disagree: 3, forecast_without_provenance: 2, activity_budget_mismatch: 2, equipment_cost_unposted: 2,
   unit_unresolved: 1, unit_mismatch: 2, structure_missing: 4,
   progress_stale: 1, period_not_locked: 1, ev_basis_divergence: 1, readiness_override_active: 1,
   orphan_change_link: 4, change_order_possible_duplicate: 1,
 });
 // The kinds that compare two owner figures: each measures the gap between them.
-const GAP_KINDS = Object.freeze(["budget_truths_disagree", "forecast_without_provenance", "activity_budget_mismatch", "committed_definition_mixed", "equipment_cost_unposted", "ev_basis_divergence"]);
+const GAP_KINDS = Object.freeze(["budget_truths_disagree", "forecast_without_provenance", "activity_budget_mismatch", "equipment_cost_unposted", "ev_basis_divergence"]);
 
 liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, read-only, each citing its evidence", () => {
   let live;
@@ -338,12 +338,12 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     expect(await evaluate("activity_budget_mismatch", clean)).toEqual([]);
   });
 
-  it("committed_definition_mixed: the purchase-order register's `committed` alias beside the register's committed cost", async () => {
-    const [row, ...rest] = await evaluate("committed_definition_mixed", gaps);
-    expect(rest).toEqual([]);
-    expect([row.subjectType, row.subjectId, row.measured.value, row.limit.value, figuresOf(row)]).toEqual(["project", gaps.project.id, 5000, 0.01, { purchaseOrderCommitted: 5000, registerCommitted: 0 }]);
-    expect(row.data.figures.purchaseOrderCommitted.basis).toMatch(/NOT committed cost/);
-    expect(await evaluate("committed_definition_mixed", clean)).toEqual([]);
+  it("committed_definition_mixed is no longer a kind (PC-7b integration K): the gaps project's purchase order beside the register raises nothing", async () => {
+    expect(RULES.find((rule) => rule.kind === "committed_definition_mixed")).toBeUndefined();
+    expect(await prisma.procurementOrder.count({ where: { projectId: gaps.project.id } })).toBe(1);
+    const engine = require("../exception-engine.service");
+    const dry = await engine.evaluateProject({ orgId: live.org.id, projectId: gaps.project.id, cutoff: NOW, trigger: "test", dryRun: true });
+    expect(dry.rows.filter((row) => row.kind === "committed_definition_mixed")).toEqual([]);
   });
 
   it("equipment_cost_unposted: usage cost a daily report carries beyond the ledger's net posting", async () => {

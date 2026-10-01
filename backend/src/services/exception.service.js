@@ -55,7 +55,6 @@ const KIND_LABELS = Object.freeze({
   progress_stale: "Progress not updated",
   period_not_locked: "Reporting period not locked",
   ev_basis_divergence: "Earned value bases differ",
-  committed_definition_mixed: "Committed figures of different definitions",
   equipment_cost_unposted: "Equipment cost not posted",
   orphan_change_link: "Change link names a missing record",
   readiness_override_active: "Readiness override active",
