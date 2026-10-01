@@ -178,6 +178,8 @@ model Organisation {
   dailyLogVisitors             DailyLogVisitor[]
   dailyLogDelays               DailyLogDelay[]
   dailyLogNotes                DailyLogNote[]
+  dailyLogQuantities           DailyLogQuantity[]
+  quantityProgressEntries      QuantityProgressEntry[]
   rfiResponses                 RfiResponse[]
   approvalWorkflowEvents       ApprovalWorkflowEvent[]
   notificationDeliveryAttempts NotificationDeliveryAttempt[]
@@ -678,6 +680,8 @@ model Project {
   dailyLogVisitors            DailyLogVisitor[]
   dailyLogDelays              DailyLogDelay[]
   dailyLogNotes               DailyLogNote[]
+  dailyLogQuantities          DailyLogQuantity[]
+  quantityProgressEntries     QuantityProgressEntry[]
   rfiResponses                RfiResponse[]
   boqItemCodeIntegrityReports BoqItemCodeIntegrityReport[]
 
@@ -1405,6 +1409,8 @@ model BoqItem {
   changeOrderAllocations  ChangeOrderAllocationLink[]
   subValuationAllocations SubValuationAllocationLink[]
   stockTransactions       StockTransaction[]
+  quantityProgressEntries QuantityProgressEntry[]
+  dailyLogQuantities      DailyLogQuantity[]
 
   @@unique([projectId, activeCodeKey])
   @@index([projectId])
@@ -1679,6 +1685,8 @@ model Activity {
   lookaheadItems         LookaheadItem[]
   stockTransactions      StockTransaction[]
   costLedgerEntries      CostLedgerEntry[]
+  quantityProgressEntries QuantityProgressEntry[]
+  dailyLogQuantities     DailyLogQuantity[]
 
   @@index([projectId])
   @@index([projectId, isActive])
@@ -1771,6 +1779,8 @@ model ActivityBoqAllocation {
   changeOrderLinks  ChangeOrderAllocationLink[]
   ipcProgressLinks  IpcItemProgressLink[]
   subValuationLinks SubValuationAllocationLink[]
+  quantityProgressEntries QuantityProgressEntry[]
+  dailyLogQuantities      DailyLogQuantity[]
 
   // Active pair uniqueness is enforced by the partial unique index
   // ActivityBoqAllocation_active_pair_key in SQL migrations because Prisma
@@ -1874,12 +1884,97 @@ model ProgressSubmission {
   dailyReport      DailyReport?      @relation(fields: [dailyReportId], references: [id], onDelete: SetNull)
   location         Location?         @relation(fields: [locationId], references: [id], onDelete: SetNull)
   approvedProgress ActivityProgress?
+  quantityEntries  QuantityProgressEntry[]
 
   @@index([projectId])
   @@index([activityId])
   @@index([projectId, status])
   @@index([dailyReportId])
   @@index([locationId])
+}
+
+/**
+ * Quantity progress (PC-6, OCTAPM_PROGRESS_MEASUREMENT.md §3): one installed
+ * quantity of one BOQ item on one activity on one day. It is un-official until
+ * `status = approved`; the installed quantity of an item or activity is always
+ * Σ approved entries — nothing stores an "installed" figure on BoqItem,
+ * Activity or ActivityBoqAllocation, so received, issued, installed, certified
+ * and paid stay five separate truths. EV keeps reading ActivityProgress only:
+ * approving a quantity-method ProgressSubmission approves the entries it
+ * bundles (`submissionId`) and writes the resulting pct through the existing
+ * writer. `source` + `submissionId` / `dailyLogId` / `dailyLogQuantityId` are
+ * the PROGRESS SOURCE provenance of every figure.
+ *
+ * Tenancy: project + organisation with the ENT-3 composite key
+ * (projectId, orgId) → Project(id, orgId), like the DailyLog sections and
+ * BudgetLine — a row of another organisation's project is refused by the
+ * database, not by code.
+ *
+ * ON DELETE, each chosen deliberately:
+ *   org / project      Cascade  — the tenant owns its rows (every P+O table).
+ *   activity, boqItem  Restrict — an entry is source data for an official
+ *                                 figure; it must never vanish silently with
+ *                                 a hard delete. Same as ActivityProgress →
+ *                                 Activity, and the activity delete already
+ *                                 answers P2003 with 409 ACTIVITY_IN_USE.
+ *   allocation         SetNull  — the mapping row is replaceable (rejected,
+ *                                 superseded); the activity + item pair is
+ *                                 the truth, the allocation only a hint.
+ *   location           SetNull  — as ProgressSubmission.location.
+ *   submission         SetNull  — as ActivityProgress.submission: the entry
+ *                                 outlives the bundle that approved it.
+ *   dailyLog,
+ *   dailyLogQuantity   SetNull  — an approved entry is progress, not a
+ *                                 daily-log line; removing the log must not
+ *                                 remove approved progress (source + date
+ *                                 keep the provenance readable).
+ */
+model QuantityProgressEntry {
+  id                 String    @id @default(uuid())
+  orgId              String
+  projectId          String
+  activityId         String
+  boqItemId          String
+  allocationId       String?
+  locationId         String?
+  unitCode           String
+  quantity           Decimal   @db.Decimal(18, 3)
+  date               DateTime  @db.Date // the calendar day the work was done
+  source             String    @default("manual") // submission, daily_log, manual, import
+  submissionId       String? // the ProgressSubmission that bundles (and approves) it
+  dailyLogId         String?
+  dailyLogQuantityId String?
+  status             String    @default("draft") // draft, submitted, approved, rejected
+  approvedBy         String?
+  approvedAt         DateTime?
+  rejectedBy         String?
+  rejectedAt         DateTime?
+  rejectionReason    String?
+  clientRequestId    String? // idempotent replay (offline outbox)
+  note               String?
+  createdBy          String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  org              Organisation           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project          Project                @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+  activity         Activity               @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  boqItem          BoqItem                @relation(fields: [boqItemId], references: [id], onDelete: Restrict)
+  allocation       ActivityBoqAllocation? @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+  location         Location?              @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  submission       ProgressSubmission?    @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+  dailyLog         DailyLog?              @relation(fields: [dailyLogId], references: [id], onDelete: SetNull)
+  dailyLogQuantity DailyLogQuantity?      @relation(fields: [dailyLogQuantityId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, clientRequestId])
+  @@index([orgId])
+  @@index([projectId, activityId, status])
+  @@index([projectId, boqItemId, status])
+  @@index([allocationId])
+  @@index([locationId])
+  @@index([submissionId])
+  @@index([dailyLogId])
+  @@index([dailyLogQuantityId])
 }
 
 // â”€â”€â”€ Schedule Revisions â”€â”€â”€
@@ -4822,6 +4917,8 @@ model Location {
   boqItems            BoqItem[]
   boqAllocations      ActivityBoqAllocation[]
   progressSubmissions ProgressSubmission[]
+  quantityProgressEntries QuantityProgressEntry[]
+  dailyLogQuantities      DailyLogQuantity[]
 
   @@unique([projectId, code])
   @@index([orgId])
@@ -7262,6 +7359,8 @@ model DailyLog {
   visitors    DailyLogVisitor[]
   delays      DailyLogDelay[]
   notes       DailyLogNote[]
+  quantities  DailyLogQuantity[]
+  quantityProgressEntries QuantityProgressEntry[]
 
   @@unique([projectId, date])
   @@index([orgId])
@@ -7472,6 +7571,63 @@ model DailyLogNote {
   @@unique([projectId, clientRequestId])
   @@index([dailyLogId])
   @@index([projectId, kind])
+}
+
+/**
+ * The daily log's seventh section (PC-6, OCTAPM_PROGRESS_MEASUREMENT.md §4):
+ * a quantity of a BOQ item installed on an activity that day, as the site
+ * recorded it. Same columns, status semantics, party column, composite tenant
+ * key and indexes as the six sections above, but with Prisma relations to the
+ * things it names. It is a site record only: submitting the log mints a
+ * QuantityProgressEntry (`source = daily_log`, `status = submitted`) that the
+ * progress approvers make official — this row never is the installed figure.
+ *
+ * ON DELETE: dailyLog / org / project Cascade exactly like the siblings (a
+ * section row is part of its log). activity and boqItem Restrict: the row is
+ * a signed site record on the log's PDF, and the entry it minted keeps the
+ * same keys — a hard delete of the activity or item is refused rather than
+ * quietly emptying a submitted log. allocation and location SetNull as on
+ * QuantityProgressEntry (hints, not the truth).
+ */
+model DailyLogQuantity {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  dailyLogId      String
+  partyId         String?
+  activityId      String
+  boqItemId       String
+  allocationId    String?
+  locationId      String?
+  quantity        Decimal   @db.Decimal(18, 3)
+  unitCode        String
+  notes           String?
+  status          String    @default("approved") // draft, submitted, approved, rejected — the section row's own review state, never progress
+  createdBy       String?
+  submittedAt     DateTime?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  clientRequestId String?
+  sortOrder       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  dailyLog        DailyLog               @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+  org             Organisation           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project         Project                @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+  activity        Activity               @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  boqItem         BoqItem                @relation(fields: [boqItemId], references: [id], onDelete: Restrict)
+  allocation      ActivityBoqAllocation? @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+  location        Location?              @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  progressEntries QuantityProgressEntry[]
+
+  @@unique([projectId, clientRequestId])
+  @@index([dailyLogId])
+  @@index([projectId, activityId])
+  @@index([projectId, boqItemId])
+  @@index([allocationId])
+  @@index([locationId])
 }
 
 // â”€â”€â”€ Report builder & portfolio (OCTA-RPT-BUILDER-023) â”€â”€â”€

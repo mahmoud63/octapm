@@ -60,9 +60,30 @@ const columnsOf = async (db, table) => (await db.query(
   `select column_name, is_nullable, column_default, data_type, udt_name from information_schema.columns
    where table_schema = 'public' and table_name = $1 order by ordinal_position`, [table])).rows;
 
-const fixtureValue = (c, row, col) => {
+/**
+ * Columns guarded by a CHECK ("col" IN ('a', 'b', …)) constraint — PostgreSQL
+ * renders it as "col" = ANY (ARRAY['a'::text, …]) — mapped to their allowed
+ * values, so a fixture row satisfies the constraint instead of writing
+ * `fx-col-N` into it (ProgressSubmission.method, ActivityBoqAllocation.status …).
+ */
+const allowedValuesOf = async (db, table) => {
+  const found = await db.query(
+    `select pg_get_constraintdef(c.oid) as def from pg_constraint c
+     where c.contype = 'c' and c.conrelid = format('%I', $1::text)::regclass`, [table]);
+  const allowed = {};
+  for (const { def } of found.rows) {
+    const m = /^CHECK \(\(?"?(\w+)"?(?:::text)?\s*=\s*ANY \(\(?ARRAY\[(.*?)\]/.exec(def);
+    if (!m) continue;
+    const values = [...m[2].matchAll(/'((?:[^']|'')*)'/g)].map((v) => v[1].replace(/''/g, "'"));
+    if (values.length) allowed[m[1]] = values;
+  }
+  return allowed;
+};
+
+const fixtureValue = (c, row, col, allowed = {}) => {
   if (c.is_nullable === "YES" && row % 2 === 1) return undefined; // odd rows leave optional columns to their default
   if (c.column_default !== null && c.is_nullable === "NO" && row === 0) return undefined; // row 0 exercises defaults
+  if (allowed[c.column_name]) return allowed[c.column_name][row % allowed[c.column_name].length];
   if (/numeric|double|real/.test(c.data_type)) return (1000 + row * 7919.37 + col * 13.01).toFixed(2);
   if (/int/.test(c.data_type)) return row * 10 + col + 1;
   if (/timestamp|date/.test(c.data_type)) return new Date(Date.UTC(2026, 8, 1 + row, col % 24));
@@ -96,10 +117,11 @@ const fixtureValue = (c, row, col) => {
     for (const table of tables) {
       colsBefore[table] = await columnsOf(db, table);
       if (!colsBefore[table].length) throw new Error(`table ${table} does not exist before the migration`);
+      const allowed = await allowedValuesOf(db, table);
       for (let row = 0; row < perTable; row += 1) {
         const keys = []; const vals = [];
         colsBefore[table].forEach((c, col) => {
-          const v = fixtureValue(c, row, col);
+          const v = fixtureValue(c, row, col, allowed);
           if (v !== undefined) { keys.push(`"${c.column_name}"`); vals.push(v); }
         });
         if (!keys.length) await db.query(`insert into "${table}" default values`);

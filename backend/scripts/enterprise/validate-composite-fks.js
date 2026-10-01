@@ -38,7 +38,9 @@ const NEVER = ["BackgroundJob", "OutboundEvent", "AuditEvent", "RecordHistorySna
 /**
  * Org-side keys added by this wave: the tables that carried an orgId with no
  * key behind it — ten without a project column, eight relation-less
- * project tables, and ApprovalWorkflowEvent (project key only).
+ * project tables, and ApprovalWorkflowEvent (project key only) — plus the
+ * two PC-6 tables born with both keys (migration 20261005050000; a table
+ * the database does not have yet is reported as pending, not counted).
  */
 const ORG_ONLY = [
   "Signature",
@@ -48,6 +50,8 @@ const ORG_ONLY = [
   "DailyLogVisitor",
   "DailyLogDelay",
   "DailyLogNote",
+  "DailyLogQuantity",
+  "QuantityProgressEntry",
   "RfiResponse",
   "ApprovalWorkflowEvent",
   "NotificationDeliveryAttempt",
@@ -166,8 +170,11 @@ const main = async () => {
   for (const table of await dualColumnTables()) {
     if (wanted(table)) results.push(await checks.project(table, context));
   }
+  const present = new Set((await rows(Prisma.sql`SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema()`)).map((row) => row.name));
   for (const table of ORG_ONLY) {
-    if (wanted(table)) results.push(await checks.organisation(table, context));
+    if (!wanted(table)) continue;
+    if (!present.has(table)) { console.log(`pending ${table}: not in this database yet (its migration is not applied); skipped`); continue; }
+    results.push(await checks.organisation(table, context));
   }
   for (const table of COST_CODE_TABLES) {
     if (wanted(table)) results.push(await checks.costCode(table, context));
