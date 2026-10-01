@@ -10,6 +10,7 @@ const {
 const { recordWorkflowHistory } = require("./workflow-support.service");
 const approvalWorkflowService = require("./approval-workflow.service");
 const { nextRef } = require("../utils/reference-number");
+const { recordWorkspacePath } = require("../utils/record-links");
 const {
   ARCHIVED_STATUS,
   applyArchiveVisibility,
@@ -20,6 +21,7 @@ const {
 const activityTraceSelect = {
   id: true,
   name: true,
+  activityCode: true,
   p6ActivityId: true,
   wbsCode: true,
   totalFloat: true,
@@ -32,6 +34,7 @@ const boqTraceSelect = {
   ref: true,
   description: true,
   unit: true,
+  unitCode: true,
   qty: true,
   rate: true,
   amount: true,
@@ -48,7 +51,7 @@ const allocationTraceSelect = {
 };
 
 const changeOrderInclude = {
-  activity: { select: { id: true, name: true, wbsCode: true } },
+  activity: { select: { id: true, name: true, activityCode: true, p6ActivityId: true, wbsCode: true } },
   budgetLine: {
     select: {
       id: true,
@@ -157,9 +160,96 @@ const summarizeChangeOrder = (order) => ({
   archivedBy: order.archivedBy || null,
 });
 
+// ─── Related records (PC-7b, owner decision R5-5) ──────────────────────────
+// Which activities and BOQ items a change order reaches, composed read-only
+// from what the order already carries (changeOrderInclude): its own
+// activityId, its activity links, and its allocation links — the BOQ item
+// each names and the activity the allocation maps it to. Nothing is written,
+// no figure is computed: impactDays is the link's own recorded
+// scheduleImpactDays (the largest of the order's relation rows on that
+// activity, as PC-7a counts an order once per activity). One row per
+// activity, carrying its strongest relation; rows ordered direct, then
+// activity_link, then via_allocation. The links open the PC-5 drawers
+// (record-links' activity and boq_item targets, as controls-detail builds
+// them). What a member without boq:read may not see — the BOQ items and the
+// allocation-derived activities — is withheld in one place,
+// utils/boq-figures (withheldAllocationLinks → withheldRelatedRecords).
+const RELATION_RANK = Object.freeze({ direct: 0, activity_link: 1, via_allocation: 2 });
+
+const activityCodeOf = (activity) =>
+  activity?.activityCode || activity?.p6ActivityId || null;
+
+const buildRelatedRecords = (order, link = () => null) => {
+  const impactByActivity = new Map();
+  for (const entry of order?.activityLinks || []) {
+    if (!entry?.activityId) continue;
+    const days = Number(entry.scheduleImpactDays) || 0;
+    const known = impactByActivity.get(entry.activityId);
+    impactByActivity.set(entry.activityId, known === undefined ? days : Math.max(known, days));
+  }
+
+  const rows = new Map();
+  const offer = (activity, fallbackId, relation) => {
+    const id = activity?.id || fallbackId;
+    if (!id) return;
+    const held = rows.get(id);
+    if (held && RELATION_RANK[held.relation] <= RELATION_RANK[relation]) return;
+    rows.set(id, {
+      id,
+      code: activityCodeOf(activity) ?? held?.code ?? null,
+      name: activity?.name ?? held?.name ?? null,
+      relation,
+    });
+  };
+  if (order?.activityId) offer(order.activity, order.activityId, "direct");
+  for (const entry of order?.activityLinks || []) offer(entry?.activity, entry?.activityId, "activity_link");
+  for (const entry of order?.allocationLinks || []) {
+    offer(entry?.allocation?.activity, entry?.allocation?.activityId, "via_allocation");
+  }
+
+  const activities = [...rows.values()]
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => RELATION_RANK[a.row.relation] - RELATION_RANK[b.row.relation] || a.index - b.index)
+    .map(({ row }) => ({
+      ...row,
+      ...(row.relation !== "via_allocation" && impactByActivity.has(row.id)
+        ? { impactDays: impactByActivity.get(row.id) }
+        : {}),
+      href: link("activity", row.id),
+    }));
+
+  const items = new Map();
+  for (const entry of order?.allocationLinks || []) {
+    const item = entry?.boqItem || entry?.allocation?.boqItem || null;
+    const id = item?.id || entry?.boqItemId || entry?.allocation?.boqItemId || null;
+    if (!id || items.has(id)) continue;
+    items.set(id, {
+      id,
+      code: item?.code ?? item?.ref ?? null,
+      description: item?.description ?? null,
+      unitCode: item?.unitCode ?? null,
+      relation: "allocation_link",
+      href: link("boq_item", id),
+    });
+  }
+
+  return { activities, boqItems: [...items.values()] };
+};
+
+const relatedRecordLinker = (project) => (recordType, recordId) =>
+  recordWorkspacePath({ projectId: project?.id, recordType, recordId, orgSlug: project?.org || null });
+
+/** The order as the register and every write answer it: with relatedRecords beside its own keys. */
+const withRelatedRecords = (project, order) =>
+  order && typeof order === "object"
+    ? { ...order, relatedRecords: buildRelatedRecords(order, relatedRecordLinker(project)) }
+    : order;
+
 const ensureProject = async ({ orgId, projectId }) => {
   const project = await prisma.project.findFirst({
     where: { id: projectId, orgId },
+    // The workspace the related records' links open in (PC-7b).
+    include: { org: { select: { id: true, slug: true } } },
   });
 
   if (!project) {
@@ -820,7 +910,7 @@ const syncApprovedBudgetRevision = async ({
 };
 
 const listChangeOrders = async ({ orgId, projectId, query = {} }) => {
-  await ensureProject({ orgId, projectId });
+  const project = await ensureProject({ orgId, projectId });
 
   const where = { projectId };
   if (Object.values(CHANGE_ORDER_STATUSES).includes(query.status)) {
@@ -860,7 +950,10 @@ const listChangeOrders = async ({ orgId, projectId, query = {} }) => {
     records: orders,
   });
 
-  return { orders: enrichedOrders, summary };
+  return {
+    orders: enrichedOrders.map((order) => withRelatedRecords(project, order)),
+    summary,
+  };
 };
 
 const createChangeOrder = async ({
@@ -870,7 +963,7 @@ const createChangeOrder = async ({
   userRole = null,
   payload,
 }) => {
-  await ensureProject({ orgId, projectId });
+  const project = await ensureProject({ orgId, projectId });
   assertCreateStatus(payload);
 
   const ref = await nextRef(prisma, { table: 'ChangeOrder', scopeColumn: 'projectId', scopeId: projectId, prefix: 'VO', pad: 2 });
@@ -878,7 +971,7 @@ const createChangeOrder = async ({
   const status = CHANGE_ORDER_STATUSES.DRAFT;
   const primaryActivityId = firstActivityIdFromPayload(payload);
 
-  return prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx) => {
     const allocation = await normalizeBudgetAllocations({ tx, projectId, payload, value: toMoneyNumber(payload.value) });
     const created = await tx.changeOrder.create({
       data: {
@@ -1003,6 +1096,17 @@ const createChangeOrder = async ({
     });
     return enriched;
   });
+  // The create answer is the row as inserted, before its links were written
+  // (unchanged); its related records are read from the links as stored, so
+  // the answer never says "none" for an order that reaches an activity.
+  const linked = await prisma.changeOrder.findFirst({
+    where: { id: created.id, projectId },
+    include: changeOrderInclude,
+  });
+  return {
+    ...created,
+    relatedRecords: buildRelatedRecords(linked || created, relatedRecordLinker(project)),
+  };
 };
 
 const updateChangeOrder = async ({
@@ -1389,7 +1493,7 @@ const updateChangeOrder = async ({
       .maybeStart({ orgId, projectId, tool: "change_order", recordId: coId, actor: { id: userId, role: userRole } })
       .catch(() => null);
   }
-  return result;
+  return withRelatedRecords(project, result);
 };
 
 const approveChangeOrder = async ({
@@ -1619,6 +1723,8 @@ const deleteChangeOrder = async ({
 
 module.exports = {
   CHANGE_ORDER_STATUSES,
+  RELATION_RANK,
+  buildRelatedRecords,
   listChangeOrders,
   createChangeOrder,
   updateChangeOrder,

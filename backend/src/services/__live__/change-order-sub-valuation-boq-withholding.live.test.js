@@ -47,8 +47,13 @@ const { startApi } = require("./auth-live-kit");
 const REASON = "The linked BOQ row and its allocation are available only to members who may read the BOQ";
 const LINK_BOQ_KEYS = ["allocationId", "boqItemId", "allocation", "boqItem"];
 
+const RELATED_REASON =
+  "BOQ items, and the activities a change order reaches through BOQ allocations, are available only to members who may read the BOQ";
+
 // A record as a member without BOQ read must receive it: each allocation
-// link less the keys that are the bill's, the rest untouched.
+// link less the keys that are the bill's, and (a change order, PC-7b) its
+// related records without the BOQ items and the allocation-derived
+// activities, the rest untouched.
 const withoutBoq = (record) => ({
   ...record,
   allocationLinks: record.allocationLinks.map((link) => {
@@ -56,6 +61,14 @@ const withoutBoq = (record) => ({
     const kept = Object.fromEntries(Object.entries(link).filter(([key]) => !keys.includes(key)));
     return { ...kept, boqWithheld: { keys, reason: REASON } };
   }),
+  ...("relatedRecords" in record
+    ? {
+        relatedRecords: {
+          activities: record.relatedRecords.activities.filter((entry) => entry.relation !== "via_allocation"),
+          boqWithheld: { keys: ["boqItems", "activities.via_allocation"], reason: RELATED_REASON },
+        },
+      }
+    : {}),
 });
 
 liveDescribe("Change-order and sub-valuation allocation links carry no BOQ row to a member who may not read the BOQ", () => {

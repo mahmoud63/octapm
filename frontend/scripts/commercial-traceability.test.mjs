@@ -36,6 +36,27 @@ const assertions = [
       'WorkflowDecisionDialog',
       'BOQ:',
       'Locked',
+      // R5-5 (PC-7b): the server's related records, linked to the PC-5 drawers.
+      'relatedRecords',
+      'RelatedActivitiesCell',
+      'RelatedBoqItemsCell',
+      'RecordLink',
+      'via allocation',
+      'boqWithheld',
+      // The Trace line and the approval panel count what the server says the
+      // order reaches, withheld activities marked — never "0 act" beside one.
+      '? related.activities.length',
+      'activitiesWithheldReason',
+      '<ActivityCount',
+      'co-trace-activity-count-',
+      'co-approval-activity-count-',
+    ],
+    // Never "No activity" when the server says the order reaches one indirectly,
+    // nor a count of the order's own activity fields printed in its place.
+    forbidden: [
+      "'No activity'",
+      '{traceSummary(order).activityCount} act',
+      '{trace.activityCount} activities',
     ],
   },
   {
@@ -109,6 +130,11 @@ for (const assertion of assertions) {
   for (const check of assertion.checks) {
     if (!source.includes(check)) {
       throw new Error(`${assertion.file} is missing ${check}`)
+    }
+  }
+  for (const banned of assertion.forbidden || []) {
+    if (source.includes(banned)) {
+      throw new Error(`${assertion.file} still contains ${banned}`)
     }
   }
 }
