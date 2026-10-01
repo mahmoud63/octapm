@@ -2,7 +2,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { useChangeEventActions } from '@/api/commercial-hooks'
-import { CHANGE_EVENT_ORIGINS, CHANGE_EVENT_TYPES } from '@/api/commercial-types'
+import { CHANGE_EVENT_PICKABLE_ORIGINS, CHANGE_EVENT_TYPES, changeEventOriginLabel } from '@/api/commercial-types'
 import { userMessage } from '@/api/errors'
 import { useActivities, useLocations } from '@/api/record-hooks'
 import { FilterChip } from '@/components/FilterChip'
@@ -29,7 +29,7 @@ export default function NewChangeEventScreen() {
   const actions = useChangeEventActions(projectId ?? '')
   const [title, setTitle] = useState(params.title ?? '')
   const [type, setType] = useState<string>('site_condition')
-  const [origin, setOrigin] = useState<string>(params.origin && (CHANGE_EVENT_ORIGINS as readonly string[]).includes(params.origin) ? params.origin : 'manual')
+  const [origin, setOrigin] = useState<string>(params.origin && (CHANGE_EVENT_PICKABLE_ORIGINS as readonly string[]).includes(params.origin) ? params.origin : 'manual')
   const [description, setDescription] = useState('')
   const [activityId, setActivityId] = useState<string | null>(params.activityId ?? null)
   const [locationId, setLocationId] = useState<string | null>(params.locationId ?? null)
@@ -91,8 +91,8 @@ export default function NewChangeEventScreen() {
             Came from
           </Text>
           <View style={styles.chips}>
-            {CHANGE_EVENT_ORIGINS.map((o) => (
-              <FilterChip key={o} label={humanise(o)} selected={origin === o} onPress={() => setOrigin(o)} testID={`change-event-origin-${o}`} />
+            {CHANGE_EVENT_PICKABLE_ORIGINS.map((o) => (
+              <FilterChip key={o} label={changeEventOriginLabel(o)} selected={origin === o} onPress={() => setOrigin(o)} testID={`change-event-origin-${o}`} />
             ))}
           </View>
           <Input label="Description" value={description} onChangeText={setDescription} multiline placeholder="What was found, what it affects, what is proposed" testID="change-event-description" />

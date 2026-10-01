@@ -73,4 +73,18 @@ assert.match(recordLinks, /change_event: \{ module: "commercial", child: "change
 assert.match(attachments, /change_event: "change_event"/, 'attachments')
 for (const model of ['ChangeEvent', 'ChangeEventLine', 'Rfq']) assert.match(schema, new RegExp(`^model ${model} \\{`, 'm'), `${model} model`)
 
+// PC-7b integration M: every origin the API stores has a name on the web — an
+// event raised from a project exception ('exception') never reads as unknown.
+const serverOrigins = JSON.parse(service.match(/const ORIGINS = Object\.freeze\((\[[^\]]*\])\)/)[1])
+assert.ok(serverOrigins.includes('exception'), "the API stores the 'exception' origin")
+const originUnion = hooks.match(/export type ChangeEventOrigin =([^]*?)\n(?:export|\n)/)[1]
+const webOrigins = [...originUnion.matchAll(/'([a-z_]+)'/g)].map((match) => match[1])
+assert.deepEqual([...webOrigins].sort(), [...serverOrigins].sort(), "the web ChangeEventOrigin union is the API's ORIGINS")
+const originLabels = hooks.match(/export const CHANGE_EVENT_ORIGIN_LABEL: Record<ChangeEventOrigin, string> = \{([^}]*)\}/)
+assert.ok(originLabels, 'CHANGE_EVENT_ORIGIN_LABEL names every origin')
+for (const origin of serverOrigins) assert.match(originLabels[1], new RegExp(`\\b${origin}: '[^']+'`), `origin ${origin} has a label`)
+assert.match(originLabels[1], /exception: 'Project exception'/, "the 'exception' origin reads as a project exception")
+const raiseDialog = read('src/features/controls/exceptions/raise-change-event-dialog.tsx')
+assert.match(raiseDialog, /Origin \{changeEventOriginLabel\(proposedDraft\.origin\)\}/, 'the raise dialog names the origin by its label')
+
 console.log('change-events-ui: ok')

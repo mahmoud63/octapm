@@ -21,7 +21,33 @@ export interface BallInCourt {
 // ── Change events ──
 
 export const CHANGE_EVENT_TYPES = ['owner_change', 'design_change', 'site_condition', 'error_omission', 'allowance', 'value_engineering', 'other'] as const
-export const CHANGE_EVENT_ORIGINS = ['manual', 'rfi', 'submittal', 'daily_log', 'observation', 'meeting', 'other'] as const
+/** Every origin the API stores (change-event.service ORIGINS). */
+export const CHANGE_EVENT_ORIGINS = ['manual', 'rfi', 'submittal', 'daily_log', 'observation', 'meeting', 'exception', 'other'] as const
+export type ChangeEventOrigin = (typeof CHANGE_EVENT_ORIGINS)[number]
+export const CHANGE_EVENT_ORIGIN_LABELS: Record<ChangeEventOrigin, string> = {
+  manual: 'Manual',
+  rfi: 'RFI',
+  submittal: 'Submittal',
+  daily_log: 'Daily log',
+  observation: 'Observation',
+  meeting: 'Meeting',
+  exception: 'Project exception',
+  other: 'Other',
+}
+/**
+ * The origins a person picks on the manual form. 'exception' is not one: it is
+ * set only by the PC-7b handoff, which raises the event from the exception
+ * with its typed link — a hand-picked 'exception' would name no exception.
+ */
+export const CHANGE_EVENT_PICKABLE_ORIGINS = CHANGE_EVENT_ORIGINS.filter((origin) => origin !== 'exception')
+/** The origin's name; one this build does not know is still shown readable, never blank. */
+export const changeEventOriginLabel = (origin: string | null | undefined): string => {
+  if (!origin) return ''
+  const known = CHANGE_EVENT_ORIGIN_LABELS[origin as ChangeEventOrigin]
+  if (known) return known
+  const words = origin.replace(/[_-]+/g, ' ').trim().toLowerCase()
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
 export const CHANGE_EVENT_STATUSES = ['open', 'pricing', 'priced', 'converted', 'closed', 'void'] as const
 
 export interface ChangeEventLine {

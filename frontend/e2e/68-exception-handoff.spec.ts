@@ -665,7 +665,7 @@ test('the screens draw the API’s shapes as sent and send what its validators t
   await expect(page.getByTestId('raise-change-event-form')).toBeVisible()
   await expect(page.getByTestId('raise-change-event-title')).toHaveValue('Installed quantity over the allocation')
   await expect(page.getByTestId('raise-change-event-description')).toHaveValue(/left for the QS to price/)
-  await expect(page.getByTestId('raise-change-event-origin')).toContainText('Origin exception')
+  await expect(page.getByTestId('raise-change-event-origin')).toContainText('Origin Project exception')
   await expect(page.getByTestId('raise-change-event-line-qty-0')).toHaveText('5 m3')
   await expect(page.getByTestId('raise-change-event-line-amount-0')).toHaveAttribute('data-amount-blank', 'true')
   await page.getByTestId('raise-change-event-save').click()

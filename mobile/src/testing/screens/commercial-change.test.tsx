@@ -4,6 +4,7 @@ import ChangeEventScreen from '../../../app/(app)/commercial/change-events/[id]'
 import ChangeEventsScreen from '../../../app/(app)/commercial/change-events/index'
 import NewChangeEventScreen from '../../../app/(app)/commercial/change-events/new'
 import CommercialHomeScreen from '../../../app/(app)/commercial/index'
+import { CHANGE_EVENT_ORIGIN_LABELS, CHANGE_EVENT_ORIGINS, changeEventOriginLabel } from '@/api/commercial-types'
 import { network } from '@/api/network'
 import { queryClient } from '@/api/query'
 import type { PermissionMatrix } from '@/api/types'
@@ -103,5 +104,34 @@ describe('change events', () => {
     // Nothing on this screen accepts a quote, converts, closes or voids.
     expect(screen.queryByTestId('action-bar')).toBeNull()
     expect(calls.every((c) => c.method === 'GET')).toBe(true)
+  })
+
+  it('names every origin the API stores — an event raised from a project exception never reads as unknown (PC-7b)', async () => {
+    expect(CHANGE_EVENT_ORIGINS).toContain('exception')
+    for (const origin of CHANGE_EVENT_ORIGINS) expect(CHANGE_EVENT_ORIGIN_LABELS[origin]).toBeTruthy()
+    expect(changeEventOriginLabel('exception')).toBe('Project exception')
+    expect(changeEventOriginLabel('rfi')).toBe('RFI')
+    // A value this build does not know is still readable, never blank.
+    expect(changeEventOriginLabel('site_walk')).toBe('Site walk')
+    calls = fakeServer({
+      'GET /projects': () => ({ status: 200, body: envelope(page(projects)) }),
+      'GET /auth/me/permissions': () => ({ status: 200, body: envelope(pmCommercial) }),
+      'GET /projects/p1/change-events/ce1': () => ({ status: 200, body: envelope(changeEvent({ origin: 'exception', sourceRecordType: 'project_exception', sourceRecordId: 'ex1', sourcePath: null })) }),
+      'GET /projects/p1/comments': () => ({ status: 200, body: envelope({ items: [], pagination: { limit: 100, nextCursor: null } }) }),
+      'GET /projects/p1/audit': () => ({ status: 200, body: envelope({ events: [], nextCursor: null }) }),
+    })
+    await renderScreen(<ChangeEventScreen />)
+    expect(await screen.findByText(/From Project exception/)).toBeTruthy()
+  })
+
+  it('offers no "exception" origin on the manual form — that origin is the handoff\'s, with its typed link', async () => {
+    serve()
+    ;(useLocalSearchParams as jest.Mock).mockReturnValue({ origin: 'exception' })
+    await renderScreen(<NewChangeEventScreen />)
+    await screen.findByTestId('change-event-raise')
+    expect(screen.queryByTestId('change-event-origin-exception')).toBeNull()
+    expect(screen.getByTestId('change-event-origin-rfi')).toBeTruthy()
+    expect(screen.getByText('RFI')).toBeTruthy()
+    expect(screen.getByTestId('change-event-origin-manual').props.accessibilityState?.selected).toBe(true)
   })
 })

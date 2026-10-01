@@ -29,6 +29,7 @@ export type ChangeEventOrigin =
   | 'daily_log'
   | 'observation'
   | 'meeting'
+  | 'exception'
   | 'other'
 export type RfqStatus =
   | 'sent'
@@ -48,6 +49,26 @@ export const CHANGE_EVENT_TYPE_LABEL: Record<ChangeEventType, string> = {
   value_engineering: 'Value engineering',
   other: 'Other',
 }
+
+/**
+ * Where a change event came from, as the API stores it (change-event.service
+ * ORIGINS). 'exception' is set only by the PC-7b handoff — a person raising
+ * the event from a project exception — so it is named, never left unknown.
+ */
+export const CHANGE_EVENT_ORIGIN_LABEL: Record<ChangeEventOrigin, string> = {
+  manual: 'Manual',
+  rfi: 'RFI',
+  submittal: 'Submittal',
+  daily_log: 'Daily log',
+  observation: 'Observation',
+  meeting: 'Meeting',
+  exception: 'Project exception',
+  other: 'Other',
+}
+
+/** The origin's label; a value this build does not know is shown as the server sent it, readable. */
+export const changeEventOriginLabel = (origin: string) =>
+  CHANGE_EVENT_ORIGIN_LABEL[origin as ChangeEventOrigin] ?? origin.replace(/_/g, ' ')
 
 export const CHANGE_EVENT_STATUS_LABEL: Record<ChangeEventStatus, string> = {
   open: 'Open',

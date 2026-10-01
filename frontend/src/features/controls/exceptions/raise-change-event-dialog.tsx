@@ -25,6 +25,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import {
   CHANGE_EVENT_TYPE_LABEL,
+  changeEventOriginLabel,
   type ChangeEventType,
 } from '@/features/change-events/hooks/use-change-events'
 import { formatQuantity } from '../lib/detail-format'
@@ -187,7 +188,7 @@ export function RaiseChangeEventDialog({
               )}
               {typeof proposedDraft.origin === 'string' && (
                 <Badge variant='outline' data-testid='raise-change-event-origin'>
-                  Origin {proposedDraft.origin.replace(/_/g, ' ')}
+                  Origin {changeEventOriginLabel(proposedDraft.origin)}
                 </Badge>
               )}
               <Badge variant='secondary'>Draft</Badge>
