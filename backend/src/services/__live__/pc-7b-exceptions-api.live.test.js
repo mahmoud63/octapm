@@ -595,15 +595,8 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     // stub rule, so nothing else of the project is touched) notifies through
     // the bridge — the critical opening once, the warning never until it
     // escalates, then once; an unchanged re-evaluation tells nobody.
-    const engineMerged = (() => {
-      try {
-        require.resolve("../exception-engine.service");
-        return true;
-      } catch {
-        return false;
-      }
-    })();
-    (engineMerged ? it : it.skip)("once merged: evaluateProject's openings and escalations reach the PM and QS once each", async () => {
+    // The engine is on the base (PC-7b merged): this case always runs.
+    it("evaluateProject's openings and escalations reach the PM and QS once each", async () => {
       // eslint-disable-next-line global-require
       const engine = require("../exception-engine.service");
       await prisma.notification.deleteMany({ where: { orgId: live.org.id, projectId: project3.id } });

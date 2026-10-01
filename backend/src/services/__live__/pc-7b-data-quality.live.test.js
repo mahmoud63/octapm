@@ -10,10 +10,8 @@
  * engine will call it, and asserted row by row: subject, measured / limit and
  * their basis. Then: no rule writes anything (every row of the organisation
  * compared before and after), a rule asked for a project under another
- * organisation sees nothing, and — once exception-engine.service.js is on the
- * base — the engine itself opens, refreshes and resolves the rows. Until the
- * engine merges, that part is skipped and says why (the orchestrator re-runs
- * this file after the merge).
+ * organisation sees nothing, and the engine itself (merged on the base, PC-7b
+ * integration: nothing here is skipped) opens, refreshes and resolves the rows.
  *
  *   DATABASE_CONNECTION_LIMIT=4 npm run -s test:live -- src/services/__live__/pc-7b-data-quality.live.test.js
  */
@@ -22,18 +20,9 @@ const { prisma } = require("../../config/db");
 const { createLiveOrg, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
 const RULES = require("../exception-rules/data-quality");
 
-// ─── the engine, through a tiny adapter ───────────────────────────────────
-const optional = (path, name) => {
-  try {
-    return require(path);
-  } catch (error) {
-    if (error && error.code === "MODULE_NOT_FOUND" && error.message.includes(name)) return null;
-    throw error;
-  }
-};
-const engine = optional("../exception-engine.service", "exception-engine.service");
-const ENGINE_ABSENT = "[skipped: backend/src/services/exception-engine.service.js is not on this base; the orchestrator re-runs this file after the engine track merges]";
-const engineIt = (name, fn, timeout) => (engine ? it(name, fn, timeout) : it.skip(`${ENGINE_ABSENT} ${name}`, fn, timeout));
+// ─── the engine (merged on the base: every case runs, none is skipped) ────
+const engine = require("../exception-engine.service");
+const engineIt = it;
 
 // ─── every row of the organisation ("writes nothing") ─────────────────────
 const scalarField = (model, name) => model.fields.some((field) => field.name === name && field.kind === "scalar");
@@ -716,12 +705,8 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     expect([all.status, all.result.scope, all.result.projects, all.result.projectsOutOfScope]).toEqual([0, "all", 6, 0]);
   }, 300_000);
 
-  it("exception-dry-run.js without --rules-only goes through the engine's dryRun (exit 3 while the engine is not on the base)", async () => {
+  it("exception-dry-run.js without --rules-only goes through the engine's dryRun", async () => {
     const { status, output, result } = runDryRun([]);
-    if (!engine) {
-      expect([status, output]).toEqual([3, expect.stringContaining("exception-engine.service.js is not on this base")]);
-      return;
-    }
     expect([status, result.mode, result.sessionReadOnly, result.projects, result.errors]).toEqual([0, "engine_dry_run", "on", 4, []]);
     // A first pass: every data-quality row the gaps project would hold is a new one.
     const counts = Object.fromEntries(result.perProject.map((row) => [row.projectId, row.counts]));

@@ -5,13 +5,11 @@
  * EXCEPTION_KIND_POLICY) agrees with every rule's statement — so a kind the
  * rules call BOQ-derived is withheld whole from a member without boq:read.
  */
-const fs = require("fs");
 const path = require("path");
 const exceptionService = require("../exception.service");
 const { EXCEPTION_KIND_POLICY, exceptionPolicy, exceptionReadable } = require("../../utils/boq-figures");
 
 const RULES_INDEX = path.join(__dirname, "..", "exception-rules", "index.js");
-const rulesMerged = fs.existsSync(RULES_INDEX);
 
 // A member without boq:read who reads schedule and progress (a site engineer
 // on a no-BOQ template), and one who also reads cost.
@@ -79,7 +77,7 @@ describe("the API's own kind table agrees with the rules' statements", () => {
     expect(exceptionReadable({ kind: "change_order_possible_duplicate", subjectType: "change_order" }, SITE_NO_BOQ, null)).toBe(false);
   });
 
-  (rulesMerged ? it : it.skip)("once merged: the real exception-rules folder loads, the registry is non-null, and the table states every rule's kind with its module and at least its BOQ derivation", () => {
+  it("the real exception-rules folder loads, the registry is non-null, and the table states every rule's kind with its module and at least its BOQ derivation", () => {
     exceptionService._resetRegistry();
     // eslint-disable-next-line global-require, import/no-dynamic-require
     const meta = require(RULES_INDEX).kindMeta();
