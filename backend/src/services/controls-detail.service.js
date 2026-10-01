@@ -30,7 +30,7 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { addMoney, toMoneyNumber } = require("../utils/money");
 const { recordWorkspacePath } = require("../utils/record-links");
-const { DETAIL_ALL_ROWS } = require("../utils/boq-figures");
+const { DETAIL_ALL_ROWS, changeEventWithheldFields } = require("../utils/boq-figures");
 const { forecastBasisOf, withForecastBasis } = require("../utils/cost-forecast");
 const allocationService = require("./activity-boq-allocation.service");
 const boqService = require("./boq.service");
@@ -867,10 +867,29 @@ const getActivityDetail = async ({
     changes.changeOrders = denied("change_order");
   }
   if (can("change_event")) {
-    const events = await prisma.changeEvent.findMany({
+    const rows = await prisma.changeEvent.findMany({
       where: { projectId, OR: [{ activityId }, { lines: { some: { activityId } } }] },
       orderBy: { createdAt: "desc" },
-      select: { id: true, number: true, title: true, status: true, changeOrderId: true, scheduleImpactDays: true, createdAt: true },
+      select: {
+        id: true, number: true, title: true, status: true, changeOrderId: true, scheduleImpactDays: true, createdAt: true,
+        activityId: true, exceptionId: true, origin: true,
+        lines: { where: { activityId }, select: { id: true, activityId: true } },
+      },
+    });
+    // How the event reaches this activity: by an activity the event took
+    // from a BOQ-derived exception's prefill (and still carries as taken),
+    // the reach says only that the activity is mapped — boq-figures
+    // withheldActivityDetail drops such an event for a reader without BOQ read.
+    const withholding = await require("./exception.service").changeEventWithholding({ orgId, projectId, events: rows });
+    const events = rows.map(({ activityId: eventActivityId, exceptionId: _exceptionId, origin: _origin, lines, ...event }) => {
+      const withheld = changeEventWithheldFields({ activityId: eventActivityId, lines }, withholding.get(event.id));
+      return {
+        ...event,
+        matchedBy: [
+          ...(eventActivityId === activityId ? [withheld.event.includes("activityId") ? "exception_prefill" : "activity"] : []),
+          ...lines.map((line) => ((withheld.lines.get(line.id) || []).includes("activityId") ? "exception_prefill" : "line")),
+        ],
+      };
     });
     changes.changeEvents = capped(
       events.map((event) => ({ ...event, createdAt: iso(event.createdAt), href: link("change_event", event.id) })),

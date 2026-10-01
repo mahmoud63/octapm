@@ -4,7 +4,7 @@ const { cursorArgs, toCursorPage, normalizeListQuery } = require("../utils/list-
 const { recordWorkspacePath } = require("../utils/record-links");
 const {
   EXCEPTION_BOQ_SUBJECT_TYPES,
-  changeEventExceptionIds,
+  changeEventRefsOf,
   withheldChangeEventAnswer,
   EXCEPTION_MODULES,
   exceptionAccess,
@@ -677,9 +677,15 @@ const raiseFromException = async ({ orgId, projectId, exceptionId, access, may, 
   requireCreator(may, "raiseChangeEvent");
   const status = statusOf(row);
   if (!["open", "snoozed"].includes(status)) throw notOpen(status);
-  const draft = changeEventService.draftOverPrefill(await exceptionPrefill(row), payload);
+  const prefill = await exceptionPrefill(row);
+  const draft = changeEventService.draftOverPrefill(prefill, payload);
   draft.origin = "exception";
-  const changeEvent = await changeEventService.createChangeEvent({ orgId, projectId, payload: draft, actor, links: { exceptionId: row.id }, auditMetadata: { sourceBoqDerived: isBoqDerivedException(row, policyOf(row)) } });
+  const boqDerived = isBoqDerivedException(row, policyOf(row));
+  // For a BOQ-derived exception, what the event takes from the prefill (the
+  // mapped activity, the cost code, the quantity delta) is recorded with the
+  // creation (metadata.prefillProvenance) so it can be withheld from a
+  // change-event reader without boq:read for as long as it stays as taken.
+  const changeEvent = await changeEventService.createChangeEvent({ orgId, projectId, payload: draft, actor, links: { exceptionId: row.id }, auditMetadata: { sourceBoqDerived: boqDerived }, prefillProvenance: boqDerived ? prefill : null });
   await auditExceptionEvent({ row, actor, action: auditService.ACTIONS.STATUS_CHANGED, oldStatus: status, newStatus: "in_change", summary: { changeEventId: changeEvent.id, changeEventRef: changeEvent.ref, handoff: "raised" } });
   return { exception: await reread({ orgId, projectId, exceptionId, access, may }), changeEvent };
 };
@@ -717,6 +723,39 @@ const boqDerivedExceptionIds = async ({ orgId, projectId, ids }) => {
 };
 
 /**
+ * Of these change events ({ id, exceptionId, origin } — stored rows or
+ * answers), the ones raised from a BOQ-derived exception, each with the
+ * prefill provenance its creation recorded: Map id → { provenance } (null
+ * when none is on record — utils/boq-figures then fails closed). An event is
+ * one when its exception link names a BOQ-derived exception (or one the
+ * project does not have), or — its link gone — when its creation audit says
+ * so (metadata.sourceBoqDerived true). The provenance lives in the creation
+ * audit's metadata (change-event.service createChangeEvent); no column holds it.
+ */
+const changeEventWithholding = async ({ orgId, projectId, events }) => {
+  const list = (events || []).filter((event) => event && event.id);
+  const withholding = new Map();
+  if (!list.length) return withholding;
+  const boqIds = await boqDerivedExceptionIds({ orgId, projectId, ids: list.map((event) => event.exceptionId) });
+  const candidates = list.filter((event) => (event.exceptionId ? boqIds.has(event.exceptionId) : event.origin === "exception"));
+  if (!candidates.length) return withholding;
+  const audits = await prisma.auditEvent.findMany({
+    where: { orgId, projectId, entityType: "change_event", entityId: { in: [...new Set(candidates.map((event) => event.id))] }, action: auditService.ACTIONS.CREATED },
+    orderBy: { occurredAt: "asc" },
+    select: { entityId: true, metadataJson: true },
+  });
+  const metaOf = new Map();
+  for (const audit of audits) if (!metaOf.has(audit.entityId)) metaOf.set(audit.entityId, audit.metadataJson && typeof audit.metadataJson === "object" ? audit.metadataJson : {});
+  for (const event of candidates) {
+    const meta = metaOf.get(event.id) || null;
+    if (!event.exceptionId && !(meta && meta.sourceBoqDerived === true)) continue;
+    const provenance = meta && meta.prefillProvenance && typeof meta.prefillProvenance === "object" ? meta.prefillProvenance : null;
+    withholding.set(event.id, { provenance });
+  }
+  return withholding;
+};
+
+/**
  * A change-event answer (an event, a list, or { changeEvent }) as this caller
  * may receive it: an event raised from a BOQ-derived exception names neither
  * the exception nor what came from it to a reader without boq:read
@@ -724,9 +763,11 @@ const boqDerivedExceptionIds = async ({ orgId, projectId, ids }) => {
  */
 const changeEventAnswerFor = async ({ orgId, projectId, access, answer }) => {
   if (!access || access.boq === true) return answer;
-  const ids = changeEventExceptionIds(answer);
-  if (!ids.length) return answer;
-  return withheldChangeEventAnswer(answer, access, await boqDerivedExceptionIds({ orgId, projectId, ids }));
+  const refs = changeEventRefsOf(answer);
+  if (!refs.length) return answer;
+  const withholding = await changeEventWithholding({ orgId, projectId, events: refs });
+  if (!withholding.size) return answer;
+  return withheldChangeEventAnswer(answer, access, withholding);
 };
 
 // ─── The workspace dashboard's open-exceptions figure ─────────────────────
@@ -960,6 +1001,7 @@ module.exports = {
   registerExceptionNotifier,
   boqDerivedExceptionIds,
   changeEventAnswerFor,
+  changeEventWithholding,
   GENERIC_EXCEPTION_TITLE,
   // for tests
   _evaluationListener: evaluationListener,

@@ -104,10 +104,12 @@ liveDescribe("PC-7b integration L: change events raised from a BOQ-derived excep
     ok("site get", one);
     const event = one.body.data;
     expect([event.sourceLinks, event.sourceRecordType, event.sourceRecordId, event.sourcePath]).toEqual([[], null, null, null]);
-    expect(event.sourceWithheld.reason).toMatch(/available only to members who may read the BOQ/);
+    expect(event.sourceWithheld.reason).toMatch(/^Part of this change event is withheld from you/);
     expect(event.lines).toHaveLength(1);
     for (const key of ["quantity", "unit", "unitCost"]) expect([key, Object.prototype.hasOwnProperty.call(event.lines[0], key)]).toEqual([key, false]);
-    expect(event.lines[0]).toMatchObject({ id: ids.boqLine, activityId: ids.activity, romAmount: 0 });
+    expect(event.lines[0]).toMatchObject({ id: ids.boqLine, romAmount: 0 });
+    // The activity the allocation maps to is the prefill's (fixer item 1): withheld too.
+    expect(Object.prototype.hasOwnProperty.call(event.lines[0], "activityId")).toBe(false);
     expect(JSON.stringify(event)).not.toContain(ids.boqException);
     expect(JSON.stringify(event)).not.toMatch(KIND_WORDS);
     const listed = await api.get(at("/change-events"), as(members.site_noboq));
@@ -148,7 +150,7 @@ liveDescribe("PC-7b integration L: change events raised from a BOQ-derived excep
     const qsEvents = await auditOf(as(members.qs_noboq));
     expect(qsEvents.length).toBe(pmEvents.length);
     expect(JSON.stringify(qsEvents)).not.toContain(ids.boqException);
-    expect(qsEvents.find((event) => event.action === "created").boqWithheld.reason).toMatch(/available only to members who may read the BOQ/);
+    expect(qsEvents.find((event) => event.action === "created").boqWithheld.reason).toMatch(/^Part of this change event is withheld from you/);
     // The money exception's event keeps its link in the history too.
     const money = (await api.get(at(`/audit?entityType=change_event&entityId=${ids.moneyEvent}&limit=100`), as(members.qs_noboq))).body.data.events.find((event) => event.action === "created");
     expect(money.summary.sourceLinks).toEqual({ exceptionId: ids.moneyException });

@@ -6,6 +6,7 @@ const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const emailService = require("./email.service");
 const { nextNumber: nextCounterNumber } = require("../utils/reference-number");
+const { changeEventPrefillProvenance } = require("../utils/boq-figures");
 
 /**
  * Change events and RFQs (OCTA-COM-CE-038).
@@ -357,13 +358,14 @@ const nextNumber = async (tx, projectId) => {
  * already carried by a live change event (one void or closed may be
  * replaced), else 409 EXCEPTION_IN_CHANGE and nothing is written.
  */
-const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null, links = null, auditMetadata = null }) => {
+const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null, links = null, auditMetadata = null, prefillProvenance = null }) => {
   await ensureProject({ orgId, projectId });
   const data = normalizeEvent(payload);
   const lines = normalizeLines(payload.lines);
   const typed = normalizeLinks(links);
   await assertRefs({ orgId, projectId, data, lines });
   await assertLinks({ orgId, projectId, links: typed });
+  const createdAudit = (row) => ({ orgId, projectId, entityType: "change_event", entityId: row.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, summary: { ref: row.ref, title: row.title, type: row.type, origin: row.origin, rom: estimateOf(row).rom, ...(Object.keys(typed).length ? { sourceLinks: typed } : {}) } });
   const created = await prisma.$transaction(async (tx) => {
     const number = await nextNumber(tx, projectId);
     const row = await tx.changeEvent.create({ data: { ...data, ...(sourcePairOf(typed) || {}), ...typed, orgId, projectId, number, ref: `CE-${String(number).padStart(3, "0")}`, status: STATUS.OPEN, createdBy: actor?.id || null, updatedBy: actor?.id || null } });
@@ -381,9 +383,17 @@ const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null,
       });
       if (claimed.count !== 1) throw new HttpError(409, "EXCEPTION_IN_CHANGE", "This exception is already carried by a change event, or is no longer open");
     }
-    return loadEvent({ orgId, projectId, changeEventId: row.id, tx });
+    const stored = await loadEvent({ orgId, projectId, changeEventId: row.id, tx });
+    // PC-7b: an event raised from a BOQ-derived exception records, with its
+    // creation and in the same transaction (never best-effort), which of its
+    // fields came from the exception's prefill — what utils/boq-figures
+    // withholds from a reader without boq:read while they stay as taken.
+    if (prefillProvenance) {
+      await auditService.recordEvent({ tx, ...createdAudit(stored), metadata: { ...(auditMetadata || {}), prefillProvenance: changeEventPrefillProvenance(prefillProvenance, stored) } });
+    }
+    return stored;
   });
-  await auditService.recordEvent({ orgId, projectId, entityType: "change_event", entityId: created.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, summary: { ref: created.ref, title: created.title, type: created.type, origin: created.origin, rom: estimateOf(created).rom, ...(Object.keys(typed).length ? { sourceLinks: typed } : {}) }, ...(auditMetadata ? { metadata: auditMetadata } : {}) }).catch(() => null);
+  if (!prefillProvenance) await auditService.recordEvent({ ...createdAudit(created), ...(auditMetadata ? { metadata: auditMetadata } : {}) }).catch(() => null);
   return eventOut(created, { detail: true });
 };
 
