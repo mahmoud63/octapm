@@ -26,6 +26,11 @@
  *   planned and marks that entry official; the log then shows it so, the
  *   row is locked, and removing the row leaves the approved entry (SET NULL);
  *   a bundled pending entry holds its row; a rejected one locks it;
+ * - a second day: a row the site team rejects after the submit takes its
+ *   pending entry with it (a date bundle finds nothing); a row approved
+ *   back, or added to the submitted day, is pending at once; approving the
+ *   log mints a row left unminted and approves no entry; a row whose entry
+ *   is bundled or official cannot be rejected by the site team;
  * - the non-BOQ member records against the picker and reads the log without
  *   the item's code or allocation (description, unit and quantity stay);
  * - a client-sent submissionId / dailyLogId on POST /quantity-progress is
@@ -51,6 +56,7 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
   let wall;
   const members = {};
   const DAY = "2026-09-07";
+  const DAY2 = "2026-09-08";
   const bearer = (token) => ({ authorization: `Bearer ${token}` });
   const at = (route) => `/api/v1/projects/${project.id}${route}`;
   const ok = (answer, status = 200) => expect([answer.status, answer.body?.error]).toEqual([status, undefined]);
@@ -74,6 +80,7 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
   const editRow = (rowId, payload, token = members.site.token, day = DAY) => api.request("PATCH", at(`/daily-logs/${day}/entries/quantities/${rowId}`), { body: payload, headers: bearer(token) });
   const removeRow = (rowId, token = members.site.token, day = DAY) => api.request("DELETE", at(`/daily-logs/${day}/entries/quantities/${rowId}`), { headers: bearer(token) });
   const rowOf = (log, rowId) => log.sections.quantities.find((row) => row.id === rowId);
+  const reviewRow = (rowId, decision, reason = null, token = live.token, day = DAY) => api.post(at(`/daily-logs/${day}/entries/quantities/${rowId}/review`), { decision, ...(reason ? { reason } : {}) }, bearer(token));
   const submitProgress = (activityId, payload, token = live.token) => api.post(at(`/activities/${activityId}/progress`), { method: "quantity", ...payload }, bearer(token));
   const approveProgress = (activityId, submissionId, token = live.token) => api.post(at(`/activities/${activityId}/progress-submissions/${submissionId}/approve`), {}, bearer(token));
   const rejectProgress = (activityId, submissionId, reason, token = live.token) => api.post(at(`/activities/${activityId}/progress-submissions/${submissionId}/reject`), { reason }, bearer(token));
@@ -247,7 +254,7 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
     ok(listed);
     expect(listed.body.data.map((entry) => [entry.id, entry.provenance.source, entry.provenance.dailyLogId, entry.provenance.dailyLogQuantityId, entry.provenance.official])).toEqual(expect.arrayContaining([[ids.e1, "daily_log", ids.log, ids.row1, false], [ids.e2, "daily_log", ids.log, ids.row2, false]]));
     const audit = await prisma.auditEvent.findFirst({ where: { orgId: live.org.id, entityType: "daily_log", entityId: ids.log, newStatus: "submitted" } });
-    expect(audit.summaryJson).toMatchObject({ transition: "daily_log.submit", quantityEntries: { minted: 2, synced: 0, kept: 0 } });
+    expect(audit.summaryJson).toMatchObject({ transition: "daily_log.submit", quantityEntries: { minted: 2, synced: 0, kept: 0, retired: 0 } });
     // Submitting again (idempotent for the entries): the same two, synced, none minted.
     ok(await api.post(at(`/daily-logs/${DAY}/submit`), {}, bearer(live.token)));
     expect((await entryRows()).map((entry) => entry.id).sort()).toEqual([ids.e1, ids.e2].sort());
@@ -296,7 +303,7 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
     ids.e4 = entries.find((entry) => entry.dailyLogQuantityId === ids.row4).id;
     expect(entries.find((entry) => entry.id === ids.e4)).toMatchObject({ status: "submitted", source: "daily_log", dailyLogId: ids.log });
     const audit = await prisma.auditEvent.findFirst({ where: { orgId: live.org.id, entityType: "daily_log", entityId: ids.log, newStatus: "submitted" }, orderBy: { occurredAt: "desc" } });
-    expect(audit.summaryJson.quantityEntries).toEqual({ minted: 1, synced: 2, kept: 0 });
+    expect(audit.summaryJson.quantityEntries).toEqual({ minted: 1, synced: 2, kept: 0, retired: 0 });
 
     ok(await removeRow(ids.row4));
     expect(await prisma.quantityProgressEntry.findUnique({ where: { id: ids.e4 } })).toBeNull();
@@ -356,12 +363,115 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
     expect(await evRow(fix.id)).toMatchObject({ pct: 0, progressStatus: "missing" });
   });
 
+  it("day two: a row the site team rejects after the submit takes its pending entry with it — nothing is left for a date bundle", async () => {
+    const added = await addRow({ activityId: pour.id, boqItemId: concrete.id, quantity: 10, clientRequestId: "dlq-d2-a" }, members.site.token, DAY2);
+    ok(added, 201);
+    ids.rowA = added.body.data.entryId;
+    expect(rowOf(added.body.data, ids.rowA).progressEntry).toBeNull();
+    const submitted = await api.post(at(`/daily-logs/${DAY2}/submit`), {}, bearer(members.site.token));
+    ok(submitted);
+    ids.log2 = submitted.body.data.id;
+    const entryA = rowOf(submitted.body.data, ids.rowA).progressEntry;
+    expect(entryA).toMatchObject({ status: "submitted", official: false, submissionId: null });
+    expect(await prisma.quantityProgressEntry.findUnique({ where: { id: entryA.id } })).toMatchObject({ status: "submitted", dailyLogId: ids.log2, dailyLogQuantityId: ids.rowA });
+
+    const rejected = await reviewRow(ids.rowA, "reject", "Bay 5 was measured twice", live.token, DAY2);
+    ok(rejected);
+    expect(rowOf(rejected.body.data, ids.rowA)).toMatchObject({ status: "rejected", rejectionReason: "Bay 5 was measured twice", progressEntry: null });
+    expect(await prisma.quantityProgressEntry.findUnique({ where: { id: entryA.id } })).toBeNull();
+    expect(await entryRows({ dailyLogQuantityId: ids.rowA })).toEqual([]);
+    const trail = await prisma.auditEvent.findFirst({ where: { orgId: live.org.id, entityType: "quantity_progress_entry", entityId: entryA.id, action: "deleted" } });
+    expect(trail).toMatchObject({ actorId: live.user.id, reason: "Bay 5 was measured twice" });
+    expect(trail.summaryJson).toMatchObject({ transition: "quantity_entry.daily_log_row_rejected", dailyLogQuantityId: ids.rowA });
+    // The pour has no free submitted entry left: a bundle by date finds nothing, and the rejected figure can never become official.
+    refused(await submitProgress(pour.id, { bundleSubmittedThrough: "2026-09-30" }), 400, "QUANTITY_NO_ENTRIES_TO_BUNDLE");
+    expect(await officialCount()).toBe(1);
+    expect(await evRow(pour.id)).toMatchObject({ pct: 50, progressStatus: "approved" });
+  });
+
+  it("day two: a row approved back by the site team, or added to the submitted day, is pending at once; approving the log mints a row left unminted and approves no entry", async () => {
+    const back = await reviewRow(ids.rowA, "approve", null, live.token, DAY2);
+    ok(back);
+    const rowA = rowOf(back.body.data, ids.rowA);
+    expect(rowA).toMatchObject({ status: "approved", progressEntry: { status: "submitted", official: false, recordedBy: members.site.id } });
+    ids.eA = rowA.progressEntry.id;
+    expect(await prisma.quantityProgressEntry.findUnique({ where: { id: ids.eA } })).toMatchObject({ status: "submitted", source: "daily_log", dailyLogId: ids.log2, dailyLogQuantityId: ids.rowA, createdBy: members.site.id, clientRequestId: `daily_log:${ids.rowA}` });
+
+    // Added by the PM to the submitted day: pending the moment it is recorded.
+    const late = await addRow({ activityId: pour.id, boqItemId: concrete.id, quantity: 7, clientRequestId: "dlq-d2-b" }, live.token, DAY2);
+    ok(late, 201);
+    ids.rowB = late.body.data.entryId;
+    expect(rowOf(late.body.data, ids.rowB).progressEntry).toMatchObject({ status: "submitted", official: false, recordedBy: live.user.id });
+    const eBFirst = rowOf(late.body.data, ids.rowB).progressEntry.id;
+    expect(await entryRows({ dailyLogId: ids.log2 })).toHaveLength(2);
+    // A row left unminted on a submitted day (recorded before this hole was closed): the day's approval is the net under it.
+    await prisma.quantityProgressEntry.delete({ where: { id: eBFirst } });
+    expect(await entryRows({ dailyLogId: ids.log2 })).toHaveLength(1);
+
+    const approved = await api.post(at(`/daily-logs/${DAY2}/approve`), {}, bearer(live.token));
+    ok(approved);
+    expect(approved.body.data.status).toBe("approved");
+    expect(rowOf(approved.body.data, ids.rowA).progressEntry).toMatchObject({ id: ids.eA, status: "submitted", official: false, approvedBy: null });
+    expect(rowOf(approved.body.data, ids.rowB).progressEntry).toMatchObject({ status: "submitted", official: false, recordedBy: live.user.id });
+    ids.eB = rowOf(approved.body.data, ids.rowB).progressEntry.id;
+    const entries = await entryRows({ dailyLogId: ids.log2 });
+    expect(entries.map((entry) => [entry.dailyLogQuantityId, entry.status, entry.approvedBy, entry.submissionId]).sort()).toEqual([[ids.rowA, "submitted", null, null], [ids.rowB, "submitted", null, null]].sort());
+    const audit = await prisma.auditEvent.findFirst({ where: { orgId: live.org.id, entityType: "daily_log", entityId: ids.log2, newStatus: "approved" }, orderBy: { occurredAt: "desc" } });
+    expect(audit.summaryJson.quantityEntries).toEqual({ minted: 1, synced: 1, kept: 0, retired: 0 });
+    expect(await prisma.auditEvent.count({ where: { orgId: live.org.id, entityType: "quantity_progress_entry", action: "approved" } })).toBe(1); // e1, by the writer, earlier
+    expect(await officialCount()).toBe(1);
+    expect(await evRow(pour.id)).toMatchObject({ pct: 50, progressStatus: "approved" });
+    refused(await api.post(at(`/daily-logs/${DAY2}/submit`), {}, bearer(live.token)), 409, "DAILY_LOG_APPROVED");
+    refused(await reviewRow(ids.rowB, "reject", "no", live.token, DAY2), 409, "DAILY_LOG_APPROVED");
+  });
+
+  it("day two: the site team cannot reject a row whose entry is bundled into a pending submission or is official progress", async () => {
+    ok(await api.post(at(`/daily-logs/${DAY2}/reopen`), { reason: "review" }, bearer(live.token)));
+    const bundled = await submitProgress(pour.id, { entryIds: [ids.eA] });
+    ok(bundled, 200);
+    ids.s3 = bundled.body.data.submission.id;
+    expect(bundled.body.data.submission).toMatchObject({ quantityComplete: 60, quantityPlanned: 100, pctComplete: 60 });
+    refused(await reviewRow(ids.rowA, "reject", "no", live.token, DAY2), 409, "QUANTITY_ENTRY_BUNDLED");
+    expect(await prisma.quantityProgressEntry.findUnique({ where: { id: ids.eA } })).toMatchObject({ status: "submitted", submissionId: ids.s3 });
+    ok(await approveProgress(pour.id, ids.s3));
+    expect(await officialCount()).toBe(2);
+    expect(await evRow(pour.id)).toMatchObject({ pct: 60, progressStatus: "approved" });
+    refused(await reviewRow(ids.rowA, "reject", "no", live.token, DAY2), 409, "DAILY_LOG_QUANTITY_LOCKED");
+    expect(await prisma.quantityProgressEntry.findUnique({ where: { id: ids.eA } })).toMatchObject({ status: "approved", submissionId: ids.s3, dailyLogQuantityId: ids.rowA });
+    expect(rowOf(await getLog(live.token, DAY2), ids.rowA)).toMatchObject({ status: "approved", progressEntry: { id: ids.eA, status: "approved", official: true } });
+    // The row the site team can still reject is the pending one; its entry goes, the official one stays.
+    ok(await reviewRow(ids.rowB, "reject", "Bay 6 not poured", live.token, DAY2));
+    expect(await prisma.quantityProgressEntry.findUnique({ where: { id: ids.eB } })).toBeNull();
+    expect(await prisma.activityProgress.count({ where: { activityId: pour.id } })).toBe(2);
+    expect(await evRow(pour.id)).toMatchObject({ pct: 60, progressStatus: "approved" });
+
+    // A row that stopped counting without the service (a rejected row whose entry stayed, the pre-fix shape): the day's next submit retires its free pending entry.
+    const extra = await addRow({ activityId: pour.id, boqItemId: concrete.id, quantity: 2, clientRequestId: "dlq-d2-c" }, members.site.token, DAY2);
+    ok(extra, 201);
+    ids.rowC = extra.body.data.entryId;
+    expect(rowOf(extra.body.data, ids.rowC).progressEntry).toBeNull(); // the day is open again
+    const resubmitted = await api.post(at(`/daily-logs/${DAY2}/submit`), {}, bearer(live.token));
+    ok(resubmitted);
+    const eC = rowOf(resubmitted.body.data, ids.rowC).progressEntry.id;
+    await prisma.dailyLogQuantity.update({ where: { id: ids.rowC }, data: { status: "rejected", rejectionReason: "stale" } });
+    const again = await api.post(at(`/daily-logs/${DAY2}/submit`), {}, bearer(live.token));
+    ok(again);
+    expect(await prisma.quantityProgressEntry.findUnique({ where: { id: eC } })).toBeNull();
+    expect(rowOf(again.body.data, ids.rowC).progressEntry).toBeNull();
+    const retired = await prisma.auditEvent.findFirst({ where: { orgId: live.org.id, entityType: "daily_log", entityId: ids.log2, newStatus: "submitted" }, orderBy: { occurredAt: "desc" } });
+    expect(retired.summaryJson.quantityEntries).toEqual({ minted: 0, synced: 0, kept: 1, retired: 1 });
+    expect(await prisma.auditEvent.findFirst({ where: { orgId: live.org.id, entityType: "quantity_progress_entry", entityId: eC, action: "deleted" } })).toMatchObject({ summaryJson: expect.objectContaining({ transition: "quantity_entry.daily_log_row_retired" }) });
+    refused(await submitProgress(pour.id, { bundleSubmittedThrough: "2026-09-30" }), 400, "QUANTITY_NO_ENTRIES_TO_BUNDLE");
+  });
+
   it("a member who may not read the BOQ records against the picker and reads the log without the item's code or allocation", async () => {
     const added = await addRow({ activityId: pour.id, boqItemId: concrete.id, quantity: 8, unitCode: "m3", clientRequestId: "dlq-row-6" }, members.noBoq.token);
     ok(added, 201);
     ids.row6 = added.body.data.entryId;
     const row = rowOf(added.body.data, ids.row6);
-    expect(row).toMatchObject({ quantity: 8, unitCode: "m3", boqItemId: concrete.id, boqItem: { id: concrete.id, description: "Concrete in foundations", unit: "Cu.M", unitCode: "m3" }, activity: { name: "Pour foundations" }, createdBy: members.noBoq.id, progressEntry: null, boqWithheld: { keys: ["allocationId", "boqItem.code"], reason: expect.stringContaining("may read the BOQ") } });
+    // The day is already submitted, so the row is pending the moment it is recorded — by its author, with no quantity on the entry block.
+    expect(row).toMatchObject({ quantity: 8, unitCode: "m3", boqItemId: concrete.id, boqItem: { id: concrete.id, description: "Concrete in foundations", unit: "Cu.M", unitCode: "m3" }, activity: { name: "Pour foundations" }, createdBy: members.noBoq.id, progressEntry: { status: "submitted", official: false, source: "daily_log", recordedBy: members.noBoq.id }, boqWithheld: { keys: ["allocationId", "boqItem.code"], reason: expect.stringContaining("may read the BOQ") } });
+    expect(row.progressEntry).not.toHaveProperty("quantity");
     expect(row).not.toHaveProperty("allocationId");
     expect(row.boqItem).not.toHaveProperty("code");
     expect(added.body.data.totals.quantities).toEqual(expect.arrayContaining([{ unitCode: "m3", quantity: 8, rows: 1 }]));
@@ -383,7 +493,7 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
     const entry = await prisma.quantityProgressEntry.findUnique({ where: { id: answer.body.data.entry.id } });
     expect(entry).toMatchObject({ source: "manual", submissionId: null, dailyLogId: null, dailyLogQuantityId: null, createdBy: live.user.id });
     expect(await prisma.quantityProgressEntry.count({ where: { submissionId: ids.s1 } })).toBe(1);
-    expect(await prisma.activityProgress.count({ where: { activityId: pour.id } })).toBe(1);
+    expect(await prisma.activityProgress.count({ where: { activityId: pour.id } })).toBe(2);
   });
 
   it("a member of another organisation gets the tenant 404 on every route and writes nothing", async () => {
@@ -396,7 +506,7 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
     refused(await api.post(at(`/daily-logs/${DAY}/submit`), {}, bearer(token)), 404, "PROJECT_NOT_FOUND");
     refused(await api.post(at(`/daily-logs/${DAY}/approve`), {}, bearer(token)), 404, "PROJECT_NOT_FOUND");
     expect(JSON.stringify(await entryRows())).toBe(before);
-    expect(await officialCount()).toBe(1);
+    expect(await officialCount()).toBe(2);
     // The daily log wrote nothing to any other activity's EV row: only the pour's official figure moved, through the writer.
     const after = (await api.get(at("/reports/ev"), bearer(live.token))).body.data.activityBreakdown;
     const strip = (rows) => JSON.stringify(rows.filter((row) => row.activityId !== "A100"));

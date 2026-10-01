@@ -304,3 +304,41 @@ describe("createEntries validates before it writes", () => {
     expect(mockPrisma.quantityProgressEntry.create.mock.calls[1][0].data).toMatchObject({ submissionId: "sub-pending", dailyLogId: "log-x", dailyLogQuantityId: "row-x", createdBy: "someone-else", source: "daily_log", status: "submitted" });
   });
 });
+
+describe("the daily log's rows and their pending entries (§4.1)", () => {
+  const row = { id: "row-1", activityId: "a-1", boqItemId: "item-1", allocationId: null, locationId: null, quantity: "5", unitCode: "m3", notes: null, createdBy: "site-1" };
+  const log = { id: "log-1", date: new Date("2026-09-07T00:00:00Z") };
+  const entry = (overrides = {}) => ({ id: "e-1", status: "submitted", submissionId: null, submission: null, dailyLogQuantityId: "row-1", activityId: "a-1", boqItemId: "item-1", quantity: new Prisma.Decimal(5), unitCode: "m3", source: "daily_log", createdBy: "site-1", ...overrides });
+  const call = (overrides = {}) => service.rejectDailyLogRowEntry({ orgId: "org-1", projectId: "project-1", row, actorId: "site-2", reason: "measured twice", ...overrides });
+
+  it("the site team's reject deletes the row's free pending entry, with the reason on the trail", async () => {
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([entry()]);
+    await expect(call()).resolves.toMatchObject({ id: "e-1" });
+    expect(mockPrisma.quantityProgressEntry.delete).toHaveBeenCalledWith({ where: { id: "e-1" } });
+    expect(mockAuditService.recordEvent).toHaveBeenCalledWith(expect.objectContaining({ entityId: "e-1", action: "deleted", actorId: "site-2", reason: "measured twice", summary: expect.objectContaining({ transition: "quantity_entry.daily_log_row_rejected", dailyLogQuantityId: "row-1" }) }));
+  });
+
+  it("an entry already approved progress locks the row; one bundled into a pending submission holds it; one the approver rejected is left as the trail", async () => {
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([entry({ status: "approved" })]);
+    await expect(call()).rejects.toMatchObject({ status: 409, code: "DAILY_LOG_QUANTITY_LOCKED", details: { entryId: "e-1" } });
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([entry({ submissionId: "sub-1", submission: { id: "sub-1", status: "submitted" } })]);
+    await expect(call()).rejects.toMatchObject({ status: 409, code: "QUANTITY_ENTRY_BUNDLED", details: { submissionId: "sub-1" } });
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([entry({ status: "rejected" })]);
+    await expect(call()).resolves.toBeNull();
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([]);
+    await expect(call()).resolves.toBeNull();
+    expect(mockPrisma.quantityProgressEntry.delete).not.toHaveBeenCalled();
+  });
+
+  it("minting retires the free pending entry of a row that no longer counts, and leaves a bundled or settled one", async () => {
+    mockPrisma.quantityProgressEntry.findMany
+      .mockResolvedValueOnce([entry()]) // retired row 1: free → deleted
+      .mockResolvedValueOnce([entry({ id: "e-2", submissionId: "sub-1", submission: { id: "sub-1", status: "submitted" } })]) // retired row 2: bundled → left
+      .mockResolvedValueOnce([entry({ id: "e-3", status: "rejected" })]); // retired row 3: settled → left
+    const result = await service.mintDailyLogEntries({ orgId: "org-1", projectId: "project-1", log, rows: [], actor: { id: "pm-1" }, retiredRows: [row, { ...row, id: "row-2" }, { ...row, id: "row-3" }] });
+    expect(result).toEqual({ minted: [], synced: [], kept: [], retired: ["e-1"] });
+    expect(mockPrisma.quantityProgressEntry.delete).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.quantityProgressEntry.delete).toHaveBeenCalledWith({ where: { id: "e-1" } });
+    expect(mockAuditService.recordEvent).toHaveBeenCalledWith(expect.objectContaining({ entityId: "e-1", summary: expect.objectContaining({ transition: "quantity_entry.daily_log_row_retired" }) }));
+  });
+});

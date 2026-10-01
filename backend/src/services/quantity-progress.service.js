@@ -1010,9 +1010,9 @@ const syncDailyLogRowEntry = async ({ tx = prisma, orgId, projectId, row, log, e
  * an approved or rejected one stays as the trail, its link to the row nulled
  * by the database (SET NULL) when the row goes.
  */
-const deleteDailyLogRowEntry = async ({ tx = prisma, orgId, projectId, row, actorId }) => {
-  const entries = await entriesForDailyLogRows({ tx, rowIds: [row.id] });
-  const bundled = entries.find((candidate) => EDITABLE_STATUSES.includes(candidate.status) && isOpenlyBundled(candidate));
+const deleteDailyLogRowEntry = async ({ tx = prisma, orgId, projectId, row, actorId, transition = "quantity_entry.daily_log_row_deleted", reason = null, entries = null }) => {
+  const found = entries || (await entriesForDailyLogRows({ tx, rowIds: [row.id] }));
+  const bundled = found.find((candidate) => EDITABLE_STATUSES.includes(candidate.status) && isOpenlyBundled(candidate));
   if (bundled) {
     throw new HttpError(409, "QUANTITY_ENTRY_BUNDLED", "This quantity is part of a progress submission awaiting approval; reject the submission first", {
       dailyLogQuantityId: row.id,
@@ -1021,7 +1021,7 @@ const deleteDailyLogRowEntry = async ({ tx = prisma, orgId, projectId, row, acto
       submissionStatus: bundled.submission.status,
     });
   }
-  const entry = entries.find((candidate) => EDITABLE_STATUSES.includes(candidate.status));
+  const entry = found.find((candidate) => EDITABLE_STATUSES.includes(candidate.status));
   if (!entry) return null;
   await tx.quantityProgressEntry.delete({ where: { id: entry.id } });
   await auditService.recordEvent({
@@ -1033,10 +1033,34 @@ const deleteDailyLogRowEntry = async ({ tx = prisma, orgId, projectId, row, acto
     action: auditService.ACTIONS.DELETED,
     actorId,
     oldStatus: entry.status,
+    reason: reason || undefined,
     oldSummary: auditSummary(entry),
-    summary: { transition: "quantity_entry.daily_log_row_deleted", dailyLogQuantityId: row.id, ...auditSummary(entry) },
+    summary: { transition, dailyLogQuantityId: row.id, ...auditSummary(entry) },
   });
   return entry;
+};
+
+/**
+ * The site team's per-row review rejects a row (§4.1: a row rejected by the
+ * site team does not count). Its free pending entry goes with that decision
+ * — deleted, never left as a free pending figure a date bundle would pick
+ * up and the writer make official. An entry already approved progress locks
+ * the row (409 DAILY_LOG_QUANTITY_LOCKED — the site team cannot reject
+ * what the approver made official; the correction is a new row); one
+ * bundled into a pending submission holds it (409 QUANTITY_ENTRY_BUNDLED);
+ * one rejected by the approver stays as the trail.
+ */
+const rejectDailyLogRowEntry = async ({ tx = prisma, orgId, projectId, row, actorId, reason = null }) => {
+  const entries = await entriesForDailyLogRows({ tx, rowIds: [row.id] });
+  const official = entries.find((entry) => entry.status === "approved");
+  if (official) {
+    throw new HttpError(409, "DAILY_LOG_QUANTITY_LOCKED", "This quantity is approved progress; record a correction as a new row", {
+      dailyLogQuantityId: row.id,
+      entryId: official.id,
+      entryStatus: official.status,
+    });
+  }
+  return deleteDailyLogRowEntry({ tx, orgId, projectId, row, actorId, transition: "quantity_entry.daily_log_row_rejected", reason, entries });
 };
 
 /**
@@ -1044,11 +1068,23 @@ const deleteDailyLogRowEntry = async ({ tx = prisma, orgId, projectId, row, acto
  * quantities row, dated the log's day, recorded by the row's author and
  * linked by dailyLogId + dailyLogQuantityId. A row that already has an entry
  * keeps it: a free pending one is synced to the row, a bundled, approved or
- * rejected one is left alone. Nothing here is official: the entries wait for
- * the progress approval writer like every other entry.
+ * rejected one is left alone. A row that no longer counts (`retiredRows`:
+ * draft, or rejected by the site team) has its free pending entry deleted —
+ * a figure the site withdrew is never left pending for a date bundle. The
+ * same call closes the day at approval and mints the rows a submitted log
+ * takes afterwards, so no counted row of a closed day is left unminted.
+ * Nothing here is official: the entries wait for the progress approval
+ * writer like every other entry.
  */
-const mintDailyLogEntries = async ({ tx = prisma, orgId, projectId, log, rows, actor }) => {
-  const result = { minted: [], synced: [], kept: [] };
+const mintDailyLogEntries = async ({ tx = prisma, orgId, projectId, log, rows, actor, retiredRows = [] }) => {
+  const result = { minted: [], synced: [], kept: [], retired: [] };
+  for (const row of retiredRows) {
+    const entries = await entriesForDailyLogRows({ tx, rowIds: [row.id] });
+    const free = entries.find((entry) => EDITABLE_STATUSES.includes(entry.status) && !isOpenlyBundled(entry));
+    if (!free) continue;
+    await deleteDailyLogRowEntry({ tx, orgId, projectId, row, actorId: actor?.id || null, transition: "quantity_entry.daily_log_row_retired", entries: [free] });
+    result.retired.push(free.id);
+  }
   if (!rows.length) return result;
   const existing = await entriesForDailyLogRows({ tx, rowIds: rows.map((row) => row.id) });
   const byRow = new Map();
@@ -1112,6 +1148,7 @@ module.exports = {
   dailyLogRowEntryGate,
   syncDailyLogRowEntry,
   deleteDailyLogRowEntry,
+  rejectDailyLogRowEntry,
   mintDailyLogEntries,
   ENTRY_STATUSES,
   CREATABLE_STATUSES,

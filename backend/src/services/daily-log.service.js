@@ -718,6 +718,27 @@ const updateLog = async ({ orgId, projectId, date, payload = {}, actor = null, v
   return serializeLog({ projectId, date: day, log });
 };
 
+// ─── PC-6 §4: the pending layer follows the day ────────────────────────────
+
+/**
+ * Mints a submitted entry for every quantities row that counts and retires
+ * the free pending entry of every row that does not (quantity-progress
+ * .service mintDailyLogEntries). Called wherever the day closes or a
+ * closed day changes: submit, approve, and — on a day already submitted —
+ * a row added, edited back into counting, or re-approved by the site team.
+ * Never on an open day: an open day's rows are site records only.
+ */
+const mintQuantities = async ({ tx, orgId, projectId, log, rows, actor }) =>
+  quantityProgress().mintDailyLogEntries({ tx, orgId, projectId, log, rows: rows.filter(counted), retiredRows: rows.filter((row) => !counted(row)), actor });
+
+const mintedSummary = (minted) => ({ minted: minted.minted.length, synced: minted.synced.length, kept: minted.kept.length, retired: (minted.retired || []).length });
+
+/** On a submitted day a counted row has a pending entry at once; on an open day nothing is minted. */
+const mintOnSubmittedDay = async ({ tx, orgId, projectId, log, row, actor }) => {
+  if (log.status !== LOG_STATUS.SUBMITTED || !counted(row)) return null;
+  return mintQuantities({ tx, orgId, projectId, log, rows: [row], actor });
+};
+
 const submitLog = async ({ orgId, projectId, date, actor, viewer = null }) => {
   const day = toDateOnly(date);
   const project = await ensureProject({ orgId, projectId });
@@ -730,8 +751,9 @@ const submitLog = async ({ orgId, projectId, date, actor, viewer = null }) => {
     const updated = await tx.dailyLog.update({ where: { id: row.id }, data: { status: LOG_STATUS.SUBMITTED, submittedAt: now, submittedBy: actor?.id || null } });
     // PC-6 §4: every quantities row that counts (not draft, not rejected by the
     // site team) becomes a SUBMITTED quantity progress entry — pending, never
-    // official: the progress approval writer decides, not this log.
-    const minted = await quantityProgress().mintDailyLogEntries({ tx, orgId, projectId, log: updated, rows: (row[QUANTITIES] || []).filter(counted), actor });
+    // official: the progress approval writer decides, not this log. A row
+    // that stopped counting since has its free pending entry retired.
+    const minted = await mintQuantities({ tx, orgId, projectId, log: updated, rows: row[QUANTITIES] || [], actor });
     await logAudit({
       tx,
       orgId,
@@ -741,7 +763,7 @@ const submitLog = async ({ orgId, projectId, date, actor, viewer = null }) => {
       actorId: actor?.id,
       oldStatus: row.status,
       newStatus: LOG_STATUS.SUBMITTED,
-      summary: { transition: "daily_log.submit", quantityEntries: { minted: minted.minted.length, synced: minted.synced.length, kept: minted.kept.length } },
+      summary: { transition: "daily_log.submit", quantityEntries: mintedSummary(minted) },
     });
     return loadLog({ tx, projectId, date: day, viewer });
   });
@@ -770,15 +792,20 @@ const approveLog = async ({ orgId, projectId, date, actor, viewer = null }) => {
     if (!row) throw new HttpError(404, "DAILY_LOG_NOT_FOUND", "Nothing has been logged for this day yet");
     if (row.status === LOG_STATUS.APPROVED) return { log: row, submittedBy: null };
     const now = new Date();
-    // Each section row's own review state — for the quantities section too,
-    // which is the row's site-record state and nothing more: the quantity
-    // progress entries the rows minted are NOT touched here (PC-6 §4). Only
+    // PC-6 §4: approving closes the day, so every quantities row that counts
+    // has its pending entry now — a row recorded after the day was submitted
+    // would otherwise sit in an approved log (which refuses a resubmit) and
+    // never reach the approvers. Minting is all this does to the pending
+    // layer: the entries are NOT approved here (they stay submitted). Only
     // the progress approval writer (progress.service) approves an entry.
+    const minted = await mintQuantities({ tx, orgId, projectId, log: row, rows: row[QUANTITIES] || [], actor });
+    // Each section row's own review state — for the quantities section too,
+    // which is the row's site-record state and nothing more.
     for (const key of SECTION_KEYS) {
       await tx[SECTIONS[key].model].updateMany({ where: { dailyLogId: row.id, status: ENTRY_STATUS.SUBMITTED }, data: { status: ENTRY_STATUS.APPROVED, reviewedBy: actor?.id || null, reviewedAt: now } });
     }
     const updated = await tx.dailyLog.update({ where: { id: row.id }, data: { status: LOG_STATUS.APPROVED, approvedAt: now, approvedBy: actor?.id || null } });
-    await logAudit({ tx, orgId, projectId, log: updated, action: auditService.ACTIONS.APPROVED, actorId: actor?.id, oldStatus: row.status, newStatus: LOG_STATUS.APPROVED, summary: { transition: "daily_log.approve", entriesApproved: totalsFor(row).awaitingReview } });
+    await logAudit({ tx, orgId, projectId, log: updated, action: auditService.ACTIONS.APPROVED, actorId: actor?.id, oldStatus: row.status, newStatus: LOG_STATUS.APPROVED, summary: { transition: "daily_log.approve", entriesApproved: totalsFor(row).awaitingReview, quantityEntries: mintedSummary(minted) } });
     return { log: await loadLog({ tx, projectId, date: day, viewer }), submittedBy: row.submittedBy };
   });
   if (submittedBy && submittedBy !== actor?.id) {
@@ -899,7 +926,10 @@ const addEntry = async ({ orgId, projectId, date, section, payload = {}, actor =
         sortOrder,
       },
     });
-    await logAudit({ tx, orgId, projectId, log: row, action: auditService.ACTIONS.CREATED, actorId: actor?.id, summary: { transition: "daily_log.entry_add", section, entryId: entry.id, status, partyId: party.partyId } });
+    // PC-6 §4: a row taken by a day already submitted is pending at once (an
+    // open day's row stays a site record until the day is submitted).
+    const minted = section === QUANTITIES ? await mintOnSubmittedDay({ tx, orgId, projectId, log: row, row: entry, actor }) : null;
+    await logAudit({ tx, orgId, projectId, log: row, action: auditService.ACTIONS.CREATED, actorId: actor?.id, summary: { transition: "daily_log.entry_add", section, entryId: entry.id, status, partyId: party.partyId, ...(minted ? { quantityEntries: mintedSummary(minted) } : {}) } });
     return { entryId: entry.id, replayed: false, scoped: party.scoped, log: await loadLog({ tx, projectId, date: day, viewer }) };
   });
   if (outcome.scoped) {
@@ -957,7 +987,9 @@ const updateEntry = async ({ orgId, projectId, date, section, entryId, payload =
       },
     });
     if (pendingEntry) await quantityProgress().syncDailyLogRowEntry({ tx, orgId, projectId, row: updated, log: row, entry: pendingEntry, actorId: actor?.id || null });
-    await logAudit({ tx, orgId, projectId, log: row, action: auditService.ACTIONS.UPDATED, actorId: actor?.id, summary: { transition: "daily_log.entry_update", section, entryId: updated.id, status: updated.status, ...(pendingEntry ? { quantityEntryId: pendingEntry.id } : {}) } });
+    // A row without an entry on a submitted day (one the site team had rejected and this edit resubmits) is pending again at once.
+    const minted = section === QUANTITIES && !pendingEntry ? await mintOnSubmittedDay({ tx, orgId, projectId, log: row, row: updated, actor }) : null;
+    await logAudit({ tx, orgId, projectId, log: row, action: auditService.ACTIONS.UPDATED, actorId: actor?.id, summary: { transition: "daily_log.entry_update", section, entryId: updated.id, status: updated.status, ...(pendingEntry ? { quantityEntryId: pendingEntry.id } : {}), ...(minted ? { quantityEntries: mintedSummary(minted) } : {}) } });
     return loadLog({ tx, projectId, date: day, viewer });
   });
   return serializeLog({ projectId, date: day, log });
@@ -993,13 +1025,24 @@ const reviewEntry = async ({ orgId, projectId, date, section, entryId, decision,
     const { row, entry: existing } = await findEntry({ tx, config, projectId, day, entryId });
     if (row.status === LOG_STATUS.APPROVED) throw new HttpError(409, "DAILY_LOG_APPROVED", "This day is approved. Reopen it to change anything.");
     const now = new Date();
+    // PC-6 §4: a quantities row the site team rejects stops counting, so the
+    // free pending entry it minted goes with the decision (never left for a
+    // date bundle to pick up); an entry already approved progress locks the
+    // row, one bundled into a pending submission holds it. Approving a row
+    // leaves its entry alone — the row's review state is never progress.
+    const rejectedEntry =
+      section === QUANTITIES && decision === "reject"
+        ? await quantityProgress().rejectDailyLogRowEntry({ tx, orgId, projectId, row: existing, actorId: actor?.id || null, reason: trimmedReason })
+        : null;
     const updated = await tx[config.model].update({
       where: { id: existing.id },
       data: decision === "approve"
         ? { status: ENTRY_STATUS.APPROVED, reviewedBy: actor?.id || null, reviewedAt: now, rejectionReason: null }
         : { status: ENTRY_STATUS.REJECTED, reviewedBy: actor?.id || null, reviewedAt: now, rejectionReason: trimmedReason },
     });
-    await logAudit({ tx, orgId, projectId, log: row, action: decision === "approve" ? auditService.ACTIONS.APPROVED : auditService.ACTIONS.REJECTED, actorId: actor?.id, reason: trimmedReason, summary: { transition: `daily_log.entry_${decision}`, section, entryId: updated.id, source: existing.source || null } });
+    // A row approved back on a submitted day counts again: pending at once.
+    const minted = section === QUANTITIES && decision === "approve" ? await mintOnSubmittedDay({ tx, orgId, projectId, log: row, row: updated, actor }) : null;
+    await logAudit({ tx, orgId, projectId, log: row, action: decision === "approve" ? auditService.ACTIONS.APPROVED : auditService.ACTIONS.REJECTED, actorId: actor?.id, reason: trimmedReason, summary: { transition: `daily_log.entry_${decision}`, section, entryId: updated.id, source: existing.source || null, ...(rejectedEntry ? { quantityEntryId: rejectedEntry.id } : {}), ...(minted ? { quantityEntries: mintedSummary(minted) } : {}) } });
     return { log: await loadLog({ tx, projectId, date: day, viewer }), entry: updated };
   });
   if (entry.createdBy && entry.createdBy !== actor?.id && entry.partyId) {
