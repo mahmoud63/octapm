@@ -22,7 +22,8 @@ import { day, dateTime, humanise } from '@/utilities/format'
 
 /** PROGRESS SOURCE: the provenance of the official figure, as the server records it on the approved row. */
 export function progressSourceLine(a: { pctComplete: number | null; approvedProgressSource?: string | null; approvedProgressUpdatedAt: string | null }): string {
-  if (a.pctComplete == null) return 'No approved progress yet. Nothing recorded on site is official until the progress approvers approve it.'
+  // The server answers 0 for an activity with no approved row at all (activity.service sanitizeActivity); the approved row's own stamp says whether one exists.
+  if (a.approvedProgressUpdatedAt == null && a.approvedProgressSource == null) return 'No approved progress yet. Nothing recorded on site is official until the progress approvers approve it.'
   const source = a.approvedProgressSource ? humanise(a.approvedProgressSource) : 'Not recorded'
   return `Progress source: ${source}${a.approvedProgressUpdatedAt ? ` · approved ${day(a.approvedProgressUpdatedAt)}` : ''}`
 }
@@ -30,10 +31,11 @@ export function progressSourceLine(a: { pctComplete: number | null; approvedProg
 /** One of the five figures as a line: its value in its unit with its truth, or a dash and the server's reason — never a zero in place of a withheld figure. */
 export function quantityFigureLine(figure: QuantityFigure | null | undefined, withheld: { reason: string } | null | undefined): { value: string; detail: string | null } {
   const reason = figure?.notAvailable?.reason ?? (figure == null ? withheld?.reason : null) ?? null
-  if (reason || figure == null || figure.value == null) return { value: '—', detail: reason ?? 'Not available' }
+  const value = figure?.value == null ? NaN : Number(figure.value)
+  if (reason || figure == null || !Number.isFinite(value)) return { value: '—', detail: reason ?? 'Not available' }
   const unit = figure.unitCode ? ` ${figure.unitCode}` : ''
   const detail = [figure.truth ? humanise(figure.truth) : null, figure.basis ? humanise(figure.basis) : null, figure.unitMatch === false ? 'unit differs from the item' : null].filter(Boolean).join(' · ')
-  return { value: `${figure.value}${unit}`, detail: detail || null }
+  return { value: `${value}${unit}`, detail: detail || null }
 }
 
 function Fact({ label, value }: { label: string; value: string | null | undefined }) {

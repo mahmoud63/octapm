@@ -63,7 +63,9 @@ export function describeEntry(section: DailyLogSection, e: DailyLogEntry): strin
       // The item is the server's to name or withhold: a reader without the BOQ sees
       // a dash and the reason, never a figure of the bill and never a zero.
       const item = e.boqItem?.description ?? (e.boqWithheld ? '—' : 'Item')
-      const quantity = e.quantity != null ? `${e.quantity} ${e.unitCode ?? e.unit ?? ''}`.trim() : '—'
+      // A Decimal(18,3) may arrive as "25.000": read as a number, shown without the padding.
+      const qty = e.quantity == null ? NaN : Number(e.quantity)
+      const quantity = Number.isFinite(qty) ? `${qty} ${e.unitCode ?? e.unit ?? ''}`.trim() : '—'
       return `${quantity} · ${item} — ${quantityStanding(e)}`
     }
   }

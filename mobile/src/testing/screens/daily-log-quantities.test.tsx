@@ -65,6 +65,8 @@ describe('quantities installed on the daily log', () => {
     expect(quantityStanding(quantityEntry({ status: 'approved', progressEntry: null }))).toBe('awaiting approval · source daily log')
     expect(quantityStanding(quantityEntry({ progressEntry: { status: 'approved', source: 'daily_log' } }))).toBe('approved as progress · source daily log')
     expect(quantityStanding(quantityEntry({ progressEntry: { status: 'rejected', source: 'daily_log' } }))).toBe('rejected · source daily log')
+    // A Decimal(18,3) serialised as a string still reads as a number.
+    expect(describeEntry('quantities', quantityEntry({ quantity: '25.000' as unknown as number }))).toBe('25 m3 · Concrete C30 to raft — awaiting approval · source daily log')
     // A withheld item is a dash, not a name and not a figure.
     expect(describeEntry('quantities', quantityEntry({ boqItem: null, boqWithheld: { reason: 'You do not have permission to read this section' } }))).toBe('120 m3 · — — awaiting approval · source daily log')
   })

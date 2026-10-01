@@ -67,8 +67,11 @@ beforeEach(() => {
 describe('progress source and quantities on an activity', () => {
   it('names the source of the official figure, and says plainly when there is none', () => {
     expect(progressSourceLine({ pctComplete: 40, approvedProgressSource: 'daily_log', approvedProgressUpdatedAt: '2026-09-15T12:00:00.000Z' })).toBe('Progress source: Daily log · approved 15 Sep 2026')
-    expect(progressSourceLine({ pctComplete: 40, approvedProgressSource: null, approvedProgressUpdatedAt: null })).toBe('Progress source: Not recorded')
+    expect(progressSourceLine({ pctComplete: 40, approvedProgressSource: null, approvedProgressUpdatedAt: '2026-09-15T12:00:00.000Z' })).toBe('Progress source: Not recorded · approved 15 Sep 2026')
+    // The server answers 0, not null, for an activity with no approved row; the stamp decides.
+    expect(progressSourceLine({ pctComplete: 0, approvedProgressSource: null, approvedProgressUpdatedAt: null })).toMatch(/^No approved progress yet/)
     expect(progressSourceLine({ pctComplete: null, approvedProgressSource: null, approvedProgressUpdatedAt: null })).toMatch(/^No approved progress yet/)
+    expect(progressSourceLine({ pctComplete: 0, approvedProgressSource: 'manual', approvedProgressUpdatedAt: '2026-09-15T12:00:00.000Z' })).toBe('Progress source: Manual · approved 15 Sep 2026')
   })
 
   it('prints a figure in its unit with its truth, and a dash with the reason for a withheld or missing one — never 0', () => {
