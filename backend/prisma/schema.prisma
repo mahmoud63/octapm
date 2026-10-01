@@ -2226,6 +2226,7 @@ model ChangeOrder {
   changeEvents    ChangeEvent[]
   rfis            Rfi[]
 
+  @@unique([projectId, ref]) // PC-7b (20261005060100): 0 duplicate groups on the shared database (record-ref-duplicates.js)
   @@index([projectId])
   @@index([projectId, status, archivedAt])
   @@index([budgetLineId])
@@ -2633,6 +2634,7 @@ model Risk {
   ballInCourtUser User?    @relation("RiskBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
   assigneeCompany Company? @relation("RiskAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
+  @@unique([projectId, ref]) // PC-7b (20261005060100): 0 duplicate groups on the shared database (record-ref-duplicates.js)
   @@index([projectId])
   @@index([projectId, status])
   @@index([projectId, status, archivedAt])
@@ -3890,6 +3892,7 @@ model NcrRecord {
   ballInCourtUser User?    @relation("NcrBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
   assigneeCompany Company? @relation("NcrAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
+  @@unique([projectId, ref]) // PC-7b (20261005060100): 0 duplicate groups on the shared database (record-ref-duplicates.js)
   @@index([projectId])
   @@index([projectId, status, dueDate])
   @@index([ownerUserId])
