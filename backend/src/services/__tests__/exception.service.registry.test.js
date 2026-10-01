@@ -88,8 +88,9 @@ describe("the API's own kind table agrees with the rules' statements", () => {
       const own = EXCEPTION_KIND_POLICY[kind];
       expect([kind, Boolean(own)]).toEqual([kind, true]);
       expect([kind, own.module]).toEqual([kind, rule.module]);
-      // The table may widen (call a kind BOQ-derived), never narrow.
-      if (rule.boqDerived) expect([kind, own.boqDerived]).toEqual([kind, true]);
+      // The table and the rule state the same BOQ derivation (PC-7b integration I:
+      // schedule_slip_on_mapped_item was withheld only by the table's widening).
+      expect([kind, own.boqDerived]).toEqual([kind, rule.boqDerived]);
       expect([kind, exceptionPolicy(kind, registry)]).toEqual([kind, { module: rule.module, boqDerived: rule.boqDerived || own.boqDerived }]);
     }
   });

@@ -44,7 +44,7 @@
  *   npm run test:live -- src/services/__live__/pc-7b-exception-engine.live.test.js
  */
 const { prisma } = require("../../config/db");
-const { createLiveOrg, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
+const { createLiveOrg, createLiveUser, dropLiveOrg, liveDescribe, mintAccessToken } = require("../../__live__/helpers");
 const { startApi } = require("./auth-live-kit");
 
 const engine = require("../exception-engine.service");
@@ -338,6 +338,39 @@ liveDescribe("PC-7b: the exception engine evaluates, refreshes, clears and respe
     expect(byKind("quantity_over_allocation").dataJson).toMatchObject({ activityId: acts.A, boqItemId: items.R1.id, allocationQuantity: 60, approvedVariationQuantity: 0, exceedance: 10 });
     expect(byKind("committed_over_budget").costCodeId).toBeTruthy();
     expect(slipOf("D").dataJson.boq.pendingItems.map((row) => row.boqItemId)).toEqual([items.R3.id]);
+  });
+
+  it("schedule_slip_on_mapped_item is BOQ-derived: a site engineer without boq:read is given none of the engine's slip rows — not listed, 404, not counted, a marker", async () => {
+    const tag = Date.now().toString(36);
+    const site = await createLiveUser(prisma, { orgId: live.org.id, name: "LiveTest site no BOQ", email: `live-pc7bint-i-site-${tag}@octapm-live.test`, role: "site_engineer" });
+    await prisma.projectAssignment.create({ data: { projectId: project.id, userId: site.id, role: "site_engineer", orgId: live.org.id } });
+    const template = await prisma.permissionTemplate.create({ data: { orgId: live.org.id, name: `LiveTest I site ${tag}`, baseRole: "site_engineer", tools: { create: [{ module: "boq", level: "none" }] } } });
+    await prisma.projectUserPermission.create({ data: { orgId: live.org.id, projectId: project.id, userId: site.id, templateId: template.id } });
+    const as = { authorization: `Bearer ${mintAccessToken(site)}` };
+    const slips = firstRows.filter((row) => row.kind === "schedule_slip_on_mapped_item");
+    expect(slips).toHaveLength(3);
+    // The PM reads them.
+    const pmList = await api.get(at("/controls/exceptions?kind=schedule_slip_on_mapped_item"), auth());
+    ok("pm list", pmList);
+    expect(pmList.body.data.data.map((row) => row.id).sort()).toEqual(slips.map((row) => row.id).sort());
+    // The site engineer reads schedule, but not the BOQ: withheld whole, with a marker and no count.
+    const list = await api.get(at("/controls/exceptions?kind=schedule_slip_on_mapped_item"), as);
+    ok("site list", list);
+    expect(list.body.data.data).toEqual([]);
+    expect(list.body.data.withheld.modules).toContain("boq");
+    expect(JSON.stringify(list.body.data.withheld)).not.toMatch(/\d/);
+    for (const row of slips) {
+      const one = await api.get(at(`/controls/exceptions/${row.id}`), as);
+      expect([row.id, one.status, one.body?.error?.code]).toEqual([row.id, 404, "EXCEPTION_NOT_FOUND"]);
+    }
+    const subject = await api.get(at(`/controls/exceptions?subject=activity:${acts.D}&status=all`), as);
+    expect(subject.body.data.data).toEqual([]);
+    const tile = await api.get("/api/v1/projects/workspace-dashboard", as);
+    ok("site tile", tile);
+    expect(tile.body.data.openExceptions.total).toBe(0);
+    expect(tile.body.data.openExceptions.withheld.modules).toContain("boq");
+    await prisma.projectUserPermission.deleteMany({ where: { userId: site.id } });
+    await prisma.projectAssignment.deleteMany({ where: { userId: site.id } });
   });
 
   it("a second run makes no duplicate and moves lastSeenAt only", async () => {

@@ -31,9 +31,12 @@
  * (IPC lines certified or paid on approved allocations) below the item's
  * amount, on an item the activity has an approved allocation of.
  *
- * Module schedule (schedule:read). The figures are schedule figures; which
- * items are pending is BOQ data and is kept under data.boq, which the reading
- * API leaves out for a member who may not read the BOQ.
+ * Module schedule (schedule:read), and BOQ-derived (PC-7b integration I): the
+ * row exists only because the activity has an approved BOQ allocation whose
+ * certification is pending, so its mere presence says the activity is mapped
+ * — mapping information. A member without boq:read is not given it at all
+ * (withheld whole by utils/boq-figures, not listed, not counted, a marker
+ * with the reason); the pending items stay under data.boq.
  */
 const reads = require("./_reads");
 const { THRESHOLDS, round2 } = require("./_thresholds");
@@ -76,7 +79,8 @@ const scheduleSlipOnMappedItem = {
   severity: "warning",
   subjectType: "activity",
   module: "schedule",
-  boqDerived: false,
+  // Its presence says the activity is mapped to a BOQ item with certification pending.
+  boqDerived: true,
   evaluate: async ({ ctx }) => {
     const threshold = THRESHOLDS.schedule_slip_on_mapped_item;
     const [activities, allocations, summary, progressMap, anchor] = await Promise.all([

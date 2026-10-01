@@ -103,7 +103,7 @@ describe("the registry", () => {
     committed_over_budget: ["money.js", "cost", false],
     actual_over_committed: ["money.js", "cost", false],
     forecast_over_revised: ["money.js", "cost", false],
-    schedule_slip_on_mapped_item: ["schedule.js", "schedule", false],
+    schedule_slip_on_mapped_item: ["schedule.js", "schedule", true],
   });
   const DATA_QUALITY_KINDS = Object.freeze({
     budget_truths_disagree: ["data-quality.js", "cost", false],
