@@ -214,4 +214,44 @@ liveDescribe("PC-7b integration fixer: a change event's prefill provenance, per 
     const after = await prisma.changeEventLine.findUnique({ where: { id: ids.thirdLine } });
     expect([after.quantity, Number(after.unitCost), Number(after.romAmount)]).toEqual([6, 10, 60]);
   });
+
+  // Item 3: the vendor portal shows a line's quantity, unit and activity; a
+  // sender without boq:read may not send an external party a line whose
+  // figures were withheld from them — 409 CHANGE_EVENT_LINE_WITHHELD with the
+  // reason, nothing written. Lines of their own go; a BOQ reader is unaffected.
+  it("an RFQ by a sender without boq:read that includes a withheld line is refused; their own lines go; a BOQ reader sends it", async () => {
+    ok("pm void third", await api.post(at(`/change-events/${ids.third}/void`), { reason: "LiveTest void" }, pm()));
+    const raised = await api.post(at(`/controls/exceptions/${ids.exception}/raise-change-event`), {}, pm());
+    ok("raise fourth", raised, 201);
+    const event = raised.body.data.changeEvent;
+    const withheldLine = event.lines[0];
+    // A line the PM adds by hand: the event's own, nothing withheld.
+    const own = await api.request("PATCH", at(`/change-events/${event.id}`), {
+      body: { lines: [{ id: withheldLine.id, description: withheldLine.description, activityId: withheldLine.activityId, costCodeId: withheldLine.costCodeId, quantity: withheldLine.quantity, unit: withheldLine.unit, unitCost: withheldLine.unitCost }, { description: "LiveTest own scope", quantity: 2, unit: "nr", unitCost: 15 }] },
+      headers: pm(),
+    });
+    ok("pm adds a line", own);
+    const ownLine = own.body.data.lines.find((line) => line.description === "LiveTest own scope");
+    const recipients = [{ companyName: "LiveTest Vendor", contactEmail: `vendor-${tag}@octapm-live.test` }];
+    const rfqCount = () => prisma.rfq.count({ where: { changeEventId: event.id } });
+    const send = (headers, body) => api.post(at(`/change-events/${event.id}/rfqs`), { recipients, ...body }, headers);
+    for (const [label, body] of [["the withheld line", { lineIds: [withheldLine.id] }], ["all lines", {}], ["both lines", { lineIds: [withheldLine.id, ownLine.id] }]]) {
+      const refused = await send(as(members.qs_noboq), body);
+      expect([label, refused.status, refused.body?.error?.code]).toEqual([label, 409, "CHANGE_EVENT_LINE_WITHHELD"]);
+      expect(refused.body.error.message).toMatch(/Part of this change event is withheld from you/);
+    }
+    expect(await rfqCount()).toBe(0);
+    expect((await prisma.changeEvent.findUnique({ where: { id: event.id } })).status).toBe("open");
+    // Their own line goes, and the vendor's portal shows only it.
+    const sent = await send(as(members.qs_noboq), { lineIds: [ownLine.id] });
+    ok("qs sends their own line", sent, 201);
+    expect(sent.body.data.rfqs[0].lineIds).toEqual([ownLine.id]);
+    const token = new URL(sent.body.data.rfqs[0].portalUrl).pathname.split("/").pop();
+    const portal = await api.get(`/api/v1/public/rfqs/${token}`);
+    ok("portal", portal);
+    expect(portal.body.data.changeEvent.lines.map((line) => line.id)).toEqual([ownLine.id]);
+    // A BOQ reader sends the withheld line as before.
+    const pmSent = await api.post(at(`/change-events/${event.id}/rfqs`), { recipients: [{ companyName: "LiveTest Vendor 2", contactEmail: `vendor2-${tag}@octapm-live.test` }], lineIds: [withheldLine.id] }, pm());
+    ok("pm sends the withheld line", pmSent, 201);
+  });
 });

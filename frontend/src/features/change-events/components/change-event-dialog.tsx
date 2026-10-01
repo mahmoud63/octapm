@@ -195,6 +195,15 @@ function SendRfqDialog({
     setInstructions('')
     setLineIds(new Set())
   }, [open, event])
+  // A line whose quantity, unit or activity the server withheld from this
+  // member is not theirs to send to a vendor (the portal shows them): it
+  // cannot be picked, and "all lines" is not offered while one exists (the
+  // server refuses either: 409 CHANGE_EVENT_LINE_WITHHELD).
+  const lineBlocked = (lineId: string) =>
+    (['quantity', 'unit', 'activityId'] as const).some((field) =>
+      isChangeEventFieldWithheld(event, field, lineId)
+    )
+  const anyBlocked = (event.lines ?? []).some((line) => lineBlocked(line.id))
   const vendors = (commitments?.items ?? []).filter((commitment) =>
     ['approved', 'executed', 'draft', 'pending'].includes(commitment.status)
   )
@@ -356,15 +365,31 @@ function SendRfqDialog({
             </div>
             <div className='space-y-1'>
               <Label>Lines to quote</Label>
-              <p className='text-xs text-muted-foreground'>
-                {lineIds.size ? `${lineIds.size} selected` : 'All lines'}
+              <p
+                className='text-xs text-muted-foreground'
+                data-testid='uat-rfq-lines-scope'
+              >
+                {lineIds.size
+                  ? `${lineIds.size} selected`
+                  : anyBlocked
+                    ? 'Choose the lines to quote — some are withheld from you'
+                    : 'All lines'}
               </p>
             </div>
           </div>
           <div className='max-h-40 space-y-1 overflow-auto rounded-md border p-2 text-sm'>
             {(event.lines ?? []).map((line) => (
-              <label key={line.id} className='flex items-center gap-2'>
+              <label
+                key={line.id}
+                className='flex items-center gap-2'
+                title={
+                  lineBlocked(line.id) ? event.sourceWithheld?.reason : undefined
+                }
+                data-testid={`uat-rfq-line-${line.id}`}
+                data-blocked={lineBlocked(line.id) || undefined}
+              >
                 <Checkbox
+                  disabled={lineBlocked(line.id)}
                   checked={lineIds.has(line.id)}
                   onCheckedChange={(checked) =>
                     setLineIds((current) => {
@@ -403,7 +428,11 @@ function SendRfqDialog({
             Cancel
           </Button>
           <Button
-            disabled={!recipients.length || send.isPending}
+            disabled={
+              !recipients.length ||
+              send.isPending ||
+              (anyBlocked && lineIds.size === 0)
+            }
             onClick={submit}
             data-testid='uat-rfq-send-submit'
           >

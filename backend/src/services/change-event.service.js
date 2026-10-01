@@ -541,6 +541,9 @@ const withheldForCaller = async ({ orgId, projectId, event, access }) => {
   return entry ? changeEventWithheldFields(event, entry) : null;
 };
 const fieldWithheld = () => new HttpError(409, "CHANGE_EVENT_FIELD_WITHHELD", CHANGE_EVENT_EXCEPTION_WITHHELD);
+// What the vendor portal shows of a line (portalLines): a line any of whose
+// shown fields was withheld from the sender is not theirs to send out.
+const RFQ_DISCLOSED_FIELDS = Object.freeze(["quantity", "unit", "activityId"]);
 
 /**
  * Updates the header and, when `lines` is sent, replaces the lines (quoted
@@ -613,8 +616,15 @@ const rotateToken = async ({ tx = prisma, rfq, dueDate }) => {
   return token;
 };
 
-/** Sends RFQs for a change event: one per recipient (a commitment's vendor or an ad-hoc contact), each with a personal link. */
-const sendRfqs = async ({ orgId, projectId, changeEventId, payload = {}, actor = null }) => {
+/**
+ * Sends RFQs for a change event: one per recipient (a commitment's vendor or
+ * an ad-hoc contact), each with a personal link. PC-7b: a sender without
+ * boq:read may not send a vendor a line whose quantity, unit or activity the
+ * answer withheld from them (taken from a BOQ-derived exception) — the RFQ
+ * that would include one (by lineIds, or "all lines" when none is named) is
+ * refused with 409 CHANGE_EVENT_LINE_WITHHELD and the reason, nothing written.
+ */
+const sendRfqs = async ({ orgId, projectId, changeEventId, payload = {}, actor = null, access = null }) => {
   const project = await ensureProject({ orgId, projectId });
   const event = await loadEvent({ orgId, projectId, changeEventId });
   assertEditable(event);
@@ -623,6 +633,13 @@ const sendRfqs = async ({ orgId, projectId, changeEventId, payload = {}, actor =
   const dueDate = optionalDate(payload.dueDate, "dueDate");
   const instructions = trimOrNull(payload.instructions)?.slice(0, 4000) || null;
   const lineIds = uniqueIds(Array.isArray(payload.lineIds) ? payload.lineIds : []).filter((id) => event.lines.some((line) => line.id === id));
+  const withheld = await withheldForCaller({ orgId, projectId, event, access });
+  if (withheld) {
+    const included = lineIds.length ? lineIds : event.lines.map((line) => line.id);
+    if (included.some((id) => (withheld.lines.get(id) || []).some((field) => RFQ_DISCLOSED_FIELDS.includes(field)))) {
+      throw new HttpError(409, "CHANGE_EVENT_LINE_WITHHELD", `${CHANGE_EVENT_EXCEPTION_WITHHELD}. A line whose figures were withheld from you cannot be sent to a vendor by you: choose only the other lines, or ask a member who may read them to send it`);
+    }
+  }
   const commitmentIds = uniqueIds(recipients.map((recipient) => recipient.commitmentId));
   const commitments = commitmentIds.length ? await prisma.commitment.findMany({ where: { id: { in: commitmentIds }, projectId }, include: { vendorCompany: { select: { id: true, name: true, email: true, contactName: true } }, projectParty: { select: { contactEmail: true, contactName: true } } } }) : [];
   const commitmentById = new Map(commitments.map((row) => [row.id, row]));

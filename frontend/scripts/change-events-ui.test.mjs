@@ -105,4 +105,13 @@ assert.match(dialog, /const rowAmount = \(row: LineRow\) =>\s*row\.withheld\.inc
 assert.doesNotMatch(dialog, /\{line\.quantity\} \{line\.unit/, "the RFQ list never prints a withheld quantity as 'undefined'")
 assert.match(service, /new HttpError\(409, "CHANGE_EVENT_FIELD_WITHHELD"/, 'the server refuses a withheld field sent back')
 
+// PC-7b integration fixer 3: a line whose quantity, unit or activity was
+// withheld from the sender is not theirs to send to a vendor — the RFQ dialog
+// does not offer it, nor "all lines" while one exists; the server refuses it.
+assert.match(dialog, /\(\['quantity', 'unit', 'activityId'\] as const\)\.some\(\(field\) =>\s*isChangeEventFieldWithheld\(event, field, lineId\)/, 'the RFQ dialog knows the lines the portal would disclose')
+assert.match(dialog, /disabled=\{lineBlocked\(line\.id\)\}/, 'a withheld line cannot be picked for an RFQ')
+assert.match(dialog, /\(anyBlocked && lineIds\.size === 0\)/, '"all lines" is not sent while a withheld line exists')
+assert.match(service, /new HttpError\(409, "CHANGE_EVENT_LINE_WITHHELD"/, 'the server refuses an RFQ of a withheld line')
+assert.match(service, /const RFQ_DISCLOSED_FIELDS = Object\.freeze\(\["quantity", "unit", "activityId"\]\)/, 'the server and the dialog name the same disclosed fields')
+
 console.log('change-events-ui: ok')
