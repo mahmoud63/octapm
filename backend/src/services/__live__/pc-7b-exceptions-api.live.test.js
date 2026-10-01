@@ -373,8 +373,11 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
       [ex.structure.id, "status_changed", "snoozed"],
       [ex.forecast.id, "status_changed", "dismissed"],
     ]);
-    // No figure in any summary.
-    for (const event of audit) expect(JSON.stringify(event.summaryJson)).not.toMatch(/1200|1000|5000|4000/);
+    // No figure in any summary. The subject's id is a random UUID, which may
+    // itself contain "4000" (PC-7b integration O: 1 run in 15 failed on
+    // "…-b8e4000c841a"), so ids are taken out before the figures are looked for.
+    const UUIDS = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+    for (const event of audit) expect(JSON.stringify(event.summaryJson).replace(UUIDS, "<id>")).not.toMatch(/1200|1000|5000|4000/);
   });
 
   it("raise change event: ONE draft change event, prefilled, amount blank, the typed link — and nothing else written", async () => {
