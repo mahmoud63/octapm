@@ -64,6 +64,7 @@ import {
   daysFromNow,
   formatDate,
 } from '../lib/submittal-workflow'
+import { RaiseChangeEventButton } from '@/features/controls/exceptions/raise-change-event-button'
 import { RfiPeopleList } from './rfi-people-list'
 
 const NONE = '__none'
@@ -628,6 +629,12 @@ export function SubmittalDetailDialog({
             </DialogHeader>
 
             <div className='flex flex-wrap gap-2' data-testid='uat-sub-actions'>
+              {/* PC-7b: a draft change event prefilled from this submittal (typed link). */}
+              <RaiseChangeEventButton
+                projectId={projectId}
+                source={{ type: 'submittal', id: submittal.id }}
+                testId='uat-sub-raise-change-event'
+              />
               {submittable && canSubmit && (
                 <Button
                   size='sm'

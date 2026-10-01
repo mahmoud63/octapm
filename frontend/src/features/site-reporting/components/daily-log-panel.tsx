@@ -63,6 +63,7 @@ import {
   SectionCard,
   type DailyLogQuantityEntry,
 } from './daily-log-sections'
+import { RaiseChangeEventButton } from '@/features/controls/exceptions/raise-change-event-button'
 import { DailyLogSettingsDialog } from './daily-log-settings-dialog'
 import { ManpowerReport } from './manpower-report'
 
@@ -744,6 +745,14 @@ export function DailyLogPanel({
               >
                 <Download className='mr-1 h-4 w-4' /> PDF
               </Button>
+            )}
+            {/* PC-7b: a draft change event prefilled from this day's log (typed link). */}
+            {log.exists && log.id && (
+              <RaiseChangeEventButton
+                projectId={projectId}
+                source={{ type: 'daily_log', id: log.id }}
+                testId='uat-dailylog-raise-change-event'
+              />
             )}
           </div>
           {locked && (

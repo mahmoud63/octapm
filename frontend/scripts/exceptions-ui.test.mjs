@@ -59,6 +59,10 @@ for (const action of ['review', 'snooze', 'dismiss', 'raiseChangeEvent', 'associ
   )
 }
 for (const [name, source] of Object.entries(all)) {
+  // The record screens' button (RFI, daily log …) is the one exception: those
+  // records carry no actions booleans, so it follows the server's permission
+  // matrix for change_event create — and the prefill call decides on press.
+  if (name === 'raise-change-event-button.tsx') continue
   assert.ok(!source.includes('useCanPerform'), `${name}: exception actions never use a client permission check`)
   assert.ok(!/role\s*===/.test(source), `${name}: exception actions never read a role`)
 }
@@ -130,5 +134,24 @@ assert.match(tile, /<WithheldNote withheld=\{data\.withheld\}/, 'the tile says w
 assert.match(tile, /project\.withheld \?/, "a project's withheld exceptions are said with the reason, never as 0")
 const dashboard = read('src/features/dashboard/index.tsx')
 assert.match(dashboard, /data\.openExceptions && <OpenExceptionsCard data=\{data\.openExceptions\} \/>/, 'the workspace dashboard draws the tile the server sends')
+
+// ── Raise change event on the source records ────────────────────────────
+const button = all['raise-change-event-button.tsx']
+assert.match(button, /const allowed = useCanPerform\('change_event', 'create'\)\s*\n\s*const \[open, setOpen\] = useState\(false\)\s*\n\s*if \(!allowed\) return null/, 'the record button is drawn only where the server grants change_event create')
+assert.match(button, /<RaiseChangeEventDialog/, 'the record button opens the prefilled form')
+assert.ok(!rowParts.includes('RaiseChangeEventButton') && !page.includes('RaiseChangeEventButton'), 'an exception row is gated by its own actions boolean, not the record button')
+for (const [file, type] of [
+  ['src/features/doc-control/components/rfi-detail-dialog.tsx', 'rfi'],
+  ['src/features/site-reporting/components/daily-log-panel.tsx', 'daily_log'],
+  ['src/features/quality/components/quality-dashboard.tsx', 'ncr'],
+  ['src/features/punch/components/punch-item-detail.tsx', 'punch_item'],
+  ['src/features/drawings/components/sheet-viewer.tsx', 'drawing_revision'],
+  ['src/features/doc-control/components/submittal-detail-dialog.tsx', 'submittal'],
+  ['src/features/meetings/components/meetings-dashboard.tsx', 'meeting_action_item'],
+]) {
+  const screen = read(file)
+  assert.equal((screen.match(/<RaiseChangeEventButton/g) ?? []).length, 1, `${file}: one Raise change event button`)
+  assert.ok(screen.includes(`source={{ type: '${type}', id:`), `${file}: raises with the typed ${type} source`)
+}
 
 console.log('exceptions-ui: ok')
