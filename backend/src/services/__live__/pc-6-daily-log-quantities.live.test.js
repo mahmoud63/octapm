@@ -582,4 +582,68 @@ liveDescribe("PC-6: the daily log's quantities section mints pending entries tha
     const strip = (rows) => JSON.stringify(rows.filter((row) => row.activityId !== "A100"));
     expect(strip(after)).toBe(strip(JSON.parse(evBefore)));
   });
+
+  // Verification finding (blocker): GET /activities/{id}/detail handed a member without boq:read the BOQ item's code and
+  // id, the allocation id and the per-entry installed quantity (the bundled entries, whole, on each listed submission),
+  // and the frozen quantityComplete / quantityPlanned / quantityUnit of every submission and approved-history row.
+  it("the activity detail for a member who may not read the BOQ: its submissions go through the submission rule (no quantity figures, each bundled entry under the ledger rule) and its approved history carries no frozen quantity — with a pending and an approved bundle", async () => {
+    // Distinctive figures: a typed planned quantity and an entry no other case uses.
+    const entry = await api.post(at("/quantity-progress"), { activityId: pour.id, boqItemId: concrete.id, quantity: 7.125, date: DAY, status: "submitted", clientRequestId: "dlq-detail-1" }, bearer(live.token));
+    ok(entry, 201);
+    const entryId = entry.body.data.entry.id;
+    const bundle = await api.post(at(`/activities/${pour.id}/progress`), { entryIds: [entryId] }, bearer(live.token));
+    ok(bundle, 200);
+    const submissionId = bundle.body.data.submission.id;
+    const detailFor = async (token) => {
+      const answer = await api.get(at(`/activities/${pour.id}/detail`), bearer(token));
+      ok(answer);
+      return answer;
+    };
+    const SUBMISSION_KEYS = ["quantityComplete", "quantityPlanned", "quantityUnit", "quantity"];
+    const ENTRY_KEYS = ["quantity", "unitCode", "boqItemId", "boqItem", "allocationId"];
+    const assertWithheld = (answer, { approvedRows }) => {
+      const progress = answer.body.data.sections.progress;
+      expect(progress.allowed).toBe(true);
+      // The percentage, the method and the provenance are progress data and stay.
+      expect(progress.method).toMatchObject({ method: "quantity" });
+      expect(progress.pctComplete.value).toEqual(expect.any(Number));
+      expect(progress.installedQuantity).toMatchObject({ value: null, withheld: true });
+      const mine = progress.submissions.items.find((row) => row.id === submissionId);
+      expect(mine).toMatchObject({ method: "quantity", pctComplete: expect.any(Number), quantityEntryIds: [entryId], progressSource: { entries: 1 }, boqWithheld: { keys: expect.arrayContaining(["quantityComplete", "quantityPlanned", "quantityUnit"]), reason: expect.stringContaining("may read the BOQ") } });
+      expect(progress.submissions.items.length).toBeGreaterThanOrEqual(3);
+      for (const row of progress.submissions.items) {
+        for (const key of SUBMISSION_KEYS) expect(row).not.toHaveProperty(key);
+        for (const bundled of row.quantityEntries || []) {
+          for (const key of ENTRY_KEYS) expect(bundled).not.toHaveProperty(key);
+          expect(bundled).toMatchObject({ id: expect.any(String), status: expect.any(String), provenance: expect.any(Object), boqWithheld: { keys: expect.arrayContaining(["quantity", "boqItemId"]) } });
+        }
+      }
+      expect(mine.quantityEntries).toHaveLength(1);
+      expect(progress.approvedHistory.items).toHaveLength(approvedRows);
+      expect(progress.approvedHistory.total).toBe(approvedRows);
+      for (const row of progress.approvedHistory.items) {
+        for (const key of ["quantityComplete", "quantityPlanned", "quantityUnit"]) expect(row).not.toHaveProperty(key);
+        expect(row).toMatchObject({ id: expect.any(String), pctComplete: expect.any(Number), progressMethod: "quantity", approvedAt: expect.any(String), boqWithheld: { keys: ["quantityComplete", "quantityPlanned", "quantityUnit"], reason: expect.stringContaining("may read the BOQ") } });
+      }
+      // Nothing of the bill anywhere in the answer: the item's id and code, the allocation, a quantity or its unit code
+      // (the percentage is progress data — 60 + 7.125 of 100 reads 67.125% — so a figure is looked for by its key).
+      const body = JSON.stringify(answer.body.data);
+      const found = [concrete.id, ids.pourAllocation, '"code":"1.1"', '"quantity":', '"quantityComplete":', '"quantityPlanned":', '"unitCode":"m3"'].filter((needle) => body.includes(needle));
+      expect(found).toEqual([]);
+    };
+    const approvedBefore = await prisma.activityProgress.count({ where: { activityId: pour.id, status: "approved" } });
+    // The pending bundle: the site engineer and the cost controller on a boq:none template.
+    assertWithheld(await detailFor(members.noBoq.token), { approvedRows: approvedBefore });
+    assertWithheld(await detailFor(members.costNoBoq.token), { approvedRows: approvedBefore });
+    // A BOQ reader's detail carries them: the entries whole, the frozen quantities.
+    const full = (await detailFor(live.token)).body.data.sections.progress;
+    expect(full.submissions.items.find((row) => row.id === submissionId)).toMatchObject({ quantityPlanned: 100, quantityUnit: "m3", quantityEntries: [{ id: entryId, quantity: 7.125, unitCode: "m3", boqItemId: concrete.id, boqItem: { code: "1.1" } }] });
+    expect(full.submissions.items.find((row) => row.id === submissionId).boqWithheld).toBeUndefined();
+    expect(full.approvedHistory.items[0]).toMatchObject({ quantityComplete: expect.any(Number), quantityPlanned: 100, quantityUnit: "m3" });
+    expect(full.approvedHistory.items[0].boqWithheld).toBeUndefined();
+    // Approved: the same member, the same rule, one more history row.
+    ok(await api.post(at(`/activities/${pour.id}/progress-submissions/${submissionId}/approve`), {}, bearer(live.token)));
+    assertWithheld(await detailFor(members.noBoq.token), { approvedRows: approvedBefore + 1 });
+    assertWithheld(await detailFor(members.costNoBoq.token), { approvedRows: approvedBefore + 1 });
+  });
 });

@@ -537,7 +537,19 @@ BOQ access: `utils/boq-figures` (`QUANTITY_FIGURES_WITHHELD`, `withheldBoqItemQu
 quantity — installed, certified, paid, received, issued, committed, the planned quantity and the comparison — from
 a member who may not read the BOQ; cost, IPC, inventory or commitment read does not unlock them. The answer is a
 dash with the reason, never zero; the activity's approved % complete and method are progress data and follow
-progress:read. Proof: `backend/src/services/__live__/pc-6-quantity-views.live.test.js` (LiveTest org; the
+progress:read. **The activity detail's progress section is under the same rule** (verification fix, 2026-10-01 —
+a blocker: `GET /activities/{id}/detail` lists the activity's submissions through `listProgressSubmissions`, which
+reads the bundled entries whole, and `withheldActivityDetail` withheld only `installedQuantity`, so a member
+without boq:read was handed the BOQ item's code and id, the allocation id, each entry's quantity and the frozen
+`quantityComplete / quantityPlanned / quantityUnit` of every submission and approved-history row): each listed
+submission now goes through `withheldProgressSubmission` (its quantity figures out, each bundled entry under the
+ledger's rule) and each approved-history row through `withheldApprovedProgress` (`boqWithheld { keys, reason }`);
+the percentage, method, source, who approved it when and PROGRESS SOURCE stay. The typed method configuration
+(`ActivityProgressMethod.plannedQuantity`, `quantityUnit`) is the progress module's own typed figure and is shown to
+progress readers there as on `GET /activities/{id}/progress-method` (reported to the owner). Proven live
+(`pc-6-daily-log-quantities`: a site engineer and a cost controller on a boq:none template, with a pending and an
+approved bundle; a BOQ reader still gets the figures) and mutation-proven (either mapping dropped fails).
+Proof of the views: `backend/src/services/__live__/pc-6-quantity-views.live.test.js` (LiveTest org; the
 seeded entries, the two certificates — one a quarter paid —, the receipt/issue/return, rebar in kg against tonnes,
 the draft commitment, the percent-method activity, the member without BOQ read, tenant 404s) and
 `pc-6-quantity-views-showcase.differential.live.test.js` (Marina Bay, read-only: every item's and activity's

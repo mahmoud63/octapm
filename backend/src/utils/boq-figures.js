@@ -1460,9 +1460,27 @@ const withheldActivityDetail = (detail, access = FULL_ACCESS) => {
   }
   // PC-6: the progress section's installed quantity is Σ approved quantity
   // entries per BOQ item — the bill's figure; the approved % complete beside
-  // it is progress data and stays.
-  if (sections.progress && sections.progress.allowed && has(sections.progress, "installedQuantity")) {
-    sections.progress = { ...sections.progress, installedQuantity: withheldQuantityFigure() };
+  // it is progress data and stays. The submissions it lists go through the
+  // submission rule (their quantity figures out, each bundled entry under
+  // the ledger's rule — the list reads the entries whole), and each approved
+  // row of the history loses the frozen quantities it was approved with:
+  // the same figures the ledger, the queue and the register withhold.
+  if (sections.progress && sections.progress.allowed) {
+    const progress = { ...sections.progress };
+    if (has(progress, "installedQuantity")) progress.installedQuantity = withheldQuantityFigure();
+    if (progress.submissions && Array.isArray(progress.submissions.items)) {
+      progress.submissions = {
+        ...pageOf(progress.submissions),
+        items: progress.submissions.items.map((row) => withheldProgressSubmission(row, access)),
+      };
+    }
+    if (progress.approvedHistory && Array.isArray(progress.approvedHistory.items)) {
+      progress.approvedHistory = {
+        ...pageOf(progress.approvedHistory),
+        items: progress.approvedHistory.items.map((row) => withheldApprovedProgress(row, access)),
+      };
+    }
+    sections.progress = progress;
   }
   return { ...detail, sections };
 };
@@ -1520,6 +1538,22 @@ const withheldProgressSubmission = (submission, access = FULL_ACCESS) => {
     : {};
   if (!keys.length) return Object.keys(entries).length ? { ...submission, ...entries } : submission;
   return { ...withoutKeys(submission, keys), ...entries, boqWithheld: { keys, reason: PROGRESS_SUBMISSION_WITHHELD } };
+};
+
+// An approved progress record (an ActivityProgress row, as the activity
+// detail's history lists it) carries the quantities it was approved with —
+// installed, planned and their unit, frozen. The same figures as the
+// submission's: BOQ readers only. Its percentage, method, source and who
+// approved it when are progress data and stay.
+const APPROVED_PROGRESS_BOQ_KEYS = ["quantityComplete", "quantityPlanned", "quantityUnit"];
+const APPROVED_PROGRESS_WITHHELD =
+  "The quantity figures of an approved progress record are available only to members who may read the BOQ";
+
+const withheldApprovedProgress = (row, access = FULL_ACCESS) => {
+  if (access.boq || !row || typeof row !== "object" || Array.isArray(row)) return row;
+  const keys = APPROVED_PROGRESS_BOQ_KEYS.filter((key) => has(row, key));
+  if (!keys.length) return row;
+  return { ...withoutKeys(row, keys), boqWithheld: { keys, reason: APPROVED_PROGRESS_WITHHELD } };
 };
 
 const withheldProgressSubmissions = (submissions, access = FULL_ACCESS) =>
@@ -1697,6 +1731,9 @@ module.exports = {
   PROGRESS_SUBMISSION_WITHHELD,
   withheldProgressSubmission,
   withheldProgressSubmissions,
+  APPROVED_PROGRESS_BOQ_KEYS,
+  APPROVED_PROGRESS_WITHHELD,
+  withheldApprovedProgress,
   // PC-6 quantity views
   QUANTITY_FIGURES_WITHHELD,
   withheldQuantityFigure,
