@@ -693,6 +693,77 @@ const assertQuantityFigureStated = async ({ orgId, projectId, activityId, quanti
 };
 
 /**
+ * A typed quantity states work installed (integration decision, 2026-10-01,
+ * for consistency with the entries rule "record nothing for no work"). A
+ * typed quantityComplete of 0 on a quantity-measured activity with no
+ * entries was accepted, and approving it wrote an official 0% row. It is
+ * refused — 400 QUANTITY_INVALID { field: 'quantityComplete' } — where the
+ * submission is made and, for one already in the queue, in the writer. The
+ * figure is read at the entries' scale (three places), so 0.0004 is zero.
+ * The route validators keep "zero or more" (a negative or a non-number is a
+ * VALIDATION_ERROR there), exactly as the entries' routes do; the service is
+ * the one place that says zero is no figure, on every path (the activity
+ * route, bulk-progress, the daily report's linked progress).
+ */
+const TYPED_ZERO_MESSAGE =
+  'A typed quantityComplete must be greater than zero: a typed 0 is not an installed quantity — record nothing for no work';
+
+const assertTypedQuantityPositive = ({ activityId, quantityComplete, submissionId = null }) => {
+  if (quantityComplete === undefined || quantityComplete === null || quantityComplete === '') return;
+  const typed = quantityProgressService().quantityDecimal(quantityComplete, 'quantityComplete');
+  if (typed && typed.greaterThan(0)) return;
+  throw new HttpError(
+    400,
+    'QUANTITY_INVALID',
+    submissionId ? `${TYPED_ZERO_MESSAGE}. This submission is not approved; reject it` : TYPED_ZERO_MESSAGE,
+    { field: 'quantityComplete', activityId, ...(submissionId ? { submissionId } : {}) },
+  );
+};
+
+/**
+ * A typed figure above zero but below the activity's official installed
+ * figure stays allowed — approving it is an approver's explicit approval of
+ * a lower figure, written as a new official row (no earlier row changes) —
+ * but it is never silent: the submission's answer and the approval's answer
+ * carry warnings: [{ code: 'QUANTITY_BELOW_OFFICIAL', officialInstalled,
+ * typed, message }] (withheld from a member who may not read the BOQ like
+ * the figures themselves; utils/boq-figures.js). The official installed
+ * figure is the one the writer's floor reads: max(Σ approved entries, the
+ * latest official typed figure in the same unit).
+ */
+const QUANTITY_BELOW_OFFICIAL = 'QUANTITY_BELOW_OFFICIAL';
+const belowOfficialWarning = ({ typed, official }) => {
+  const qp = quantityProgressService();
+  const typedNumber = qp.quantityNumber(typed);
+  const officialNumber = qp.quantityNumber(official);
+  return {
+    code: QUANTITY_BELOW_OFFICIAL,
+    officialInstalled: officialNumber,
+    typed: typedNumber,
+    message: `The typed installed quantity (${typedNumber}) is below the official installed figure (${officialNumber}); approving it lowers the official installed figure to the typed one`,
+  };
+};
+
+/** The official installed figure a typed quantity is compared with: Σ approved entries, or the floor above it. */
+const officialInstalledFor = async ({ orgId, projectId, activityId, unitCode }, tx) => {
+  const qp = quantityProgressService();
+  const approvedRows = await tx.quantityProgressEntry.findMany({
+    where: { projectId, ...(orgId ? { orgId } : {}), activityId, status: 'approved' },
+    select: { quantity: true },
+  });
+  const approvedBefore = qp.sumQuantities((approvedRows || []).map((row) => row.quantity));
+  const { floor } = await legacyInstalledFloor({ activityId, approvedBefore, expectedUnit: unitCode }, tx);
+  return floor ? floor.quantity : approvedBefore;
+};
+
+const typedBelowOfficial = async ({ orgId, projectId, activityId, quantityComplete, unitCode }, tx) => {
+  const typed = quantityProgressService().quantityDecimal(quantityComplete, 'quantityComplete');
+  if (!typed) return null;
+  const official = await officialInstalledFor({ orgId, projectId, activityId, unitCode }, tx);
+  return typed.lessThan(official) ? belowOfficialWarning({ typed, official }) : null;
+};
+
+/**
  * A milestone submission states its milestones (integration decision under
  * the owner rule "the activity's progress method is respected", 2026-10-01).
  * On an activity configured weighted_milestone with weighted milestones, a
@@ -965,13 +1036,19 @@ const buildSubmissionData = async ({
   // what the planner mapped; the other methods are untouched.
   let bundled = null;
   let quantity = null;
+  const warnings = [];
   if (method === 'quantity') {
     bundled = await resolveQuantityBundle({ orgId, projectId, activityId, payload }, tx);
     if (!bundled) {
       await assertTypedQuantityAllowed({ orgId, projectId, activityId, payload }, tx);
       await assertQuantityFigureStated({ orgId, projectId, activityId, quantityComplete: payload.quantityComplete }, tx);
+      assertTypedQuantityPositive({ activityId, quantityComplete: payload.quantityComplete });
     }
     quantity = await deriveQuantityFigures({ orgId, projectId, activityId, payload, bundled, methodConfig }, tx);
+    if (!bundled) {
+      const below = await typedBelowOfficial({ orgId, projectId, activityId, quantityComplete: quantity.installed, unitCode: quantity.unitCode }, tx);
+      if (below) warnings.push(below);
+    }
   } else if (uniqueIds(payload.entryIds).length || payload.bundleSubmittedThrough || payload.bundleThrough) {
     throw new HttpError(
       400,
@@ -998,6 +1075,7 @@ const buildSubmissionData = async ({
   return {
     bundled,
     quantity,
+    warnings,
     data: {
     projectId,
     activityId,
@@ -1101,8 +1179,10 @@ const settleBundledEntries = async ({ tx, orgId, projectId, submission, entries,
  * official installed figure — max(Σ approved entries, the latest official
  * installed figure), the floor — so the activity has one truth of installed
  * quantity from then on and the next bundle adds to it. Nothing is minted
- * when the delta is zero or negative (the floor rule keeps the figure from
- * regressing by derivation; the approved row stands as approved), when the
+ * when the delta is zero or negative (no derivation lowers a figure; the
+ * approved row stands as approved — and when negative that row IS lower than
+ * the official figure before it, an approver's explicit approval of a lower
+ * figure, which the answer warns of: QUANTITY_BELOW_OFFICIAL), when the
  * activity has no single allocated BOQ item (an entry names an item; an
  * activity-level figure on several items cannot be attributed to one — the
  * answer says so, and such an activity is served by entries from then on,
@@ -1127,7 +1207,16 @@ const mintTypedQuantityEntry = async ({ tx, orgId, projectId, submission, userId
   const base = floor ? floor.quantity : approvedBefore;
   const delta = typed.minus(base);
   if (!delta.greaterThan(0)) {
-    return skip('The typed figure does not exceed the official installed figure; nothing is minted and the official figure is not lowered by derivation', { typed: qp.quantityNumber(typed), officialBefore: qp.quantityNumber(base) });
+    // The approval writes the typed figure as the new official row whatever
+    // happens here: equal, it changes nothing; below, it LOWERS the official
+    // installed figure (an approver's explicit approval of a lower figure),
+    // and the answer warns. Nothing is minted either way — a negative delta
+    // is no entry, and the entries already approved stay as they are.
+    if (delta.isZero()) {
+      return skip('The typed figure equals the official installed figure; nothing is minted and the official figure is unchanged', { typed: qp.quantityNumber(typed), officialBefore: qp.quantityNumber(base) });
+    }
+    result.warning = belowOfficialWarning({ typed, official: base });
+    return skip('The typed figure is below the official installed figure; nothing is minted, and this approval lowers the official installed figure to the typed one (a new official row; no earlier row or entry is changed)', { typed: qp.quantityNumber(typed), officialBefore: qp.quantityNumber(base) });
   }
   const allocations = await tx.activityBoqAllocation.findMany({
     where: { projectId, activityId, status: 'approved', isActive: true },
@@ -1210,7 +1299,7 @@ const createProgressSubmission = async ({
       userRole,
       tx: client,
     });
-    const { data, bundled, quantity } = await buildSubmissionData({
+    const { data, bundled, quantity, warnings } = await buildSubmissionData({
       orgId,
       projectId,
       activityId,
@@ -1275,8 +1364,10 @@ const createProgressSubmission = async ({
     });
     const serialized = serializeSubmission(row);
     // The answer's basis: where the planned and installed figures came from
-    // (a transient block; the columns above are the frozen values).
-    return quantity ? { ...serialized, quantity } : serialized;
+    // (a transient block; the columns above are the frozen values) — and
+    // the warnings a typed figure below the official one carries.
+    const warned = warnings && warnings.length ? { warnings } : {};
+    return quantity ? { ...serialized, quantity, ...warned } : serialized;
   };
 
   return tx ? runner(tx) : prisma.$transaction(runner);
@@ -1467,6 +1558,8 @@ const approveProgressSubmissionWithClient = async ({
       { orgId, projectId, activityId: submission.activityId, quantityComplete: submission.quantityComplete, submissionId: submission.id },
       tx,
     );
+    // ... nor at a typed 0 (one in the queue from before the zero rule).
+    assertTypedQuantityPositive({ activityId: submission.activityId, quantityComplete: submission.quantityComplete, submissionId: submission.id });
   }
   // A quantity submission typed the old way (no entries): approved as it
   // stands, and ONE approved entry is minted from it so the activity has one
@@ -1577,7 +1670,7 @@ const approveProgressSubmissionWithClient = async ({
   // note says whether the legacy floor applied), as the activity payload will.
   const serialized = { ...serializeSubmission(approved), progressSource: buildProgressSource({ submission: approved, progress: approvedProgress }) };
   if (quantity) return { ...serialized, quantity, approvedProgressId: approvedProgress.id };
-  if (typed) return { ...serialized, quantity: typed.answer, approvedProgressId: approvedProgress.id };
+  if (typed) return { ...serialized, quantity: typed.answer, approvedProgressId: approvedProgress.id, ...(typed.warning ? { warnings: [typed.warning] } : {}) };
   return serialized;
 };
 

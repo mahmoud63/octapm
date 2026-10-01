@@ -98,6 +98,16 @@
  * a submission stating its milestones is recorded and approved at their
  * weighted figure.
  *
+ * A typed zero is no installed quantity (integration decision, for
+ * consistency with the entries' rule "record nothing for no work"): a typed
+ * quantityComplete of 0 (or 0.0004, zero at three places) on the zero pour
+ * is 400 QUANTITY_INVALID on every path — the activity route, bulk-progress,
+ * the daily report — and one in the queue is refused by the writer; a typed
+ * figure above zero but below the official installed figure is accepted and
+ * approved (a new, lower official row — the approver's explicit approval)
+ * with warnings [{ code: 'QUANTITY_BELOW_OFFICIAL', officialInstalled, typed }],
+ * withheld from a PM on a boq:none template like the figures (code kept).
+ *
  *   DATABASE_CONNECTION_LIMIT=4 npm run test:live -- src/services/__live__/pc-6-method-authority.live.test.js
  */
 const { prisma } = require("../../config/db");
@@ -117,6 +127,8 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
   let late;
   let screed;
   let milestones;
+  let zeroPour;
+  let noBoqPm;
   let site;
   let auditor;
   const bearer = (token) => ({ authorization: `Bearer ${token}` });
@@ -165,6 +177,14 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
       data: { orgId: live.org.id, name: `LiveTest cost controller, no BOQ ${tag}`, baseRole: "cost_controller", tools: { create: [{ module: "boq", level: "none" }] } },
     });
     await prisma.projectUserPermission.create({ data: { orgId: live.org.id, projectId: project.id, userId: auditor.id, templateId: noBoq.id } });
+    // A PM who may approve progress but not read the BOQ (the warnings' withholding).
+    noBoqPm = await createLiveUser(prisma, { orgId: live.org.id, name: "LiveTest PM, no BOQ", email: `live-pm-ma-${tag}@octapm-live.test`, role: "pm" });
+    noBoqPm.token = mintAccessToken(noBoqPm);
+    await prisma.projectAssignment.create({ data: { projectId: project.id, userId: noBoqPm.id, role: "pm", orgId: live.org.id } });
+    const pmNoBoq = await prisma.permissionTemplate.create({
+      data: { orgId: live.org.id, name: `LiveTest PM, no BOQ ${tag}`, baseRole: "pm", tools: { create: [{ module: "boq", level: "none" }] } },
+    });
+    await prisma.projectUserPermission.create({ data: { orgId: live.org.id, projectId: project.id, userId: noBoqPm.id, templateId: pmNoBoq.id } });
 
     const item = await api.post(at("/boq/items"), { code: "1.1", description: "Concrete in strip footings", quantity: 900, unit: "m3", rate: 100 }, bearer(live.token));
     ok(item, 201);
@@ -181,8 +201,9 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     kerb = await activity({ name: "Kerbs (typed)", activityCode: "A150", duration: 2, startDate: "2026-03-09", endDate: "2026-03-10", engineerIds: [live.user.id, site.id] });
     late = await activity({ name: "Late pour (configured after a percent submission)", activityCode: "A160", duration: 3, startDate: "2026-03-16", endDate: "2026-03-18", engineerIds: [live.user.id, site.id] });
     screed = await activity({ name: "Screed (a quantity submission states a quantity)", activityCode: "A170", duration: 3, startDate: "2026-03-23", endDate: "2026-03-25", engineerIds: [live.user.id, site.id] });
+    zeroPour = await activity({ name: "Zero pour (a typed zero is no figure)", activityCode: "A190", duration: 3, startDate: "2026-04-06", endDate: "2026-04-08", engineerIds: [live.user.id, site.id] });
     milestones = await activity({ name: "Steel erection (weighted milestones)", activityCode: "A180", duration: 5, startDate: "2026-03-30", endDate: "2026-04-03", engineerIds: [live.user.id, site.id] });
-    for (const [row, quantity, configured = true] of [[pour, 100], [slab, 100], [slab2, 100], [kerb, 50], [late, 100, false], [screed, 100]]) {
+    for (const [row, quantity, configured = true] of [[pour, 100], [slab, 100], [slab2, 100], [kerb, 50], [late, 100, false], [screed, 100], [zeroPour, 200]]) {
       const allocation = await api.post(at("/activity-boq-allocations"), { boqItemId: concrete.id, activityId: row.id, quantity }, bearer(live.token));
       ok(allocation, 201);
       for (const step of ["submit", "approve"]) ok(await api.post(at(`/activity-boq-allocations/${allocation.body.data.id}/${step}`), {}, bearer(live.token)));
@@ -365,13 +386,17 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     refused(await api.post(at("/activities/bulk-progress"), { updates: [{ activityId: kerb.id, quantityComplete: 30 }] }, bearer(site.token)), 409, "QUANTITY_ENTRIES_REQUIRED");
   });
 
-  it("a typed figure below the official one mints nothing and lowers nothing by derivation: the approved row stands as approved and is the floor of the next bundle", async () => {
+  it("a typed figure below the official one mints nothing and lowers nothing by derivation — the approver's approval lowers it, and both answers warn QUANTITY_BELOW_OFFICIAL: the approved row stands as approved and is the floor of the next bundle", async () => {
     const legacy = await prisma.activityProgress.findFirst({ where: { activityId: slab2.id } });
-    const typed = await submit(slab2.id, { quantityComplete: 50 }, site.token);
+    const typed = await submit(slab2.id, { quantityComplete: 50 }, live.token);
     ok(typed, 200);
+    const warning = { code: "QUANTITY_BELOW_OFFICIAL", officialInstalled: 60, typed: 50, message: expect.stringContaining("approving it lowers the official installed figure to the typed one") };
+    expect(typed.body.data.submission.warnings).toEqual([warning]);
     const approved = await approve(slab2.id, typed.body.data.submission.id);
     ok(approved);
-    expect(approved.body.data).toMatchObject({ pctComplete: 50, quantityComplete: 50, quantity: { mintedEntry: null, mintSkipped: { typed: 50, officialBefore: 60, reason: expect.stringMatching(/does not exceed/) } } });
+    expect(approved.body.data).toMatchObject({ pctComplete: 50, quantityComplete: 50, quantity: { mintedEntry: null, mintSkipped: { typed: 50, officialBefore: 60, reason: expect.stringMatching(/below the official installed figure; nothing is minted, and this approval lowers the official installed figure to the typed one/) } } });
+    expect(approved.body.data.quantity.mintSkipped.reason).not.toMatch(/not lowered/);
+    expect(approved.body.data.warnings).toEqual([warning]);
     expect(await prisma.quantityProgressEntry.count({ where: { activityId: slab2.id } })).toBe(0);
     expect(JSON.stringify(await prisma.activityProgress.findUnique({ where: { id: legacy.id } }))).toBe(JSON.stringify(legacy));
     expect((await activityPayload(slab2.id)).pctComplete).toBe(50);
@@ -669,5 +694,62 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     expect(stated.body.data.submission).toMatchObject({ method: "weighted_milestone", pctComplete: 70 });
     ok(await approve(milestones.id, stated.body.data.submission.id));
     expect((await progressRows(milestones.id)).map((row) => [row.progressMethod, row.pctComplete])).toEqual([["weighted_milestone", 70]]);
+  });
+  it("a typed zero is no installed quantity: 400 QUANTITY_INVALID on every path and in the writer, never an official 0%; a typed figure below the official one is approved with QUANTITY_BELOW_OFFICIAL, withheld from a PM without boq:read like the figures", async () => {
+    const evBefore = await evReport();
+    const before = await footprint();
+    for (const quantityComplete of [0, "0", 0.0004]) {
+      const answer = await submit(zeroPour.id, { method: "quantity", quantityComplete }, site.token);
+      refused(answer, 400, "QUANTITY_INVALID");
+      expect(answer.body.error.details).toEqual({ field: "quantityComplete", activityId: zeroPour.id });
+      expect(answer.body.error.message).toMatch(/must be greater than zero: a typed 0 is not an installed quantity/);
+    }
+    refused(await submit(zeroPour.id, { quantityComplete: 0, status: "draft" }, site.token), 400, "QUANTITY_INVALID");
+    const bulk = await api.post(at("/activities/bulk-progress"), { updates: [{ activityId: wall.id, pctComplete: 16 }, { activityId: zeroPour.id, quantityComplete: 0 }] }, bearer(site.token));
+    refused(bulk, 400, "QUANTITY_INVALID");
+    expect(bulk.body.error.details.batch).toEqual({ index: 1, activityId: zeroPour.id, updates: 2, written: 0 });
+    refused(await api.post(at("/daily-reports"), { activityId: zeroPour.id, date: "2026-04-06", notes: "LiveTest", progress: { method: "quantity", quantityComplete: 0 } }, bearer(site.token)), 400, "QUANTITY_INVALID");
+    expect(await footprint()).toBe(before);
+    expect(await evReport()).toBe(evBefore);
+
+    // One in the queue from before the rule: the writer refuses it; nothing official.
+    const queued = await prisma.progressSubmission.create({
+      data: { projectId: project.id, activityId: zeroPour.id, method: "quantity", source: "mobile", pctComplete: 0, quantityComplete: 0, quantityPlanned: 100, quantityUnit: "m3", status: "submitted", submittedBy: site.id, submittedAt: new Date(), createdBy: site.id },
+    });
+    const held = await footprint();
+    const writer = await approve(zeroPour.id, queued.id);
+    refused(writer, 400, "QUANTITY_INVALID");
+    expect(writer.body.error.details).toEqual({ field: "quantityComplete", activityId: zeroPour.id, submissionId: queued.id });
+    expect(await footprint()).toBe(held);
+    expect(await progressRows(zeroPour.id)).toHaveLength(0);
+    ok(await api.post(at(`/activities/${zeroPour.id}/progress-submissions/${queued.id}/reject`), { reason: "LiveTest: a typed zero" }, bearer(live.token)));
+
+    // An official 70 typed the legacy way; a typed 40 below it: accepted with the warning, which the PM without boq:read gets as its code only.
+    await prisma.activityProgress.create({
+      data: { activityId: zeroPour.id, pctComplete: 35, progressMethod: "quantity", source: "mobile", quantityComplete: 70, quantityPlanned: 200, quantityUnit: "m3", status: "approved", approvedBy: live.user.id, approvedAt: new Date("2026-08-02T12:00:00.000Z") },
+    });
+    const full = await submit(zeroPour.id, { quantityComplete: 40 }, live.token);
+    ok(full, 200);
+    expect(full.body.data.submission.warnings).toEqual([{ code: "QUANTITY_BELOW_OFFICIAL", officialInstalled: 70, typed: 40, message: expect.stringContaining("(40) is below the official installed figure (70)") }]);
+    const withheldWarning = [{ code: "QUANTITY_BELOW_OFFICIAL", boqWithheld: { keys: ["officialInstalled", "typed", "message"], reason: expect.stringContaining("only to members who may read the BOQ") } }];
+    const approvedByNoBoq = await approve(zeroPour.id, full.body.data.submission.id, noBoqPm.token);
+    ok(approvedByNoBoq);
+    expect(approvedByNoBoq.body.data.warnings).toEqual(withheldWarning);
+    expect(approvedByNoBoq.body.data).not.toHaveProperty("quantityComplete");
+    const numbersIn = (value, out = []) => { if (typeof value === "number") out.push(value); else if (value && typeof value === "object") Object.values(value).forEach((inner) => numbersIn(inner, out)); return out; };
+    expect(numbersIn(approvedByNoBoq.body.data).filter((value) => [70, 40, 200].includes(value))).toEqual([]);
+    expect(approvedByNoBoq.body.data.pctComplete).toBe(20);
+    expect((await progressRows(zeroPour.id)).map((row) => [row.pctComplete, row.quantityComplete])).toEqual([[35, 70], [20, 40]]);
+    expect(await prisma.quantityProgressEntry.count({ where: { activityId: zeroPour.id } })).toBe(0);
+    // The same member putting a lower figure forward: the code, never the figures.
+    const typedByNoBoq = await submit(zeroPour.id, { quantityComplete: 30 }, noBoqPm.token);
+    ok(typedByNoBoq, 200);
+    expect(typedByNoBoq.body.data.submission.warnings).toEqual(withheldWarning);
+    expect(numbersIn(typedByNoBoq.body.data.submission).filter((value) => [30, 40, 200].includes(value))).toEqual([]);
+    // A figure above the official one carries no warning.
+    ok(await api.post(at(`/activities/${zeroPour.id}/progress-submissions/${typedByNoBoq.body.data.submission.id}/reject`), { reason: "LiveTest" }, bearer(live.token)));
+    const above = await submit(zeroPour.id, { quantityComplete: 45 }, live.token);
+    ok(above, 200);
+    expect(above.body.data.submission).not.toHaveProperty("warnings");
   });
 });

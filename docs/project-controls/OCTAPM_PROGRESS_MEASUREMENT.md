@@ -243,10 +243,32 @@ bundles entries, and approving it is what approves them:
   it is made (`POST /activities/{id}/progress`, `bulk-progress`, a draft too) and — for one already in the queue —
   in the writer: 409 `QUANTITY_ENTRIES_REQUIRED` `{ activityId, entries }` once the activity has entries (bundle
   them), else 400 `QUANTITY_NO_ENTRIES_TO_BUNDLE`; at approval the details name the `submissionId`. A typed
-  `quantityComplete` of 0 is a stated quantity and is still recorded. The web forms relay the server's sentence.
+  `quantityComplete` of 0 was then a stated quantity and still recorded — superseded the same day (next bullet). The
+  web forms relay the server's sentence.
   Proven live (`pc-6-method-authority`, the screed: every shape refused with the footprint and EV byte-identical,
   the official 25% standing, a hollow submission seeded in the queue refused by the writer) and mutation-proven (the
   check removed where the submission is made, and in the writer, each fail).
+- **A typed zero is no installed quantity; a lower typed figure is approved, never silently** (integration decision,
+  2026-10-01, for consistency with the entries' rule "record nothing for no work", §3.1). A typed `quantityComplete`
+  of 0 on a quantity-measured activity with no entries was accepted and its approval wrote an official 0% row.
+  `assertTypedQuantityPositive` refuses it — 400 `QUANTITY_INVALID` `{ field: 'quantityComplete', activityId }`, the
+  figure read at the entries' scale (0.0004 is zero) — where the submission is made (every path: the activity route,
+  `bulk-progress`, the daily report's linked progress; a draft too) and, for one already in the queue, in the writer
+  (`submissionId` named). The route validators keep "zero or more" exactly as the entries' routes do (a negative is a
+  `VALIDATION_ERROR` there); the service is the one place that says zero is no figure. The mobile ProgressSheet offers
+  a typed quantity only above zero. A typed figure **above zero but below** the official installed figure (max(Σ
+  approved entries, the latest official typed figure in the same unit) — the writer's floor) stays allowed: the
+  approver's approval of a lower figure is explicit and writes a new official row (no earlier row or entry changes,
+  nothing is minted). It is never silent: the submission's answer and the approval's answer carry `warnings: [{ code:
+  'QUANTITY_BELOW_OFFICIAL', officialInstalled, typed, message }]`, withheld from a member who may not read the BOQ
+  like the figures (the code stays; `utils/boq-figures.js withheldProgressWarning`). The mint's skip reason no longer
+  says the official figure is not lowered when the approval lowers it: equal → "nothing is minted and the official
+  figure is unchanged"; below → "nothing is minted, and this approval lowers the official installed figure to the
+  typed one". Proven live (`pc-6-method-authority`: the zero pour — 0, "0" and 0.0004 refused on every path with the
+  footprint and EV byte-identical, a queued zero refused by the writer; a typed 40 under an official 70 approved by a
+  PM on a `boq: none` template with the warning's code only; the slab's typed 50 under 60 warned on both answers),
+  by unit (`progress.service.quantity-bundle`, `boq-figures.progress-warnings`, mobile `progress-sheet`) and
+  mutation-proven (each check removed fails).
 - **The milestone method is respected like quantity** (integration decision, 2026-10-01, under the owner rule "the
   activity's progress method is respected"). On an activity configured `weighted_milestone` with weighted milestones a
   submission carrying no milestone state — `{ pctComplete: 60 }`, with or without the method named — was recorded as a

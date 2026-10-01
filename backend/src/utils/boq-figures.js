@@ -1582,6 +1582,22 @@ const PROGRESS_SUBMISSION_BOQ_KEYS = ["quantityComplete", "quantityPlanned", "qu
 const PROGRESS_SUBMISSION_WITHHELD =
   "The quantity figures of a progress submission are available only to members who may read the BOQ";
 
+// The warnings a typed figure below the official installed figure carries
+// (QUANTITY_BELOW_OFFICIAL — progress.service, 2026-10-01) compare the typed
+// quantity with the official installed one: for a member who may not read
+// the BOQ a warning keeps its code (the approver is still told the figure is
+// lower) and loses both figures and the sentence that states them.
+const PROGRESS_WARNING_BOQ_KEYS = ["officialInstalled", "typed", "message"];
+const PROGRESS_WARNING_WITHHELD =
+  "The quantities a progress warning compares are available only to members who may read the BOQ";
+
+const withheldProgressWarning = (warning) => {
+  if (!warning || typeof warning !== "object" || Array.isArray(warning)) return warning;
+  const keys = PROGRESS_WARNING_BOQ_KEYS.filter((key) => has(warning, key));
+  if (!keys.length) return warning;
+  return { ...withoutKeys(warning, keys), boqWithheld: { keys, reason: PROGRESS_WARNING_WITHHELD } };
+};
+
 /** A progress submission (pending, approved or rejected) as this caller may receive it. */
 const withheldProgressSubmission = (submission, access = FULL_ACCESS) => {
   if (access.boq || !submission || typeof submission !== "object" || Array.isArray(submission)) return submission;
@@ -1591,6 +1607,7 @@ const withheldProgressSubmission = (submission, access = FULL_ACCESS) => {
   const entries = Array.isArray(submission.quantityEntries)
     ? { quantityEntries: submission.quantityEntries.map((entry) => withheldQuantityEntry(entry, access)) }
     : {};
+  if (Array.isArray(submission.warnings)) entries.warnings = submission.warnings.map(withheldProgressWarning);
   if (!keys.length) return Object.keys(entries).length ? { ...submission, ...entries } : submission;
   return { ...withoutKeys(submission, keys), ...entries, boqWithheld: { keys, reason: PROGRESS_SUBMISSION_WITHHELD } };
 };
@@ -1812,6 +1829,9 @@ module.exports = {
   PROGRESS_SUBMISSION_WITHHELD,
   withheldProgressSubmission,
   withheldProgressSubmissions,
+  PROGRESS_WARNING_BOQ_KEYS,
+  PROGRESS_WARNING_WITHHELD,
+  withheldProgressWarning,
   APPROVED_PROGRESS_BOQ_KEYS,
   APPROVED_PROGRESS_WITHHELD,
   withheldApprovedProgress,
