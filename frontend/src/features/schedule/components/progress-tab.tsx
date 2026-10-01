@@ -77,7 +77,11 @@ type SourceStory = { headline: string; details: string[] }
 
 const describeSource = (
   provenance: ProgressSource | null | undefined,
-  fallback: { source?: string | null; at?: string | null } = {}
+  fallback: {
+    source?: string | null
+    at?: string | null
+    atLabel?: 'Approved' | 'Submitted'
+  } = {}
 ): SourceStory | null => {
   if (provenance) {
     const dates = provenance.dailyLogDates?.length
@@ -130,7 +134,10 @@ const describeSource = (
   const word = sourceWord(fallback.source)
   if (!word) return null
   const at = when(fallback.at)
-  return { headline: word, details: at ? [`Approved ${at}`] : [] }
+  return {
+    headline: word,
+    details: at ? [`${fallback.atLabel ?? 'Approved'} ${at}`] : [],
+  }
 }
 
 function ProgressSourceCell({
@@ -267,7 +274,18 @@ function BundledEntries({
 function InstalledPlanned({ activity }: { activity: ScheduleActivity }) {
   const extras = extrasOf(activity)
   const installed = extras.installedQuantity ?? null
-  const planned = extras.plannedQuantity ?? null
+  // A server that derives nothing yet still stores the figure typed on the
+  // method: shown as what it is (basis method_config), never invented.
+  const typedOnMethod = activity.progressMethodConfig?.plannedQuantity
+  const planned =
+    extras.plannedQuantity ??
+    (typedOnMethod != null
+      ? {
+          planned: typedOnMethod,
+          unitCode: activity.progressMethodConfig?.quantityUnit ?? null,
+          basis: 'method_config',
+        }
+      : null)
   const installedReason =
     withheldReason(installed?.withheld, 'Withheld by the server') ??
     withheldReason(installed?.notAvailable, 'Not available') ??
@@ -489,8 +507,59 @@ const buildDefaultDraft = (activity: ScheduleActivity): RowDraft => ({
   milestoneChecks: {},
 })
 
-export function ProgressTab({ activities, projectId }: Props) {
+// The progress-side fields the activity register carries and the schedule
+// payload does not: GET /projects/:id/schedule sends an activity's approved
+// percentage only, while GET /projects/:id/activities (sanitizeActivity)
+// also sends its pending submission, its progress method, the source of its
+// approved figure, who is assigned, and — with PC-6 core — the structured
+// PROGRESS SOURCE, installed and planned quantities. The tab reads both and
+// lets the register's fields win; a withheld budget stays withheld (both
+// reads pass utils/boq-figures).
+const PROGRESS_FIELDS = [
+  'approvedProgressUpdatedAt',
+  'approvedProgressSource',
+  'progressMethod',
+  'progressMethodConfig',
+  'pendingProgress',
+  'progressApprovalStatus',
+  'assignedEngineers',
+  'progressSource',
+  'installedQuantity',
+  'plannedQuantity',
+  'pendingQuantityEntries',
+] as const
+
+const withRegisterProgress = (
+  activities: ScheduleActivity[],
+  register: Array<Record<string, unknown>> | undefined
+): ScheduleActivity[] => {
+  if (!register?.length) return activities
+  const byId = new Map(register.map((row) => [String(row.id), row]))
+  return activities.map((activity) => {
+    const row = byId.get(activity.id)
+    if (!row) return activity
+    const merged: Record<string, unknown> = { ...activity }
+    for (const field of PROGRESS_FIELDS) {
+      if (row[field] !== undefined) merged[field] = row[field]
+    }
+    return merged as ScheduleActivity
+  })
+}
+
+export function ProgressTab({ activities: scheduled, projectId }: Props) {
   const queryClient = useQueryClient()
+  const registerQuery = useQuery<Array<Record<string, unknown>>>({
+    queryKey: ['activities', projectId],
+    queryFn: () =>
+      apiClient
+        .get(`/projects/${projectId}/activities`)
+        .then((r) => r.data.data as Array<Record<string, unknown>>),
+    enabled: !!projectId,
+  })
+  const activities = useMemo(
+    () => withRegisterProgress(scheduled, registerQuery.data),
+    [scheduled, registerQuery.data]
+  )
   const currentUser = useAuthStore((state) => state.auth.user)
   const { data: setupReadiness } = useProjectSetupReadiness(projectId)
   const canConfigureProgressMethod = useCanPerform(
@@ -950,6 +1019,7 @@ export function ProgressTab({ activities, projectId }: Props) {
                     story={describeSource(submission.progressSource, {
                       source: submission.source,
                       at: submission.submittedAt,
+                      atLabel: 'Submitted',
                     })}
                   />
                 </div>
@@ -1014,6 +1084,7 @@ export function ProgressTab({ activities, projectId }: Props) {
             ? describeSource(pending.progressSource, {
                 source: pending.source,
                 at: pending.submittedAt,
+                atLabel: 'Submitted',
               })
             : null
           const plannedFromAllocations =
