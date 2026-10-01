@@ -86,6 +86,9 @@ router.get(
   asyncHandler(async (req, res) => sendSuccess(res, await service.listExceptions({ ...scope(req), ...callerFor(req), query: req.query }))),
 );
 
+// Declared before /:exceptionId: the Overview strip's counts (open and in change, per severity).
+router.get("/summary", asyncHandler(async (req, res) => sendSuccess(res, await service.exceptionsSummary({ ...scope(req), access: callerFor(req).access }))));
+
 router.get("/:exceptionId", [exceptionIdParam, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.getException({ ...scope(req), ...callerFor(req), exceptionId: req.params.exceptionId }))));
 
 router.post(

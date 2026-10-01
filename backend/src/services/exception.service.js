@@ -381,6 +381,44 @@ const listExceptions = async ({ orgId, projectId, access, may, query = {} }) => 
   return answer(await serializeAll({ projectId, rows: page.rows, may }), page.pagination.nextCursor);
 };
 
+/**
+ * GET /projects/:id/controls/exceptions/summary — the Overview strip: the
+ * project's exceptions this caller may read that are OPEN or IN CHANGE (a
+ * live change event carries them), counted per severity — `total` and
+ * `bySeverity` are the two together, `open` and `inChange` each apart.
+ * Snoozed, dismissed and resolved rows are not counted. The readable filter
+ * is the list's own (in the query); a caller who may not read every kind gets
+ * `withheld { reason, modules }` from their access alone — never a count of
+ * what was left out, never whether there is any.
+ */
+const SUMMARY_BASIS = "Unresolved project exceptions this caller may read that are open (not snoozed, not carried by a live change event) or in change (carried by a live change event); snoozed, dismissed and resolved ones are not counted";
+const emptyCounts = () => ({ total: 0, bySeverity: { critical: 0, warning: 0, info: 0 } });
+const exceptionsSummary = async ({ orgId, projectId, access }) => {
+  const registry = ruleRegistry();
+  const withheld = exceptionsWithheldMarker(access);
+  const open = emptyCounts();
+  const inChange = emptyCounts();
+  const readable = exceptionReadableWhere(access, registry);
+  if (readable) {
+    const rows = await prisma.projectException.findMany({
+      where: { orgId, projectId, resolvedAt: null, AND: [readable] },
+      select: { kind: true, severity: true, subjectType: true, secondarySubjectType: true, snoozedUntil: true, changeEventId: true, changeEvent: { select: { status: true } } },
+    });
+    const now = new Date();
+    for (const row of rows) {
+      // Belt and braces: the query already kept only readable rows.
+      if (!exceptionReadable(row, access, registry)) continue;
+      const status = statusOf(row, now);
+      const bucket = status === "open" ? open : status === "in_change" ? inChange : null;
+      if (!bucket) continue;
+      bucket.total += 1;
+      if (Object.prototype.hasOwnProperty.call(bucket.bySeverity, row.severity)) bucket.bySeverity[row.severity] += 1;
+    }
+  }
+  const bySeverity = Object.fromEntries(Object.keys(open.bySeverity).map((severity) => [severity, open.bySeverity[severity] + inChange.bySeverity[severity]]));
+  return { total: open.total + inChange.total, bySeverity, open, inChange, basis: SUMMARY_BASIS, ...(withheld ? { withheld } : {}) };
+};
+
 /** One exception this caller may read, or 404 — an unreadable one is not said to exist. */
 const loadReadable = async ({ orgId, projectId, exceptionId, access, tx = prisma }) => {
   const row = await tx.projectException.findFirst({ where: { id: exceptionId, orgId, projectId }, include: ROW_INCLUDE });
@@ -907,6 +945,7 @@ module.exports = {
   KIND_LABELS,
   statusOf,
   listExceptions,
+  exceptionsSummary,
   getException,
   reviewException,
   snoozeException,

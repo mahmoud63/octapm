@@ -283,6 +283,27 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     }
   });
 
+  it("GET …/controls/exceptions/summary counts, per severity, the open (and in change) exceptions each caller may read — BOQ-derived withheld with a marker, never counted (PC-7b integration N)", async () => {
+    const summary = (headers) => api.get(at("/controls/exceptions/summary"), headers);
+    const pmSummary = await summary(pm());
+    ok("pm summary", pmSummary);
+    // All seven seeded rows are open: critical qtyAlloc + committed, warning qtyBoq + slip + forecast, info stale + structure.
+    expect(pmSummary.body.data).toMatchObject({ total: 7, bySeverity: { critical: 2, warning: 3, info: 2 }, open: { total: 7 }, inChange: { total: 0, bySeverity: { critical: 0, warning: 0, info: 0 } } });
+    expect(pmSummary.body.data).not.toHaveProperty("withheld");
+    // A cost controller without boq:read: committed, forecast and stale only.
+    const noBoq = await summary(as(members.cost_noboq));
+    ok("cost_noboq summary", noBoq);
+    expect(noBoq.body.data).toMatchObject({ total: 3, bySeverity: { critical: 1, warning: 1, info: 1 }, withheld: { reason: BOQ_REASON, modules: ["boq"] } });
+    // A site engineer without boq:read: progress_stale only; the marker carries no figure.
+    const site = await summary(as(members.site_noboq));
+    ok("site summary", site);
+    expect(site.body.data).toMatchObject({ total: 1, bySeverity: { critical: 0, warning: 0, info: 1 } });
+    expect(site.body.data.withheld.modules).toEqual(["boq", "cost", "change_order"]);
+    expect(JSON.stringify(site.body.data.withheld)).not.toMatch(/\d/);
+    // Another organisation's member: the project is not theirs.
+    expect((await summary(as(members.other_pm))).status).toBe(404);
+  });
+
   it("filters by status, kind, severity and subject, and walks every page of the cursor once", async () => {
     const critical = await list(pm(), "?severity=critical");
     expect(idsOf(critical)).toEqual([ex.qtyAlloc.id, ex.committed.id].sort());
@@ -397,6 +418,13 @@ liveDescribe("PC-7b: the project exceptions API and the change-event handoff", (
     expect(money.body.data.changeEvent.lines[0]).toMatchObject({ budgetLineId: ids.budgetLine, costCodeId: ids.costCode, quantity: 1, romAmount: 0 });
     expect(await footprint(claims)).toBe(before);
     ids.raisedEvent = event.id;
+  });
+
+  it("the summary counts an exception in change with the open ones, and no longer counts a snoozed or dismissed one", async () => {
+    const answer = await api.get(at("/controls/exceptions/summary"), pm());
+    ok("summary after raise", answer);
+    // In change: qtyAlloc (critical) and committed (critical). Open: qtyBoq, slip (warning), stale (info). Snoozed structure, dismissed forecast: not counted.
+    expect(answer.body.data).toMatchObject({ total: 5, bySeverity: { critical: 2, warning: 2, info: 1 }, open: { total: 3, bySeverity: { critical: 0, warning: 2, info: 1 } }, inChange: { total: 2, bySeverity: { critical: 2, warning: 0, info: 0 } } });
   });
 
   it("associate: an event of the same project only; another project's or organisation's is refused", async () => {
