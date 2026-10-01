@@ -179,6 +179,38 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
       target.period0 = await lockedOver("DQ-P0", 20, { override: false, ev: 20000 });
     }
 
+    // Change orders. Gaps: VO-2 repeats VO-1 (description differing only in
+    // case and spacing, the same 10 days on A1); VO-3 the same words with 5
+    // days; VO-4 a repeat archived; VO-5 a repeat only pending. Clean: two
+    // approved orders on A1 with different descriptions.
+    const SAME = "LiveTest Client instruction: upgrade blockwork, grid A-F";
+    const order = (ref, description, { status = "approved", archivedAt = null, days = 10, approvedDaysAgo = 10 } = {}) =>
+      prisma.changeOrder.create({
+        data: {
+          projectId: project.id, ref, description, status, archivedAt, value: 0,
+          approvedAt: status === "approved" ? daysAgo(approvedDaysAgo) : null,
+          activityLinks: { create: [{ projectId: project.id, activityId: target.a1.id, relationType: "delay", scheduleImpactDays: days, approvedScheduleImpactDays: status === "approved" ? days : 0 }] },
+        },
+      });
+    target.vo1 = await order("VO-1", gap ? SAME : "LiveTest Client instruction A");
+    target.vo2 = await order("VO-2", gap ? `  ${SAME.toUpperCase().replace(/ /g, "   ")} ` : "LiveTest Client instruction B", { approvedDaysAgo: 9 });
+    if (gap) {
+      target.vo3 = await order("VO-3", SAME, { days: 5, approvedDaysAgo: 8 });
+      target.vo4 = await order("VO-4", SAME, { archivedAt: daysAgo(1), approvedDaysAgo: 7 });
+      target.vo5 = await order("VO-5", SAME, { status: "pending" });
+    }
+
+    // Change links. Gaps: a draft revision naming no order (VO-404), two
+    // naming real ones (by ref, by id); a workflow link to an RFI that is not
+    // there beside one to a real RFI. Clean: each link resolves.
+    const revision = (ref, linkedChangeOrder) => prisma.budgetRevision.create({ data: { projectId: project.id, ref, title: `LiveTest ${ref}`, status: "draft", amount: 10, linkedChangeOrder } });
+    if (gap) target.orphanRevision = await revision("BR-DQ2", "VO-404");
+    await revision("BR-DQ3", "VO-1");
+    await revision("BR-DQ4", target.vo2.id);
+    target.rfi = await prisma.rfi.create({ data: { projectId: project.id, ref: "RFI-1", subject: "LiveTest question" } });
+    await prisma.workflowActivityLink.create({ data: { projectId: project.id, recordType: "rfi", recordId: target.rfi.id, activityId: target.a1.id } });
+    if (gap) target.orphanLink = await prisma.workflowActivityLink.create({ data: { projectId: project.id, recordType: "rfi", recordId: "00000000-0000-4000-8000-00000000dead", activityId: target.a1.id } });
+
     // Equipment usage: DR1 with no posting (gap), DR2 posted, DR3 posted then
     // reversed (gap). The clean project's one report is posted.
     const report = (date) => prisma.dailyReport.create({ data: { projectId: project.id, activityId: target.a1.id, engineerId: live.user.id, date, status: "approved" } });
@@ -208,6 +240,8 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     other = await createLiveOrg(prisma);
     await build(gaps, { gap: true });
     await build(clean, { gap: false });
+    // An RFI of the gaps project whose change order is the clean project's.
+    gaps.crossRfi = await prisma.rfi.create({ data: { projectId: gaps.project.id, ref: "RFI-2", subject: "LiveTest converted elsewhere", changeOrderId: clean.vo1.id } });
   }, 120_000);
 
   afterAll(async () => {
@@ -368,6 +402,28 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
     expect(await evaluate("readiness_override_active", clean)).toEqual([]);
   });
 
+  // ─── change links ────────────────────────────────────────────────────────
+
+  it("orphan_change_link: a revision naming no order, a workflow link to a missing record, an RFI pointing at another project's order", async () => {
+    const rows = bySubject(await evaluate("orphan_change_link", gaps));
+    expect([...rows.keys()].sort()).toEqual([`budget_revision:${gaps.orphanRevision.id}`, `rfi:${gaps.crossRfi.id}`, `workflow_activity_link:${gaps.orphanLink.id}`].sort());
+    expect(rows.get(`budget_revision:${gaps.orphanRevision.id}`).data.value).toBe("VO-404");
+    expect(rows.get(`workflow_activity_link:${gaps.orphanLink.id}`).data.recordType).toBe("rfi");
+    expect(rows.get(`rfi:${gaps.crossRfi.id}`).data.crossProject).toBe(true);
+    for (const row of rows.values()) expect([row.measured.value, row.limit.value]).toEqual([1, 0]);
+    expect(await evaluate("orphan_change_link", clean)).toEqual([]);
+  });
+
+  it("change_order_possible_duplicate: approved, unarchived repeats of one description and activity impact — one info row naming the original", async () => {
+    const [row, ...rest] = await evaluate("change_order_possible_duplicate", gaps);
+    expect(rest).toEqual([]);
+    expect([row.subjectType, row.subjectId, row.secondarySubjectType, row.secondarySubjectId]).toEqual(["change_order", gaps.vo2.id, "change_order", gaps.vo1.id]);
+    expect([row.measured.value, row.limit.value, row.data.refs]).toEqual([2, 1, ["VO-1", "VO-2"]]);
+    expect(row.data.activityImpacts).toEqual([{ activityId: gaps.a1.id, approvedScheduleImpactDays: 10 }]);
+    expect(ruleOf("change_order_possible_duplicate").severity).toBe("info");
+    expect(await evaluate("change_order_possible_duplicate", clean)).toEqual([]);
+  });
+
   // ─── tenancy and read-only ───────────────────────────────────────────────
 
   it("a rule asked for a project under another organisation sees nothing of it", async () => {
@@ -415,7 +471,14 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
 
     await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
     const first = await openRows();
-    const expected = { budget_truths_disagree: 3, forecast_without_provenance: 2, activity_budget_mismatch: 2, committed_definition_mixed: 1, equipment_cost_unposted: 2 };
+    // What the standalone tests above assert, rule by rule, on this project.
+    const expected = {
+      budget_truths_disagree: 3, forecast_without_provenance: 2, activity_budget_mismatch: 2, committed_definition_mixed: 1, equipment_cost_unposted: 2,
+      unit_unresolved: 1, unit_mismatch: 2, structure_missing: 4,
+      progress_stale: 1, period_not_locked: 1, ev_basis_divergence: 1, readiness_override_active: 1,
+      orphan_change_link: 3, change_order_possible_duplicate: 1,
+    };
+    expect(Object.keys(expected).sort()).toEqual([...dqKinds].sort());
     for (const [kind, count] of Object.entries(expected)) expect([kind, first.filter((row) => row.kind === kind).length]).toEqual([kind, count]);
     expect(first.every((row) => ["info", "warning"].includes(row.severity) && row.measuredBasis && row.limitBasis)).toBe(true);
     // The dry run said what the write did.

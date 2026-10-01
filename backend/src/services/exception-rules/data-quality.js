@@ -572,6 +572,152 @@ const readinessOverrideActive = async ({ orgId, projectId, ctx }) => {
   }];
 };
 
+// ─── change links ─────────────────────────────────────────────────────────
+
+// orphan_change_link — a link naming a record that is not there.
+// Evidence: BudgetRevision.linkedChangeOrder is free text (schema
+// BudgetRevision; written as the order's id by change-order.service.js:876 and
+// typed by a person through budget-revision.service.js:118, so an id or a
+// ref); WorkflowActivityLink.recordId is a bare id beside its recordType
+// (workflow-support.service.js:5 RECORD_TYPES, :561 createMany; the forecast
+// reads these links as recorded impacts, forecast.service.js:190); and
+// Rfi.changeOrderId, a foreign key since PC-7b that cannot dangle but cannot
+// refuse another project's order either (OCTAPM_CHANGE_INTELLIGENCE.md §5:
+// change-link-census.js stays that guard — this rule is its standing form).
+// Each link is checked in the link's own project. measured 1 = the link does
+// not resolve there.
+const WORKFLOW_RECORD_MODELS = Object.freeze({
+  ncr: "ncrRecord",
+  itp: "itpRecord",
+  defect: "defectRecord",
+  punch_item: "punchItem",
+  safety_incident: "safetyIncident",
+  material_test: "materialTest",
+  rfi: "rfi",
+  submittal: "submittal",
+  drawing: "drawingRecord",
+  transmittal: "transmittal",
+  correspondence: "correspondence",
+  change_order: "changeOrder",
+});
+const ORPHAN_LIMIT = { value: 0, basis: "Every link resolves to a record of the link's own project" };
+
+const orphanChangeLinks = async ({ orgId, projectId }) => {
+  const [revisions, workflowLinks, rfis, orders] = await Promise.all([
+    prisma.budgetRevision.findMany({ where: { projectId, project: { orgId }, linkedChangeOrder: { not: null } }, select: { id: true, ref: true, title: true, linkedChangeOrder: true }, orderBy: { id: "asc" } }),
+    prisma.workflowActivityLink.findMany({ where: { projectId, project: { orgId } }, select: { id: true, recordType: true, recordId: true, activityId: true, relationType: true }, orderBy: { id: "asc" } }),
+    prisma.rfi.findMany({ where: { projectId, project: { orgId }, changeOrderId: { not: null } }, select: { id: true, ref: true, changeOrderId: true, changeOrder: { select: { projectId: true, ref: true } } }, orderBy: { id: "asc" } }),
+    prisma.changeOrder.findMany({ where: { projectId, project: { orgId } }, select: { id: true, ref: true } }),
+  ]);
+  const rows = [];
+  const orderKeys = new Set(orders.flatMap((order) => [order.id, order.ref]).filter(Boolean));
+  for (const revision of revisions) {
+    const value = String(revision.linkedChangeOrder).trim();
+    if (!value || orderKeys.has(value)) continue;
+    rows.push({
+      subjectType: "budget_revision",
+      subjectId: revision.id,
+      measured: { value: 1, basis: "BudgetRevision.linkedChangeOrder names no change order (by id or ref) of this project" },
+      limit: ORPHAN_LIMIT,
+      data: { field: "BudgetRevision.linkedChangeOrder", value, label: [revision.ref, revision.title].filter(Boolean).join(" ") || null },
+    });
+  }
+  const byType = new Map();
+  for (const link of workflowLinks) {
+    if (!WORKFLOW_RECORD_MODELS[link.recordType]) continue;
+    if (!byType.has(link.recordType)) byType.set(link.recordType, []);
+    byType.get(link.recordType).push(link);
+  }
+  for (const [recordType, links] of byType) {
+    const delegate = prisma[WORKFLOW_RECORD_MODELS[recordType]];
+    if (!delegate?.findMany) continue;
+    const found = new Set((await delegate.findMany({ where: { id: { in: [...new Set(links.map((link) => link.recordId))] }, projectId }, select: { id: true } })).map((row) => row.id));
+    for (const link of links) {
+      if (found.has(link.recordId)) continue;
+      rows.push({
+        subjectType: "workflow_activity_link",
+        subjectId: link.id,
+        measured: { value: 1, basis: `WorkflowActivityLink.recordId names no ${recordType} of this project (workflow-support.service RECORD_TYPES)` },
+        limit: ORPHAN_LIMIT,
+        data: { field: "WorkflowActivityLink.recordId", recordType, value: link.recordId, activityId: link.activityId, relationType: link.relationType },
+      });
+    }
+  }
+  for (const rfi of rfis) {
+    if (rfi.changeOrder && rfi.changeOrder.projectId === projectId) continue;
+    rows.push({
+      subjectType: "rfi",
+      subjectId: rfi.id,
+      measured: { value: 1, basis: "Rfi.changeOrderId names a change order of another project (the foreign key cannot refuse it; change-link-census.js)" },
+      limit: ORPHAN_LIMIT,
+      data: { field: "Rfi.changeOrderId", value: rfi.changeOrderId, crossProject: Boolean(rfi.changeOrder), label: rfi.ref || null },
+    });
+  }
+  return rows;
+};
+
+// change_order_possible_duplicate — approved, unarchived change orders on one
+// project with the same description and the same activity impact.
+// Evidence: forecast.service.js:115 recordedImpacts counts every approved
+// order's approved impact on an activity, so one instruction recorded twice is
+// counted twice (OCTAPM_FORECAST_CHANGE_IMPACTS_CENSUS.md §5: VO-10…VO-20 are
+// one client instruction recorded six times; the census groups repeated
+// descriptions, scripts/project-controls/forecast-change-impacts-census.js).
+// Decision taken under the R5-1 trace and reported to the owner: an info row
+// for a person to review — it never dedupes, archives or changes an order,
+// a forecast or a figure (R5-1: the forecast's change-order impacts stay a
+// forecast). Same description = trimmed, whitespace-collapsed, case-folded;
+// same activity impact = the same set of (activity, approved schedule impact
+// days) on ChangeOrderActivityLink — the largest of an order's relation rows
+// per activity, as the forecast keys it — and at least one link. Money is not
+// compared. The earliest approved order of a group is the original; every
+// later one is a row naming it as the secondary subject.
+const normalizedDescription = (text) => String(text || "").trim().replace(/\s+/g, " ").toLowerCase();
+
+const changeOrderDuplicates = async ({ orgId, projectId }) => {
+  const orders = await prisma.changeOrder.findMany({
+    where: { projectId, project: { orgId }, status: "approved", archivedAt: null },
+    select: { id: true, ref: true, description: true, approvedAt: true, createdAt: true, activityLinks: { select: { activityId: true, approvedScheduleImpactDays: true } } },
+  });
+  const groups = new Map();
+  for (const order of orders) {
+    const description = normalizedDescription(order.description);
+    if (!description || !order.activityLinks.length) continue;
+    const impact = new Map();
+    for (const link of order.activityLinks) impact.set(link.activityId, Math.max(impact.get(link.activityId) ?? 0, Number(link.approvedScheduleImpactDays) || 0));
+    const signature = [...impact.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([activityId, days]) => `${activityId}:${days}`).join("|");
+    const key = `${description}\u0000${signature}`;
+    if (!groups.has(key)) groups.set(key, { orders: [], impact });
+    groups.get(key).orders.push(order);
+  }
+  const at = (value) => (value ? new Date(value).getTime() : Infinity);
+  const rows = [];
+  for (const { orders: group, impact } of groups.values()) {
+    if (group.length < 2) continue;
+    group.sort((a, b) => at(a.approvedAt) - at(b.approvedAt) || at(a.createdAt) - at(b.createdAt) || a.id.localeCompare(b.id));
+    const [original, ...later] = group;
+    for (const order of later) {
+      rows.push({
+        subjectType: "change_order",
+        subjectId: order.id,
+        secondarySubjectType: "change_order",
+        secondarySubjectId: original.id,
+        measured: { value: group.length, basis: "Approved, unarchived change orders on this project with this description and this activity impact (ChangeOrder.description; ChangeOrderActivityLink activity + approvedScheduleImpactDays)" },
+        limit: { value: 1, basis: "One order per instruction; a person decides whether these are the same instruction (nothing is merged, archived or changed)" },
+        data: {
+          ref: order.ref,
+          originalRef: original.ref,
+          refs: group.map((entry) => entry.ref),
+          description: String(order.description || "").slice(0, 160),
+          activityImpacts: [...impact.entries()].map(([activityId, days]) => ({ activityId, approvedScheduleImpactDays: days })),
+          label: order.ref,
+        },
+      });
+    }
+  }
+  return rows.sort((a, b) => a.subjectId.localeCompare(b.subjectId));
+};
+
 // ─── the rules ────────────────────────────────────────────────────────────
 
 const RULES = [
@@ -701,6 +847,26 @@ const RULES = [
     label: "Reporting readiness",
     note: () => "The last period was locked over a PM override of the reporting gate, and the gate is still not ready.",
     evaluate: readinessOverrideActive,
+  },
+  {
+    kind: "orphan_change_link",
+    severity: "warning",
+    subjectType: "budget_revision",
+    module: "cost",
+    boqDerived: false,
+    label: "Change links",
+    note: (count) => `${plural(count, "change link")} name${count === 1 ? "s" : ""} a record that is not in this project.`,
+    evaluate: orphanChangeLinks,
+  },
+  {
+    kind: "change_order_possible_duplicate",
+    severity: "info",
+    subjectType: "change_order",
+    module: "cost",
+    boqDerived: false,
+    label: "Change orders",
+    note: (count) => `${plural(count, "approved change order")} repeat${count === 1 ? "s" : ""} an earlier one's description and activity impact; the forecast counts each (review, nothing is changed).`,
+    evaluate: changeOrderDuplicates,
   },
 ];
 
