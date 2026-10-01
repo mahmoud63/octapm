@@ -5,28 +5,30 @@
  */
 import { api, run } from '@/api/client'
 import { isAppError, looksTechnical } from '@/api/errors'
-import type {
-  Activity,
-  ActivityQuantities,
-  AllocatedItem,
-  AllocatedItemsAnswer,
-  Crew,
-  DailyLog,
-  DailyLogDay,
-  DailyLogSection,
-  DailyLogSettings,
-  EntryInput,
-  Lookahead,
-  LookaheadItem,
-  Photo,
-  PhotosPage,
-  ProgressInput,
-  ProgressMethod,
-  ProgressSubmission,
-  QuantityProgressEntry,
-  Timesheet,
-  TimesheetEntry,
-  Worker,
+import {
+  QUANTITY_FIGURE_KEYS,
+  type Activity,
+  type ActivityQuantities,
+  type ActivityQuantitiesAnswer,
+  type AllocatedItem,
+  type AllocatedItemsAnswer,
+  type Crew,
+  type DailyLog,
+  type DailyLogDay,
+  type DailyLogSection,
+  type DailyLogSettings,
+  type EntryInput,
+  type Lookahead,
+  type LookaheadItem,
+  type Photo,
+  type PhotosPage,
+  type ProgressInput,
+  type ProgressMethod,
+  type ProgressSubmission,
+  type QuantityProgressEntry,
+  type Timesheet,
+  type TimesheetEntry,
+  type Worker,
 } from '@/api/site-types'
 
 type Query = Record<string, string | number | boolean | undefined>
@@ -163,9 +165,28 @@ export const listQuantityProgress = async (projectId: string, filters: { activit
   return Array.isArray(data) ? data : (data.items ?? [])
 }
 
+/**
+ * The views server's answer as the app reads it. The six figures sit under
+ * `figures` (quantity-views.service folds them there; they are never at the
+ * top level), and a member the server withholds the bill from gets
+ * `withheld: true` with the reason at the top — that becomes the answer's
+ * `notAvailable`, so a dash and the server's reason stand in for every
+ * figure. A figure the server did send — a genuine 0 received, a figure with
+ * its own `notAvailable` reason — is passed through as it came, reason and
+ * all: the app never substitutes its own sentence for the server's.
+ */
+export const readActivityQuantities = (answer: ActivityQuantitiesAnswer | null | undefined): ActivityQuantities => {
+  const figures = answer?.figures && typeof answer.figures === 'object' ? answer.figures : {}
+  const read: ActivityQuantities = {}
+  for (const key of QUANTITY_FIGURE_KEYS) if (key in figures) read[key] = figures[key] ?? null
+  read.notAvailable = answer?.withheld ? { reason: answer.reason || 'Not available' } : null
+  read.progressSource = answer?.progress && answer.progress.allowed ? (answer.progress.progressSource ?? null) : null
+  return read
+}
+
 /** The five quantities and the committed one for an activity (views contract), each with its truth, basis and unit — or the reason it is not available. */
-export const getActivityQuantities = (projectId: string, activityId: string, signal?: AbortSignal) =>
-  get<ActivityQuantities>('/projects/{projectId}/activities/{id}/quantities', { path: { projectId, id: activityId }, signal })
+export const getActivityQuantities = async (projectId: string, activityId: string, signal?: AbortSignal): Promise<ActivityQuantities> =>
+  readActivityQuantities(await get<ActivityQuantitiesAnswer>('/projects/{projectId}/activities/{id}/quantities', { path: { projectId, id: activityId }, signal }))
 
 // ── Lookaheads ──
 

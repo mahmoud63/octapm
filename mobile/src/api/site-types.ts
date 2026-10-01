@@ -135,13 +135,50 @@ export interface QuantityFigure {
   basis: string | null
   unitCode: string | null
   unitMatch?: boolean | null
+  /** Set by the server on a figure it withheld from this reader (utils/boq-figures); the reason is in notAvailable. */
+  withheld?: boolean
   notAvailable?: { reason: string } | null
 }
 
 export type QuantityFigureKey = 'received' | 'issued' | 'installed' | 'certified' | 'paid' | 'committed'
 export const QUANTITY_FIGURE_KEYS: readonly QuantityFigureKey[] = ['received', 'issued', 'installed', 'certified', 'paid', 'committed']
 
-export type ActivityQuantities = Partial<Record<QuantityFigureKey, QuantityFigure | null>> & { notAvailable?: { reason: string } | null }
+/**
+ * GET /projects/:id/activities/:id/quantities as the views server answers it
+ * (quantity-views.service getActivityQuantities): the activity's identity,
+ * its progress section (follows progress:read) and the six figures nested
+ * under `figures` — never at the top level. A member the server withholds
+ * the bill from (utils/boq-figures withheldActivityQuantities) gets
+ * `withheld: true` and the reason at the top, and every figure withheld
+ * with that same reason. Only what the app reads is typed.
+ */
+export interface ActivityQuantitiesAnswer {
+  kind?: string
+  id?: string
+  activityId?: string
+  code?: string | null
+  name?: string | null
+  cutoffDate?: string | null
+  asOf?: string | null
+  /** Whether the core register (quantity-progress.service) is on the server: 'present' | 'pending'. */
+  core?: string
+  progress?:
+    | { allowed: true; method?: string; pctComplete?: { value: number | null; truth?: string | null; basis?: string | null } | null; progressSource?: string | null; planned?: QuantityFigure | null }
+    | { allowed: false; module?: string; reason?: string }
+    | null
+  figures?: Partial<Record<QuantityFigureKey, QuantityFigure | null>> | null
+  comparisons?: unknown
+  items?: unknown[]
+  keys?: string[]
+  withheld?: boolean
+  reason?: string
+}
+
+/**
+ * The same, as the app reads it: the six figures by key, the whole-answer
+ * withholding as `notAvailable`, and the official figure's source.
+ */
+export type ActivityQuantities = Partial<Record<QuantityFigureKey, QuantityFigure | null>> & { notAvailable?: { reason: string } | null; progressSource?: string | null }
 
 export interface DailyLogWeather {
   condition?: string | null
