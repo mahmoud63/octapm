@@ -1023,15 +1023,19 @@ export function ChangeEventDialog({
                 <p className='font-medium'>Scope lines</p>
                 <span className='text-xs text-muted-foreground'>
                   ROM{' '}
-                  {money(
-                    rows.length ? totals.rom : Number(header.romAmount) || 0
-                  )}{' '}
+                  <span data-testid='uat-change-event-rom-total'>
+                    {money(
+                      rows.length ? totals.rom : Number(header.romAmount) || 0
+                    )}
+                  </span>{' '}
                   · estimate{' '}
-                  {money(
-                    rows.length
-                      ? totals.estimate
-                      : Number(header.romAmount) || 0
-                  )}
+                  <span data-testid='uat-change-event-estimate-total'>
+                    {money(
+                      rows.length
+                        ? totals.estimate
+                        : Number(header.romAmount) || 0
+                    )}
+                  </span>
                   {event.totals.quoted !== null
                     ? ` · quoted ${money(event.totals.quoted)}`
                     : ''}

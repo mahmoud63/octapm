@@ -85,8 +85,8 @@ const call = async (
   return moved.body!.data as Record<string, unknown>
 }
 
-/** What the raise took from the exception onto the line (the BOQ item here carries no cost code). */
-const WITHHELD = ['activityId', 'quantity', 'unit', 'unitCost']
+/** What the raise took from the exception onto the line (the BOQ item carries a project cost code). */
+const WITHHELD = ['costCodeId', 'activityId', 'quantity', 'unit', 'unitCost']
 
 type Line = { id: string; description: string; romAmount: number }
 type Event = { id: string; ref: string; title: string; lines: Line[]; sourceWithheld?: { keys: string[]; reason: string } }
@@ -129,6 +129,16 @@ test('a member without BOQ read opens and saves a change event raised from a BOQ
       data: { boqItemId: (item.item as { id: string }).id, activityId: activity.id, quantity: 40 },
       status: 201,
     })
+    // The BOQ item carries a cost code of the project: the raise takes it onto the line.
+    const costCodeId = inLiveOrg(
+      org.orgId,
+      `const code = await prisma.costCode.create({ data: { orgId, code: 'LTCC-' + Date.now(), name: 'LiveTest piling cost code' } });
+       await prisma.projectCostCode.create({ data: { orgId, projectId: args[0], costCodeId: code.id } });
+       await prisma.boqItem.update({ where: { id: args[1] }, data: { costCodeId: code.id } });
+       return code.id;`,
+      projectId,
+      (item.item as { id: string }).id,
+    ) as string
     for (const step of ['submit', 'approve']) {
       await call(client, 'post', `/projects/${projectId}/activity-boq-allocations/${allocation.id as string}/${step}`)
     }
@@ -144,6 +154,7 @@ test('a member without BOQ read opens and saves a change event raised from a BOQ
     }
     const event = raised.changeEvent
     const line = event.lines[0]
+    expect(line.costCodeId, 'the raise took the cost code of the BOQ item').toBe(costCodeId)
     // The PM prices the line's amount (a BOQ reader): the quantity, unit and activity stay as taken.
     await call(client, 'patch', `/projects/${projectId}/change-events/${event.id}`, {
       data: { lines: [{ id: line.id, description: line.description, activityId: line.activityId, costCodeId: line.costCodeId, quantity: line.quantity, unit: line.unit, unitCost: line.unitCost, romAmount: 250 }] },
@@ -160,7 +171,8 @@ test('a member without BOQ read opens and saves a change event raised from a BOQ
   }
   expect(theirs.sourceWithheld!.keys).toContain('activityId')
   const before = storedOf(event.id)
-  expect(before.lines[0]).toMatchObject({ quantity: 5, unit: 'm', romAmount: '250' })
+  expect(before.lines[0]).toMatchObject({ quantity: 5, unit: 'm', unitCost: '0', romAmount: '250' })
+  expect(before.lines[0].costCodeId, 'a stored cost code the surveyor is not shown').toBeTruthy()
 
   await page.routeWebSocket(/socket\.io/, () => {})
   await signInForm(page, qsEmail)
@@ -186,8 +198,10 @@ test('a member without BOQ read opens and saves a change event raised from a BOQ
   await expect(dialog.getByTestId('uat-change-event-source-withheld')).toContainText(`— ${reason}`)
   await expect(dialog).not.toContainText('undefined')
   await expect(dialog).not.toContainText('NaN')
-  // The line's stored amount, not quantity × unit cost.
+  // The line's stored amount, not quantity × unit cost (5 × 0) — in the line and in the ROM and estimate totals.
   await expect(row.getByTestId(`uat-change-event-line-amount-${lineId}`).locator('input')).toHaveValue('250')
+  await expect(dialog.getByTestId('uat-change-event-rom-total')).toHaveText('250')
+  await expect(dialog.getByTestId('uat-change-event-estimate-total')).toHaveText('250')
 
   // Save an edit of the title: nothing withheld is sent back.
   await dialog.getByTestId('uat-change-event-title').fill('LiveTest saved by the surveyor')
