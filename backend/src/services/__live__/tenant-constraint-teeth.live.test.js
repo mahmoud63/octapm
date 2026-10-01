@@ -159,4 +159,32 @@ liveDescribe("Tenant constraint teeth (M7)", () => {
     await expect(insertSection({ orgId: b.org.id })).rejects.toThrow(/DailyLogQuantity_projectId_orgId_fkey/);
     await insertSection({ orgId: a.org.id });
   });
+
+  test("ProjectException refuses a disagreeing (projectId, orgId) pair, another organisation's cost code and a second open row (20261005060000)", async () => {
+    // Raw SQL on purpose, as for PC-6: the table exists only once the
+    // orchestrator has applied migration 20261005060000_project_exceptions, and
+    // the shared Prisma client may predate it. Until then the case reports
+    // itself as not yet applicable; the same assertions (and more) run green
+    // on a throwaway database through
+    // scripts/db/prove-project-exceptions-constraints.js.
+    const present = await prisma.$queryRaw`SELECT to_regclass('"ProjectException"') IS NOT NULL AS ok`;
+    if (!present[0]?.ok) {
+      console.warn("tenant-constraint-teeth: 20261005060000_project_exceptions is not applied to this database; PC-7b case not yet applicable");
+      return;
+    }
+    const subjectId = `teeth-${crypto.randomUUID().slice(0, 8)}`;
+    const insertException = ({ orgId, costCodeId = null }) =>
+      prisma.$executeRaw`
+        INSERT INTO "ProjectException" ("id", "orgId", "projectId", "kind", "severity", "subjectType", "subjectId", "costCodeId", "measured", "limit", "measuredBasis", "limitBasis", "updatedAt")
+        VALUES (${crypto.randomUUID()}, ${orgId}, ${projectA.id}, 'quantity_over_allocation', 'warning', 'allocation', ${subjectId}, ${costCodeId}, 120, 100, 'teeth measured', 'teeth limit', now())`;
+
+    await expect(insertException({ orgId: b.org.id })).rejects.toThrow(/ProjectException_projectId_orgId_fkey/);
+    await expect(insertException({ orgId: a.org.id, costCodeId: costCodeB.id })).rejects.toThrow(/ProjectException_costCodeId_orgId_fkey/);
+    await insertException({ orgId: a.org.id, costCodeId: costCodeA.id });
+    // The open-row key is a hand-written partial expression index; a unique
+    // violation is reported by SQLSTATE, not by name.
+    await expect(insertException({ orgId: a.org.id })).rejects.toThrow(/Code: `23505`/);
+    const rows = await prisma.$queryRaw`SELECT count(*)::int AS n FROM "ProjectException" WHERE "projectId" = ${projectA.id} AND "subjectId" = ${subjectId}`;
+    expect(rows[0].n).toBe(1);
+  });
 });
