@@ -97,4 +97,20 @@ const detail = read('src/features/projects/components/project-detail.tsx')
 assert.ok(detail.includes("import('@/features/controls/exceptions/exceptions-page')"), 'the Exceptions screen is lazily loaded')
 assert.match(detail, /childState\.controls === 'exceptions'/, 'the controls module renders Exceptions on its sub-tab')
 
+// ── The PC-5 drawers: one exceptions section each ───────────────────────
+const section = all['record-exceptions-section.tsx']
+assert.match(section, /<WithheldNote/, 'the drawer section says what the server withheld')
+assert.match(section, /withheld \? null : \(\s*<Empty>No open exception on this record\.<\/Empty>/, 'a drawer never says "none" beside a withheld marker')
+assert.match(section, /<ChangeEventLink/, 'an exception in change links to its event from the drawer')
+assert.match(section, /<MeasuredVsLimit/, 'the drawer draws measured vs limit with their bases')
+for (const [file, kind, testId] of [
+  ['src/features/boq/components/boq-detail-drawer.tsx', 'boq_item', 'boq-detail-exceptions'],
+  ['src/features/schedule/components/activity-detail-drawer.tsx', 'activity', 'activity-detail-exceptions'],
+]) {
+  const drawer = read(file)
+  assert.equal((drawer.match(/<RecordExceptionsSection/g) ?? []).length, 1, `${file}: one exceptions section`)
+  assert.ok(drawer.includes(`recordType='${kind}'`), `${file}: the section reads the ${kind}'s exceptions`)
+  assert.ok(drawer.includes(`testId='${testId}'`), `${file}: the section is ${testId}`)
+}
+
 console.log('exceptions-ui: ok')

@@ -24,6 +24,7 @@ import {
   formatQuantity,
 } from '@/features/controls/lib/detail-format'
 import { useBoqItemDetail } from '@/features/controls/hooks/use-controls-detail'
+import { RecordExceptionsSection } from '@/features/controls/exceptions/record-exceptions-section'
 import { RecordQuantities } from '@/features/controls/quantities/quantities-section'
 import { useRecordQuantities } from '@/features/controls/quantities/use-record-quantities'
 import { useProject } from '@/features/projects/hooks/use-projects'
@@ -359,6 +360,14 @@ function BoqDetailBody({
           <Withheld section={sections.changes} testId='boq-detail-changes-withheld' />
         )}
       </DetailSection>
+
+      {/* PC-7b: the exceptions the server lists on this row and its allocations. */}
+      <RecordExceptionsSection
+        projectId={projectId}
+        recordType='boq_item'
+        recordId={detail.id}
+        testId='boq-detail-exceptions'
+      />
 
       <DetailSection title='Procurement' testId='boq-detail-procurement'>
         {sections.procurement.allowed ? (
