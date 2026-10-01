@@ -642,12 +642,14 @@ const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
  * with the pending submission's id and `approvesPending: true` (a gate that
  * refuses leaves it pending with the reason, as for any other row). When the
  * figure differs, a new submission is made and approved as for any other
- * row; the older pending import row is left exactly as the writer leaves a
- * superseded manual submission — untouched, still in the queue — and is
- * reported on the row (`superseded`) and in `supersededPendingSubmissions`
- * so the approver can reject it from the queue. Nothing here rejects or
- * deletes a submission. Any other figure is written again — the writer keeps
- * no idempotency key of its own.
+ * row. Either way, every OTHER older submitted import row on the activity
+ * at another figure — there may be several — is left exactly as the writer
+ * leaves a superseded manual submission — untouched, still in the queue —
+ * and each is reported on the row (`superseded`, newest first) and in
+ * `supersededPendingSubmissions` (one entry per submission; the count is of
+ * submissions, not rows) so the approver can reject them from the queue.
+ * Nothing here rejects or deletes a submission. Any other figure is written
+ * again — the writer keeps no idempotency key of its own.
  *
  * `dryRun` answers the per-row plan for this person without writing, and the
  * plan is read from the writer's own rules, not assumed: the assignment
@@ -712,9 +714,13 @@ async function importProgress({
     const waiting = activity.progressSubmissions.find(
       (row) => normalizePct(row.pctComplete) === pctComplete,
     );
-    const olderPending = activity.progressSubmissions.find(
-      (row) => row.status === 'submitted' && normalizePct(row.pctComplete) !== pctComplete,
-    );
+    // Every older submitted import row at another figure, newest first — all
+    // of them, since a queue can hold more than one (a site engineer's 30
+    // then 32): each is left there, and each is reported by a row that is
+    // written. A draft is not in the queue and is not one of them.
+    const olderPending = activity.progressSubmissions
+      .filter((row) => row.status === 'submitted' && normalizePct(row.pctComplete) !== pctComplete)
+      .map((row) => ({ submissionId: row.id, pctComplete: normalizePct(row.pctComplete) }));
     const row = {
       activityId: activity.id,
       p6ActivityId: key,
@@ -727,7 +733,7 @@ async function importProgress({
       progressId: null,
       waitingStatus: null,
       approvesPending: false,
-      superseded: null,
+      superseded: [],
       reason: null,
     };
     if (pctComplete === null) {
@@ -754,6 +760,9 @@ async function importProgress({
       row.evidenceRequired =
         Boolean(activity.progressMethod?.evidenceRequired) &&
         !progressService.hasEvidence(waiting.evidenceJson);
+      // The other older rows at other figures are left in the queue just
+      // the same, and this person — the one the report exists for — is told.
+      row.superseded = olderPending;
     } else if (waiting) {
       // A draft is not in any approver's queue: it waits for evidence, and
       // the reason says so rather than calling it "awaiting approval".
@@ -770,14 +779,9 @@ async function importProgress({
     } else {
       row.status = canApprove ? 'approve' : 'submit';
       row.evidenceRequired = Boolean(activity.progressMethod?.evidenceRequired);
-      if (olderPending) {
-        // Left in the queue, as the writer leaves a superseded manual
-        // submission; the approver is told so they can reject it.
-        row.superseded = {
-          submissionId: olderPending.id,
-          pctComplete: normalizePct(olderPending.pctComplete),
-        };
-      }
+      // Left in the queue, as the writer leaves a superseded manual
+      // submission; the approver is told so they can reject them.
+      row.superseded = olderPending;
     }
     plan.push(row);
   }
@@ -848,18 +852,21 @@ async function importProgress({
     outcome: canApprove ? 'approved' : 'submitted',
   };
   // An older pending import row at another figure is superseded only by a
-  // row that was (or would be) written; a refused or skipped row leaves it
-  // as the only figure in the queue, and it is not reported.
+  // row that was (or would be) written — including one that approves an
+  // already-pending submission; a refused or skipped row leaves it as the
+  // only figure in the queue, and it is not reported.
   const WRITTEN = new Set(['approve', 'submit', 'hold', 'approved', 'pending', 'submitted', 'draft']);
   const settleSuperseded = (rows) => {
     for (const row of rows) {
-      if (row.superseded && !WRITTEN.has(row.status)) row.superseded = null;
+      if (row.superseded.length && !WRITTEN.has(row.status)) row.superseded = [];
     }
     return rows;
   };
   const summarize = (rows) => {
     const count = (status) => rows.filter((row) => row.status === status).length;
-    const superseded = rows.filter((row) => row.superseded);
+    // One entry per submission left in the queue, not per row: an activity
+    // may leave several behind.
+    const superseded = rows.flatMap((row) => row.superseded.map((older) => ({ row, older })));
     return {
       matched: rows.length,
       notMatched,
@@ -872,12 +879,12 @@ async function importProgress({
       skipped: count('skipped'),
       refused: count('refused'),
       supersededPending: superseded.length,
-      supersededPendingSubmissions: superseded.map((row) => ({
+      supersededPendingSubmissions: superseded.map(({ row, older }) => ({
         activityId: row.activityId,
         p6ActivityId: row.p6ActivityId,
         name: row.name,
-        submissionId: row.superseded.submissionId,
-        pctComplete: row.superseded.pctComplete,
+        submissionId: older.submissionId,
+        pctComplete: older.pctComplete,
         importedPctComplete: row.pctComplete,
       })),
     };
