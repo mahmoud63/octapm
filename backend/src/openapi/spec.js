@@ -2074,6 +2074,116 @@ const components = {
       },
       ["kind", "id"],
     ),
+    // PC-6 quantity views: one envelope for the five quantities (and the
+    // committed quantity) of a BOQ item or an activity, each from its owner.
+    QuantityFigure: {
+      type: "object",
+      description:
+        "One quantity and where it comes from. truth: installed derived (Σ approved QuantityProgressEntry — only approval counts), certified source (Σ IpcItem.qty on the allocation summary's certified basis), paid projection (certified × the certificate's paid share, pro-rata per certificate), received and issued derived (StockTransaction receipt / issue net of returns, in the inventory item's unit), committed derived (Σ CommitmentSovLine.qty on executed/closed commitments — excludes variations). unitCode is the unit the value is in; unitMatch says whether it is the BOQ row's unit (null when nothing was counted). A figure that cannot be stated has value null and notAvailable: { reason } — the viewer's modules do not admit it (module names which), the core track's module is pending, the activity is not measured by quantity (installed is never % × quantity), or the rows are in more than one unit (byUnit lists each unit's own sum; nothing is summed across units). Figures are never merged or netted against each other.",
+      additionalProperties: true,
+      properties: {
+        value: { type: "number", nullable: true },
+        truth: { type: "string", enum: ["source", "derived", "projection"], nullable: true },
+        basis: { type: "string" },
+        unitCode: { type: "string", nullable: true },
+        unitMatch: { type: "boolean", nullable: true },
+        derivedFrom: arrayOf(freeObject("A record type (and id or filter) the figure is read or derived from.")),
+        notAvailable: objectSchema({ reason: { type: "string" } }, ["reason"]),
+        module: { type: "string", description: "On a figure the viewer may not read: the permission module that owns it." },
+        label: { type: "string", description: "committed: \"Committed quantity (excludes variations)\"." },
+        byUnit: arrayOf(objectSchema({ unitCode: { type: "string", nullable: true }, value: { type: "number" }, unitMatch: { type: "boolean", nullable: true } })),
+        byItem: arrayOf(freeObject("On an activity figure: each BOQ item's own figure (QuantityFigure plus boqItemId).")),
+        certificates: arrayOf(
+          objectSchema({
+            certificateId: { type: "string", nullable: true },
+            period: { type: "string", nullable: true },
+            certifiedQuantity: { type: "number" },
+            amountPaid: { type: "number" },
+            netPayable: { type: "number" },
+            paidShare: { type: "number" },
+            paidQuantity: { type: "number" },
+          }),
+        ),
+        components: objectSchema({ issued: { type: "number" }, returned: { type: "number" } }),
+        subcontract: freeObject("On certified: the subcontract-side certified quantity, not available (SubPayAppLine has no quantity)."),
+        withheld: { type: "boolean", description: "True when utils/boq-figures withheld the figure from a member who may not read the BOQ." },
+      },
+      required: ["value", "truth", "basis", "unitCode", "unitMatch"],
+    },
+    QuantityFigures: objectSchema(
+      {
+        installed: ref("QuantityFigure"),
+        certified: ref("QuantityFigure"),
+        paid: ref("QuantityFigure"),
+        received: ref("QuantityFigure"),
+        issued: ref("QuantityFigure"),
+        committed: ref("QuantityFigure"),
+      },
+      ["installed", "certified", "paid", "received", "issued", "committed"],
+    ),
+    QuantityComparisons: objectSchema({
+      certifiedOverInstalled: objectSchema({
+        flag: { type: "boolean", nullable: true, description: "certified > installed, in one unit; null when either figure is not available or the units differ (reason says which). A raw comparison: the reviewed exception is PC-7b." },
+        certified: { type: "number", nullable: true },
+        installed: { type: "number", nullable: true },
+        unitCode: { type: "string", nullable: true },
+        basis: { type: "string" },
+        reason: { type: "string" },
+      }),
+      withheld: { type: "boolean" },
+      reason: { type: "string" },
+    }),
+    BoqItemQuantities: objectSchema(
+      {
+        kind: { type: "string", enum: ["boq_item"] },
+        id: uuid,
+        boqItemId: uuid,
+        code: { type: "string" },
+        description: { type: "string", nullable: true },
+        unit: { type: "string", nullable: true },
+        unitCode: { type: "string", nullable: true, description: "The row's unit code (BoqItem.unitCode, or its typed unit resolved against the organisation's unit list)." },
+        quantity: ref("QuantityFigure"),
+        cutoffDate: { type: "string", format: "date-time", nullable: true },
+        asOf: { type: "string", format: "date-time" },
+        core: { type: "string", enum: ["present", "pending"], description: "Whether the core track's quantity-progress module is merged; pending means every installed figure is not available." },
+        figures: ref("QuantityFigures"),
+        comparisons: ref("QuantityComparisons"),
+        keys: arrayOf({ type: "string" }),
+        withheld: { type: "boolean" },
+        reason: { type: "string" },
+      },
+      ["kind", "id"],
+    ),
+    ActivityQuantities: objectSchema(
+      {
+        kind: { type: "string", enum: ["activity"] },
+        id: uuid,
+        activityId: uuid,
+        code: { type: "string", nullable: true },
+        name: { type: "string", nullable: true },
+        cutoffDate: { type: "string", format: "date-time", nullable: true },
+        asOf: { type: "string", format: "date-time", nullable: true },
+        core: { type: "string", enum: ["present", "pending"], nullable: true },
+        progress: {
+          type: "object",
+          additionalProperties: true,
+          description:
+            "progress:read — { allowed, method, pctComplete (the latest approved ActivityProgress, on or before the cutoff), progressSource, planned (QuantityFigure: the core track's plannedQuantityFor — Σ approved allocations or the method configuration; withheld from a member who may not read the BOQ) }; otherwise { allowed: false, module: \"progress\", reason }.",
+        },
+        figures: ref("QuantityFigures"),
+        comparisons: ref("QuantityComparisons"),
+        items: {
+          description: "The per-BOQ-item blocks, scoped to this activity: { boqItemId, code, description, unit, unitCode, figures, comparisons }; { withheld: true, reason } for a member who may not read the BOQ.",
+          oneOf: [arrayOf(freeObject("A per-BOQ-item block.")), objectSchema({ withheld: { type: "boolean" }, reason: { type: "string" } })],
+        },
+        stockWithoutBoqItem: { type: "integer", description: "Stock movements against this activity that name no BOQ item (not in any figure)." },
+        sovLinesWithoutBoqItem: { type: "integer", description: "SOV lines against this activity that name no BOQ item (not in any figure)." },
+        keys: arrayOf({ type: "string" }),
+        withheld: { type: "boolean" },
+        reason: { type: "string" },
+      },
+      ["kind", "id"],
+    ),
     BoqItemUpdateResponse: objectSchema({
       item: ref("GenericObject"),
       financial: ref("GenericObject"),
@@ -8272,11 +8382,26 @@ add(
     tag: "BOQ",
     summary: "BOQ item detail: the row's story across the modules (PC-5).",
     description:
-      "Composed read-only from the services that own each figure: structure (WBS, location, cost code), mapping and linked activities (dates, critical flag, float, approved progress, authorised quantity per allocation — the schedule fields only for a schedule reader: anyone else gets each activity's id, code and name, href null and schedule: { allowed: false, module: \"schedule\", reason }; the approved % complete and its source only for a progress reader, as on the activity detail: a schedule reader who may not read progress gets progress: { allowed: false, module: \"progress\", reason } in their place), quantities (original from the baseline-locked revision, current, authorised = current + approved change-order allocation-link quantity by the IPC certification cap's rule, mapped, unallocated; installed, paid and forecast are not available yet and name their wave), money (rate, amount, approved allocation, EV derived as of now — not the official reporting-cutoff EV), certification (ipc:read; the certified quantity and the certified amount count the same rows, the allocation summary's certified basis — certified or paid lines on an approved, active allocation — and every line of the row is listed in any status), commitments (commitment:read; the SOV lines on executed/closed commitments and baseCommitmentValue, the \"Base commitment value (excluding approved variations)\": Σ of those lines naming the item — approved commitment change orders are not included, so it is not the committed cost on the cost record or the budget register, which include them; owner decision R5-3, formerly the key committed), changes (change_order:read), procurement (procurement:read; order values, not committed cost), PC-4 readiness flags (a row beyond a capped list is reported as not itemised, never as clean), history (audit:read) and documents. A section the viewer may not read is { allowed: false, module, reason }. Another organisation's item, or a missing one, is 404 BOQ_ITEM_NOT_FOUND.",
+      "Composed read-only from the services that own each figure: structure (WBS, location, cost code), mapping and linked activities (dates, critical flag, float, approved progress, authorised quantity per allocation — the schedule fields only for a schedule reader: anyone else gets each activity's id, code and name, href null and schedule: { allowed: false, module: \"schedule\", reason }; the approved % complete and its source only for a progress reader, as on the activity detail: a schedule reader who may not read progress gets progress: { allowed: false, module: \"progress\", reason } in their place), quantities (original from the baseline-locked revision, current, authorised = current + approved change-order allocation-link quantity by the IPC certification cap's rule, mapped, unallocated; and, PC-6, the five separate quantities as QuantityFigure — installed, certifiedQuantity, paid, received, issued, committedQuantity — with comparisons, exactly as GET /boq/items/{id}/quantities states them; forecast is not available yet and names PC-7), money (rate, amount, approved allocation, EV derived as of now — not the official reporting-cutoff EV), certification (ipc:read; the certified quantity and the certified amount count the same rows, the allocation summary's certified basis — certified or paid lines on an approved, active allocation — and every line of the row is listed in any status), commitments (commitment:read; the SOV lines on executed/closed commitments and baseCommitmentValue, the \"Base commitment value (excluding approved variations)\": Σ of those lines naming the item — approved commitment change orders are not included, so it is not the committed cost on the cost record or the budget register, which include them; owner decision R5-3, formerly the key committed), changes (change_order:read), procurement (procurement:read; order values, not committed cost), PC-4 readiness flags (a row beyond a capped list is reported as not itemised, never as clean), history (audit:read) and documents. A section the viewer may not read is { allowed: false, module, reason }. Another organisation's item, or a missing one, is 404 BOQ_ITEM_NOT_FOUND.",
     operationId: "getBoqItemDetail",
     parameters: projectRecordParams,
     permissions: modulePermission("boq", "read"),
     responseSchema: ref("ControlsDetail"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/boq/items/{id}/quantities",
+  "get",
+  operation({
+    tag: "BOQ",
+    summary: "BOQ item quantities: installed, certified, paid, received, issued and committed, kept apart (PC-6).",
+    description:
+      "Five quantities with five truths, each read from the service that owns it and never merged, netted against another or summed across units (docs/project-controls/OCTAPM_PROGRESS_MEASUREMENT.md §5–§6): installed = Σ approved QuantityProgressEntry naming the row (the core track's quantity-progress.service; a daily log, site capture or import never counts until the progress approvers approve it; not available with reason \"PC-6 core pending\" until that module is merged), certified = Σ IpcItem.qty on the allocation summary's certified basis (status certified or paid on an approved, active allocation; the subcontract side is not available — SubPayAppLine has no quantity), paid = certified × the certificate's paid share (IpcCertificate.amountPaid ÷ netPayable, capped at 1 — the payment state ipc.service keeps) pro-rata per certificate, a labelled projection, received = Σ StockTransaction receipts and issued = Σ issues net of returns naming the row, in the inventory item's unit with unitMatch against the row's unit (never converted), committed = Σ CommitmentSovLine.qty on executed/closed commitments, \"Committed quantity (excludes variations)\". comparisons.certifiedOverInstalled is a raw flag (the reviewed exception is PC-7b). cutoffDate (ISO 8601) bounds installed (approved on or before), certified (certDate, or the certificate's certifiedAt) and the stock movements (occurredAt); paid and committed are as of now and say so. Admitted on boq:read; certified and paid follow ipc:read, received and issued inventory:read, committed commitment:read (a party-scoped member is refused it) — a figure the viewer's modules do not admit is value null with notAvailable.reason and the module. Another organisation's item, or a missing one, is 404 BOQ_ITEM_NOT_FOUND.",
+    operationId: "getBoqItemQuantities",
+    parameters: [...projectRecordParams, queryParam("cutoffDate", "Bound installed, certified and the stock movements to this instant (ISO 8601).", { type: "string", format: "date-time" })],
+    permissions: modulePermission("boq", "read"),
+    responseSchema: ref("BoqItemQuantities"),
   }),
 );
 
@@ -8797,11 +8922,26 @@ add(
     tag: "Activities",
     summary: "Activity detail: the activity's story across the modules (PC-5).",
     description:
-      "Composed read-only from the services that own each figure: header (dates, float, critical flag), structure (WBS, location; an activity has no cost code of its own), mapping (BOQ allocations with links to each BOQ item, mapped quantity, budget = Σ approved allocations, generated budget as a projection, EV derived as of now = the allocation summary's per-allocation EV scoped to this activity) — for BOQ readers only, cost readers included (owner decision E1), otherwise { allowed: false, module: \"boq\" } —; for a member who may not read the BOQ, a change order reached only through an allocation link is left out, every listed order carries no allocationLinks and boqWithheld: { keys: [\"allocationLinks\"], reason }, and changes.changeOrders and history carry boqWithheld: { reason } (always, with no count) — their pages and totals leave out what is withheld over every row, not only the first 50 —, progress (progress:read; method, approved history, progress source, submissions), cost (cost:read; CostRecord committed and actual, stored forecast — its basis says entered, the initial default or not recorded, and forecast.forecastSource names it; a default is { value: null, withheld: true } with the reason for a member who may not read the BOQ, owner decision R5-2), certification (ipc:read and BOQ read; the certified or paid lines on the activity's approved, active allocations — the BOQ item detail's and the allocation summary's certified basis — listed and summed), changes (change orders and change events), procurement, quality (NCR, ITP, punch), constraints (logic ties and open lookahead constraints), documents and photos (a linked RFI or submittal only where its own register lists it to the viewer — routed to a party-scoped member's company, an RFI draft to its author or manager — and a linked punch item never to a party-scoped member), and history (audit:read; progress-submission, allocation-approval, change-order and schedule-revision events — activities have no audit trail of their own). Another organisation's activity, or a missing one, is 404 ACTIVITY_NOT_FOUND.",
+      "Composed read-only from the services that own each figure: header (dates, float, critical flag), structure (WBS, location; an activity has no cost code of its own), mapping (BOQ allocations with links to each BOQ item, mapped quantity, budget = Σ approved allocations, generated budget as a projection, EV derived as of now = the allocation summary's per-allocation EV scoped to this activity) — for BOQ readers only, cost readers included (owner decision E1), otherwise { allowed: false, module: \"boq\" } —; for a member who may not read the BOQ, a change order reached only through an allocation link is left out, every listed order carries no allocationLinks and boqWithheld: { keys: [\"allocationLinks\"], reason }, and changes.changeOrders and history carry boqWithheld: { reason } (always, with no count) — their pages and totals leave out what is withheld over every row, not only the first 50 —, progress (progress:read; method, approved history, progress source, submissions, installedQuantity — PC-6: Σ approved quantity entries per BOQ item folded into one unit, as GET /activities/{id}/quantities states it, not available with the reason on an activity not measured by quantity, and withheld from a member who may not read the BOQ), cost (cost:read; CostRecord committed and actual, stored forecast — its basis says entered, the initial default or not recorded, and forecast.forecastSource names it; a default is { value: null, withheld: true } with the reason for a member who may not read the BOQ, owner decision R5-2), certification (ipc:read and BOQ read; the certified or paid lines on the activity's approved, active allocations — the BOQ item detail's and the allocation summary's certified basis — listed and summed), changes (change orders and change events), procurement, quality (NCR, ITP, punch), constraints (logic ties and open lookahead constraints), documents and photos (a linked RFI or submittal only where its own register lists it to the viewer — routed to a party-scoped member's company, an RFI draft to its author or manager — and a linked punch item never to a party-scoped member), and history (audit:read; progress-submission, allocation-approval, change-order and schedule-revision events — activities have no audit trail of their own). Another organisation's activity, or a missing one, is 404 ACTIVITY_NOT_FOUND.",
     operationId: "getActivityDetail",
     parameters: projectRecordParams,
     permissions: modulePermission("schedule", "read"),
     responseSchema: ref("ControlsDetail"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/activities/{id}/quantities",
+  "get",
+  operation({
+    tag: "Activities",
+    summary: "Activity quantities: installed, certified, paid, received, issued and committed per BOQ item of the activity, kept apart (PC-6).",
+    description:
+      "The BOQ item quantities (GET /boq/items/{id}/quantities) scoped to this activity — installed per item from the core track's installedByActivity, certified and paid on the lines of the activity's allocations, received and issued on the stock movements naming the activity, committed on the SOV lines naming it — for each BOQ item of its approved allocations (items[]), and folded into one activity-level figure per column where every item's figure is in one unit (byItem lists each item's own; several units → not available with byUnit, nothing summed across units). An activity not measured by quantity has no installed figure: value null with the reason, never % complete × quantity. progress (progress:read) carries the method, the latest approved % complete (on or before the cutoff) and the planned quantity (the core track's plannedQuantityFor: Σ approved allocations or the method configuration). comparisons.certifiedOverInstalled is a raw flag (PC-7b owns the exception). Admitted on schedule:read; every figure, the comparison, the items and the planned quantity go to BOQ readers only (utils/boq-figures) — cost, IPC, inventory or commitment read does not unlock them: anyone else gets value null with notAvailable.reason and withheld: true on each, and keeps the activity's identity and its approved % complete. Another organisation's activity, or a missing one, is 404 ACTIVITY_NOT_FOUND.",
+    operationId: "getActivityQuantities",
+    parameters: [...projectRecordParams, queryParam("cutoffDate", "Bound installed, certified, the stock movements and the approved progress to this instant (ISO 8601).", { type: "string", format: "date-time" })],
+    permissions: modulePermission("schedule", "read"),
+    responseSchema: ref("ActivityQuantities"),
   }),
 );
 

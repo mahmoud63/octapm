@@ -15,11 +15,13 @@ const {
   boqFigureAccess,
   withheldActivity,
   withheldActivityDetail,
+  withheldActivityQuantities,
   withheldProgressSubmission,
   withheldProgressSubmissions,
   withheldAllocatedItems,
 } = require('../utils/boq-figures');
 const controlsDetailService = require('../services/controls-detail.service');
+const quantityViewsService = require('../services/quantity-views.service');
 const progressService = require('../services/progress.service');
 const quantityProgressService = require('../services/quantity-progress.service');
 
@@ -209,6 +211,33 @@ router.get(
       ...controlsDetailService.detailReader(req),
     });
     return sendSuccess(res, withheldActivityDetail(detail, boqFigureAccess(req)));
+  }),
+);
+
+// GET /projects/:projectId/activities/:id/quantities — the activity's five
+// quantities (PC-6) per BOQ item of its approved allocations and folded into
+// one unit where they share one: installed (Σ approved quantity entries;
+// "—" on an activity not measured by quantity), certified, paid, received,
+// issued, committed, each from its owner with truth, basis, unit and
+// unit-match flag (quantity-views.service), plus the raw certified >
+// installed comparison. Admitted on schedule:read; the approved % complete
+// and the planned quantity follow progress:read; every figure goes to BOQ
+// readers only (utils/boq-figures), anyone else gets a dash and the reason.
+router.get(
+  '/:id/quantities',
+  requirePermission('schedule', 'read'),
+  [param('id').isUUID(), query('cutoffDate').optional().isISO8601(), validate],
+  asyncHandler(async (req, res) => {
+    const { can, partyScoped } = controlsDetailService.detailReader(req);
+    const view = await quantityViewsService.getActivityQuantities({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      activityId: req.params.id,
+      cutoffDate: req.query.cutoffDate || null,
+      can,
+      partyScoped,
+    });
+    return sendSuccess(res, withheldActivityQuantities(view, boqFigureAccess(req)));
   }),
 );
 

@@ -31,7 +31,8 @@ const canPollBoqJob = (req, res, next) =>
     : next(Object.assign(new HttpError(403, 'FORBIDDEN', 'You do not have permission for this action'), { details: { module: 'boq', action: 'read', source: req.projectAccess?.template ? 'template' : 'role' } }));
 const boqService = require('../services/boq.service');
 const controlsDetailService = require('../services/controls-detail.service');
-const { boqFigureAccess, withheldBoqItemDetail } = require('../utils/boq-figures');
+const quantityViewsService = require('../services/quantity-views.service');
+const { boqFigureAccess, withheldBoqItemDetail, withheldBoqItemQuantities } = require('../utils/boq-figures');
 const fileStorageService = require('../services/file-storage.service');
 const jobService = require('../jobs/job.service');
 const { assertMoneyInput } = require('../utils/money');
@@ -299,6 +300,37 @@ router.get(
       ...controlsDetailService.detailReader(req),
     });
     return sendSuccess(res, withheldBoqItemDetail(detail, boqFigureAccess(req)));
+  }),
+);
+
+// GET /projects/:projectId/boq/items/:itemId/quantities — the row's five
+// quantities (PC-6): installed, certified, paid, received, issued — plus
+// committed — each from the service that owns it, each with its truth, basis,
+// unit and unit-match flag, never merged or summed across units
+// (quantity-views.service). cutoffDate bounds installed, certified and the
+// stock movements. Admitted on boq:read; the certified and paid figures
+// follow ipc:read, received and issued inventory:read, committed
+// commitment:read — a figure a viewer's modules do not admit says so.
+router.get(
+  '/items/:itemId/quantities',
+  authenticate,
+  requirePermission('boq', 'read'),
+  [
+    param('itemId').isUUID().withMessage('The BOQ item id is not valid'),
+    query('cutoffDate').optional().isISO8601().withMessage('cutoffDate must be an ISO 8601 date'),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const { can, partyScoped } = controlsDetailService.detailReader(req);
+    const view = await quantityViewsService.getBoqItemQuantities({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      itemId: req.params.itemId,
+      cutoffDate: req.query.cutoffDate || null,
+      can,
+      partyScoped,
+    });
+    return sendSuccess(res, withheldBoqItemQuantities(view, boqFigureAccess(req)));
   }),
 );
 
