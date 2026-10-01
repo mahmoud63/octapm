@@ -23,7 +23,12 @@
  *     dismissed whatever the figure, a new key (a new episode) reopens;
  *   - an open row whose kind was evaluated and whose subject was not found
  *     again is resolved: resolvedAt = now, resolvedReason 'cleared'. A kind
- *     whose rule was skipped (its source absent) or failed keeps its rows.
+ *     whose rule was skipped (its source absent) or failed keeps its rows;
+ *   - a subject whose latest resolved row is a DISMISSAL and that its
+ *     evaluated kind no longer finds (the condition cleared) has the release
+ *     recorded on that row (dataJson.dismissalReleasedAt and
+ *     dismissalReleaseTrigger): the dismissal was of that occurrence, so a
+ *     later recurrence opens a fresh row instead of being suppressed by it.
  *
  * The engine writes ProjectException rows and nothing else: no change order,
  * no budget, schedule, forecast or EAC figure, no audit event, no domain
@@ -44,7 +49,7 @@ const { QUANTITY_TOLERANCE } = require("./exception-rules/_thresholds");
 const RESOLVED_CLEARED = "cleared";
 const DISMISSED_PREFIX = "dismissed:";
 // dataJson keys the engine and the dismissal own; a rule's data never uses them.
-const RESERVED_DATA_KEYS = Object.freeze(["dismissal", "reopenedFrom"]);
+const RESERVED_DATA_KEYS = Object.freeze(["dismissal", "reopenedFrom", "dismissalReleasedAt", "dismissalReleaseTrigger"]);
 const TRIGGERS = Object.freeze(["event", "scheduled", "manual", "test"]);
 const DEBOUNCE_MS = 30_000;
 const TRANSACTION_OPTIONS = Object.freeze({ maxWait: 15_000, timeout: 120_000 });
@@ -162,6 +167,8 @@ const fingerprintOfRow = (row) =>
   });
 
 const isDismissed = (row) => typeof row?.resolvedReason === "string" && row.resolvedReason.startsWith(DISMISSED_PREFIX);
+/** A dismissal whose condition has since cleared: it no longer holds a recurrence back. */
+const isReleased = (row) => Boolean(row?.dataJson && typeof row.dataJson === "object" && row.dataJson.dismissalReleasedAt);
 
 /** The measured figure a dismissal was made against: its fingerprint, else the frozen row's own. */
 const dismissedMeasured = (row) => {
@@ -212,11 +219,14 @@ const isSnoozed = (row, now) => Boolean(row?.snoozedUntil && new Date(row.snooze
 /**
  * What the findings mean for the stored rows. `open` is every open row of the
  * project; `latestResolved` maps a subject key to its latest resolved row;
- * `evaluatedKinds` are the kinds whose rules ran to the end.
+ * `evaluatedKinds` are the kinds whose rules ran to the end; `dismissedLatest`
+ * are the dismissed rows that are the latest resolved row of their subject
+ * (readReleasableDismissals) — each one whose subject is not found again by
+ * its evaluated kind, and has no open row, is released.
  */
-const planChanges = ({ findings, open, latestResolved, evaluatedKinds }) => {
+const planChanges = ({ findings, open, latestResolved, evaluatedKinds, dismissedLatest = [] }) => {
   const openByKey = new Map(open.map((row) => [keyOf(row), row]));
-  const plan = { create: [], refresh: [], touch: [], resolve: [], suppressed: [] };
+  const plan = { create: [], refresh: [], touch: [], resolve: [], suppressed: [], release: [] };
   const seen = new Set();
   for (const finding of findings) {
     const key = keyOf(finding);
@@ -228,7 +238,7 @@ const planChanges = ({ findings, open, latestResolved, evaluatedKinds }) => {
       continue;
     }
     const previous = latestResolved.get(key) || null;
-    if (previous && isDismissed(previous)) {
+    if (previous && isDismissed(previous) && !isReleased(previous)) {
       if (!reopensDismissal(finding, previous)) {
         plan.suppressed.push({ dismissed: previous, finding });
         continue;
@@ -240,6 +250,11 @@ const planChanges = ({ findings, open, latestResolved, evaluatedKinds }) => {
   }
   for (const row of open) {
     if (!seen.has(keyOf(row)) && evaluatedKinds.has(row.kind)) plan.resolve.push(row);
+  }
+  for (const row of dismissedLatest) {
+    if (!isDismissed(row) || isReleased(row) || !evaluatedKinds.has(row.kind)) continue;
+    if (seen.has(keyOf(row)) || openByKey.has(keyOf(row))) continue;
+    plan.release.push(row);
   }
   return plan;
 };
@@ -368,6 +383,26 @@ const readLatestResolved = async ({ client, orgId, projectId, findings, openKeys
   return latest;
 };
 
+/**
+ * The dismissed rows of the evaluated kinds that are still the latest resolved
+ * row of their subject and not released yet: the candidates for a release.
+ */
+const readReleasableDismissals = async ({ client, orgId, projectId, evaluatedKinds }) => {
+  if (!evaluatedKinds.size) return [];
+  const kinds = [...evaluatedKinds];
+  const dismissed = (
+    await client.projectException.findMany({ where: { orgId, projectId, resolvedAt: { not: null }, kind: { in: kinds }, resolvedReason: { startsWith: DISMISSED_PREFIX } } })
+  ).filter((row) => isDismissed(row) && !isReleased(row));
+  if (!dismissed.length) return [];
+  const resolved = await client.projectException.findMany({
+    where: { orgId, projectId, resolvedAt: { not: null }, kind: { in: [...new Set(dismissed.map((row) => row.kind))] }, subjectId: { in: [...new Set(dismissed.map((row) => row.subjectId))] } },
+    orderBy: [{ resolvedAt: "desc" }, { createdAt: "desc" }],
+  });
+  const latest = new Map();
+  for (const row of resolved) if (!latest.has(keyOf(row))) latest.set(keyOf(row), row);
+  return dismissed.filter((row) => latest.get(keyOf(row))?.id === row.id);
+};
+
 const rowSummary = (row, change, now) => ({
   id: row.id || null,
   change,
@@ -395,7 +430,7 @@ const findingData = (finding) => ({
   limitBasis: finding.limitBasis,
 });
 
-const applyPlan = async ({ tx, plan, project, now }) => {
+const applyPlan = async ({ tx, plan, project, now, trigger }) => {
   const opened = [];
   const refreshed = [];
   for (const { finding, reopenedFrom } of plan.create) {
@@ -432,6 +467,12 @@ const applyPlan = async ({ tx, plan, project, now }) => {
   if (touchIds.length) {
     await tx.projectException.updateMany({ where: { id: { in: touchIds }, projectId: project.id, resolvedAt: null }, data: { lastSeenAt: now } });
   }
+  for (const row of plan.release) {
+    await tx.projectException.updateMany({
+      where: { id: row.id, projectId: project.id, resolvedAt: { not: null } },
+      data: { dataJson: { ...(row.dataJson && typeof row.dataJson === "object" ? row.dataJson : {}), dismissalReleasedAt: now.toISOString(), dismissalReleaseTrigger: trigger } },
+    });
+  }
   const resolveIds = plan.resolve.map((row) => row.id);
   if (resolveIds.length) {
     await tx.projectException.updateMany({
@@ -458,7 +499,8 @@ const evaluateProject = async ({ orgId, projectId, cutoff = null, trigger = "man
   const reconcile = async (client) => {
     const open = await client.projectException.findMany({ where: { orgId, projectId, resolvedAt: null } });
     const latestResolved = await readLatestResolved({ client, orgId, projectId, findings, openKeys: new Set(open.map(keyOf)) });
-    return planChanges({ findings, open, latestResolved, evaluatedKinds });
+    const dismissedLatest = await readReleasableDismissals({ client, orgId, projectId, evaluatedKinds });
+    return planChanges({ findings, open, latestResolved, evaluatedKinds, dismissedLatest });
   };
 
   const base = {
@@ -482,12 +524,14 @@ const evaluateProject = async ({ orgId, projectId, cutoff = null, trigger = "man
       resolved: plan.resolve.length,
       unchanged: plan.touch.length,
       suppressed: plan.suppressed.length,
+      released: plan.release.length,
       rows: [
         ...plan.create.map(({ finding, reopenedFrom }) => rowSummary(finding, reopenedFrom ? "reopen" : "open", now)),
         ...plan.refresh.map(({ existing, finding }) => ({ ...rowSummary(finding, "refresh", now), id: existing.id, snoozed: isSnoozed(existing, now) })),
         ...plan.touch.map(({ existing }) => rowSummary(existing, "unchanged", now)),
         ...plan.resolve.map((row) => rowSummary(row, "resolve", now)),
         ...plan.suppressed.map(({ dismissed, finding }) => ({ ...rowSummary(finding, "suppressed", now), id: null, dismissedId: dismissed.id })),
+        ...plan.release.map((row) => rowSummary(row, "release", now)),
       ],
     };
   }
@@ -497,7 +541,7 @@ const evaluateProject = async ({ orgId, projectId, cutoff = null, trigger = "man
     // the database, and the lock keeps two evaluations from racing into it.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`project-exceptions:${projectId}`}))`;
     const plan = await reconcile(tx);
-    const applied = await applyPlan({ tx, plan, project, now });
+    const applied = await applyPlan({ tx, plan, project, now, trigger: base.trigger });
     return { plan, applied };
   }, TRANSACTION_OPTIONS);
 
@@ -513,11 +557,13 @@ const evaluateProject = async ({ orgId, projectId, cutoff = null, trigger = "man
     resolved: plan.resolve.length,
     unchanged: plan.touch.length,
     suppressed: plan.suppressed.length,
+    released: plan.release.length,
     rows: [
       ...opened,
       ...applied.refreshed.map(({ row }) => rowSummary(row, "refresh", now)),
       ...plan.touch.map(({ existing }) => rowSummary(existing, "unchanged", now)),
       ...plan.resolve.map((row) => rowSummary(row, "resolve", now)),
+      ...plan.release.map((row) => rowSummary(row, "release", now)),
     ],
   };
   if (opened.length || escalated.length) await notifyListeners({ orgId, projectId, trigger: result.trigger, opened, escalated });
@@ -616,7 +662,7 @@ const runEvaluationJob = async ({ job, log = () => {} }) => {
   if (!job?.orgId || !job?.projectId) throw new HttpError(400, "VALIDATION_ERROR", "An exceptions.evaluate job names its organisation and project");
   const payload = job.payload || job.payloadJson || {};
   const result = await evaluateProject({ orgId: job.orgId, projectId: job.projectId, trigger: TRIGGERS.includes(payload.trigger) ? payload.trigger : "event" });
-  log(`opened ${result.opened}, refreshed ${result.refreshed}, resolved ${result.resolved}, unchanged ${result.unchanged}, suppressed ${result.suppressed}`);
+  log(`opened ${result.opened}, refreshed ${result.refreshed}, resolved ${result.resolved}, unchanged ${result.unchanged}, suppressed ${result.suppressed}, released ${result.released}`);
   const { rows, ...counts } = result;
   return { ...counts, rows: rows.length };
 };
@@ -633,6 +679,7 @@ module.exports = {
   fingerprintOfFinding,
   fingerprintOfRow,
   isDismissed,
+  isReleased,
   dismissalKeyOf,
   keyOf,
   normalizeFinding,

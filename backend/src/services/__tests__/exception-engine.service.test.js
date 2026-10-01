@@ -204,6 +204,38 @@ describe("evaluateProject", () => {
     expect(bad.errors[0].message).toMatch(/dismissalKey/);
   });
 
+  it("a dismissal whose condition clears is released on its row; a later recurrence then opens a fresh row instead of being suppressed", async () => {
+    const dismissedRow = stored({ id: "dismissed-row", resolvedAt: new Date("2026-09-30"), resolvedReason: "dismissed:accepted", dataJson: { label: "x", dismissedFingerprint: { measured: 110 } } });
+    resolvedRows = [dismissedRow];
+    // The subject is not found by its (evaluated) kind: the release is recorded on the dismissed row.
+    let result = await evaluate([ruleOf("quantity_over_boq", [])]);
+    expect(result).toMatchObject({ opened: 0, resolved: 0, released: 1 });
+    expect(prisma.projectException.updateMany).toHaveBeenCalledWith({
+      where: { id: "dismissed-row", projectId: PROJECT, resolvedAt: { not: null } },
+      data: { dataJson: { label: "x", dismissedFingerprint: { measured: 110 }, dismissalReleasedAt: NOW.toISOString(), dismissalReleaseTrigger: "test" } },
+    });
+    expect(result.rows.map((row) => [row.change, row.id])).toEqual([["release", "dismissed-row"]]);
+    // Not released: the kind failed, or the subject is still found (still suppressed), or the row is not the subject's latest.
+    prisma.projectException.updateMany.mockClear();
+    // (another kind ran to the end beside the failed one, so the evaluation itself is not empty)
+    result = await evaluate([ruleOf("quantity_over_boq", [], { evaluate: jest.fn(async () => { throw new Error("owner down"); }) }), ruleOf("committed_over_budget", [])]);
+    expect(result.released).toBe(0);
+    result = await evaluate([ruleOf("quantity_over_boq", [finding()])]);
+    expect(result).toMatchObject({ released: 0, suppressed: 1 });
+    resolvedRows = [stored({ id: "cleared-later", resolvedAt: new Date("2026-10-01"), resolvedReason: "cleared" }), dismissedRow];
+    expect((await evaluate([ruleOf("quantity_over_boq", [])])).released).toBe(0);
+    expect(prisma.projectException.updateMany).not.toHaveBeenCalled();
+    // Released: the condition comes back as a FRESH row (no reopenedFrom), even at the dismissed figure.
+    resolvedRows = [{ ...dismissedRow, dataJson: { ...dismissedRow.dataJson, dismissalReleasedAt: "2026-10-01T00:00:00.000Z", dismissalReleaseTrigger: "scheduled" } }];
+    result = await evaluate([ruleOf("quantity_over_boq", [finding()])]);
+    expect(result).toMatchObject({ opened: 1, suppressed: 0, released: 0 });
+    expect(prisma.projectException.create).toHaveBeenCalledWith({ data: expect.objectContaining({ dataJson: { label: "1.1 Concrete" } }) });
+    expect(result.rows[0].change).toBe("open");
+    // A rule may not write the engine's release keys.
+    const bad = await evaluate([ruleOf("quantity_over_boq", [finding({ data: { dismissalReleasedAt: "x" } })])]);
+    expect(bad.errors[0].message).toMatch(/reserved/);
+  });
+
   it("a condition that was cleared and comes back opens a new row", async () => {
     resolvedRows = [stored({ id: "cleared-row", resolvedAt: new Date("2026-09-30"), resolvedReason: "cleared" })];
     const result = await evaluate([ruleOf("quantity_over_boq", [finding()])]);

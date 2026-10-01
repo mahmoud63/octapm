@@ -847,4 +847,35 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
       await prisma.activityProgress.delete({ where: { id: newer.id } });
     }
   }, 240_000);
+
+  // ─── PC-7b integration F: a cleared condition releases its dismissal ─────
+
+  engineIt("a dismissal whose condition clears is released on its row (with the trigger), and the condition's return opens a fresh row", async () => {
+    const orgId = live.org.id;
+    const projectId = gaps.project.id;
+    const subject = { orgId, projectId, kind: "orphan_change_link", subjectId: gaps.orphanRevision.id };
+    await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+    const open = await prisma.projectException.findFirst({ where: { ...subject, resolvedAt: null } });
+    if (open) await engine.setDismissed({ orgId, projectId, exceptionId: open.id, actorId: live.user.id, reason: "LiveTest reviewed" });
+    const dismissed = await prisma.projectException.findFirst({ where: { ...subject, resolvedReason: { startsWith: "dismissed:" } }, orderBy: { resolvedAt: "desc" } });
+    expect(dismissed).toBeTruthy();
+    // Still there: suppressed, nothing released.
+    await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+    expect((await prisma.projectException.findUnique({ where: { id: dismissed.id } })).dataJson.dismissalReleasedAt).toBeUndefined();
+    // The link is fixed: the condition clears, and the release is recorded on the dismissed row.
+    await prisma.budgetRevision.update({ where: { id: gaps.orphanRevision.id }, data: { linkedChangeOrder: "VO-1" } });
+    try {
+      const cleared = await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "manual" });
+      expect(cleared.released).toBeGreaterThanOrEqual(1);
+      const released = await prisma.projectException.findUnique({ where: { id: dismissed.id } });
+      expect([released.resolvedReason, typeof released.dataJson.dismissalReleasedAt, released.dataJson.dismissalReleaseTrigger, released.resolvedAt.toISOString()]).toEqual([dismissed.resolvedReason, "string", "manual", dismissed.resolvedAt.toISOString()]);
+      expect(await prisma.projectException.count({ where: { ...subject, resolvedAt: null } })).toBe(0);
+    } finally {
+      await prisma.budgetRevision.update({ where: { id: gaps.orphanRevision.id }, data: { linkedChangeOrder: "VO-404" } });
+    }
+    // It comes back: a FRESH open row, not suppressed and not "reopened from" the old dismissal.
+    await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+    const fresh = await prisma.projectException.findFirst({ where: { ...subject, resolvedAt: null } });
+    expect([Boolean(fresh), fresh?.dataJson?.reopenedFrom]).toEqual([true, undefined]);
+  }, 240_000);
 });
