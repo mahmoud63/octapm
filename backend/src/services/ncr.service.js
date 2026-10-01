@@ -203,7 +203,6 @@ const createNcr = async ({
 }) => {
   await ensureProject({ orgId, projectId });
 
-  const generatedRef = await nextRef(prisma, { table: 'NcrRecord', scopeColumn: 'projectId', scopeId: projectId, prefix: 'NCR' });
   const activityId = primaryActivityIdFromPayload(payload);
   const status = payload.status || NCR_STATUS.OPEN;
   if (status !== NCR_STATUS.OPEN) {
@@ -214,12 +213,55 @@ const createNcr = async ({
     );
   }
 
+  // A reference is one NCR's per project (NcrRecord_projectId_ref_key,
+  // migration 20261005060100). A typed one that is taken is refused by name;
+  // a generated one skips any reference someone typed ahead of the counter.
+  const typedRef = trimOrNull(payload.ref);
+  if (typedRef) {
+    await assertNcrRefFree({ projectId, ref: typedRef });
+    try {
+      return await insertNcr({ orgId, projectId, payload, userId, userRole, activityId, status, ref: typedRef });
+    } catch (error) {
+      if (isRefConflict(error)) throw ncrRefTaken(typedRef);
+      throw error;
+    }
+  }
+  for (let attempt = 0; attempt < GENERATED_REF_ATTEMPTS; attempt += 1) {
+    const generatedRef = await nextRef(prisma, { table: 'NcrRecord', scopeColumn: 'projectId', scopeId: projectId, prefix: 'NCR' });
+    if (await ncrRefTakenBy({ projectId, ref: generatedRef })) continue;
+    try {
+      return await insertNcr({ orgId, projectId, payload, userId, userRole, activityId, status, ref: generatedRef });
+    } catch (error) {
+      // Typed by a concurrent request between the check and the insert.
+      if (!isRefConflict(error)) throw error;
+    }
+  }
+  throw new HttpError(500, "NCR_NUMBERING_FAILED", "Could not allocate a free NCR reference; type one or try again");
+};
+
+const GENERATED_REF_ATTEMPTS = 50;
+
+const ncrRefTaken = (ref) =>
+  new HttpError(409, "NCR_REF_TAKEN", `${ref} is already used by another NCR in this project.`);
+
+const ncrRefTakenBy = async ({ projectId, ref }) =>
+  prisma.ncrRecord.findFirst({ where: { projectId, ref }, select: { id: true } });
+
+const assertNcrRefFree = async ({ projectId, ref }) => {
+  if (await ncrRefTakenBy({ projectId, ref })) throw ncrRefTaken(ref);
+};
+
+// P2002 on NcrRecord's (projectId, ref) unique — the only unique an insert can hit.
+const isRefConflict = (error) =>
+  error?.code === "P2002" && /\bref\b|_ref_key/.test([].concat(error?.meta?.target ?? "").join(","));
+
+const insertNcr = async ({ orgId, projectId, payload, userId, userRole, activityId, status, ref }) => {
   const row = await prisma.$transaction(async (tx) => {
     const created = await tx.ncrRecord.create({
       data: {
         projectId,
         activityId,
-        ref: payload.ref || generatedRef,
+        ref,
         severity: payload.severity || "minor",
         description: payload.description?.trim() || null,
         disposition: payload.disposition?.trim() || null,

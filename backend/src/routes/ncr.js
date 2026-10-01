@@ -61,6 +61,7 @@ router.post(
   "/",
   requirePermission("ncr", "create"),
   [
+    body("ref").optional({ nullable: true }).isString(),
     body("severity").optional().isIn(["major", "minor"]),
     body("status").optional().isIn(["open"]),
     body("owner").optional().isString().trim(),

@@ -985,6 +985,8 @@ const components = {
         "NCR_NOT_READY_FOR_REJECTION",
         "NCR_NOT_READY_FOR_REOPEN",
         "NCR_NOT_FOUND",
+        "NCR_NUMBERING_FAILED",
+        "NCR_REF_TAKEN",
         "NCR_REOPEN_REASON_REQUIRED",
         "NCR_WORKFLOW_ACTION_REQUIRED",
         "NOTIFICATION_NOT_FOUND",
@@ -7088,6 +7090,7 @@ const components = {
       ["item"],
     ),
     NcrRequest: objectSchema({
+      ref: { type: "string", description: "Optional. Omitted: the next free generated NCR-nnn, skipping any reference already used in the project. Typed: trimmed, and refused 409 NCR_REF_TAKEN when another NCR of the project already uses it (one reference per NCR per project, NcrRecord_projectId_ref_key)." },
       severity: { type: "string", enum: ["major", "minor"] },
       status: { type: "string", enum: ["open"] },
       owner: { type: "string" },
