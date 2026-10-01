@@ -8,9 +8,11 @@
  * concrete rows in m3, rebar in t), a programme of three activities — the
  * pour (quantity method; two approved allocations, 100 + 60 m3, so planned
  * = Σ = 160), the fixing (quantity method with a typed planned quantity and
- * evidence required) and the wall (never configured: measured by the
- * default) — a PM, a site engineer (submit, not approve; assigned to the
- * pour) and a second organisation for the tenant rule.
+ * evidence required), the wall (never configured: measured by the
+ * default) and the slab (quantity method, nothing typed, nothing mapped:
+ * the pre-PC-6 shape a client plans) — a PM, a site engineer (submit, not
+ * approve; assigned to the pour) and a second organisation for the tenant
+ * rule.
  *
  * - the submission's figures are DERIVED: installed = Σ bundled + Σ already
  *   approved entries, planned = Σ approved allocations; a client-sent
@@ -24,6 +26,13 @@
  *   the activity, the EV report's row at that percentage, the audit trail;
  * - a second bundle (by date) writes a second row and leaves the first
  *   byte-identical; reject marks the entries rejected and writes nothing;
+ * - two bundles on one activity approved at once are serialised (the
+ *   activity row is held): the later official row carries Σ approved
+ *   entries, never less than its own source data; the same submission
+ *   approved twice at once answers idempotently;
+ * - a bundle on an activity with nothing typed and nothing mapped is
+ *   planned by the client and approved with that frozen figure (basis
+ *   submission), not stuck pending;
  * - the evidence gate still holds a bundle (entries stay pending);
  * - planned from a typed method configuration (basis method_config);
  * - the method lock: 409 PROGRESS_METHOD_LOCKED on an activity with approved
@@ -49,13 +58,14 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
   let pour;
   let fix;
   let wall;
+  let slab;
   let site;
   const bearer = (token) => ({ authorization: `Bearer ${token}` });
   const at = (route) => `/api/v1/projects/${project.id}${route}`;
   const ok = (answer, status = 200) => expect([answer.status, answer.body?.error]).toEqual([status, undefined]);
   const refused = (answer, status, code) => expect([answer.status, answer.body?.error?.code]).toEqual([status, code]);
 
-  const activityIds = () => [pour.id, fix.id, wall.id];
+  const activityIds = () => [pour.id, fix.id, wall.id, slab.id];
   const progressRows = async (activityId) =>
     prisma.activityProgress.findMany({ where: { activityId }, orderBy: { updatedAt: "asc" } });
   const entryRow = async (id) => prisma.quantityProgressEntry.findUnique({ where: { id } });
@@ -63,7 +73,7 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
     const answer = await api.get(at("/reports/ev"), bearer(live.token));
     ok(answer);
     // The breakdown names an activity by its code (the twenty largest budgets).
-    const code = [pour, fix, wall].find((row) => row.id === activityId).activityCode;
+    const code = [pour, fix, wall, slab].find((row) => row.id === activityId).activityCode;
     return answer.body.data.activityBreakdown.find((row) => row.activityId === code);
   };
   const activityPayload = async (activityId, token = live.token) => {
@@ -116,6 +126,7 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
     pour = await activity({ name: "Pour foundations", activityCode: "A100", duration: 5, startDate: "2026-02-02", endDate: "2026-02-06", engineerIds: [live.user.id, site.id] });
     fix = await activity({ name: "Fix reinforcement", activityCode: "A110", duration: 6, startDate: "2026-01-26", endDate: "2026-02-01", engineerIds: [live.user.id] });
     wall = await activity({ name: "Blockwork", activityCode: "A120", duration: 10, startDate: "2026-02-09", endDate: "2026-02-20", engineerIds: [live.user.id] });
+    slab = await activity({ name: "Ground slab", activityCode: "A130", duration: 4, startDate: "2026-02-23", endDate: "2026-02-26", engineerIds: [live.user.id] });
 
     for (const [boqItemId, quantity] of [[concreteA.id, 100], [concreteB.id, 60]]) {
       const created = await api.post(at("/activity-boq-allocations"), { boqItemId, activityId: pour.id, quantity }, bearer(live.token));
@@ -126,6 +137,8 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
     ok(await api.request("PUT", at(`/activities/${pour.id}/progress-method`), { body: { method: "quantity", quantityUnit: "m3" }, headers: bearer(live.token) }));
     // The fixing: a typed planned quantity, and evidence before anything is approved.
     ok(await api.request("PUT", at(`/activities/${fix.id}/progress-method`), { body: { method: "quantity", plannedQuantity: 50, quantityUnit: "t", evidenceRequired: true }, headers: bearer(live.token) }));
+    // The slab: measured by quantity, nothing typed, nothing mapped.
+    ok(await api.request("PUT", at(`/activities/${slab.id}/progress-method`), { body: { method: "quantity", quantityUnit: "m3" }, headers: bearer(live.token) }));
   }, 180_000);
 
   afterAll(async () => {
@@ -276,6 +289,47 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
     expect(events.map((event) => [event.action, event.newStatus, event.reason])).toEqual([["created", "submitted", null], ["rejected", "rejected", "Bay 4 was measured twice"]]);
   });
 
+  it("two bundles on one activity approved at once are serialised: the later official row carries Σ approved entries, and the same submission approved twice at once is idempotent", async () => {
+    ids.e8 = (await entry({ activityId: pour.id, boqItemId: concreteA.id, quantity: 10, date: "2026-09-16", clientRequestId: "ap-8" })).id;
+    ids.e9 = (await entry({ activityId: pour.id, boqItemId: concreteA.id, quantity: 20, date: "2026-09-17", clientRequestId: "ap-9" })).id;
+    const first = await submit(pour.id, { entryIds: [ids.e8] }, site.token);
+    ok(first, 200);
+    ids.s5 = first.body.data.submission.id;
+    const second = await submit(pour.id, { entryIds: [ids.e9] }, site.token);
+    ok(second, 200);
+    ids.s6 = second.body.data.submission.id;
+    // Each was put forward against the 100 m3 approved so far: 110 and 120.
+    expect([first.body.data.submission.quantityComplete, second.body.data.submission.quantityComplete]).toEqual([110, 120]);
+    expect(await progressRows(pour.id)).toHaveLength(2);
+
+    const [a, b] = await Promise.all([approve(pour.id, ids.s5), approve(pour.id, ids.s6)]);
+    ok(a);
+    ok(b);
+    const rows = await progressRows(pour.id);
+    expect(rows).toHaveLength(4);
+    expect(JSON.stringify(rows[0])).toBe(firstRowFrozen);
+    // Whichever committed first read 100 + its own entry; the second read what the first wrote: 100 + 10 + 20.
+    const installed = rows.slice(2).map((row) => row.quantityComplete).sort((x, y) => x - y);
+    expect(installed[1]).toBe(130);
+    expect([110, 120]).toContain(installed[0]);
+    const latest = rows.slice(2).sort((x, y) => y.approvedAt - x.approvedAt)[0];
+    expect(latest).toMatchObject({ quantityComplete: 130, quantityPlanned: 160, pctComplete: 81.25 });
+    expect([a.body.data.quantityComplete, b.body.data.quantityComplete].sort((x, y) => x - y)).toEqual(installed);
+    for (const id of [ids.e8, ids.e9]) expect(await entryRow(id)).toMatchObject({ status: "approved", approvedBy: live.user.id });
+    // The official figure agrees with its own source data: Σ approved entries on the pour is 130 of 160.
+    const approvedSum = (await prisma.quantityProgressEntry.findMany({ where: { activityId: pour.id, status: "approved" } })).reduce((sum, row) => sum + Number(row.quantity), 0);
+    expect(approvedSum).toBe(130);
+    expect((await activityPayload(pour.id)).pctComplete).toBe(81.25);
+    expect(await evRow(pour.id)).toMatchObject({ pct: 81.25, progressStatus: "approved" });
+
+    // The same submission approved twice at once: both answer, one row was added, none more.
+    const [c, d] = await Promise.all([approve(pour.id, ids.s5), approve(pour.id, ids.s5)]);
+    ok(c);
+    ok(d);
+    expect(await progressRows(pour.id)).toHaveLength(4);
+    expect(JSON.stringify(await progressRows(pour.id))).toBe(JSON.stringify(rows));
+  });
+
   it("planned from a typed method configuration (basis method_config); the evidence gate still holds the bundle and its entries", async () => {
     ids.e5 = (await entry({ activityId: fix.id, boqItemId: rebar.id, quantity: 10, date: "2026-09-04", clientRequestId: "ap-5" }, live.token)).id;
     refused(await submit(fix.id, { entryIds: [ids.e5] }), 400, "PROGRESS_EVIDENCE_REQUIRED");
@@ -292,11 +346,36 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
     expect(await evRow(fix.id)).toMatchObject({ pct: 0, progressStatus: "missing" });
   });
 
+  it("a bundle on an activity with nothing typed and nothing mapped is planned by the client and APPROVED with that frozen figure (basis submission)", async () => {
+    const recorded = await api.post(at("/quantity-progress"), { status: "submitted", activityId: slab.id, boqItemId: concreteA.id, quantity: 5, date: "2026-09-05", clientRequestId: "ap-7" }, bearer(live.token));
+    ok(recorded, 201);
+    ids.e7 = recorded.body.data.entry.id;
+    expect(recorded.body.data.warnings.map((warning) => warning.code)).toContain("QUANTITY_NO_APPROVED_ALLOCATION");
+    // Without a planned figure from anywhere the bundle is refused as before, and the entry stays free.
+    refused(await submit(slab.id, { entryIds: [ids.e7] }), 400, "PLANNED_QUANTITY_REQUIRED");
+    expect(await entryRow(ids.e7)).toMatchObject({ status: "submitted", submissionId: null });
+    const answer = await submit(slab.id, { entryIds: [ids.e7], quantityPlanned: 20 });
+    ok(answer, 200);
+    ids.s7 = answer.body.data.submission.id;
+    expect(answer.body.data.submission).toMatchObject({ pctComplete: 25, quantityComplete: 5, quantityPlanned: 20, quantityUnit: "m3", quantity: { plannedBasis: "client", installedBasis: "approved_entries", bundledEntries: 1, clientQuantityPlannedIgnored: false } });
+    expect(await entryRow(ids.e7)).toMatchObject({ status: "submitted", submissionId: ids.s7 });
+    // The approval cannot derive a planned figure from the mapping; the one the submission was put forward with stands.
+    const approved = await approve(slab.id, ids.s7);
+    ok(approved);
+    expect(approved.body.data).toMatchObject({ status: "approved", pctComplete: 25, quantityComplete: 5, quantityPlanned: 20, quantityUnit: "m3", quantity: { installed: 5, planned: 20, plannedBasis: "submission", installedBasis: "approved_entries", bundledEntries: 1 }, approvedProgressId: expect.any(String) });
+    const rows = await progressRows(slab.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ submissionId: ids.s7, pctComplete: 25, quantityComplete: 5, quantityPlanned: 20, quantityUnit: "m3", progressMethod: "quantity", status: "approved", approvedBy: live.user.id });
+    expect(await entryRow(ids.e7)).toMatchObject({ status: "approved", submissionId: ids.s7, approvedBy: live.user.id });
+    expect((await activityPayload(slab.id)).pctComplete).toBe(25);
+    expect(await evRow(slab.id)).toMatchObject({ pct: 25, progressMethod: "quantity", progressStatus: "approved" });
+  });
+
   it("the method lock: an activity with approved progress keeps its method; a row naming that method is written, and clears PROGRESS_METHODS_INCOMPLETE", async () => {
     const put = (activityId, body) => api.request("PUT", at(`/activities/${activityId}/progress-method`), { body, headers: bearer(live.token) });
     const locked = await put(pour.id, { method: "percent" });
     refused(locked, 409, "PROGRESS_METHOD_LOCKED");
-    expect(locked.body.error.details).toMatchObject({ activityId: pour.id, effectiveMethod: "quantity", effectiveMethodBasis: "method_config", requestedMethod: "percent", approvedProgressCount: 2 });
+    expect(locked.body.error.details).toMatchObject({ activityId: pour.id, effectiveMethod: "quantity", effectiveMethodBasis: "method_config", requestedMethod: "percent", approvedProgressCount: 4 });
     refused(await put(pour.id, { method: "weighted_milestone", milestoneWeights: [{ id: "a", weight: 100 }] }), 409, "PROGRESS_METHOD_LOCKED");
     const same = await put(pour.id, { method: "quantity", quantityUnit: "m3", plannedQuantity: 200 });
     ok(same);
@@ -314,7 +393,7 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
     expect(await prisma.activityProgressMethod.findFirst({ where: { activityId: wall.id } })).toMatchObject({ method: "percent" });
     expect(await readinessText()).not.toContain("PROGRESS_METHODS_INCOMPLETE");
     // The lock changed nothing official.
-    expect(await progressRows(pour.id)).toHaveLength(2);
+    expect(await progressRows(pour.id)).toHaveLength(4);
     expect(JSON.stringify((await progressRows(pour.id))[0])).toBe(firstRowFrozen);
   });
 
@@ -326,13 +405,13 @@ liveDescribe("PC-6: a quantity submission bundles entries and the one writer app
     refused(await reject(fix.id, ids.s4, "no", token), 404, "PROJECT_NOT_FOUND");
     refused(await api.request("PUT", at(`/activities/${wall.id}/progress-method`), { body: { method: "quantity" }, headers: bearer(token) }), 404, "PROJECT_NOT_FOUND");
     expect(JSON.stringify(await prisma.progressSubmission.findMany({ where: { projectId: project.id }, orderBy: { createdAt: "asc" } }))).toBe(before);
-    expect(await prisma.activityProgress.count({ where: { activityId: { in: activityIds() } } })).toBe(3);
+    expect(await prisma.activityProgress.count({ where: { activityId: { in: activityIds() } } })).toBe(6);
     // The writer's own tenant scope, below the route: the other organisation's id finds no project.
     const foreign = { orgId: other.org.id, projectId: project.id, activityId: fix.id, submissionId: ids.s4, userId: other.user.id };
     await expect(progressService.approveProgressSubmission(foreign)).rejects.toMatchObject({ status: 404, code: "PROJECT_NOT_FOUND" });
     await expect(progressService.rejectProgressSubmission({ ...foreign, reason: "no" })).rejects.toMatchObject({ status: 404, code: "PROJECT_NOT_FOUND" });
     await expect(progressService.createProgressSubmission({ ...foreign, activityId: pour.id, userRole: "pm", payload: { method: "quantity", entryIds: [ids.e4] } })).rejects.toMatchObject({ status: 404, code: "PROJECT_NOT_FOUND" });
     expect(await entryRow(ids.e5)).toMatchObject({ status: "submitted", submissionId: ids.s4 });
-    expect(await prisma.activityProgress.count({ where: { activityId: { in: activityIds() } } })).toBe(3);
+    expect(await prisma.activityProgress.count({ where: { activityId: { in: activityIds() } } })).toBe(6);
   });
 });

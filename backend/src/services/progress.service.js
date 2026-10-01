@@ -588,17 +588,23 @@ const resolveQuantityBundle = async ({ orgId, projectId, activityId, payload }, 
  *   plannedQuantityFor. A client-sent quantityPlanned never overrides either;
  *   it counts only when neither exists (basis client — an activity measured
  *   by quantity with nothing mapped and nothing typed, the pre-PC-6 shape),
- *   and without it the submission is refused as before.
+ *   and without it the submission is refused as before. At approval, when
+ *   still nothing is typed and nothing mapped, the figure the submission
+ *   was put forward with (its frozen quantityPlanned — `frozen`) is the
+ *   planned quantity (basis submission): the bundle a client planned is
+ *   approvable, not stuck between an approval that cannot derive and an
+ *   edit the bundle refuses.
  * - installed: when the submission bundles entries, Σ the bundled entries +
  *   Σ entries already approved on the activity (basis approved_entries), in
  *   one unit — the planned figure's when it has one; otherwise the client's
  *   typed quantityComplete (basis client), the pre-PC-6 shape.
  * - pctComplete = installed ÷ planned, clamped to 0..100.
  */
-const deriveQuantityFigures = async ({ orgId, projectId, activityId, payload, bundled, methodConfig }, tx) => {
+const deriveQuantityFigures = async ({ orgId, projectId, activityId, payload, bundled, methodConfig, frozen = null }, tx) => {
   const qp = quantityProgressService();
   const planned = await qp.plannedQuantityFor({ orgId, projectId, activityId, tx });
   const clientPlanned = payload.quantityPlanned !== undefined && payload.quantityPlanned !== null ? toNumber(payload.quantityPlanned) : null;
+  const frozenPlanned = frozen && frozen.planned !== undefined && frozen.planned !== null ? toNumber(frozen.planned) : null;
   const figures = {
     planned: planned.planned,
     plannedBasis: planned.basis,
@@ -610,9 +616,18 @@ const deriveQuantityFigures = async ({ orgId, projectId, activityId, payload, bu
     clientQuantityPlannedIgnored: false,
   };
   if (planned.basis === 'none') {
-    figures.planned = clientPlanned !== null && clientPlanned > 0 ? clientPlanned : null;
-    figures.plannedBasis = figures.planned === null ? 'none' : 'client';
-    figures.unitCode = payload.quantityUnit?.trim() || methodConfig.quantityUnit || null;
+    if (clientPlanned !== null && clientPlanned > 0) {
+      figures.planned = clientPlanned;
+      figures.plannedBasis = 'client';
+    } else if (frozenPlanned !== null && frozenPlanned > 0) {
+      figures.planned = frozenPlanned;
+      figures.plannedBasis = 'submission';
+    } else {
+      figures.planned = null;
+      figures.plannedBasis = 'none';
+    }
+    figures.unitCode =
+      payload.quantityUnit?.trim() || (figures.plannedBasis === 'submission' ? frozen.unitCode?.trim() : null) || methodConfig.quantityUnit || null;
     figures.plannedReason = planned.reason || null;
   } else if (clientPlanned !== null && clientPlanned !== figures.planned) {
     figures.clientQuantityPlannedIgnored = true;
@@ -980,13 +995,27 @@ const approveProgressSubmissionWithClient = async ({
   userId,
 }) => {
   await ensureProject({ orgId, projectId }, tx);
-  const submission = await ensureSubmission({ projectId, submissionId }, tx);
+  let submission = await ensureSubmission({ projectId, submissionId }, tx);
   if (activityId && submission.activityId !== activityId) {
     throw new HttpError(
       404,
       'PROGRESS_SUBMISSION_NOT_FOUND',
       'Progress submission not found for this activity',
     );
+  }
+
+  // PC-6: approvals are serialised per activity. A quantity bundle's
+  // installed figure is Σ approved entries on the activity read in this
+  // transaction; two bundles approved at once would each read "approved so
+  // far" before the other commits and the later official row would carry
+  // less than its own source data (the lens's race). Holding the activity's
+  // row makes the second wait for the first and read what it wrote; the
+  // submission is read again under the lock (the same one approved twice at
+  // once answers idempotently). Prisma without $queryRaw (a mocked client)
+  // skips the hold — the pattern boq.service uses for the item row.
+  if (typeof tx.$queryRaw === 'function') {
+    await tx.$queryRaw`SELECT id FROM "Activity" WHERE id = ${submission.activityId} FOR UPDATE`;
+    submission = await ensureSubmission({ projectId, submissionId }, tx);
   }
 
   if (submission.status === 'approved') {
@@ -1034,9 +1063,11 @@ const approveProgressSubmissionWithClient = async ({
   // in this transaction, and its figures are read again now — installed is
   // Σ approved entries on the activity, and another bundle may have been
   // approved since this one was put forward; planned may have been typed or
-  // mapped since. The columns are then the frozen values of this approval.
-  // A quantity submission typed the old way (no entries) is approved as it
-  // stands.
+  // mapped since — and when still neither exists, the planned figure the
+  // submission was put forward with (its frozen column) stands, so a bundle
+  // a client planned is approvable. The columns are then the frozen values
+  // of this approval. A quantity submission typed the old way (no entries)
+  // is approved as it stands.
   const pending = (submission.quantityEntries || []).filter(
     (entry) => BUNDLEABLE_ENTRY_STATUSES.includes(entry.status) && entry.submissionId === submission.id,
   );
@@ -1044,7 +1075,15 @@ const approveProgressSubmissionWithClient = async ({
   let bundledEntries = [];
   if (submission.method === 'quantity' && pending.length) {
     quantity = await deriveQuantityFigures(
-      { orgId, projectId, activityId: submission.activityId, payload: {}, bundled: pending, methodConfig },
+      {
+        orgId,
+        projectId,
+        activityId: submission.activityId,
+        payload: {},
+        bundled: pending,
+        methodConfig,
+        frozen: { planned: submission.quantityPlanned, unitCode: submission.quantityUnit },
+      },
       tx,
     );
     bundledEntries = await settleBundledEntries({ tx, orgId, projectId, submission, entries: pending, outcome: 'approved', userId, now });

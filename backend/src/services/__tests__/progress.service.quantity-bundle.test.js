@@ -8,6 +8,7 @@ const { Prisma } = require("@prisma/client");
 
 const mockPrisma = {
   $transaction: jest.fn((fn) => fn(mockPrisma)),
+  $queryRaw: jest.fn(async () => []),
   project: { findFirst: jest.fn() },
   activity: { findFirst: jest.fn() },
   activityAssignment: { findMany: jest.fn() },
@@ -156,6 +157,39 @@ describe("PC-6 quantity bundles in the one writer", () => {
     expect(mockPrisma.activityProgress.create.mock.calls[0][0].data).toMatchObject({ activityId: "activity-1", submissionId: "sub-1", pctComplete: 50, quantityComplete: 80, quantityPlanned: 160, quantityUnit: "m3", progressMethod: "quantity", status: "approved", approvedBy: "pm-1" });
     const entryEvents = mockAuditService.recordEvent.mock.calls.map(([event]) => event).filter((event) => event.entityType === "quantity_progress_entry");
     expect(entryEvents.map((event) => [event.entityId, event.action, event.newStatus])).toEqual([["e-1", "approved", "approved"], ["e-2", "approved", "approved"]]);
+    // Approvals are serialised per activity: the activity row is held and the submission read again under the hold, before the figures are derived.
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.$queryRaw.mock.calls[0].slice(1)).toEqual(["activity-1"]);
+    expect(mockPrisma.progressSubmission.findFirst).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(mockPrisma.quantityProgressEntry.findMany.mock.invocationCallOrder[0]);
+    expect(mockPrisma.progressSubmission.findFirst.mock.invocationCallOrder[1]).toBeGreaterThan(mockPrisma.$queryRaw.mock.invocationCallOrder[0]);
+  });
+
+  it("a submission approved twice at once answers idempotently: the second reads 'approved' under the hold and writes nothing", async () => {
+    mockPrisma.progressSubmission.findFirst.mockResolvedValueOnce(submitted([])).mockResolvedValueOnce({ ...submitted([]), status: "approved" });
+    const answer = await progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" });
+    expect(answer).toMatchObject({ id: "sub-1", status: "approved" });
+    expect(mockPrisma.activityProgress.create).not.toHaveBeenCalled();
+    expect(mockPrisma.progressSubmission.update).not.toHaveBeenCalled();
+  });
+
+  it("a bundle planned by the client (nothing typed, nothing mapped) is approved with the figure it was put forward with (basis submission), never stuck pending", async () => {
+    mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([]);
+    const bundle = [entry("e-1", 5, { submissionId: "sub-1" })];
+    const frozen = { ...submitted(bundle), pctComplete: 25, quantityComplete: 5, quantityPlanned: 20 };
+    mockPrisma.progressSubmission.findFirst.mockResolvedValue(frozen);
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([]);
+    mockPrisma.progressSubmission.update.mockImplementation(({ data }) => Promise.resolve({ ...frozen, ...data }));
+    mockPrisma.activityProgress.create.mockResolvedValue({ id: "progress-1" });
+    const answer = await progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" });
+    expect(answer).toMatchObject({ status: "approved", pctComplete: 25, quantityComplete: 5, quantityPlanned: 20, quantityUnit: "m3", quantity: { installed: 5, planned: 20, plannedBasis: "submission", installedBasis: "approved_entries", bundledEntries: 1 } });
+    expect(mockPrisma.activityProgress.create.mock.calls[0][0].data).toMatchObject({ pctComplete: 25, quantityComplete: 5, quantityPlanned: 20, quantityUnit: "m3" });
+    expect(mockPrisma.quantityProgressEntry.updateMany.mock.calls[0][0]).toMatchObject({ where: { id: { in: ["e-1"] } }, data: { status: "approved" } });
+    // A typed or mapped figure found at approval still wins over the frozen one.
+    mockPrisma.activityBoqAllocation.findMany.mockResolvedValue(allocations);
+    mockPrisma.quantityProgressEntry.findMany.mockResolvedValueOnce([]);
+    const mapped = await progressService.approveProgressSubmission({ orgId: "org-1", projectId: "project-1", activityId: "activity-1", submissionId: "sub-1", userId: "pm-1" });
+    expect(mapped).toMatchObject({ quantityPlanned: 160, pctComplete: 3.125, quantity: { plannedBasis: "approved_allocations" } });
   });
 
   it("reject marks the bundled entries rejected with the reason and writes nothing official", async () => {
