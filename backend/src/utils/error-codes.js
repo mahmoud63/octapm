@@ -777,6 +777,84 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "conflict",
     message: "This workspace is already a company workspace",
   },
+  // PC-6 (core): quantity progress entries — the pending layer of installed
+  // quantity (quantity-progress.service). Approval is the progress
+  // submission's; these codes are the entry lifecycle's own.
+  QUANTITY_INVALID: {
+    status: 400,
+    category: "validation",
+    message: "A quantity must be a finite number",
+  },
+  QUANTITY_NEGATIVE: {
+    status: 400,
+    category: "validation",
+    message: "A quantity entry is never negative; a correction is a rejection plus a new entry",
+  },
+  QUANTITY_DATE_REQUIRED: {
+    status: 400,
+    category: "validation",
+    message: "The calendar day the work was done is required",
+  },
+  QUANTITY_UNIT_REQUIRED: {
+    status: 400,
+    category: "validation",
+    message: "The BOQ item has no unit; name the unit the quantity is measured in",
+  },
+  QUANTITY_UNIT_MISMATCH: {
+    status: 400,
+    category: "validation",
+    message: "The quantity's unit is neither the BOQ item's unit nor a registered alias of it; no conversion is made",
+  },
+  QUANTITY_ALLOCATION_MISMATCH: {
+    status: 400,
+    category: "validation",
+    message: "The allocation named does not map this BOQ item to this activity",
+  },
+  QUANTITY_ENTRY_STATUS_INVALID: {
+    status: 400,
+    category: "validation",
+    message: "Quantity entry status must be draft or submitted",
+  },
+  QUANTITY_ENTRY_SOURCE_INVALID: {
+    status: 400,
+    category: "validation",
+    message: "Quantity entry source must be one of submission, daily_log, manual, import",
+  },
+  QUANTITY_CLIENT_REQUEST_DUPLICATE: {
+    status: 400,
+    category: "validation",
+    message: "Two entries in one request carry the same clientRequestId",
+  },
+  QUANTITY_ENTRY_IMMUTABLE_FIELD: {
+    status: 400,
+    category: "validation",
+    message: "An entry's activity, BOQ item and status are not changed through an edit",
+  },
+  QUANTITY_ENTRY_FORBIDDEN: {
+    status: 403,
+    category: "authz",
+    message: "Only the person who recorded this entry, or a progress approver, can change it",
+  },
+  QUANTITY_ENTRY_NOT_FOUND: {
+    status: 404,
+    category: "not_found",
+    message: "Quantity entry not found",
+  },
+  QUANTITY_ENTRY_LOCKED: {
+    status: 409,
+    category: "conflict",
+    message: "An approved or rejected quantity entry is not changed; record a correction as a new entry",
+  },
+  QUANTITY_ENTRY_BUNDLED: {
+    status: 409,
+    category: "conflict",
+    message: "This entry is part of a progress submission awaiting approval; reject the submission first",
+  },
+  QUANTITY_ENTRY_NOT_SUBMITTABLE: {
+    status: 409,
+    category: "conflict",
+    message: "Only a draft quantity entry is submitted",
+  },
 });
 
 const DEFAULT_CODE_BY_STATUS = Object.freeze({

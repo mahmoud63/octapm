@@ -1004,6 +1004,22 @@ const components = {
         "PROJECT_PARTY_NOT_FOUND",
         "PROJECT_PARTY_PROJECT_REQUIRED",
         "PROJECT_PARTY_RECORD_ACCESS_DENIED",
+        // PC-6 (core): quantity progress entries
+        "QUANTITY_INVALID",
+        "QUANTITY_NEGATIVE",
+        "QUANTITY_DATE_REQUIRED",
+        "QUANTITY_UNIT_REQUIRED",
+        "QUANTITY_UNIT_MISMATCH",
+        "QUANTITY_ALLOCATION_MISMATCH",
+        "QUANTITY_ENTRY_STATUS_INVALID",
+        "QUANTITY_ENTRY_SOURCE_INVALID",
+        "QUANTITY_CLIENT_REQUEST_DUPLICATE",
+        "QUANTITY_ENTRY_IMMUTABLE_FIELD",
+        "QUANTITY_ENTRY_FORBIDDEN",
+        "QUANTITY_ENTRY_NOT_FOUND",
+        "QUANTITY_ENTRY_LOCKED",
+        "QUANTITY_ENTRY_BUNDLED",
+        "QUANTITY_ENTRY_NOT_SUBMITTABLE",
         "PO_LINE_NOT_FOUND",
         "PO_LINES_REQUIRED",
         "PROCUREMENT_ACTIVITY_REQUIRED",
@@ -5207,6 +5223,144 @@ const components = {
       },
       ["reason"],
     ),
+    // PC-6 (core): quantity progress entries — the pending layer of installed
+    // quantity (quantity-progress.service). Σ APPROVED entries per BOQ item is
+    // the installed quantity; an entry is approved only through the progress
+    // submission that bundles it. quantity is Decimal(18,3).
+    QuantityEntryProvenance: objectSchema({
+      source: { type: "string", enum: ["submission", "daily_log", "manual", "import"] },
+      recordedBy: nullableUuid,
+      recordedAt: nullableDateString,
+      submissionId: nullableUuid,
+      dailyLogId: nullableUuid,
+      dailyLogQuantityId: nullableUuid,
+      official: { type: "boolean", description: "True once approved — only then does the quantity count as installed." },
+      approvedBy: nullableUuid,
+      approvedAt: nullableDateString,
+      rejectedBy: nullableUuid,
+      rejectedAt: nullableDateString,
+    }),
+    QuantityProgressEntry: {
+      type: "object",
+      description:
+        "One quantity of one BOQ item installed on one activity on one day. PROGRESS SOURCE provenance is on every row (provenance). For a caller who may not read the BOQ (boq:read), quantity, unitCode, boqItemId, boqItem and allocationId are omitted (never zeroed) and boqWithheld: { keys, reason } says so; the entry's existence, status, date, activity and provenance stay.",
+      properties: {
+        id: uuid,
+        projectId: uuid,
+        activityId: uuid,
+        boqItemId: boqFigure(uuid, "The BOQ item installed."),
+        allocationId: boqFigure(nullableUuid, "The approved allocation the site picked the item from (a hint; activity + item is the truth)."),
+        locationId: nullableUuid,
+        quantity: boqFigure({ type: "number", minimum: 0, multipleOf: 0.001 }, "Quantity in the item's unit, Decimal(18,3)."),
+        unitCode: boqFigure({ type: "string" }, "The BOQ item's unit code the entry is stored under."),
+        date: { type: "string", format: "date", description: "The calendar day the work was done." },
+        source: { type: "string", enum: ["submission", "daily_log", "manual", "import"] },
+        status: { type: "string", enum: ["draft", "submitted", "approved", "rejected"] },
+        submissionId: nullableUuid,
+        dailyLogId: nullableUuid,
+        dailyLogQuantityId: nullableUuid,
+        approvedBy: nullableUuid,
+        approvedAt: nullableDateString,
+        rejectedBy: nullableUuid,
+        rejectedAt: nullableDateString,
+        rejectionReason: { type: "string", nullable: true },
+        clientRequestId: { type: "string", nullable: true },
+        note: { type: "string", nullable: true },
+        createdBy: nullableUuid,
+        createdAt: dateString,
+        updatedAt: dateString,
+        provenance: ref("QuantityEntryProvenance"),
+        activity: objectSchema({ id: uuid, name: { type: "string" }, code: { type: "string", nullable: true } }),
+        boqItem: boqFigure(
+          objectSchema({ id: uuid, code: { type: "string", nullable: true }, description: { type: "string" }, unit: { type: "string", nullable: true }, unitCode: { type: "string", nullable: true } }),
+          "The BOQ row.",
+        ),
+        location: { nullable: true, allOf: [objectSchema({ id: uuid, name: { type: "string" }, code: { type: "string", nullable: true } })] },
+        submission: { nullable: true, allOf: [objectSchema({ id: uuid, status: { type: "string" }, source: { type: "string" }, pctComplete: { type: "number", nullable: true } })] },
+        replayed: { type: "boolean", description: "On a write: true when this entry was answered for a clientRequestId seen before, unchanged." },
+        boqWithheld: objectSchema({ keys: arrayOf({ type: "string" }), reason: { type: "string" } }),
+      },
+      additionalProperties: false,
+    },
+    QuantityEntryWarning: {
+      type: "object",
+      description:
+        "A raw comparison the write answers with — never a block, never an exception row (PC-7b): QUANTITY_OVER_ALLOCATION (approved installed + this entry > Σ approved allocation quantity of the item on the activity) or QUANTITY_NO_APPROVED_ALLOCATION. For a caller who may not read the BOQ the figures, the item and the message are omitted.",
+      properties: {
+        code: { type: "string", enum: ["QUANTITY_OVER_ALLOCATION", "QUANTITY_NO_APPROVED_ALLOCATION"] },
+        message: { type: "string" },
+        entryId: uuid,
+        activityId: uuid,
+        boqItemId: uuid,
+        allocationQuantity: { type: "number" },
+        approvedQuantity: { type: "number" },
+        entryQuantity: { type: "number" },
+        wouldBe: { type: "number" },
+        boqWithheld: objectSchema({ keys: arrayOf({ type: "string" }), reason: { type: "string" } }),
+      },
+      additionalProperties: false,
+    },
+    QuantityEntryInput: objectSchema(
+      {
+        activityId: uuid,
+        boqItemId: uuid,
+        quantity: { type: "number", minimum: 0, multipleOf: 0.001, description: "Never negative: a correction is a rejection plus a new entry." },
+        date: { type: "string", format: "date", description: "The calendar day the work was done (YYYY-MM-DD)." },
+        unitCode: { type: "string", nullable: true, description: "The item's unit code or a spelling the organisation's unit master maps to it; omitted means the item's unit. Any other unit is refused (400 QUANTITY_UNIT_MISMATCH) — nothing is converted." },
+        unit: { type: "string", nullable: true, description: "Alias of unitCode." },
+        allocationId: nullableUuid,
+        locationId: nullableUuid,
+        note: { type: "string", nullable: true },
+        clientRequestId: { type: "string", nullable: true, maxLength: 128, description: "Idempotency key, unique per project: the same key answers with the entry it made (database-enforced)." },
+        status: { type: "string", enum: ["draft", "submitted"] },
+        source: { type: "string", enum: ["manual", "import"] },
+      },
+      ["activityId", "boqItemId", "quantity", "date"],
+    ),
+    QuantityEntriesRequest: {
+      description:
+        "Either one QuantityEntryInput at the top level, or { entries: [...] } with up to 200 of them; status, source and clientRequestId at the top level apply to every entry that does not say its own (a top-level clientRequestId is suffixed with a colon and the index when there are several entries).",
+      oneOf: [
+        ref("QuantityEntryInput"),
+        objectSchema(
+          {
+            entries: arrayOf(ref("QuantityEntryInput")),
+            status: { type: "string", enum: ["draft", "submitted"] },
+            source: { type: "string", enum: ["manual", "import"] },
+            clientRequestId: { type: "string", nullable: true, maxLength: 128 },
+          },
+          ["entries"],
+        ),
+      ],
+    },
+    QuantityEntriesResponse: objectSchema(
+      {
+        projectId: uuid,
+        entries: arrayOf(ref("QuantityProgressEntry")),
+        entry: { allOf: [ref("QuantityProgressEntry")], description: "Present when one entry was sent at the top level." },
+        created: { type: "integer" },
+        replayed: { type: "integer" },
+        warnings: arrayOf(ref("QuantityEntryWarning")),
+      },
+      ["entries", "created", "replayed", "warnings"],
+    ),
+    QuantityEntryUpdateRequest: objectSchema({
+      quantity: { type: "number", minimum: 0, multipleOf: 0.001 },
+      date: { type: "string", format: "date" },
+      unitCode: { type: "string", nullable: true },
+      unit: { type: "string", nullable: true },
+      allocationId: nullableUuid,
+      locationId: nullableUuid,
+      note: { type: "string", nullable: true },
+    }),
+    QuantityEntryResponse: objectSchema(
+      {
+        entry: ref("QuantityProgressEntry"),
+        warnings: arrayOf(ref("QuantityEntryWarning")),
+        submitted: { type: "boolean", description: "On submit: false when the entry was already submitted." },
+      },
+      ["entry"],
+    ),
     RevisionActivationRequest: objectSchema(
       {
         mappings: arrayOf(
@@ -8786,6 +8940,118 @@ add(
     }),
   );
 });
+
+// ─── PC-6 (core): quantity progress entries ───────────────────────────────
+const quantityProgressParams = [...projectParams, pathParam("entryId", "Quantity progress entry UUID.")];
+const QUANTITY_ENTRY_AUTHORITY =
+  "Nothing here is official: the installed quantity of a BOQ item on an activity is Σ APPROVED entries, and an entry is approved only through the progress submission that bundles it (POST /activities/{id}/progress and its approve/reject — the one writer of ActivityProgress). A daily log, a site capture or an import makes draft/submitted entries, never progress. Every answer is withheld for a caller who may not read the BOQ (boq:read): the entry's quantity, unit, BOQ item and allocation are omitted (never zeroed) with boqWithheld: { keys, reason }; its existence, status, date, activity and PROGRESS SOURCE provenance stay. Another organisation's project is 404 PROJECT_NOT_FOUND.";
+
+add(
+  "/projects/{projectId}/quantity-progress",
+  "get",
+  operation({
+    tag: "Progress",
+    summary: "List quantity progress entries (installed quantity, pending and approved).",
+    description: "Entries of the project, newest day first, filtered by activity, BOQ item, location, submission, daily log, status, source and the day the work was done (from/to, YYYY-MM-DD). " + QUANTITY_ENTRY_AUTHORITY,
+    operationId: "listQuantityProgressEntries",
+    parameters: [
+      ...projectParams,
+      queryParam("activityId", "Entries on one activity.", uuid),
+      queryParam("boqItemId", "Entries of one BOQ item.", uuid),
+      queryParam("locationId", "Entries at one location.", uuid),
+      queryParam("submissionId", "Entries bundled by one progress submission.", uuid),
+      queryParam("dailyLogId", "Entries minted by one daily log.", uuid),
+      queryParam("status", "Entry status.", { type: "string", enum: ["draft", "submitted", "approved", "rejected"] }),
+      queryParam("source", "Where the entry came from.", { type: "string", enum: ["submission", "daily_log", "manual", "import"] }),
+      queryParam("from", "First day (YYYY-MM-DD) of the work recorded.", { type: "string", format: "date" }),
+      queryParam("to", "Last day (YYYY-MM-DD) of the work recorded.", { type: "string", format: "date" }),
+    ],
+    permissions: modulePermission("progress", "read"),
+    responseSchema: arrayOf(ref("QuantityProgressEntry")),
+  }),
+);
+
+add(
+  "/projects/{projectId}/quantity-progress",
+  "post",
+  operation({
+    tag: "Progress",
+    summary: "Record quantity progress entries (draft or submitted; never official by themselves).",
+    description:
+      "Records one entry or a batch. The unit must be the BOQ item's unit code or a registered alias of it (400 QUANTITY_UNIT_MISMATCH otherwise; nothing is converted); a quantity is never negative (400 QUANTITY_NEGATIVE); the day the work was done is required. The site-engineer assignment rule of progress submissions applies (403 ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED); PM and planning engineer override it. An entry whose clientRequestId was seen before on this project is answered with the entry it made, unchanged, flagged replayed — 201 when anything was recorded, 200 when every entry was a replay; the (projectId, clientRequestId) unique index enforces it. An entry taking approved installed past the approved allocation of the item on the activity, or naming an item the activity has no approved allocation of, is accepted with a warning (a raw comparison; no block, no exception row). " +
+      QUANTITY_ENTRY_AUTHORITY,
+    operationId: "createQuantityProgressEntries",
+    parameters: projectParams,
+    permissions: modulePermission("progress", "submit", "submission.submit"),
+    requestBody: jsonBody(ref("QuantityEntriesRequest"), "One entry, or a batch under entries[]."),
+    responses: {
+      201: jsonResponse("At least one entry was recorded.", ref("QuantityEntriesResponse")),
+      200: jsonResponse("Every entry was a replay of a clientRequestId seen before; the existing entries are returned unchanged.", ref("QuantityEntriesResponse")),
+    },
+  }),
+);
+
+add(
+  "/projects/{projectId}/quantity-progress/{entryId}",
+  "get",
+  operation({
+    tag: "Progress",
+    summary: "Get one quantity progress entry.",
+    description: QUANTITY_ENTRY_AUTHORITY,
+    operationId: "getQuantityProgressEntry",
+    parameters: quantityProgressParams,
+    permissions: modulePermission("progress", "read"),
+    responseSchema: ref("QuantityProgressEntry"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/quantity-progress/{entryId}",
+  "patch",
+  operation({
+    tag: "Progress",
+    summary: "Edit a pending quantity progress entry.",
+    description:
+      "Changes a draft or submitted entry's quantity, unit (the item's unit or an alias of it), date, location, allocation or note — by the person who recorded it, or by anyone holding the submission.approve authority (403 QUANTITY_ENTRY_FORBIDDEN otherwise). An approved or rejected entry is not changed (409 QUANTITY_ENTRY_LOCKED: a correction is a rejection plus a new entry); an entry bundled into a submission awaiting approval is not changed under it (409 QUANTITY_ENTRY_BUNDLED). The activity, the BOQ item and the status are not edited (400 QUANTITY_ENTRY_IMMUTABLE_FIELD). " +
+      QUANTITY_ENTRY_AUTHORITY,
+    operationId: "updateQuantityProgressEntry",
+    parameters: quantityProgressParams,
+    permissions: modulePermission("progress", "submit", "submission.submit"),
+    requestBody: jsonBody(ref("QuantityEntryUpdateRequest"), "The fields to change."),
+    responseSchema: ref("QuantityEntryResponse"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/quantity-progress/{entryId}",
+  "delete",
+  operation({
+    tag: "Progress",
+    summary: "Remove a pending quantity progress entry.",
+    description:
+      "Removes a draft or submitted entry — by the person who recorded it, or by anyone holding the submission.approve authority (403 QUANTITY_ENTRY_FORBIDDEN). An approved or rejected entry stays (409 QUANTITY_ENTRY_LOCKED); one bundled into a submission awaiting approval stays (409 QUANTITY_ENTRY_BUNDLED). It was never official, so nothing it fed changes.",
+    operationId: "deleteQuantityProgressEntry",
+    parameters: quantityProgressParams,
+    permissions: modulePermission("progress", "submit", "submission.submit"),
+    responseSchema: objectSchema({ deleted: { type: "boolean" }, id: uuid }),
+  }),
+);
+
+add(
+  "/projects/{projectId}/quantity-progress/{entryId}/submit",
+  "post",
+  operation({
+    tag: "Progress",
+    summary: "Submit a draft quantity progress entry for approval.",
+    description:
+      "draft → submitted, by its creator or an approver; the assignment rule applies to the person submitting. Submitting a submitted entry again answers it unchanged (submitted: false); an approved or rejected one is 409 QUANTITY_ENTRY_NOT_SUBMITTABLE. Submitting does NOT make the entry official. " +
+      QUANTITY_ENTRY_AUTHORITY,
+    operationId: "submitQuantityProgressEntry",
+    parameters: quantityProgressParams,
+    permissions: modulePermission("progress", "submit", "submission.submit"),
+    responseSchema: ref("QuantityEntryResponse"),
+  }),
+);
 
 [
   [

@@ -1439,7 +1439,62 @@ const withheldActivityDetail = (detail, access = FULL_ACCESS) => {
   return { ...detail, sections };
 };
 
+// ─── PC-6 (core): quantity progress entries ───────────────────────────────
+//
+// An entry records how much of a BOQ item was installed on an activity on a
+// day (quantity-progress.service). The routes under /quantity-progress are
+// admitted on progress:read / progress:submit, so their reader may be unable
+// to read the BOQ — and a per-item quantity is BOQ-derived (binding rule,
+// PC-6): such a member is told that an entry exists for the activity, its
+// status, its date, who recorded it and where it came from (PROGRESS SOURCE
+// provenance is progress data), and is given no quantity, no unit, no item
+// (id or row) and no allocation. Omitted, never zeroed; `boqWithheld` names
+// the keys and why. A BOQ reader's entry is the same object, untouched.
+//
+// The warnings a write answers with (over-allocation, no approved
+// allocation) compare the entry to the allocation in quantities: for such a
+// member they keep their code and activity only.
+const QUANTITY_ENTRY_WITHHELD =
+  "The quantity, unit, BOQ item and allocation of a quantity entry are available only to members who may read the BOQ";
+const QUANTITY_ENTRY_BOQ_KEYS = ["quantity", "unitCode", "boqItemId", "boqItem", "allocationId"];
+const QUANTITY_WARNING_BOQ_KEYS = ["boqItemId", "allocationQuantity", "approvedQuantity", "entryQuantity", "wouldBe", "message"];
+
+const withheldQuantityEntry = (entry, access = FULL_ACCESS) => {
+  if (access.boq || !entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+  const keys = QUANTITY_ENTRY_BOQ_KEYS.filter((key) => has(entry, key));
+  return { ...withoutKeys(entry, keys), boqWithheld: { keys, reason: QUANTITY_ENTRY_WITHHELD } };
+};
+
+const withheldQuantityWarning = (warning) => {
+  if (!warning || typeof warning !== "object") return warning;
+  const keys = QUANTITY_WARNING_BOQ_KEYS.filter((key) => has(warning, key));
+  return { ...withoutKeys(warning, keys), boqWithheld: { keys, reason: QUANTITY_ENTRY_WITHHELD } };
+};
+
+/** A list of entries (GET /quantity-progress) as this caller may receive it. */
+const withheldQuantityEntries = (entries, access = FULL_ACCESS) =>
+  access.boq || !Array.isArray(entries) ? entries : entries.map((entry) => withheldQuantityEntry(entry, access));
+
+/**
+ * The answer to writing entries ({ entries, warnings, … }) or to editing one
+ * ({ entry, warnings }) as this caller may receive it.
+ */
+const withheldQuantityEntryResult = (result, access = FULL_ACCESS) => {
+  if (access.boq || !result || typeof result !== "object" || Array.isArray(result)) return result;
+  const copy = { ...result };
+  if (Array.isArray(copy.entries)) copy.entries = withheldQuantityEntries(copy.entries, access);
+  if (copy.entry && typeof copy.entry === "object") copy.entry = withheldQuantityEntry(copy.entry, access);
+  if (Array.isArray(copy.warnings)) copy.warnings = copy.warnings.map(withheldQuantityWarning);
+  return copy;
+};
+
 module.exports = {
+  // PC-6 (core): quantity progress entries.
+  QUANTITY_ENTRY_BOQ_KEYS,
+  QUANTITY_ENTRY_WITHHELD,
+  withheldQuantityEntry,
+  withheldQuantityEntries,
+  withheldQuantityEntryResult,
   ALLOCATION_LINK_BOQ_KEYS,
   ALLOCATION_LINK_WITHHELD,
   withheldAllocationLinks,
