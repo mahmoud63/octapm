@@ -5,7 +5,7 @@ const assistant = require("./assistant.service");
 const scheduleService = require("./schedule.service");
 const evService = require("./earned-value.service");
 const budgetService = require("./budget.service");
-const { EXCEPTIONS_BOQ_WITHHELD, exceptionPolicy, exceptionReadable, forecastCostWithheld, withheldForecast } = require("../utils/boq-figures");
+const { EXCEPTIONS_BOQ_WITHHELD, EXCEPTION_MODULES, exceptionPolicy, exceptionReadable, exceptionReadableWhere, forecastCostWithheld, withheldForecast } = require("../utils/boq-figures");
 const { EAC_BASES, EAC_BASIS_LABELS, eacBasisOf, eacIsBudgetFallback } = require("../utils/eac-basis");
 const { EV_NOTES, cpiNoteFor, spiNoteFor, cutoffNotReached } = require("../utils/ev-notes");
 // Source / derived / projection labels (control model §3) — labels only.
@@ -239,9 +239,25 @@ const dataQualityWithheldFor = (access) => {
   return { reason: parts.join(". ") };
 };
 const SEVERITY_RANK = Object.freeze({ info: 0, warning: 1 });
+/**
+ * The rows are read through the exceptions list's own filter
+ * (utils/boq-figures exceptionReadableWhere, with the registry the list reads
+ * with), so a note never counts a row the list withholds from the same caller
+ * — a kind they read on a subject or secondary subject that is a BOQ record
+ * included (PC-7b integration fixer 5). An access without `modules` (the
+ * { boq, budget } shape of an in-process caller) is read as the modules it
+ * implies (moduleReadable).
+ */
+const listAccessOf = (access) => {
+  const reader = access || NO_EXCEPTION_ACCESS;
+  if (reader.modules) return reader;
+  return { ...reader, modules: Object.fromEntries(EXCEPTION_MODULES.map((module) => [module, moduleReadable(module, reader)])) };
+};
 const exceptionNotes = async ({ orgId, projectId, asOf, access }) => {
   const rules = dataQualityRules().filter((rule) => kindReadable(rule, access || NO_EXCEPTION_ACCESS));
   if (!rules.length) return [];
+  const readable = exceptionReadableWhere(listAccessOf(access), require("./exception.service").ruleRegistry());
+  if (!readable) return [];
   const rows = await safeMany("projectException", {
     where: {
       orgId,
@@ -250,6 +266,7 @@ const exceptionNotes = async ({ orgId, projectId, asOf, access }) => {
       kind: { in: rules.map((rule) => rule.kind) },
       severity: { in: ["info", "warning"] },
       OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: asOf } }],
+      AND: [readable],
     },
     select: { kind: true, severity: true },
   });

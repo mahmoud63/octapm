@@ -1003,6 +1003,8 @@ module.exports = {
   changeEventAnswerFor,
   changeEventWithholding,
   GENERIC_EXCEPTION_TITLE,
+  // The kinds' registry the list reads with (forecast.service exceptionNotes reads with it too).
+  ruleRegistry,
   // for tests
   _evaluationListener: evaluationListener,
   _exceptionPrefill: exceptionPrefill,

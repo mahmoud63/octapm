@@ -117,4 +117,38 @@ liveDescribe("PC-7b integration D: the forecast's data-quality notes per reader"
     expect(none.status).toBe(200);
     expect(none.body.data.dataQualityWithheld).toEqual(there.body.data.dataQualityWithheld);
   });
+
+  // PC-7b integration fixer 5: the notes read the rows through the list's own
+  // filter (exceptionReadableWhere), so a row the list withholds — a kind the
+  // caller reads, on a subject (or secondary subject) that is a BOQ record —
+  // is never counted in a note.
+  it("a note never counts a row the exceptions list withholds from the same caller", async () => {
+    const parity = await prisma.project.create({ data: { orgId: live.org.id, name: "LiveTest PC-7b fixer forecast parity", startDate: new Date("2026-01-05") } });
+    for (const key of ["pm", "site_noboq"]) {
+      await prisma.projectAssignment.create({ data: { projectId: parity.id, userId: members[key].id, role: members[key].role, orgId: live.org.id } });
+    }
+    const template = await prisma.projectUserPermission.findFirst({ where: { projectId: project.id, userId: members.site_noboq.id } });
+    await prisma.projectUserPermission.create({ data: { orgId: live.org.id, projectId: parity.id, userId: members.site_noboq.id, templateId: template.templateId } });
+    const stale = (subjectType, subjectId, extra = {}) => ({
+      orgId: live.org.id, projectId: parity.id, kind: "progress_stale", severity: ruleOf("progress_stale").severity, subjectType, subjectId,
+      measured: 1, limit: 0, measuredBasis: "LiveTest seeded", limitBasis: "LiveTest seeded", ...extra,
+    });
+    await prisma.projectException.createMany({
+      data: [stale("activity", "parity-plain"), stale("allocation", "parity-on-allocation"), stale("activity", "parity-beside-item", { secondarySubjectType: "boq_item", secondarySubjectId: "parity-item" })],
+    });
+    const noteOf = async (user) => {
+      const answer = await api.get(`/api/v1/projects/${parity.id}/forecast`, as(user));
+      expect(answer.status).toBe(200);
+      return answer.body.data.dataQualityItems.find((item) => item.kind === "progress_stale");
+    };
+    const listed = async (user) => {
+      const answer = await api.get(`/api/v1/projects/${parity.id}/controls/exceptions?kind=progress_stale&status=open&limit=100`, as(user));
+      expect(answer.status).toBe(200);
+      return answer.body.data.data.length;
+    };
+    expect(await listed(members.site_noboq)).toBe(1);
+    expect((await noteOf(members.site_noboq)).message).toBe(ruleOf("progress_stale").note(1));
+    expect(await listed(members.pm)).toBe(3);
+    expect((await noteOf(members.pm)).message).toBe(ruleOf("progress_stale").note(3));
+  });
 });
