@@ -321,6 +321,52 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "quality",
     message: "That NCR reference is already used in this project",
   },
+  // PC-7b: project exceptions and the change-event handoff.
+  EXCEPTION_NOT_FOUND: {
+    status: 404,
+    category: "commercial",
+    message: "Exception not found",
+  },
+  EXCEPTION_NOT_OPEN: {
+    status: 409,
+    category: "commercial",
+    message: "The exception is resolved or dismissed",
+  },
+  EXCEPTION_IN_CHANGE: {
+    status: 409,
+    category: "commercial",
+    message: "The exception is already carried by a change event",
+  },
+  EXCEPTION_SNOOZE_INVALID: {
+    status: 400,
+    category: "commercial",
+    message: "Snooze until a moment in the next 365 days",
+  },
+  EXCEPTION_CHANGE_EVENT_CLOSED: {
+    status: 409,
+    category: "commercial",
+    message: "A void or closed change event cannot carry an exception",
+  },
+  CHANGE_EVENT_NOT_FOUND: {
+    status: 404,
+    category: "commercial",
+    message: "Change event not found",
+  },
+  CHANGE_EVENT_SOURCE_INVALID: {
+    status: 400,
+    category: "commercial",
+    message: "The record a change event is raised from is not on this project",
+  },
+  CHANGE_EVENT_SOURCE_NOT_FOUND: {
+    status: 404,
+    category: "commercial",
+    message: "The record to raise a change event from was not found",
+  },
+  CHANGE_EVENT_BUDGET_LINE_INVALID: {
+    status: 400,
+    category: "commercial",
+    message: "A budget line is not on this project",
+  },
   NCR_NUMBERING_FAILED: {
     status: 500,
     category: "quality",
