@@ -17,7 +17,10 @@
  *     the measured figure has not moved past the dismissed one in the adverse
  *     (upward) direction: then nothing is written. A worsening opens a NEW
  *     open row that names the dismissed one (dataJson.reopenedFrom); the
- *     person's dismissal stays as they left it;
+ *     person's dismissal stays as they left it. A rule whose measured figure
+ *     grows by itself (elapsed days) names the EPISODE instead, in
+ *     data.dismissalKey: then the key decides — the same key stays
+ *     dismissed whatever the figure, a new key (a new episode) reopens;
  *   - an open row whose kind was evaluated and whose subject was not found
  *     again is resolved: resolvedAt = now, resolvedReason 'cleared'. A kind
  *     whose rule was skipped (its source absent) or failed keeps its rows.
@@ -109,6 +112,7 @@ const normalizeFinding = (rule, raw) => {
   const data = raw.data === undefined || raw.data === null ? {} : raw.data;
   if (typeof data !== "object" || Array.isArray(data)) fail("data must be an object");
   for (const key of RESERVED_DATA_KEYS) if (data[key] !== undefined) fail(`data.${key} is reserved for the engine`);
+  if (data.dismissalKey !== undefined && (typeof data.dismissalKey !== "string" || !data.dismissalKey.trim())) fail("data.dismissalKey, when given, must be a non-empty string naming the episode");
   const groupKeys = raw.groupKeys || {};
   return {
     kind: rule.kind,
@@ -168,6 +172,31 @@ const dismissedMeasured = (row) => {
 /** A dismissed condition comes back only when its measured figure has moved past the dismissed one, upwards. */
 const worsenedSince = (finding, dismissedRow) => Number(finding.measured) > dismissedMeasured(dismissedRow) + QUANTITY_TOLERANCE;
 
+/**
+ * The episode a finding belongs to, when its rule names one (data.dismissalKey):
+ * a measured figure that grows by itself — days since the latest approved
+ * progress, days since a period's cutoff — cannot say "worse than when it was
+ * dismissed", so the rule names what the person dismissed (that progress, that
+ * period) instead.
+ */
+const dismissalKeyOf = (data) => {
+  const key = data && typeof data === "object" ? data.dismissalKey : undefined;
+  return typeof key === "string" && key.trim() ? key.trim() : null;
+};
+
+/**
+ * Whether a finding reopens a dismissed subject. With an episode key on both
+ * sides: only a NEW key reopens (the same episode stays dismissed whatever the
+ * figure says); otherwise the measured figure must have moved past the
+ * dismissed one (worsenedSince).
+ */
+const reopensDismissal = (finding, dismissedRow) => {
+  const now = dismissalKeyOf(finding.data);
+  const then = dismissalKeyOf(dismissedRow?.dataJson);
+  if (now && then) return now !== then;
+  return worsenedSince(finding, dismissedRow);
+};
+
 /** The status the readers show: dismissed / resolved / in_change / snoozed / open. */
 const statusOf = (row, now = new Date()) => {
   if (row.resolvedAt) return isDismissed(row) ? "dismissed" : "resolved";
@@ -200,7 +229,7 @@ const planChanges = ({ findings, open, latestResolved, evaluatedKinds }) => {
     }
     const previous = latestResolved.get(key) || null;
     if (previous && isDismissed(previous)) {
-      if (!worsenedSince(finding, previous)) {
+      if (!reopensDismissal(finding, previous)) {
         plan.suppressed.push({ dismissed: previous, finding });
         continue;
       }
@@ -604,10 +633,12 @@ module.exports = {
   fingerprintOfFinding,
   fingerprintOfRow,
   isDismissed,
+  dismissalKeyOf,
   keyOf,
   normalizeFinding,
   planChanges,
   registerEvaluationListener,
+  reopensDismissal,
   runEvaluationJob,
   setDismissed,
   statusOf,

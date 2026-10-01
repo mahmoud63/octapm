@@ -178,6 +178,32 @@ describe("evaluateProject", () => {
     expect(result.rows[0].change).toBe("reopen");
   });
 
+  it("an episode key (data.dismissalKey) decides the dismissal of a figure that grows by itself: the same key stays dismissed however far it grows; a new key reopens", async () => {
+    const staleRule = (rows) => ruleOf("progress_stale", rows, { subjectType: "activity", module: "progress", boqDerived: false });
+    const stale = (days, dismissalKey) => finding({ subjectType: "activity", subjectId: "act-1", measured: { value: days, unitCode: "day", basis: "days basis" }, limit: { value: 14, unitCode: "day", basis: "threshold" }, data: { label: "A1", dismissalKey } });
+    resolvedRows = [
+      stored({ id: "dismissed-stale", kind: "progress_stale", subjectType: "activity", subjectId: "act-1", measured: new Prisma.Decimal("20"), limit: new Prisma.Decimal("14"), unitCode: "day", resolvedAt: new Date("2026-09-30"), resolvedReason: "dismissed:known", dataJson: { label: "A1", dismissalKey: "activity_progress:p1@2026-09-01T00:00:00.000Z" } }),
+    ];
+    // The same episode, 25 days further on: still the person's dismissal.
+    let result = await evaluate([staleRule([stale(45, "activity_progress:p1@2026-09-01T00:00:00.000Z")])]);
+    expect(result).toMatchObject({ opened: 0, suppressed: 1 });
+    expect(prisma.projectException.create).not.toHaveBeenCalled();
+    // Newer approved progress that went stale again: a new episode reopens, even at a LOWER figure.
+    result = await evaluate([staleRule([stale(16, "activity_progress:p2@2026-09-20T00:00:00.000Z")])]);
+    expect(result).toMatchObject({ opened: 1, suppressed: 0 });
+    expect(prisma.projectException.create).toHaveBeenCalledWith({ data: expect.objectContaining({ measured: "16.000", dataJson: expect.objectContaining({ dismissalKey: "activity_progress:p2@2026-09-20T00:00:00.000Z", reopenedFrom: expect.objectContaining({ id: "dismissed-stale" }) }) }) });
+    expect(result.rows[0].change).toBe("reopen");
+    // A dismissal stored before keys existed: the measured rule decides.
+    prisma.projectException.create.mockClear();
+    resolvedRows = [stored({ id: "legacy", kind: "progress_stale", subjectType: "activity", subjectId: "act-1", measured: new Prisma.Decimal("20"), limit: new Prisma.Decimal("14"), resolvedAt: new Date("2026-09-30"), resolvedReason: "dismissed:known", dataJson: { label: "A1" } })];
+    expect((await evaluate([staleRule([stale(20, "activity_progress:p1@x")])])).suppressed).toBe(1);
+    expect((await evaluate([staleRule([stale(21, "activity_progress:p1@x")])])).opened).toBe(1);
+    // A key that is not a non-empty string fails the rule (its rows stand).
+    const bad = await evaluate([staleRule([stale(30, 42)])]);
+    expect(bad.errors.map((error) => error.kind)).toEqual(["progress_stale"]);
+    expect(bad.errors[0].message).toMatch(/dismissalKey/);
+  });
+
   it("a condition that was cleared and comes back opens a new row", async () => {
     resolvedRows = [stored({ id: "cleared-row", resolvedAt: new Date("2026-09-30"), resolvedReason: "cleared" })];
     const result = await evaluate([ruleOf("quantity_over_boq", [finding()])]);

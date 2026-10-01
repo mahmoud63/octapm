@@ -634,7 +634,7 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
       // The kinds left out are named (PC-7b integration D): from the access, with no count; the full reader has no marker.
       expect(full).not.toHaveProperty("dataQualityWithheld");
       expect(cost.dataQualityWithheld.reason).toMatch(/available only to members who may read the BOQ/);
-      expect(JSON.stringify(cost.dataQualityWithheld)).not.toMatch(/d/);
+      expect(JSON.stringify(cost.dataQualityWithheld)).not.toMatch(/\d/);
       // A schedule reader of neither, and a caller that names no access: the progress kind only.
       for (const access of [NONE, null, undefined]) {
         const plain = await buildForecast({ orgId, projectId, asOf: NOW, ...(access === undefined ? {} : { access }) });
@@ -811,4 +811,40 @@ liveDescribe("PC-7b data quality: the §7 kinds are rules of the one engine, rea
       await prisma.project.update({ where: { id: projectId }, data: { contractValue: 100000 } });
     }
   }, 180_000);
+
+  // ─── PC-7b integration E: dismissal episodes ─────────────────────────────
+
+  engineIt("progress_stale and period_not_locked name their episode: a dismissal holds however many days pass, and a new episode reopens", async () => {
+    const orgId = live.org.id;
+    const projectId = gaps.project.id;
+    const later = (days) => new Date(NOW.getTime() + days * DAY);
+    const openOf = (kind, subjectId) => prisma.projectException.findFirst({ where: { orgId, projectId, kind, subjectId, resolvedAt: null } });
+    await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+    const stale = await openOf("progress_stale", gaps.a1.id);
+    const period = await openOf("period_not_locked", gaps.period1.id);
+    expect([stale.dataJson.dismissalKey, period.dataJson.dismissalKey]).toEqual([`activity_progress:${gaps.p1.id}@${gaps.p1.approvedAt.toISOString()}`, `reporting_period:${gaps.period1.id}`]);
+    const exceptionService = require("../exception.service");
+    const access = { boq: true, modules: { boq: true, cost: true, schedule: true, progress: true } };
+    const may = { changeEventUpdate: true, changeEventCreate: true, moduleUpdate: {} };
+    // Dismissed through the API's own action (dataJson.dismissedFingerprint).
+    for (const row of [stale, period]) await exceptionService.dismissException({ orgId, projectId, exceptionId: row.id, access, may, actor: { id: live.user.id, role: "pm" }, payload: { reason: "LiveTest known" } });
+    // Ten and forty days later the same episodes have grown — they stay dismissed.
+    for (const days of [10, 40]) {
+      const result = await engine.evaluateProject({ orgId, projectId, cutoff: later(days), trigger: "test" });
+      expect([days, await openOf("progress_stale", gaps.a1.id), await openOf("period_not_locked", gaps.period1.id)]).toEqual([days, null, null]);
+      expect(result.rows.filter((row) => row.change === "suppressed" || row.change === "reopen").length).toBe(0);
+    }
+    // A new episode: newer approved progress on A1 that went stale itself.
+    const newer = await prisma.activityProgress.create({ data: { activityId: gaps.a1.id, pctComplete: 45, status: "approved", approvedAt: daysAgo(20), updatedAt: daysAgo(20) } });
+    try {
+      await engine.evaluateProject({ orgId, projectId, cutoff: NOW, trigger: "test" });
+      const reopened = await openOf("progress_stale", gaps.a1.id);
+      expect([Boolean(reopened), reopened && Number(reopened.measured), reopened?.dataJson?.reopenedFrom?.id, reopened?.dataJson?.dismissalKey]).toEqual([true, 20, stale.id, `activity_progress:${newer.id}@${newer.approvedAt.toISOString()}`]);
+      // The period's dismissal still holds.
+      expect(await openOf("period_not_locked", gaps.period1.id)).toBeNull();
+    } finally {
+      await prisma.projectException.deleteMany({ where: { orgId, projectId, kind: "progress_stale", resolvedAt: null } });
+      await prisma.activityProgress.delete({ where: { id: newer.id } });
+    }
+  }, 240_000);
 });

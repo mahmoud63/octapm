@@ -538,7 +538,10 @@ const progressStale = async ({ orgId, projectId, cutoff }) => {
       measured: { value: days, unitCode: "day", basis: "Whole days from the activity's latest approved progress (ActivityProgress approvedAt, updatedAt for a legacy row; the earned-value report's own selection, earned-value.service selectApprovedProgressForCutoff) to the cutoff" },
       limit: { value: PROGRESS_STALE_DAYS, unitCode: "day", basis: "Stale after 14 days without approved progress on a begun, incomplete activity (the forecast's stall threshold, forecast.service STALL_DAYS)" },
       groupKeys: groupKeysOf(activity),
-      data: { lastApprovedAt: new Date(since).toISOString(), legacyDate: !latest.approvedAt, pctComplete: pct, progressId: latest.id, label: activityLabel(activity) },
+      // The episode (engine dismissal): the approved progress the days are
+      // counted from. A dismissal holds while it stays the latest; newer
+      // approved progress that goes stale again is a new episode.
+      data: { lastApprovedAt: new Date(since).toISOString(), legacyDate: !latest.approvedAt, pctComplete: pct, progressId: latest.id, label: activityLabel(activity), dismissalKey: `activity_progress:${latest.id}@${new Date(since).toISOString()}` },
     });
   }
   return rows;
@@ -567,7 +570,8 @@ const periodNotLocked = async ({ orgId, projectId, cutoff }) => {
       subjectId: period.id,
       measured: { value: days, unitCode: "day", basis: "Whole days since the period's cutoff instant as the EV reports cut it (earned-value.service listReportingPeriods), with no locked EvPeriodSnapshot" },
       limit: { value: PERIOD_LOCK_GRACE_DAYS, unitCode: "day", basis: "A period is expected to be locked (earned-value.service lockReportingPeriod) within 7 days of its cutoff" },
-      data: { code: period.code, status: period.status, cutoffDate: period.cutoffDate, cutoffLocalDate: period.cutoffLocalDate || null, lockedWithoutSnapshot: period.status === "locked", label: period.label || period.code },
+      // The episode (engine dismissal): the period itself — its days only grow.
+      data: { code: period.code, status: period.status, cutoffDate: period.cutoffDate, cutoffLocalDate: period.cutoffLocalDate || null, lockedWithoutSnapshot: period.status === "locked", label: period.label || period.code, dismissalKey: `reporting_period:${period.id}` },
     });
   }
   return rows;
