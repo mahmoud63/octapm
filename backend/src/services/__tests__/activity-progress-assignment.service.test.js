@@ -153,6 +153,28 @@ describe('activity progress assignment authorization', () => {
     for (const [call] of mockProgressService.createProgressSubmission.mock.calls) expect(call.tx).toBe(mockTx);
   });
 
+  it('an update naming an activity that is not in the project is refused 404 before the batch starts, never skipped', async () => {
+    mockPrisma.activity.findMany.mockResolvedValue([{ id: 'activity-1', budget: 1000 }]);
+    await expect(
+      activityService.bulkUpdateProgress({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        userId: 'site-1',
+        userRole: 'site_engineer',
+        updates: [
+          { activityId: 'activity-1', pctComplete: 10 },
+          { activityId: 'activity-elsewhere', pctComplete: 20 },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      status: 404,
+      code: 'ACTIVITY_NOT_FOUND',
+      details: { batch: { index: 1, activityId: 'activity-elsewhere', updates: 2, written: 0 } },
+    });
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockProgressService.createProgressSubmission).not.toHaveBeenCalled();
+  });
+
   it('does not create partial bulk submissions when authorization fails', async () => {
     mockPrisma.activity.findMany.mockResolvedValue([
       { id: 'activity-1', budget: 1000 },

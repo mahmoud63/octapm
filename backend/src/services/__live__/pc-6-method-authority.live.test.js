@@ -548,6 +548,13 @@ liveDescribe("PC-6: the submission's method is the activity's effective method",
     refused(hollow, 409, "QUANTITY_ENTRIES_REQUIRED");
     expect(hollow.body.error.details).toMatchObject({ activityId: screed.id, batch: { index: 2, activityId: screed.id, updates: 3, written: 0 } });
     expect(await footprint()).toBe(before);
+    // An update naming an activity that is not in the project is not skipped: 404, named, nothing written.
+    const stranger = require("crypto").randomUUID();
+    const unknown = await bulk([{ activityId: wall.id, pctComplete: 14 }, { activityId: stranger, pctComplete: 50 }]);
+    refused(unknown, 404, "ACTIVITY_NOT_FOUND");
+    expect(unknown.body.error.details).toEqual({ batch: { index: 1, activityId: stranger, updates: 2, written: 0 } });
+    expect(unknown.body.error.message).toMatch(/Update 2 of 2 names an activity that is not in this project; nothing was written/);
+    expect(await footprint()).toBe(before);
     expect(await evReport()).toBe(evBefore);
     // A clean batch writes every update, in order.
     const clean = await bulk([{ activityId: wall.id, pctComplete: 12 }, { activityId: wall.id, method: "manual", pctComplete: 13, notes: "typed" }]);

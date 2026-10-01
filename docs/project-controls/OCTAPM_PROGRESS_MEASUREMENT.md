@@ -254,7 +254,11 @@ bundles entries, and approving it is what approves them:
   on the batch's `tx`): every update is written or none is, and the refusal's details carry `batch { index,
   activityId, updates, written: 0 }`. Proven live (`pc-6-method-authority`: a mixed batch and its retry leave the
   footprint byte-identical; a clean batch writes both) and mutation-proven (the submissions made outside the batch's
-  transaction → the wall's submission is written despite the refusal).
+  transaction → the wall's submission is written despite the refusal). **An unknown activity is not skipped**
+  (integration fix, 2026-10-01): an update naming an activity that is not in the project used to be dropped inside the
+  batch (`if (!activity) continue`) and the call answered 200 with one update fewer; it is now refused before the
+  transaction — 404 `ACTIVITY_NOT_FOUND` with the same `details.batch` — and nothing is written (live:
+  `pc-6-method-authority`, a random id second in the batch; mutation: the skip restored fails it).
 - **The web's bulk screen offers no percentage for an activity measured by quantity** (integration, 2026-10-01).
   `frontend/src/features/schedule/components/bulk-progress-update.tsx` sends one percentage for every selected
   activity (`{ activityId, pctComplete }`, no method), so after the refusals above a selection that included a

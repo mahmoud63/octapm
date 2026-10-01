@@ -741,6 +741,17 @@ const bulkUpdateProgress = async ({
   const activityMap = new Map(
     activities.map((activity) => [activity.id, activity]),
   );
+  const list = updates || [];
+  // An update naming an activity that is not in the project used to be
+  // skipped silently inside the batch — the caller was answered 200 with one
+  // update fewer than it sent. It is refused before anything is written, and
+  // the refusal names the update, as the writer's refusals do.
+  const unknown = list.findIndex((update) => !activityMap.has(update.activityId));
+  if (unknown !== -1) {
+    throw new HttpError(404, 'ACTIVITY_NOT_FOUND', `Update ${unknown + 1} of ${list.length} names an activity that is not in this project; nothing was written`, {
+      batch: { index: unknown, activityId: list[unknown].activityId, updates: list.length, written: 0 },
+    });
+  }
   await progressService.assertProgressSubmitAllowed({
     projectId,
     activityIds: activities.map((activity) => activity.id),
@@ -748,13 +759,9 @@ const bulkUpdateProgress = async ({
     userRole,
   });
 
-  const list = updates || [];
   const submissions = await prisma.$transaction(async (tx) => {
     const written = [];
     for (const [index, update] of list.entries()) {
-      const activity = activityMap.get(update.activityId);
-      if (!activity) continue;
-
       try {
         written.push(
           await progressService.createProgressSubmission({
