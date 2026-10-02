@@ -104,6 +104,12 @@ describe('Stripe webhook route', () => {
       .send(payload)
       .expect(200);
 
-    expect(consoleLogSpy).not.toHaveBeenCalled();
+    // Each event's outcome is logged on one line (certification D2); no secret ever is.
+    const logged = [...consoleLogSpy.mock.calls, ...consoleErrorSpy.mock.calls].flat().map(String).join('\n');
+    expect(logged).not.toContain(process.env.STRIPE_WEBHOOK_SECRET);
+    expect(logged).not.toContain(process.env.STRIPE_SECRET_KEY);
+    expect(logged).not.toMatch(/sk_(test|live)_|whsec_/);
+    expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+    expect(String(consoleLogSpy.mock.calls[0][0])).toMatch(/^\[stripe-webhook\] \{.*"outcome":"unhandled"/);
   });
 });

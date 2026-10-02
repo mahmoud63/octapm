@@ -97,7 +97,8 @@ const createApp = () => {
   app.use(
     "/api/v1/webhooks/stripe",
     stripeWebhookLimiter,
-    express.raw({ type: "application/json" }),
+    // An invoice event with many lines exceeds Express's 100 kb default; it was refused before its signature was read (D23).
+    express.raw({ type: "application/json", limit: "1mb" }),
     require("./routes/stripe-webhook"),
   );
   // Inbound email carries base64 attachments: its own, larger JSON limit (OCTA-COMM-CONV-042).

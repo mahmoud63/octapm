@@ -65,6 +65,7 @@ const ENTITY_TYPES = Object.freeze({
   COMMITMENT: "commitment",
   COMMITMENT_CHANGE_ORDER: "commitment_change_order",
   SUB_PAY_APP: "sub_pay_app",
+  SUBSCRIPTION: "subscription",
 });
 
 const ACTIONS = Object.freeze({
