@@ -8,12 +8,19 @@
  * allocation, so the ceiling is set by stage 9, not by this stage:
  *
  *   B-001  A110 at 100%   5,000 m3 @  12.00  =  60,000.00
- *   B-002  A120 at  50%  +  A130 at 50%       =  60,000.00   (400 of 800 m3 @ 150.00)
- *   gross certified this period               = 120,000.00   <- equals the EV, and must
- *   retention 10%                             =  12,000.00
- *   net / invoice                             = 108,000.00
+ *   B-002  A120 at  50%   100 of 200 m3 @ 150 =  15,000.00
+ *   B-002  A130 at  25%   150 of 600 m3 @ 150 =  22,500.00
+ *   gross certified this period               =  97,500.00   <- equals the EV, and must
+ *   retention 10%                             =   9,750.00
+ *   net / invoice                             =  87,750.00
  *   client pays                               =  80,000.00
- *   outstanding receivable                    =  28,000.00
+ *   outstanding receivable                    =   7,750.00
+ *
+ * These are the figures of ONE clean pass of stages 1-9. Stage 9 books A110
+ * at 100%, A120 at 50% and advances A130 by 25 points from where it stands —
+ * from 0 to 25% on a clean pass. The figures here used to be 120,000 / 12,000 /
+ * 108,000 / 28,000 with A130 at 50% (300 m3): the durable project they were
+ * read from had stage 9 run twice, so A130 had been advanced twice.
  *
  * Two rules under test: revenue never touches the cost ledger, and an
  * over-certification (B-002 at 100%) is refused rather than silently taken.
@@ -25,7 +32,7 @@ const fs = require("fs");
 const path = require("path");
 const { GET, POST, PATCH, probe, cents, money, check, note, section, summary, readLedger } = require("./harness");
 
-const CONTEXT = path.join(__dirname, "context.json");
+const CONTEXT = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
 const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
 const P = ctx.projectId;
 const { pm, qs, finance, cost, site } = ctx.people;
@@ -36,16 +43,18 @@ const RETENTION_RATE = 10;
  * Certification is per ALLOCATION, not per bill row. B-002 is split across
  * A120 (200 m3) and A130 (600 m3), so the IPC carries two items for it, each
  * capped by its own allocation quantity and its activity's approved progress.
- * Both are at 50%, so 100 and 300 m3 respectively.
+ * A120 is at 50% of 200 m3 = 100 m3; A130 is at 25% of 600 m3 = 150 m3.
  */
 const CERT = {
   "B-001/A110": { qty: 5000, rate: 12 }, // A110 at 100%
   "B-002/A120": { qty: 100, rate: 150 }, //  A120 at 50% of 200
-  "B-002/A130": { qty: 300, rate: 150 }, //  A130 at 50% of 600
+  "B-002/A130": { qty: 150, rate: 150 }, //  A130 at 25% of 600 (stage 9: 0 -> 25 on a clean pass)
 };
-const EXPECTED_GROSS = 120_000;
-const EXPECTED_RETENTION = 12_000;
-const EXPECTED_NET = 108_000;
+// 5,000 x 12 + 100 x 150 + 150 x 150 = 60,000 + 15,000 + 22,500 = 97,500 (= stage 9 EV:
+// 60,000 x 100% + 30,000 x 50% + 90,000 x 25%); 10% retention = 9,750; net = 87,750.
+const EXPECTED_GROSS = 97_500;
+const EXPECTED_RETENTION = 9_750;
+const EXPECTED_NET = 87_750;
 const PAYMENT = 80_000;
 const PAY_REF = `${ctx.tag}-CLIENT-PMT-01`;
 const INVOICE_NO = `${ctx.tag}-INV-01`;
@@ -62,9 +71,13 @@ async function main() {
   const before = await GET(qs, `/projects/${P}/prime-contract`);
   note("contract", `${before.ref} original=${before.originalValue} approvedChanges=${before.approvedChangesValue} revised=${before.revisedValue}`);
   check("original value is the project's contract value", cents(2_000_000), cents(before.originalValue));
-  check("the two approved variations reached the client contract", cents(250_000), cents(before.approvedChangesValue));
+  // One clean pass of stage 8 approves ONE variation of 125,000.00 and leaves the 40,000.00
+  // one in draft. It was 250,000 on the durable project, where stage 8 had been run twice
+  // and approved the same 125,000.00 variation twice.
+  check("the one approved variation (125,000.00) reached the client contract", cents(125_000), cents(before.approvedChangesValue));
   check("revised client value = original + approved changes", cents(before.originalValue) + cents(before.approvedChangesValue), cents(before.revisedValue));
-  check("draft variations are not in the revised value", true, cents(before.revisedValue) === cents(2_250_000));
+  // 2,000,000 + 125,000 = 2,125,000; the 40,000 draft would make it 2,165,000.
+  check("draft variations are not in the revised value", true, cents(before.revisedValue) === cents(2_125_000));
 
   const contract = await PATCH(qs, `/projects/${P}/prime-contract`, {
     clientCompanyId: ctx.companies.client.id,
@@ -140,7 +153,7 @@ async function main() {
     check("certifying more than the allocation holds is refused", 400, overAlloc.status);
     check("  and it says why", "IPC_ALLOCATION_QTY_EXCEEDED", overAlloc.code);
 
-    // (b) within the allocation but beyond approved progress: A130 is at 50%
+    // (b) within the allocation but beyond approved progress: A130 is at 25%
     //     of 600 m3, so 600 must be refused — at the edit or at submission.
     const a130 = byKey.get("B-002/A130");
     const overProgress = await probe(qs, "PATCH", `/projects/${P}/ipc/${PERIOD}/items/${a130.id}`, { qty: 600, rate: 150 });
@@ -148,7 +161,7 @@ async function main() {
     if (overProgress.ok) {
       progressRefusal = await probe(qs, "POST", `/projects/${P}/ipc/${PERIOD}/submit`, {});
       // whichever way it was stopped, restore the honest figure before the real submit
-      await PATCH(qs, `/projects/${P}/ipc/${PERIOD}/items/${a130.id}`, { qty: 300, rate: 150, retentionRate: RETENTION_RATE });
+      await PATCH(qs, `/projects/${P}/ipc/${PERIOD}/items/${a130.id}`, { qty: CERT["B-002/A130"].qty, rate: 150, retentionRate: RETENTION_RATE });
     }
     check("certifying beyond approved progress is refused, not taken", false, progressRefusal.ok);
     note("  over-progress refusal", `${progressRefusal.status} ${progressRefusal.code ?? ""}`);
@@ -168,9 +181,9 @@ async function main() {
   const retention = cents(certified.totalRet ?? 0);
   const net = cents(certified.netPayable ?? 0);
   check("the period is certified", "certified", ["certified", "invoiced", "paid", "partially_paid"].includes(certified.status) ? "certified" : certified.status);
-  check("gross certified is 120,000.00 — the same figure as EV", cents(EXPECTED_GROSS), gross);
-  check("retention at 10% is 12,000.00", cents(EXPECTED_RETENTION), retention);
-  check("net is 108,000.00", cents(EXPECTED_NET), net);
+  check("gross certified is 97,500.00 — the same figure as EV", cents(EXPECTED_GROSS), gross);
+  check("retention at 10% is 9,750.00", cents(EXPECTED_RETENTION), retention);
+  check("net is 87,750.00", cents(EXPECTED_NET), net);
   check("gross - retention = net, to the cent", gross - retention, net);
   ctx.client = { gross, retention, net };
 
@@ -198,14 +211,14 @@ async function main() {
   check("the period shows its invoice as issued", true, /issued|invoiced|paid/.test(String(invoiced.invoiceStatus ?? invoiced.status)));
   const invoice = (invoiced.invoices || [])[0] ?? {};
   check("exactly one invoice on the period", 1, (invoiced.invoices || []).length);
-  check("invoice gross is the certified 120,000.00", cents(EXPECTED_GROSS), cents(invoice.grossAmount));
-  check("invoice retention held is 12,000.00", cents(EXPECTED_RETENTION), cents(invoice.retentionHeld));
-  check("invoice net is 108,000.00", cents(EXPECTED_NET), cents(invoice.netAmount));
+  check("invoice gross is the certified 97,500.00", cents(EXPECTED_GROSS), cents(invoice.grossAmount));
+  check("invoice retention held is 9,750.00", cents(EXPECTED_RETENTION), cents(invoice.retentionHeld));
+  check("invoice net is 87,750.00", cents(EXPECTED_NET), cents(invoice.netAmount));
   check("gross - retention held = net, on the invoice itself", cents(invoice.grossAmount) - cents(invoice.retentionHeld), cents(invoice.netAmount));
   ctx.client.invoiceId = invoice.id;
 
   // ── 10.5 payment, deliberately short ─────────────────────────────────────
-  section("10.5  Client payment — 80,000 of 108,000, so receivable stays visible");
+  section("10.5  Client payment — 80,000 of 87,750, so receivable stays visible");
 
   const rcBefore = await GET(finance, `/projects/${P}/prime-contract/receivables`);
   if (cents(rcBefore.received) >= cents(PAYMENT)) {
@@ -222,9 +235,9 @@ async function main() {
 
   const rc = await GET(finance, `/projects/${P}/prime-contract/receivables`);
   note("receivables", JSON.stringify({ invoiced: rc.invoiced, received: rc.received, outstanding: rc.outstanding, overdue: rc.overdue }));
-  check("invoiced 108,000.00", cents(EXPECTED_NET), cents(rc.invoiced));
+  check("invoiced 87,750.00", cents(EXPECTED_NET), cents(rc.invoiced));
   check("received 80,000.00", cents(PAYMENT), cents(rc.received));
-  check("outstanding receivable 28,000.00", cents(EXPECTED_NET - PAYMENT), cents(rc.outstanding));
+  check("outstanding receivable 7,750.00", cents(EXPECTED_NET - PAYMENT), cents(rc.outstanding));
   check("invoiced - received = outstanding", cents(rc.invoiced) - cents(rc.received), cents(rc.outstanding));
   ctx.client.invoiced = cents(rc.invoiced);
   ctx.client.received = cents(rc.received);
@@ -241,7 +254,7 @@ async function main() {
   const afterPay = await GET(finance, `/projects/${P}/ipc/${PERIOD}`);
   const paidInvoice = (afterPay.invoices || [])[0] ?? {};
   check("the invoice records 80,000.00 paid", cents(PAYMENT), cents(paidInvoice.amountPaid));
-  check("and 28,000.00 balance due", cents(EXPECTED_NET - PAYMENT), cents(paidInvoice.balanceDue));
+  check("and 7,750.00 balance due", cents(EXPECTED_NET - PAYMENT), cents(paidInvoice.balanceDue));
   check("and calls itself partially paid", "partially_paid", paidInvoice.status);
 
   /**
@@ -252,11 +265,17 @@ async function main() {
    * them agree. The stage reads the projection before touching it, so the
    * defect is measured on any project it has not already been rebuilt on,
    * and then rebuilds so the figures below are the reconciled ones.
+   *
+   * The rebuild is the cost controller's: the route is guarded by cost:update
+   * (pm | qs | cost_controller in shared/permissions.json) since the P21-010
+   * fix guarded the project routers. This stage was written before that guard
+   * existed and rebuilt as finance, which the policy refuses — asserted here.
    */
   const cashBefore = await GET(finance, `/projects/${P}/cash-flow`);
   note("cash flow before rebuild", JSON.stringify(cashBefore.summary));
   ctx.client.cashInflowBeforeRebuild = cents(cashBefore.summary?.inflow ?? 0);
-  await POST(finance, `/projects/${P}/cash-flow/rebuild`, {});
+  check("finance cannot rebuild the cash-flow projection (cost:update is pm, qs, cost controller)", 403, (await probe(finance, "POST", `/projects/${P}/cash-flow/rebuild`, {})).status);
+  await POST(cost, `/projects/${P}/cash-flow/rebuild`, {});
   const cash = await GET(finance, `/projects/${P}/cash-flow`);
   note("cash flow after rebuild", JSON.stringify(cash.summary));
   check("cash in is the client payment (after rebuild)", cents(PAYMENT), cents(cash.summary?.inflow ?? 0));

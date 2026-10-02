@@ -45,11 +45,11 @@ const only = process.argv.find((a) => a.startsWith("--only="))?.split("=")[1];
 if (!keep) {
   const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
   process.env.P21_STAMP = stamp;
-  const ctxPath = path.join(__dirname, "context.json");
+  const ctxPath = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
   if (fs.existsSync(ctxPath)) fs.rmSync(ctxPath);
   console.log(`fresh run, stamp ${stamp}\n`);
 } else {
-  const ctx = JSON.parse(fs.readFileSync(path.join(__dirname, "context.json"), "utf8"));
+  const ctx = JSON.parse(fs.readFileSync(process.env.P21_CONTEXT || path.join(__dirname, "context.json"), "utf8"));
   process.env.P21_STAMP = ctx.stamp;
   console.log(`continuing stamp ${ctx.stamp}\n`);
 }

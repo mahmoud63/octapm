@@ -25,7 +25,7 @@ const fs = require("fs");
 const path = require("path");
 const { GET, POST, PATCH, probe, cents, money, check, note, section, summary, API } = require("./harness");
 
-const CONTEXT = path.join(__dirname, "context.json");
+const CONTEXT = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
 const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
 const P = ctx.projectId;
 const { pm, procurement, site } = ctx.people;
@@ -33,10 +33,13 @@ const { pm, procurement, site } = ctx.people;
 const PKG_NUMBER = `PKG-${ctx.stamp}-REBAR`;
 const QTY = 60;
 const ESTIMATE_RATE = 1200;
+// The product stores a contact email in lower case, and the stage finds its invitations
+// by that email — so the address is built in lower case (a certification stamp is "C021").
+const MAIL_HOST = `${String(ctx.stamp).toLowerCase()}.${process.env.P21_PARTY_DOMAIN || "octapm.test"}`;
 const BIDDERS = [
-  { key: "gulf", companyName: ctx.companies.supplier.name, vendorCompanyId: ctx.companies.supplier.id, contactName: "Rana Haddad", contactEmail: `gulf@${ctx.stamp}.octapm.test`, rate: 1150, leadTimeDays: 35, exclusions: null },
-  { key: "emirates", companyName: `${ctx.tag} Emirates Rebar Trading`, contactName: "Yusuf Al Amin", contactEmail: `emirates@${ctx.stamp}.octapm.test`, rate: 1240, leadTimeDays: 14, exclusions: null },
-  { key: "northern", companyName: `${ctx.tag} Northern Steel Mills`, contactName: "Ingrid Solberg", contactEmail: `northern@${ctx.stamp}.octapm.test`, rate: 1190, leadTimeDays: 21, exclusions: "Ex-works. Excludes delivery to site and offloading." },
+  { key: "gulf", companyName: ctx.companies.supplier.name, vendorCompanyId: ctx.companies.supplier.id, contactName: "Rana Haddad", contactEmail: `gulf@${MAIL_HOST}`, rate: 1150, leadTimeDays: 35, exclusions: null },
+  { key: "emirates", companyName: `${ctx.tag} Emirates Rebar Trading`, contactName: "Yusuf Al Amin", contactEmail: `emirates@${MAIL_HOST}`, rate: 1240, leadTimeDays: 14, exclusions: null },
+  { key: "northern", companyName: `${ctx.tag} Northern Steel Mills`, contactName: "Ingrid Solberg", contactEmail: `northern@${MAIL_HOST}`, rate: 1190, leadTimeDays: 21, exclusions: "Ex-works. Excludes delivery to site and offloading." },
 ];
 const WINNER = "emirates";
 

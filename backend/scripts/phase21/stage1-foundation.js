@@ -13,18 +13,21 @@ const fs = require("fs");
 const path = require("path");
 const { GET, POST, DELETE, probe, check, note, section, summary } = require("./harness");
 
-const CONTEXT = path.join(__dirname, "context.json");
+const CONTEXT = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
+
+/** The nine personas sign in at <key>@<domain>; P21_EMAIL_DOMAIN names another company's people. */
+const DOMAIN = process.env.P21_EMAIL_DOMAIN || "octapm.demo";
 
 const PEOPLE = {
-  admin: "pm@octapm.demo", // company admin + PM
-  pm: "pm@octapm.demo",
-  planner: "planner@octapm.demo",
-  qs: "qs@octapm.demo",
-  cost: "cost@octapm.demo",
-  procurement: "procurement@octapm.demo",
-  warehouse: "warehouse@octapm.demo",
-  site: "site@octapm.demo",
-  finance: "finance@octapm.demo",
+  admin: `pm@${DOMAIN}`, // company admin + PM
+  pm: `pm@${DOMAIN}`,
+  planner: `planner@${DOMAIN}`,
+  qs: `qs@${DOMAIN}`,
+  cost: `cost@${DOMAIN}`,
+  procurement: `procurement@${DOMAIN}`,
+  warehouse: `warehouse@${DOMAIN}`,
+  site: `site@${DOMAIN}`,
+  finance: `finance@${DOMAIN}`,
 };
 
 /** Project roles the team members should hold on this job. */
@@ -74,7 +77,7 @@ async function main() {
   for (const [kind, payload] of Object.entries(companies)) {
     const created = await POST(PEOPLE.admin, "/companies", {
       ...payload,
-      email: `${kind}@${STAMP}.octapm.test`,
+      email: `${kind}@${STAMP}.${process.env.P21_PARTY_DOMAIN || "octapm.test"}`,
       phone: "+1 555 0100",
       address: "1 Industrial Way",
       status: "active",

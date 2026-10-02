@@ -9,7 +9,7 @@
  * either side. The mismatch must be DETECTED, not silently accepted.
  *
  * The financial gate: the cement was stocked, and its cost was recognised at
- * material issue (704.00 already on the ledger). Invoicing it must not post a
+ * material issue (660.00 already on the ledger). Invoicing it must not post a
  * second cost. The ledger is read before and after, and the expected delta is
  * 0.00. If the product posts anyway, this stage fails and the finding is
  * classified then — not assumed either way.
@@ -21,7 +21,7 @@ const fs = require("fs");
 const path = require("path");
 const { GET, POST, probe, cents, money, check, note, section, summary, readLedger } = require("./harness");
 
-const CONTEXT = path.join(__dirname, "context.json");
+const CONTEXT = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
 const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
 const P = ctx.projectId;
 const { pm, finance, cost, warehouse, site } = ctx.people;
@@ -181,7 +181,8 @@ async function main() {
   const delta = after.ledgerCents - before.ledgerCents;
   note("ledger after both invoices approved", `${money(after.ledgerCents)} by source ${JSON.stringify(Object.fromEntries(Object.entries(after.bySource).map(([k, v]) => [k, money(v)])))}`);
   check("cost recognised at issue is unchanged — the invoice posts no second cost (delta 0.00)", 0, delta);
-  check("material_issue is still the only material cost source", cents(704), after.bySource.material_issue ?? 0);
+  // 60 bags at 11.00 (stage 4). It was 704 while four probe bags of stage 7 stayed out; they are returned now.
+  check("material_issue is still the only material cost source", cents(660), after.bySource.material_issue ?? 0);
   check("the projections still agree", after.ledgerCents, after.budgetProjectionCents);
   check("still balanced", true, after.balanced);
   ctx.financials.stockedInvoiceLedgerDelta = delta;

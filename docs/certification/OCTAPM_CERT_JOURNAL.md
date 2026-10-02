@@ -142,3 +142,26 @@ Layer 2: `scripts/cert/load-projects.js` — create each company's projects thro
 **Next exact action**
 
 When the driver workflow reports: read each report, run every driver on every company with `node scripts/cert/load-records.js` (failures are listed by kind), fix or record. When the lifecycle workflow reports: review the diff of `scripts/phase21`, commit. Then the clean generation run, `finalize-population.js --apply`, `isolation/index-ids.js`, `OCTAPM_100_COMPANY_MATRIX.md`, mark CERT-1 complete. Then CERT-2: `replay.js`, `read-sweep.js`, `inject.js` on the certified population, and the lead-verification workflow for the 46 guessed P0/P1 leads.
+
+## 2026-10-02 (stopped at the usage limit) — work in progress saved, both workflows stopped
+
+**State**
+
+| | |
+|---|---|
+| Checkpoint | CERT-0 complete. CERT-1 in progress (development population only; the certified population has NOT been generated). CERT-2 tooling written and proven, not yet run for certification |
+| Stopped by me | Workflow `cert-record-drivers` (`wf_aed54dfb-200`) and workflow `cert-lifecycle-driver-repair` (`wf_447e2a96-45c`), both mid-run, because the session's usage limit was reached. Neither returned its report |
+| Saved as work in progress in this commit, UNREVIEWED | `backend/scripts/cert/drivers/{structure,procurement,inventory,subcontract,change-cost,progress,client-billing,quality-field,documents,collaboration-admin}.js` (written by the driver agents; none has been run at scale or reviewed by me); `backend/scripts/phase21/*` and `scripts/cert/run-certified-lifecycle.js` (edited by the repair agent: expectations of stages 10–18 and snapshot changed for one clean pass — every changed value still has to be audited against an on-paper derivation; the independent audit did not finish) |
+| Services left running | Certification Postgres :55433, certification API :5190. Shared environment untouched |
+
+**Proven since the last entry**
+
+- `isolation/prove-tools.js`: the fingerprint and the cross-company reference scan detect a changed row, an added row, a deleted row, a foreign identifier in a text column, a foreign key into another company, and a reference to a non-member — 8 of 8, in a rolled-back transaction.
+- `matrix-report.js` written and tried on the development population (its output was not kept: it is not a certification result).
+
+**Next exact action**
+
+1. Review the diff of `backend/scripts/phase21` (git show of this commit): for every changed expected value check the comment's derivation; then run `node scripts/cert/run-certified-lifecycle.js <code>` on a company not yet used (045, 051, 057…) as one clean pass. Lifecycle logs of the stopped runs: `C:\Temp\octapm-cert\logs\lifecycle\`.
+2. Run each driver on every company: `node scripts/cert/load-records.js "--drivers=<name>"`; read the failures by kind; fix the driver or record the product finding.
+3. Clean generation from an empty database: `reset-population.js --apply`, `generate-population.js --apply`, `load-projects.js`, `load-records.js`, the certified lifecycle on the companies whose first project is `certified`, `finalize-population.js --apply`, `isolation/index-ids.js`, `matrix-report.js`. Mark CERT-1 complete.
+4. CERT-2: `isolation/replay.js`, `read-sweep.js`, `inject.js` on the certified population; verify the 46 guessed P0/P1 leads.

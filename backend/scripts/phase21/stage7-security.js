@@ -15,7 +15,7 @@ const fs = require("fs");
 const path = require("path");
 const { API, GET, POST, probe, check, note, section, summary, readLedger } = require("./harness");
 
-const CONTEXT = path.join(__dirname, "context.json");
+const CONTEXT = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
 const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
 const P = ctx.projectId;
 const { pm, qs, cost, finance, procurement, warehouse, site, planner } = ctx.people;
@@ -34,6 +34,11 @@ const OUTSIDER = process.env.P21_OUTSIDER || "owner@buildright.test";
  * neither of the statuses a tenant boundary returns.
  */
 async function findOutsider() {
+  // P21_OUTSIDER_EMAIL names a person of another company who already exists and
+  // signs in with the run's password — nobody is registered for the run.
+  if (process.env.P21_OUTSIDER_EMAIL) {
+    return { email: process.env.P21_OUTSIDER_EMAIL, orgId: "(named)", name: "Outsider" };
+  }
   const email = `outsider-${ctx.stamp}@rival.test`;
   const res = await fetch(`${API}/auth/register`, {
     method: "POST",

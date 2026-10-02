@@ -20,7 +20,7 @@ const fs = require("fs");
 const path = require("path");
 const { GET, POST, probe, cents, money, check, note, section, summary, readLedger } = require("./harness");
 
-const CONTEXT = path.join(__dirname, "context.json");
+const CONTEXT = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
 const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
 const P = ctx.projectId;
 const { pm, procurement, warehouse, site, cost } = ctx.people;
@@ -42,7 +42,7 @@ async function main() {
     name: ctx.companies.supplier.name,
     code: `SUP-${ctx.stamp}`,
     contactName: "Rana Haddad",
-    email: `supplier@${ctx.stamp}.octapm.test`,
+    email: `supplier@${ctx.stamp}.${process.env.P21_PARTY_DOMAIN || "octapm.test"}`,
     status: "approved",
   });
   ctx.supplierId = supplier.id;

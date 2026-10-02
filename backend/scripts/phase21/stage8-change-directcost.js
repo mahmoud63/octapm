@@ -2,7 +2,7 @@
  * Phase 21B · stage 8 — change management, and a direct cost.
  *
  *   APPROVED CHANGE  125,000.00   Original 1,700,000 -> Revised 1,825,000
- *   DIRECT COST        8,500.00   Actual   60,704.00 -> 69,204.00
+ *   DIRECT COST        8,500.00   Actual   60,660.00 -> 69,160.00
  *
  * Two rules are under test, and they pull in opposite directions:
  *
@@ -18,7 +18,7 @@ const fs = require("fs");
 const path = require("path");
 const { GET, POST, PATCH, probe, cents, money, check, note, section, summary, readLedger, upload } = require("./harness");
 
-const CONTEXT = path.join(__dirname, "context.json");
+const CONTEXT = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
 const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
 const P = ctx.projectId;
 const { pm, qs, cost, finance, site } = ctx.people;
@@ -274,7 +274,12 @@ async function main() {
     directDelta,
   );
   check("the direct cost stands at 8,500.00", cents(DIRECT_COST), ledgerAfterDirect.bySource.direct_cost ?? 0);
-  check("total actual is 60,704 + 8,500 = 69,204.00", cents(60_704 + DIRECT_COST), ledgerAfterDirect.ledgerCents);
+  // On paper, for one clean pass: 660.00 of cement issued (stage 4) + 60,000.00
+  // certified to the subcontractor (stage 5) + this 8,500.00. The security
+  // stage returns the bags its probes draw (register T-14), so it adds nothing.
+  // The figure here used to be 60,704: the 44.00 was four probe bags left out
+  // on the first certified project, before stage 7 returned them.
+  check("total actual is 660 + 60,000 + 8,500 = 69,160.00", cents(660 + 60_000 + DIRECT_COST), ledgerAfterDirect.ledgerCents);
   check("the projections keep up", ledgerAfterDirect.ledgerCents, ledgerAfterDirect.budgetProjectionCents);
   check("still balanced", true, ledgerAfterDirect.balanced);
   note("ledger by source", JSON.stringify(Object.fromEntries(Object.entries(ledgerAfterDirect.bySource).map(([k, v]) => [k, money(v)]))));

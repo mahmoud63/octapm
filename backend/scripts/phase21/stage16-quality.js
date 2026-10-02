@@ -21,7 +21,7 @@ const fs = require("fs");
 const path = require("path");
 const { GET, POST, PATCH, probe, check, note, section, summary, upload } = require("./harness");
 
-const CONTEXT = path.join(__dirname, "context.json");
+const CONTEXT = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
 const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
 const P = ctx.projectId;
 const { pm, planner, qs, site, warehouse, finance } = ctx.people;
@@ -110,7 +110,12 @@ async function main() {
   const strays = ncrRows.slice(1).filter((r) => r.id !== T10_DUPLICATE);
   if (strays.length) throw new Error(`unexpected duplicate NCR-01: ${strays.map((r) => r.ref).join(", ")}`);
   if (T10_DUPLICATE) note("  T-10 duplicate on record (approved history, kept)", `${ncrRows[1]?.ref} ${T10_DUPLICATE} status=${ncrRows[1]?.status}`);
-  const EXPECTED_MAJOR = ncrRows.length; // 1 deliberate + the T-10 duplicate
+  // One clean pass raises exactly ONE major NCR (NCR-01, below); the T-10 duplicate exists only
+  // on the durable project that had this stage run twice. This used to be `ncrRows.length`,
+  // counted BEFORE NCR-01 is raised — 2 on that project, but 0 on a first clean pass, where
+  // the stage then expected a dashboard with no major NCR and a score that moved by 15, not 35.
+  // Paper, clean pass: 100 − 20·1 major − 8·0 minor − 15·1 failed ITP = 65.
+  const EXPECTED_MAJOR = 1 + (T10_DUPLICATE ? 1 : 0);
   let ncr = ncrRows[0] ?? null;
   if (!ncr) {
     ncr = await POST(site, `/projects/${P}/ncr`, {
@@ -134,7 +139,7 @@ async function main() {
   check("NCR-01 is on the foundation activity", ctx.activities.A130, ncr.activityId);
 
   const afterNcr = await score();
-  check(`the dashboard counts ${EXPECTED_MAJOR} major NCR(s) — NCR-01 plus the named T-10 duplicate`, EXPECTED_MAJOR, afterNcr.major);
+  check(`the dashboard counts ${EXPECTED_MAJOR} major NCR(s) — NCR-01${T10_DUPLICATE ? " plus the named T-10 duplicate" : ""}`, EXPECTED_MAJOR, afterNcr.major);
   check("the quality score is exactly 100 − 20·major − 8·minor − 15·failed ITP", 100 - 20 * afterNcr.major - 8 * afterNcr.minor - 15 * afterNcr.failedItps, afterNcr.score);
 
   if (ncr.status === "open") {
@@ -252,7 +257,7 @@ async function main() {
   const finalScore = await score();
   note("quality after", JSON.stringify(finalScore));
   check("the final score is 100 − 20·major − 8·minor − 15·failed ITP", 100 - 20 * finalScore.major - 8 * finalScore.minor - 15 * finalScore.failedItps, finalScore.score);
-  check("nothing but NCR-01, the T-10 duplicate and the failed ITP moved the score", EXPECTED_MAJOR * 20 + 15, ctx.quality.scoreAtStart - finalScore.score);
+  check(`nothing but NCR-01${T10_DUPLICATE ? ", the T-10 duplicate" : ""} and the failed ITP moved the score (20 per major NCR + 15)`, EXPECTED_MAJOR * 20 + 15, ctx.quality.scoreAtStart - finalScore.score);
   ctx.quality.scoreFinal = finalScore.score;
   const out = await probe(ctx.outsider, "GET", `/projects/${P}/ncr/${ncr.id}`);
   check("another tenant cannot read the NCR", true, out.status === 403 || out.status === 404);

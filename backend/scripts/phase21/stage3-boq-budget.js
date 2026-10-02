@@ -17,7 +17,7 @@ const fs = require("fs");
 const path = require("path");
 const { GET, POST, PATCH, probe, cents, money, check, note, section, summary } = require("./harness");
 
-const CONTEXT = path.join(__dirname, "context.json");
+const CONTEXT = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
 const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
 const P = ctx.projectId;
 const { pm, planner, qs, cost } = ctx.people;

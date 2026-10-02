@@ -20,7 +20,7 @@ const path = require("path");
 const { chromium } = require("C:/Users/mabde29/OneDrive - Louisiana State University/Constech/octapm-main/octapm-main/.claude/worktrees/procore-competitive-benchmark-6bd1b6/node_modules/playwright-core");
 const { GET } = require("./harness");
 
-const CONTEXT = path.join(__dirname, "context.json");
+const CONTEXT = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
 const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
 const P = ctx.projectId;
 const BASE = "http://localhost:5173";
