@@ -62,14 +62,31 @@ describe("checkNightly", () => {
     expect(scheduler.startExceptionScheduler({ env: { EXCEPTIONS_ENGINE_ENABLED: "false" } })).toBeNull();
   });
 
+  // C0-1: the engine is off by default, so a deployment that sets nothing starts no tick —
+  // whatever the tick's own switch says.
+  it.each([
+    ["nothing is set", {}],
+    ["only the tick's own switch is on", { EXCEPTIONS_SCHEDULER_ENABLED: "true" }],
+    ["the engine switch is empty", { EXCEPTIONS_ENGINE_ENABLED: "", EXCEPTIONS_SCHEDULER_ENABLED: "true" }],
+    ["the engine switch is unrecognised", { EXCEPTIONS_ENGINE_ENABLED: "yes", EXCEPTIONS_SCHEDULER_ENABLED: "true" }],
+  ])("does not start when %s", (_label, env) => {
+    const log = jest.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(scheduler.startExceptionScheduler({ env })).toBeNull();
+      expect(log).toHaveBeenCalledWith("[exception-scheduler] disabled: EXCEPTIONS_ENGINE_ENABLED is not true");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("has its own switch, EXCEPTIONS_SCHEDULER_ENABLED (default true, as its siblings): false starts no tick though the engine is on", () => {
     const log = jest.spyOn(console, "log").mockImplementation(() => {});
     try {
       expect([scheduler.schedulerEnabled({}), scheduler.schedulerEnabled({ EXCEPTIONS_SCHEDULER_ENABLED: "true" }), scheduler.schedulerEnabled({ EXCEPTIONS_SCHEDULER_ENABLED: " FALSE " })]).toEqual([true, true, false]);
       expect(scheduler.startExceptionScheduler({ env: { EXCEPTIONS_ENGINE_ENABLED: "true", EXCEPTIONS_SCHEDULER_ENABLED: "false" } })).toBeNull();
       expect(log).toHaveBeenCalledWith("[exception-scheduler] disabled by EXCEPTIONS_SCHEDULER_ENABLED=false");
-      // Both on (the defaults): the tick's timer starts — and is stopped again.
-      const timer = scheduler.startExceptionScheduler({ env: {} });
+      // The engine switched on and the tick's own switch left at its default: the timer starts — and is stopped again.
+      const timer = scheduler.startExceptionScheduler({ env: { EXCEPTIONS_ENGINE_ENABLED: "true" } });
       expect(timer).not.toBeNull();
       scheduler.stopExceptionScheduler();
     } finally {

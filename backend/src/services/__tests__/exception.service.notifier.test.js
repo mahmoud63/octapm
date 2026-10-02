@@ -24,11 +24,20 @@ const quiet = { log: () => {} };
 describe("registerExceptionNotifier", () => {
   it("registers exactly one listener per process and unregisters it", () => {
     const engine = fakeEngine();
-    const off = exceptionService.registerExceptionNotifier({ env: {}, engine, logger: quiet });
-    expect(exceptionService.registerExceptionNotifier({ env: {}, engine, logger: quiet })).toBe(off);
+    const off = exceptionService.registerExceptionNotifier({ env: { EXCEPTIONS_ENGINE_ENABLED: "true" }, engine, logger: quiet });
+    expect(exceptionService.registerExceptionNotifier({ env: { EXCEPTIONS_ENGINE_ENABLED: "true" }, engine, logger: quiet })).toBe(off);
     expect(engine.listeners).toEqual([exceptionService._evaluationListener]);
     off();
     expect(engine.listeners).toEqual([]);
+  });
+
+  // C0-1: off by default — nothing registers unless the variable is exactly "true".
+  it.each([["missing", {}], ["empty", { EXCEPTIONS_ENGINE_ENABLED: "" }], ["1", { EXCEPTIONS_ENGINE_ENABLED: "1" }], ["yes", { EXCEPTIONS_ENGINE_ENABLED: "yes" }], ["no environment", null]])("registers nothing when the switch is %s", (_label, env) => {
+    const engine = fakeEngine();
+    const log = jest.fn();
+    exceptionService.registerExceptionNotifier({ env, engine, logger: { log } });
+    expect(engine.listeners).toEqual([]);
+    expect(log).toHaveBeenCalledWith("[exception-notifier] disabled: EXCEPTIONS_ENGINE_ENABLED is not true");
   });
 
   it("stands down with EXCEPTIONS_ENGINE_ENABLED=false", () => {

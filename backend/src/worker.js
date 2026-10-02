@@ -32,7 +32,7 @@ const { registerExceptionNotifier } = require('./services/exception.service');
 registerWebhookSubscriber();
 registerAutoSubscriptions();
 // PC-7b: exception evaluation jobs run here too; a newly opened critical
-// exception tells the project's PM and QS (off with EXCEPTIONS_ENGINE_ENABLED=false).
+// exception tells the project's PM and QS (only with EXCEPTIONS_ENGINE_ENABLED=true).
 registerExceptionNotifier();
 
 // People waiting on those events are connected to the API tasks. A socket.io

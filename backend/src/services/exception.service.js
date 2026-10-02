@@ -956,12 +956,12 @@ const notifyOpened = ({ orgId, projectId, exceptions = [] }) =>
  * notifyOpened, which tells only the open, critical, unsnoozed ones, once
  * per opening. Registered once per process — by the API entry point and the
  * dedicated worker (src/index.js, src/worker.js), wherever an evaluation job
- * may run — and stands down with EXCEPTIONS_ENGINE_ENABLED=false, as the
- * engine's own trigger and tick do. Without the engine (this track's base)
+ * may run — and only when EXCEPTIONS_ENGINE_ENABLED is exactly "true", as the
+ * engine's own trigger and tick (a missing or unrecognised value is off). Without the engine (this track's base)
  * it registers nothing. Returns the unregister function.
  */
 let notifierOff = null;
-const engineEnabledByEnv = (env) => String(env.EXCEPTIONS_ENGINE_ENABLED ?? "true").trim().toLowerCase() !== "false";
+const engineEnabledByEnv = (env) => String(env?.EXCEPTIONS_ENGINE_ENABLED ?? "").trim().toLowerCase() === "true";
 const evaluationListener = async ({ orgId, projectId, opened = [], escalated = [] } = {}) => {
   const exceptions = [...(Array.isArray(opened) ? opened : []), ...(Array.isArray(escalated) ? escalated : [])];
   if (!orgId || !projectId || !exceptions.length) return { notified: 0, exceptions: 0 };
@@ -970,7 +970,7 @@ const evaluationListener = async ({ orgId, projectId, opened = [], escalated = [
 const registerExceptionNotifier = ({ env = process.env, engine = null, logger = console } = {}) => {
   if (notifierOff) return notifierOff;
   if (!engineEnabledByEnv(env)) {
-    logger?.log?.("[exception-notifier] disabled by EXCEPTIONS_ENGINE_ENABLED=false");
+    logger?.log?.("[exception-notifier] disabled: EXCEPTIONS_ENGINE_ENABLED is not true");
     return () => {};
   }
   let target = engine;

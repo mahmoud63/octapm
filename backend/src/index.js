@@ -45,7 +45,7 @@ attachRealtime(io);
 registerAutoSubscriptions();
 registerWebhookSubscriber();
 // Project exceptions (PC-7b): a relevant event asks for a debounced evaluation
-// job of its project; off with EXCEPTIONS_ENGINE_ENABLED=false.
+// job of its project; only with EXCEPTIONS_ENGINE_ENABLED=true (default off).
 registerExceptionTriggers();
 
 const PORT = process.env.PORT || 5000;
@@ -58,8 +58,8 @@ httpServer.listen(PORT, () => {
 // API tasks set SCHEDULERS_ENABLED=false and leave them to the worker.
 startSchedulerLeadership();
 // PC-7b: an exception evaluation (a job run here) that opens a critical
-// exception tells the project's PM and QS, once; off with
-// EXCEPTIONS_ENGINE_ENABLED=false (exception.service registerExceptionNotifier).
+// exception tells the project's PM and QS, once; only with
+// EXCEPTIONS_ENGINE_ENABLED=true (exception.service registerExceptionNotifier).
 registerExceptionNotifier();
 // Durable job worker (BOQ AI, schedule generation). Set JOB_WORKER_ENABLED=false
 // on API instances when running dedicated workers via `npm run worker`.

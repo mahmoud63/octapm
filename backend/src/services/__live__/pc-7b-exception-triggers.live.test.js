@@ -128,7 +128,7 @@ liveDescribe("PC-7b: domain events and the nightly tick ask for debounced evalua
   it("the enabled API debounces a burst of allocation events into ONE queued job per project, each with its own organisation; the disabled API queues nothing", async () => {
     othersBefore = await othersJobCount([live.org.id, other.org.id]);
     expect(enabledApi.proc.output()).not.toMatch(/exception-triggers\] disabled/);
-    expect(disabledApi.proc.output()).toMatch(/exception-triggers\] disabled by EXCEPTIONS_ENGINE_ENABLED=false/);
+    expect(disabledApi.proc.output()).toMatch(/exception-triggers\] disabled: EXCEPTIONS_ENGINE_ENABLED is not true/);
 
     const before = Date.now();
     await mapThrough(enabledApi, live, "A");
@@ -177,7 +177,7 @@ liveDescribe("PC-7b: domain events and the nightly tick ask for debounced evalua
     expect(await prisma.projectException.count({ where: { projectId: projects.B.id } })).toBe(0);
     // Disabled, the handler stands down.
     process.env.EXCEPTIONS_ENGINE_ENABLED = "false";
-    expect(await engine.runEvaluationJob({ job })).toEqual({ skipped: "EXCEPTIONS_ENGINE_ENABLED=false" });
+    expect(await engine.runEvaluationJob({ job })).toEqual({ skipped: "EXCEPTIONS_ENGINE_ENABLED is not true" });
   });
 
   it("a progress approval and a change-order approval through the enabled API each ask for exactly one job; the jobs open, then clear, the quantity rows", async () => {

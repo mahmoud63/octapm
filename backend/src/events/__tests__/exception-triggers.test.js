@@ -47,13 +47,38 @@ describe("registerExceptionTriggers", () => {
     expect(bus.listenerCount()).toBe(before);
   });
 
+  // C0-1: the engine is off by default. Only the exact word "true" switches it on;
+  // a deployment that says nothing, or says something unrecognised, subscribes nothing.
+  it.each([
+    ["the variable is missing", {}],
+    ["the variable is empty", { EXCEPTIONS_ENGINE_ENABLED: "" }],
+    ["the variable is blank", { EXCEPTIONS_ENGINE_ENABLED: "   " }],
+    ["the variable is 1", { EXCEPTIONS_ENGINE_ENABLED: "1" }],
+    ["the variable is yes", { EXCEPTIONS_ENGINE_ENABLED: "yes" }],
+    ["the variable is on", { EXCEPTIONS_ENGINE_ENABLED: "on" }],
+    ["the variable is malformed", { EXCEPTIONS_ENGINE_ENABLED: "true;false" }],
+    ["the environment itself is missing", null],
+  ])("subscribes nothing when %s", (_label, env) => {
+    const before = bus.listenerCount();
+    const quiet = { log: jest.fn(), error: jest.fn() };
+    expect(registerExceptionTriggers({ env, enqueue: jest.fn(), logger: quiet })).toBeNull();
+    expect(bus.listenerCount()).toBe(before);
+    expect(quiet.log).toHaveBeenCalledWith("[exception-triggers] disabled: EXCEPTIONS_ENGINE_ENABLED is not true");
+  });
+
+  it("reads the switch without regard to case or surrounding space", () => {
+    const engine = require("../../services/exception-engine.service");
+    expect(["true", " TRUE ", "True"].map((value) => engine.engineEnabled({ EXCEPTIONS_ENGINE_ENABLED: value }))).toEqual([true, true, true]);
+    expect([undefined, "", "false", "0", "1", "yes"].map((value) => engine.engineEnabled({ EXCEPTIONS_ENGINE_ENABLED: value }))).toEqual([false, false, false, false, false, false]);
+  });
+
   it("enqueues for the event's own organisation and project, only for a relevant event", async () => {
     const enqueue = jest.fn(async () => ({ enqueued: true }));
     const before = bus.listenerCount();
-    const off = registerExceptionTriggers({ env: {}, enqueue, logger });
+    const off = registerExceptionTriggers({ env: { EXCEPTIONS_ENGINE_ENABLED: "true" }, enqueue, logger });
     expect(bus.listenerCount()).toBe(before + 1);
     // A second registration is the same subscription.
-    expect(registerExceptionTriggers({ env: {}, enqueue, logger })).toBe(off);
+    expect(registerExceptionTriggers({ env: { EXCEPTIONS_ENGINE_ENABLED: "true" }, enqueue, logger })).toBe(off);
     bus.publish(record("rfi", "updated"), { delayMs: 0 });
     bus.publish(record("change_order", "approved", "approved"), { delayMs: 0 });
     await new Promise((resolve) => setImmediate(resolve));

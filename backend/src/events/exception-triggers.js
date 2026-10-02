@@ -76,7 +76,7 @@ let unsubscribe = null;
 const registerExceptionTriggers = ({ env = process.env, enqueue = null, logger = console } = {}) => {
   const engine = require("../services/exception-engine.service");
   if (!engine.engineEnabled(env)) {
-    logger.log("[exception-triggers] disabled by EXCEPTIONS_ENGINE_ENABLED=false");
+    logger.log("[exception-triggers] disabled: EXCEPTIONS_ENGINE_ENABLED is not true");
     return null;
   }
   if (unsubscribe) return unsubscribe;

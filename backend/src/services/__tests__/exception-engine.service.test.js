@@ -369,8 +369,13 @@ describe("runEvaluationJob", () => {
   });
 
   it("stands down when the engine is disabled; otherwise evaluates the job's own organisation and project", async () => {
-    process.env.EXCEPTIONS_ENGINE_ENABLED = "false";
-    expect(await engine.runEvaluationJob({ job: { orgId: ORG, projectId: PROJECT } })).toEqual({ skipped: "EXCEPTIONS_ENGINE_ENABLED=false" });
+    // Off is the default: an explicit false, a missing variable, an empty one and
+    // anything that is not exactly "true" all leave the handler standing down (C0-1).
+    for (const value of ["false", undefined, "", "  ", "1", "yes", "on", "enabled", "truthy", "true,false"]) {
+      if (value === undefined) delete process.env.EXCEPTIONS_ENGINE_ENABLED;
+      else process.env.EXCEPTIONS_ENGINE_ENABLED = value;
+      expect([value, await engine.runEvaluationJob({ job: { orgId: ORG, projectId: PROJECT } })]).toEqual([value, { skipped: "EXCEPTIONS_ENGINE_ENABLED is not true" }]);
+    }
     expect(prisma.project.findFirst).not.toHaveBeenCalled();
     process.env.EXCEPTIONS_ENGINE_ENABLED = "true";
     prisma.project.findFirst.mockResolvedValue(null);

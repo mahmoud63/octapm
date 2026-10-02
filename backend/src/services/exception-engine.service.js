@@ -61,8 +61,14 @@ const TRIGGERS = Object.freeze(["event", "scheduled", "manual", "test"]);
 const DEBOUNCE_MS = 30_000;
 const TRANSACTION_OPTIONS = Object.freeze({ maxWait: 15_000, timeout: 120_000 });
 
-/** EXCEPTIONS_ENGINE_ENABLED (default true): the event subscriber, the nightly tick and the job handler all stand down when it is "false". */
-const engineEnabled = (env = process.env) => String(env.EXCEPTIONS_ENGINE_ENABLED ?? "true").trim().toLowerCase() !== "false";
+/**
+ * EXCEPTIONS_ENGINE_ENABLED (default OFF): the event subscriber, the nightly
+ * tick, the job handler and the notifier run only when it is exactly "true".
+ * A missing, empty or unrecognised value leaves the engine off — a deployment
+ * that says nothing must not start evaluating every organisation (C0-1).
+ */
+const ENGINE_DISABLED = "EXCEPTIONS_ENGINE_ENABLED is not true";
+const engineEnabled = (env = process.env) => String(env?.EXCEPTIONS_ENGINE_ENABLED ?? "").trim().toLowerCase() === "true";
 
 const jobService = () => require("../jobs/job.service");
 
@@ -709,7 +715,7 @@ const enqueueEvaluation = async ({ orgId, projectId, reason = null, trigger = "e
 
 /** The 'exceptions.evaluate' job handler: one project, the job's organisation. */
 const runEvaluationJob = async ({ job, log = () => {} }) => {
-  if (!engineEnabled()) return { skipped: "EXCEPTIONS_ENGINE_ENABLED=false" };
+  if (!engineEnabled()) return { skipped: ENGINE_DISABLED };
   if (!job?.orgId || !job?.projectId) throw new HttpError(400, "VALIDATION_ERROR", "An exceptions.evaluate job names its organisation and project");
   const payload = job.payload || job.payloadJson || {};
   const result = await evaluateProject({ orgId: job.orgId, projectId: job.projectId, trigger: TRIGGERS.includes(payload.trigger) ? payload.trigger : "event" });
@@ -720,6 +726,7 @@ const runEvaluationJob = async ({ job, log = () => {} }) => {
 
 module.exports = {
   DEBOUNCE_MS,
+  ENGINE_DISABLED,
   DISMISSED_PREFIX,
   RESERVED_DATA_KEYS,
   RESOLVED_CLEARED,

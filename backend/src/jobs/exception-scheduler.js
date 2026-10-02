@@ -24,7 +24,11 @@ const DEFAULT_NIGHTLY_HOUR_UTC = 7;
 const engine = () => require("../services/exception-engine.service");
 const jobService = () => require("./job.service");
 
-/** EXCEPTIONS_SCHEDULER_ENABLED (default true): the nightly tick's own switch, beside the engine's. */
+/**
+ * EXCEPTIONS_SCHEDULER_ENABLED (default true): the nightly tick's own switch,
+ * beside the engine's. It can only take the tick away: the tick never starts
+ * unless the engine itself is on (EXCEPTIONS_ENGINE_ENABLED=true, default off).
+ */
 const schedulerEnabled = (env = process.env) => String(env.EXCEPTIONS_SCHEDULER_ENABLED ?? "true").trim().toLowerCase() !== "false";
 
 const nightlyHour = (env = process.env) => {
@@ -78,7 +82,7 @@ async function checkNightly({ now = new Date(), env = process.env } = {}) {
 function startExceptionScheduler({ env = process.env } = {}) {
   if (timer) return timer;
   if (!engine().engineEnabled(env)) {
-    console.log("[exception-scheduler] disabled by EXCEPTIONS_ENGINE_ENABLED=false");
+    console.log("[exception-scheduler] disabled: EXCEPTIONS_ENGINE_ENABLED is not true");
     return null;
   }
   if (!schedulerEnabled(env)) {
