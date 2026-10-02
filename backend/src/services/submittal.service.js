@@ -33,6 +33,23 @@ const {
   archiveResult,
 } = require("./archive-policy.service");
 
+/**
+ * The ids a submittal may point at belong to its own project (package) or
+ * organisation (workflow template, manager, distribution) — certification
+ * findings L7 and L8: a foreign package, template or person used to be stored
+ * and their names served back, and a foreign submittal then counted in another
+ * company's package.
+ */
+const assertSubmittalReferences = async ({ orgId, projectId, upgrade }) => {
+  const refs = require("./tenant-references.service");
+  if (upgrade.packageId) await refs.assertProjectRows({ model: "submittalPackage", projectId, ids: [upgrade.packageId], code: "SUBMITTAL_PACKAGE_NOT_FOUND", message: "Package not found" });
+  if (upgrade.workflowTemplateId) {
+    const template = await prisma.submittalWorkflowTemplate.findFirst({ where: { id: upgrade.workflowTemplateId, orgId, OR: [{ projectId }, { projectId: null }] }, select: { id: true } });
+    if (!template) throw new HttpError(404, "SUBMITTAL_TEMPLATE_NOT_FOUND", "Workflow template not found");
+  }
+  await refs.assertMembers({ orgId, userIds: [upgrade.managerUserId, ...(Array.isArray(upgrade.distributionJson) ? upgrade.distributionJson : [])] });
+};
+
 /** Fields added by OCTA-PM-SUB-017 (packages, workflow, lead time, people). */
 const upgradeFields = (payload = {}) => {
   const data = {};
@@ -283,6 +300,7 @@ const createSubmittal = async ({
   const activityId = primaryActivityIdFromPayload(payload);
   const assignmentPayload = withDefaultOwnerParty(payload, projectAccess);
   const upgrade = upgradeFields(payload);
+  await assertSubmittalReferences({ orgId, projectId, upgrade });
   const submitBy = await submitByFor({ projectId, record: { ...upgrade, activityId } });
 
   const { row, patch } = await prisma.$transaction(async (tx) => {
@@ -480,6 +498,7 @@ const updateSubmittal = async ({
   }
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
   const upgrade = upgradeFields(payload);
+  await assertSubmittalReferences({ orgId, projectId, upgrade });
   const datesTouched = ["leadTimeWeeks", "reviewDays", "requiredOnSite", "workflowTemplateId"].some((key) => key in upgrade) || activityId !== existing.activityId;
   const submitBy = datesTouched ? await submitByFor({ projectId, record: { ...existing, ...upgrade, activityId } }) : undefined;
 

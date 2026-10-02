@@ -11,7 +11,7 @@ const mockPrisma = {
   submittalStep: { create: jest.fn(), update: jest.fn(), updateMany: jest.fn(async () => ({ count: 0 })), findMany: jest.fn(async () => []) },
   submittalStepAssignment: { create: jest.fn(), update: jest.fn(async () => ({})), updateMany: jest.fn(async () => ({ count: 0 })) },
   submittalWorkflowTemplate: { findFirst: jest.fn(), findMany: jest.fn(async () => []), create: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
-  submittalPackage: { findFirst: jest.fn(), findMany: jest.fn(async () => []), aggregate: jest.fn(async () => ({ _max: { number: 2 } })), create: jest.fn(), update: jest.fn(async () => ({})) },
+  submittalPackage: { findFirst: jest.fn(), findUnique: jest.fn(async () => ({ projectId: "project-1" })), findMany: jest.fn(async () => []), aggregate: jest.fn(async () => ({ _max: { number: 2 } })), create: jest.fn(), update: jest.fn(async () => ({})) },
   workflowActivityLink: { upsert: jest.fn(async (args) => args.create) },
 };
 const mockAudit = { ENTITY_TYPES: { SUBMITTAL: "submittal", SUBMITTAL_PACKAGE: "submittal_package", SUBMITTAL_WORKFLOW_TEMPLATE: "submittal_workflow_template" }, ACTIONS: { CREATED: "created", UPDATED: "updated", STATUS_CHANGED: "status_changed" }, recordEvent: jest.fn(async () => ({})) };

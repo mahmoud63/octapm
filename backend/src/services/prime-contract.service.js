@@ -379,6 +379,8 @@ const updateContract = async ({ orgId, projectId, userId, payload = {}, canConfi
     }
     data[field] = typeof payload[field] === "string" ? trimOrNull(payload[field]) : payload[field];
   }
+  // The client is a company of this organisation's directory (certification finding L4).
+  if (data.clientCompanyId) await require("./tenant-references.service").assertCompanies({ orgId, companyIds: [data.clientCompanyId] });
 
   if (payload.originalValue !== undefined) {
     const value = num(payload.originalValue);

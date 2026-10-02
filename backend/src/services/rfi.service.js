@@ -466,6 +466,11 @@ const updateRfi = async ({
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
   if (payload.managerUserId) await rfiWorkflow.validateUsers({ orgId, userIds: [payload.managerUserId] });
   if (payload.locationId) await rfiWorkflow.validateLocation({ projectId, locationId: payload.locationId });
+  // An official response is chosen among this RFI's own responses (certification finding L9).
+  if (payload.officialResponseId) {
+    const response = await prisma.rfiResponse.findFirst({ where: { id: payload.officialResponseId, rfiId: existing.id }, select: { id: true } });
+    if (!response) throw new HttpError(404, "RFI_RESPONSE_NOT_FOUND", "Response not found on this RFI");
+  }
 
   const { row, people } = await prisma.$transaction(async (tx) => {
     const assignments = await workflowPartyAssignmentData({

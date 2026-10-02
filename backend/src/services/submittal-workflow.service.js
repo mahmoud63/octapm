@@ -665,7 +665,9 @@ const loadPackage = async ({ orgId, projectId, packageId }, tx = prisma) => {
 };
 
 const refreshPackageStatus = async (tx, packageId) => {
-  const rows = await tx.submittal.findMany({ where: { packageId }, select: { status: true } });
+  // A package counts its own project's submittals only (defence in depth for finding L8).
+  const pkg = await tx.submittalPackage.findUnique({ where: { id: packageId }, select: { projectId: true } });
+  const rows = await tx.submittal.findMany({ where: { packageId, ...(pkg?.projectId ? { projectId: pkg.projectId } : {}) }, select: { status: true } });
   const status = packageStatusFor(rows);
   await tx.submittalPackage.update({ where: { id: packageId }, data: { status } });
   return status;
@@ -693,8 +695,16 @@ const attachSubmittals = async (tx, { projectId, packageId, submittalIds }) => {
   return result.count;
 };
 
+/** A package's activity is on its project and its manager is a member of the company (certification finding L7). */
+const assertPackageReferences = async ({ orgId, projectId, activityId, managerUserId }) => {
+  const refs = require("./tenant-references.service");
+  if (activityId) await refs.assertProjectRows({ model: "activity", projectId, ids: [activityId], code: "ACTIVITY_NOT_FOUND", message: "Activity not found" });
+  if (managerUserId) await refs.assertMembers({ orgId, userIds: [managerUserId] });
+};
+
 const createPackage = async ({ orgId, projectId, payload = {}, actor = null }) => {
   await ensureProjectRow({ orgId, projectId });
+  await assertPackageReferences({ orgId, projectId, activityId: payload.activityId || null, managerUserId: payload.managerUserId || null });
   const name = trimOrNull(payload.name);
   if (!name) throw new HttpError(400, "SUBMITTAL_PACKAGE_NAME_REQUIRED", "Give the package a name");
   const created = await prisma.$transaction(async (tx) => {
@@ -743,6 +753,7 @@ const updatePackage = async ({ orgId, projectId, packageId, payload = {}, actor 
   if (payload.activityId !== undefined) data.activityId = payload.activityId || null;
   if (payload.requiredOnSite !== undefined) data.requiredOnSite = payload.requiredOnSite ? new Date(payload.requiredOnSite) : null;
   if (payload.managerUserId !== undefined) data.managerUserId = payload.managerUserId || null;
+  await assertPackageReferences({ orgId, projectId, activityId: data.activityId, managerUserId: data.managerUserId });
   await prisma.$transaction(async (tx) => {
     await tx.submittalPackage.update({ where: { id: packageId }, data });
     await auditService.recordEvent({

@@ -4,6 +4,15 @@ const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
 const { deriveBallInCourt } = require("./workflow-support.service");
 const { nextRef } = require("../utils/reference-number");
+
+const RISK_REF_FIELDS = Object.freeze(["ownerUserId", "reviewerUserId", "approverUserId", "assigneeUserId", "assigneeCompanyId", "ballInCourtUserId"]);
+
+/** The people and the company a risk names belong to this organisation (certification finding L6). */
+const assertRiskReferences = async ({ orgId, data }) => {
+  const refs = require("./tenant-references.service");
+  await refs.assertMembers({ orgId, userIds: [data.ownerUserId, data.reviewerUserId, data.approverUserId, data.assigneeUserId, data.ballInCourtUserId] });
+  await refs.assertCompanies({ orgId, companyIds: [data.assigneeCompanyId] });
+};
 const {
   ARCHIVED_STATUS,
   applyArchiveVisibility,
@@ -539,14 +548,7 @@ const buildRiskData = (payload, existing = null) => {
   }
   if (payload.phase !== undefined) data.phase = trimOrNull(payload.phase);
   if (payload.owner !== undefined) data.owner = trimOrNull(payload.owner);
-  for (const field of [
-    "ownerUserId",
-    "reviewerUserId",
-    "approverUserId",
-    "assigneeUserId",
-    "assigneeCompanyId",
-    "ballInCourtUserId",
-  ]) {
+  for (const field of RISK_REF_FIELDS) {
     if (payload[field] !== undefined) data[field] = trimOrNull(payload[field]);
   }
   if (payload.dueDate !== undefined) data.dueDate = parseDate(payload.dueDate);
@@ -627,6 +629,7 @@ const createRisk = async ({
   const generatedRef = await nextRef(prisma, { table: 'Risk', scopeColumn: 'projectId', scopeId: projectId, prefix: 'RSK', pad: 2 });
   const ref = generatedRef;
 
+  await assertRiskReferences({ orgId, data: buildRiskData({ ...payload, status }) });
   const risk = await prisma.$transaction(async (tx) => {
     if (activityLinks !== null) {
       await assertActivitiesInProject({ tx, projectId, activityLinks });
@@ -708,6 +711,7 @@ const updateRisk = async ({
     message: "Archived risks cannot be updated through normal workflow actions",
   });
   const data = buildRiskData(payload, existing);
+  await assertRiskReferences({ orgId, data });
   const nextStatus = data.status ?? existing.status;
   assertDirectStatusUpdateAllowed({
     existingStatus: existing.status,

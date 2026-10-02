@@ -7,6 +7,8 @@ const mockPrisma = {
   sheet: { findFirst: jest.fn() },
   activity: { findFirst: jest.fn() },
   company: { findFirst: jest.fn() },
+  // The people an inspection names must be members of the company (certification finding L3).
+  organizationMembership: { findMany: jest.fn(async ({ where }) => (where.userId?.in || []).map((userId) => ({ userId }))) },
   formTemplate: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
   formSection: { findMany: jest.fn(), create: jest.fn(), update: jest.fn(), deleteMany: jest.fn() },
   formItem: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), deleteMany: jest.fn() },

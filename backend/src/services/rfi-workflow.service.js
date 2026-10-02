@@ -409,7 +409,9 @@ const convertToChangeEvent = async ({ orgId, projectId, rfiId, payload = {}, use
   const { rfi } = await loadRfi({ orgId, projectId, rfiId });
   if (rfi.changeOrderId) throw new HttpError(409, "RFI_ALREADY_CONVERTED", "This RFI already has a change event");
   const changeOrderService = require("./change-order.service");
-  const official = rfi.officialResponseId && prisma.rfiResponse?.findFirst ? await prisma.rfiResponse.findFirst({ where: { id: rfi.officialResponseId } }) : null;
+  // The official response is one of THIS RFI's responses (certification finding L9: an id from
+  // another company's RFI used to be dereferenced here and its text copied into the change order).
+  const official = rfi.officialResponseId && prisma.rfiResponse?.findFirst ? await prisma.rfiResponse.findFirst({ where: { id: rfi.officialResponseId, rfiId: rfi.id } }) : null;
   const description = trimOrNull(payload.description) || [`${rfi.ref}: ${rfi.subject}`, rfi.question ? `Question: ${rfi.question}` : null, official?.body || rfi.response ? `Response: ${official?.body || rfi.response}` : null].filter(Boolean).join("\n\n");
   const changeOrder = await changeOrderService.createChangeOrder({
     orgId,

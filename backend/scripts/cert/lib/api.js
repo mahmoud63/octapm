@@ -121,7 +121,53 @@ const raw = async (method, route, options = {}) => {
   return res;
 };
 
-const rawUncaptured = async (method, route, { token = null, json, form, headers = {}, binary = false } = {}) => {
+/**
+ * CERT_INPROCESS=1: requests go to the product's Express application loaded in
+ * this process from the working tree (on the certification database), not to
+ * a running server — so a proof, and a mutation proof, exercise exactly the
+ * code on disk.
+ */
+let inprocessApp = null;
+const inprocess = () => {
+  if (!inprocessApp) {
+    // eslint-disable-next-line global-require
+    const guard = require('./cert-env');
+    process.env.DATABASE_URL = guard.certDatabaseUrl();
+    for (const name of ['JOB_WORKER_ENABLED', 'SCHEDULERS_ENABLED', 'EXCEPTIONS_ENGINE_ENABLED']) process.env[name] = 'false';
+    // eslint-disable-next-line global-require
+    inprocessApp = require('../../../src/app').createApp();
+  }
+  return inprocessApp;
+};
+
+const rawInprocess = async (method, route, { token = null, json, form, headers = {}, binary = false } = {}) => {
+  // eslint-disable-next-line global-require
+  const request = require('supertest');
+  let req = request(inprocess())[method.toLowerCase()](`/api/v1${route}`);
+  for (const [key, value] of Object.entries(headers)) req = req.set(key, value);
+  if (token) req = req.set('authorization', `Bearer ${token}`);
+  if (json !== undefined) {
+    req = req.set('content-type', 'application/json').send(typeof json === 'string' ? json : JSON.stringify(json));
+  } else if (form) {
+    for (const [key, value] of form.entries()) {
+      if (value && typeof value === 'object' && typeof value.arrayBuffer === 'function') {
+        req = req.attach(key, Buffer.from(await value.arrayBuffer()), { filename: value.name || 'file', contentType: value.type || 'application/octet-stream' });
+      } else {
+        req = req.field(key, String(value));
+      }
+    }
+  }
+  if (binary) req = req.buffer(true).parse((res, done) => { const chunks = []; res.on('data', (c) => chunks.push(c)); res.on('end', () => done(null, Buffer.concat(chunks))); });
+  const res = await req;
+  const headerBag = { get: (name) => res.headers[String(name).toLowerCase()] ?? null };
+  if (binary && res.status >= 200 && res.status < 300) return { status: res.status, headers: headerBag, buffer: res.body, body: null, text: null };
+  const text = binary ? Buffer.from(res.body || '').toString('utf8') : res.text;
+  return { status: res.status, headers: headerBag, text, body: parse(text) };
+};
+
+const rawUncaptured = async (method, route, options = {}) => {
+  if (process.env.CERT_INPROCESS === '1' && !route.startsWith('http')) return rawInprocess(method, route, options);
+  const { token = null, json, form, headers = {}, binary = false } = options;
   const url = route.startsWith('http') ? route : `${API}${route}`;
   const init = { method, headers: { ...headers } };
   if (token) init.headers.authorization = `Bearer ${token}`;

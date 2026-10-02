@@ -752,6 +752,8 @@ const validateReferences = async ({ orgId, projectId, data }, tx = prisma) => {
   for (const [row, code, message] of await Promise.all(checks)) {
     if (!row) throw new HttpError(404, code, message);
   }
+  // The people an inspection names are members of this company (certification finding L3).
+  await require("./tenant-references.service").assertMembers({ tx, orgId, userIds: [data.assigneeUserId, data.inspectorUserId, data.approverUserId] });
 };
 
 const normalizeRecurrence = (value) => {
