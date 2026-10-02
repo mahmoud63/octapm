@@ -19,6 +19,7 @@
  */
 
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 
 const BASE = (process.env.CERT_API_BASE || 'http://localhost:5190').replace(/\/$/, '');
@@ -74,8 +75,53 @@ const parse = (text) => {
   }
 };
 
+/**
+ * The request corpus. When CERT_CAPTURE_DIR is set (the loaders set it), every
+ * request is appended to <dir>/<pid>.jsonl: who asked, what, with which body,
+ * and what came back. The cross-company attacks replay the successful ones as
+ * somebody from another company, with the same valid body. Tokens and
+ * passwords are never written.
+ */
+let captureFile = null;
+const capture = (entry) => {
+  const dir = process.env.CERT_CAPTURE_DIR;
+  if (!dir) return;
+  if (!captureFile) {
+    fs.mkdirSync(dir, { recursive: true });
+    captureFile = path.join(dir, `${process.pid}.jsonl`);
+  }
+  fs.appendFileSync(captureFile, `${JSON.stringify(entry)}\n`);
+};
+const SECRET_KEYS = /password|secret|token/i;
+const scrub = (value) => {
+  if (Array.isArray(value)) return value.map(scrub);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, SECRET_KEYS.test(k) ? '(withheld)' : scrub(v)]));
+  }
+  return value;
+};
+
 /** One raw request. Never throws on a status. */
-const raw = async (method, route, { token = null, json, form, headers = {}, binary = false } = {}) => {
+const raw = async (method, route, options = {}) => {
+  const res = await rawUncaptured(method, route, options);
+  if (process.env.CERT_CAPTURE_DIR && !route.startsWith('/auth/')) {
+    const data = res.body && typeof res.body === 'object' ? res.body.data : null;
+    capture({
+      at: Date.now(),
+      actor: options.actor || null,
+      org: options.org || null,
+      method,
+      route,
+      ...(options.json !== undefined ? { json: scrub(typeof options.json === 'string' ? parse(options.json) : options.json) } : {}),
+      ...(options.file ? { file: options.file } : {}),
+      status: res.status,
+      id: data && typeof data === 'object' ? data.id ?? data.item?.id ?? null : null,
+    });
+  }
+  return res;
+};
+
+const rawUncaptured = async (method, route, { token = null, json, form, headers = {}, binary = false } = {}) => {
   const url = route.startsWith('http') ? route : `${API}${route}`;
   const init = { method, headers: { ...headers } };
   if (token) init.headers.authorization = `Bearer ${token}`;
@@ -158,7 +204,7 @@ const as = (who, orgIdArg = null) => {
   const email = typeof who === 'string' ? who : who.email;
   const orgId = typeof who === 'string' ? orgIdArg : who.orgId || orgIdArg;
   const send = async (method, route, payload, options = {}) =>
-    raw(method, route, { token: options.token === undefined ? await tokenFor(email, orgId) : options.token, json: payload, ...options });
+    raw(method, route, { token: options.token === undefined ? await tokenFor(email, orgId) : options.token, json: payload, actor: email, org: orgId, ...options });
   const call = async (method, route, payload, options = {}) => {
     const res = await send(method, route, payload, options);
     if (res.status < 200 || res.status >= 300) throw new ApiError(method, route, res.status, res.body);
@@ -176,9 +222,14 @@ const as = (who, orgIdArg = null) => {
     PATCH: (route, payload = {}) => call('PATCH', route, payload),
     PUT: (route, payload = {}) => call('PUT', route, payload),
     DELETE: (route) => call('DELETE', route),
-    upload: (method, route, file) => call(method, route, undefined, { form: multipart(file) }),
+    upload: (method, route, file) =>
+      call(method, route, undefined, {
+        form: multipart(file),
+        // What the corpus keeps of an upload: the field names and the file's name and type, not its bytes.
+        file: { field: file.field || 'file', filename: file.filename, contentType: file.contentType || 'application/octet-stream', fields: file.fields || {}, bytes: file.body ? Buffer.byteLength(file.body) : 0 },
+      }),
     download: async (route) => {
-      const res = await raw('GET', route, { token: await tokenFor(email, orgId), binary: true });
+      const res = await raw('GET', route, { token: await tokenFor(email, orgId), binary: true, actor: email, org: orgId });
       if (res.status !== 200) throw new ApiError('GET', route, res.status, res.body);
       return res.buffer;
     },

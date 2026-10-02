@@ -268,7 +268,9 @@ const buildPeople = ({ n, size, orgId, domain, rng }) => {
       key: persona.key,
       role: persona.role,
       name: personName(rng),
-      isAdmin: persona.key === 'pm' || (persona.key === 'finance' && n % 3 === 0),
+      // One company in three has a finance officer who administers the company — never a
+      // company that runs the certified lifecycle, whose finance persona must be a plain member.
+      isAdmin: persona.key === 'pm' || (persona.key === 'finance' && n % 3 === 1),
       persona: persona.key,
     });
   }
