@@ -344,4 +344,43 @@ liveDescribe("PC-7b integration fixer: a change event's prefill provenance, per 
     // without boq:read sees it too — documented in §2, the owner may reverse it).
     expect((await register(as(members.qs_noboq))).activityId).toBe(ids.mapped);
   });
+
+  // Third fixer, item 2: a stored figure a member was not shown is never
+  // removed by that member. A save without boq:read that would delete a line
+  // carrying a withheld field — by leaving it out of `lines` — is refused (409
+  // CHANGE_EVENT_LINE_WITHHELD, "cannot be removed by you"), and so is deleting
+  // the whole event (409 CHANGE_EVENT_FIELD_WITHHELD); nothing is written. Lines
+  // of their own come and go; a BOQ reader removes the line as before.
+  it("a caller without boq:read cannot remove a line carrying withheld fields, nor delete the event; a BOQ reader can", async () => {
+    const exception = await prisma.projectException.create({
+      data: { orgId: live.org.id, projectId: project.id, kind: "quantity_over_boq", severity: "critical", subjectType: "boq_item", subjectId: ids.boqItem, measured: 45, limit: 40, unitCode: "m", measuredBasis: "seeded (measured)", limitBasis: "seeded (limit)" },
+    });
+    const raised = await api.post(at(`/controls/exceptions/${exception.id}/raise-change-event`), {}, pm());
+    ok("raise from the BOQ item", raised, 201);
+    const event = raised.body.data.changeEvent;
+    const line = event.lines[0];
+    expect([line.costCodeId, line.quantity, line.unit]).toEqual([ids.costCode, 5, "m"]);
+    const rowOf = async () => JSON.stringify(await prisma.changeEvent.findUnique({ where: { id: event.id }, include: { lines: { orderBy: { sortOrder: "asc" } } } }));
+    const before = await rowOf();
+    for (const [label, lines] of [["no lines", []], ["only a new line", [{ description: "LiveTest QS replacement", quantity: 1, unitCost: 5 }]]]) {
+      const refused = await api.request("PATCH", at(`/change-events/${event.id}`), { body: { title: "LiveTest QS removes", lines }, headers: as(members.qs_noboq) });
+      expect([label, refused.status, refused.body?.error?.code]).toEqual([label, 409, "CHANGE_EVENT_LINE_WITHHELD"]);
+      expect(refused.body.error.message).toMatch(/^Part of this change event is withheld from you/);
+      expect(refused.body.error.message).toMatch(/cannot be removed by you/);
+    }
+    const deleted = await api.request("DELETE", at(`/change-events/${event.id}`), { headers: as(members.qs_noboq) });
+    expect([deleted.status, deleted.body?.error?.code]).toEqual([409, "CHANGE_EVENT_FIELD_WITHHELD"]);
+    expect(deleted.body.error.message).toMatch(/^Part of this change event is withheld from you/);
+    expect(await rowOf()).toBe(before);
+    // Their own line comes and goes; the withheld line stays as stored.
+    const kept = { id: line.id, description: line.description };
+    const added = await api.request("PATCH", at(`/change-events/${event.id}`), { body: { lines: [kept, { description: "LiveTest QS own line", quantity: 1, unitCost: 5 }] }, headers: as(members.qs_noboq) });
+    ok("qs adds a line", added);
+    ok("qs removes its own line", await api.request("PATCH", at(`/change-events/${event.id}`), { body: { lines: [kept] }, headers: as(members.qs_noboq) }));
+    const stored = await prisma.changeEventLine.findMany({ where: { changeEventId: event.id } });
+    expect(stored.map((row) => [row.id, row.costCodeId, row.quantity, row.unit])).toEqual([[line.id, ids.costCode, 5, "m"]]);
+    // A BOQ reader removes it.
+    ok("pm removes the line", await api.request("PATCH", at(`/change-events/${event.id}`), { body: { lines: [] }, headers: pm() }));
+    expect(await prisma.changeEventLine.count({ where: { changeEventId: event.id } })).toBe(0);
+  });
 });

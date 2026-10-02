@@ -202,6 +202,12 @@ test('a member without BOQ read opens and saves a change event raised from a BOQ
   await expect(row.getByTestId(`uat-change-event-line-amount-${lineId}`).locator('input')).toHaveValue('250')
   await expect(dialog.getByTestId('uat-change-event-rom-total')).toHaveText('250')
   await expect(dialog.getByTestId('uat-change-event-estimate-total')).toHaveText('250')
+  // Third fixer, item 2: the surveyor may not remove the line nor delete the
+  // event (the server refuses both) — no control is offered, the reason is.
+  await expect(row.getByTestId(`uat-change-event-line-remove-${lineId}`)).toHaveCount(0)
+  await expect(row.getByTestId(`uat-change-event-line-keep-${lineId}`)).toHaveAttribute('title', `This line cannot be removed by you — ${reason}`)
+  await expect(dialog.getByTestId('uat-change-event-delete-withheld')).toContainText(`Delete — ${reason}`)
+  await expect(dialog.getByRole('button', { name: /^Delete$/ })).toHaveCount(0)
 
   // Save an edit of the title: nothing withheld is sent back.
   await dialog.getByTestId('uat-change-event-title').fill('LiveTest saved by the surveyor')

@@ -61,7 +61,7 @@ router.post("/rfqs/:rfqId/reject", requirePermission("change_event", "approve", 
 
 router.get("/:changeEventId", requirePermission("change_event", "read"), [param("changeEventId").isUUID(), validate], asyncHandler(async (req, res) => send(req, res, await service.getChangeEvent({ ...scope(req), changeEventId: req.params.changeEventId }))));
 router.patch("/:changeEventId", requirePermission("change_event", "update"), [param("changeEventId").isUUID(), ...eventValidators(true), validate], asyncHandler(async (req, res) => send(req, res, await service.updateChangeEvent({ ...scope(req), changeEventId: req.params.changeEventId, payload: req.body, actor: actorFor(req), access: boqFigureAccess(req) }))));
-router.delete("/:changeEventId", requirePermission("change_event", "delete"), [param("changeEventId").isUUID(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.deleteChangeEvent({ ...scope(req), changeEventId: req.params.changeEventId, actor: actorFor(req) }))));
+router.delete("/:changeEventId", requirePermission("change_event", "delete"), [param("changeEventId").isUUID(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.deleteChangeEvent({ ...scope(req), changeEventId: req.params.changeEventId, actor: actorFor(req), access: boqFigureAccess(req) }))));
 router.post(
   "/:changeEventId/rfqs",
   requirePermission("change_event", "submit", { transition: "change_event.rfq_send" }),

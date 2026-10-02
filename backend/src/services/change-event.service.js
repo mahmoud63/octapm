@@ -548,6 +548,8 @@ const withheldForCaller = async ({ orgId, projectId, event, access }) => {
   return entry ? changeEventWithheldFields(event, entry) : null;
 };
 const fieldWithheld = () => new HttpError(409, "CHANGE_EVENT_FIELD_WITHHELD", CHANGE_EVENT_EXCEPTION_WITHHELD);
+const lineRemovalWithheld = () => new HttpError(409, "CHANGE_EVENT_LINE_WITHHELD", `${CHANGE_EVENT_EXCEPTION_WITHHELD}. A line whose figures were withheld from you cannot be removed by you: keep it in the lines you save, or ask a member who may read it to remove it`);
+const hasWithheldField = (withheld) => Boolean(withheld && (withheld.event.length || withheld.lines.size));
 /**
  * PC-7b adoption: a field withheld from a caller (withheldForCaller) stays
  * withheld until a person who may read it adopts it by an explicit act.
@@ -561,7 +563,7 @@ const fieldWithheld = () => new HttpError(409, "CHANGE_EVENT_FIELD_WITHHELD", CH
  */
 const assertMayAdopt = async ({ orgId, projectId, event, access }) => {
   const withheld = await withheldForCaller({ orgId, projectId, event, access });
-  if (withheld && (withheld.event.length || withheld.lines.size)) {
+  if (hasWithheldField(withheld)) {
     throw new HttpError(409, "CHANGE_EVENT_FIELD_WITHHELD", `${CHANGE_EVENT_EXCEPTION_WITHHELD}. Converting this change event, or accepting a quote into a commitment change order, would copy what was withheld from you into a commercial record: ask a member who may read it to do so`);
   }
 };
@@ -587,6 +589,13 @@ const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}
     for (const row of Array.isArray(payload.lines) ? payload.lines : []) {
       const fields = row && row.id ? withheld.lines.get(String(row.id).trim()) : null;
       if (fields && fields.some((field) => row[field] !== undefined)) throw fieldWithheld();
+    }
+    // Sending lines replaces them: a line carrying a withheld field that the
+    // body leaves out would be deleted, with its stored figures — not by a
+    // member who was not shown them.
+    if (payload.lines !== undefined) {
+      const sent = new Set((Array.isArray(payload.lines) ? payload.lines : []).map((row) => (row && row.id ? String(row.id).trim() : null)).filter(Boolean));
+      if ([...withheld.lines.keys()].some((id) => !sent.has(id))) throw lineRemovalWithheld();
     }
   }
   const data = normalizeEvent(payload, existing);
@@ -622,9 +631,17 @@ const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}
   return eventOut(updated, { detail: true });
 };
 
-const deleteChangeEvent = async ({ orgId, projectId, changeEventId, actor = null }) => {
+/**
+ * Deletes an open change event without RFQs. PC-7b: deleting removes its
+ * stored figures, so a caller who was not given some of them (withheldForCaller)
+ * is refused (409 CHANGE_EVENT_FIELD_WITHHELD, the reason), nothing written.
+ */
+const deleteChangeEvent = async ({ orgId, projectId, changeEventId, actor = null, access = null }) => {
   const existing = await loadEvent({ orgId, projectId, changeEventId });
   if (existing.status !== STATUS.OPEN || existing.rfqs.length) throw new HttpError(409, "CHANGE_EVENT_LOCKED", "Only open change events without RFQs can be deleted — void it instead");
+  if (hasWithheldField(await withheldForCaller({ orgId, projectId, event: existing, access }))) {
+    throw new HttpError(409, "CHANGE_EVENT_FIELD_WITHHELD", `${CHANGE_EVENT_EXCEPTION_WITHHELD}. A change event carrying figures withheld from you cannot be deleted by you: ask a member who may read them to delete it`);
+  }
   await prisma.changeEvent.delete({ where: { id: changeEventId } });
   await auditService.recordEvent({ orgId, projectId, entityType: "change_event", entityId: changeEventId, action: auditService.ACTIONS.DELETED, actorId: actor?.id || null, summary: { ref: existing.ref } }).catch(() => null);
   return { deleted: true };
