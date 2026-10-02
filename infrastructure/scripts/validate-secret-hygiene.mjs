@@ -13,7 +13,12 @@ import {
 import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
 
-const LIVE_STRIPE_SECRET_PATTERNS = [
+// Stripe credentials that must never be in a tracked file. Live keys of any
+// length; test-mode keys and webhook signing secrets at the length Stripe
+// issues them (a test-mode secret key is a credential too: it opens the
+// account's test data and can be used to forge nothing less than its own
+// events). Short, obviously fake fixtures in tests stay allowed.
+const STRIPE_SECRET_PATTERNS = [
   {
     name: 'Stripe live secret key',
     pattern: /\bsk_live_[A-Za-z0-9]{12,}\b/g,
@@ -22,7 +27,27 @@ const LIVE_STRIPE_SECRET_PATTERNS = [
     name: 'Stripe live restricted key',
     pattern: /\brk_live_[A-Za-z0-9]{12,}\b/g,
   },
+  {
+    name: 'Stripe test-mode secret key',
+    pattern: /\bsk_test_[A-Za-z0-9]{40,}\b/g,
+  },
+  {
+    name: 'Stripe test-mode restricted key',
+    pattern: /\brk_test_[A-Za-z0-9]{40,}\b/g,
+  },
+  {
+    name: 'Stripe webhook signing secret',
+    pattern: /\bwhsec_[A-Za-z0-9]{28,}\b/g,
+  },
 ]
+
+// In a workflow file every STRIPE_* value must come from secrets or variables
+// (${{ ... }}); a literal there is a credential or a stand-in for one (C0-3).
+const WORKFLOW_STRIPE_LITERAL = {
+  name: 'Stripe value written as a literal in a workflow (use secrets or vars)',
+  pattern: /^[ \t]*STRIPE_[A-Z0-9_]+[ \t]*:[ \t]*(?!\$\{\{)(?![ \t]*$)\S.*$/gm,
+}
+const isWorkflowFile = (file) => /(^|[\\/])\.github[\\/]workflows[\\/][^\\/]+\.ya?ml$/i.test(file)
 
 const SKIP_DIRS = new Set([
   '.git',
@@ -137,7 +162,8 @@ const lineNumberForIndex = (text, index) =>
 
 const scanText = (text, file = '<inline>') => {
   const findings = []
-  for (const { name, pattern } of LIVE_STRIPE_SECRET_PATTERNS) {
+  const patterns = isWorkflowFile(file) ? [...STRIPE_SECRET_PATTERNS, WORKFLOW_STRIPE_LITERAL] : STRIPE_SECRET_PATTERNS
+  for (const { name, pattern } of patterns) {
     pattern.lastIndex = 0
     let match = pattern.exec(text)
     while (match) {
@@ -174,6 +200,25 @@ const runSelfTest = () => {
   }
   if (scanText(safe).length !== 0) {
     throw new Error('self-test expected no findings for sanitized examples')
+  }
+
+  // Test-mode credentials at their real length, and webhook signing secrets (C0-3).
+  const testKey = ['STRIPE_SECRET_KEY=sk', 'test', '51' + 'A1b2C3d4'.repeat(6)].join('_')
+  const signingSecret = ['STRIPE_WEBHOOK_SECRET=whsec', 'Q7r8S9t0'.repeat(4)].join('_')
+  if (scanText(testKey).length !== 1 || scanText(signingSecret).length !== 1) {
+    throw new Error('self-test expected test-mode keys and webhook signing secrets to be findings')
+  }
+  const workflow = '.github/workflows/deploy.yml'
+  const literal = ["          STRIPE_WEBHOOK_SECRET: 'whsec", "placeholder'"].join('_')
+  const reference = '          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}'
+  if (scanText(literal, workflow).length !== 1) {
+    throw new Error('self-test expected a literal STRIPE_* value in a workflow to be a finding')
+  }
+  if (scanText(reference, workflow).length !== 0) {
+    throw new Error('self-test expected a secrets reference in a workflow to pass')
+  }
+  if (scanText(literal, 'docs/notes.md').length !== 0) {
+    throw new Error('self-test expected the workflow rule to apply to workflow files only')
   }
 
   const tmp = mkdtempSync(join(tmpdir(), 'pmc-secret-hygiene-'))
@@ -219,7 +264,7 @@ const main = () => {
   const findings = scanRepository(root)
   if (findings.length > 0) {
     console.error(
-      `${findings.length} potential live Stripe secret reference(s) found. Values are intentionally not printed.`,
+      `${findings.length} potential Stripe credential(s) found in tracked files. Values are intentionally not printed.`,
     )
     for (const finding of findings) {
       console.error(`- ${finding.file}:${finding.line} ${finding.name}`)

@@ -28,9 +28,15 @@ const STRIPE_PLACEHOLDER_VALUES = new Set([
 
 const normalize = (value) => String(value || '').trim();
 
+// A credential whose body is a stand-in word rather than a value Stripe issued:
+// a known prefix followed by "placeholder", "example", "changeme" and the like. Such a
+// value passes the shape checks below, so it is refused here (C0-3: a deploy
+// workflow carried one as its webhook signing secret).
+const PLACEHOLDER_BODY = /^(?:sk|rk)_(?:test|live)_(?:placeholder|example|sample|changeme|change_?me|dummy|replace_?me|todo|secret|x+)$|^whsec_(?:placeholder|example|sample|changeme|change_?me|dummy|replace_?me|todo|secret|x+)$|^price_(?:placeholder|example|sample|changeme|change_?me|dummy|replace_?me|todo|x+)$/i;
+
 const isPlaceholderStripeValue = (value) => {
   const normalized = normalize(value);
-  return !normalized || STRIPE_PLACEHOLDER_VALUES.has(normalized);
+  return !normalized || STRIPE_PLACEHOLDER_VALUES.has(normalized) || PLACEHOLDER_BODY.test(normalized);
 };
 
 const getStripeSecretKeyMode = (value) => {
@@ -139,6 +145,7 @@ module.exports = {
   STRIPE_PRICE_ENV_KEYS,
   allowsTestSecretKey,
   collectStripeConfigProblems,
+  isPlaceholderStripeValue,
   getStripe,
   getStripeSecretKeyMode,
   getStripeWebhookSecret,

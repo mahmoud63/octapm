@@ -157,6 +157,27 @@ describe('security configuration', () => {
       ...validProductionEnv(),
       STRIPE_WEBHOOK_SECRET: 'whsec_...',
     })).toThrow(/STRIPE_WEBHOOK_SECRET/);
+
+    // C0-3: a stand-in word has the shape of a signing secret and must still be refused.
+    for (const word of ['placeholder', 'PlaceHolder', 'example', 'changeme', 'change_me', 'dummy', 'replaceme', 'xxxx']) {
+      expect(() => validateProductionEnv({
+        ...validProductionEnv(),
+        STRIPE_WEBHOOK_SECRET: ['whsec', word].join('_'),
+      })).toThrow(/STRIPE_WEBHOOK_SECRET must be set to a non-placeholder/);
+    }
+    expect(() => validateProductionEnv({
+      ...validProductionEnv(),
+      STRIPE_SECRET_KEY: ['sk', 'live', 'placeholder'].join('_'),
+    })).toThrow(/STRIPE_SECRET_KEY must be set to a non-placeholder/);
+    expect(() => validateProductionEnv({
+      ...validProductionEnv(),
+      STRIPE_PRICE_BUSINESS_ANNUAL: ['price', 'placeholder'].join('_'),
+    })).toThrow(/STRIPE_PRICE_BUSINESS_ANNUAL must be set to a non-placeholder/);
+    // A real-looking value whose body merely contains one of the words is not a placeholder.
+    expect(() => validateProductionEnv({
+      ...validProductionEnv(),
+      STRIPE_WEBHOOK_SECRET: ['whsec', 'examplePlaceholderXy12345'].join('_'),
+    })).not.toThrow();
   });
 
   it('fails production validation when Stripe price ids are missing or malformed', () => {
