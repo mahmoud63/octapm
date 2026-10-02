@@ -548,6 +548,23 @@ const withheldForCaller = async ({ orgId, projectId, event, access }) => {
   return entry ? changeEventWithheldFields(event, entry) : null;
 };
 const fieldWithheld = () => new HttpError(409, "CHANGE_EVENT_FIELD_WITHHELD", CHANGE_EVENT_EXCEPTION_WITHHELD);
+/**
+ * PC-7b adoption: a field withheld from a caller (withheldForCaller) stays
+ * withheld until a person who may read it adopts it by an explicit act.
+ * Converting the event to a change order, and accepting a quote into a
+ * commitment change order, copy the event's activity and its lines' activity
+ * and cost code into a commercial record read under that record's own
+ * permissions — such an act. A caller without boq:read is refused it (409
+ * CHANGE_EVENT_FIELD_WITHHELD, the neutral reason) while the event carries a
+ * withheld field, before anything is written; a BOQ reader's act proceeds and
+ * what it copies becomes the new record's own.
+ */
+const assertMayAdopt = async ({ orgId, projectId, event, access }) => {
+  const withheld = await withheldForCaller({ orgId, projectId, event, access });
+  if (withheld && (withheld.event.length || withheld.lines.size)) {
+    throw new HttpError(409, "CHANGE_EVENT_FIELD_WITHHELD", `${CHANGE_EVENT_EXCEPTION_WITHHELD}. Converting this change event, or accepting a quote into a commitment change order, would copy what was withheld from you into a commercial record: ask a member who may read it to do so`);
+  }
+};
 // What the vendor portal shows of a line (portalLines): a line any of whose
 // shown fields was withheld from the sender is not theirs to send out.
 const RFQ_DISCLOSED_FIELDS = Object.freeze(["quantity", "unit", "activityId"]);
@@ -715,11 +732,13 @@ const notifyTeam = ({ orgId, projectId, event, actorId = null, notificationEvent
  * the event is priced, and — for a commitment's vendor — a commitment change
  * order can be drafted with the quoted lines.
  */
-const acceptQuote = async ({ orgId, projectId, rfqId, payload = {}, actor = null }) => {
+const acceptQuote = async ({ orgId, projectId, rfqId, payload = {}, actor = null, access = null }) => {
   const rfq = await loadRfq({ orgId, projectId, rfqId });
   if (rfq.status !== RFQ_STATUS.QUOTED) throw new HttpError(409, "RFQ_NOT_QUOTED", "Only a quoted RFQ can be accepted");
   const event = rfq.changeEvent;
   assertEditable(event);
+  // The commitment change order copies the lines' cost code and activity (PC-7b adoption).
+  if (payload.createCommitmentChangeOrder && rfq.commitmentId) await assertMayAdopt({ orgId, projectId, event, access });
   const quoted = quoteLines(rfq);
   const now = new Date();
   let commitmentChangeOrder = null;
@@ -755,10 +774,12 @@ const rejectQuote = async ({ orgId, projectId, rfqId, payload = {}, actor = null
 // ─── Conversion and closing ───────────────────────────────────────────────
 
 /** Creates the prime change order from the event (value = quoted where accepted, else ROM) and links accepted commitment change orders. */
-const convertToChangeOrder = async ({ orgId, projectId, changeEventId, payload = {}, actor = null }) => {
+const convertToChangeOrder = async ({ orgId, projectId, changeEventId, payload = {}, actor = null, access = null }) => {
   const event = await loadEvent({ orgId, projectId, changeEventId });
   if (event.status === STATUS.CONVERTED || event.changeOrderId) throw new HttpError(409, "CHANGE_EVENT_CONVERTED", `${event.ref} is already ${event.changeOrder?.ref || "converted"}`);
   if ([STATUS.CLOSED, STATUS.VOID].includes(event.status)) throw new HttpError(409, "CHANGE_EVENT_LOCKED", `A ${event.status} change event cannot be converted`);
+  // The order copies the event's activity and its lines' activities (PC-7b adoption).
+  await assertMayAdopt({ orgId, projectId, event, access });
   const totals = estimateOf(event);
   const value = payload.value !== undefined && payload.value !== null && payload.value !== "" ? round2(payload.value) : totals.estimate;
   const changeOrderService = require("./change-order.service");

@@ -122,4 +122,14 @@ assert.match(panel, /\{event\.sourceWithheld && \([^]*?Raised from — \{event\.
 assert.match(panel, /isChangeEventFieldWithheld\(event, 'activityId'\) \?[^]*?title=\{event\.sourceWithheld\?\.reason\}/, 'a withheld activity in the register reads "—" with the reason')
 assert.match(dialog, /\{!sourceLink && event\.sourceWithheld && \([^]*?Raised from — \{event\.sourceWithheld\.reason\}/, 'the dialog names the reason where the source would be')
 
+// PC-7b third fixer, item 1: converting, and accepting a quote into a
+// commitment change order, are refused to a member without boq:read while the
+// event carries a withheld field (409 CHANGE_EVENT_FIELD_WITHHELD). No new UI:
+// both actions already show the server's own message, which carries the reason.
+const handleServerError = read('src/lib/handle-server-error.ts')
+assert.match(handleServerError, /errMsg = errorData\?\.error\?\.message \|\| errMsg/, "the toast reads the server's message")
+assert.match(dialog, /const convert = async \(\) => \{[^]*?action: 'convert'[^]*?catch \(error\) \{\s*toast\.error\(getServerErrorMessage\(error\)\)/, "a refused conversion shows the server's reason")
+assert.match(dialog, /action: 'remind' \| 'cancel' \| 'accept' \| 'reject'[^]*?catch \(error\) \{\s*toast\.error\(getServerErrorMessage\(error\)\)/, "a refused acceptance shows the server's reason")
+assert.match(service, /const assertMayAdopt = async/, 'the server refuses an adoption by a member who was not shown the fields')
+
 console.log('change-events-ui: ok')

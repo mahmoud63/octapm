@@ -278,4 +278,70 @@ liveDescribe("PC-7b integration fixer: a change event's prefill provenance, per 
     ok("pm clears", cleared);
     expect((await stored()).map((line) => [line.description, line.notes, line.budgetLineId])).toEqual([["LiveTest noted line", null, null], ["LiveTest new line", null, null]]);
   });
+
+  // Third fixer, item 1: a BOQ-derived field stays withheld until a person who
+  // may read it ADOPTS it by an explicit act. Converting the event to a change
+  // order, and accepting a commitment vendor's quote with a commitment change
+  // order, copy the event's activity and its lines' activity / cost code into
+  // a commercial record — so a caller without boq:read is refused (409
+  // CHANGE_EVENT_FIELD_WITHHELD, the neutral reason, nothing written) while
+  // the event still carries a withheld field; a BOQ reader's act proceeds and
+  // the copied values are the new record's own.
+  it("convert and accept-with-commitment-change-order are refused to a caller without boq:read while fields are withheld; a BOQ reader adopts them", async () => {
+    const live4 = await prisma.changeEvent.findFirst({ where: { projectId: project.id, exceptionId: ids.exception, status: { notIn: ["void", "closed"] } } });
+    ok("pm void fourth", await api.post(at(`/change-events/${live4.id}/void`), { reason: "LiveTest void" }, pm()));
+    const raised = await api.post(at(`/controls/exceptions/${ids.exception}/raise-change-event`), {}, pm());
+    ok("raise fifth", raised, 201);
+    const event = raised.body.data.changeEvent;
+    const line = event.lines[0];
+    const commitment = await prisma.commitment.create({ data: { orgId: live.org.id, projectId: project.id, number: 1, ref: `SC-ADOPT-${tag}`, title: "LiveTest adoption subcontract", type: "subcontract", status: "executed" } });
+    const sent = await api.post(at(`/change-events/${event.id}/rfqs`), { recipients: [{ commitmentId: commitment.id, companyName: "LiveTest Sub", contactEmail: `sub-${tag}@octapm-live.test` }], lineIds: [line.id] }, pm());
+    ok("pm sends the rfq", sent, 201);
+    const rfq = sent.body.data.rfqs[0];
+    const token = new URL(rfq.portalUrl).pathname.split("/").pop();
+    ok("vendor quotes", await api.request("PUT", `/api/v1/public/rfqs/${token}/quote`, { body: { lines: [{ lineId: line.id, amount: 300 }] } }));
+
+    const footprint = async () => JSON.stringify({
+      changeOrders: await prisma.changeOrder.findMany({ where: { projectId: project.id }, orderBy: { id: "asc" } }),
+      activityLinks: await prisma.changeOrderActivityLink.findMany({ where: { projectId: project.id }, orderBy: { id: "asc" } }),
+      commitmentChangeOrders: await prisma.commitmentChangeOrder.findMany({ where: { projectId: project.id }, orderBy: { id: "asc" } }),
+      budgetRevisions: await prisma.budgetRevision.findMany({ where: { projectId: project.id }, orderBy: { id: "asc" } }),
+      event: await prisma.changeEvent.findUnique({ where: { id: event.id }, include: { lines: { orderBy: { sortOrder: "asc" } } } }),
+      rfqs: await prisma.rfq.findMany({ where: { changeEventId: event.id }, orderBy: { id: "asc" } }),
+    });
+    const before = await footprint();
+    const refused = async (label, answer) => {
+      expect([label, answer.status, answer.body?.error?.code]).toEqual([label, 409, "CHANGE_EVENT_FIELD_WITHHELD"]);
+      expect(answer.body.error.message).toMatch(/^Part of this change event is withheld from you/);
+      expect(answer.body.error.message).not.toMatch(/BOQ|bill/i);
+      for (const secret of [ids.mapped, ids.costCode]) expect([label, secret, JSON.stringify(answer.body).includes(secret)]).toEqual([label, secret, false]);
+    };
+    await refused("qs accepts with a commitment change order", await api.post(at(`/change-events/rfqs/${rfq.id}/accept`), { createCommitmentChangeOrder: true }, as(members.qs_noboq)));
+    await refused("qs converts", await api.post(at(`/change-events/${event.id}/convert`), {}, as(members.qs_noboq)));
+    await refused("qs converts without commitment change orders", await api.post(at(`/change-events/${event.id}/convert`), { includeCommitmentChangeOrders: false }, as(members.qs_noboq)));
+    expect(await footprint()).toBe(before);
+
+    // A BOQ reader's acceptance and conversion proceed: the activity and cost
+    // code become the commercial records' own.
+    const accepted = await api.post(at(`/change-events/rfqs/${rfq.id}/accept`), { createCommitmentChangeOrder: true }, pm());
+    ok("pm accepts", accepted);
+    const cco = await prisma.commitmentChangeOrder.findUnique({ where: { id: accepted.body.data.commitmentChangeOrder.id } });
+    expect(cco.linesJson).toEqual([expect.objectContaining({ activityId: ids.mapped, costCodeId: ids.costCode, amount: 300 })]);
+    const converted = await api.post(at(`/change-events/${event.id}/convert`), {}, pm());
+    ok("pm converts", converted, 201);
+    const orderId = converted.body.data.changeOrder.id;
+    expect((await prisma.changeOrder.findUnique({ where: { id: orderId } })).activityId).toBe(ids.mapped);
+    expect((await prisma.changeOrderActivityLink.findMany({ where: { changeOrderId: orderId } })).map((link) => link.activityId)).toEqual([ids.mapped]);
+    const register = async (headers) => {
+      const listed = await api.get(at("/change-orders"), headers);
+      ok("change-order register", listed);
+      return listed.body.data.orders.find((order) => order.id === orderId);
+    };
+    // A change-order reader with BOQ read sees the order's activity.
+    expect((await register(pm())).activityId).toBe(ids.mapped);
+    // Adoption: the order is a commercial record an authorized person created;
+    // its activity follows the change-order permissions (a change-order reader
+    // without boq:read sees it too — documented in §2, the owner may reverse it).
+    expect((await register(as(members.qs_noboq))).activityId).toBe(ids.mapped);
+  });
 });
