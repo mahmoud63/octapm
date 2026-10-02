@@ -1,4 +1,5 @@
 const { prisma } = require("../config/db");
+const { isSwitchOn, offMessage } = require("../config/switches");
 
 /**
  * Daily log automation (OCTA-FLD-DAILY-022).
@@ -49,8 +50,8 @@ let timers = null;
 
 function startDailyLogScheduler() {
   if (timers) return timers;
-  if (String(process.env.DAILY_LOG_SCHEDULER_ENABLED ?? "true").toLowerCase() === "false") {
-    console.log("[daily-log-scheduler] disabled by DAILY_LOG_SCHEDULER_ENABLED=false");
+  if (!isSwitchOn("DAILY_LOG_SCHEDULER_ENABLED")) {
+    console.log(offMessage("daily-log-scheduler", "DAILY_LOG_SCHEDULER_ENABLED"));
     return null;
   }
   const safe = (label, fn) => () => fn().catch((error) => console.error(`[daily-log-scheduler] ${label}`, error));

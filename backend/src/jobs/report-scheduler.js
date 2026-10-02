@@ -1,4 +1,5 @@
 const { prisma } = require("../config/db");
+const { isSwitchOn, offMessage } = require("../config/switches");
 
 /**
  * Report automation (OCTA-RPT-BUILDER-023).
@@ -39,8 +40,8 @@ let timers = null;
 
 function startReportScheduler() {
   if (timers) return timers;
-  if (String(process.env.REPORT_SCHEDULER_ENABLED ?? "true").toLowerCase() === "false") {
-    console.log("[report-scheduler] disabled by REPORT_SCHEDULER_ENABLED=false");
+  if (!isSwitchOn("REPORT_SCHEDULER_ENABLED")) {
+    console.log(offMessage("report-scheduler", "REPORT_SCHEDULER_ENABLED"));
     return null;
   }
   const safe = (label, fn) => () => fn().catch((error) => console.error(`[report-scheduler] ${label}`, error));

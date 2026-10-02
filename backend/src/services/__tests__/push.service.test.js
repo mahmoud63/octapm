@@ -22,6 +22,16 @@ const service = require("../push.service");
 
 const device = (overrides = {}) => ({ id: "sub-1", userId: "user-1", endpoint: "https://push.example/abc", p256dh: "p", auth: "a", failureCount: 0, ...overrides });
 
+// The Expo sender is off unless EXPO_PUSH_ENABLED is exactly "true" (C0-2); these tests are about a process that has it on.
+const savedExpoSwitch = process.env.EXPO_PUSH_ENABLED;
+beforeAll(() => {
+  process.env.EXPO_PUSH_ENABLED = "true";
+});
+afterAll(() => {
+  if (savedExpoSwitch === undefined) delete process.env.EXPO_PUSH_ENABLED;
+  else process.env.EXPO_PUSH_ENABLED = savedExpoSwitch;
+});
+
 describe("push service", () => {
   beforeEach(() => {
     jest.clearAllMocks();

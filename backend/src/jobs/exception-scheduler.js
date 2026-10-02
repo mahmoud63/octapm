@@ -1,4 +1,5 @@
 const { prisma } = require("../config/db");
+const { isSwitchOn, offMessage } = require("../config/switches");
 
 /**
  * Trigger 2 of the exception engine (OCTAPM_CHANGE_INTELLIGENCE.md §6): once a
@@ -25,11 +26,11 @@ const engine = () => require("../services/exception-engine.service");
 const jobService = () => require("./job.service");
 
 /**
- * EXCEPTIONS_SCHEDULER_ENABLED (default true): the nightly tick's own switch,
- * beside the engine's. It can only take the tick away: the tick never starts
- * unless the engine itself is on (EXCEPTIONS_ENGINE_ENABLED=true, default off).
+ * EXCEPTIONS_SCHEDULER_ENABLED (default off, C0-2): the nightly tick's own
+ * switch, beside the engine's. The tick starts only when both are exactly
+ * "true": the engine (EXCEPTIONS_ENGINE_ENABLED) and this one.
  */
-const schedulerEnabled = (env = process.env) => String(env.EXCEPTIONS_SCHEDULER_ENABLED ?? "true").trim().toLowerCase() !== "false";
+const schedulerEnabled = (env = process.env) => isSwitchOn("EXCEPTIONS_SCHEDULER_ENABLED", env);
 
 const nightlyHour = (env = process.env) => {
   const hour = Number.parseInt(env.EXCEPTIONS_NIGHTLY_HOUR_UTC ?? "", 10);
@@ -86,7 +87,7 @@ function startExceptionScheduler({ env = process.env } = {}) {
     return null;
   }
   if (!schedulerEnabled(env)) {
-    console.log("[exception-scheduler] disabled by EXCEPTIONS_SCHEDULER_ENABLED=false");
+    console.log(offMessage("exception-scheduler", "EXCEPTIONS_SCHEDULER_ENABLED"));
     return null;
   }
   timer = setInterval(() => checkNightly().catch((error) => console.error("[exception-scheduler]", error)), CHECK_INTERVAL_MS);

@@ -1,4 +1,5 @@
 const { prisma } = require('../config/db');
+const { isSwitchOn, offMessage } = require('../config/switches');
 const { sendEmail, templates } = require('../services/email.service');
 const { findBillingRecipient } = require('../services/membership.service');
 
@@ -99,8 +100,8 @@ let timer = null;
 
 function startBillingScheduler() {
   if (timer) return timer;
-  if (String(process.env.BILLING_SCHEDULER_ENABLED ?? 'true').toLowerCase() === 'false') {
-    console.log('[billing-scheduler] disabled by BILLING_SCHEDULER_ENABLED=false');
+  if (!isSwitchOn('BILLING_SCHEDULER_ENABLED')) {
+    console.log(offMessage('billing-scheduler', 'BILLING_SCHEDULER_ENABLED'));
     return null;
   }
   runBillingChecks().catch((e) => console.error('[billing-scheduler]', e));

@@ -1,4 +1,5 @@
 const { prisma } = require("../config/db");
+const { isSwitchOn } = require("../config/switches");
 const { HttpError } = require("../utils/http-error");
 
 /**
@@ -74,7 +75,8 @@ const resetConfiguration = () => {
 
 const getPublicKey = () => (isConfigured() ? vapid().publicKey : null);
 
-const expoEnabled = () => String(process.env.EXPO_PUSH_ENABLED || "true").trim().toLowerCase() !== "false";
+// Off unless EXPO_PUSH_ENABLED is exactly "true" (C0-2): nothing is sent to the Expo push service otherwise.
+const expoEnabled = () => isSwitchOn("EXPO_PUSH_ENABLED");
 const isExpoRow = (row) => EXPO_TOKEN_PATTERN.test(String(row?.endpoint || ""));
 
 const serializeSubscription = (row) => ({

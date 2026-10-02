@@ -5,9 +5,11 @@ require('dotenv').config();
  *
  *   npm run worker --workspace=backend
  *
- * Runs the durable job worker (unless JOB_WORKER_ENABLED=false) and competes
- * for scheduler leadership (unless SCHEDULERS_ENABLED=false). In production
- * the API tasks turn both off and this service does the background work.
+ * Runs the durable job worker (when JOB_WORKER_ENABLED=true) and competes
+ * for scheduler leadership (when SCHEDULERS_ENABLED=true). Both are off
+ * unless set to exactly "true", as is each scheduler (config/switches.js):
+ * the worker service's configuration names what it is to do. In production
+ * the API tasks leave both off and this service does the background work.
  * Several worker processes can run at once: job claims use SKIP LOCKED, and
  * only the leader runs the schedulers.
  */
@@ -57,6 +59,8 @@ const exitWith = (code, message) => {
   process.exit(code);
 };
 
+console.log(`[switches] ${require('./config/switches').describeSwitches()}`);
+
 const worker = startJobWorker({
   concurrency: Number.parseInt(process.env.JOB_WORKER_CONCURRENCY || '4', 10),
   strictStart: true,
@@ -64,7 +68,7 @@ const worker = startJobWorker({
 const leadership = startSchedulerLeadership();
 
 if (!worker && !leadership) {
-  exitWith(1, '[worker] JOB_WORKER_ENABLED=false and SCHEDULERS_ENABLED=false; nothing to run');
+  exitWith(1, '[worker] neither JOB_WORKER_ENABLED nor SCHEDULERS_ENABLED is true; nothing to run');
 }
 
 worker?.ready.catch((error) => {

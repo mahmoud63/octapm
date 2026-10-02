@@ -1,4 +1,5 @@
 const notificationService = require("../services/notification.service");
+const { isSwitchOn, offMessage } = require("../config/switches");
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -37,8 +38,8 @@ let timers = null;
 
 function startNotificationScheduler() {
   if (timers) return timers;
-  if (String(process.env.NOTIFICATION_SCHEDULER_ENABLED ?? "true").toLowerCase() === "false") {
-    console.log("[notification-scheduler] disabled by NOTIFICATION_SCHEDULER_ENABLED=false");
+  if (!isSwitchOn("NOTIFICATION_SCHEDULER_ENABLED")) {
+    console.log(offMessage("notification-scheduler", "NOTIFICATION_SCHEDULER_ENABLED"));
     return null;
   }
   runNotificationChecks().catch((error) =>

@@ -79,6 +79,16 @@ const quantityRow = (overrides = {}) => ({ id: "qty-1", dailyLogId: "log-1", par
 const staff = { id: "staff-1", projectAccess: { assignmentRole: "site_engineer" } };
 const partyUser = { id: "sub-user", projectAccess: { partyScoped: true, partyAccess: [{ projectPartyId: "party-1", companyId: "co-2", role: "subcontractor" }] } };
 
+// The weather feed is off unless WEATHER_FEED_ENABLED is exactly "true" (C0-2); these tests are about a process that has it on.
+const savedWeatherSwitch = process.env.WEATHER_FEED_ENABLED;
+beforeAll(() => {
+  process.env.WEATHER_FEED_ENABLED = "true";
+});
+afterAll(() => {
+  if (savedWeatherSwitch === undefined) delete process.env.WEATHER_FEED_ENABLED;
+  else process.env.WEATHER_FEED_ENABLED = savedWeatherSwitch;
+});
+
 describe("daily log", () => {
   beforeEach(() => {
     jest.clearAllMocks();

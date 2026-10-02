@@ -37,8 +37,17 @@ Also fixed because they break several tasks: login lockout in memory (now the `A
 | | API tasks | Worker task |
 |---|---|---|
 | Command | `node src/index.js` | `node src/worker.js` |
-| `SCHEDULERS_ENABLED` | `false` | `true` (default) |
-| `JOB_WORKER_ENABLED` | `false` | `true` |
+| `SCHEDULERS_ENABLED` | unset or `false` | `true` |
+| `JOB_WORKER_ENABLED` | unset or `false` | `true` |
+| `BILLING_SCHEDULER_ENABLED`, `NOTIFICATION_SCHEDULER_ENABLED`, `DAILY_LOG_SCHEDULER_ENABLED`, `REPORT_SCHEDULER_ENABLED`, `WORKFLOW_SCHEDULER_ENABLED`, `ACCOUNTING_SCHEDULER_ENABLED` | unset | `true` for each one the worker is to run |
+| `EXPO_PUSH_ENABLED` | `true` if native push is in use | `true` if native push is in use |
+| `WEATHER_FEED_ENABLED` | `true` if the weather feed is in use | `true` if the weather feed is in use |
+| `EXCEPTIONS_ENGINE_ENABLED`, `EXCEPTIONS_SCHEDULER_ENABLED` | unset (off) until the owner approves the engine for durable organisations | unset (off) |
+
+**Nothing has an "on" default** (certification finding C0-2, `backend/src/config/switches.js`): every
+switch above is off unless it is exactly `true`. A task definition that leaves a line out runs without
+that writer — the worker exits at once if neither the job worker nor scheduler leadership is on, and each
+process prints `[switches] on: … | off: …` at start so the omission is visible in its first log lines.
 | `DATABASE_CONNECTION_LIMIT` | 10 | 6 |
 | `SHUTDOWN_TIMEOUT_MS` | 25000 (ECS stopTimeout 30) | 110000 (stopTimeout 120) |
 | Health check | ALB → `/api/health` | none |

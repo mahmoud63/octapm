@@ -1,9 +1,10 @@
+const { isSwitchOn, offMessage } = require("../config/switches");
 const logger = console;
 
 /**
  * Hourly poll of accounting systems for bill payment status
  * (OCTA-INT-API-026). One `accounting.poll` job per organisation with a
- * connected provider. Disable with ACCOUNTING_SCHEDULER_ENABLED=false.
+ * connected provider. Runs only with ACCOUNTING_SCHEDULER_ENABLED=true (default off).
  */
 const INTERVAL_MS = Number(process.env.ACCOUNTING_POLL_INTERVAL_MS || 60 * 60_000);
 
@@ -22,7 +23,11 @@ const runPollTick = async () => {
 };
 
 const startAccountingScheduler = () => {
-  if (timer || process.env.ACCOUNTING_SCHEDULER_ENABLED === "false" || process.env.NODE_ENV === "test") return null;
+  if (timer || process.env.NODE_ENV === "test") return null;
+  if (!isSwitchOn("ACCOUNTING_SCHEDULER_ENABLED")) {
+    logger.log(offMessage("accounting-scheduler", "ACCOUNTING_SCHEDULER_ENABLED"));
+    return null;
+  }
   timer = setInterval(runPollTick, INTERVAL_MS);
   timer.unref?.();
   // The first poll waits 90 s; its handle is kept so a stop before then cancels it too.

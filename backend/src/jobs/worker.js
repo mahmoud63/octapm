@@ -1,4 +1,5 @@
 const os = require("os");
+const { isSwitchOn, offMessage } = require("../config/switches");
 const jobService = require("./job.service");
 const { isTransientError } = require("./errors");
 
@@ -7,8 +8,9 @@ const { isTransientError } = require("./errors");
  *
  * Polls the BackgroundJob table, claims runnable jobs with SKIP LOCKED, runs
  * the registered handler with a heartbeat, and records success or failure.
- * Runs in-process with the API by default (JOB_WORKER_ENABLED != "false") and
- * can also run as a dedicated process via `node src/worker.js`.
+ * Runs in-process with the API, or as a dedicated process via
+ * `node src/worker.js` — in either, only when JOB_WORKER_ENABLED is exactly
+ * "true" (default off, C0-2).
  */
 
 const handlers = new Map();
@@ -338,8 +340,8 @@ const createJobWorker = ({
 let defaultWorker = null;
 
 const startJobWorker = ({ strictStart = false, ...options } = {}) => {
-  if (String(process.env.JOB_WORKER_ENABLED || "true").toLowerCase() === "false") {
-    console.log("[job-worker] disabled by JOB_WORKER_ENABLED=false");
+  if (!isSwitchOn("JOB_WORKER_ENABLED")) {
+    console.log(offMessage("job-worker", "JOB_WORKER_ENABLED"));
     return null;
   }
   if (defaultWorker) return defaultWorker;

@@ -79,14 +79,18 @@ describe("checkNightly", () => {
     }
   });
 
-  it("has its own switch, EXCEPTIONS_SCHEDULER_ENABLED (default true, as its siblings): false starts no tick though the engine is on", () => {
+  it("has its own switch, EXCEPTIONS_SCHEDULER_ENABLED (default off, as its siblings since C0-2): the tick starts only when the engine AND this switch are true", () => {
     const log = jest.spyOn(console, "log").mockImplementation(() => {});
     try {
-      expect([scheduler.schedulerEnabled({}), scheduler.schedulerEnabled({ EXCEPTIONS_SCHEDULER_ENABLED: "true" }), scheduler.schedulerEnabled({ EXCEPTIONS_SCHEDULER_ENABLED: " FALSE " })]).toEqual([true, true, false]);
-      expect(scheduler.startExceptionScheduler({ env: { EXCEPTIONS_ENGINE_ENABLED: "true", EXCEPTIONS_SCHEDULER_ENABLED: "false" } })).toBeNull();
-      expect(log).toHaveBeenCalledWith("[exception-scheduler] disabled by EXCEPTIONS_SCHEDULER_ENABLED=false");
-      // The engine switched on and the tick's own switch left at its default: the timer starts — and is stopped again.
-      const timer = scheduler.startExceptionScheduler({ env: { EXCEPTIONS_ENGINE_ENABLED: "true" } });
+      expect([scheduler.schedulerEnabled({}), scheduler.schedulerEnabled({ EXCEPTIONS_SCHEDULER_ENABLED: "true" }), scheduler.schedulerEnabled({ EXCEPTIONS_SCHEDULER_ENABLED: " FALSE " }), scheduler.schedulerEnabled({ EXCEPTIONS_SCHEDULER_ENABLED: "yes" })]).toEqual([false, true, false, false]);
+      // The engine on, the tick's own switch false, missing, empty or unrecognised: no tick.
+      for (const own of [{ EXCEPTIONS_SCHEDULER_ENABLED: "false" }, {}, { EXCEPTIONS_SCHEDULER_ENABLED: "" }, { EXCEPTIONS_SCHEDULER_ENABLED: "1" }]) {
+        log.mockClear();
+        expect(scheduler.startExceptionScheduler({ env: { EXCEPTIONS_ENGINE_ENABLED: "true", ...own } })).toBeNull();
+        expect(log).toHaveBeenCalledWith("[exception-scheduler] disabled: EXCEPTIONS_SCHEDULER_ENABLED is not true");
+      }
+      // Both switched on: the timer starts — and is stopped again.
+      const timer = scheduler.startExceptionScheduler({ env: { EXCEPTIONS_ENGINE_ENABLED: "true", EXCEPTIONS_SCHEDULER_ENABLED: "true" } });
       expect(timer).not.toBeNull();
       scheduler.stopExceptionScheduler();
     } finally {

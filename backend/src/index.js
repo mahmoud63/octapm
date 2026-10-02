@@ -10,6 +10,7 @@ const { registerAutoSubscriptions } = require('./services/comment.service');
 const { registerWebhookSubscriber } = require('./services/webhook.service');
 const { registerExceptionTriggers } = require('./events/exception-triggers');
 const { startJobWorker, stopJobWorker } = require('./jobs/worker');
+const { describeSwitches } = require('./config/switches');
 const { installGracefulShutdown, waitForEventBus } = require('./utils/graceful-shutdown');
 const { registerExceptionNotifier } = require('./services/exception.service');
 
@@ -55,13 +56,15 @@ httpServer.listen(PORT, () => {
 
 // Billing, notifications, daily logs, reports, workflow SLAs and accounting
 // polls — run by whichever process holds scheduler leadership. Production
-// API tasks set SCHEDULERS_ENABLED=false and leave them to the worker.
+// API tasks leave SCHEDULERS_ENABLED unset (off) and leave them to the worker.
 startSchedulerLeadership();
 // PC-7b: an exception evaluation (a job run here) that opens a critical
 // exception tells the project's PM and QS, once; only with
 // EXCEPTIONS_ENGINE_ENABLED=true (exception.service registerExceptionNotifier).
 registerExceptionNotifier();
-// Durable job worker (BOQ AI, schedule generation). Set JOB_WORKER_ENABLED=false
+// What this process will and will not do on its own, in its first log lines (C0-2).
+console.log(`[switches] ${describeSwitches()}`);
+// Durable job worker (BOQ AI, schedule generation); runs only with JOB_WORKER_ENABLED=true. Leave it unset
 // on API instances when running dedicated workers via `npm run worker`.
 startJobWorker();
 

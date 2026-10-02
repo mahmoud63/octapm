@@ -9,9 +9,10 @@ Task: `OCTA-PLAT-JOBS-001` (Sprint 1, P0 foundations).
   table (`backend/src/jobs/job.service.js`) claimed by a worker
   (`backend/src/jobs/worker.js`) with `FOR UPDATE SKIP LOCKED`, so any number of
   API/worker instances share one queue without double-processing.
-- The worker runs inside the API process by default. Set
-  `JOB_WORKER_ENABLED=false` on API instances and run `npm run worker
-  --workspace=backend` to move AI work to dedicated processes.
+- The worker runs only where `JOB_WORKER_ENABLED=true` (it is off unless set to
+  exactly `true`): inside the API process for a single-process setup, or leave
+  it unset on API instances and run `npm run worker --workspace=backend` with
+  it set to move AI work to dedicated processes.
 - Jobs heartbeat every `JOB_HEARTBEAT_MS` (15 s). A job whose worker dies is
   detected after `JOB_STALE_MS` (5 min) and re-queued (or failed once
   `maxAttempts` is spent). Retryable failures back off 30 s, 60 s, 120 s … up to
@@ -43,7 +44,7 @@ Task: `OCTA-PLAT-JOBS-001` (Sprint 1, P0 foundations).
 
 ```
 REDIS_URL=redis://localhost:6379        # optional; enables shared rate-limit counters
-JOB_WORKER_ENABLED=true                 # false to run workers as separate processes
+JOB_WORKER_ENABLED=true                 # off unless exactly "true"; leave unset on API instances that have dedicated workers
 JOB_WORKER_CONCURRENCY=2
 JOB_POLL_INTERVAL_MS=2000
 JOB_HEARTBEAT_MS=15000

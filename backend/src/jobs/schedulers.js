@@ -1,9 +1,10 @@
 const { createSchedulerLeader, leaderOptionsFromEnv } = require("./scheduler-leader");
+const { isSwitchOn } = require("../config/switches");
 
 /**
  * The periodic schedulers, run by exactly one process at a time.
  *
- * Any process with SCHEDULERS_ENABLED (default true) competes for scheduler
+ * Any process with SCHEDULERS_ENABLED=true (default off) competes for scheduler
  * leadership; only the leader runs them. Locally the one API process wins at
  * once and behaves as before. In production the API tasks set
  * SCHEDULERS_ENABLED=false and the worker service leads; the lock is the
@@ -84,14 +85,14 @@ const stopSchedulers = () => {
 
 let leader = null;
 
-const schedulersEnabled = (env = process.env) =>
-  String(env.SCHEDULERS_ENABLED ?? "true").toLowerCase() !== "false" && env.NODE_ENV !== "test";
+// Off unless SCHEDULERS_ENABLED is exactly "true" (C0-2); never under test.
+const schedulersEnabled = (env = process.env) => isSwitchOn("SCHEDULERS_ENABLED", env) && env.NODE_ENV !== "test";
 
 /** Starts competing for leadership; returns null when this process may not schedule. */
 const startSchedulerLeadership = ({ env = process.env, logger = console } = {}) => {
   if (leader) return leader;
   if (!schedulersEnabled(env)) {
-    logger.log("[schedulers] disabled in this process (SCHEDULERS_ENABLED=false)");
+    logger.log("[schedulers] disabled in this process: SCHEDULERS_ENABLED is not true");
     return null;
   }
   leader = createSchedulerLeader({

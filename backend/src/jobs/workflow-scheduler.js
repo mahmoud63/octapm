@@ -1,3 +1,4 @@
+const { isSwitchOn, offMessage } = require("../config/switches");
 /**
  * Workflow SLA scan (OCTA-PLAT-WF-024): every hour, steps past their due
  * date notify the assignee again and escalate to the step's roles.
@@ -13,8 +14,8 @@ let timer = null;
 
 function startWorkflowScheduler() {
   if (timer) return timer;
-  if (String(process.env.WORKFLOW_SCHEDULER_ENABLED ?? "true").toLowerCase() === "false") {
-    console.log("[workflow-scheduler] disabled by WORKFLOW_SCHEDULER_ENABLED=false");
+  if (!isSwitchOn("WORKFLOW_SCHEDULER_ENABLED")) {
+    console.log(offMessage("workflow-scheduler", "WORKFLOW_SCHEDULER_ENABLED"));
     return null;
   }
   const safe = () => runEscalationTick().catch((error) => console.error("[workflow-scheduler] escalation", error));

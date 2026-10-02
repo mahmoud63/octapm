@@ -1,4 +1,5 @@
 const { HttpError } = require("../utils/http-error");
+const { isSwitchOn } = require("../config/switches");
 
 /**
  * Daily weather by coordinates (OCTA-FLD-DAILY-022).
@@ -52,7 +53,8 @@ const DEFAULT_THRESHOLDS = Object.freeze({
   windKph: 50,
 });
 
-const isEnabled = () => String(process.env.WEATHER_FEED_ENABLED ?? "true").toLowerCase() !== "false";
+// Off unless WEATHER_FEED_ENABLED is exactly "true" (C0-2): no call to the weather provider otherwise.
+const isEnabled = () => isSwitchOn("WEATHER_FEED_ENABLED");
 
 const conditionFor = (code) => (code === null || code === undefined ? null : CONDITIONS[Number(code)] || `Code ${code}`);
 
