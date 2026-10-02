@@ -51,7 +51,7 @@ const subjectOfToken = (req, _res, next) => {
   // An identity token names no workspace; an access token names the one the
   // session is bound to, which is what "is this link's project in the active
   // workspace" is answered against.
-  req.tokenSubject = { userId: payload.sub, type: payload.type, orgId: payload.orgId || null };
+  req.tokenSubject = { userId: payload.sub, type: payload.type, orgId: payload.orgId || null, ssoOrgId: payload.sso || null };
   return next();
 };
 
@@ -99,7 +99,7 @@ const register = (router, { sendSession, getRequestContext }) => {
     subjectOfToken,
     asyncHandler(async (req, res) => {
       const result = await authService.issueWorkspaceSession(
-        { userId: req.tokenSubject.userId, orgId: req.params.orgId },
+        { userId: req.tokenSubject.userId, orgId: req.params.orgId, ssoOrgId: req.tokenSubject.ssoOrgId },
         getRequestContext(req),
       );
       return sendSession(req, res, result);

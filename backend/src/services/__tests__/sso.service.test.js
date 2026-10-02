@@ -193,6 +193,30 @@ describe("single sign-on", () => {
     expect(store.audit.at(-1)).toMatchObject({ action: "sso.login_failed" });
   });
 
+  // Certification finding L10: a company's SSO may sign in only people who belong to it.
+  it("refuses an identity that lives in another company and has no membership here, and leaves it untouched", async () => {
+    await configure();
+    store.orgs.push({ id: "org-2", name: "Other Co", status: "active", ssoEnabled: false, ssoDomainsJson: [] });
+    store.users.push({ id: "u-2", orgId: "org-2", name: "Visitor", email: "visitor@constech.test", passwordHash: "x", role: "qs", isCompanyAdmin: false, status: "active", ssoSubject: null });
+    const started = await ssoService.start({ email: "visitor@constech.test", fetchImpl });
+    idTokenClaims = { iss: ISSUER, aud: CLIENT_ID, sub: "idp-visitor", email: "visitor@constech.test", email_verified: true, nonce: nonceOf(started.authorizationUrl) };
+    const refused = await ssoService.callback({ code: "good-code", state: stateOf(started.authorizationUrl) }, {}, { fetchImpl });
+    expect(refused.error).toBe("SSO_USER_NOT_FOUND");
+    expect(store.tickets).toHaveLength(0);
+    expect(store.users.find((user) => user.id === "u-2")).toMatchObject({ orgId: "org-2", ssoSubject: null });
+  });
+
+  it("binds the session it issues to this company: the token says so, and a switch to another workspace is refused", async () => {
+    await configure();
+    const started = await ssoService.start({ email: "pat@constech.test", fetchImpl });
+    idTokenClaims = { iss: ISSUER, aud: CLIENT_ID, sub: "idp-pat", email: "pat@constech.test", nonce: nonceOf(started.authorizationUrl) };
+    const result = await ssoService.callback({ code: "good-code", state: stateOf(started.authorizationUrl) }, {}, { fetchImpl });
+    const session = await ssoService.complete({ ticket: new URL(result.redirectUrl).searchParams.get("ticket") });
+    expect(jwt.decode(session.tokens.accessToken)).toMatchObject({ sso: "org-1", orgId: "org-1" });
+    const authService = require("../auth.service");
+    await expect(authService.issueWorkspaceSession({ userId: "u-1", orgId: "org-2", ssoOrgId: "org-1" })).rejects.toMatchObject({ status: 403, code: "SSO_SESSION_BOUND" });
+  });
+
   it("scopes a subject match to this organisation's IdP: another organisation's equal subject is no conflict, this one's is", async () => {
     await configure();
     // Another organisation's IdP linked the same subject string to another

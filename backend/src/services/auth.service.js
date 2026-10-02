@@ -200,8 +200,9 @@ const createRefreshSession = async (tx, principal, context = {}) => {
  * A session for a user row, bound to their membership in `orgId` (their own
  * organisation unless the caller names another workspace they belong to).
  */
-const createAuthSessionPayload = async (tx, user, context = {}, { orgId = null } = {}) => {
-  const principal = await membershipService.resolveSessionPrincipal(tx, user, { orgId });
+const createAuthSessionPayload = async (tx, user, context = {}, { orgId = null, ssoOrgId = null } = {}) => {
+  const resolved = await membershipService.resolveSessionPrincipal(tx, user, { orgId });
+  const principal = ssoOrgId ? { ...resolved, ssoOrgId } : resolved;
   const refreshSession = await createRefreshSession(tx, principal, context);
   return buildAuthPayload(user, principal, refreshSession);
 };
@@ -597,7 +598,12 @@ const issueLoginOutcome = async ({ user, entry, org, context }) =>
  * that membership on the caller's channel. Nothing is revoked: the other
  * workspace's session family stays valid so the person can switch back.
  */
-const issueWorkspaceSession = async ({ userId, orgId }, context = {}) => {
+const issueWorkspaceSession = async ({ userId, orgId, ssoOrgId = null }, context = {}) => {
+  // A session from a company's single sign-on opens that company only (certification
+  // finding L10): that company's identity provider vouches for nobody elsewhere.
+  if (ssoOrgId && ssoOrgId !== orgId) {
+    throw new HttpError(403, "SSO_SESSION_BOUND", "This session came from your company's single sign-on and opens that company only. Sign in with your own password to open another workspace.");
+  }
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user || user.status !== "active") {
     throw new HttpError(401, "USER_INACTIVE", "Your account is not active");
@@ -622,7 +628,7 @@ const issueWorkspaceSession = async ({ userId, orgId }, context = {}) => {
 
   const memberships = await membershipService.listWorkspacesForUser(userId);
   return prisma.$transaction(async (tx) => {
-    const payload = await createAuthSessionPayload(tx, user, context, { orgId });
+    const payload = await createAuthSessionPayload(tx, user, context, { orgId, ssoOrgId });
     payload.user.mfaEnrollmentRequired = Boolean(org.mfaRequired && !user.mfaEnabled);
     const workspace = membership
       ? membershipService.workspaceEntry({ ...membership, org })
@@ -747,7 +753,9 @@ const refresh = async ({
     if (standing.inactive) {
       return refuse(session, "session", createInvalidRefreshTokenError());
     }
-    const principal = standing.principal || membershipService.principalFromUser(session.user);
+    const standingPrincipal = standing.principal || membershipService.principalFromUser(session.user);
+    // An SSO session stays bound to its company through every refresh (L10).
+    const principal = payload.sso ? { ...standingPrincipal, ssoOrgId: payload.sso } : standingPrincipal;
 
     // The read above is not a claim: two refreshes with the same token (a
     // retry, two tabs, two API tasks) both see revokedAt still empty. The

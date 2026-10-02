@@ -80,6 +80,10 @@ const createAccessToken = (user) => {
       // minted with is not dropped from under them.
       isCompanyAdmin: Boolean(user.isCompanyAdmin),
       ...membershipClaims(user),
+      // A session that came from a company's single sign-on is bound to that
+      // company (certification finding L10): it cannot be exchanged for a
+      // session in another workspace the person belongs to.
+      ...(user.ssoOrgId ? { sso: user.ssoOrgId } : {}),
       type: 'access',
     },
     getEnv('JWT_SECRET'),
@@ -104,6 +108,8 @@ const createRefreshToken = (user, sessionId, client = 'web') => {
       // The membership the session was issued for; refresh binds the stored
       // session to it and re-mints from the membership row (M4).
       ...(user.membershipId ? { mid: user.membershipId } : {}),
+      // Carried through every refresh: an SSO session stays bound to its company (L10).
+      ...(user.ssoOrgId ? { sso: user.ssoOrgId } : {}),
       type: 'refresh',
       // The delivery channel this token was issued on: 'web' (httpOnly cookie)
       // or 'mobile' (response body, kept in the device keychain). A token that
