@@ -99,7 +99,8 @@ async function assertCertEnvironment(query, { env = process.env, destructive = f
     refuse('database-name', `connected to "${where && where.database}", not "${DATABASE_NAME}".`);
   }
 
-  const [table] = await query("select to_regclass($1) as found", [MARKER_TABLE]);
+  // Cast to text: Prisma's raw query cannot read a regclass column.
+  const [table] = await query("select to_regclass($1)::text as found", [MARKER_TABLE]);
   if (!table || !table.found) {
     refuse('marker-missing', `${MARKER_TABLE} does not exist: this is not the certification environment.`);
   }

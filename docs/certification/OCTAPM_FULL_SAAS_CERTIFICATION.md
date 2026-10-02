@@ -37,8 +37,8 @@ are fixed; smaller findings are recorded for later.
 
 | | Checkpoint | Status |
 |---|---|---|
-| CERT-0 | Baseline verified | In progress |
-| CERT-1 | Hundred-company data generated | Not started |
+| CERT-0 | Baseline verified | Complete (2026-10-02) |
+| CERT-1 | Hundred-company data generated | In progress |
 | CERT-2 | Tenant isolation complete | Not started |
 | CERT-3 | Construction workflows complete | Not started |
 | CERT-4 | Billing complete | Not started |
@@ -151,6 +151,33 @@ skipped itself, as it does when it finds no film to play.
 
 Recorded in the [issue register](OCTAPM_LAUNCH_BLOCKERS.md).
 
-- **C0-1** — the exception engine's default is on: a deployment that does not
-  set `EXCEPTIONS_ENGINE_ENABLED` evaluates every organisation. The brief
-  requires the opposite default.
+- **C0-1 (P1, fixed in `ef5e919`)** — the exception engine's default was on: a
+  deployment that did not set `EXCEPTIONS_ENGINE_ENABLED` evaluated every
+  organisation. It is now off unless the variable is exactly `true`.
+- **C0-2 (P1, open)** — the same "on unless set to false" default applies to
+  scheduler leadership, six schedulers, the job worker, the weather feed and
+  Expo push. Assessed with the job tests at CERT-6.
+- **C0-3 (P1, open, needs the owner)** — a Stripe test secret key and a
+  placeholder webhook secret are literals in the tracked deploy workflow.
+
+### The guard, proven against real databases
+
+`backend/scripts/cert/prove-guard.js` ran 28 cases and all 28 behaved as
+expected: no address, an empty address, only `DATABASE_URL` set (no fallback),
+the shared development database's address, a live read-only connection to the
+shared database (refused, plain and destructive), a wrong marker id, the marker
+removed, dropped, doubled or of another kind, a company with a durable name, a
+company with only half the naming rule, a company named for the E2E suite, a
+person with a durable address — each refused with the rule that applies — and
+the certification database itself accepted. Each "wrong" state was made inside
+a transaction that was rolled back; the proof checks that nothing was left.
+
+### Leads from reading the code
+
+Before testing, eleven read-only passes mapped the areas the certification
+depends on (tenancy and sign-in, billing, jobs and realtime, files, every
+route, the test infrastructure, finance, the lifecycle, CI and deployment).
+They returned 214 suspected defects: 10 guessed P0, 36 guessed P1, 105 P2,
+63 P3. None was executed. They are in
+[OCTAPM_CERT_LEADS.md](OCTAPM_CERT_LEADS.md); each is confirmed or dismissed
+by a test at its checkpoint.

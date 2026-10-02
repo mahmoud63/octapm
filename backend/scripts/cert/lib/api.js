@@ -1,0 +1,204 @@
+'use strict';
+
+/**
+ * The HTTP client every certification driver and attack uses.
+ *
+ * It talks to the certification API only: the base address comes from
+ * CERT_API_BASE (default http://localhost:5190) and is refused unless it is a
+ * local address on a port other than the shared development API's.
+ *
+ * Two ways to ask:
+ *   call(...)   returns the unwrapped `data`, throws ApiError on a refusal —
+ *               for drivers, where a refusal is a failure of the run;
+ *   send(...)   returns { status, body, headers, text } and never throws on a
+ *               status — for attacks, where the status is the answer.
+ *
+ * A session is a person acting in one company: `as(email, orgId?)`. A person
+ * with one company signs in straight to it; a person with several chooses
+ * with the identity token, as the product's own clients do.
+ */
+
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '..', '..', '.env') });
+
+const BASE = (process.env.CERT_API_BASE || 'http://localhost:5190').replace(/\/$/, '');
+const parsedBase = new URL(BASE);
+if (!['localhost', '127.0.0.1', '[::1]'].includes(parsedBase.hostname)) {
+  throw new Error(`CERT_API_BASE ${BASE} is not a local address: certification drivers never call a remote API.`);
+}
+if (parsedBase.port === '5000') {
+  throw new Error('CERT_API_BASE names port 5000, the shared development API: certification drivers never call it.');
+}
+const API = `${BASE}/api/v1`;
+
+/** Access tokens live 15 minutes; mint again well before. */
+const TOKEN_TTL_MS = 8 * 60_000;
+
+const password = () => {
+  const value = process.env.CERT_PASSWORD;
+  if (!value) throw new Error('CERT_PASSWORD is not set.');
+  return value;
+};
+
+const describeDetails = (details) => {
+  if (!details) return '';
+  const list = Array.isArray(details) ? details : details.errors || details.fields;
+  if (Array.isArray(list)) {
+    return ` :: ${list.map((d) => `${d.path ?? d.param ?? d.field ?? '?'}=${JSON.stringify(d.value)} (${d.msg ?? d.message ?? 'invalid'})`).join('; ')}`;
+  }
+  return ` :: ${JSON.stringify(details).slice(0, 400)}`;
+};
+
+class ApiError extends Error {
+  constructor(method, route, status, body) {
+    const code = body?.error?.code ?? '(no code)';
+    const message = body?.error?.message ?? '(no message)';
+    super(`${method} ${route} -> ${status} ${code}: ${message}${describeDetails(body?.error?.details)}`);
+    this.name = 'ApiError';
+    this.method = method;
+    this.route = route;
+    this.status = status;
+    this.code = code;
+    this.serverMessage = message;
+    this.details = body?.error?.details ?? null;
+    this.body = body;
+  }
+}
+
+const parse = (text) => {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
+/** One raw request. Never throws on a status. */
+const raw = async (method, route, { token = null, json, form, headers = {}, binary = false } = {}) => {
+  const url = route.startsWith('http') ? route : `${API}${route}`;
+  const init = { method, headers: { ...headers } };
+  if (token) init.headers.authorization = `Bearer ${token}`;
+  if (json !== undefined) {
+    init.headers['content-type'] = 'application/json';
+    init.body = typeof json === 'string' ? json : JSON.stringify(json);
+  } else if (form) {
+    init.body = form;
+  }
+  const res = await fetch(url, init);
+  if (binary && res.ok) {
+    const buffer = Buffer.from(await res.arrayBuffer());
+    return { status: res.status, headers: res.headers, buffer, body: null, text: null };
+  }
+  const text = await res.text();
+  return { status: res.status, headers: res.headers, text, body: parse(text) };
+};
+
+// ── sessions ───────────────────────────────────────────────────────────────
+
+const sessions = new Map();
+
+/** Signs a person in to one company. Returns { token, orgId, user, memberships }. */
+const signIn = async (email, orgId = null, { client = null } = {}) => {
+  const headers = client ? { 'x-octapm-client': client } : {};
+  const res = await raw('POST', '/auth/login', { json: { email, password: password() }, headers });
+  if (res.status !== 200) throw new ApiError('POST', '/auth/login', res.status, res.body);
+  const data = res.body?.data || {};
+  if (data.tokens?.accessToken) {
+    const boundOrg = data.user?.orgId || null;
+    if (orgId && boundOrg && boundOrg !== orgId) throw new Error(`${email} was signed in to ${boundOrg}, not ${orgId}`);
+    return { token: data.tokens.accessToken, refreshToken: data.tokens.refreshToken || null, orgId: boundOrg, user: data.user, memberships: null };
+  }
+  if (data.chooseWorkspace && data.identityToken) {
+    const target = orgId || data.memberships?.[0]?.orgId;
+    if (!target) throw new Error(`${email} must choose a company and none was named`);
+    const chosen = await raw('POST', `/auth/workspaces/${target}/session`, { token: data.identityToken, headers });
+    if (chosen.status !== 200) throw new ApiError('POST', `/auth/workspaces/${target}/session`, chosen.status, chosen.body);
+    const session = chosen.body?.data || {};
+    return {
+      token: session.tokens?.accessToken,
+      refreshToken: session.tokens?.refreshToken || null,
+      orgId: target,
+      user: session.user,
+      identityToken: data.identityToken,
+      memberships: data.memberships,
+    };
+  }
+  throw new Error(`${email}: sign-in answered 200 with neither a session nor a choice of company: ${JSON.stringify(Object.keys(data))}`);
+};
+
+/** A cached access token for a person in a company. */
+const tokenFor = async (email, orgId = null) => {
+  const key = `${email}|${orgId || ''}`;
+  const cached = sessions.get(key);
+  if (cached && Date.now() - cached.minted < TOKEN_TTL_MS) return cached.token;
+  const session = await signIn(email, orgId);
+  if (!session.token) throw new Error(`${email}: no access token after sign-in`);
+  sessions.set(key, { token: session.token, minted: Date.now(), session });
+  return session.token;
+};
+
+const forget = (email = null) => {
+  if (!email) return sessions.clear();
+  for (const key of [...sessions.keys()]) if (key.startsWith(`${email}|`)) sessions.delete(key);
+  return undefined;
+};
+
+// ── asking ─────────────────────────────────────────────────────────────────
+
+const multipart = ({ field = 'file', filename, contentType = 'application/octet-stream', body, fields = {} }) => {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) form.append(key, typeof value === 'string' ? value : JSON.stringify(value));
+  if (body !== undefined) form.append(field, new Blob([body], { type: contentType }), filename);
+  return form;
+};
+
+/** A person acting in a company. `who` is { email, orgId? } or an email. */
+const as = (who, orgIdArg = null) => {
+  const email = typeof who === 'string' ? who : who.email;
+  const orgId = typeof who === 'string' ? orgIdArg : who.orgId || orgIdArg;
+  const send = async (method, route, payload, options = {}) =>
+    raw(method, route, { token: options.token === undefined ? await tokenFor(email, orgId) : options.token, json: payload, ...options });
+  const call = async (method, route, payload, options = {}) => {
+    const res = await send(method, route, payload, options);
+    if (res.status < 200 || res.status >= 300) throw new ApiError(method, route, res.status, res.body);
+    if (res.body === undefined) throw new Error(`${method} ${route} -> ${res.status} but the body was not JSON: ${String(res.text).slice(0, 200)}`);
+    return res.body?.data;
+  };
+  return {
+    email,
+    orgId,
+    token: () => tokenFor(email, orgId),
+    send,
+    call,
+    GET: (route) => call('GET', route),
+    POST: (route, payload = {}) => call('POST', route, payload),
+    PATCH: (route, payload = {}) => call('PATCH', route, payload),
+    PUT: (route, payload = {}) => call('PUT', route, payload),
+    DELETE: (route) => call('DELETE', route),
+    upload: (method, route, file) => call(method, route, undefined, { form: multipart(file) }),
+    download: async (route) => {
+      const res = await raw('GET', route, { token: await tokenFor(email, orgId), binary: true });
+      if (res.status !== 200) throw new ApiError('GET', route, res.status, res.body);
+      return res.buffer;
+    },
+  };
+};
+
+/** Runs `worker` over `items`, `limit` at a time, keeping the order of results. */
+const pool = async (items, limit, worker) => {
+  const results = new Array(items.length);
+  let next = 0;
+  const run = async () => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  return results;
+};
+
+module.exports = { API, BASE, ApiError, TOKEN_TTL_MS, as, forget, multipart, pool, raw, signIn, tokenFor };
