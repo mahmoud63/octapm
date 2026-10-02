@@ -10,12 +10,34 @@
  * template with a per-user override, workflow templates and instances.
  *
  * Once per company (ids kept in ctx.companyRefs.collab): a company custom
- * field, a company workflow template, a company-wide saved report, company
- * conversations, a notification preference, one paused webhook and one API
- * key.
+ * field, fieldset and record type, a company workflow template, a
+ * company-wide saved report, company conversations, a notification
+ * preference, one paused webhook, one API key and one revoked API key.
  *
  * Every list of states below is ordered so that the low end of each count
  * already leaves the whole mix behind.
+ *
+ * Every record of this area is made strictly: a refusal fails the run. Only
+ * two things may be refused and become notes: the webhook (the server checks
+ * the address it would deliver to) and records of other drivers that may be
+ * absent or closed.
+ *
+ * What this driver changes that it did not create, and why that is safe:
+ * one non-persona staff member's permission template on this project (a
+ * persona, when there is no such staff member, gets a template that restates
+ * its own role), one person's notification preferences (e-mail off for
+ * comments), this project's task fieldset (the company fieldset, whose one
+ * field is optional), and read/archive marks on notifications about records
+ * made in this run only.
+ *
+ * External effects: none. Every address named ends .octapm-cert.test (the
+ * outside meeting attendee has no address at all; the client's minutes go to
+ * a certification address); the report schedule is created disabled and the stored run
+ * is not delivered; the webhook subscribes to one specific event type on this
+ * project only, points at a documentation address (RFC 5737, never routed)
+ * and is paused straight after it is made; the API key's secret is used for
+ * two requests and never stored or printed. No assistant (AI) endpoint is
+ * called.
  *
  * Re-runnable: names that the product keeps unique (permission templates,
  * custom-field keys) carry a run counter kept in ctx.refs.collab.runs;
@@ -26,6 +48,12 @@ const PERSONAS = ['pm', 'planner', 'qs', 'cost', 'procurement', 'warehouse', 'si
 
 /** Companies whose webhook was already asked for in this loader run. */
 const webhookTried = new Set();
+
+/** The only event a certification webhook may listen to (never "*", job.progress or background_job.*). */
+const WEBHOOK_EVENT = 'rfi.created';
+
+/** A documentation address (RFC 5737 TEST-NET-1): accepted as public by the product, routed nowhere. */
+const webhookUrl = (code) => `https://192.0.2.${(Number(code) % 250) + 1}/octapm-cert/c${code}/hook`;
 
 const listOf = (data) =>
   Array.isArray(data)
@@ -75,7 +103,6 @@ const run = async (ctx) => {
   const { P, rng, company } = ctx;
   const projectId = ctx.project.id;
   const pm = ctx.who('pm');
-  const planner = ctx.who('planner');
   const pmId = ctx.userId('pm');
 
   // ── what this run is, and what earlier runs left ─────────────────────────
@@ -84,6 +111,9 @@ const run = async (ctx) => {
   const tag = `R${state.runs}`;
   const co = (ctx.companyRefs.collab = ctx.companyRefs.collab || {});
   const keyBase = `cx_${ctx.project.key.replace(/[^0-9a-z]+/gi, '_')}_r${state.runs}`.toLowerCase();
+  // What was recorded before this run, so the run can tell its own records from earlier ones.
+  const recordedBefore = new Map(Object.entries(ctx.records).map(([type, ids]) => [type, ids.length]));
+  const madeThisRun = () => new Set(Object.entries(ctx.records).flatMap(([type, ids]) => ids.slice(recordedBefore.get(type) || 0)));
 
   const activities = Object.entries(ctx.refs.activities || {});
   if (!activities.length) throw new Error('collaboration-admin: the project has no activities');
@@ -124,215 +154,235 @@ const run = async (ctx) => {
 
   // A company custom field on tasks (optional, so no other driver's writes are refused).
   if (!co.customFieldId) {
-    await ctx.attempt('company custom field', async () => {
-      const existing = listOf(await pm.GET('/company/custom-fields?recordType=task&includeArchived=true')).find((row) => row.key === 'cert_company_reference');
-      const row =
-        existing ||
-        (await pm.POST('/company/custom-fields', {
-          recordType: 'task',
-          type: 'text',
-          key: 'cert_company_reference',
-          label: `Company reference ${company.canary}`,
-          description: `Company-wide field — ${company.canary}-CUSTOM_FIELD_DEFINITION`,
-          required: false,
-          position: 900,
-        }));
-      co.customFieldId = row.id;
-      co.customFieldKey = row.key;
-      ctx.record('custom_field_definition', row.id, { scope: 'company' });
-    });
+    const existing = listOf(await pm.GET('/company/custom-fields?recordType=task&includeArchived=true')).find((row) => row.key === 'cert_company_reference');
+    const row =
+      existing ||
+      (await pm.POST('/company/custom-fields', {
+        recordType: 'task',
+        type: 'text',
+        key: 'cert_company_reference',
+        label: `Company reference ${company.canary}`,
+        description: `Company-wide field — ${company.canary}-CUSTOM_FIELD_DEFINITION`,
+        required: false,
+        position: 900,
+      }));
+    co.customFieldId = row.id;
+    co.customFieldKey = row.key;
+    if (!existing) ctx.record('custom_field_definition', row.id, { scope: 'company' });
   }
 
   // A company workflow template: not the default and without rules, so it is never picked automatically.
   if (!co.workflowTemplateId) {
-    await ctx.attempt('company workflow template', async () => {
-      const name = `${company.canary} correspondence close-out (company)`;
-      const existing = listOf(await pm.GET('/company/workflow-templates?tool=correspondence&includeArchived=true')).find((row) => row.name === name);
-      const row =
-        existing ||
-        (await pm.POST('/company/workflow-templates', {
-          tool: 'correspondence',
-          name,
-          description: `Company route — ${company.canary}-WORKFLOW_TEMPLATE`,
-          isDefault: false,
-          priority: 0,
-          rules: [],
-          steps: [
-            {
-              key: 'pm_closeout',
-              name: 'PM close-out',
-              type: 'response',
-              assignees: [{ type: 'role', role: 'pm' }],
-              days: 7,
-              responses: [
-                { key: 'close', label: 'Close', next: 'end_success', tone: 'positive' },
-                { key: 'keep_open', label: 'Keep open', next: 'end_fail', tone: 'negative', requireComment: true },
-              ],
-            },
-          ],
-        }));
-      co.workflowTemplateId = row.id;
-      ctx.record('workflow_template', row.id, { scope: 'company' });
-    });
+    const name = `${company.canary} correspondence close-out (company)`;
+    const existing = listOf(await pm.GET('/company/workflow-templates?tool=correspondence&includeArchived=true')).find((row) => row.name === name);
+    const row =
+      existing ||
+      (await pm.POST('/company/workflow-templates', {
+        tool: 'correspondence',
+        name,
+        description: `Company route — ${company.canary}-WORKFLOW_TEMPLATE`,
+        isDefault: false,
+        priority: 0,
+        rules: [],
+        steps: [
+          {
+            key: 'pm_closeout',
+            name: 'PM close-out',
+            type: 'response',
+            assignees: [{ type: 'role', role: 'pm' }],
+            days: 7,
+            responses: [
+              { key: 'close', label: 'Close', next: 'end_success', tone: 'positive' },
+              { key: 'keep_open', label: 'Keep open', next: 'end_fail', tone: 'negative', requireComment: true },
+            ],
+          },
+        ],
+      }));
+    if (row.isDefault) throw new Error(`collaboration-admin: company workflow template ${row.id} was saved as the default although isDefault:false was sent`);
+    co.workflowTemplateId = row.id;
+    if (!existing) ctx.record('workflow_template', row.id, { scope: 'company' });
   }
 
   // A company fieldset holding that field (not the default), and a correspondence record type.
-  if (!co.fieldsetId && co.customFieldId) {
-    await ctx.attempt('company fieldset', async () => {
-      const name = `${company.canary} task fields`;
-      const existing = listOf(await pm.GET('/company/custom-fieldsets?recordType=task&includeArchived=true')).find((row) => row.name === name);
-      const row =
-        existing ||
-        (await pm.POST('/company/custom-fieldsets', {
-          recordType: 'task',
-          name,
-          description: `Company fieldset — ${company.canary}-CUSTOM_FIELDSET`,
-          isDefault: false,
-          fields: [{ fieldId: co.customFieldId, required: false, hidden: false }],
-        }));
-      co.fieldsetId = row.id;
-      ctx.record('custom_fieldset', row.id, { scope: 'company' });
-    });
+  if (!co.fieldsetId) {
+    const name = `${company.canary} task fields`;
+    const existing = listOf(await pm.GET('/company/custom-fieldsets?recordType=task&includeArchived=true')).find((row) => row.name === name);
+    const row =
+      existing ||
+      (await pm.POST('/company/custom-fieldsets', {
+        recordType: 'task',
+        name,
+        description: `Company fieldset — ${company.canary}-CUSTOM_FIELDSET`,
+        isDefault: false,
+        fields: [{ fieldId: co.customFieldId, required: false, hidden: false }],
+      }));
+    co.fieldsetId = row.id;
+    if (!existing) ctx.record('custom_fieldset', row.id, { scope: 'company' });
   }
   if (!co.recordTypeKey) {
-    await ctx.attempt('company record type', async () => {
-      const existing = listOf(await pm.GET('/company/record-types?tool=correspondence&includeArchived=true')).find((row) => row.key === 'cert_site_instruction');
-      const row =
-        existing ||
-        (await pm.POST('/company/record-types', {
-          tool: 'correspondence',
-          key: 'cert_site_instruction',
-          label: `Site instruction ${company.canary}`,
-          description: `A letter that instructs work — ${company.canary}-RECORD_TYPE_DEFINITION`,
-          position: 5,
-        }));
-      co.recordTypeId = row.id;
-      co.recordTypeKey = row.key;
-      ctx.record('record_type_definition', row.id, { scope: 'company' });
-    });
+    const existing = listOf(await pm.GET('/company/record-types?tool=correspondence&includeArchived=true')).find((row) => row.key === 'cert_site_instruction');
+    const row =
+      existing ||
+      (await pm.POST('/company/record-types', {
+        tool: 'correspondence',
+        key: 'cert_site_instruction',
+        label: `Site instruction ${company.canary}`,
+        description: `A letter that instructs work — ${company.canary}-RECORD_TYPE_DEFINITION`,
+        position: 5,
+      }));
+    co.recordTypeId = row.id;
+    co.recordTypeKey = row.key;
+    if (!existing) ctx.record('record_type_definition', row.id, { scope: 'company' });
   }
 
-  // One outbound webhook per company: a single specific event type, paused at once.
-  // Tried once per company in a loader run; the refusal (if any) is kept for the report.
+  // One outbound webhook per company, on the project where it is first made: one
+  // specific event type, paused at once. Tried once per company in a loader run;
+  // a refusal (the server judges the address) is kept for the report.
   if (!co.webhookId && !webhookTried.has(company.code)) {
     webhookTried.add(company.code);
-    const url = `https://hooks.c${company.code}.octapm-cert.test/hook`;
-    const existing = listOf(await pm.GET('/integrations/webhooks')).find((row) => row.url === url);
-    if (existing) {
-      if (existing.status !== 'paused') await pm.PATCH(`/integrations/webhooks/${existing.id}`, { status: 'paused' });
-      co.webhookId = existing.id;
-    } else {
-      const created = await ctx.attempt('webhook subscription', () =>
+    const url = webhookUrl(company.code);
+    const existing = listOf(await pm.GET('/integrations/webhooks')).find((row) => row.url === url || row.url === `${url}/`);
+    let hook = existing || null;
+    if (!hook) {
+      hook = await ctx.attempt('webhook subscription', () =>
         pm.POST('/integrations/webhooks', {
           name: `${company.canary} RFI created`,
           description: `Certification subscription — ${company.canary}-WEBHOOK_SUBSCRIPTION`,
           url,
-          eventTypes: ['rfi.created'],
+          projectId,
+          eventTypes: [WEBHOOK_EVENT],
           status: 'paused',
         })
       );
-      if (created?.id) {
-        // The create ignores `status`; pause before anything else happens, and never leave it active.
-        let paused = null;
-        try {
-          paused = await pm.PATCH(`/integrations/webhooks/${created.id}`, { status: 'paused' });
-        } catch (error) {
-          await pm.send('DELETE', `/integrations/webhooks/${created.id}`);
-          throw error;
-        }
-        if (paused?.status !== 'paused') {
-          await pm.send('DELETE', `/integrations/webhooks/${created.id}`);
-          throw new Error(`collaboration-admin: webhook ${created.id} did not pause (status ${paused?.status}); it was removed`);
-        }
-        if (created.status && created.status !== 'paused') ctx.note(`webhook: POST with status "paused" answered status "${created.status}"; paused by PATCH straight after`);
-        co.webhookId = created.id;
-        delete co.webhookRefused;
-        ctx.record('webhook_subscription', created.id, { scope: 'company' });
-      } else {
-        co.webhookRefused = ctx.notes[ctx.notes.length - 1] || true;
+      if (hook?.id) {
+        ctx.record('webhook_subscription', hook.id, { scope: 'company' });
+        if (hook.status !== 'paused') co.webhookCreatedStatus = hook.status;
       }
     }
+    if (hook?.id) {
+      // Pause before anything else happens, and never leave it active.
+      let paused = null;
+      try {
+        paused = hook.status === 'paused' ? hook : await pm.PATCH(`/integrations/webhooks/${hook.id}`, { status: 'paused' });
+      } finally {
+        if (paused?.status !== 'paused') await pm.send('DELETE', `/integrations/webhooks/${hook.id}`);
+      }
+      if (paused?.status !== 'paused') throw new Error(`collaboration-admin: webhook ${hook.id} did not pause (status ${paused?.status}); it was removed`);
+      const events = paused.eventTypes || [];
+      if (events.length !== 1 || events[0] !== WEBHOOK_EVENT) {
+        await pm.send('DELETE', `/integrations/webhooks/${hook.id}`);
+        throw new Error(`collaboration-admin: webhook ${hook.id} listens to ${JSON.stringify(events)}, not only ${WEBHOOK_EVENT}; it was removed`);
+      }
+      co.webhookId = hook.id;
+      co.webhookProjectId = paused.projectId || null;
+      delete co.webhookRefused;
+    } else {
+      co.webhookRefused = ctx.notes[ctx.notes.length - 1] || true;
+    }
+  }
+  if (co.webhookCreatedStatus && !co.webhookStatusNoted) {
+    ctx.note(`webhook: POST /integrations/webhooks with status "paused" created the subscription "${co.webhookCreatedStatus}"; paused by PATCH straight after`);
+    co.webhookStatusNoted = true;
   }
 
-  // One API key per company. The key itself is used once for a read and then dropped: it is never stored or printed.
+  // API keys: one live, one revoked. A key's secret is used for two requests and
+  // then dropped: it is never stored, recorded or printed.
   if (!co.apiClientId) {
-    await ctx.attempt('api client', async () => {
-      const name = `${company.canary} reporting key`;
-      const existing = listOf(await pm.GET('/integrations/api-clients')).find((row) => row.name === name);
-      if (existing) {
-        co.apiClientId = existing.id;
-        return;
-      }
+    const name = `${company.canary} reporting key`;
+    const existing = listOf(await pm.GET('/integrations/api-clients')).find((row) => row.name === name);
+    if (existing) {
+      co.apiClientId = existing.id;
+    } else {
       const created = await pm.POST('/integrations/api-clients', {
         name,
         description: `Read-only key for tasks, risks and meetings — ${company.canary}-API_CLIENT`,
         scopes: ['task:read', 'risk:read', 'meeting:read'],
+        projectIds: [projectId],
         expiresAt: `${ctx.daysAhead(180)}T00:00:00.000Z`,
       });
       co.apiClientId = created.id;
-      co.apiClientPrefix = created.keyPrefix || null;
+      co.apiClientProjectId = projectId;
       ctx.record('api_client', created.id, { scope: 'company' });
-      if (created.token) {
-        const read = await pm.send('GET', `${P}/risks`, undefined, { token: created.token });
+      const secret = created.token;
+      if (!secret) {
+        ctx.note('api client: the create answered without the one-time key');
+      } else {
+        const read = await pm.send('GET', `${P}/risks`, undefined, { token: secret });
         if (read.status !== 200) ctx.note(`api client: a risk:read key read ${P}/risks -> ${read.status} ${read.body?.error?.code || ''}`);
-        const write = await pm.send('POST', `${P}/risks`, { description: `${company.canary}-API_CLIENT must not be written` }, { token: created.token });
-        if (write.status < 400) ctx.note(`api client: a read-only key created a risk (${write.status}) — id ${write.body?.data?.id}`);
+        const write = await pm.send('POST', `${P}/risks`, { description: `${company.canary}-API_CLIENT must not be written` }, { token: secret });
+        if (write.status < 400) {
+          ctx.note(`api client: a read-only key created a risk (${write.status})`);
+          if (write.body?.data?.id) ctx.record('risk', write.body.data.id);
+        }
         if (write.status >= 500) ctx.note(`api client: read-only key write -> ${write.status}`);
       }
-    });
+    }
+  }
+  if (!co.revokedApiClientId) {
+    const name = `${company.canary} retired key`;
+    const existing = listOf(await pm.GET('/integrations/api-clients?includeRevoked=true')).find((row) => row.name === name);
+    const row =
+      existing ||
+      (await pm.POST('/integrations/api-clients', {
+        name,
+        description: `Retired straight after it was made — ${company.canary}-API_CLIENT`,
+        scopes: ['report:read'],
+        expiresAt: `${ctx.daysAhead(30)}T00:00:00.000Z`,
+      }));
+    if (!existing) ctx.record('api_client', row.id, { scope: 'company' });
+    const revoked = row.status === 'revoked' ? row : await pm.DELETE(`/integrations/api-clients/${row.id}`);
+    if (revoked?.status !== 'revoked') throw new Error(`collaboration-admin: API key ${row.id} did not revoke (status ${revoked?.status})`);
+    co.revokedApiClientId = row.id;
   }
 
   // Company conversations: one direct, one group, both outside any project.
   if (!co.conversations && colleagues.length) {
-    await ctx.attempt('company conversations', async () => {
-      const other = colleagues[0];
-      const direct = await pm.POST('/conversations', { kind: 'direct', memberUserIds: [other.id], message: `Company direct message — ${company.canary}-CONVERSATION_MESSAGE-D` });
-      const group = await pm.POST('/conversations', {
-        kind: 'group',
-        title: `${company.canary} management team`,
-        memberUserIds: colleagues.slice(0, 5).map((person) => person.id),
-        message: `Company group message — ${company.canary}-CONVERSATION_MESSAGE-G`,
-      });
-      co.conversations = { direct: direct.id, group: group.id };
-      ctx.record('conversation', direct.id, { scope: 'company' });
-      ctx.record('conversation', group.id, { scope: 'company' });
+    const other = colleagues[0];
+    const direct = await pm.POST('/conversations', { kind: 'direct', memberUserIds: [other.id], message: `Company direct message — ${company.canary}-CONVERSATION_MESSAGE-D` });
+    const group = await pm.POST('/conversations', {
+      kind: 'group',
+      title: `${company.canary} management team`,
+      memberUserIds: colleagues.slice(0, 5).map((person) => person.id),
+      message: `Company group message — ${company.canary}-CONVERSATION_MESSAGE-G`,
     });
+    co.conversations = { direct: direct.id, group: group.id };
+    ctx.record('conversation', direct.id, { scope: 'company' });
+    ctx.record('conversation', group.id, { scope: 'company' });
+    for (const id of [direct.id, group.id]) {
+      for (const row of listOf(await pm.GET(`/conversations/${id}/messages?limit=50`))) if (row.id) ctx.record('conversation_message', row.id, { scope: 'company' });
+    }
   }
 
   // A company-wide saved report (no project).
   if (!co.reportId) {
-    await ctx.attempt('company report', async () => {
-      const name = `${company.canary} open tasks, all projects`;
-      const existing = listOf(await pm.GET('/reports?source=task')).find((row) => row.name === name);
-      const row =
-        existing ||
-        (await pm.POST('/reports', {
-          name,
-          description: `Company-wide — ${company.canary}-REPORT_DEFINITION`,
-          source: 'task',
-          columns: ['project.name', 'taskNumber', 'title', 'status', 'priority', 'dueDate'],
-          filters: [{ field: 'status', op: 'nin', value: ['done', 'canceled'] }],
-          sort: { field: 'dueDate', dir: 'asc' },
-          visibility: 'org',
-        }));
-      co.reportId = row.id;
-      ctx.record('report_definition', row.id, { scope: 'company' });
-    });
+    const name = `${company.canary} open tasks, all projects`;
+    const existing = listOf(await pm.GET('/reports?source=task')).find((row) => row.name === name);
+    const row =
+      existing ||
+      (await pm.POST('/reports', {
+        name,
+        description: `Company-wide — ${company.canary}-REPORT_DEFINITION`,
+        source: 'task',
+        columns: ['project.name', 'taskNumber', 'title', 'status', 'priority', 'dueDate'],
+        filters: [{ field: 'status', op: 'nin', value: ['done', 'canceled'] }],
+        sort: { field: 'dueDate', dir: 'asc' },
+        visibility: 'org',
+      }));
+    co.reportId = row.id;
+    if (!existing) ctx.record('report_definition', row.id, { scope: 'company' });
   }
 
   // One person's notification preferences (their own setting; nothing else depends on it).
   if (!co.preferencesSet) {
-    await ctx.attempt('notification preferences', async () => {
-      const person = colleagues[0] || members[0];
-      const saved = await sessionOf(person).PUT('/notifications/preferences', {
-        preferences: [
-          { category: 'comment', inAppEnabled: true, emailEnabled: false, digestEnabled: true },
-          { category: 'due', dueSoonDays: 5, quietHoursStart: '20:00', quietHoursEnd: '06:00' },
-        ],
-      });
-      co.preferencesSet = person.id;
-      for (const row of listOf(saved?.preferences || saved)) if (row?.id) ctx.record('notification_preference', row.id, { scope: 'company' });
+    const person = colleagues[0] || members[0];
+    const saved = await sessionOf(person).PUT('/notifications/preferences', {
+      preferences: [
+        { category: 'comment', inAppEnabled: true, emailEnabled: false, digestEnabled: true },
+        { category: 'due', dueSoonDays: 5, quietHoursStart: '20:00', quietHoursEnd: '06:00' },
+      ],
     });
+    co.preferencesSet = person.id;
+    for (const row of listOf(saved?.preferences || saved)) if (row?.id) ctx.record('notification_preference', row.id, { scope: 'company' });
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -414,7 +464,8 @@ const run = async (ctx) => {
     const commenter = otherThan(maker, i);
     const remark = await sessionOf(commenter).POST(`${P}/meetings/${created.id}/comments`, { body: `Please correct item 1 before the minutes go out. ${ctx.canary('meeting_comment')}`, activityId });
     const remarkId = remark?.id && remark.id !== created.id ? remark.id : (remark?.comments || []).slice(-1)[0]?.id;
-    if (remarkId) ctx.record('meeting_comment', remarkId);
+    if (!remarkId) throw new Error(`collaboration-admin: a comment on meeting ${created.id} answered without an id`);
+    ctx.record('meeting_comment', remarkId);
 
     if (target !== 'draft') {
       full = await who.PATCH(`${P}/meetings/${created.id}`, {
@@ -426,11 +477,25 @@ const run = async (ctx) => {
       });
     }
     if (target === 'distributed' || target === 'archived') {
-      // To the attendees only: no outside address is ever named.
-      const distributor = i % 2 === 0 ? planner : pm;
-      await distributor.POST(`${P}/meetings/${created.id}/distribute`, { includeAttendees: true, message: `Minutes attached. ${ctx.canary('meeting_distribution')}` });
+      // To the attendees; the first distributed meeting also goes to the client by
+      // address — a certification address, the only kind this driver ever names.
+      const distributor = i % 2 === 0 ? sessionOf(plannerPerson) : pm;
+      const outside = target === 'distributed' && !(made.meetings.distributed || []).length ? `minutes@client.c${company.code}.octapm-cert.test` : null;
+      await distributor.POST(`${P}/meetings/${created.id}/distribute`, {
+        includeAttendees: true,
+        message: `Minutes attached. ${ctx.canary('meeting_distribution')}`,
+        ...(outside ? { recipients: [{ name: `Client document controller ${ctx.canary('meeting_recipient')}`, email: outside, companyName: `${company.canary} Property Group` }] } : {}),
+      });
       full = await who.GET(`${P}/meetings/${created.id}`);
       for (const row of full.distributions || []) if (row.id) ctx.record('meeting_distribution', row.id);
+      if (!(full.distributions || []).length) throw new Error(`collaboration-admin: meeting ${created.id} was distributed but lists no distribution`);
+      if (outside && !co.outsideDistributionNoted) {
+        const row = (full.distributions || []).find((d) => d.recipientEmail === outside);
+        if (row && !row.recipientUserId && row.status === 'sent') {
+          ctx.note(`meeting distribution: the outside recipient ${outside} is recorded channel "${row.channel}" status "sent", but no e-mail is sent to an address without an account (meeting.service.js distributeMeeting creates the row and notifies users only)`);
+          co.outsideDistributionNoted = true;
+        }
+      }
     }
     if (target === 'archived') await pm.DELETE(`${P}/meetings/${created.id}`);
     meetings.push({ id: created.id, state: target, activityId });
@@ -438,7 +503,7 @@ const run = async (ctx) => {
   }
 
   // A file on the first meeting (the signed attendance sheet).
-  await ctx.attempt('meeting attachment', async () => {
+  {
     const name = `${ctx.canary('meeting_file')}-attendance.png`;
     const uploaded = await sessionOf(plannerPerson).upload('POST', `${P}/attachments`, {
       field: 'files',
@@ -447,11 +512,13 @@ const run = async (ctx) => {
       body: PNG_1X1,
       fields: { recordType: 'meeting', recordId: meetings[0].id, caption: `Signed attendance sheet ${ctx.canary('meeting_file_caption')}` },
     });
-    for (const row of listOf(uploaded)) {
+    const rows = listOf(uploaded?.attachments || uploaded);
+    if (!rows.some((row) => row.id)) throw new Error(`collaboration-admin: the meeting attachment upload answered without an attachment: ${JSON.stringify(uploaded).slice(0, 200)}`);
+    for (const row of rows) {
       if (row.id) ctx.record('attachment', row.id);
       if (row.documentId) ctx.record('project_document', row.documentId);
     }
-  });
+  }
 
   // ════════════════════════════════════════════════════════════════════════
   // Tasks
@@ -501,7 +568,7 @@ const run = async (ctx) => {
   }
 
   // A small PDF on the first task, then named on the task itself.
-  await ctx.attempt('task attachment', async () => {
+  {
     const first = tasks[0];
     const name = `${ctx.canary('task_file')}-briefing.pdf`;
     const uploaded = await pm.upload('POST', `${P}/attachments`, {
@@ -511,17 +578,18 @@ const run = async (ctx) => {
       body: pdfOf(`Briefing note ${ctx.canary('task_file_content')}`),
       fields: { recordType: 'task', recordId: first.id, caption: `Briefing note ${ctx.canary('task_file_caption')}` },
     });
-    const rows = listOf(uploaded);
+    const rows = listOf(uploaded?.attachments || uploaded);
     for (const row of rows) {
       if (row.id) ctx.record('attachment', row.id);
       if (row.documentId) ctx.record('project_document', row.documentId);
     }
     const documentId = rows[0]?.documentId;
-    if (documentId) {
-      const linked = await ctx.attempt('task attachment link', () => pm.POST(`/tasks/${first.id}/attachments`, { attachments: [{ projectDocumentId: documentId, fileName: name }] }));
-      for (const row of listOf(linked?.attachments || linked)) if (row?.id && row.id !== first.id) ctx.record('task_attachment', row.id);
-    }
-  });
+    if (!documentId) throw new Error(`collaboration-admin: the task attachment upload answered without a document: ${JSON.stringify(uploaded).slice(0, 200)}`);
+    const linked = await pm.POST(`/tasks/${first.id}/attachments`, { attachments: [{ projectDocumentId: documentId, fileName: name }] });
+    const links = listOf(linked?.attachments).filter((row) => row?.id && row.id !== first.id);
+    if (!links.length) throw new Error(`collaboration-admin: linking document ${documentId} to task ${first.id} left the task without attachments`);
+    for (const row of links) ctx.record('task_attachment', row.id);
+  }
 
   // ════════════════════════════════════════════════════════════════════════
   // Risks
@@ -611,19 +679,26 @@ const run = async (ctx) => {
         mentionUserIds: mentioned.id === author.id ? [] : [mentioned.id],
       });
     const top = target.optional ? await ctx.attempt(`comment on ${target.recordType}`, post) : await post();
-    if (!top?.id) continue;
+    if (!top?.id) {
+      if (target.optional) continue;
+      throw new Error(`collaboration-admin: a comment on ${target.recordType} ${target.recordId} answered without an id`);
+    }
     ctx.record('comment', top.id);
     for (const mention of top.mentions || []) if (mention.id) ctx.record('comment_mention', mention.id);
+    if (mentioned.id !== author.id && !(top.mentions || []).some((mention) => (mention.userId || mention.user?.id) === mentioned.id)) {
+      ctx.note(`comment ${top.id} on ${target.recordType}: ${mentioned.persona} was named in mentionUserIds but the comment carries no mention of them`);
+    }
     // The person mentioned answers in the thread.
-    const reply = await ctx.attempt(`reply on ${target.recordType}`, () =>
+    const answer = () =>
       sessionOf(mentioned).POST(`${P}/comments`, {
         recordType: target.recordType,
         recordId: target.recordId,
         parentId: top.id,
         body: `Seen, thank you — I will deal with it. ${ctx.canary('comment_reply')}`,
-      })
-    );
+      });
+    const reply = target.optional ? await ctx.attempt(`reply on ${target.recordType}`, answer) : await answer();
     if (reply?.id) ctx.record('comment', reply.id);
+    else if (!target.optional) throw new Error(`collaboration-admin: a reply on ${target.recordType} ${target.recordId} answered without an id`);
     threads.push({ ...target, top, reply, author, mentioned });
     made.comments.push(top.id);
   }
@@ -662,6 +737,16 @@ const run = async (ctx) => {
   // Conversations and messages
   // ════════════════════════════════════════════════════════════════════════
   if (colleagues.length) {
+    const knownMessages = new Set(ctx.records.conversation_message || []);
+    const keepMessage = (id) => {
+      if (!id || knownMessages.has(id)) return;
+      knownMessages.add(id);
+      ctx.record('conversation_message', id);
+    };
+    /** The opening message a create leaves is not in its answer: read the thread back. */
+    const keepThread = async (conversationId, viewer) => {
+      for (const row of listOf(await sessionOf(viewer).GET(`/conversations/${conversationId}/messages?limit=200`))) keepMessage(row.id);
+    };
     const talk = async (conversationId, count, people) => {
       const sent = [];
       for (let k = 0; k < count; k += 1) {
@@ -672,10 +757,9 @@ const run = async (ctx) => {
           mentionUserIds: k % 2 === 0 && other.id !== speaker.id ? [other.id] : [],
           ...(k === 1 ? { linkedRecord: { recordType: 'task', recordId: liveTask.id, projectId, title: `Task ${ctx.canary('conversation_link')}` } } : {}),
         });
-        if (message?.id) {
-          ctx.record('conversation_message', message.id);
-          sent.push({ id: message.id, speaker });
-        }
+        if (!message?.id) throw new Error(`collaboration-admin: a message in conversation ${conversationId} answered without an id`);
+        keepMessage(message.id);
+        sent.push({ id: message.id, speaker });
       }
       return sent;
     };
@@ -693,6 +777,7 @@ const run = async (ctx) => {
       ctx.record('conversation', group.id);
       const people = [ctx.person('pm'), ...invited];
       const sent = await talk(group.id, ctx.count(3, 6), people);
+      await keepThread(group.id, ctx.person('pm'));
       // An edit and a removal, each by the author.
       if (sent[0]) await sessionOf(sent[0].speaker).PATCH(`/conversations/${group.id}/messages/${sent[0].id}`, { body: `Edited update. ${ctx.canary('conversation_message_edit')}` });
       if (sent.length > 2) await sessionOf(sent[2].speaker).DELETE(`/conversations/${group.id}/messages/${sent[2].id}`);
@@ -713,10 +798,11 @@ const run = async (ctx) => {
     const direct = await sessionOf(a).POST('/conversations', { kind: 'direct', projectId, memberUserIds: [b.id], message: `Can you call me about the pour? ${ctx.canary('conversation_message')}` });
     if (!(ctx.records.conversation || []).includes(direct.id)) ctx.record('conversation', direct.id);
     await talk(direct.id, 2, [b, a]);
+    await keepThread(direct.id, a);
     made.conversations.direct = direct.id;
 
     // A conversation about one record (found again on a later run: one per record).
-    const about = await planner.POST('/conversations', {
+    const about = await sessionOf(plannerPerson).POST('/conversations', {
       kind: 'record',
       projectId,
       recordType: 'activity',
@@ -725,6 +811,7 @@ const run = async (ctx) => {
       message: `Thread on this activity. ${ctx.canary('conversation_message')}`,
     });
     if (!(ctx.records.conversation || []).includes(about.id)) ctx.record('conversation', about.id);
+    await keepThread(about.id, plannerPerson);
     made.conversations.record = about.id;
   } else {
     ctx.note('conversations: the company has nobody but the owner on this project; none created');
@@ -765,8 +852,9 @@ const run = async (ctx) => {
       if (!rows.length && !result?.total && !result?.rowCount) ctx.note(`report ${spec.source}: the run returned no rows`);
       await who.PUT(`/reports/${report.id}`, { description: `Reviewed every Monday. ${ctx.canary('report_description')}` });
       // A stored run of the report (rendered at once; nothing is delivered).
-      const stored = await ctx.attempt('report run', () => who.POST(`/reports/${report.id}/runs`, { format: 'xlsx', deliver: false }));
-      if (stored?.id) ctx.record('report_run', stored.id);
+      const stored = await who.POST(`/reports/${report.id}/runs`, { format: 'xlsx', deliver: false });
+      if (!stored?.id) throw new Error(`collaboration-admin: a stored run of report ${report.id} answered without an id`);
+      ctx.record('report_run', stored.id);
     }
   }
   // One schedule, created disabled: it never runs.
@@ -822,12 +910,11 @@ const run = async (ctx) => {
     fields.push({ ...spec, id: definition.id, key: definition.key || spec.key });
   }
   // The company's task fieldset is the one this project uses (it holds the optional company field only).
-  if (co.fieldsetId) {
-    await ctx.attempt('project fieldset', async () => {
-      const assigned = await pm.PUT(`${P}/custom-fields/assignments`, { recordType: 'task', fieldsetId: co.fieldsetId });
-      made.customFields.projectFieldset = { recordType: 'task', fieldsetId: co.fieldsetId };
-      for (const row of listOf(assigned)) if (row.id) ctx.record('project_fieldset', row.id);
-    });
+  // (The assignment has no id of its own: it is one row per project and record type.)
+  {
+    const assigned = listOf(await pm.PUT(`${P}/custom-fields/assignments`, { recordType: 'task', fieldsetId: co.fieldsetId }));
+    if (!assigned.some((row) => row.recordType === 'task' && row.fieldsetId === co.fieldsetId)) throw new Error(`collaboration-admin: the task fieldset ${co.fieldsetId} was not assigned to the project: ${JSON.stringify(assigned).slice(0, 200)}`);
+    made.customFields.projectFieldset = { recordType: 'task', fieldsetId: co.fieldsetId };
   }
   const valueOf = (field) =>
     field.type === 'text' ? `Ref ${ctx.canary('custom_field_value')}` : field.type === 'select' ? field.options[rng.int(0, field.options.length - 1)] : field.type === 'number' ? rng.int(4, 18) : field.type === 'date' ? ctx.daysAhead(30) : true;
@@ -838,8 +925,10 @@ const run = async (ctx) => {
     const values = Object.fromEntries(mine.map((field) => [field.key, valueOf(field)]));
     // The company-wide task field takes a value too.
     if (recordType === 'task' && co.customFieldKey) values[co.customFieldKey] = `Company ref ${ctx.canary('custom_field_value')}`;
+    // A value has no id of its own in the answer (it is keyed by record and field): the holder is kept in refs.
     const saved = await pm.PUT(`${P}/custom-fields/values/${recordType}/${holders[recordType]}`, { values, partial: true });
-    for (const row of saved?.rows || saved?.valueRows || []) if (row.id) ctx.record('custom_field_value', row.id);
+    const missing = Object.keys(values).filter((key) => saved?.values?.[key] === undefined || saved.values[key] === null);
+    if (missing.length) throw new Error(`collaboration-admin: custom values ${missing.join(', ')} on ${recordType} ${holders[recordType]} were not kept: ${JSON.stringify(saved?.values).slice(0, 200)}`);
     (made.customFields[recordType] = made.customFields[recordType] || []).push({ recordId: holders[recordType], keys: Object.keys(values) });
   }
   // The last field is archived again: a definition nobody uses any more.
@@ -851,15 +940,26 @@ const run = async (ctx) => {
   // ════════════════════════════════════════════════════════════════════════
   // A custom permission template and one person's override on this project
   // ════════════════════════════════════════════════════════════════════════
-  await ctx.attempt('permission template and override', async () => {
+  await (async () => {
     const personaIds = new Set(company.people.filter((person) => person.persona).map((person) => person.id));
+    const teamRow = (userId) => team.find((row) => row.userId === userId);
+    // The role a person holds on this project (their assignment's role, else their company role).
+    const projectRole = (row, fallbackRole) => row?.assignmentRole || row?.orgRole || fallbackRole;
+    // The person an earlier run chose, so a re-run does not spread templates over more people.
+    const earlier = state.permission?.userId ? teamRow(state.permission.userId) : null;
     // Prefer a member of staff nobody signs in as, so no persona's own rights move.
-    const staff = team.find((row) => !row.isCompanyAdmin && row.orgRole !== 'pm' && row.source === 'assignment' && !personaIds.has(row.userId));
-    const fallback = ['warehouse', 'procurement', 'finance', 'cost', 'quality', 'qs', 'site']
+    const isStaff = (row) => row && !row.isCompanyAdmin && row.orgRole !== 'pm' && !row.party && !personaIds.has(row.userId);
+    const staff = (isStaff(earlier) && earlier) || team.find((row) => isStaff(row) && row.source === 'assignment');
+    const fallbackPersona = ['warehouse', 'procurement', 'finance', 'cost', 'quality', 'qs', 'site']
       .filter((key) => ctx.hasPersona(key))
       .map((key) => ctx.person(key))
-      .find((person) => !person.isAdmin && person.role !== 'pm' && onTeam.has(person.id));
-    const target = staff ? { userId: staff.userId, role: staff.orgRole, email: staff.email, persona: null } : fallback ? { userId: fallback.id, role: fallback.role, email: fallback.email, persona: fallback.persona } : null;
+      .find((person) => !person.isAdmin && person.role !== 'pm' && onTeam.has(person.id) && !teamRow(person.id)?.isCompanyAdmin);
+    const fallback = earlier && !staff && personaIds.has(earlier.userId) ? company.people.find((person) => person.id === earlier.userId) : fallbackPersona;
+    const target = staff
+      ? { userId: staff.userId, role: projectRole(staff, staff.orgRole), email: staff.email, persona: null }
+      : fallback
+        ? { userId: fallback.id, role: projectRole(teamRow(fallback.id), fallback.role), email: fallback.email, persona: fallback.persona }
+        : null;
     if (!target) {
       ctx.note('permission override: nobody on this project but administrators and project managers; skipped');
       return;
@@ -886,14 +986,15 @@ const run = async (ctx) => {
     ctx.record('permission_template', copy.id, { scope: 'company' });
     await pm.DELETE(`/permissions/templates/${copy.id}`);
     const assigned = await pm.PUT(`${P}/team/${target.userId}/permissions`, { templateId: template.id, overrides: { tools: { conversation: 'standard' }, grants: overrideGrants } });
-    if (assigned?.id) ctx.record('project_user_permission', assigned.id);
-    made.permission = { templateId: template.id, archivedTemplateId: copy.id, userId: target.userId, email: target.email, persona: target.persona, additive: !target.persona, grants, overrideGrants };
-  });
+    if (!assigned?.id || assigned.template?.id !== template.id) throw new Error(`collaboration-admin: template ${template.id} was not assigned to ${target.userId}: ${JSON.stringify(assigned).slice(0, 200)}`);
+    if (!(ctx.records.project_user_permission || []).includes(assigned.id)) ctx.record('project_user_permission', assigned.id);
+    made.permission = { templateId: template.id, archivedTemplateId: copy.id, userId: target.userId, email: target.email, persona: target.persona, role: target.role, additive: !target.persona, grants, overrideGrants };
+  })();
 
   // ════════════════════════════════════════════════════════════════════════
   // Workflow templates and instances (on correspondence made here)
   // ════════════════════════════════════════════════════════════════════════
-  await ctx.attempt('workflow templates and instances', async () => {
+  await (async () => {
     // Neither template is a default and neither has rules: they start only when named.
     const template = await pm.POST(`${P}/workflows/templates`, {
       tool: 'correspondence',
@@ -974,32 +1075,44 @@ const run = async (ctx) => {
       if (instance?.applyStatus === 'failed') ctx.note(`workflow instance ${instance.id}: outcome not applied — ${instance.applyError}`);
       made.workflow.instances[outcome] = { instanceId: instance.id, correspondenceId: letter.id };
     }
-  });
+  })();
 
   // ════════════════════════════════════════════════════════════════════════
-  // Notifications: what two people now see; some read, one archived
+  // Notifications: what two people now see; some read, one archived — only
+  // notifications about records this run made are touched.
   // ════════════════════════════════════════════════════════════════════════
-  await ctx.attempt('notification due scan', () => pm.POST('/notifications/scan-due', { projectId, horizonDays: 7 }));
+  await pm.POST('/notifications/scan-due', { projectId, horizonDays: 7 });
+  const ours = madeThisRun();
   const readers = [colleagues[0] || ctx.person('pm'), ctx.person('pm')].filter((person, index, list) => list.findIndex((row) => row.id === person.id) === index);
   const known = new Set(ctx.records.notification || []);
   const counts = [];
+  let touched = 0;
   for (const [index, person] of readers.entries()) {
     const who = sessionOf(person);
     const rows = listOf(await who.GET(`/notifications?status=all&limit=100&projectId=${projectId}`));
     const summary = await who.GET('/notifications/summary');
-    counts.push(`${person.persona}: ${rows.length} on this project (${rows.filter((row) => !row.readAt && row.status !== 'read').length} unread), ${summary?.unread ?? '?'} unread in all`);
-    for (const row of rows.slice(0, 10)) {
+    const mine = rows.filter((row) => row.entityId && ours.has(row.entityId) && row.status !== 'archived');
+    counts.push(`${person.persona}: ${rows.length} on this project (${rows.filter((row) => row.status === 'unread').length} unread, ${mine.length} about this run's records), ${summary?.unread ?? '?'} unread in all`);
+    for (const row of mine.slice(0, 10)) {
       if (row.id && !known.has(row.id)) {
         known.add(row.id);
         ctx.record('notification', row.id);
       }
     }
     // The first reader reads two and archives a third; the second reads one.
-    const toRead = rows.slice(0, index === 0 ? 2 : 1);
-    for (const row of toRead) await who.PATCH(`/notifications/${row.id}/read`, { read: true });
-    if (index === 0 && rows[2]) await who.PATCH(`/notifications/${rows[2].id}/archive`);
-    if (index === 0 && rows[0]) await who.GET(`/notifications/${rows[0].id}`);
+    const toRead = mine.slice(0, index === 0 ? 2 : 1);
+    for (const row of toRead) {
+      const read = await who.PATCH(`/notifications/${row.id}/read`, { read: true });
+      if (read?.status && read.status !== 'read') ctx.note(`notification ${row.id}: marked read but answered status ${read.status}`);
+      touched += 1;
+    }
+    if (index === 0 && mine[2]) {
+      await who.PATCH(`/notifications/${mine[2].id}/archive`);
+      touched += 1;
+    }
+    if (index === 0 && mine[0]) await who.GET(`/notifications/${mine[0].id}`);
   }
+  if (!touched) throw new Error(`collaboration-admin: nobody received a notification about this run's records (${counts.join('; ')})`);
   ctx.note(`notifications ${tag} — ${counts.join('; ')}`);
 
   // ── what later drivers and the attacks can pick up by name ───────────────

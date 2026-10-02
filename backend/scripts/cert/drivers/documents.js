@@ -6,18 +6,23 @@
  *   attachments     on activities, bill rows, the project, a location and on
  *                   every record made here (PDF, text and PNG; one linked
  *                   to a second record by its document id)
- *   RFIs            raised on an activity with a due date, then left in a mix
- *                   of states: closed, open with a discussion, answered,
- *                   draft, rejected, overdue, reopened, converted to a change
- *                   order, archived — the ball in court moves with each step
- *   submittals      a workflow template, packages, and submittals left
- *                   approved, pending, under review, rejected, resubmitted,
- *                   sent back, decided step by step, archived
+ *   RFIs            raised on an activity with a due date, then left in every
+ *                   state the product has: closed, open with a discussion,
+ *                   answered, rejected (back to open), overdue, reopened,
+ *                   converted to a change order, archived — the ball in court
+ *                   moves with each step. One more is raised with nobody asked
+ *                   yet: a draft is asked for first, and the product refuses
+ *                   it although its routes offer it (a finding, noted).
+ *   submittals      two workflow templates (one archived), two packages (one
+ *                   submitted and decided at once, one open with a member
+ *                   taken out), and submittals left approved, pending, under
+ *                   review, rejected, resubmitted and approved, sent back,
+ *                   decided step by step (approved, rejected), archived
  *   drawings        the legacy register with file revisions (uploaded, in
- *                   review, approved, superseded) and drawing sets (a PDF is
- *                   uploaded; processing needs the job worker, so a set stays
- *                   wherever it got to); sheets, markups and pins only where
- *                   a published sheet exists
+ *                   review, approved, superseded, cancelled) and drawing sets
+ *                   (a PDF is uploaded; processing needs the job worker, so a
+ *                   set stays wherever it got to); sheets, markups and pins
+ *                   only where this run's set was processed and published
  *   transmittals    pending acknowledgement and acknowledged
  *   correspondence  letters, e-mails, memos and notices, in and out, open
  *                   and closed
@@ -25,11 +30,23 @@
  *                   the index (indexing needs extracted text: the worker)
  *   register/search the register, the dashboard, the attachment search, the
  *                   global search and the content search, asked at the end
- *                   for this run's canaries
+ *                   for this run's canaries; every record's state is read
+ *                   back and a state that differs from the one asked for is
+ *                   written to the notes
  *
  * Every file made here carries its canary in its name and in its bytes.
  * Nothing is looked up by a fixed number, so the driver can run again: each
- * run makes a new batch, and the codes it generates carry the run counter.
+ * run makes a new batch. The codes it generates carry the run counter, and so
+ * do its canaries from the second run on (…-RFI-R2-1), so a canary names one
+ * record however often the driver ran.
+ *
+ * Failure policy. The records of the area are made without a safety net: a
+ * refusal or a 5xx on one fails the run. Only a step the product may
+ * legitimately refuse here (one that needs the job worker or an AI provider,
+ * or a status the product does not offer) goes through `optional`, and a 5xx
+ * there is still written to the notes as a product 5xx. A write is never
+ * sent twice — a write that answered 5xx may have written part of its record
+ * — and a read that answers 5xx is asked again, with a note each time.
  */
 
 // ── files ────────────────────────────────────────────────────────────────────
@@ -116,8 +133,11 @@ const RFI_TOPICS = [
   ['Foundation detail for lighting columns', 'electrical', '26 56 00'],
   ['Waterproofing upstand at the podium edge', 'architectural', '07 10 00'],
 ];
+/** Every standard project gets every flow; extra RFIs repeat the first ones. */
 const RFI_FLOWS = ['closed', 'open', 'answered', 'draft', 'rejected', 'overdue', 'reopened', 'converted', 'archived'];
 const PRIORITIES = ['normal', 'high', 'urgent', 'low'];
+/** The state each flow leaves an RFI in (`unassigned` is the draft the product refused). */
+const RFI_STATE = { closed: 'closed', open: 'open', answered: 'answered', draft: 'draft', unassigned: 'open', rejected: 'open', overdue: 'open', reopened: 'open', converted: 'answered', archived: 'archived' };
 
 const SUBMITTAL_TOPICS = [
   ['Cement OPC 42.5N mill certificate', 'structural', '03 30 00'],
@@ -131,6 +151,18 @@ const SUBMITTAL_TOPICS = [
   ['Kerb unit technical submission', 'civil', '32 16 00'],
 ];
 const SUBMITTAL_FLOWS = ['approved', 'pending', 'under_review', 'rejected', 'resubmitted', 'sent_back', 'step_approved', 'step_rejected', 'archived'];
+/** [status, response code] each flow leaves a submittal in. */
+const SUBMITTAL_STATE = {
+  approved: ['approved', 'approved'],
+  pending: ['pending', null],
+  under_review: ['under_review', null],
+  rejected: ['rejected', 'rejected'],
+  resubmitted: ['approved', 'approved'],
+  sent_back: ['resubmit', 'revise_resubmit'],
+  step_approved: ['approved', 'approved'],
+  step_rejected: ['resubmit', 'revise_resubmit'],
+  archived: ['archived', null],
+};
 
 const DRAWING_TITLES = [
   ['S', 'Foundation layout, grid A-D', 'issued'],
@@ -139,6 +171,14 @@ const DRAWING_TITLES = [
   ['C', 'External works and drainage layout', 'cancelled'],
   ['E', 'Lighting and small power layout', 'uploaded'],
 ];
+/** [drawing status, latest revision label and status] each flow leaves a drawing in. */
+const DRAWING_STATE = {
+  issued: ['active', 'C', 'uploaded'],
+  in_review: ['active', 'A', 'submitted'],
+  superseded: ['superseded', null, null],
+  cancelled: ['cancelled', 'P1', 'submitted'],
+  uploaded: ['active', 'A', 'uploaded'],
+};
 
 const TRANSMITTAL_SUBJECTS = ['Issue of drawings for construction', 'Material submittals for review', 'As-built records for the handover file', 'Method statements for comment', 'Test certificates for the record'];
 const TRANSMITTAL_METHODS = ['email', 'courier', 'hand'];
@@ -171,32 +211,46 @@ const SPEC_PAGES = (canary) => [
 
 const listOf = (data) => {
   if (Array.isArray(data)) return data;
-  for (const key of ['items', 'rows', 'records', 'rfis', 'submittals', 'drawings', 'transmittals', 'correspondence', 'sets', 'sheets', 'packages', 'locations']) {
+  for (const key of ['items', 'rows', 'records', 'rfis', 'submittals', 'drawings', 'transmittals', 'correspondence', 'sets', 'sheets', 'packages', 'locations', 'results']) {
     if (Array.isArray(data?.[key])) return data[key];
   }
   return [];
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const isApiError = (error) => error?.name === 'ApiError';
+
 /**
- * An interactive transaction that ran past its time limit answers 500 (P2028)
- * and writes nothing. Under a loaded API that is not rare, so such a call is
- * made again — and every time it happens it is written to the notes, because
- * a 500 is a finding, not noise.
+ * A person's session as this driver uses it. A read that answers 5xx is asked
+ * again (up to three times), and every 5xx is written to the notes: a 5xx is
+ * a finding, not noise. A write is sent once: several routes write part of
+ * their record outside the transaction that failed (the stored file before
+ * the attachment, the RFI before its notifications, the change order before
+ * the RFI points at it), so a second send could leave an unrecorded twin. A
+ * write that answers 5xx is noted with its route and fails the step.
  */
-const expired = (error) => error?.name === 'ApiError' && error.status >= 500 && /P2028|P2034|transaction/i.test(`${error.code} ${error.serverMessage}`);
 const steady = (ctx, session) => {
-  const again = (method) => async (...args) => {
+  const read = (method) => async (...args) => {
     for (let tries = 1; ; tries += 1) {
       try {
         return await session[method](...args);
       } catch (error) {
-        if (!expired(error) || tries >= 4) throw error;
-        ctx.note(`5xx, asked again (${tries}): ${error.message}`.slice(0, 260));
-        await new Promise((resolve) => setTimeout(resolve, 500 * tries));
+        if (!isApiError(error) || error.status < 500) throw error;
+        ctx.note(`product 5xx on a read${tries < 3 ? ', asked again' : ''} (${tries}): ${error.message}`.slice(0, 400));
+        if (tries >= 3) throw error;
+        await sleep(500 * tries);
       }
     }
   };
-  return { ...session, GET: again('GET'), POST: again('POST'), PATCH: again('PATCH'), PUT: again('PUT'), DELETE: again('DELETE'), upload: again('upload'), download: again('download') };
+  const write = (method) => async (...args) => {
+    try {
+      return await session[method](...args);
+    } catch (error) {
+      if (isApiError(error) && error.status >= 500) ctx.note(`product 5xx on a write, not sent again: ${error.message}`.slice(0, 400));
+      throw error;
+    }
+  };
+  return { ...session, GET: read('GET'), download: read('download'), POST: write('POST'), PATCH: write('PATCH'), PUT: write('PUT'), DELETE: write('DELETE'), upload: write('upload') };
 };
 
 // ── the driver ───────────────────────────────────────────────────────────────
@@ -213,53 +267,86 @@ const run = async (ctx) => {
   const state = (ctx.refs.documents = ctx.refs.documents || {});
   state.runs = (state.runs || 0) + 1;
   const runNo = state.runs;
+  /** This run's canaries: from the second run on they carry the run, so no two records share one. */
+  const canary = (type) => ctx.canary(runNo > 1 ? `${type}-r${runNo}` : type);
+
+  /**
+   * A step the product may legitimately refuse here. A refusal is a note; a
+   * 5xx is a note marked as a product 5xx; anything that is not an API answer
+   * (a programming error) is thrown.
+   */
+  const optional = async (label, fn) => {
+    try {
+      return await fn();
+    } catch (error) {
+      if (!isApiError(error)) throw error;
+      ctx.note(`${error.status >= 500 ? 'PRODUCT 5xx — ' : ''}${label}: ${error.status} ${error.code} ${error.serverMessage}`.slice(0, 400));
+      return null;
+    }
+  };
+
   const made = { rfis: {}, submittals: {}, drawings: {}, transmittals: {}, correspondence: {}, packages: [], templates: [], sets: [], revisions: {}, documents: [] };
+  const recorded = { document_revision: new Set(), project_document: new Set(), attachment: new Set(), workflow_attachment: new Set() };
+  /** Records an id once per run. */
+  const once = (type, id) => {
+    const seen = recorded[type];
+    if (seen) {
+      if (seen.has(id)) return id;
+      seen.add(id);
+    }
+    return ctx.record(type, id);
+  };
+  const keepDocument = (documentId) => {
+    if (!documentId) return;
+    if (!recorded.project_document.has(documentId)) made.documents.push(documentId);
+    once('project_document', documentId);
+  };
   /** Remembers a record under the state it was left in; a second one in the same state gets a suffix. */
   const keep = (group, name, id) => {
     let key = name;
     for (let n = 2; group[key]; n += 1) key = `${name}_${n}`;
     group[key] = id;
   };
+  const flowOf = (key) => key.replace(/_\d+$/, '');
+  const required = (value, what) => {
+    if (!value) throw new Error(`documents: ${what} answered without an id`);
+    return value;
+  };
 
   const activityCodes = Object.keys(ctx.refs.activities || {});
   if (!activityCodes.length) throw new Error('documents: the foundation driver left no activities');
   const activityAt = (i) => ctx.refs.activities[activityCodes[i % activityCodes.length]];
   const boqCodes = Object.keys(ctx.refs.boq || {});
+  if (!boqCodes.length) throw new Error('documents: the foundation driver left no bill rows');
   const party = (kind) => `${ctx.company.canary} ${{ client: 'Property Group', consultant: 'Consulting Engineers', subcontractor: 'Concrete Works', supplier: 'Steel & Cement Supply' }[kind]}`;
 
-  /** Attaches one file to a record; returns the attachment (with its documentId). */
+  /** Attaches one file to a record (or links filed documents); returns the first attachment, with its documentId. */
   const attach = async (who, recordType, recordId, file, fields = {}) => {
     const out = await who.upload('POST', `${P}/attachments`, { field: 'files', ...file, fields: { recordType, recordId, ...fields } });
-    const item = (out?.items || [])[0];
-    if (!item?.id) throw new Error(`documents: attaching to ${recordType} ${recordId} answered without an attachment`);
-    ctx.record('attachment', item.id);
-    const documentId = item.documentId || item.document?.id;
-    if (documentId) {
-      ctx.record('project_document', documentId);
-      made.documents.push(documentId);
+    const items = out?.items || [];
+    if (!items[0]?.id) throw new Error(`documents: attaching to ${recordType} ${recordId} answered without an attachment`);
+    for (const item of items) {
+      once('attachment', item.id);
+      keepDocument(item.documentId || item.document?.id);
+      const photoId = item.photo?.id || item.document?.photo?.id;
+      if (photoId) ctx.record('photo', photoId);
     }
-    const photoId = item.photo?.id || item.document?.photo?.id;
-    if (photoId) ctx.record('photo', photoId);
-    return { ...item, documentId };
+    return { ...items[0], documentId: items[0].documentId || items[0].document?.id };
   };
 
   /** Uploads a file as a revision of a document-control record. */
   const uploadRevision = async (who, recordType, recordId, revision, file, fields = {}) => {
     const out = await who.upload('POST', `${P}/doc-control/${recordType}/${recordId}/revisions/upload`, { field: 'file', ...file, fields: { revision, ...fields } });
     const row = out?.revision || out;
-    if (!row?.id) throw new Error(`documents: revision ${revision} of ${recordType} ${recordId} answered without an id`);
-    ctx.record('document_revision', row.id);
+    required(row?.id, `revision ${revision} of ${recordType} ${recordId}`);
+    once('document_revision', row.id);
     const documentId = out?.document?.documentId || out?.document?.id || row.projectDocumentId;
-    if (documentId) {
-      ctx.record('project_document', documentId);
-      made.documents.push(documentId);
-    }
+    keepDocument(documentId);
     return { ...row, documentId };
   };
 
   // ── a place on the project, for the records that name one ─────────────────
-  let location = null;
-  const places = await ctx.attempt('locations', () => site.GET(`${P}/locations`));
+  // Looked up by its code so that a second run uses the same zone.
   const flat = [];
   const walk = (nodes) => {
     for (const node of nodes || []) {
@@ -267,44 +354,41 @@ const run = async (ctx) => {
       walk(node.children);
     }
   };
-  walk(listOf(places));
-  location = flat.find((l) => l.code === 'DOC-GRID-AD') || null;
+  walk(listOf(await site.GET(`${P}/locations`)));
+  let location = flat.find((l) => l.code === 'DOC-GRID-AD') || null;
   if (!location) {
-    const canary = ctx.canary('location');
-    location = await ctx.attempt('location', () =>
-      planner.POST(`${P}/locations`, { name: `Foundation zone grid A-D ${canary}`.slice(0, 120), code: 'DOC-GRID-AD', kind: 'zone', description: `Pad and strip foundations between grids A and D — ${canary}` })
-    );
-    if (location?.id) ctx.record('location', location.id);
+    const locationCanary = canary('location');
+    location = await planner.POST(`${P}/locations`, { name: `Foundation zone grid A-D ${locationCanary}`.slice(0, 120), code: 'DOC-GRID-AD', kind: 'zone', description: `Pad and strip foundations between grids A and D — ${locationCanary}` });
+    ctx.record('location', required(location?.id, 'the location'));
   }
-  location = location?.id ? location : flat[0] || null;
 
   // ── attachments on what foundation left ───────────────────────────────────
-  for (let i = 0; i < ctx.count(1, 3); i += 1) {
-    const canary = ctx.canary('activity-file');
-    const file = i % 3 === 1 ? pngFile(canary) : i % 3 === 2 ? textFile(canary, 'Method statement note') : pdfFile(canary, 'Method statement for the activity');
-    await attach(planner, 'activity', activityAt(i * 2), file, { caption: `Method statement — ${canary}`, role: i % 3 === 1 ? 'photo' : 'reference', ...(i % 3 === 1 ? { tags: 'site,progress' } : {}) });
+  for (let i = 0; i < ctx.count(2, 3); i += 1) {
+    const fileCanary = canary('activity-file');
+    const file = i % 3 === 1 ? pngFile(fileCanary) : i % 3 === 2 ? textFile(fileCanary, 'Method statement note') : pdfFile(fileCanary, 'Method statement for the activity');
+    await attach(planner, 'activity', activityAt(i * 2), file, { caption: `Method statement — ${fileCanary}`, role: i % 3 === 1 ? 'photo' : 'reference', ...(i % 3 === 1 ? { tags: 'site,progress' } : {}) });
   }
   for (let i = 0; i < Math.min(boqCodes.length, ctx.count(1, 2)); i += 1) {
-    const canary = ctx.canary('boq-file');
-    await attach(qs, 'boq_item', ctx.refs.boq[boqCodes[(i * 3) % boqCodes.length]], i ? textFile(canary, 'Rate build-up') : pdfFile(canary, 'Measurement sheet'), { caption: `Take-off — ${canary}`, role: 'evidence' });
+    const fileCanary = canary('boq-file');
+    await attach(qs, 'boq_item', ctx.refs.boq[boqCodes[(i * 3) % boqCodes.length]], i ? textFile(fileCanary, 'Rate build-up') : pdfFile(fileCanary, 'Measurement sheet'), { caption: `Take-off — ${fileCanary}`, role: 'evidence' });
   }
-  if (location?.id) {
-    const canary = ctx.canary('location-file');
-    await ctx.attempt('attachment on the location', () => attach(site, 'location', location.id, pngFile(canary), { caption: `Zone photo — ${canary}`, locationId: location.id, tags: 'zone' }));
+  {
+    const fileCanary = canary('location-file');
+    await attach(site, 'location', location.id, pngFile(fileCanary), { caption: `Zone photo — ${fileCanary}`, locationId: location.id, tags: 'zone' });
   }
 
   // ── RFIs ──────────────────────────────────────────────────────────────────
-  const rfiCount = ctx.count(4, RFI_FLOWS.length);
+  const rfiCount = RFI_FLOWS.length + ctx.count(0, 2);
   for (let i = 0; i < rfiCount; i += 1) {
     const flow = RFI_FLOWS[i % RFI_FLOWS.length];
     const [topic, discipline, specSection] = RFI_TOPICS[i % RFI_TOPICS.length];
-    const canary = ctx.canary('rfi');
+    const rfiCanary = canary('rfi');
     const raiser = i % 2 ? quality : site;
     const activityId = activityAt(i);
     const R = (id) => `${P}/rfi/${id}`;
     const asked = {
-      subject: `${topic} — ${canary}`,
-      question: `Please confirm: ${topic.toLowerCase()}. The drawings and the specification disagree. ${canary}`,
+      subject: `${topic} — ${rfiCanary}`,
+      question: `Please confirm: ${topic.toLowerCase()}. The drawings and the specification disagree. ${rfiCanary}`,
       priority: PRIORITIES[i % PRIORITIES.length],
       discipline,
       specSection,
@@ -313,126 +397,129 @@ const run = async (ctx) => {
       assigneeUserIds: [user.planner],
       distributionUserIds: [user.qs],
       activityId,
-      ...(i % 3 === 0 ? { activityLinks: [{ activityId, relationType: 'impacted', scheduleImpactDays: 2, notes: canary }] } : {}),
-      ...(location?.id ? { locationId: location.id } : {}),
+      ...(i % 3 === 0 ? { activityLinks: [{ activityId, relationType: 'impacted', scheduleImpactDays: 2, notes: rfiCanary }] } : {}),
+      locationId: location.id,
       costImpact: i % 2 === 0,
       ...(i % 2 === 0 ? { costImpactAmount: 1500 + i * 250 } : {}),
       scheduleImpactFlag: i % 3 === 0,
       raisedDate: ctx.daysAgo(flow === 'overdue' ? 20 : 6),
       dueDate: flow === 'overdue' ? ctx.daysAgo(5) : ctx.daysAhead(7 + i),
       responseRequiredBy: flow === 'overdue' ? ctx.daysAgo(5) : ctx.daysAhead(7 + i),
-      comment: `Raised from site — ${canary}`,
+      comment: `Raised from site — ${rfiCanary}`,
     };
     let rfi = null;
     let kept = flow;
     if (flow === 'draft') {
-      // The routes offer a draft; where the product refuses one, the RFI is raised open with nobody asked yet.
-      rfi = await ctx.attempt('rfi raised as a draft', () => raiser.POST(`${P}/rfi`, { ...asked, status: 'draft' }));
-      if (!rfi) {
+      // routes/rfi.js offers "draft" on create, but the approval-workflow table has no rule from
+      // nothing to draft. Asked as a probe: a refusal is a product finding, and the RFI is then
+      // raised open with nobody asked yet. Anything else than that refusal fails the run.
+      const probe = await raiser.send('POST', `${P}/rfi`, { ...asked, status: 'draft' });
+      if (probe.status >= 200 && probe.status < 300 && probe.body?.data?.id) {
+        rfi = probe.body.data;
+      } else if (probe.status === 409 && probe.body?.error?.code === 'APPROVAL_WORKFLOW_INVALID_TRANSITION') {
+        ctx.note(`product: POST /rfi with status "draft" (offered by its validator) is refused 409 ${probe.body.error.code}; raised open with nobody asked instead`);
         kept = 'unassigned';
         const { managerUserId, assigneeUserIds, distributionUserIds, ...bare } = asked;
         rfi = await raiser.POST(`${P}/rfi`, bare);
+      } else {
+        throw new Error(`documents: POST ${P}/rfi (draft) -> ${probe.status} ${JSON.stringify(probe.body?.error || probe.text).slice(0, 300)}`);
       }
     } else {
       rfi = await raiser.POST(`${P}/rfi`, asked);
     }
-    ctx.record('rfi', rfi.id);
+    ctx.record('rfi', required(rfi?.id, 'an RFI'));
     keep(made.rfis, kept, rfi.id);
 
     if (i < 2) {
-      const fileCanary = ctx.canary('rfi-file');
+      const fileCanary = canary('rfi-file');
       await attach(raiser, 'rfi', rfi.id, i ? pngFile(fileCanary) : pdfFile(fileCanary, `Sketch for ${topic}`), { caption: `Marked-up sketch — ${fileCanary}` });
     }
     if (i === 0) {
-      const fileCanary = ctx.canary('rfi-revision');
+      const fileCanary = canary('rfi-revision');
       await uploadRevision(raiser, 'rfi', rfi.id, 'Q1', pdfFile(fileCanary, `Question sheet for ${topic}`), { title: `Question sheet — ${fileCanary}`, notes: fileCanary, folderPath: '/RFI/Structure', category: 'RFI' });
     }
 
     const answer = (how) =>
       how === 'response'
-        ? planner.POST(`${R(rfi.id)}/responses`, { body: `Proceed as the specification states; the drawing will be revised. ${canary}`, isOfficial: true })
-        : planner.POST(`${R(rfi.id)}/answer`, { response: `Proceed as the specification states; the drawing will be revised. ${canary}`, answeredDate: ctx.today, comment: canary });
+        ? planner.POST(`${R(rfi.id)}/responses`, { body: `Proceed as the specification states; the drawing will be revised. ${rfiCanary}`, isOfficial: true })
+        : planner.POST(`${R(rfi.id)}/answer`, { response: `Proceed as the specification states; the drawing will be revised. ${rfiCanary}`, answeredDate: ctx.today, comment: rfiCanary });
 
     if (flow === 'closed') {
       // Approving the answer is what closes an RFI.
       await answer('answer');
-      await pm.POST(`${R(rfi.id)}/approve`, { comment: `Answer accepted — ${canary}` });
-      await ctx.attempt('rfi pdf', () => pm.download(`${R(rfi.id)}/export.pdf`));
+      await pm.POST(`${R(rfi.id)}/approve`, { comment: `Answer accepted — ${rfiCanary}` });
+      const bytes = await pm.download(`${R(rfi.id)}/export.pdf`);
+      if (!bytes?.length) throw new Error(`documents: the PDF export of RFI ${rfi.id} came back empty`);
     } else if (flow === 'open') {
-      const first = await planner.POST(`${R(rfi.id)}/responses`, { body: `Checking with the design team. ${canary}` });
-      const second = await raiser.POST(`${R(rfi.id)}/responses`, { body: `Site needs this before the pour. ${canary}` });
+      const first = await planner.POST(`${R(rfi.id)}/responses`, { body: `Checking with the design team. ${rfiCanary}` });
+      const second = await raiser.POST(`${R(rfi.id)}/responses`, { body: `Site needs this before the pour. ${rfiCanary}` });
       const responses = second?.responses || first?.responses || [];
-      if (responses[0]?.id) await ctx.attempt('rfi response edit', () => planner.PATCH(`${R(rfi.id)}/responses/${responses[0].id}`, { body: `Checking with the design team; answer expected this week. ${canary}` }));
+      const mine = responses.find((r) => String(r.body || '').startsWith('Checking with the design team')) || responses[0];
+      if (!mine?.id) throw new Error(`documents: the discussion on RFI ${rfi.id} answered without its responses`);
+      await planner.PATCH(`${R(rfi.id)}/responses/${mine.id}`, { body: `Checking with the design team; answer expected this week. ${rfiCanary}` });
       // The ball moves to whoever is asked next.
-      await ctx.attempt('rfi people', () => pm.PUT(`${R(rfi.id)}/people`, { managerUserId: user.pm, assigneeUserIds: [user.quality, user.planner], distributionUserIds: [user.qs, user.site] }));
+      await pm.PUT(`${R(rfi.id)}/people`, { managerUserId: user.pm, assigneeUserIds: [user.quality, user.planner], distributionUserIds: [user.qs, user.site] });
     } else if (flow === 'answered') {
       // Answered in the thread; the manager then makes that reply the official answer.
-      const thread = await planner.POST(`${R(rfi.id)}/responses`, { body: `Proceed as the specification states; the drawing will be revised. ${canary}` });
+      const thread = await planner.POST(`${R(rfi.id)}/responses`, { body: `Proceed as the specification states; the drawing will be revised. ${rfiCanary}` });
       const reply = (thread?.responses || []).slice(-1)[0];
-      if (reply?.id) await pm.POST(`${R(rfi.id)}/responses/${reply.id}/official`, {});
-      else await answer('answer');
+      if (!reply?.id) throw new Error(`documents: the reply on RFI ${rfi.id} answered without its responses`);
+      await pm.POST(`${R(rfi.id)}/responses/${reply.id}/official`, {});
     } else if (flow === 'draft') {
-      await ctx.attempt('rfi edit', () => raiser.PATCH(`${R(rfi.id)}`, { question: `Still being written; nobody has been asked yet. ${canary}`, comment: canary }));
+      // Still being written (or, where the draft was refused, open with nobody asked).
+      await raiser.PATCH(`${R(rfi.id)}`, { question: `Still being written; nobody has been asked yet. ${rfiCanary}`, comment: rfiCanary });
     } else if (flow === 'rejected') {
       await answer('response');
-      await pm.POST(`${R(rfi.id)}/reject`, { reason: `The answer does not address the question — ${canary}` });
+      await pm.POST(`${R(rfi.id)}/reject`, { reason: `The answer does not address the question — ${rfiCanary}` });
     } else if (flow === 'overdue') {
-      await raiser.POST(`${R(rfi.id)}/submit`, { comment: `Sent again, the answer is late — ${canary}` });
+      await raiser.POST(`${R(rfi.id)}/submit`, { comment: `Sent again, the answer is late — ${rfiCanary}` });
     } else if (flow === 'reopened') {
       await answer('answer');
-      await pm.POST(`${R(rfi.id)}/close`, { comment: `Closed — ${canary}` });
-      await pm.POST(`${R(rfi.id)}/reopen`, { reason: `Site found the same clash on the next bay — ${canary}` });
+      await pm.POST(`${R(rfi.id)}/close`, { comment: `Closed — ${rfiCanary}` });
+      await pm.POST(`${R(rfi.id)}/reopen`, { reason: `Site found the same clash on the next bay — ${rfiCanary}` });
     } else if (flow === 'converted') {
       await answer('answer');
-      const converted = await ctx.attempt('rfi to change order', () => qs.POST(`${R(rfi.id)}/convert-to-change`, { description: `Variation from the RFI answer — ${canary}`, category: 'rfi', value: 1500 + i * 250 }));
-      const changeOrderId = converted?.changeOrder?.id || converted?.id;
-      if (changeOrderId) {
-        ctx.record('change_order', changeOrderId);
-        made.rfiChangeOrder = changeOrderId;
-      }
+      const converted = await qs.POST(`${R(rfi.id)}/convert-to-change`, { description: `Variation from the RFI answer — ${rfiCanary}`, category: 'rfi', value: 1500 + i * 250 });
+      const changeOrderId = required(converted?.changeOrder?.id, `converting RFI ${rfi.id} to a change order`);
+      ctx.record('change_order', changeOrderId);
+      made.rfiChangeOrders = [...(made.rfiChangeOrders || []), changeOrderId];
     } else if (flow === 'archived') {
-      await ctx.attempt('rfi archive', () => pm.DELETE(`${R(rfi.id)}`));
+      await pm.DELETE(`${R(rfi.id)}`);
     }
 
-    // Every reply in the thread, the official answer included, is a row of its own.
-    if (flow !== 'archived') {
-      const thread = await ctx.attempt('rfi responses', () => raiser.GET(`${R(rfi.id)}/responses`));
-      for (const response of listOf(thread)) ctx.record('rfi_response', response.id);
-    }
+    // Every reply in the thread, the official answer included, is a row of its own (an archived RFI has none).
+    if (flow !== 'archived') for (const response of listOf(await raiser.GET(`${R(rfi.id)}/responses`))) ctx.record('rfi_response', response.id);
   }
 
-  // ── submittals: a workflow template, then the submittals and their packages ──
-  const templateCanary = ctx.canary('submittal-template');
+  // ── submittals: workflow templates, then the submittals and their packages ──
+  const templateCanary = canary('submittal-template');
   const template = await planner.POST(`${P}/submittals/workflow-templates`, {
     name: `Technical then PM review r${runNo} ${templateCanary}`.slice(0, 120),
     description: `Two steps: technical check, then the project manager — ${templateCanary}`,
     isDefault: false,
     steps: [
-      { name: 'Technical check', mode: 'sequential', days: 5, assignees: [{ type: 'user', userId: user.qs }] },
-      { name: 'Project manager', mode: 'sequential', days: 3, assignees: [{ type: 'user', userId: user.pm }] },
+      { name: `Technical check ${templateCanary}`, mode: 'sequential', days: 5, assignees: [{ type: 'user', userId: user.qs }] },
+      { name: `Project manager ${templateCanary}`, mode: 'sequential', days: 3, assignees: [{ type: 'user', userId: user.pm }] },
     ],
   });
-  ctx.record('submittal_workflow_template', template.id);
+  ctx.record('submittal_workflow_template', required(template?.id, 'a submittal workflow template'));
   made.templates.push(template.id);
-  await ctx.attempt('template edit', () => planner.PATCH(`${P}/submittals/workflow-templates/${template.id}`, { description: `Technical check, then the project manager (edited) — ${templateCanary}` }));
-  if (ctx.count(0, 1)) {
-    const spareCanary = ctx.canary('submittal-template');
-    const spare = await ctx.attempt('spare template', () =>
-      planner.POST(`${P}/submittals/workflow-templates`, { name: `Single review r${runNo} ${spareCanary}`.slice(0, 120), description: spareCanary, steps: [{ name: 'Review', mode: 'parallel', days: 7, assignees: [{ type: 'role', role: 'pm' }, { type: 'user', userId: user.planner }] }] })
-    );
-    if (spare?.id) {
-      ctx.record('submittal_workflow_template', spare.id);
-      made.templates.push(spare.id);
-      await ctx.attempt('template archive', () => planner.DELETE(`${P}/submittals/workflow-templates/${spare.id}`));
-    }
+  await planner.PATCH(`${P}/submittals/workflow-templates/${template.id}`, { description: `Technical check, then the project manager (edited) — ${templateCanary}` });
+  {
+    // A second template, archived: the list keeps it under includeArchived.
+    const spareCanary = canary('submittal-template');
+    const spare = await planner.POST(`${P}/submittals/workflow-templates`, { name: `Single review r${runNo} ${spareCanary}`.slice(0, 120), description: spareCanary, steps: [{ name: `Review ${spareCanary}`, mode: 'parallel', days: 7, assignees: [{ type: 'role', role: 'pm' }, { type: 'user', userId: user.planner }] }] });
+    ctx.record('submittal_workflow_template', required(spare?.id, 'the spare submittal template'));
+    made.templates.push(spare.id);
+    await planner.DELETE(`${P}/submittals/workflow-templates/${spare.id}`);
   }
 
   const S = (id) => `${P}/submittals/${id}`;
   const newSubmittal = async (i, raiser, extra = {}) => {
     const [topic, discipline, specRef] = SUBMITTAL_TOPICS[i % SUBMITTAL_TOPICS.length];
-    const canary = ctx.canary('submittal');
+    const subCanary = canary('submittal');
     const row = await raiser.POST(`${P}/submittals`, {
-      title: `${topic} — ${canary}`,
+      title: `${topic} — ${subCanary}`,
       specRef,
       discipline,
       activityId: activityAt(i + 1),
@@ -442,111 +529,121 @@ const run = async (ctx) => {
       reviewDays: 7,
       requiredOnSite: ctx.daysAhead(45 + i * 3),
       dueDate: ctx.daysAhead(10 + i),
-      comment: `For approval — ${canary}`,
+      comment: `For approval — ${subCanary}`,
       ...extra,
     });
-    ctx.record('submittal', row.id);
-    return { id: row.id, canary, topic };
+    ctx.record('submittal', required(row?.id, 'a submittal'));
+    return { id: row.id, canary: subCanary, topic };
   };
 
-  const submittalCount = ctx.count(4, SUBMITTAL_FLOWS.length);
+  const submittalCount = SUBMITTAL_FLOWS.length + ctx.count(0, 1);
   for (let i = 0; i < submittalCount; i += 1) {
     const flow = SUBMITTAL_FLOWS[i % SUBMITTAL_FLOWS.length];
     const raiser = i % 2 ? quality : site;
     const stepped = flow === 'step_approved' || flow === 'step_rejected';
     const sub = await newSubmittal(i, raiser, stepped ? { workflowTemplateId: template.id } : {});
     keep(made.submittals, flow, sub.id);
-    const { canary } = sub;
+    const subCanary = sub.canary;
 
     // The submission itself: a revision file, and on some an attachment as well.
-    const fileCanary = ctx.canary('submittal-revision');
+    const fileCanary = canary('submittal-revision');
     const rev0 = await uploadRevision(raiser, 'submittal', sub.id, '0', pdfFile(fileCanary, `${sub.topic} rev 0`), { title: `${sub.topic} rev 0 — ${fileCanary}`, notes: fileCanary, folderPath: '/Submittals/Materials', category: 'Submittals' });
     made.revisions[`submittal:${flow}:0`] = rev0.id;
     if (i % 2 === 0) {
-      const attCanary = ctx.canary('submittal-file');
+      const attCanary = canary('submittal-file');
       await attach(raiser, 'submittal', sub.id, i % 4 === 0 ? textFile(attCanary, 'Covering note') : pngFile(attCanary), { caption: `Covering note — ${attCanary}` });
     }
     if (flow === 'pending') continue;
     if (flow === 'archived') {
-      await ctx.attempt('submittal archive', () => pm.DELETE(S(sub.id)));
+      await pm.DELETE(S(sub.id));
       continue;
     }
 
-    await raiser.POST(`${S(sub.id)}/submit`, { comment: `Submitted for review — ${canary}` });
+    await raiser.POST(`${S(sub.id)}/submit`, { comment: `Submitted for review — ${subCanary}` });
     if (flow === 'approved') {
-      await qs.POST(`${S(sub.id)}/review`, { comment: `Checked against the specification — ${canary}` });
-      await pm.POST(`${S(sub.id)}/approve`, { comment: `Approved — ${canary}` });
+      await qs.POST(`${S(sub.id)}/review`, { comment: `Checked against the specification — ${subCanary}` });
+      await pm.POST(`${S(sub.id)}/approve`, { comment: `Approved — ${subCanary}` });
     } else if (flow === 'rejected') {
-      await pm.POST(`${S(sub.id)}/reject`, { reason: `Wrong grade certified; resubmit — ${canary}` });
+      await pm.POST(`${S(sub.id)}/reject`, { reason: `Wrong grade certified; resubmit — ${subCanary}` });
     } else if (flow === 'resubmitted') {
-      await pm.POST(`${S(sub.id)}/reject`, { reason: `Certificate out of date — ${canary}` });
-      const secondCanary = ctx.canary('submittal-revision');
+      await pm.POST(`${S(sub.id)}/reject`, { reason: `Certificate out of date — ${subCanary}` });
+      const secondCanary = canary('submittal-revision');
       const rev1 = await uploadRevision(raiser, 'submittal', sub.id, '1', pdfFile(secondCanary, `${sub.topic} rev 1`), { title: `${sub.topic} rev 1 — ${secondCanary}`, notes: secondCanary });
       made.revisions[`submittal:${flow}:1`] = rev1.id;
-      await raiser.POST(`${S(sub.id)}/resubmit`, { reason: `Current certificate attached — ${canary}` });
-      await qs.POST(`${S(sub.id)}/review`, { comment: `Rev 1 checked — ${canary}` });
-      await pm.POST(`${S(sub.id)}/approve`, { comment: `Rev 1 approved — ${canary}` });
+      await raiser.POST(`${S(sub.id)}/resubmit`, { reason: `Current certificate attached — ${subCanary}` });
+      await qs.POST(`${S(sub.id)}/review`, { comment: `Rev 1 checked — ${subCanary}` });
+      await pm.POST(`${S(sub.id)}/approve`, { comment: `Rev 1 approved — ${subCanary}` });
     } else if (flow === 'sent_back') {
-      await pm.POST(`${S(sub.id)}/resubmit`, { reason: `Add the test report and send again — ${canary}` });
+      await pm.POST(`${S(sub.id)}/resubmit`, { reason: `Add the test report and send again — ${subCanary}` });
     } else if (flow === 'step_approved') {
-      await ctx.attempt('submittal step 1', () => qs.POST(`${S(sub.id)}/decide`, { decision: 'approve', responseCode: 'approved_as_noted', comment: `Technically acceptable, see notes — ${canary}` }));
-      await ctx.attempt('submittal step 2', () => pm.POST(`${S(sub.id)}/decide`, { decision: 'approve', responseCode: 'approved', comment: `Approved — ${canary}` }));
+      await qs.POST(`${S(sub.id)}/decide`, { decision: 'approve', responseCode: 'approved_as_noted', comment: `Technically acceptable, see notes — ${subCanary}` });
+      await pm.POST(`${S(sub.id)}/decide`, { decision: 'approve', responseCode: 'approved', comment: `Approved — ${subCanary}` });
     } else if (flow === 'step_rejected') {
-      await ctx.attempt('submittal step reject', () => qs.POST(`${S(sub.id)}/decide`, { decision: 'reject', responseCode: 'revise_resubmit', comment: `Dimensions missing; revise and resubmit — ${canary}` }));
-    }
-    if (flow === 'under_review') {
-      await ctx.attempt('submittal people', () => pm.PUT(`${S(sub.id)}/people`, { managerUserId: user.pm, distributionUserIds: [user.qs, user.site] }));
+      await qs.POST(`${S(sub.id)}/decide`, { decision: 'reject', responseCode: 'revise_resubmit', comment: `Dimensions missing; revise and resubmit — ${subCanary}` });
+    } else if (flow === 'under_review') {
+      await pm.PUT(`${S(sub.id)}/people`, { managerUserId: user.pm, distributionUserIds: [user.qs, user.site] });
     }
   }
 
-  const packageCount = ctx.count(1, 2);
+  /** A package answer lists what happened to each member; a member that failed is a failure of the step. */
+  const membersDone = (label, answer, key) => {
+    const results = answer?.results;
+    if (!Array.isArray(results)) throw new Error(`documents: ${label} answered without its per-member results`);
+    for (const row of results) {
+      if (row[key] === false) throw new Error(`documents: ${label}: member ${row.ref || row.submittalId} was not ${key}: ${row.error || 'no reason given'}`);
+      if (row.skipped) ctx.note(`${label}: member ${row.ref || row.submittalId} skipped (${row.reason})`);
+    }
+    return results;
+  };
+
+  const packageCount = 2;
   for (let p = 0; p < packageCount; p += 1) {
-    const canary = ctx.canary('submittal-package');
+    const packCanary = canary('submittal-package');
     const members = [];
     for (let k = 0; k < 2; k += 1) members.push(await newSubmittal(p * 3 + k + 2, site, p === 0 ? { workflowTemplateId: template.id } : {}));
     const pack = await site.POST(`${P}/submittals/packages`, {
-      name: `Package ${p + 1} r${runNo} ${canary}`,
-      description: `Submitted together — ${canary}`,
+      name: `Package ${p + 1} r${runNo} ${packCanary}`,
+      description: `Submitted together — ${packCanary}`,
       activityId: activityAt(p + 3),
       requiredOnSite: ctx.daysAhead(50),
       managerUserId: user.pm,
       submittalIds: [members[0].id],
     });
-    ctx.record('submittal_package', pack.id);
+    ctx.record('submittal_package', required(pack?.id, 'a submittal package'));
     made.packages.push(pack.id);
     await site.POST(`${P}/submittals/packages/${pack.id}/items`, { submittalIds: [members[1].id] });
-    await ctx.attempt('package edit', () => site.PATCH(`${P}/submittals/packages/${pack.id}`, { description: `Submitted together (edited) — ${canary}` }));
+    await site.PATCH(`${P}/submittals/packages/${pack.id}`, { description: `Submitted together (edited) — ${packCanary}` });
     if (p === 0) {
       // Submitted as one, and the first step decided for every member at once.
-      await ctx.attempt('package submit', () => site.POST(`${P}/submittals/packages/${pack.id}/submit`, { comment: `Package submitted — ${canary}` }));
-      await ctx.attempt('package decide', () => qs.POST(`${P}/submittals/packages/${pack.id}/decide`, { decision: 'approve', responseCode: 'approved', comment: `Package checked — ${canary}` }));
+      membersDone('package submit', await site.POST(`${P}/submittals/packages/${pack.id}/submit`, { comment: `Package submitted — ${packCanary}` }), 'submitted');
+      membersDone('package decide', await qs.POST(`${P}/submittals/packages/${pack.id}/decide`, { decision: 'approve', responseCode: 'approved', comment: `Package checked — ${packCanary}` }), 'decided');
     } else {
       // Left open; one member taken out again.
-      await ctx.attempt('package remove item', () => site.DELETE(`${P}/submittals/packages/${pack.id}/items/${members[1].id}`));
+      await site.DELETE(`${P}/submittals/packages/${pack.id}/items/${members[1].id}`);
     }
   }
 
   // ── drawings: the register and its revisions ──────────────────────────────
   const D = `${P}/doc-control`;
-  const drawingCount = ctx.count(2, DRAWING_TITLES.length);
+  const drawingCount = DRAWING_TITLES.length + ctx.count(0, 1);
   for (let i = 0; i < drawingCount; i += 1) {
     const [letter, title, flow] = DRAWING_TITLES[i % DRAWING_TITLES.length];
-    const canary = ctx.canary('drawing');
+    const drawingCanary = canary('drawing');
     const number = `${letter}-${101 + i}-R${runNo}`;
     const drawing = await planner.POST(`${P}/drawings`, {
       drawingNumber: number,
-      title: `${title} — ${canary}`,
+      title: `${title} — ${drawingCanary}`,
       status: 'active',
       activityId: activityAt(i + 2),
       activityIds: [activityAt(i + 2)],
       issueDate: ctx.daysAgo(30 - i),
-      comment: `Registered — ${canary}`,
+      comment: `Registered — ${drawingCanary}`,
     });
-    ctx.record('drawing_record', drawing.id);
+    ctx.record('drawing_record', required(drawing?.id, 'a drawing'));
     keep(made.drawings, flow, drawing.id);
 
     const revision = async (label, who = site) => {
-      const fileCanary = ctx.canary('drawing-revision');
+      const fileCanary = canary('drawing-revision');
       const row = await uploadRevision(who, 'drawing', drawing.id, label, pdfFile(fileCanary, `${number} rev ${label}`, [title]), {
         title: `${title} rev ${label} — ${fileCanary}`,
         notes: `Rev ${label} — ${fileCanary}`,
@@ -558,8 +655,8 @@ const run = async (ctx) => {
       made.revisions[`drawing:${flow}:${label}`] = row.id;
       return row;
     };
-    const review = (row, who = site) => who.POST(`${D}/revisions/${row.id}/submit-review`, { comment: `For review — ${canary}`, reviewDueAt: ctx.daysAhead(5) });
-    const approve = (row) => pm.POST(`${D}/revisions/${row.id}/approve`, { comment: `Approved for construction — ${canary}` });
+    const review = (row, who = site) => who.POST(`${D}/revisions/${row.id}/submit-review`, { comment: `For review — ${drawingCanary}`, reviewDueAt: ctx.daysAhead(5) });
+    const approve = (row) => pm.POST(`${D}/revisions/${row.id}/approve`, { comment: `Approved for construction — ${drawingCanary}` });
 
     if (flow === 'issued') {
       const a = await revision('A');
@@ -569,31 +666,27 @@ const run = async (ctx) => {
       await review(b);
       await approve(b);
       await revision('C');
-      const fileCanary = ctx.canary('drawing-file');
+      const fileCanary = canary('drawing-file');
       await attach(planner, 'drawing', drawing.id, textFile(fileCanary, `Issue note for ${number}`), { caption: `Issue note — ${fileCanary}` });
-      const bytes = await ctx.attempt('revision download', () => pm.download(`${D}/revisions/${b.id}/download`));
-      if (bytes && !bytes.includes(Buffer.from(ctx.project.canary))) ctx.note(`revision ${b.id} downloaded without its canary`);
-      await ctx.attempt('revision preview', () => pm.download(`${D}/revisions/${b.id}/preview`));
+      const bytes = await pm.download(`${D}/revisions/${b.id}/download`);
+      if (!bytes.includes(Buffer.from(ctx.project.canary))) throw new Error(`documents: revision ${b.id} downloaded without its canary`);
+      await pm.download(`${D}/revisions/${b.id}/preview`);
     } else if (flow === 'in_review') {
       await review(await revision('A', planner), planner);
     } else if (flow === 'superseded') {
       const a = await revision('A');
       await review(a);
       await approve(a);
-      await ctx.attempt('revision supersede', () => pm.POST(`${D}/revisions/${a.id}/supersede`, { reason: `Replaced by the coordinated set — ${canary}` }));
-      await ctx.attempt('drawing superseded', () => planner.PATCH(`${P}/drawings/${drawing.id}`, { status: 'superseded', comment: `Superseded — ${canary}` }));
+      await pm.POST(`${D}/revisions/${a.id}/supersede`, { reason: `Replaced by the coordinated set — ${drawingCanary}` });
+      await planner.PATCH(`${P}/drawings/${drawing.id}`, { status: 'superseded', comment: `Superseded — ${drawingCanary}` });
     } else if (flow === 'cancelled') {
       // A revision that points at a file already on the project (the JSON route), then the drawing is cancelled.
-      const fileCanary = ctx.canary('drawing-file');
+      const fileCanary = canary('drawing-file');
       const filed = await attach(planner, 'drawing', drawing.id, pdfFile(fileCanary, `${number} preliminary`), { caption: `Preliminary — ${fileCanary}`, role: 'reference' });
-      const linked = await ctx.attempt('revision from a filed document', () =>
-        planner.POST(`${D}/drawing/${drawing.id}/revisions`, { revision: 'P1', projectDocumentId: filed.documentId, title: `${title} rev P1 — ${fileCanary}`, notes: fileCanary, status: 'submitted', folderPath: '/Drawings/Preliminary', category: 'Drawings' })
-      );
-      if (linked?.id) {
-        ctx.record('document_revision', linked.id);
-        made.revisions[`drawing:${flow}:P1`] = linked.id;
-      }
-      await ctx.attempt('drawing cancelled', () => planner.PATCH(`${P}/drawings/${drawing.id}`, { status: 'cancelled', comment: `Scope removed — ${canary}` }));
+      const linked = await planner.POST(`${D}/drawing/${drawing.id}/revisions`, { revision: 'P1', projectDocumentId: required(filed.documentId, 'the preliminary drawing file'), title: `${title} rev P1 — ${fileCanary}`, notes: fileCanary, status: 'submitted', folderPath: '/Drawings/Preliminary', category: 'Drawings' });
+      once('document_revision', required(linked?.id, `revision P1 of drawing ${drawing.id}`));
+      made.revisions[`drawing:${flow}:P1`] = linked.id;
+      await planner.PATCH(`${P}/drawings/${drawing.id}`, { status: 'cancelled', comment: `Scope removed — ${drawingCanary}` });
     } else {
       await revision('A');
     }
@@ -602,90 +695,76 @@ const run = async (ctx) => {
   // ── drawing sets: uploaded; processing is the worker's ────────────────────
   const setCount = ctx.count(1, 2);
   for (let i = 0; i < setCount; i += 1) {
-    const canary = ctx.canary('drawing-set');
+    const setCanary = canary('drawing-set');
+    // Sheet numbers carry the run and the set, so a set published by a later run lands on sheets of its own.
+    const sheetNo = (n) => `S-${runNo * 100 + (i + 1) * 10 + n}`;
     const body = pdf([
-      [`S-20${i + 1} FOUNDATION PLAN`, 'Rev A', canary, 'Scale 1:100'],
-      [`S-20${i + 2} COLUMN SCHEDULE`, 'Rev A', canary, 'Scale 1:50'],
+      [`${sheetNo(1)} FOUNDATION PLAN`, 'Rev A', setCanary, 'Scale 1:100'],
+      [`${sheetNo(2)} COLUMN SCHEDULE`, 'Rev A', setCanary, 'Scale 1:50'],
     ]);
     const set = await planner.upload('POST', `${P}/drawings/sets`, {
       field: 'file',
-      filename: `${canary}.pdf`,
+      filename: `${setCanary}.pdf`,
       contentType: 'application/pdf',
       body,
-      fields: { name: `Structural set ${i + 1} r${runNo} ${canary}`, discipline: 'structural', purpose: i ? 'SHOP' : 'IFC', description: `Issued for construction — ${canary}`, receivedAt: ctx.daysAgo(3), issuedAt: ctx.daysAgo(4) },
+      fields: { name: `Structural set ${i + 1} r${runNo} ${setCanary}`, discipline: 'structural', purpose: i ? 'SHOP' : 'IFC', description: `Issued for construction — ${setCanary}`, receivedAt: ctx.daysAgo(3), issuedAt: ctx.daysAgo(4) },
     });
-    ctx.record('drawing_set', set.id);
+    ctx.record('drawing_set', required(set?.id, 'a drawing set'));
     made.sets.push(set.id);
-    const sourceId = set.sourceDocumentId || set.sourceDocument?.id;
-    if (sourceId) {
-      ctx.record('project_document', sourceId);
-      made.documents.push(sourceId);
-    }
-    await ctx.attempt('drawing set edit', () => planner.PATCH(`${P}/drawings/sets/${set.id}`, { description: `Issued for construction (edited) — ${canary}` }));
-    const fileCanary = ctx.canary('drawing-set-file');
-    await ctx.attempt('attachment on the drawing set', () => attach(planner, 'drawing_set', set.id, textFile(fileCanary, 'Set cover sheet'), { caption: `Cover sheet — ${fileCanary}` }));
-    const after = await ctx.attempt('drawing set read', () => planner.GET(`${P}/drawings/sets/${set.id}`));
-    if (i === 0 && after && ['review', 'published'].includes(after.status)) {
+    keepDocument(set.sourceDocumentId || set.sourceDocument?.id);
+    await planner.PATCH(`${P}/drawings/sets/${set.id}`, { description: `Issued for construction (edited) — ${setCanary}` });
+    const fileCanary = canary('drawing-set-file');
+    await attach(planner, 'drawing_set', set.id, textFile(fileCanary, 'Set cover sheet'), { caption: `Cover sheet — ${fileCanary}` });
+    const after = await planner.GET(`${P}/drawings/sets/${set.id}`);
+    if (i === 0 && ['review', 'published'].includes(after?.status)) {
       // Only where something processed the set: name the pages and publish.
       const pages = after.revisions || [];
-      await ctx.attempt('drawing set review', () => planner.PATCH(`${P}/drawings/sets/${set.id}/revisions`, { updates: pages.map((page, n) => ({ id: page.id, number: page.number || `S-${runNo}${i}${n + 1}`, title: page.title || `Sheet ${n + 1} ${canary}`.slice(0, 200), revision: page.revision || 'A' })) }));
-      const published = await ctx.attempt('drawing set publish', () => planner.POST(`${P}/drawings/sets/${set.id}/publish`, {}));
-      if (published) for (const page of pages) ctx.record('sheet_revision', page.id);
+      if (after.status === 'review') {
+        await planner.PATCH(`${P}/drawings/sets/${set.id}/revisions`, { updates: pages.map((page, n) => ({ id: page.id, number: page.number || sheetNo(n + 1), title: page.title || `Sheet ${n + 1} ${setCanary}`.slice(0, 200), revision: page.revision || 'A' })) });
+        await planner.POST(`${P}/drawings/sets/${set.id}/publish`, {});
+      }
+      for (const page of pages) ctx.record('sheet_revision', page.id);
     } else if (i === 0) {
       ctx.note(`drawing set ${set.id} is ${after?.status || set.status}: publishing waits for the job worker`);
     }
   }
 
-  // Sheets exist only where a set was processed and published.
-  try {
-    const sheets = listOf(await planner.GET(`${P}/drawings/sheets?status=all`));
-    if (!sheets.length) {
-      ctx.note('no sheets on the project (drawing sets were not processed): sheet revisions, markups and pins were not made');
-    } else {
-      const sheet = sheets[0];
-      ctx.record('sheet', sheet.id);
-      const canary = ctx.canary('sheet');
-      const added = await ctx.attempt('sheet revision', () =>
-        planner.upload('POST', `${P}/drawings/sheets/${sheet.id}/revisions`, { field: 'file', ...pdfFile(canary, `${sheet.number} revised`), fields: { revision: `R${runNo}`, title: `${sheet.title || sheet.number} ${canary}`.slice(0, 200) } })
-      );
-      const addedId = added?.revision?.id || added?.id;
-      if (addedId) ctx.record('sheet_revision', addedId);
-      const markup = await ctx.attempt('markup', () =>
-        site.PUT(`${P}/drawings/sheets/${sheet.id}/markups/mine`, { name: `Site notes ${canary}`.slice(0, 120), shapes: [{ type: 'text', x: 0.3, y: 0.4, text: canary }, { type: 'rect', x: 0.1, y: 0.1, w: 0.2, h: 0.1 }] })
-      );
-      const markupId = markup?.id || markup?.markup?.id;
-      if (markupId) {
-        ctx.record('markup', markupId);
-        await ctx.attempt('markup publish', () => planner.POST(`${P}/drawings/sheets/${sheet.id}/markups/${markupId}/publish`, { name: `Published notes ${canary}`.slice(0, 120) }));
-      }
-      const pinTarget = made.rfis.open || made.rfis.closed;
-      if (pinTarget) {
-        const pin = await ctx.attempt('pin', () => site.POST(`${P}/drawings/sheets/${sheet.id}/pins`, { x: 0.42, y: 0.37, recordType: 'rfi', recordId: pinTarget, label: canary.slice(-40) }));
-        const pinId = pin?.id || pin?.pin?.id;
-        if (pinId) ctx.record('pin', pinId);
-      }
-    }
-  } catch (error) {
-    ctx.note(`sheets: ${String(error.message || error).slice(0, 200)}`);
+  // Sheets exist only where this run's set was processed and published; earlier runs' sheets are not touched.
+  const sheets = [];
+  for (const setId of made.sets) sheets.push(...listOf(await planner.GET(`${P}/drawings/sheets?status=all&setId=${setId}`)));
+  if (!sheets.length) {
+    ctx.note("no sheets from this run's drawing sets (the sets were not processed): sheet revisions, markups and pins were not made");
+  } else {
+    for (const sheet of sheets) ctx.record('sheet', sheet.id);
+    const sheet = sheets[0];
+    const sheetCanary = canary('sheet');
+    const added = await planner.upload('POST', `${P}/drawings/sheets/${sheet.id}/revisions`, { field: 'file', ...pdfFile(sheetCanary, `${sheet.number} revised`), fields: { revision: `R${runNo}`, title: `${sheet.title || sheet.number} ${sheetCanary}`.slice(0, 200) } });
+    ctx.record('sheet_revision', required(added?.revision?.id || added?.id, `a revision of sheet ${sheet.id}`));
+    // The markup is the site engineer's own layer; only its author may publish it.
+    const markup = await site.PUT(`${P}/drawings/sheets/${sheet.id}/markups/mine`, { name: `Site notes ${sheetCanary}`.slice(0, 120), shapes: [{ type: 'text', x: 0.3, y: 0.4, text: sheetCanary }, { type: 'rect', x: 0.1, y: 0.1, w: 0.2, h: 0.1 }] });
+    const markupId = required(markup?.id || markup?.markup?.id, `the markup on sheet ${sheet.id}`);
+    ctx.record('markup', markupId);
+    await site.POST(`${P}/drawings/sheets/${sheet.id}/markups/${markupId}/publish`, { name: `Published notes ${sheetCanary}`.slice(0, 120) });
+    const pinTarget = made.rfis.open || made.rfis.closed;
+    const pin = await site.POST(`${P}/drawings/sheets/${sheet.id}/pins`, { x: 0.42, y: 0.37, recordType: 'rfi', recordId: pinTarget, label: sheetCanary.slice(-40) });
+    ctx.record('pin', required(pin?.id || pin?.pin?.id, `the pin on sheet ${sheet.id}`));
   }
 
   // ── a file put in the workflow store first, cited afterwards by its key ───
-  const receiptCanary = ctx.canary('workflow-file');
-  const stored = await ctx.attempt('workflow upload', () => site.upload('POST', `${P}/workflow/uploads`, { field: 'files', ...textFile(receiptCanary, 'Courier receipt') }));
+  const receiptCanary = canary('workflow-file');
+  const stored = await site.upload('POST', `${P}/workflow/uploads`, { field: 'files', ...textFile(receiptCanary, 'Courier receipt') });
   const receipt = (Array.isArray(stored) ? stored : stored?.items || [])[0] || null;
-  if (receipt?.documentId) {
-    ctx.record('project_document', receipt.documentId);
-    made.documents.push(receipt.documentId);
-    await ctx.attempt('workflow file download', () => site.download(`${P}/workflow/uploads/${receipt.key || receipt.documentId}`));
-  }
+  keepDocument(required(receipt?.documentId, 'the workflow upload'));
+  const receiptBytes = await site.download(`${P}/workflow/uploads/${receipt.key || receipt.documentId}`);
+  if (!receiptBytes.includes(Buffer.from(receiptCanary))) throw new Error('documents: the workflow upload came back without its canary');
 
   // ── transmittals ──────────────────────────────────────────────────────────
   const transmittalCount = ctx.count(2, TRANSMITTAL_SUBJECTS.length);
   for (let i = 0; i < transmittalCount; i += 1) {
-    const canary = ctx.canary('transmittal');
+    const trmCanary = canary('transmittal');
     const acknowledged = i % 2 === 1;
     const row = await planner.POST(`${P}/transmittals`, {
-      subject: `${TRANSMITTAL_SUBJECTS[i % TRANSMITTAL_SUBJECTS.length]} — ${canary}`,
+      subject: `${TRANSMITTAL_SUBJECTS[i % TRANSMITTAL_SUBJECTS.length]} — ${trmCanary}`,
       sender: `${ctx.company.canary} site office`,
       recipient: party(i % 2 ? 'consultant' : 'client'),
       method: TRANSMITTAL_METHODS[i % TRANSMITTAL_METHODS.length],
@@ -693,78 +772,81 @@ const run = async (ctx) => {
       transmittedOn: ctx.daysAgo(10 - i),
       dueDate: ctx.daysAhead(4 + i),
       activityIds: [activityAt(i + 4)],
-      comment: `Issued — ${canary}`,
-      ...(i === 1 && receipt ? { attachmentRefs: [{ fileName: receipt.fileName, storageKey: receipt.storageKey || receipt.key, mimeType: receipt.mimeType, sizeBytes: receipt.sizeBytes, description: `Courier receipt — ${receiptCanary}` }] } : {}),
+      comment: `Issued — ${trmCanary}`,
+      ...(i === 1 ? { attachmentRefs: [{ fileName: receipt.fileName, storageKey: receipt.storageKey || receipt.key, mimeType: receipt.mimeType, sizeBytes: receipt.sizeBytes, description: `Courier receipt — ${receiptCanary}` }] } : {}),
     });
-    ctx.record('transmittal', row.id);
+    ctx.record('transmittal', required(row?.id, 'a transmittal'));
     keep(made.transmittals, acknowledged ? 'acknowledged' : 'pending_ack', row.id);
     if (i === 0) {
       // Filed as an attachment, then made a revision of the transmittal by its document id and sent for review.
-      const fileCanary = ctx.canary('transmittal-file');
+      const fileCanary = canary('transmittal-file');
       const filed = await attach(planner, 'transmittal', row.id, pdfFile(fileCanary, 'Transmittal cover sheet'), { caption: `Cover sheet — ${fileCanary}` });
-      const rev = await planner.POST(`${D}/transmittal/${row.id}/revisions`, { revision: 'A', projectDocumentId: filed.documentId, title: `Transmittal cover sheet — ${fileCanary}`, fileName: `${fileCanary}.pdf`, notes: fileCanary, status: 'submitted', folderPath: '/Transmittals/Client', category: 'Transmittals' });
-      ctx.record('document_revision', rev.id);
+      const rev = await planner.POST(`${D}/transmittal/${row.id}/revisions`, { revision: 'A', projectDocumentId: required(filed.documentId, 'the transmittal cover sheet'), title: `Transmittal cover sheet — ${fileCanary}`, fileName: `${fileCanary}.pdf`, notes: fileCanary, status: 'submitted', folderPath: '/Transmittals/Client', category: 'Transmittals' });
+      once('document_revision', required(rev?.id, `revision A of transmittal ${row.id}`));
       made.revisions['transmittal:A:submitted'] = rev.id;
     }
     if (i === 1) {
-      const fileCanary = ctx.canary('transmittal-revision');
+      const fileCanary = canary('transmittal-revision');
       const rev = await uploadRevision(planner, 'transmittal', row.id, 'A', textFile(fileCanary, 'Delivery note'), { title: `Delivery note — ${fileCanary}`, notes: fileCanary });
       made.revisions['transmittal:A:uploaded'] = rev.id;
     }
-    if (acknowledged) await pm.PATCH(`${P}/transmittals/${row.id}`, { status: 'acknowledged', acknowledgedOn: ctx.daysAgo(1), comment: `Acknowledged by the recipient — ${canary}` });
+    if (acknowledged) await pm.PATCH(`${P}/transmittals/${row.id}`, { status: 'acknowledged', acknowledgedOn: ctx.daysAgo(1), comment: `Acknowledged by the recipient — ${trmCanary}` });
   }
 
   // ── correspondence ────────────────────────────────────────────────────────
-  const letterCount = ctx.count(3, LETTERS.length);
+  const letterCount = ctx.count(4, LETTERS.length);
   let filedLetter = null;
   for (let i = 0; i < letterCount; i += 1) {
     const [direction, type, subject] = LETTERS[i % LETTERS.length];
-    const canary = ctx.canary('correspondence');
+    const corCanary = canary('correspondence');
     const closing = i % 3 === 1;
     const row = await (i % 2 ? site : pm).POST(`${P}/correspondence`, {
       direction,
       type,
-      subject: `${subject} — ${canary}`,
+      subject: `${subject} — ${corCanary}`,
       date: ctx.daysAgo(12 - i),
       responseRequiredBy: ctx.daysAhead(i % 2 ? 3 : -2),
       status: 'open',
       activityId: activityAt(i + 5),
-      comment: `${direction === 'incoming' ? 'Received from' : 'Sent to'} ${party(i % 2 ? 'consultant' : 'client')} — ${canary}`,
+      comment: `${direction === 'incoming' ? 'Received from' : 'Sent to'} ${party(i % 2 ? 'consultant' : 'client')} — ${corCanary}`,
     });
-    ctx.record('correspondence', row.id);
+    ctx.record('correspondence', required(row?.id, 'a letter'));
     keep(made.correspondence, `${closing ? 'closed' : 'open'}_${direction}_${type}`, row.id);
     if (i === 0) {
-      const fileCanary = ctx.canary('correspondence-file');
+      const fileCanary = canary('correspondence-file');
       filedLetter = await attach(pm, 'correspondence', row.id, pdfFile(fileCanary, subject, [`To: ${party('client')}`]), { caption: `Signed letter — ${fileCanary}`, role: 'signature' });
-    } else if (i === 1 && filedLetter?.documentId) {
+    } else if (i === 1) {
       // The same file filed on a second record: linked by its document id, not uploaded again.
-      const link = await ctx.attempt('attachment by document id', () => pm.upload('POST', `${P}/attachments`, { fields: { recordType: 'correspondence', recordId: row.id, documentIds: [filedLetter.documentId], caption: `See also — ${canary}` } }));
-      for (const item of link?.items || []) ctx.record('attachment', item.id);
+      const link = await pm.upload('POST', `${P}/attachments`, { fields: { recordType: 'correspondence', recordId: row.id, documentIds: [required(filedLetter?.documentId, 'the signed letter')], caption: `See also — ${corCanary}` } });
+      const items = link?.items || [];
+      if (!items.length) throw new Error(`documents: linking document ${filedLetter.documentId} to letter ${row.id} answered without an attachment`);
+      for (const item of items) once('attachment', item.id);
     }
-    if (closing) await pm.PATCH(`${P}/correspondence/${row.id}`, { status: 'closed', responseDate: ctx.today, comment: `Answered and closed — ${canary}` });
+    if (closing) await pm.PATCH(`${P}/correspondence/${row.id}`, { status: 'closed', responseDate: ctx.today, comment: `Answered and closed — ${corCanary}` });
   }
 
   // ── the specification ─────────────────────────────────────────────────────
-  const specCanary = ctx.canary('specification');
+  const specCanary = canary('specification');
   const spec = await attach(pm, 'project', ctx.project.id, { filename: `${specCanary}.pdf`, contentType: 'application/pdf', body: pdf(SPEC_PAGES(specCanary)) }, { caption: `Project specification — ${specCanary}`, role: 'reference' });
-  if (spec.documentId) {
-    const queued = await ctx.attempt('text extraction', () => planner.POST(`${P}/documents/${spec.documentId}/extract`, {}));
-    const indexed = await ctx.attempt('specification index', () => planner.POST(`${P}/specifications/index`, { documentIds: [spec.documentId] }));
-    const sectionsMade = indexed?.sections || 0;
-    if (!sectionsMade) ctx.note(`specification ${spec.documentId} not indexed (${indexed?.documents?.[0]?.error || 'no sections'}); extraction ${queued?.status || 'not queued'} — sections need the job worker`);
-  }
-  const sections = listOf(await ctx.attempt('specification sections', () => site.GET(`${P}/specifications`)));
+  required(spec.documentId, 'the specification');
+  const queued = await planner.POST(`${P}/documents/${spec.documentId}/extract`, {});
+  // Indexing reads the extracted text, which the job worker writes: without it the index answers per document.
+  const indexed = await planner.POST(`${P}/specifications/index`, { documentIds: [spec.documentId] });
+  if (!indexed?.sections) ctx.note(`specification ${spec.documentId} not indexed (${indexed?.documents?.[0]?.error || 'no sections'}); extraction ${queued?.status || 'not queued'} — sections need the job worker`);
+  // Only this run's specification: earlier runs' sections are theirs.
+  const sections = listOf(await site.GET(`${P}/specifications?documentId=${spec.documentId}`));
   for (const section of sections) ctx.record('spec_section', section.id);
   if (sections[0]?.id) {
-    await ctx.attempt('specification section', () => site.GET(`${P}/specifications/${sections[0].id}`));
-    const canary = ctx.canary('rfi');
-    const raised = await ctx.attempt('rfi from a specification section', () => site.POST(`${P}/specifications/${sections[0].id}/rfi`, { subject: `Clarify section ${sections[0].code || ''} — ${canary}`.slice(0, 200), question: `The section and the drawings disagree. ${canary}`, priority: 'normal' }));
-    const raisedId = raised?.rfi?.id || raised?.id;
+    await site.GET(`${P}/specifications/${sections[0].id}`);
+    const sectionCanary = canary('rfi');
+    // raiseRfi asks createRfi for a draft, which the workflow table refuses (the same finding as above).
+    const raised = await optional('rfi from a specification section', () => site.POST(`${P}/specifications/${sections[0].id}/rfi`, { subject: `Clarify section ${sections[0].code || ''} — ${sectionCanary}`.slice(0, 200), question: `The section and the drawings disagree. ${sectionCanary}`, priority: 'normal' }));
+    const raisedId = raised?.record?.id || raised?.rfi?.id || raised?.id;
     if (raisedId) ctx.record('rfi', raisedId);
   }
-  await ctx.attempt('specification status', () => site.GET(`${P}/specifications/status`));
-  await ctx.attempt('specification documents', () => site.GET(`${P}/specifications/documents`));
-  await ctx.attempt('specification scope gaps', () => planner.GET(`${P}/specifications/scope-gaps`));
+  await site.GET(`${P}/specifications/status`);
+  await site.GET(`${P}/specifications/documents`);
+  await planner.GET(`${P}/specifications/scope-gaps`);
 
   // ── reading it all back: lists, register, searches ────────────────────────
   const mark = ctx.project.canary;
@@ -776,37 +858,94 @@ const run = async (ctx) => {
   // An archived record leaves the lists; a draft is its author's alone.
   const live = (group) => Object.entries(group).filter(([flow]) => !flow.startsWith('archived') && !flow.startsWith('draft')).map(([, id]) => id);
 
-  need('the RFI list', listOf(await pm.GET(`${P}/rfi?limit=100&sortBy=created&sortDir=desc`)), live(made.rfis));
-  need('the submittal list', listOf(await pm.GET(`${P}/submittals?limit=100&sortBy=created&sortDir=desc`)), live(made.submittals));
-  need('the drawing list', listOf(await site.GET(`${P}/drawings`)), Object.values(made.drawings));
-  need('the transmittal list', listOf(await qs.GET(`${P}/transmittals`)), Object.values(made.transmittals));
-  need('the correspondence list', listOf(await qs.GET(`${P}/correspondence`)), Object.values(made.correspondence));
+  const rfiList = listOf(await pm.GET(`${P}/rfi?limit=100&sortBy=created&sortDir=desc`));
+  need('the RFI list', rfiList, live(made.rfis));
+  const submittalList = listOf(await pm.GET(`${P}/submittals?limit=100&sortBy=created&sortDir=desc`));
+  need('the submittal list', submittalList, live(made.submittals));
+  const drawingList = listOf(await site.GET(`${P}/drawings`));
+  need('the drawing list', drawingList, Object.values(made.drawings));
+  const transmittalList = listOf(await qs.GET(`${P}/transmittals`));
+  need('the transmittal list', transmittalList, Object.values(made.transmittals));
+  const letterList = listOf(await qs.GET(`${P}/correspondence`));
+  need('the correspondence list', letterList, Object.values(made.correspondence));
   need('the drawing set list', listOf(await site.GET(`${P}/drawings/sets`)), made.sets);
-  need('the package list', listOf(await qs.GET(`${P}/submittals/packages`)), made.packages);
+  const packageList = listOf(await qs.GET(`${P}/submittals/packages`));
+  need('the package list', packageList, made.packages);
   need('the template list', listOf(await qs.GET(`${P}/submittals/workflow-templates?scope=project&includeArchived=true`)), made.templates);
 
   const register = listOf(await pm.GET(`${D}/register?search=${encodeURIComponent(mark.toLowerCase())}`));
   need('the document register (searched by canary)', register, [...live(made.rfis), ...live(made.submittals), ...Object.values(made.drawings), ...Object.values(made.transmittals), ...Object.values(made.correspondence)]);
-  for (const folder of ['drawings', 'submittals', 'rfi', 'transmittals', 'correspondence']) await ctx.attempt(`register folder ${folder}`, () => qs.GET(`${D}/register?folder=${folder}`));
-  await ctx.attempt('register by type and status', () => qs.GET(`${D}/register?recordType=drawing&status=approved`));
-  await ctx.attempt('document control dashboard', () => qs.GET(`${D}/dashboard`));
-  await ctx.attempt('attachments of a record', () => pm.GET(`${P}/attachments?recordType=project&recordId=${ctx.project.id}`));
-
-  const evidence = await ctx.attempt('attachment search', () => pm.GET(`${P}/attachments/search?q=${encodeURIComponent(mark)}&limit=100`));
-  const found = { register: register.length, attachments: listOf(evidence).length };
-  if (spec.documentId) {
-    const bytes = await ctx.attempt('document download', () => pm.download(`${P}/attachments/documents/${spec.documentId}`));
-    if (bytes && !bytes.includes(Buffer.from(specCanary))) throw new Error('documents: the specification came back without its canary');
+  // The register also lists rows no earlier answer named: the revision each record is given when it
+  // is made (no file), and the workflow attachment a revision upload files on its record (as does the
+  // receipt a transmittal cites). A file attached through /attachments carries attachmentId and is
+  // already recorded as an attachment.
+  const ours = new Set([...Object.values(made.rfis), ...Object.values(made.submittals), ...Object.values(made.drawings), ...Object.values(made.transmittals), ...Object.values(made.correspondence)]);
+  for (const row of register) {
+    if (!ours.has(row.recordId)) continue;
+    for (const rev of row.revisions || []) if (rev.id) once('document_revision', rev.id);
+    for (const file of row.attachments || []) if (file.id && !file.attachmentId) once('workflow_attachment', file.id);
   }
-  const global = await ctx.attempt('global search', () => pm.GET(`/search?q=${encodeURIComponent(mark)}&projectId=${ctx.project.id}&limit=50`));
+
+  // ── the states, read back: every record is where its flow left it ─────────
+  const drift = [];
+  for (const [key, id] of Object.entries(made.rfis)) {
+    const flow = flowOf(key);
+    const row = await pm.GET(`${P}/rfi/${id}`);
+    if (row.status !== RFI_STATE[flow]) drift.push(`RFI ${row.ref} (${key}) is ${row.status}, expected ${RFI_STATE[flow]}`);
+    if (flow === 'overdue' && !row.isOverdue) drift.push(`RFI ${row.ref} (${key}) is not overdue`);
+    if (flow === 'converted' && !row.changeOrderId) drift.push(`RFI ${row.ref} (${key}) has no change order`);
+  }
+  for (const [key, id] of Object.entries(made.submittals)) {
+    const [status, code] = SUBMITTAL_STATE[flowOf(key)];
+    const row = await pm.GET(`${S(id)}`);
+    if (row.status !== status) drift.push(`submittal ${row.ref} (${key}) is ${row.status}, expected ${status}`);
+    else if ((row.responseCode || null) !== code) drift.push(`product: submittal ${row.ref} (${key}) is ${row.status} with response code ${row.responseCode}, expected ${code}`);
+  }
+  for (const [n, id] of made.packages.entries()) {
+    const row = packageList.find((p) => p.id === id) || (await qs.GET(`${P}/submittals/packages/${id}`));
+    const want = n === 0 ? 'submitted' : 'open';
+    if (row.status !== want) drift.push(`package ${row.ref} is ${row.status}, expected ${want}`);
+  }
+  for (const [key, id] of Object.entries(made.drawings)) {
+    const [status, label, revStatus] = DRAWING_STATE[flowOf(key)];
+    const row = drawingList.find((d) => d.id === id);
+    if (row?.status !== status) drift.push(`drawing ${row?.drawingNumber} (${key}) is ${row?.status}, expected ${status}`);
+    if (!label) continue;
+    const entry = register.find((r) => r.recordId === id);
+    const latest = (entry?.revisions || []).filter((r) => r.revision === label).sort((a, b) => Number(b.isLatest) - Number(a.isLatest))[0];
+    if (latest?.status !== revStatus) drift.push(`drawing ${row?.drawingNumber} (${key}) revision ${label} is ${latest?.status}, expected ${revStatus}`);
+  }
+  for (const [key, id] of Object.entries(made.transmittals)) {
+    const row = transmittalList.find((t) => t.id === id);
+    if (row?.status !== flowOf(key)) drift.push(`transmittal ${row?.ref} is ${row?.status}, expected ${flowOf(key)}`);
+  }
+  for (const [key, id] of Object.entries(made.correspondence)) {
+    const row = letterList.find((c) => c.id === id);
+    const want = key.startsWith('closed') ? 'closed' : 'open';
+    if (row?.status !== want) drift.push(`letter ${row?.ref} is ${row?.status}, expected ${want}`);
+  }
+  for (const line of drift) ctx.note(`state: ${line}`.slice(0, 300));
+
+  for (const folder of ['drawings', 'submittals', 'rfi', 'transmittals', 'correspondence']) await qs.GET(`${D}/register?folder=${folder}`);
+  await qs.GET(`${D}/register?recordType=drawing&status=approved`);
+  await qs.GET(`${D}/dashboard`);
+  // An attachment row names the record it hangs on as recordId; it is matched by its own id.
+  const onProject = listOf(await pm.GET(`${P}/attachments?recordType=project&recordId=${ctx.project.id}`));
+  need('the attachments of the project', onProject.map((row) => ({ id: row.id })), [spec.id]);
+
+  const evidence = await pm.GET(`${P}/attachments/search?q=${encodeURIComponent(mark)}&limit=100`);
+  const found = { register: register.length, attachments: listOf(evidence).length };
+  const specBytes = await pm.download(`${P}/attachments/documents/${spec.documentId}`);
+  if (!specBytes.includes(Buffer.from(specCanary))) throw new Error('documents: the specification came back without its canary');
+  const global = await pm.GET(`/search?q=${encodeURIComponent(mark)}&projectId=${ctx.project.id}&limit=50`);
   found.global = listOf(global?.results || global).length;
-  const content = await ctx.attempt('document content search', () => pm.GET(`${P}/documents/search?q=${encodeURIComponent(specCanary)}&limit=50`));
+  const content = await pm.GET(`${P}/documents/search?q=${encodeURIComponent(specCanary)}&limit=50`);
   found.content = listOf(content).length;
-  const index = await ctx.attempt('document index status', () => pm.GET(`${P}/documents/index-status`));
-  if (spec.documentId) await ctx.attempt('document text', () => pm.GET(`${P}/documents/${spec.documentId}/text`));
+  const index = await pm.GET(`${P}/documents/index-status`);
+  await pm.GET(`${P}/documents/${spec.documentId}/text`);
   ctx.note(`canary search: register ${found.register}, attachment search ${found.attachments}, global search ${found.global}, content search ${found.content}${found.content ? '' : ` (text index: ${JSON.stringify(index?.counts || index?.byStatus || index || {}).slice(0, 120)})`}`);
 
-  state.last = { run: runNo, ...made, documents: made.documents.slice(0, 20), location: location?.id || null };
+  state.last = { run: runNo, ...made, documents: made.documents.slice(0, 20), location: location.id };
 };
 
 module.exports = { name: 'documents', needs: ['foundation'], depths: ['standard'], run };

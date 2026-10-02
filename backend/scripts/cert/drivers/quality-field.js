@@ -8,14 +8,17 @@
  *                         ITP with hold / witness points, inspection, form
  *                         (a permit to work — the product has no permit
  *                         module), toolbox talk; active, draft, archived,
- *                         duplicated
+ *                         duplicated; their sections and items
  *   checklist instances   scheduled, in progress, complete (pass and fail),
- *                         closed, void, reopened; answers, signatures, photos
- *                         on an answer, a deficiency raised from a failed item,
- *                         a recurring talk that schedules its successor
+ *                         closed, void, reopened; answers, signatures (each
+ *                         with its attachment and gallery photo), photos on an
+ *                         answer, a deficiency raised from a failed item, a
+ *                         recurring talk that schedules its successor
  *   legacy ITP register   pending, passed, failed, waived
  *   NCRs                  major and minor; open, submitted, closed (approved),
- *                         rejected, reopened; evidence uploaded
+ *                         rejected (back to open), reopened; photos and a
+ *                         report attached, closeout evidence uploaded through
+ *                         the workflow store as the closeout dialog does
  *   punch items           draft, open, ready for review, closed, in dispute,
  *                         void, reopened; bulk; distributed
  *   observations          one per observation type the product offers
@@ -31,9 +34,18 @@
  * Every text carries a canary; a second run of the driver numbers its
  * canaries apart from the first (…-R2-…), so a record's canary stays its own.
  *
- * One ITP per project is left with a FAILED hold point on the project's last
- * activity: the product then refuses progress approval on that activity. The
- * activity is named in ctx.refs.qualityField.holdPointActivity.
+ * Open ITP hold points block progress approval on their activity (409
+ * ITP_HOLD_POINT_OPEN). This driver leaves them on the project's LAST activity
+ * only: the failed hold point and the still-scheduled ITP both go there, and a
+ * re-run voids a still-pending ITP an earlier run left on another activity.
+ * The activities are named in ctx.refs.qualityField.holdPointActivities
+ * (holdPointActivity keeps the first, for older readers).
+ *
+ * Failure policy. The records of the area are created by plain calls: a
+ * refusal fails the run. A 5xx is never silent: it is written to the notes as
+ * a FINDING and fails the step. Read-only checks (exports, hold points, the
+ * gallery, health) are made with `check`: a refusal there is a FINDING note
+ * and the run goes on.
  */
 
 const zlib = require('zlib');
@@ -42,28 +54,43 @@ const { ApiError } = require('../lib/api');
 /**
  * Prisma errors the API hands back as a 500 when the database is busy (an
  * interactive transaction that outlived its 5 s, a write conflict, a pool
- * timeout). The step is tried again — the transaction was rolled back — and
- * every occurrence is written to the notes as a finding: a 5xx is never silent.
+ * timeout). Only reads and idempotent writes (GET, PUT, a download) are tried
+ * again. A POST, PATCH, DELETE or upload is not: the product stores files and
+ * sends notifications outside its transaction, so the record may already be
+ * there, and a second attempt would make a copy that is never recorded.
  */
 const BUSY_CODES = new Set(['P2028', 'P2034', 'P2024']);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const describe = (error) => String(error?.message || error).replace(/\s+/g, ' ').slice(0, 260);
 const steady = (session, ctx) => {
-  const again = (fn) => async (...args) => {
+  const wrap = (fn, idempotent) => async (...args) => {
     for (let attempt = 1; ; attempt += 1) {
       try {
         return await fn(...args);
       } catch (error) {
-        const busy = error instanceof ApiError && error.status >= 500 && BUSY_CODES.has(error.code);
-        if (!busy || attempt >= 3) throw error;
-        ctx.note(`FINDING 5xx from a busy database, step tried again: ${String(error.message).replace(/\s+/g, ' ').slice(0, 230)}`);
+        if (!(error instanceof ApiError) || error.status < 500) throw error;
+        const busy = BUSY_CODES.has(error.code);
+        const again = idempotent && busy && attempt < 3;
+        ctx.note(`FINDING 5xx${busy ? ' from a busy database' : ''}${again ? ' (read tried again)' : ''}: ${describe(error)}`);
+        error.noted = true;
+        if (!again) throw error;
         await sleep(1500 * attempt);
       }
     }
   };
-  return { ...session, GET: again(session.GET), POST: again(session.POST), PATCH: again(session.PATCH), PUT: again(session.PUT), DELETE: again(session.DELETE), upload: again(session.upload), download: again(session.download) };
+  return {
+    ...session,
+    GET: wrap(session.GET, true),
+    PUT: wrap(session.PUT, true),
+    download: wrap(session.download, true),
+    POST: wrap(session.POST, false),
+    PATCH: wrap(session.PATCH, false),
+    DELETE: wrap(session.DELETE, false),
+    upload: wrap(session.upload, false),
+  };
 };
 
-const rowsOf =(data) => (Array.isArray(data) ? data : data?.rows || data?.items || data?.records || data?.files || data?.locations || []);
+const rowsOf = (data) => (Array.isArray(data) ? data : data?.rows || data?.items || data?.records || data?.files || data?.locations || []);
 
 // ── small real files ───────────────────────────────────────────────────────
 
@@ -142,12 +169,12 @@ const itpSections = (mark) => [
     ],
   },
   {
-    title: 'During the pour',
+    title: `During the pour — ${mark}`,
     items: [
       { label: 'Slump at discharge', responseType: 'number', options: { min: 75, max: 125, unit: 'mm' } },
       { label: 'Concrete grade delivered', responseType: 'choice', options: ['C30', 'C35', 'C40'] },
       { label: 'Date of pour', responseType: 'date', required: false },
-      { label: 'Remarks', responseType: 'text', required: false },
+      { label: `Remarks — ${mark}`, responseType: 'text', required: false },
       { label: 'Photo of the pour face', responseType: 'photo', required: false },
     ],
   },
@@ -159,7 +186,7 @@ const inspectionSections = (mark) => [
       { label: 'Setting out and bond', responseType: 'pass_fail' },
       { label: 'Plumb and level within tolerance', responseType: 'pass_fail' },
       { label: 'Wall ties and movement joints', responseType: 'yes_no' },
-      { label: 'Notes', responseType: 'text', required: false },
+      { label: `Notes — ${mark}`, responseType: 'text', required: false },
     ],
   },
 ];
@@ -171,7 +198,7 @@ const permitSections = (mark) => [
       { label: 'Extinguisher at the work face', responseType: 'checkbox' },
       { label: 'Fire watch (minutes after work)', responseType: 'number', options: { min: 30, max: 120, unit: 'min' } },
       { label: 'Permit valid until', responseType: 'date' },
-      { label: 'Work described', responseType: 'text' },
+      { label: `Work described — ${mark}`, responseType: 'text' },
       { label: 'Permit holder signature', responseType: 'signature', required: false },
     ],
   },
@@ -183,7 +210,7 @@ const talkSections = (mark) => [
       { label: 'Topic delivered', responseType: 'choice', options: ['Working at height', 'Excavations', 'Lifting operations', 'Housekeeping'] },
       { label: 'Crew understood the controls', responseType: 'yes_no' },
       { label: 'Number attending', responseType: 'number', options: { min: 1, max: 200 } },
-      { label: 'Points raised by the crew', responseType: 'text', required: false },
+      { label: `Points raised by the crew — ${mark}`, responseType: 'text', required: false },
     ],
   },
 ];
@@ -199,16 +226,50 @@ const run = async (ctx) => {
   const subcontractor = ctx.companyRefs.directory?.subcontractor || null;
   const supplier = ctx.companyRefs.directory?.supplier || null;
 
+  /** A read the product must answer: a refusal or a 5xx is a FINDING, and the run goes on. */
+  const check = async (label, fn) => {
+    try {
+      return await fn();
+    } catch (error) {
+      if (!(error instanceof ApiError)) throw error;
+      ctx.note(error.noted ? `${label}: failed with the 5xx noted above; run continued` : `FINDING ${label} refused: ${describe(error)}`);
+      return null;
+    }
+  };
+  /** Records an id once (responses, attachments and photos come back from several calls). */
+  const remember = (type, id) => {
+    if (!id) return null;
+    if (!(ctx.records[type] || []).includes(id)) ctx.record(type, id);
+    return id;
+  };
+
   // A second run numbers its canaries apart from the first.
   const state = (ctx.refs.qualityField = ctx.refs.qualityField || { runs: 0 });
   state.runs += 1;
   const tag = (type) => ctx.canary(state.runs > 1 ? `${type}-r${state.runs}` : type);
+  // Offline-replay keys are unique per run even if a killed run left its canaries unrecorded.
+  const nonce = `${Date.now().toString(36)}${rng.int(100, 999)}`;
+  const requestKey = (mark) => `${mark}-${nonce}`.slice(0, 120);
+
+  // Earlier versions of this driver recorded unified Attachment ids (the
+  // closeout response lists them first) as workflow_attachment. Only this
+  // driver records that type; ids that are also attachments are taken out of it.
+  {
+    const unified = new Set(ctx.records.attachment || []);
+    const before = ctx.records.workflow_attachment || [];
+    const kept = before.filter((id) => !unified.has(id));
+    if (kept.length !== before.length) {
+      ctx.records.workflow_attachment = kept;
+      ctx.note(`inventory: ${before.length - kept.length} attachment id(s) an earlier run recorded as workflow_attachment were removed from that type (they stay under attachment)`);
+    }
+  }
 
   const activityCodes = Object.keys(ctx.refs.activities || {}).sort();
   if (!activityCodes.length) throw new Error('quality-field: the project has no activities');
   const activityId = (i) => ctx.refs.activities[activityCodes[i % activityCodes.length]];
   const lastActivityCode = activityCodes[activityCodes.length - 1];
-  // Spread over the schedule, never the last activity (that one carries the failed hold point).
+  const lastActivityId = ctx.refs.activities[lastActivityCode];
+  // Spread over the schedule, never the last activity (that one carries the open hold points).
   let turn = rng.int(0, activityCodes.length);
   const anyActivity = () => {
     turn += 3;
@@ -216,6 +277,7 @@ const run = async (ctx) => {
   };
 
   // ── files ────────────────────────────────────────────────────────────────
+  const madePhotos = [];
   const fileOf = (kind, label) => {
     const mark = tag(`${label}-file`);
     return kind === 'pdf'
@@ -233,29 +295,37 @@ const run = async (ctx) => {
       fields: { recordType, recordId, caption: caption || `${recordType} ${kind === 'pdf' ? 'document' : 'photo'} — ${file.mark}`, ...fields },
     });
     const item = rowsOf(result)[0];
-    if (!item?.id) throw new Error(`quality-field: attaching to ${recordType} ${recordId} returned no attachment`);
-    ctx.record('attachment', item.id);
-    if (item.documentId) ctx.record('project_document', item.documentId);
-    if (item.photo?.id) ctx.record('photo', item.photo.id);
+    if (!item?.id) throw new Error(`quality-field: attaching to ${recordType} ${recordId} returned no attachment: ${JSON.stringify(result).slice(0, 200)}`);
+    remember('attachment', item.id);
+    remember('project_document', item.documentId);
+    if (item.photo?.id) {
+      remember('photo', item.photo.id);
+      madePhotos.push(item.photo.id);
+    } else if (kind === 'png') {
+      ctx.note(`FINDING an image attached to ${recordType} ${recordId} made no gallery photo (attachment ${item.id})`);
+    }
     return item;
   };
-  const evidenceOf = (item) => ({
-    documentId: item.documentId,
-    fileName: item.fileName || item.document?.fileName,
-    storageKey: item.documentId,
-    fileUrl: item.fileUrl,
-    mimeType: item.mimeType,
-    sizeBytes: item.sizeBytes,
-    description: tag('evidence-note'),
-  });
-  /** Evidence through the workflow store (what the closeout dialogs use). */
+  /** Closeout evidence through the workflow store, as the product's closeout dialog sends it. */
   const workflowUpload = async (who, label, kind = 'pdf') => {
     const file = fileOf(kind, label);
     const result = await who.upload('POST', `${P}/workflow/uploads`, { field: 'files', filename: file.filename, contentType: file.contentType, body: file.body });
     const item = rowsOf(result)[0];
-    if (!item?.documentId) throw new Error('quality-field: the workflow upload returned no document');
-    ctx.record('project_document', item.documentId);
-    return { documentId: item.documentId, fileName: item.fileName, storageKey: item.storageKey, fileUrl: item.fileUrl, mimeType: item.mimeType, sizeBytes: item.sizeBytes, description: tag('evidence-note') };
+    if (!item?.documentId) throw new Error(`quality-field: the workflow upload returned no document: ${JSON.stringify(result).slice(0, 200)}`);
+    remember('project_document', item.documentId);
+    return { fileName: item.fileName, fileUrl: item.fileUrl, storageKey: item.storageKey || item.documentId, mimeType: item.mimeType, sizeBytes: item.sizeBytes, description: `Closeout evidence — ${tag('evidence-note')}` };
+  };
+  /**
+   * The evidence list of an NCR or incident merges unified attachments (they
+   * carry attachmentId) with the WorkflowAttachment rows its closeout wrote.
+   * Only the latter are workflow_attachment records.
+   */
+  const recordWorkflowRows = (record) => {
+    for (const row of record?.attachments || []) if (row?.id && !row.attachmentId) remember('workflow_attachment', row.id);
+  };
+  /** The activity links a workflow record carries (WorkflowActivityLink rows). */
+  const recordActivityLinks = (record) => {
+    for (const link of record?.activityLinks || []) if (link?.id) remember('workflow_activity_link', link.id);
   };
 
   // ── a place on site (other drivers may have made the project's locations) ──
@@ -265,65 +335,61 @@ const run = async (ctx) => {
     const mine = existing.find((row) => row.code === 'QF-YARD');
     if (mine) locationId = mine.id;
     else {
-      const created = await ctx.attempt('location', () =>
-        site.POST(`${P}/locations`, { name: `Site yard and laydown ${tag('location')}`.slice(0, 120), code: 'QF-YARD', kind: 'area', description: `Where field records of this driver are pinned — ${tag('location')}` })
-      );
-      if (created?.id) {
-        locationId = created.id;
-        ctx.record('location', created.id);
-      } else if (existing[0]?.id) locationId = existing[0].id;
+      const created = await site.POST(`${P}/locations`, { name: `Site yard and laydown ${tag('location')}`.slice(0, 120), code: 'QF-YARD', kind: 'area', description: `Where field records of this driver are pinned — ${tag('location')}` });
+      if (!created?.id) throw new Error(`quality-field: the location create returned no id: ${JSON.stringify(created).slice(0, 200)}`);
+      locationId = ctx.record('location', created.id);
     }
     state.locationId = locationId;
   }
 
   // ── checklist templates ──────────────────────────────────────────────────
-  // Company-wide templates: once per company, by a company administrator.
+  /** A template, its sections and its items. */
+  const recordTemplate = (template, scope = 'project') => {
+    const options = scope === 'company' ? { scope: 'company' } : undefined;
+    ctx.record('form_template', template.id, options);
+    for (const section of template.sections || []) {
+      if (section.id) ctx.record('form_section', section.id, options);
+      for (const item of section.items || []) if (item.id) ctx.record('form_item', item.id, options);
+    }
+    return template;
+  };
+
+  // Company-wide templates: once per company, by the company administrator (the PM persona).
   ctx.companyRefs.formTemplates = ctx.companyRefs.formTemplates || {};
   if (!ctx.companyRefs.formTemplates.inspection) {
-    const created = await ctx.attempt('company inspection template', () =>
-      pm.POST('/company/form-templates', {
-        name: `Company housekeeping inspection ${company.canary}-FORM_TEMPLATE-1`,
-        description: `Company-wide checklist ${company.canary}-FORM_TEMPLATE-1`,
-        trade: 'General',
-        type: 'inspection',
-        status: 'active',
-        settings: { instructions: `Walk the whole floor. ${company.canary}-FORM_TEMPLATE-1` },
-        sections: [{ title: `Housekeeping ${company.canary}`, items: [{ label: 'Access routes clear', responseType: 'pass_fail' }, { label: 'Waste segregated', responseType: 'yes_no' }, { label: 'Remarks', responseType: 'text', required: false }] }],
-      })
-    );
-    if (created?.id) {
-      ctx.companyRefs.formTemplates.inspection = created.id;
-      ctx.record('form_template', created.id, { scope: 'company' });
-    }
+    const created = await pm.POST('/company/form-templates', {
+      name: `Company housekeeping inspection ${company.canary}-FORM_TEMPLATE-1`,
+      description: `Company-wide checklist ${company.canary}-FORM_TEMPLATE-1`,
+      trade: 'General',
+      type: 'inspection',
+      status: 'active',
+      settings: { instructions: `Walk the whole floor. ${company.canary}-FORM_TEMPLATE-1` },
+      sections: [{ title: `Housekeeping ${company.canary}`, items: [{ label: 'Access routes clear', responseType: 'pass_fail' }, { label: 'Waste segregated', responseType: 'yes_no' }, { label: `Remarks ${company.canary}`, responseType: 'text', required: false }] }],
+    });
+    ctx.companyRefs.formTemplates.inspection = recordTemplate(created, 'company').id;
   }
   if (!ctx.companyRefs.formTemplates.talk) {
-    const created = await ctx.attempt('company talk template', () =>
-      pm.POST('/company/form-templates', {
-        name: `Company induction talk ${company.canary}-FORM_TEMPLATE-2`,
-        description: `Company-wide toolbox talk ${company.canary}-FORM_TEMPLATE-2`,
-        type: 'talk',
-        status: 'draft',
-        sections: [{ title: `Induction ${company.canary}`, items: [{ label: 'Site rules explained', responseType: 'yes_no' }] }],
-      })
-    );
-    if (created?.id) {
-      ctx.companyRefs.formTemplates.talk = created.id;
-      ctx.record('form_template', created.id, { scope: 'company' });
-    }
+    const created = await pm.POST('/company/form-templates', {
+      name: `Company induction talk ${company.canary}-FORM_TEMPLATE-2`,
+      description: `Company-wide toolbox talk ${company.canary}-FORM_TEMPLATE-2`,
+      type: 'talk',
+      status: 'draft',
+      sections: [{ title: `Induction ${company.canary}`, items: [{ label: 'Site rules explained', responseType: 'yes_no' }] }],
+    });
+    ctx.companyRefs.formTemplates.talk = recordTemplate(created, 'company').id;
   }
   if (!ctx.companyRefs.formTemplates.starters) {
-    const seeded = await ctx.attempt('company starter templates', () => pm.POST('/company/form-templates/starters', {}));
-    if (seeded) {
-      ctx.companyRefs.formTemplates.starters = rowsOf(seeded).map((row) => row.id);
-      for (const row of rowsOf(seeded)) {
-        ctx.record('form_template', row.id, { scope: 'company' });
-        // The starters come with fixed words; the description is the one place a canary fits.
-        await ctx.attempt('starter description', () => pm.PATCH(`/company/form-templates/${row.id}`, { description: `Starter checklist ${company.canary}-FORM_TEMPLATE-STARTER` }));
-      }
+    // The product seeds only the starters the company does not have yet; it may make none.
+    const seeded = await pm.POST('/company/form-templates/starters', {});
+    ctx.companyRefs.formTemplates.starters = rowsOf(seeded).map((row) => row.id);
+    for (const row of rowsOf(seeded)) {
+      recordTemplate(row, 'company');
+      // The starters come with fixed words; the description is the one place a canary fits.
+      await pm.PATCH(`/company/form-templates/${row.id}`, { description: `Starter checklist ${company.canary}-FORM_TEMPLATE-STARTER` });
     }
   }
 
-  // Project templates: by the quality engineer (template administration).
+  // Project templates: by the quality engineer and the QS (template administration).
   const makeTemplate = async (who, { type, label, sections, status = 'active', settings = undefined, trade = null }) => {
     const mark = tag('form-template');
     const created = await who.POST(`${P}/forms/templates`, {
@@ -335,8 +401,7 @@ const run = async (ctx) => {
       ...(settings ? { settings } : {}),
       sections: sections(mark),
     });
-    ctx.record('form_template', created.id);
-    return created;
+    return recordTemplate(created);
   };
   const templates = {
     itp: await makeTemplate(quality, { type: 'itp', label: 'Concrete pour ITP', sections: itpSections, trade: 'Concrete', settings: { requireSignatures: ['inspector'], deficiencyTarget: 'punch_item', instructions: `No pour before the hold point is released. ${tag('form-template')}` } }),
@@ -347,21 +412,47 @@ const run = async (ctx) => {
   state.templates = Object.fromEntries(Object.entries(templates).map(([key, template]) => [key, template.id]));
   // A draft (cannot be used yet), one archived, one duplicated and renamed.
   const draft = await makeTemplate(quality, { type: 'inspection', label: 'Waterproofing inspection (draft)', sections: inspectionSections, status: 'draft' });
-  await ctx.attempt('template edit', () => quality.PATCH(`${P}/forms/templates/${draft.id}`, { description: `Still being written — ${tag('form-template')}`, trade: 'Waterproofing' }));
+  await quality.PATCH(`${P}/forms/templates/${draft.id}`, { description: `Still being written — ${tag('form-template')}`, trade: 'Waterproofing' });
   const retired = await makeTemplate(quality, { type: 'form', label: 'Superseded permit', sections: permitSections });
-  await ctx.attempt('template archive', () => quality.DELETE(`${P}/forms/templates/${retired.id}`));
-  const copy = await ctx.attempt('template duplicate', () => quality.POST(`${P}/forms/templates/${templates.inspection.id}/duplicate`, { name: `Blockwork inspection (copy) ${tag('form-template')}` }));
-  if (copy?.id) ctx.record('form_template', copy.id);
+  const archived = await quality.DELETE(`${P}/forms/templates/${retired.id}`);
+  if (archived?.status !== 'archived') ctx.note(`FINDING archiving template ${retired.id} answered ${JSON.stringify(archived).slice(0, 160)}`);
+  const copy = await quality.POST(`${P}/forms/templates/${templates.inspection.id}/duplicate`, { name: `Blockwork inspection (copy) ${tag('form-template')}` });
+  recordTemplate(copy);
+  state.templateStates = { draft: draft.id, archived: retired.id, duplicate: copy.id };
 
   // ── checklist instances ──────────────────────────────────────────────────
   const itemsOf = (template) => (template.sections || []).flatMap((section) => section.items || []);
   const signatureImage = () => `data:image/png;base64,${png(tag('signature')).toString('base64')}`;
+  const recordResponses = (instance) => {
+    for (const section of instance?.sections || []) for (const item of section.items || []) remember('form_item_response', item.response?.id);
+  };
   const SIGNER = { inspector: quality, approver: pm, attendee: site, witness: site, subcontractor: site };
+  const SIGNER_PERSONA = { inspector: 'quality', approver: 'pm', attendee: 'site', witness: 'site', subcontractor: 'site' };
   const signAs = async (instanceId, role, extra = {}) => {
-    const signed = await SIGNER[role].POST(`${P}/forms/${instanceId}/signatures`, { role, image: signatureImage(), signerName: `${ctx.person(role === 'inspector' ? 'quality' : role === 'approver' ? 'pm' : 'site').name} ${tag('signature')}`.slice(0, 200), signerCompany: `${company.name || company.code} ${tag('signature')}`.slice(0, 200), ...extra });
-    if (signed?.signature?.id) ctx.record('signature', signed.signature.id);
-    if (signed?.signature?.documentId) ctx.record('project_document', signed.signature.documentId);
+    const signed = await SIGNER[role].POST(`${P}/forms/${instanceId}/signatures`, {
+      role,
+      image: signatureImage(),
+      signerName: `${ctx.person(SIGNER_PERSONA[role]).name} ${tag('signature')}`.slice(0, 200),
+      signerCompany: `${company.name || company.code} ${tag('signature')}`.slice(0, 200),
+      ...extra,
+    });
+    if (!signed?.signature?.id) throw new Error(`quality-field: signing ${instanceId} as ${role} returned no signature`);
+    ctx.record('signature', signed.signature.id);
+    remember('project_document', signed.signature.documentId);
+    recordResponses(signed.instance); // a signature item is answered by the signature
     return signed;
+  };
+  /** Each signature is also an attachment (role signature) and, being a PNG, a gallery photo. */
+  const recordInstanceFiles = async (instanceId) => {
+    const listed = rowsOf(await quality.GET(`${P}/attachments?recordType=form_instance&recordId=${instanceId}`));
+    for (const row of listed) {
+      remember('attachment', row.id);
+      remember('project_document', row.documentId);
+      if (row.photo?.id) {
+        remember('photo', row.photo.id);
+        if (!madePhotos.includes(row.photo.id)) madePhotos.push(row.photo.id);
+      }
+    }
   };
   /** One answer per item; `fail` names the kind of item to answer badly. */
   const answers = (template, { fail = null, only = null } = {}) => {
@@ -405,9 +496,6 @@ const run = async (ctx) => {
     }
     return out;
   };
-  const recordResponses = (instance) => {
-    for (const section of instance?.sections || []) for (const item of section.items || []) if (item.response?.id) ctx.record('form_item_response', item.response.id);
-  };
   /**
    * One instance driven to `plan`:
    *   scheduled | in_progress | complete | complete_fail | complete_fail_hold | closed | void | reopened
@@ -450,15 +538,27 @@ const run = async (ctx) => {
     if (photoItem) {
       answered = await site.PUT(`${P}/forms/${created.id}/responses`, { responses: [{ itemId: photoItem.id, value: 'provided', note: `Photo taken at the face — ${tag('form-answer')}` }] });
       const response = (answered.sections || []).flatMap((section) => section.items).find((item) => item.id === photoItem.id)?.response;
-      if (response?.id) await attach(site, 'form_response', response.id, { fields: { tags: 'inspection,pour', ...(locationId ? { locationId } : {}) } });
+      if (!response?.id) throw new Error(`quality-field: the photo answer on ${created.ref} returned no response`);
+      await attach(site, 'form_response', response.id, { fields: { tags: 'inspection,pour', ...(locationId ? { locationId } : {}) } });
     }
     recordResponses(answered);
     // A signature item, then the signatures the template requires.
     const signatureItem = itemsOf(template).find((item) => item.responseType === 'signature');
-    if (signatureItem) await signAs(created.id, 'subcontractor', { itemId: signatureItem.id });
-    for (const role of template.settings?.requireSignatures || []) await signAs(created.id, role);
-    if (template.type === 'talk') await signAs(created.id, 'witness');
+    let signatures = 0;
+    if (signatureItem) {
+      await signAs(created.id, 'subcontractor', { itemId: signatureItem.id });
+      signatures += 1;
+    }
+    for (const role of template.settings?.requireSignatures || []) {
+      await signAs(created.id, role);
+      signatures += 1;
+    }
+    if (template.type === 'talk') {
+      await signAs(created.id, 'witness');
+      signatures += 1;
+    }
     const completed = await site.POST(`${P}/forms/${created.id}/complete`);
+    recordResponses(completed);
     if (completed?.nextInstance?.id) {
       ctx.record('form_instance', completed.nextInstance.id);
       result.nextInstanceId = completed.nextInstance.id;
@@ -480,15 +580,32 @@ const run = async (ctx) => {
         finalApproverUserId: ids.quality,
         dueDate: ctx.daysAhead(7),
       });
-      if (raised?.record?.id) ctx.record('punch_item', raised.record.id);
+      if (!raised?.record?.id) throw new Error(`quality-field: the deficiency on ${created.ref} returned no record`);
+      ctx.record('punch_item', raised.record.id);
+      result.deficiencyId = raised.record.id;
+      recordResponses(raised.instance);
       await attach(quality, 'form_instance', created.id, { kind: 'pdf' });
-      return result; // left complete, outcome fail
     }
-    if (plan === 'complete') return result;
+    if (signatures) await recordInstanceFiles(created.id);
+    if (fail || plan === 'complete') return result; // left complete (a failed one with outcome fail)
     await quality.POST(`${P}/forms/${created.id}/close`, { reason: `Accepted — ${tag('form-instance')}` });
     if (plan === 'reopened') await quality.POST(`${P}/forms/${created.id}/reopen`, { reason: `Re-inspection asked for by the consultant — ${tag('form-instance')}` });
     return result;
   };
+
+  // An earlier run may have left a still-pending ITP on another activity (older
+  // versions put the scheduled one there). It would block progress approval
+  // where nobody expects it, so it is voided; its record stays.
+  const previousItps = state.instances?.itp || [];
+  for (const made of previousItps) {
+    if (!made.activityId || made.activityId === lastActivityId || made.plan !== 'scheduled') continue;
+    const open = await quality.GET(`${P}/forms/hold-points?activityId=${made.activityId}`);
+    const mine = (open?.holdPoints || []).find((point) => point.instanceId === made.id);
+    if (!mine || !['scheduled', 'in_progress'].includes(mine.status)) continue;
+    await quality.POST(`${P}/forms/${made.id}/void`, { reason: `Superseded: the pending ITP now sits on the hold-point activity — ${tag('form-instance')}` });
+    made.plan = 'void';
+    ctx.note(`voided ${mine.ref} from an earlier run: its ${mine.state} hold point blocked progress approval on activity ${made.activityId}`);
+  }
 
   state.instances = {};
   const drive = async (key, template, plans, options) => {
@@ -498,33 +615,38 @@ const run = async (ctx) => {
       state.instances[key].push(made);
     }
   };
-  // ITPs hang on activities; the failed hold point goes on the last activity only.
+  // ITPs hang on activities; the failed hold point and the pending one go on the last activity only.
   const itpPlans = ['closed', 'complete_fail_hold', 'scheduled', 'in_progress', 'void', 'reopened'].slice(0, ctx.count(2, 6));
   await drive('itp', templates.itp, itpPlans, (i, plan) => ({
-    activity: plan === 'complete_fail_hold' ? ctx.refs.activities[lastActivityCode] : activityId(i),
+    activity: plan === 'complete_fail_hold' || plan === 'scheduled' ? lastActivityId : activityId(i),
     title: 'Pour ITP',
     schedule: plan === 'scheduled' ? 5 + i : -i,
     photo: plan === 'closed',
   }));
-  if (itpPlans.includes('complete_fail_hold')) state.holdPointActivity = lastActivityCode;
+  const holdPointActivities = [...new Set([...(state.holdPointActivities || (state.holdPointActivity ? [state.holdPointActivity] : [])), ...(itpPlans.some((plan) => ['complete_fail_hold', 'scheduled'].includes(plan)) ? [lastActivityCode] : [])])];
+  state.holdPointActivities = holdPointActivities;
+  if (holdPointActivities.length) state.holdPointActivity = holdPointActivities.includes(lastActivityCode) ? lastActivityCode : holdPointActivities[0];
   const inspectionPlans = ['complete_fail', 'closed', 'scheduled', 'void'].slice(0, ctx.count(1, 4));
   await drive('inspection', templates.inspection, inspectionPlans, (i, plan) => ({ activity: anyActivity(), title: 'Blockwork inspection', schedule: plan === 'scheduled' ? -3 : 0 })); // the scheduled one is overdue
   const permitPlans = ['closed', 'in_progress', 'scheduled'].slice(0, ctx.count(1, 3));
   await drive('form', templates.form, permitPlans, (i) => ({ activity: anyActivity(), title: 'Hot works permit', schedule: i }));
   const talkPlans = ['closed', 'complete', 'scheduled', 'complete'].slice(0, ctx.count(1, 4));
   await drive('talk', templates.talk, talkPlans, (i) => ({ title: 'Toolbox talk', schedule: -7 * i, recurrence: i === 1 ? { every: 'week', interval: 1, until: ctx.daysAhead(60) } : null }));
-  if (ctx.companyRefs.formTemplates.inspection) {
-    const companyTemplate = await ctx.attempt('company template read', () => site.GET(`${P}/forms/templates/${ctx.companyRefs.formTemplates.inspection}`));
-    if (companyTemplate?.id) await drive('company', companyTemplate, ['complete'], () => ({ activity: anyActivity(), title: 'Housekeeping inspection' }));
+  // An instance of the company's own checklist, read through the project.
+  const companyTemplate = await site.GET(`${P}/forms/templates/${ctx.companyRefs.formTemplates.inspection}`);
+  await drive('company', companyTemplate, ['complete'], () => ({ activity: anyActivity(), title: 'Housekeeping inspection' }));
+
+  // What the product gives back for an instance: its PDF, and the hold points open on the activities.
+  const exported = await check('form export.pdf', () => quality.download(`${P}/forms/${state.instances.itp[0].id}/export.pdf?includePhotos=true`));
+  if (exported && exported.subarray(0, 4).toString('latin1') !== '%PDF') ctx.note('FINDING form export.pdf did not return a PDF');
+  if (itpPlans.some((plan) => ['complete_fail_hold', 'scheduled'].includes(plan))) {
+    const open = await check('hold points', () => site.GET(`${P}/forms/hold-points?activityId=${lastActivityId}`));
+    if (open && !open.open) ctx.note(`FINDING the failed or pending hold point on ${lastActivityCode} is not reported open: ${JSON.stringify(open).slice(0, 200)}`);
   }
-  // What the product gives back for an instance: its PDF, and the hold points open on the activity.
-  if (state.instances.itp[0]) {
-    const exported = await ctx.attempt('form export.pdf', () => quality.download(`${P}/forms/${state.instances.itp[0].id}/export.pdf?includePhotos=true`));
-    if (exported && exported.subarray(0, 4).toString('latin1') !== '%PDF') ctx.note('FINDING form export.pdf did not return a PDF');
-    if (state.holdPointActivity) {
-      const open = await ctx.attempt('hold points', () => site.GET(`${P}/forms/hold-points?activityId=${ctx.refs.activities[lastActivityCode]}`));
-      if (open && !open.open) ctx.note(`FINDING a failed hold point on ${lastActivityCode} is not reported open: ${JSON.stringify(open).slice(0, 200)}`);
-    }
+  for (const made of state.instances.itp) {
+    if (made.activityId === lastActivityId) continue;
+    const open = await check('hold points', () => site.GET(`${P}/forms/hold-points?activityId=${made.activityId}`));
+    if (open?.open) ctx.note(`hold points still open on activity ${made.activityId} (not the hold-point activity): ${JSON.stringify(open.holdPoints || []).slice(0, 200)}`);
   }
 
   // ── the legacy ITP register (feeds the quality score: 15 per failed) ─────
@@ -546,6 +668,7 @@ const run = async (ctx) => {
       assigneeCompanyId: subcontractor,
     });
     ctx.record('itp_record', created.id);
+    recordActivityLinks(created);
     if (target !== 'pending') {
       await site.PATCH(`${P}/itp/${created.id}`, { status: target, inspectionDate: ctx.today, comment: `${target === 'failed' ? 'Not accepted' : target === 'waived' ? 'Waived by the consultant' : 'Accepted'} — ${tag('itp-record')}` });
     }
@@ -571,19 +694,22 @@ const run = async (ctx) => {
       comment: `Raised after inspection — ${mark}`,
     });
     ctx.record('ncr_record', ncr.id);
+    recordActivityLinks(ncr);
     state.ncr.push({ id: ncr.id, ref: ncr.ref, severity, plan: target });
-    const photo = await attach(raiser, 'ncr', ncr.id, { fields: locationId ? { locationId, tags: 'ncr,defect' } : { tags: 'ncr,defect' } });
-    if (i === 1) await ctx.attempt('ncr edit', () => quality.PATCH(`${P}/ncr/${ncr.id}`, { responsible: `Blockwork subcontractor ${tag('ncr')}`, comment: `Responsibility corrected — ${tag('ncr')}`, dueDate: ctx.daysAhead(14) }));
+    await attach(raiser, 'ncr', ncr.id, { fields: locationId ? { locationId, tags: 'ncr,defect' } : { tags: 'ncr,defect' } });
+    if (i === 1) await quality.PATCH(`${P}/ncr/${ncr.id}`, { responsible: `Blockwork subcontractor ${tag('ncr')}`, comment: `Responsibility corrected — ${tag('ncr')}`, dueDate: ctx.daysAhead(14) });
     if (target === 'open') continue;
-    // The closeout is sent by the person the NCR is assigned to, with evidence.
-    const repair = await attach(site, 'ncr', ncr.id, { kind: 'pdf' });
+    // The closeout is sent by the person the NCR is assigned to: the repair report
+    // attached to the NCR, and the closeout evidence uploaded as the dialog does.
+    await attach(site, 'ncr', ncr.id, { kind: 'pdf' });
     ncr = await site.POST(`${P}/ncr/${ncr.id}/${i % 2 ? 'submit' : 'close'}`, {
       closureComment: `Defective work cut out and made good; re-inspected — ${tag('ncr')}`,
       responsible: `Subcontractor foreman ${mark}`,
       dueDate: ctx.daysAhead(10 + i),
-      attachmentRefs: [evidenceOf(repair), evidenceOf(photo)],
+      attachmentRefs: [await workflowUpload(site, 'ncr-closeout')],
     });
-    for (const row of ncr?.attachments || ncr?.attachmentRefs || []) if (row?.id) ctx.record('workflow_attachment', row.id);
+    if (ncr?.status !== 'submitted') ctx.note(`FINDING NCR closeout left ${ncr?.ref} ${ncr?.status}, not submitted`);
+    recordWorkflowRows(ncr);
     if (target === 'submitted') continue;
     if (target === 'rejected') {
       await quality.POST(`${P}/ncr/${ncr.id}/reject`, { reason: `The repair is not to the approved method — ${tag('ncr')}` });
@@ -631,24 +757,32 @@ const run = async (ctx) => {
       managerUserId: ids.pm,
       finalApproverUserId: ids.quality,
       dueDate: i === 1 ? ctx.daysAgo(4) : ctx.daysAhead(5 + i), // one overdue
-      clientRequestId: mark,
+      clientRequestId: requestKey(mark),
     });
+    if (created.replayed) throw new Error(`quality-field: punch ${mark} was answered as a replay of ${created.ref}`);
     ctx.record('punch_item', created.id);
+    recordActivityLinks(created);
     state.punch.push({ id: created.id, ref: created.ref, plan: target });
     if (i < 2) await attach(site, 'punch_item', created.id, { fields: { tags: 'punch,snag', ...(locationId ? { locationId } : {}) } });
-    if (i === 1) await ctx.attempt('punch edit', () => site.PATCH(`${P}/punch/${created.id}`, { description: `Snag found on the walk-round; access needed from level 2 — ${tag('punch-item')}`, priority: 'urgent' }));
+    if (i === 1) await site.PATCH(`${P}/punch/${created.id}`, { description: `Snag found on the walk-round; access needed from level 2 — ${tag('punch-item')}`, priority: 'urgent' });
     await walk(created.id, target);
   }
   // Several at once, already open, then sent to the people who must clear them.
-  const bulkMark = tag('punch-item');
+  const bulkMarks = [tag('punch-item'), tag('punch-item')];
   const bulk = await site.POST(`${P}/punch/bulk`, {
-    items: [{ title: `Make good plaster at socket boxes ${bulkMark}` }, { title: `Label distribution board circuits ${tag('punch-item')}` }],
-    defaults: { priority: 'low', trade: 'Electrical', status: 'open', activityId: activityId(4), assigneeUserId: ids.site, assigneeCompanyId: supplier || subcontractor, description: `Listed on the pre-handover walk — ${bulkMark}` },
+    items: [
+      { title: `Make good plaster at socket boxes ${bulkMarks[0]}`, description: `Listed on the pre-handover walk — ${bulkMarks[0]}`, clientRequestId: requestKey(bulkMarks[0]) },
+      { title: `Label distribution board circuits ${bulkMarks[1]}`, description: `Listed on the pre-handover walk — ${bulkMarks[1]}`, clientRequestId: requestKey(bulkMarks[1]) },
+    ],
+    defaults: { priority: 'low', trade: 'Electrical', status: 'open', activityId: activityId(4), assigneeUserId: ids.site, assigneeCompanyId: supplier || subcontractor },
   });
   const bulkIds = rowsOf(bulk).map((row) => row.id).filter(Boolean);
+  if (bulkIds.length !== 2) throw new Error(`quality-field: punch bulk made ${bulkIds.length} item(s), not 2: ${JSON.stringify(bulk).slice(0, 200)}`);
   for (const id of bulkIds) ctx.record('punch_item', id);
-  if (!bulkIds.length) ctx.note(`punch bulk answered without items: ${JSON.stringify(bulk).slice(0, 200)}`);
-  await ctx.attempt('punch distribute', () => site.POST(`${P}/punch/distribute`, { itemIds: bulkIds, userIds: [ids.site], message: `Please clear before handover — ${tag('punch-item')}`, kind: 'punch' }));
+  state.bulkPunch = bulkIds;
+  // Only the two bulk items: an empty list would distribute every open item of the project.
+  const distributed = await site.POST(`${P}/punch/distribute`, { itemIds: bulkIds, userIds: [ids.site], message: `Please clear before handover — ${tag('punch-item')}`, kind: 'punch' });
+  state.distributed = { items: bulkIds.length, answer: JSON.stringify(distributed).slice(0, 120) };
 
   // ── observations: one of each type the product offers ────────────────────
   const OBSERVATIONS = [
@@ -675,9 +809,11 @@ const run = async (ctx) => {
       assigneeUserId: ids.site,
       managerUserId: ids.pm,
       dueDate: ctx.daysAhead(2 + i),
-      clientRequestId: mark,
+      clientRequestId: requestKey(mark),
     });
+    if (created.replayed) throw new Error(`quality-field: observation ${mark} was answered as a replay of ${created.ref}`);
     ctx.record('punch_item', created.id);
+    recordActivityLinks(created);
     state.observations.push({ id: created.id, ref: created.ref, type: observationType, plan: target });
     if (i === 0) await attach(quality, 'punch_item', created.id, { fields: { tags: 'observation,safety' } });
     // No final approver here: a PM or quality engineer closes it.
@@ -687,7 +823,7 @@ const run = async (ctx) => {
     if (target === 'closed') await step(pm, created.id, 'close', `Made safe — ${tag('observation')}`);
     if (target === 'void') await step(pm, created.id, 'void', `Recorded twice — ${tag('observation')}`);
   }
-  const listing = await ctx.attempt('punch export.csv', () => quality.download(`${P}/punch/export.csv?kind=all`));
+  const listing = await check('punch export.csv', () => quality.download(`${P}/punch/export.csv?kind=all`));
   if (listing && !listing.length) ctx.note('FINDING punch export.csv is empty');
 
   // ── defects ──────────────────────────────────────────────────────────────
@@ -710,6 +846,7 @@ const run = async (ctx) => {
       assigneeCompanyId: subcontractor,
     });
     ctx.record('defect_record', created.id);
+    recordActivityLinks(created);
     if (i === 0) await attach(site, 'defect', created.id);
     if (target === 'open') continue;
     await site.PATCH(`${P}/defects/${created.id}`, { status: 'in_progress', comment: `Repair started — ${tag('defect-record')}` });
@@ -740,6 +877,7 @@ const run = async (ctx) => {
       assigneeUserId: ids.quality,
     });
     ctx.record('material_test', created.id);
+    recordActivityLinks(created);
     if (i === 0) await attach(quality, 'material_test', created.id, { kind: 'pdf' });
     if (target !== 'pending') {
       await (i % 2 ? site : quality).PATCH(`${P}/material-tests/${created.id}`, { result: target, actualValue: `${actualValue} ${tag('material-test')}`, comment: `Laboratory report received — ${tag('material-test')}` });
@@ -750,13 +888,14 @@ const run = async (ctx) => {
   const INCIDENTS = [
     ['near_miss', 'closed', 'Pallet slipped from the forks during offloading'],
     ['first_aid', 'open', 'Cut to hand while fixing reinforcement'],
+    ['near_miss', 'archived', 'Entered twice in error'],
     ['lti', 'investigating', 'Operative fell from a hop-up, sprained ankle'],
     ['near_miss', 'submitted', 'Reversing dumper with no banksman'],
     ['first_aid', 'rejected', 'Dust in eye while cutting blocks'],
-    ['near_miss', 'archived', 'Entered twice in error'],
     ['near_miss', 'reopened', 'Scaffold tie removed by another trade'],
   ];
   state.safety = [];
+  let closeouts = 0;
   for (const [i, [incidentType, target, text]] of INCIDENTS.slice(0, ctx.count(2, 7)).entries()) {
     const mark = tag('safety-incident');
     let incident = await site.POST(`${P}/safety`, {
@@ -775,10 +914,11 @@ const run = async (ctx) => {
       status: target === 'investigating' ? 'investigating' : 'open',
     });
     ctx.record('safety_incident', incident.id);
+    recordActivityLinks(incident);
     state.safety.push({ id: incident.id, ref: incident.ref, type: incidentType, plan: target });
     if (i < 2) await attach(site, 'safety_incident', incident.id, { fields: { tags: 'safety' } });
     if (target === 'open' || target === 'investigating') {
-      if (i === 1) await ctx.attempt('safety edit', () => quality.PATCH(`${P}/safety/${incident.id}`, { comment: `First aider's report added — ${tag('safety-incident')}`, lostDays: 0 }));
+      if (i === 1) await quality.PATCH(`${P}/safety/${incident.id}`, { comment: `First aider's report added — ${tag('safety-incident')}`, lostDays: 0 });
       continue;
     }
     if (target === 'archived') {
@@ -786,13 +926,14 @@ const run = async (ctx) => {
       continue;
     }
     const evidence = await workflowUpload(site, 'safety');
-    incident = await site.POST(`${P}/safety/${incident.id}/${i % 2 ? 'submit' : 'close'}`, {
+    incident = await site.POST(`${P}/safety/${incident.id}/${closeouts % 2 ? 'submit' : 'close'}`, {
       closureComment: `Corrective actions briefed and in place — ${tag('safety-incident')}`,
       responsible: `Site supervisor ${mark}`,
       dueDate: ctx.daysAhead(4 + i),
       attachmentRefs: [evidence],
     });
-    for (const row of incident?.attachments || incident?.attachmentRefs || []) if (row?.id) ctx.record('workflow_attachment', row.id);
+    closeouts += 1;
+    recordWorkflowRows(incident);
     if (target === 'submitted') continue;
     if (target === 'rejected') {
       await quality.POST(`${P}/safety/${incident.id}/reject`, { reason: `No evidence that the crew was briefed — ${tag('safety-incident')}` });
@@ -813,44 +954,73 @@ const run = async (ctx) => {
     else body.activityLinks = [{ activityId: activityId(i), delayStart: date, delayEnd: date, delayDays, notes: `Stood down all day — ${mark}` }];
     const created = await planner.POST(`${P}/weather-delays`, body);
     ctx.record('weather_delay', created.id);
+    for (const link of created.activityLinks || []) if (link?.id) remember('weather_delay_activity_link', link.id);
     state.weather.push(created.id);
+    // The route accepts any non-negative number of days (isFloat); the record keeps whole days.
+    if (Number(created.delayDays) !== delayDays) ctx.note(`FINDING weather delay sent with delayDays ${delayDays} was stored with ${created.delayDays} (POST ${P}/weather-delays answered ${created.id})`);
     if (i === 0) {
       await attach(planner, 'weather_delay', created.id, { kind: 'pdf' });
       await attach(planner, 'weather_delay', created.id);
     }
-    if (i === 1) await ctx.attempt('weather delay edit', () => qs.PATCH(`${P}/weather-delays/${created.id}`, { delayDays: 1, description: `${text}; a full day lost after inspection — ${tag('weather-delay')}` }));
+    if (i === 1) await qs.PATCH(`${P}/weather-delays/${created.id}`, { delayDays: 1, description: `${text}; a full day lost after inspection — ${tag('weather-delay')}` });
+  }
+  {
+    // The allowance rule: a warning at 70% of the contractual allowance used.
+    const listed = await planner.GET(`${P}/weather-delays`);
+    const summary = listed?.summary;
+    if (summary) {
+      const used = rowsOf(listed).filter((row) => row.contractual).reduce((sum, row) => sum + (Number(row.delayDays) || 0), 0);
+      if (Number(summary.contractualUsed) !== used) ctx.note(`FINDING weather summary contractualUsed ${summary.contractualUsed} is not the sum of contractual delays ${used}`);
+      if (Boolean(summary.warning) !== Number(summary.consumedPct) >= 70) ctx.note(`FINDING weather warning ${summary.warning} at ${summary.consumedPct}% of the allowance (the rule warns from 70%)`);
+      state.weatherSummary = { allowance: summary.allowance, contractualUsed: summary.contractualUsed, consumedPct: summary.consumedPct, warning: summary.warning };
+    } else ctx.note(`weather delays answered no summary: ${JSON.stringify(listed).slice(0, 160)}`);
   }
 
   // ── site photos ──────────────────────────────────────────────────────────
   // The gallery is every image attached anywhere on the project; these hang on the place and on activities.
   state.photos = [];
   for (let i = 0, n = ctx.count(1, 4); i < n; i += 1) {
-    const onLocation = locationId && i % 2 === 0;
+    const onLocation = i % 2 === 0;
     const item = await attach(onLocation ? site : planner, onLocation ? 'location' : 'activity', onLocation ? locationId : activityId(i), {
       caption: `Progress photo ${i + 1} — ${tag('photo')}`,
-      fields: { role: 'photo', tags: 'progress,site', ...(locationId ? { locationId } : {}) },
+      fields: { role: 'photo', tags: 'progress,site', locationId },
     });
-    if (!item.photo?.id) {
-      ctx.note(`an image attached to ${item.recordType} made no photo`);
-      continue;
-    }
+    if (!item.photo?.id) continue; // noted as a FINDING by attach
     state.photos.push(item.photo.id);
     if (i === 0) {
       await site.PATCH(`${P}/photos/${item.photo.id}`, { caption: `North elevation after the pour — ${tag('photo')}`, tags: ['progress', 'north-elevation', 'pour'], takenAt: new Date(Date.now() - 3_600_000).toISOString() });
-      const bytes = await ctx.attempt('photo file', () => site.download(`${P}/photos/${item.photo.id}/file`));
+      const bytes = await check('photo file', () => site.download(`${P}/photos/${item.photo.id}/file`));
       if (bytes && bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') ctx.note('FINDING the photo file is not the PNG that was uploaded');
     }
   }
-  const gallery = await site.GET(`${P}/photos?limit=200`);
-  const seen = new Set(rowsOf(gallery).map((row) => row.id));
-  const missing = state.photos.filter((id) => !seen.has(id));
-  if (missing.length && rowsOf(gallery).length < 200) ctx.note(`FINDING ${missing.length} uploaded photo(s) are not in the gallery`);
+  {
+    // Every photo this run made (signatures included) is in the gallery, page after page.
+    const seen = new Set();
+    let signaturePhotos = 0;
+    let cursor = null;
+    for (let page = 0; page < 50; page += 1) {
+      const listed = await check('photo gallery', () => site.GET(`${P}/photos?limit=200${cursor ? `&cursor=${cursor}` : ''}`));
+      if (!listed) break;
+      for (const row of rowsOf(listed)) {
+        seen.add(row.id);
+        if ((row.records || []).some((link) => link.role === 'signature')) signaturePhotos += 1;
+      }
+      cursor = listed.pagination?.nextCursor || null;
+      if (!cursor) break;
+    }
+    const missing = madePhotos.filter((id) => !seen.has(id));
+    if (seen.size && missing.length) ctx.note(`FINDING ${missing.length} photo(s) made by this run are not in the project gallery: ${missing.slice(0, 3).join(', ')}`);
+    state.gallery = { photos: seen.size, signaturePhotos };
+  }
   // The site-reporting photo store (what daily reports and diaries point at).
+  state.sitePhotoKeys = state.sitePhotoKeys || [];
   for (let i = 0, n = ctx.count(1, 2); i < n; i += 1) {
     const file = fileOf('png', 'site-photo');
-    const stored = await ctx.attempt('site-reporting upload', () => site.upload('POST', `${P}/site-reporting/uploads`, { field: 'files', filename: file.filename, contentType: file.contentType, body: file.body }));
-    for (const row of rowsOf(stored)) if (row.documentId) ctx.record('project_document', row.documentId);
-    if (stored) (state.sitePhotoKeys = state.sitePhotoKeys || []).push(...rowsOf(stored).map((row) => row.key));
+    const stored = await site.upload('POST', `${P}/site-reporting/uploads`, { field: 'files', filename: file.filename, contentType: file.contentType, body: file.body });
+    const rows = rowsOf(stored);
+    if (!rows.length || !rows[0].documentId) throw new Error(`quality-field: the site-reporting upload returned no document: ${JSON.stringify(stored).slice(0, 200)}`);
+    for (const row of rows) remember('project_document', row.documentId);
+    state.sitePhotoKeys.push(...rows.map((row) => row.key));
   }
 
   // ── the quality score and the project health, as the product reports them ──
@@ -858,19 +1028,43 @@ const run = async (ctx) => {
   const metrics = dashboard?.metrics || {};
   const ncrs = rowsOf(await quality.GET(`${P}/ncr`));
   const itps = rowsOf(await quality.GET(`${P}/itp`));
-  const major = ncrs.filter((row) => row.severity === 'major').length;
-  const minor = ncrs.filter((row) => row.severity === 'minor').length;
-  const failed = itps.filter((row) => row.status === 'failed').length;
-  const expected = Math.max(0, 100 - 20 * major - 8 * minor - 15 * failed);
-  ctx.note(`quality score ${metrics.qualityScore} (major NCRs ${metrics.majorNcrs}, minor ${metrics.minorNcrs}, failed ITPs ${metrics.failedItps}); safety incidents ${metrics.safetyIncidents}, open ${metrics.safetyOpen}; open punch ${metrics.openDefects}, open observations ${metrics.observationsOpen}`);
-  if (Number(metrics.qualityScore) !== expected) ctx.note(`FINDING quality score ${metrics.qualityScore} is not 100 - 20x${major} - 8x${minor} - 15x${failed} = ${expected}`);
-  const health = await ctx.attempt('project health', () => pm.GET(`${P}/health`));
+  const incidents = rowsOf(await quality.GET(`${P}/safety?includeArchived=true`));
+  // An archived or void record is withdrawn: it does not count (quality.service.js).
+  const live = (rows) => rows.filter((row) => row.status !== 'archived' && row.status !== 'void');
+  const qualityRule = (ncrRows, itpRows) => {
+    const major = ncrRows.filter((row) => row.severity === 'major').length;
+    const minor = ncrRows.filter((row) => row.severity === 'minor').length;
+    const failed = itpRows.filter((row) => row.status === 'failed').length;
+    return { major, minor, failed, score: Math.max(0, 100 - 20 * major - 8 * minor - 15 * failed) };
+  };
+  const safetyRule = (rows) => {
+    const lti = rows.filter((row) => row.incidentType === 'lti').length;
+    const fatal = rows.filter((row) => row.incidentType === 'fatality').length;
+    const open = rows.filter((row) => row.status !== 'closed').length;
+    return { lti, fatal, open, score: Math.max(0, Math.min(100, 100 - 100 * fatal - 20 * lti - 5 * open)) };
+  };
+  const expected = qualityRule(live(ncrs), live(itps));
+  const liveIncidents = live(incidents);
+  const archivedIncidents = incidents.length - liveIncidents.length;
+  ctx.note(`quality score ${metrics.qualityScore} (major NCRs ${metrics.majorNcrs}, minor ${metrics.minorNcrs}, failed ITPs ${metrics.failedItps}); safety incidents ${metrics.safetyIncidents}, open ${metrics.safetyOpen}, archived ${archivedIncidents}; open punch ${metrics.openDefects}, open observations ${metrics.observationsOpen}`);
+  if (Number(metrics.qualityScore) !== expected.score) ctx.note(`FINDING quality score ${metrics.qualityScore} is not 100 - 20x${expected.major} - 8x${expected.minor} - 15x${expected.failed} = ${expected.score}`);
+  const safetyOpen = liveIncidents.filter((row) => row.status !== 'closed').length;
+  if (Number(metrics.safetyOpen) !== safetyOpen) ctx.note(`FINDING quality dashboard safetyOpen ${metrics.safetyOpen}, the incident list says ${safetyOpen} open (archived excluded)`);
+  const health = await check('project health', () => pm.GET(`${P}/health`));
   if (health) {
     const dimension = (key) => (health.dimensions || []).find((row) => row.key === key);
     ctx.note(`project health: overall ${health.overallScore}, quality ${dimension('quality')?.score}, safety ${dimension('safety')?.score}`);
-    if (dimension('quality') && Number(dimension('quality').score) !== expected) ctx.note(`FINDING health quality ${dimension('quality').score} differs from the quality rule ${expected}`);
+    if (dimension('quality') && Number(dimension('quality').score) !== expected.score) ctx.note(`FINDING health quality ${dimension('quality').score} differs from the quality rule ${expected.score} (dashboard ${metrics.qualityScore})`);
+    const safetyExpected = safetyRule(liveIncidents);
+    if (dimension('safety') && Number(dimension('safety').score) !== safetyExpected.score) {
+      const withArchived = safetyRule(incidents).score;
+      ctx.note(
+        `FINDING health safety ${dimension('safety').score} is not 100 - 100x${safetyExpected.fatal} - 20x${safetyExpected.lti} - 5x${safetyExpected.open} open = ${safetyExpected.score} over live incidents` +
+          (archivedIncidents && Number(dimension('safety').score) === withArchived ? `; it counts the ${archivedIncidents} archived incident(s) as open investigations (= ${withArchived}), which the quality dashboard excludes` : ''),
+      );
+    }
   }
-  state.score = { quality: metrics.qualityScore, expected, major, minor, failedItps: failed };
+  state.score = { quality: metrics.qualityScore, expected: expected.score, major: expected.major, minor: expected.minor, failedItps: expected.failed, safetyOpen: metrics.safetyOpen, archivedIncidents };
 };
 
 module.exports = { name: 'quality-field', needs: ['foundation'], depths: ['standard'], run };
