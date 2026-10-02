@@ -202,6 +202,8 @@ async function main() {
   // Advance from wherever it stands, so a repeated run still measures a real
   // movement rather than re-booking a percentage it already has.
   const currentPct = Number(afterRows.find((a) => a.activityCode === "A130")?.pctComplete ?? 0);
+  // One clean pass: A130 has no approved progress yet, so this stage takes it 0 -> 25 and the certified figures rest on that.
+  check("one clean pass: A130 has no approved progress before this stage", 0, currentPct);
   const nextPct = Math.min(currentPct + 25, 100);
   note("A130 advancing", `${currentPct}% -> ${nextPct}%`);
   await POST(site, `/projects/${P}/activities/${a130.id}/progress`, {

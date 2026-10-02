@@ -195,12 +195,9 @@ async function main() {
     afterApproval.original + afterApproval.approvedChanges + afterApproval.revisions,
     afterApproval.revised,
   );
-  check(
-    "this variation contributed exactly 125,000.00 of it",
-    true,
-    approvedFromRegister % cents(APPROVED_CHANGE) === 0 && approvedFromRegister >= cents(APPROVED_CHANGE),
-  );
-  check("the unapproved 40,000 draft is excluded", true, afterApproval.approvedChanges % cents(DRAFT_CHANGE) !== cents(DRAFT_CHANGE));
+  // One clean pass: this is the only approved change (the old checks accepted any multiple of it, and the draft check was always true).
+  check("this variation is the only approved change: 125,000.00", cents(APPROVED_CHANGE), approvedFromRegister);
+  check("the unapproved 40,000 draft is excluded: approved changes are exactly 125,000.00", cents(APPROVED_CHANGE), afterApproval.approvedChanges);
 
   // An approved variation is a contractual fact, not a draft. Proven, because
   // a duplicate raised by a repeated stage run could not be taken back.

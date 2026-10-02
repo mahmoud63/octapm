@@ -16,7 +16,12 @@
 // The API under test: the local stack on :5000 unless P21_API_BASE names
 // another origin (a wave's own API on a free port, so the stages can be
 // re-run against code the running API does not have yet).
-const API = `${(process.env.P21_API_BASE || "http://127.0.0.1:5000").replace(/\/$/, "")}/api/v1`;
+const API_BASE = (process.env.P21_API_BASE || "http://127.0.0.1:5000").replace(/\/$/, "");
+// A certification run (named by P21_CONTEXT or P21_EMAIL_DOMAIN) must name its own API, never the shared one on :5000.
+if ((process.env.P21_CONTEXT || process.env.P21_EMAIL_DOMAIN) && (!process.env.P21_API_BASE || new URL(API_BASE).port === "5000")) {
+  throw new Error("P21_CONTEXT / P21_EMAIL_DOMAIN name a certification run but P21_API_BASE is unset or names port 5000");
+}
+const API = `${API_BASE}/api/v1`;
 const PASSWORD = process.env.P21_PASSWORD || "DemoPassw0rd!";
 
 /** Well under the 15-minute JWT_EXPIRY. */

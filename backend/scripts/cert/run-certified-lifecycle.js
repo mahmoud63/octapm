@@ -53,6 +53,7 @@ const only = process.argv.find((a) => a.startsWith('--only='))?.split('=')[1];
 const from = process.argv.find((a) => a.startsWith('--from='))?.split('=')[1];
 
 const main = () => {
+  if (!process.env.CERT_PASSWORD) throw new Error('CERT_PASSWORD is not set.');
   const { companies } = buildPopulation();
   const company = companies.find((c) => c.code === code);
   if (!company) throw new Error(`no certification company ${code}`);

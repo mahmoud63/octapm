@@ -59,6 +59,7 @@ async function main() {
   note("quality before", JSON.stringify(before));
   ctx.quality = ctx.quality || {};
   if (ctx.quality.scoreAtStart === undefined) ctx.quality.scoreAtStart = before.score;
+  check("a project with no NCR and no failed ITP starts at 100", 100, ctx.quality.scoreAtStart);
 
   // ── 16.1 ITPs ─────────────────────────────────────────────────────────────
   section("16.1  Inspection & test plan — one hold point passed, one witness point failed");
@@ -105,7 +106,8 @@ async function main() {
   // store, and the second run raised NCR-002 a second time, closed it out and had it
   // approved before the defect was seen. That record is approved history and stays.
   // It is named here so that a THIRD copy fails loudly.
-  if (!ctx.quality.ncrDuplicateT10 && ncrRows.length === 2) ctx.quality.ncrDuplicateT10 = ncrRows[1].id; // recorded once, 2026-09-12
+  // The T-10 allowance is the durable demo project's history; on a certification project a second NCR-01 must fail below.
+  if (!process.env.P21_CONTEXT && !ctx.quality.ncrDuplicateT10 && ncrRows.length === 2) ctx.quality.ncrDuplicateT10 = ncrRows[1].id; // recorded once, 2026-09-12
   const T10_DUPLICATE = ctx.quality.ncrDuplicateT10 || null;
   const strays = ncrRows.slice(1).filter((r) => r.id !== T10_DUPLICATE);
   if (strays.length) throw new Error(`unexpected duplicate NCR-01: ${strays.map((r) => r.ref).join(", ")}`);
@@ -258,6 +260,7 @@ async function main() {
   note("quality after", JSON.stringify(finalScore));
   check("the final score is 100 − 20·major − 8·minor − 15·failed ITP", 100 - 20 * finalScore.major - 8 * finalScore.minor - 15 * finalScore.failedItps, finalScore.score);
   check(`nothing but NCR-01${T10_DUPLICATE ? ", the T-10 duplicate" : ""} and the failed ITP moved the score (20 per major NCR + 15)`, EXPECTED_MAJOR * 20 + 15, ctx.quality.scoreAtStart - finalScore.score);
+  if (!T10_DUPLICATE) check("one clean pass: 100 − 20·1 − 8·0 − 15·1 = 65", 65, finalScore.score);
   ctx.quality.scoreFinal = finalScore.score;
   const out = await probe(ctx.outsider, "GET", `/projects/${P}/ncr/${ncr.id}`);
   check("another tenant cannot read the NCR", true, out.status === 403 || out.status === 404);

@@ -209,6 +209,10 @@ async function main() {
   check("received from the client", cents(EXPECTED.cashIn), cents(receivables.received));
   check("outstanding receivable is 87,750 - 80,000 = 7,750.00", cents(EXPECTED.ipcNet - EXPECTED.cashIn), cents(receivables.outstanding));
 
+  // The brief's quality rule, reconciled here too: one major NCR and one failed ITP.
+  const quality = await GET(qs, `/projects/${P}/quality/dashboard`);
+  check("QUALITY SCORE is 100 − 20·1 − 8·0 − 15·1 = 65", 65, Number((quality.metrics || quality).qualityScore));
+
   // ── the anchors Phase 21B will build on ──────────────────────────────────
   ctx.baseline21B = {
     verifiedAt: new Date().toISOString(),

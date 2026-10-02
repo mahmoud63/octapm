@@ -20,7 +20,9 @@ const path = require("path");
 const { chromium } = require("C:/Users/mabde29/OneDrive - Louisiana State University/Constech/octapm-main/octapm-main/.claude/worktrees/procore-competitive-benchmark-6bd1b6/node_modules/playwright-core");
 const { GET } = require("./harness");
 
-const CONTEXT = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
+// This stage drives the shared development web (:5173) and API (:5000) as the demo personas: never part of a certification run.
+if (process.env.P21_CONTEXT) throw new Error("stage19 drives http://localhost:5173 and :5000 as the demo personas; it is not part of a certification run");
+const CONTEXT = path.join(__dirname, "context.json");
 const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
 const P = ctx.projectId;
 const BASE = "http://localhost:5173";
