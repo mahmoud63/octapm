@@ -2256,6 +2256,8 @@ const withheldChangeEventAuditEvent = (event) => {
 // money kind without the budget figures) the event goes, as the bill's own
 // records' events do. The summaries carry no figure.
 const withheldExceptionEvent = (event, access) => {
+  // Fail closed: a caller whose access is not known is given no exception event.
+  if (!access) return true;
   const meta = (event && (event.metadata || event.metadataJson)) || {};
   if (meta.boqDerived !== false && !access.boq) return true;
   if (meta.module === "cost" && !access.budget) return true;

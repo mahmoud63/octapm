@@ -774,7 +774,8 @@ const changeEventWithholding = async ({ orgId, projectId, events }) => {
  * (utils/boq-figures withheldChangeEventAnswer).
  */
 const changeEventAnswerFor = async ({ orgId, projectId, access, answer }) => {
-  if (!access || access.boq === true) return answer;
+  // Fail closed: a caller whose access is not known is a reader without boq:read.
+  if (access && access.boq === true) return answer;
   const refs = changeEventRefsOf(answer);
   if (!refs.length) return answer;
   const withholding = await changeEventWithholding({ orgId, projectId, events: refs });

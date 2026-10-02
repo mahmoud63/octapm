@@ -539,10 +539,12 @@ const assertEditable = (row) => {
  * PC-7b: what this caller was not given of a change event raised from a
  * BOQ-derived exception (utils/boq-figures changeEventWithheldFields:
  * { event: [field], lines: Map lineId → [field] }) — null for a caller who
- * may read the BOQ, or an event raised from no BOQ-derived exception.
+ * may read the BOQ, or an event raised from no BOQ-derived exception. A
+ * missing access (undefined / null) is treated as no boq:read (fail closed).
  */
 const withheldForCaller = async ({ orgId, projectId, event, access }) => {
-  if (!access || access.boq === true) return null;
+  // Fail closed: a caller whose access is not known is a reader without boq:read.
+  if (access && access.boq === true) return null;
   const withholding = await require("./exception.service").changeEventWithholding({ orgId, projectId, events: [event] });
   const entry = withholding.get(event.id);
   return entry ? changeEventWithheldFields(event, entry) : null;
@@ -926,4 +928,4 @@ const portalDecline = async (token, payload = {}) => {
   return portalOut(row);
 };
 
-module.exports = { STATUS, TYPES, ORIGINS, SOURCE_LINKS, SOURCE_LINK_FIELDS, RECORD_SOURCES, RECORD_SOURCE_TYPES, RFQ_STATUS, prefillFromRecord, raiseFromRecord, draftOverPrefill, estimateOf, normalizeLines, listChangeEvents, getChangeEvent, createChangeEvent, updateChangeEvent, deleteChangeEvent, sendRfqs, remindRfq, cancelRfq, acceptQuote, rejectQuote, convertToChangeOrder, closeChangeEvent, voidChangeEvent, portalContext, portalView, portalSubmitQuote, portalDecline, hashToken };
+module.exports = { STATUS, TYPES, ORIGINS, SOURCE_LINKS, SOURCE_LINK_FIELDS, RECORD_SOURCES, RECORD_SOURCE_TYPES, RFQ_STATUS, prefillFromRecord, raiseFromRecord, draftOverPrefill, estimateOf, normalizeLines, listChangeEvents, getChangeEvent, createChangeEvent, updateChangeEvent, deleteChangeEvent, sendRfqs, remindRfq, cancelRfq, acceptQuote, rejectQuote, convertToChangeOrder, closeChangeEvent, voidChangeEvent, portalContext, portalView, portalSubmitQuote, portalDecline, hashToken, _withheldForCaller: withheldForCaller };
