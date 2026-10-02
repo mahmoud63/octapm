@@ -296,8 +296,33 @@ const itemFields = (payload, existing = null) => {
   return data;
 };
 
+/**
+ * The records an item or a warehouse may point at — its project, its preferred
+ * supplier, its manager — must be this organisation's own (certification
+ * finding C2-INV-1, lead L5). The database's composite key used to be the
+ * only thing that stopped a foreign project (with a 500), and nothing stopped
+ * a foreign supplier or person, whose names were then served back. A foreign
+ * id and an id that exists nowhere get the same answer, so the refusal says
+ * nothing about another company.
+ */
+const assertOwnReferences = async (client, orgId, { projectId = null, preferredSupplierId = null, managerId = null } = {}) => {
+  if (projectId) {
+    const project = await client.project.findFirst({ where: { id: projectId, orgId }, select: { id: true } });
+    if (!project) throw new HttpError(404, "PROJECT_NOT_FOUND", "That project is not this organisation's");
+  }
+  if (preferredSupplierId) {
+    const supplier = await client.procurementSupplier.findFirst({ where: { id: preferredSupplierId, project: { orgId } }, select: { id: true } });
+    if (!supplier) throw new HttpError(404, "SUPPLIER_NOT_FOUND", "That supplier is not this organisation's");
+  }
+  if (managerId) {
+    const member = await client.organizationMembership.findFirst({ where: { orgId, userId: managerId, status: { not: "left" } }, select: { id: true } });
+    if (!member) throw new HttpError(404, "USER_NOT_FOUND", "That person is not a member of this organisation");
+  }
+};
+
 const createItem = async ({ orgId, user, payload }) => {
   const data = itemFields(payload);
+  await assertOwnReferences(prisma, orgId, data);
   // A scanner needs something to resolve; default the QR token to the SKU so
   // an item is scannable the moment it exists.
   if (!data.qrCode) data.qrCode = data.sku;
@@ -320,6 +345,7 @@ const updateItem = async ({ orgId, user, itemId, payload }) => {
   if (!existing) throw new HttpError(404, "ITEM_NOT_FOUND", "Item not found");
 
   const data = itemFields(payload, existing);
+  await assertOwnReferences(prisma, orgId, { projectId: data.projectId, preferredSupplierId: data.preferredSupplierId });
   if (data.sku && data.sku !== existing.sku) {
     const clash = await prisma.inventoryItem.findFirst({
       where: { orgId, sku: data.sku, id: { not: itemId } },
@@ -374,6 +400,7 @@ const createWarehouse = async ({ orgId, user, payload }) => {
   const name = requireText(payload.name, "Name");
   const kind = oneOf(payload.kind, WAREHOUSE_KINDS, "kind", "project");
 
+  await assertOwnReferences(prisma, orgId, { projectId: trimOrNull(payload.projectId), managerId: trimOrNull(payload.managerId) });
   const clash = await prisma.warehouse.findFirst({ where: { orgId, code }, select: { id: true } });
   if (clash) throw new HttpError(409, "WAREHOUSE_CODE_TAKEN", `Code "${code}" is already in use`);
 
@@ -406,6 +433,7 @@ const updateWarehouse = async ({ orgId, user, warehouseId, payload, allowedProje
   if (payload.kind !== undefined) data.kind = oneOf(payload.kind, WAREHOUSE_KINDS, "kind", existing.kind);
   if (payload.address !== undefined) data.address = trimOrNull(payload.address);
   if (payload.managerId !== undefined) data.managerId = trimOrNull(payload.managerId);
+  await assertOwnReferences(prisma, orgId, { managerId: data.managerId });
   if (payload.notes !== undefined) data.notes = trimOrNull(payload.notes);
   if (payload.status !== undefined) {
     data.status = oneOf(payload.status, ["active", "archived"], "status", existing.status);
