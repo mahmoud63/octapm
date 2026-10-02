@@ -1000,6 +1000,7 @@ const components = {
         "PROJECT_LIMIT_REACHED",
         "ORG_NOT_FOUND",
         "PROJECT_ACCESS_DENIED",
+        "IDENTITY_SHARED",
         "PROJECT_ARCHIVED",
         "PROJECT_ARCHIVE_ACTION_REQUIRED",
         "PROJECT_NOT_FOUND",

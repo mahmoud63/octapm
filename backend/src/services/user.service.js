@@ -462,6 +462,13 @@ const updateUser = async ({ orgId, userId, actor = null, payload, context = {} }
       });
       if (clash)
         throw new HttpError(409, "EMAIL_EXISTS", "Email already exists");
+      // The login e-mail is the key to every workspace the identity belongs to.
+      // A home admin must not move it for a person who also belongs to other
+      // companies — doing so would let them capture the account through the
+      // self-service reset link (certification finding L39).
+      if (await membershipService.hasOtherActiveMembership({ orgId, userId })) {
+        throw new HttpError(403, "IDENTITY_SHARED", "This person also belongs to other workspaces; they change their own sign-in e-mail");
+      }
       data.email = normalized;
     }
   }
@@ -546,6 +553,13 @@ const resetPassword = async ({
   // A password belongs to the identity: only its own workspace resets it.
   if (user.orgId !== orgId) {
     throw new HttpError(403, "FORBIDDEN", "This person's password is managed by their own workspace");
+  }
+  // And when the identity also belongs to other companies, the home admin may
+  // not set a password of their choosing — that is a takeover of the account
+  // in those companies too (certification finding L39). The person resets it
+  // themselves through the self-service e-mail flow.
+  if (await membershipService.hasOtherActiveMembership({ orgId, userId })) {
+    throw new HttpError(403, "IDENTITY_SHARED", "This person also belongs to other workspaces; ask them to reset their own password");
   }
 
   const passwordHash = await bcrypt.hash(newPassword, 12);

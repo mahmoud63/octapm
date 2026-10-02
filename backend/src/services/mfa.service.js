@@ -6,6 +6,7 @@ const { HttpError } = require("../utils/http-error");
 const { generateSecret, verifyTotp, otpauthUrl } = require("../utils/totp");
 const { qrToSvg } = require("../utils/qr");
 const authAbuseService = require("./auth-abuse.service");
+const membershipService = require("./membership.service");
 const { keyring } = require("../utils/keyring");
 
 /**
@@ -205,6 +206,12 @@ const regenerateBackupCodes = async ({ userId, code, context = {} }) => {
 const adminReset = async ({ orgId, userId, actor, context = {} }) => {
   const user = await prisma.user.findFirst({ where: { id: userId, orgId } });
   if (!user) throw new HttpError(404, "USER_NOT_FOUND", "User not found");
+  // Clearing the second factor from a workspace this person only visits would
+  // weaken their sign-in to the companies they belong to (certification
+  // finding L39): refuse when the identity has other active memberships.
+  if (user.orgId !== orgId || (await membershipService.hasOtherActiveMembership({ orgId, userId }))) {
+    throw new HttpError(403, "IDENTITY_SHARED", "This person's second factor is managed from their own workspace");
+  }
   await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: false, mfaSecretEnc: null, mfaPendingSecretEnc: null, mfaEnrolledAt: null, mfaLastTotpStep: null, mfaBackupCodesJson: [] } });
   await audit({ orgId, userId, actorId: actor?.id || null, action: "mfa.reset_by_admin", context });
   return { reset: true };

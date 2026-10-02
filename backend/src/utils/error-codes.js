@@ -118,6 +118,11 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "project",
     message: "Project not found",
   },
+  IDENTITY_SHARED: {
+    status: 403,
+    category: "auth",
+    message: "This person also belongs to other workspaces; their credentials are changed only by themselves",
+  },
   PROJECT_ARCHIVED: {
     status: 409,
     category: "project",
