@@ -122,4 +122,22 @@ assert.match(panel, /\{event\.sourceWithheld && \([^]*?Raised from — \{event\.
 assert.match(panel, /isChangeEventFieldWithheld\(event, 'activityId'\) \?[^]*?title=\{event\.sourceWithheld\?\.reason\}/, 'a withheld activity in the register reads "—" with the reason')
 assert.match(dialog, /\{!sourceLink && event\.sourceWithheld && \([^]*?Raised from — \{event\.sourceWithheld\.reason\}/, 'the dialog names the reason where the source would be')
 
+// PC-7b third fixer, item 1: converting, and accepting a quote into a
+// commitment change order, are refused to a member without boq:read while the
+// event carries a withheld field (409 CHANGE_EVENT_FIELD_WITHHELD). No new UI:
+// both actions already show the server's own message, which carries the reason.
+const handleServerError = read('src/lib/handle-server-error.ts')
+assert.match(handleServerError, /errMsg = errorData\?\.error\?\.message \|\| errMsg/, "the toast reads the server's message")
+assert.match(dialog, /const convert = async \(\) => \{[^]*?action: 'convert'[^]*?catch \(error\) \{\s*toast\.error\(getServerErrorMessage\(error\)\)/, "a refused conversion shows the server's reason")
+assert.match(dialog, /action: 'remind' \| 'cancel' \| 'accept' \| 'reject'[^]*?catch \(error\) \{\s*toast\.error\(getServerErrorMessage\(error\)\)/, "a refused acceptance shows the server's reason")
+assert.match(service, /const assertMayAdopt = async/, 'the server refuses an adoption by a member who was not shown the fields')
+
+// PC-7b third fixer, item 2: a line carrying a field withheld from this member
+// is not theirs to remove, nor the event theirs to delete (the server refuses
+// both) — the dialog offers no control for either and gives the reason.
+assert.match(dialog, /\{row\.withheld\.length \? \([^]*?This line cannot be removed by you — \$\{withheldReason[^]*?\) : \([^]*?title='Remove line'/, 'a withheld line has no remove control, and says why')
+assert.match(dialog, /canDelete &&\s*carriesWithheldField && \([^]*?Delete — \{withheldReason\}/, 'no delete for a member who was not shown some figures, and why')
+assert.match(dialog, /canDelete &&\s*!carriesWithheldField && \(/, 'delete is offered only when nothing is withheld')
+assert.match(service, /const lineRemovalWithheld = \(\) => new HttpError\(409, "CHANGE_EVENT_LINE_WITHHELD"/, 'the server refuses removing a withheld line')
+
 console.log('change-events-ui: ok')

@@ -383,7 +383,9 @@ function SendRfqDialog({
                 key={line.id}
                 className='flex items-center gap-2'
                 title={
-                  lineBlocked(line.id) ? event.sourceWithheld?.reason : undefined
+                  lineBlocked(line.id)
+                    ? event.sourceWithheld?.reason
+                    : undefined
                 }
                 data-testid={`uat-rfq-line-${line.id}`}
                 data-blocked={lineBlocked(line.id) || undefined}
@@ -739,6 +741,11 @@ export function ChangeEventDialog({
   const commitmentOptions = commitments?.items ?? []
   const withheldReason = event?.sourceWithheld?.reason
   const headerActivityWithheld = isChangeEventFieldWithheld(event, 'activityId')
+  // Deleting the event would remove figures withheld from this member (the
+  // server refuses it: 409 CHANGE_EVENT_FIELD_WITHHELD).
+  const carriesWithheldField = (event?.sourceWithheld?.keys ?? []).some(
+    (key) => key === 'activityId' || key.startsWith('lines[')
+  )
   const totals = useMemo(() => {
     const rom = rows.reduce((sum, row) => sum + rowAmount(row), 0)
     const estimate = rows.reduce(
@@ -1293,19 +1300,37 @@ export function ChangeEventDialog({
                         </td>
                         {editable && (
                           <td className='px-2 py-1'>
-                            <button
-                              type='button'
-                              className='text-destructive'
-                              title='Remove line'
-                              onClick={() => {
-                                setRows((current) =>
-                                  current.filter((item) => item.key !== row.key)
-                                )
-                                setDirty(true)
-                              }}
-                            >
-                              <Trash2 className='h-4 w-4' />
-                            </button>
+                            {/* A line carrying a field withheld from this member is not
+                                theirs to remove (the server refuses it: 409
+                                CHANGE_EVENT_LINE_WITHHELD) — no delete control, the reason. */}
+                            {row.withheld.length ? (
+                              <span
+                                className='cursor-help text-muted-foreground'
+                                title={`This line cannot be removed by you — ${withheldReason ?? ''}`}
+                                aria-label={`This line cannot be removed by you — ${withheldReason ?? ''}`}
+                                data-testid={`uat-change-event-line-keep-${row.key}`}
+                                data-reason={withheldReason}
+                              >
+                                —
+                              </span>
+                            ) : (
+                              <button
+                                type='button'
+                                className='text-destructive'
+                                title='Remove line'
+                                data-testid={`uat-change-event-line-remove-${row.key}`}
+                                onClick={() => {
+                                  setRows((current) =>
+                                    current.filter(
+                                      (item) => item.key !== row.key
+                                    )
+                                  )
+                                  setDirty(true)
+                                }}
+                              >
+                                <Trash2 className='h-4 w-4' />
+                              </button>
+                            )}
                           </td>
                         )}
                       </tr>
@@ -1439,7 +1464,21 @@ export function ChangeEventDialog({
               )}
               {event.status === 'open' &&
                 event.rfqCounts.total === 0 &&
-                canDelete && (
+                canDelete &&
+                carriesWithheldField && (
+                  <span
+                    className='ml-auto cursor-help text-xs text-muted-foreground'
+                    title={withheldReason}
+                    data-testid='uat-change-event-delete-withheld'
+                    data-reason={withheldReason}
+                  >
+                    Delete — {withheldReason}
+                  </span>
+                )}
+              {event.status === 'open' &&
+                event.rfqCounts.total === 0 &&
+                canDelete &&
+                !carriesWithheldField && (
                   <Button
                     size='sm'
                     variant='ghost'

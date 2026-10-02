@@ -539,15 +539,36 @@ const assertEditable = (row) => {
  * PC-7b: what this caller was not given of a change event raised from a
  * BOQ-derived exception (utils/boq-figures changeEventWithheldFields:
  * { event: [field], lines: Map lineId → [field] }) — null for a caller who
- * may read the BOQ, or an event raised from no BOQ-derived exception.
+ * may read the BOQ, or an event raised from no BOQ-derived exception. A
+ * missing access (undefined / null) is treated as no boq:read (fail closed).
  */
 const withheldForCaller = async ({ orgId, projectId, event, access }) => {
-  if (!access || access.boq === true) return null;
+  // Fail closed: a caller whose access is not known is a reader without boq:read.
+  if (access && access.boq === true) return null;
   const withholding = await require("./exception.service").changeEventWithholding({ orgId, projectId, events: [event] });
   const entry = withholding.get(event.id);
   return entry ? changeEventWithheldFields(event, entry) : null;
 };
 const fieldWithheld = () => new HttpError(409, "CHANGE_EVENT_FIELD_WITHHELD", CHANGE_EVENT_EXCEPTION_WITHHELD);
+const lineRemovalWithheld = () => new HttpError(409, "CHANGE_EVENT_LINE_WITHHELD", `${CHANGE_EVENT_EXCEPTION_WITHHELD}. A line whose figures were withheld from you cannot be removed by you: keep it in the lines you save, or ask a member who may read it to remove it`);
+const hasWithheldField = (withheld) => Boolean(withheld && (withheld.event.length || withheld.lines.size));
+/**
+ * PC-7b adoption: a field withheld from a caller (withheldForCaller) stays
+ * withheld until a person who may read it adopts it by an explicit act.
+ * Converting the event to a change order, and accepting a quote into a
+ * commitment change order, copy the event's activity and its lines' activity
+ * and cost code into a commercial record read under that record's own
+ * permissions — such an act. A caller without boq:read is refused it (409
+ * CHANGE_EVENT_FIELD_WITHHELD, the neutral reason) while the event carries a
+ * withheld field, before anything is written; a BOQ reader's act proceeds and
+ * what it copies becomes the new record's own.
+ */
+const assertMayAdopt = async ({ orgId, projectId, event, access }) => {
+  const withheld = await withheldForCaller({ orgId, projectId, event, access });
+  if (hasWithheldField(withheld)) {
+    throw new HttpError(409, "CHANGE_EVENT_FIELD_WITHHELD", `${CHANGE_EVENT_EXCEPTION_WITHHELD}. Converting this change event, or accepting a quote into a commitment change order, would copy what was withheld from you into a commercial record: ask a member who may read it to do so`);
+  }
+};
 // What the vendor portal shows of a line (portalLines): a line any of whose
 // shown fields was withheld from the sender is not theirs to send out.
 const RFQ_DISCLOSED_FIELDS = Object.freeze(["quantity", "unit", "activityId"]);
@@ -570,6 +591,13 @@ const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}
     for (const row of Array.isArray(payload.lines) ? payload.lines : []) {
       const fields = row && row.id ? withheld.lines.get(String(row.id).trim()) : null;
       if (fields && fields.some((field) => row[field] !== undefined)) throw fieldWithheld();
+    }
+    // Sending lines replaces them: a line carrying a withheld field that the
+    // body leaves out would be deleted, with its stored figures — not by a
+    // member who was not shown them.
+    if (payload.lines !== undefined) {
+      const sent = new Set((Array.isArray(payload.lines) ? payload.lines : []).map((row) => (row && row.id ? String(row.id).trim() : null)).filter(Boolean));
+      if ([...withheld.lines.keys()].some((id) => !sent.has(id))) throw lineRemovalWithheld();
     }
   }
   const data = normalizeEvent(payload, existing);
@@ -605,9 +633,17 @@ const updateChangeEvent = async ({ orgId, projectId, changeEventId, payload = {}
   return eventOut(updated, { detail: true });
 };
 
-const deleteChangeEvent = async ({ orgId, projectId, changeEventId, actor = null }) => {
+/**
+ * Deletes an open change event without RFQs. PC-7b: deleting removes its
+ * stored figures, so a caller who was not given some of them (withheldForCaller)
+ * is refused (409 CHANGE_EVENT_FIELD_WITHHELD, the reason), nothing written.
+ */
+const deleteChangeEvent = async ({ orgId, projectId, changeEventId, actor = null, access = null }) => {
   const existing = await loadEvent({ orgId, projectId, changeEventId });
   if (existing.status !== STATUS.OPEN || existing.rfqs.length) throw new HttpError(409, "CHANGE_EVENT_LOCKED", "Only open change events without RFQs can be deleted — void it instead");
+  if (hasWithheldField(await withheldForCaller({ orgId, projectId, event: existing, access }))) {
+    throw new HttpError(409, "CHANGE_EVENT_FIELD_WITHHELD", `${CHANGE_EVENT_EXCEPTION_WITHHELD}. A change event carrying figures withheld from you cannot be deleted by you: ask a member who may read them to delete it`);
+  }
   await prisma.changeEvent.delete({ where: { id: changeEventId } });
   await auditService.recordEvent({ orgId, projectId, entityType: "change_event", entityId: changeEventId, action: auditService.ACTIONS.DELETED, actorId: actor?.id || null, summary: { ref: existing.ref } }).catch(() => null);
   return { deleted: true };
@@ -715,11 +751,13 @@ const notifyTeam = ({ orgId, projectId, event, actorId = null, notificationEvent
  * the event is priced, and — for a commitment's vendor — a commitment change
  * order can be drafted with the quoted lines.
  */
-const acceptQuote = async ({ orgId, projectId, rfqId, payload = {}, actor = null }) => {
+const acceptQuote = async ({ orgId, projectId, rfqId, payload = {}, actor = null, access = null }) => {
   const rfq = await loadRfq({ orgId, projectId, rfqId });
   if (rfq.status !== RFQ_STATUS.QUOTED) throw new HttpError(409, "RFQ_NOT_QUOTED", "Only a quoted RFQ can be accepted");
   const event = rfq.changeEvent;
   assertEditable(event);
+  // The commitment change order copies the lines' cost code and activity (PC-7b adoption).
+  if (payload.createCommitmentChangeOrder && rfq.commitmentId) await assertMayAdopt({ orgId, projectId, event, access });
   const quoted = quoteLines(rfq);
   const now = new Date();
   let commitmentChangeOrder = null;
@@ -755,10 +793,12 @@ const rejectQuote = async ({ orgId, projectId, rfqId, payload = {}, actor = null
 // ─── Conversion and closing ───────────────────────────────────────────────
 
 /** Creates the prime change order from the event (value = quoted where accepted, else ROM) and links accepted commitment change orders. */
-const convertToChangeOrder = async ({ orgId, projectId, changeEventId, payload = {}, actor = null }) => {
+const convertToChangeOrder = async ({ orgId, projectId, changeEventId, payload = {}, actor = null, access = null }) => {
   const event = await loadEvent({ orgId, projectId, changeEventId });
   if (event.status === STATUS.CONVERTED || event.changeOrderId) throw new HttpError(409, "CHANGE_EVENT_CONVERTED", `${event.ref} is already ${event.changeOrder?.ref || "converted"}`);
   if ([STATUS.CLOSED, STATUS.VOID].includes(event.status)) throw new HttpError(409, "CHANGE_EVENT_LOCKED", `A ${event.status} change event cannot be converted`);
+  // The order copies the event's activity and its lines' activities (PC-7b adoption).
+  await assertMayAdopt({ orgId, projectId, event, access });
   const totals = estimateOf(event);
   const value = payload.value !== undefined && payload.value !== null && payload.value !== "" ? round2(payload.value) : totals.estimate;
   const changeOrderService = require("./change-order.service");
@@ -888,4 +928,4 @@ const portalDecline = async (token, payload = {}) => {
   return portalOut(row);
 };
 
-module.exports = { STATUS, TYPES, ORIGINS, SOURCE_LINKS, SOURCE_LINK_FIELDS, RECORD_SOURCES, RECORD_SOURCE_TYPES, RFQ_STATUS, prefillFromRecord, raiseFromRecord, draftOverPrefill, estimateOf, normalizeLines, listChangeEvents, getChangeEvent, createChangeEvent, updateChangeEvent, deleteChangeEvent, sendRfqs, remindRfq, cancelRfq, acceptQuote, rejectQuote, convertToChangeOrder, closeChangeEvent, voidChangeEvent, portalContext, portalView, portalSubmitQuote, portalDecline, hashToken };
+module.exports = { STATUS, TYPES, ORIGINS, SOURCE_LINKS, SOURCE_LINK_FIELDS, RECORD_SOURCES, RECORD_SOURCE_TYPES, RFQ_STATUS, prefillFromRecord, raiseFromRecord, draftOverPrefill, estimateOf, normalizeLines, listChangeEvents, getChangeEvent, createChangeEvent, updateChangeEvent, deleteChangeEvent, sendRfqs, remindRfq, cancelRfq, acceptQuote, rejectQuote, convertToChangeOrder, closeChangeEvent, voidChangeEvent, portalContext, portalView, portalSubmitQuote, portalDecline, hashToken, _withheldForCaller: withheldForCaller };

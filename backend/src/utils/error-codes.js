@@ -365,12 +365,12 @@ const ERROR_CODE_CATALOG = Object.freeze({
   CHANGE_EVENT_FIELD_WITHHELD: {
     status: 409,
     category: "commercial",
-    message: "A field of this change event that was withheld from you cannot be written by you",
+    message: "A field of this change event that was withheld from you cannot be written, adopted into a commercial record or deleted by you",
   },
   CHANGE_EVENT_LINE_WITHHELD: {
     status: 409,
     category: "commercial",
-    message: "A change-event line whose figures were withheld from you cannot be sent to a vendor by you",
+    message: "A change-event line whose figures were withheld from you cannot be sent to a vendor or removed by you",
   },
   CHANGE_EVENT_BUDGET_LINE_INVALID: {
     status: 400,
