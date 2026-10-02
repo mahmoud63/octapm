@@ -225,6 +225,8 @@ test('overview landing shows the controls strip; the wizard lists the offending 
     'Cost',
     'Forecast',
     'Changes',
+    // PC-7b: the reviewed exceptions of the project.
+    'Exceptions',
     'Resources',
     'Risks',
     'Baselines / Revisions',
@@ -1059,6 +1061,8 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       `GET ${project}/activities/progress-submissions`,
       `GET ${project}/assignments/mine`,
       `GET ${project}/audit`,
+      // PC-7b: the Overview strip's open-exceptions figure — swept like every other answer.
+      `GET ${project}/controls/exceptions/summary`,
       `GET ${project}/forecast`,
       `GET ${project}/health`,
       `GET ${project}/long-lead`,

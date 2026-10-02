@@ -49,6 +49,22 @@ const unstamped = (text) =>
     .replace(/"asOf":"[^"]*"/g, '"asOf":"-"')
     .replace(/"asOfDate":"[^"]*"/g, '"asOfDate":"-"');
 
+// PC-7b appends the open-exceptions tile to the route's answer (routes/projects.js);
+// the service's dashboard is everything before it. The answer without the tile is
+// compared with the service byte for byte; the tile is asserted on its own.
+const withoutExceptionsTile = (text) => {
+  const body = JSON.parse(text);
+  const { openExceptions, ...data } = body.data;
+  return { text: JSON.stringify({ ...body, data }), openExceptions };
+};
+const EMPTY_EXCEPTIONS_TILE = {
+  total: 0,
+  bySeverity: { critical: 0, warning: 0, info: 0 },
+  inChange: 0,
+  snoozed: 0,
+  basis: "Unresolved project exceptions the caller may read, on every project they can open; open = not carried by a live change event and not snoozed",
+};
+
 const ipcQueue = (dashboard) => dashboard.workflowQueues.find((queue) => queue.key === "ipcActions");
 const ipcPending = (dashboard) => dashboard.pendingReview.metrics.find((metric) => metric.key === "ipcActions").count;
 
@@ -165,7 +181,12 @@ liveDescribe("The workspace home lists IPC certificate lines only to a member wh
         isCompanyAdmin: user.isCompanyAdmin,
       });
       const beforeText = JSON.stringify({ success: true, data: normalizeMoneyTree(before) });
-      if (who === "owner") expect([who, unstamped(answer.text)]).toEqual([who, unstamped(beforeText)]);
+      if (who === "owner") {
+        const { text, openExceptions } = withoutExceptionsTile(answer.text);
+        expect([who, unstamped(text)]).toEqual([who, unstamped(beforeText)]);
+        // This LiveTest organisation holds no exception rows: the tile is the empty figure, exactly.
+        expect([who, openExceptions]).toEqual([who, EMPTY_EXCEPTIONS_TILE]);
+      }
       else expect([who, ipcQueue(answer.body.data)]).toEqual([who, ipcQueue(JSON.parse(beforeText).data)]);
 
       const queue = ipcQueue(answer.body.data);
