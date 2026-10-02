@@ -105,9 +105,47 @@ suites, BOQ-access security, cost ledger, backend unit tests, web typecheck,
 lint, source checks and the full web browser suite, mobile typecheck, lint and
 unit tests, the financial snapshot and reconciliation, the membership sentinel
 and the bulk-write fingerprint) was started on the untouched starting state.
-Its results are recorded here when it finishes.
+It ran on 2026-10-02 from 07:27 UTC against `fbc0f76`, on the shared environment
+(the durable organisations, with the exception engine off).
 
-*Pending.*
+| Gate | Discovered | Passed | Failed | Skipped |
+|---|---|---|---|---|
+| Prisma validate | — | pass | | |
+| Prisma migrate status | — | up to date | | |
+| OpenAPI | 791 documented paths | pass | | |
+| Error catalogue (backend utils) | 288 tests / 38 suites | 288 | 0 | 0 |
+| Live: tenant | 77 tests / 11 suites | 77 | 0 | 0 |
+| Live: project controls (PC-1 to PC-7b, R5) | 412 tests / 47 suites | 412 | 0 | 0 |
+| Live: BOQ-access security | 41 tests / 11 suites | 41 | 0 | 0 |
+| Live: cost ledger | 2 tests / 1 suite | 2 | 0 | 0 |
+| Backend unit | 2,856 tests / 243 suites | 2,856 | 0 | 0 |
+| Web typecheck | — | pass | | |
+| Web lint | — | pass | | |
+| Web static source checks | 83 | 83 | 0 | 0 |
+| Web browser suite (full, with the E2E organisation reset) | 231 | 227 | 3 | 1 |
+| Mobile typecheck | — | pass | | |
+| Mobile lint | — | pass | | |
+| Mobile unit | 417 tests / 70 suites | 417 | 0 | 0 |
+| Financial snapshot (certified project) | 36 checks | 36 | 0 | |
+| Financial reconciliation | 16 source lines | 16 | 0 | |
+| Actual Cost delta | | 0.00 (SQL), 0.00 (API), 0.00 (SQL against API) | | |
+| Subscription invariants | 24 durable organisations | 24 | 0 | |
+| Membership sentinel (before and after) | — | no violations | | |
+| Bulk-write fingerprint (before and after) | — | no write touched several organisations | | |
+
+Not in this run, and so not claimed: `prisma generate` (skipped because the
+shared API holds the engine file open); the 62 live test files that are not in
+the four live groups above; the mobile browser suite; a production build of the
+web application. Each is run at its own checkpoint.
+
+**The three browser failures** are all in `68-exception-handoff.spec.ts`. That
+spec needs an API with the exception engine switched on; the shared API runs
+with it off, deliberately, so that it never evaluates the durable organisations.
+They are an effect of the environment, not a defect in the product, and the spec
+is run against a certification API with the engine on at CERT-6.
+
+**The one skipped browser test** is the landing page's hero reel test, which
+skipped itself, as it does when it finds no film to play.
 
 ### CERT-0 findings
 
