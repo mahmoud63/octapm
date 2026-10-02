@@ -2126,26 +2126,30 @@ const changeEventWithheldFields = (event, entry) => {
 };
 /**
  * The provenance a raise records: of the stored event (with its lines) the
- * fields that came from the prefill — the event's activity, each line's
- * activity and cost code where they equal the prefill line's, and the
- * quantity delta and its unit on a line that carries that delta.
+ * fields that came from the prefill — as the prefill STATES them
+ * ({ prefill, fields: { event: [field], line: [field] } }, exception.service
+ * buildExceptionPrefill), never guessed from the values: the event's activity,
+ * each line's activity and cost code where they equal the prefill line's, and
+ * the quantity delta (with its unit) on a line that carries it. A source that
+ * does not state its fields records nothing known (null): every such field
+ * that is set is then withheld (fail closed).
  */
-const changeEventPrefillProvenance = (prefill, created) => {
+const changeEventPrefillProvenance = (source, created) => {
+  const fields = source && source.fields && typeof source.fields === "object" ? source.fields : null;
+  if (!source || !source.prefill || !fields || !Array.isArray(fields.event) || !Array.isArray(fields.line) || !created) return null;
+  const { prefill } = source;
   const out = { lines: [] };
-  if (!prefill || !created) return out;
-  if (prefill.activityId && created.activityId === prefill.activityId) out.activityId = created.activityId;
-  const source = Array.isArray(prefill.lines) && prefill.lines.length ? prefill.lines[0] : null;
-  if (!source) return out;
-  // The prefill took a quantity delta (with its unit) only for the quantity kinds.
-  const tookQuantity = provenanceValue("unit", source.unit) !== null || provenanceValue("quantity", source.quantity) !== 1;
+  if (fields.event.includes("activityId") && prefill.activityId && created.activityId === prefill.activityId) out.activityId = created.activityId;
+  const line0 = Array.isArray(prefill.lines) && prefill.lines.length ? prefill.lines[0] : null;
+  if (!line0) return out;
   for (const line of Array.isArray(created.lines) ? created.lines : []) {
     const entry = { id: line.id };
     for (const field of ["activityId", "costCodeId"]) {
-      if (provenanceValue(field, source[field]) !== null && sameProvenance(field, line[field], source[field])) entry[field] = provenanceValue(field, line[field]);
+      if (fields.line.includes(field) && provenanceValue(field, line0[field]) !== null && sameProvenance(field, line[field], line0[field])) entry[field] = provenanceValue(field, line[field]);
     }
-    if (tookQuantity && sameProvenance("quantity", line.quantity, source.quantity)) {
+    if (fields.line.includes("quantity") && sameProvenance("quantity", line.quantity, line0.quantity)) {
       entry.quantity = provenanceValue("quantity", line.quantity);
-      if (sameProvenance("unit", line.unit, source.unit)) entry.unit = provenanceValue("unit", line.unit);
+      if (fields.line.includes("unit") && sameProvenance("unit", line.unit, line0.unit)) entry.unit = provenanceValue("unit", line.unit);
     }
     if (Object.keys(entry).length > 1) out.lines.push(entry);
   }

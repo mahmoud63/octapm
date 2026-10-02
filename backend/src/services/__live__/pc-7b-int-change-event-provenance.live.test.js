@@ -383,4 +383,24 @@ liveDescribe("PC-7b integration fixer: a change event's prefill provenance, per 
     ok("pm removes the line", await api.request("PATCH", at(`/change-events/${event.id}`), { body: { lines: [] }, headers: pm() }));
     expect(await prisma.changeEventLine.count({ where: { changeEventId: event.id } })).toBe(0);
   });
+
+  // Third fixer, item 3: the prefill states which fields it filled — no
+  // guessing from the values. A quantity delta of exactly 1 with no unit (the
+  // line's default quantity) is still the exception's figure: recorded, and
+  // withheld from a reader without boq:read.
+  it("a quantity delta of exactly 1 with no unit is recorded as taken and withheld", async () => {
+    const exception = await prisma.projectException.create({
+      data: { orgId: live.org.id, projectId: project.id, kind: "certified_over_installed", severity: "warning", subjectType: "boq_item", subjectId: ids.boqItem, measured: 41, limit: 40, unitCode: null, measuredBasis: "seeded (measured)", limitBasis: "seeded (limit)" },
+    });
+    const raised = await api.post(at(`/controls/exceptions/${exception.id}/raise-change-event`), {}, pm());
+    ok("raise a delta of one", raised, 201);
+    const event = raised.body.data.changeEvent;
+    const line = event.lines[0];
+    expect([line.quantity, line.unit ?? null, line.costCodeId]).toEqual([1, null, ids.costCode]);
+    const created = await prisma.auditEvent.findFirst({ where: { entityType: "change_event", entityId: event.id, action: "created" } });
+    expect(created.metadataJson.prefillProvenance.lines).toEqual([{ id: line.id, costCodeId: ids.costCode, quantity: 1, unit: null }]);
+    const theirs = (await api.get(at(`/change-events/${event.id}`), as(members.qs_noboq))).body.data;
+    for (const key of ["quantity", "unit", "unitCost", "costCodeId"]) expect([key, has(theirs.lines[0], key)]).toEqual([key, false]);
+    expect(theirs.sourceWithheld.keys).toEqual(expect.arrayContaining([`lines[${line.id}].quantity`, `lines[${line.id}].unit`, `lines[${line.id}].unitCost`]));
+  });
 });

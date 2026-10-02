@@ -578,7 +578,12 @@ const projectCostCode = async ({ projectId, costCodeId }) => {
 // The words of a change event raised from a BOQ-derived exception: the kind
 // is named only by the typed link (withheld from a reader without boq:read).
 const GENERIC_EXCEPTION_TITLE = "Raised from a project controls exception";
-const exceptionPrefill = async (row) => {
+// The draft AND the exact fields it filled from the exception — { event:
+// [field], line: [field] } — so the raise records its provenance as stated,
+// never guessed from the values (a quantity delta of exactly 1 with no unit
+// is the line's default quantity, and still the exception's figure).
+const buildExceptionPrefill = async (row) => {
+  const filled = { event: [], line: [] };
   const projectId = row.projectId;
   const boqDerived = isBoqDerivedException(row, policyOf(row));
   const label = boqDerived ? GENERIC_EXCEPTION_TITLE : kindLabel(row.kind);
@@ -621,10 +626,13 @@ const exceptionPrefill = async (row) => {
   costCodeId = await projectCostCode({ projectId, costCodeId });
   if (activityId) {
     line.activityId = activityId;
+    filled.event.push("activityId");
+    filled.line.push("activityId");
     hasRef = true;
   }
   if (costCodeId) {
     line.costCodeId = costCodeId;
+    filled.line.push("costCodeId");
     hasRef = true;
   }
   if (QUANTITY_DELTA_KINDS.has(row.kind)) {
@@ -632,6 +640,7 @@ const exceptionPrefill = async (row) => {
     if (delta > 0) {
       line.quantity = delta;
       line.unit = row.unitCode ? String(row.unitCode).slice(0, 20) : null;
+      filled.line.push("quantity", "unit");
       hasRef = true;
     }
   }
@@ -641,7 +650,7 @@ const exceptionPrefill = async (row) => {
     locationId = location ? location.id : null;
   }
   const subjectWords = boqDerived ? null : (await loadSubjectLabels({ projectId, rows: [row] })).get(`${row.subjectType}:${row.subjectId}`) || null;
-  return {
+  const prefill = {
     title: (subjectWords ? `${label}: ${subjectWords}` : label).slice(0, 200),
     description: (boqDerived
       ? `${GENERIC_EXCEPTION_TITLE}. The amount is left for the QS to price.`
@@ -655,7 +664,10 @@ const exceptionPrefill = async (row) => {
     scheduleImpactDays: 0,
     lines: hasRef ? [line] : [],
   };
+  if (!hasRef) filled.line = [];
+  return { prefill, filled };
 };
+const exceptionPrefill = async (row) => (await buildExceptionPrefill(row)).prefill;
 
 const getExceptionPrefill = async ({ orgId, projectId, exceptionId, access, may }) => {
   const row = await loadReadable({ orgId, projectId, exceptionId, access });
@@ -677,7 +689,7 @@ const raiseFromException = async ({ orgId, projectId, exceptionId, access, may, 
   requireCreator(may, "raiseChangeEvent");
   const status = statusOf(row);
   if (!["open", "snoozed"].includes(status)) throw notOpen(status);
-  const prefill = await exceptionPrefill(row);
+  const { prefill, filled } = await buildExceptionPrefill(row);
   const draft = changeEventService.draftOverPrefill(prefill, payload);
   draft.origin = "exception";
   const boqDerived = isBoqDerivedException(row, policyOf(row));
@@ -685,7 +697,7 @@ const raiseFromException = async ({ orgId, projectId, exceptionId, access, may, 
   // mapped activity, the cost code, the quantity delta) is recorded with the
   // creation (metadata.prefillProvenance) so it can be withheld from a
   // change-event reader without boq:read for as long as it stays as taken.
-  const changeEvent = await changeEventService.createChangeEvent({ orgId, projectId, payload: draft, actor, links: { exceptionId: row.id }, auditMetadata: { sourceBoqDerived: boqDerived }, prefillProvenance: boqDerived ? prefill : null });
+  const changeEvent = await changeEventService.createChangeEvent({ orgId, projectId, payload: draft, actor, links: { exceptionId: row.id }, auditMetadata: { sourceBoqDerived: boqDerived }, prefillProvenance: boqDerived ? { prefill, fields: filled } : null });
   await auditExceptionEvent({ row, actor, action: auditService.ACTIONS.STATUS_CHANGED, oldStatus: status, newStatus: "in_change", summary: { changeEventId: changeEvent.id, changeEventRef: changeEvent.ref, handoff: "raised" } });
   return { exception: await reread({ orgId, projectId, exceptionId, access, may }), changeEvent };
 };
