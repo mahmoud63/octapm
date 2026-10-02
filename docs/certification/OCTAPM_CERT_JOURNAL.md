@@ -165,3 +165,32 @@ When the driver workflow reports: read each report, run every driver on every co
 2. Run each driver on every company: `node scripts/cert/load-records.js "--drivers=<name>"`; read the failures by kind; fix the driver or record the product finding.
 3. Clean generation from an empty database: `reset-population.js --apply`, `generate-population.js --apply`, `load-projects.js`, `load-records.js`, the certified lifecycle on the companies whose first project is `certified`, `finalize-population.js --apply`, `isolation/index-ids.js`, `matrix-report.js`. Mark CERT-1 complete.
 4. CERT-2: `isolation/replay.js`, `read-sweep.js`, `inject.js` on the certified population; verify the 46 guessed P0/P1 leads.
+
+## 2026-10-02 (resumed on the owner's "resume from e0bf6c7" brief) — blockers 2-5 fixed; the guessed P0/P1 leads verified
+
+**State**
+
+| | |
+|---|---|
+| Branch / HEAD | `cert/full-saas-certification`, the commit that adds this entry (after `7ec3d7f`) |
+| Checkpoint | CERT-0 complete. CERT-1 still partial: the development population only; the certified population is not generated yet |
+| Certification database | Development population (100 companies, foundation records everywhere, deeper records in the driver companies). It also carries residue from the mutation runs of this entry (provider-event audit rows and invoices on companies the mutated code hit, all subscription rows restored; one inventory item of 022 pointing at a supplier of 023). The clean regeneration wipes all of it |
+| Services | Certification Postgres :55433; certification API :5190 (PID in `api.pid`, still the code of `bbce8fc` — restart before CERT-1 generation); billing API :5191 (PID in `billing-api.pid`, current code, Stripe calls redirected to the stand-in); Stripe stand-in :5390 (`stripe-fake.pid`). Shared environment untouched |
+
+**Done in this entry**
+
+1. The untrusted commit `e0bf6c7` reviewed (workflow `cert-untrusted-commit-review`): the lifecycle audit re-derived all 26 changed expected values on paper, all equal, nothing weakened; its seven guard/tightening corrections applied (`e3119d9`). A clean lifecycle pass on company 057 with the corrected stages: 18 stages, 0 failures (logs `C:\Temp\octapm-cert\logs\lifecycle\057-*`). Driver reviews: 9 of 10 returned (collaboration-admin's review died at the usage limit); must-fix items per driver are listed in the review journal `wf_18160c82-a45`; NONE of the drivers has been run at scale yet.
+2. C0-2 fixed (`b0f5147`): every writer off unless exactly `true`. 13/13 mutations, live 43/43.
+3. C0-3 fixed in the repository (`ed43fd1`): deploy workflow reads secrets; stand-ins refused at boot; hygiene check widened. ROTATION OWNER ACTION REQUIRED (register, "C0-3 in detail").
+4. Billing webhook (`e50753e`): D2, D3, D4, D20, D23, D24, NEW-1, NEW-4 fixed, NEW-2 partly; live proof 37/37 in octapm_cert, suite 104/106, mutations 9/9.
+5. Inventory references (`7ec3d7f`): C2-INV-1 / L5 fixed; live proof 19/19, mutations 5/5.
+6. Lead verification (workflow `cert-lead-verification`, run `wf_718e6cf5-98c`): the 46 guessed P0/P1 leads reproduced against the live API; 36 findings in the register (L2-L46 and extras), each with a script in `backend/scripts/cert/leads/` that exits 2 while the defect exists. Ten are cross-company (L3, L4, L5-fixed, L6, L7, L8, L9, L10, L38, L39); three are P0 (L8, L9, L10). The independent re-check ran for 14 findings and died at the usage limit for 22.
+7. Billing suites: `suite-webhooks.js` reviewed and committed; `suite-plans-states.js`, `suite-isolation-idempotency.js` and `_probe-iso.js` were left by agents that died at the usage limit — uncommitted, unreviewed, not run.
+
+**Open launch blockers now: 26** (register, "Launch blockers now").
+
+**Next exact action**
+
+1. Apply the drivers' must-fix items (structure L421, procurement L728/L765, inventory L535, quality-field L586, client-billing L229/L611, change-cost L543) and review collaboration-admin.js; then run every driver on six companies outside the development set and read `node scripts/cert/inventory-report.js`.
+2. Restart the certification API on the current code; clean generation from an empty database (reset → layer 1 → projects → records → certified lifecycles on the companies whose first project is `certified` → finalize); regenerate a second time from empty and compare shapes; `isolation/index-ids.js`; `matrix-report.js`; CERT-1 complete.
+3. CERT-2 from zero on the certified population; fix the cross-company findings (L3, L4, L6-L10, L38, L39 and whatever the sweeps add) until cross-company reads and writes are 0.
