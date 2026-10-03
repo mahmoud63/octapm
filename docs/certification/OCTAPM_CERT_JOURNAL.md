@@ -221,3 +221,26 @@ When the driver workflow reports: read each report, run every driver on every co
 2. Apply the `lib/api.js` retry; restart the API on the fixed code.
 3. Clean generation: move `state/` and `corpus/` aside; `reset-population.js --apply`; `generate-population.js --apply`; `layer1-fingerprint.js take run1`; reset and generate again; `take run2`; `compare run1 run2` (must be IDENTICAL); `load-projects.js`; then `start-detached.ps1 -Name gen-records -Script scripts/cert/run-with-watchdog.js -ScriptArgs "scripts/cert/load-records.js --concurrency=8"`; the 14 certified lifecycles (021,027,033,039,045,051,057,063,069,075,081,087,093,099); `finalize-population.js --apply`; `matrix-report.js`; `isolation/index-ids.js`.
 4. CERT-2 on that population (fingerprint before/after; replay, read-sweep, inject, cross-links).
+
+## 2026-10-02 (night) — party-visibility round 1 committed; independent review found 39 more; round 2 running
+
+**State**
+
+| | |
+|---|---|
+| Branch / HEAD | `cert/full-saas-certification` at the commit adding this entry (after `49ea340`), pushed |
+| Checkpoint | CERT-1 not complete (the clean generation waits for the fixes). CERT-2 not started |
+| Certification database | Still the proof bed of the evening entry (companies 026, 031, 041, 072 carry the fix agents' fixtures). To be reset |
+| Services | Cert Postgres :55433; cert API :5190 PID in `api.pid` (restarted by the watchdog test at 22:21, runs the round-1 working tree); Stripe stand-in :5390 |
+
+**Done in this entry**
+
+1. Tooling, committed: CERT-2 judging hardened — 4xx other than 401/403/404 no longer passes, figure-only answers compared with the owner's, random-id control (`5d02dfd`); a database-bound file sweep and the CERT-2 and lifecycle runners (`43389ab`); request retry after a watchdog restart, proven by killing the API mid-run (40/40, `391fabe`).
+2. Round 1 of the within-company visibility fixes (L2, L23, L24, L25, L40, L41, L42, L43, L44, L45, L46, FILES-X1, FILES-X2, X-PARTY-1, X-PARTY-2): written by four agents, then verified here — changed suites 214/214, full suite 3,174 (one pinned-argument test updated), all 22 proofs and lead scripts re-run in process (21 + L43 after its oracle was corrected and mutation-proved), template and assistant follow-ups added with tests and mutations. Committed per area: `978023b`, `295f4f9`, `d88f275`, `49ea340`.
+3. Independent adversarial review of those diffs (four reviewers, read-only): all SHIP_WITH_FIXES, 39 findings — 10 P1 (among them a bypass the round itself introduced: links written through unchecked paths now count as read grants, R29; and a regression: a consultant step reviewer can no longer open the submittal, R4), 8 P2, the rest P3. Recorded in the review journal `wf_e36cca78-855`.
+4. Round 2 launched (`wf_add102be-96d`): every finding reproduced or refuted first, then fixed, proven refused and allowed, mutation-proven, round-1 proofs re-run.
+
+**Next exact action**
+
+1. When round 2 reports: verify independently (unit suites, every proof in process, full suite), adjudicate REFUTED/PRODUCT_DECISION verdicts by reading the code, commit per area, update the register (round-1 leads fixed; review findings with their verdicts).
+2. Then the clean generation and CERT-2, exactly as in the evening entry's next action (now with `run-with-watchdog.js` and `start-detached.ps1`).
