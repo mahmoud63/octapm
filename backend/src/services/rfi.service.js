@@ -202,6 +202,47 @@ const buildRfiWhere = ({ projectId, query = {} }) => {
   return where;
 };
 
+/**
+ * A status — or an answer — written straight through create / update is the
+ * decision an action route takes (/submit, /answer, /close, /reject, /reopen)
+ * and needs the transition that route needs (certification finding L40: a
+ * subcontractor without rfi.answer or rfi.close closed its own RFI through
+ * PATCH, with an answer it wrote and an approved schedule impact).
+ * `canTransition(action, transition)` is the caller's permission check, given
+ * by the create / update routes; internal callers that already passed an
+ * action route's guard give none.
+ */
+const RFI_ANSWER_FIELDS = Object.freeze(["response", "answeredBy", "answeredDate", "officialResponseId"]);
+
+const directStatusTransition = (fromStatus, toStatus) => {
+  if (!toStatus || toStatus === fromStatus) return null;
+  if (toStatus === "answered") return { action: "submit", transition: "rfi.answer" };
+  if (toStatus === "closed") return { action: "approve", transition: "rfi.close" };
+  if (toStatus === "open" && fromStatus === "draft") return { action: "submit", transition: "rfi.submit" };
+  if (toStatus === "open" && fromStatus === "answered") return { action: "approve", transition: "rfi.reject" };
+  if (toStatus === "open" && fromStatus === "closed") return { action: "approve", transition: "rfi.reopen" };
+  return null;
+};
+
+const sameAnswerValue = (field, next, current) => {
+  if (field === "answeredDate") return (next ? new Date(next).getTime() : null) === (current ? new Date(current).getTime() : null);
+  return trimToNull(next) === trimToNull(current);
+};
+
+const assertDirectRfiChange = ({ existing = null, payload = {}, canTransition = null }) => {
+  if (typeof canTransition !== "function") return;
+  const fromStatus = existing ? existing.status : null;
+  const toStatus = payload.status ?? fromStatus;
+  const statusNeed = directStatusTransition(fromStatus, toStatus);
+  if (statusNeed && !canTransition(statusNeed.action, statusNeed.transition)) {
+    throw new HttpError(403, "FORBIDDEN", `Moving this RFI to "${toStatus}" needs the ${statusNeed.transition} permission; use the RFI's workflow action`, { module: "rfi", action: statusNeed.action, transition: statusNeed.transition, fromStatus, toStatus });
+  }
+  const answerFields = RFI_ANSWER_FIELDS.filter((field) => payload[field] !== undefined && !sameAnswerValue(field, payload[field], existing ? existing[field] : null));
+  if (answerFields.length && !canTransition("submit", "rfi.answer")) {
+    throw new HttpError(403, "FORBIDDEN", "Answering an RFI needs the rfi.answer permission; use the answer action", { module: "rfi", action: "submit", transition: "rfi.answer", fields: answerFields });
+  }
+};
+
 const countByStatus = (counts, statuses) =>
   counts.reduce(
     (acc, row) => ({
@@ -274,8 +315,10 @@ const createRfi = async ({
   userId = null,
   userRole = null,
   projectAccess = null,
+  canTransition = null,
 }) => {
   await ensureProject({ orgId, projectId });
+  assertDirectRfiChange({ payload, canTransition });
 
   const generatedRef = await nextRef(prisma, { table: 'Rfi', scopeColumn: 'projectId', scopeId: projectId, prefix: 'RFI' });
   const activityId = primaryActivityIdFromPayload(payload);
@@ -439,6 +482,7 @@ const updateRfi = async ({
   userRole,
   forceWorkflowEvent = false,
   projectAccess = null,
+  canTransition = null,
 }) => {
   await ensureProject({ orgId, projectId });
 
@@ -454,6 +498,7 @@ const updateRfi = async ({
     code: "RFI_ARCHIVED",
     message: "Archived RFIs cannot be updated through normal workflow actions",
   });
+  assertDirectRfiChange({ existing, payload, canTransition });
 
   const nextStatus = payload.status ?? existing.status;
   if (nextStatus === ARCHIVED_STATUS && existing.status !== ARCHIVED_STATUS) {
@@ -933,6 +978,7 @@ const deleteRfi = async ({
   rfiId,
   userId = null,
   userRole = null,
+  projectAccess = null,
 }) => {
   await ensureProject({ orgId, projectId });
 
@@ -943,6 +989,7 @@ const deleteRfi = async ({
   if (!existing) {
     throw new HttpError(404, "RFI_NOT_FOUND", "RFI not found");
   }
+  assertPartyWorkflowAccess({ projectAccess, record: existing });
 
   if (existing.status === ARCHIVED_STATUS || existing.archivedAt) {
     return archiveResult({
@@ -1018,6 +1065,7 @@ const deleteRfi = async ({
 
 module.exports = {
   RFI_STATUSES,
+  assertDirectRfiChange,
   listRfis,
   createRfi,
   updateRfi,

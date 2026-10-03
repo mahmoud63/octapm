@@ -220,6 +220,40 @@ const buildSubmittalWhere = ({ projectId, query = {} }) => {
   return where;
 };
 
+/**
+ * A status — or a review outcome — written straight through create / update is
+ * the decision an action route takes (/submit, /approve, /reject, /resubmit)
+ * and needs the transition that route needs (certification finding L40: a
+ * subcontractor without submittal.approve approved its own submittal through
+ * PATCH, response code and distribution stamped, review steps skipped).
+ * `canTransition(action, transition)` is the caller's permission check, given
+ * by the create / update routes; internal callers that already passed an
+ * action route's guard (or a review step) give none.
+ */
+const SUBMITTAL_OUTCOME_FIELDS = Object.freeze(["responseCode", "responseCodeLabel", "currentStepId"]);
+
+const directSubmittalTransition = (fromStatus, toStatus) => {
+  if (!toStatus || toStatus === fromStatus) return null;
+  if (toStatus === "under_review") return { action: "submit", transition: "submittal.submit" };
+  if (toStatus === "approved") return { action: "approve", transition: "submittal.approve" };
+  if (toStatus === "rejected" || toStatus === "resubmit") return { action: "approve", transition: "submittal.reject" };
+  return null;
+};
+
+const assertDirectSubmittalChange = ({ existing = null, payload = {}, canTransition = null }) => {
+  if (typeof canTransition !== "function") return;
+  const fromStatus = existing ? existing.status : null;
+  const toStatus = payload.status ?? fromStatus;
+  const statusNeed = directSubmittalTransition(fromStatus, toStatus);
+  if (statusNeed && !canTransition(statusNeed.action, statusNeed.transition)) {
+    throw new HttpError(403, "FORBIDDEN", `Moving this submittal to "${toStatus}" needs the ${statusNeed.transition} permission; use the submittal's workflow action`, { module: "submittal", action: statusNeed.action, transition: statusNeed.transition, fromStatus, toStatus });
+  }
+  const outcomeFields = SUBMITTAL_OUTCOME_FIELDS.filter((field) => payload[field] !== undefined && trimToNull(payload[field]) !== trimToNull(existing ? existing[field] : null));
+  if (outcomeFields.length && !canTransition("approve", "submittal.approve")) {
+    throw new HttpError(403, "FORBIDDEN", "A submittal's review outcome is set by its reviewers; use the review actions", { module: "submittal", action: "approve", transition: "submittal.approve", fields: outcomeFields });
+  }
+};
+
 const countByStatus = (counts) =>
   counts.reduce(
     (acc, row) => ({
@@ -293,8 +327,10 @@ const createSubmittal = async ({
   userId = null,
   userRole = null,
   projectAccess = null,
+  canTransition = null,
 }) => {
   await ensureProject({ orgId, projectId });
+  assertDirectSubmittalChange({ payload, canTransition });
 
   const generatedRef = await nextRef(prisma, { table: 'Submittal', scopeColumn: 'projectId', scopeId: projectId, prefix: 'SUB' });
   const activityId = primaryActivityIdFromPayload(payload);
@@ -471,6 +507,7 @@ const updateSubmittal = async ({
   userRole,
   forceWorkflowEvent = false,
   projectAccess = null,
+  canTransition = null,
 }) => {
   await ensureProject({ orgId, projectId });
 
@@ -487,6 +524,12 @@ const updateSubmittal = async ({
       "Archived submittals cannot be updated through normal workflow actions",
   });
   assertPartyWorkflowAccess({ projectAccess, record: existing });
+  assertDirectSubmittalChange({ existing, payload, canTransition });
+  // A status sent straight to update respects a running workflow as the
+  // approve / reject actions do: the instance owns the decision (finding L40).
+  if (typeof canTransition === "function" && payload.status && payload.status !== existing.status) {
+    await require("./workflow-engine.service").assertNotLocked({ tool: "submittal", projectId, recordId: submittalId });
+  }
 
   const nextStatus = payload.status ?? existing.status;
   if (nextStatus === ARCHIVED_STATUS && existing.status !== ARCHIVED_STATUS) {
@@ -915,6 +958,7 @@ const deleteSubmittal = async ({
   submittalId,
   userId = null,
   userRole = null,
+  projectAccess = null,
 }) => {
   await ensureProject({ orgId, projectId });
 
@@ -925,6 +969,7 @@ const deleteSubmittal = async ({
   if (!existing) {
     throw new HttpError(404, "SUBMITTAL_NOT_FOUND", "Submittal not found");
   }
+  assertPartyWorkflowAccess({ projectAccess, record: existing });
 
   if (existing.status === ARCHIVED_STATUS || existing.archivedAt) {
     return archiveResult({
@@ -1002,6 +1047,7 @@ const deleteSubmittal = async ({
 
 module.exports = {
   SUBMITTAL_STATUSES,
+  assertDirectSubmittalChange,
   listSubmittals,
   createSubmittal,
   updateSubmittal,

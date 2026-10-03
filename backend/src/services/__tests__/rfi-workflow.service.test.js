@@ -114,6 +114,52 @@ describe("rfi workflow", () => {
     expect(mockRfiService.answerRfi).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ response: "Use 150 c/c per S-201 rev C", officialResponseId: "resp-2", answeredBy: "user-arch" }) }));
   });
 
+  it("leaves the thread flags untouched when the official answer is refused (certification finding L42)", async () => {
+    mockPrisma.rfiResponse.findFirst.mockResolvedValue({ id: "resp-2", rfiId: "rfi-1", body: "Use 150 c/c", authorId: "user-arch", isOfficial: false });
+    mockRfiService.answerRfi.mockRejectedValueOnce(Object.assign(new Error("routed to another company"), { status: 403, code: "PROJECT_PARTY_RECORD_ACCESS_DENIED" }));
+    await expect(service.setOfficialResponse({ orgId: "org-1", projectId: "project-1", rfiId: "rfi-1", responseId: "resp-2", userId: "user-cons", userRole: "external_party" })).rejects.toMatchObject({ code: "PROJECT_PARTY_RECORD_ACCESS_DENIED" });
+    expect(mockPrisma.rfiResponse.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.rfiResponse.update).not.toHaveBeenCalled();
+  });
+
+  describe("party routing on every by-id path (certification findings L42 / FILES-X1)", () => {
+    const partyX = { scope: "party", role: "external_party", assignmentRole: null, partyAccess: [{ projectPartyId: "party-x", role: "subcontractor" }] };
+    const args = { orgId: "org-1", projectId: "project-1", rfiId: "rfi-1", viewerId: "user-x", userId: "user-x", userRole: "external_party", projectAccess: partyX };
+
+    it("refuses a party member an RFI routed to another company, before any read or write", async () => {
+      mockPrisma.rfi.findFirst.mockResolvedValue(rfiRow({ ownerPartyId: "party-y", reviewerPartyId: null, approverPartyId: null }));
+      mockPrisma.rfiResponse.findFirst.mockResolvedValue({ id: "resp-1", rfiId: "rfi-1", body: "x", authorId: "user-x", isOfficial: false });
+      const refused = { code: "PROJECT_PARTY_RECORD_ACCESS_DENIED", status: 403 };
+      await expect(service.getRfi(args)).rejects.toMatchObject(refused);
+      await expect(service.listResponses(args)).rejects.toMatchObject(refused);
+      await expect(service.assertRfiVisible(args)).rejects.toMatchObject(refused);
+      await expect(service.exportRfiPdf(args)).rejects.toMatchObject(refused);
+      await expect(service.addResponse({ ...args, payload: { body: "X writes on Y" } })).rejects.toMatchObject(refused);
+      await expect(service.updateResponse({ ...args, responseId: "resp-1", payload: { body: "edit" } })).rejects.toMatchObject(refused);
+      await expect(service.deleteResponse({ ...args, responseId: "resp-1" })).rejects.toMatchObject(refused);
+      await expect(service.setOfficialResponse({ ...args, responseId: "resp-1" })).rejects.toMatchObject(refused);
+      await expect(service.convertToChangeEvent({ ...args, payload: {} })).rejects.toMatchObject(refused);
+      expect(mockPrisma.rfiResponse.create).not.toHaveBeenCalled();
+      expect(mockPrisma.rfiResponse.update).not.toHaveBeenCalled();
+      expect(mockPrisma.rfiResponse.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.rfiResponse.delete).not.toHaveBeenCalled();
+      expect(mockRfiService.answerRfi).not.toHaveBeenCalled();
+      expect(mockChangeOrders.createChangeOrder).not.toHaveBeenCalled();
+    });
+
+    it("lets the same party member through on an RFI routed to their company, and internal callers through on any", async () => {
+      mockPrisma.rfi.findFirst.mockResolvedValue(rfiRow({ ownerPartyId: null, reviewerPartyId: "party-x" }));
+      mockPrisma.rfiResponse.create.mockResolvedValue({ id: "resp-3", rfiId: "rfi-1", body: "ok", isOfficial: false, revision: 0, authorId: "user-x", author: null, createdAt: new Date(), updatedAt: new Date() });
+      await expect(service.getRfi(args)).resolves.toMatchObject({ id: "rfi-1" });
+      await expect(service.assertRfiVisible(args)).resolves.toEqual({ id: "rfi-1" });
+      await service.addResponse({ ...args, payload: { body: "ok" } });
+      expect(mockPrisma.rfiResponse.create).toHaveBeenCalled();
+      mockPrisma.rfi.findFirst.mockResolvedValue(rfiRow({ ownerPartyId: "party-y" }));
+      await expect(service.getRfi({ ...args, projectAccess: { scope: "assignment", assignmentRole: "site_engineer", partyAccess: [] } })).resolves.toMatchObject({ id: "rfi-1" });
+      await expect(service.getRfi({ ...args, projectAccess: null })).resolves.toMatchObject({ id: "rfi-1" });
+    });
+  });
+
   it("records the official response row for answers that came through the base workflow", async () => {
     mockPrisma.rfiResponse.create.mockResolvedValue({ id: "resp-9", rfiId: "rfi-1", body: "Answer", isOfficial: true, revision: 1, authorId: "user-arch", author: null, createdAt: new Date(), updatedAt: new Date() });
     const result = await service.recordOfficialResponse({ orgId: "org-1", projectId: "project-1", rfi: rfiRow({ revision: 1 }), body: "Answer", authorId: "user-arch" });

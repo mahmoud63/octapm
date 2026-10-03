@@ -199,4 +199,77 @@ describe("submittal workflow", () => {
     const decided = await service.decidePackage({ orgId: "org-1", projectId: "project-1", packageId: "pkg-1", payload: { decision: "approve" }, userId: "user-arch", userRole: "external_party" });
     expect(decided.results).toEqual([{ submittalId: "sub-1", ref: "SUB-004", decided: true }]);
   });
+
+  describe("party routing (certification findings L42 / FILES-X1)", () => {
+    const partyX = { scope: "party", role: "external_party", assignmentRole: null, partyAccess: [{ projectPartyId: "party-x", role: "subcontractor" }] };
+    const item = (id, ownerPartyId) => ({ id, ref: id.toUpperCase(), status: "pending", ownerPartyId, reviewerPartyId: null, approverPartyId: null });
+    const pkg = (submittals, createdBy = "user-y") => ({ id: "pkg-1", projectId: "project-1", ref: "PKG-001", name: "Mixed", status: "open", createdBy, submittals, managerUser: null, activity: null });
+
+    it("opens a submittal only for the company it is routed to; internal callers open any", async () => {
+      mockPrisma.submittal.findFirst.mockResolvedValue(submittal({ ownerPartyId: "party-y" }));
+      await expect(service.getSubmittal({ orgId: "org-1", projectId: "project-1", submittalId: "sub-1", projectAccess: partyX })).rejects.toMatchObject({ code: "PROJECT_PARTY_RECORD_ACCESS_DENIED", status: 403 });
+      await expect(service.getSubmittal({ orgId: "org-1", projectId: "project-1", submittalId: "sub-1", projectAccess: null })).resolves.toMatchObject({ id: "sub-1" });
+      mockPrisma.submittal.findFirst.mockResolvedValue(submittal({ ownerPartyId: null, approverPartyId: "party-x" }));
+      await expect(service.getSubmittal({ orgId: "org-1", projectId: "project-1", submittalId: "sub-1", projectAccess: partyX })).resolves.toMatchObject({ id: "sub-1" });
+    });
+
+    it("shows a party member a package only through their own submittals, and refuses the rest", async () => {
+      mockPrisma.submittalPackage.findFirst.mockResolvedValue(pkg([item("sub-x", "party-x"), item("sub-y", "party-y")]));
+      const shared = await service.getPackage({ orgId: "org-1", projectId: "project-1", packageId: "pkg-1", projectAccess: partyX, viewerId: "user-x" });
+      expect(shared.items.map((row) => row.id)).toEqual(["sub-x"]);
+      expect(shared.items[0]).not.toHaveProperty("ownerPartyId");
+      const internal = await service.getPackage({ orgId: "org-1", projectId: "project-1", packageId: "pkg-1" });
+      expect(internal.items.map((row) => row.id)).toEqual(["sub-x", "sub-y"]);
+
+      mockPrisma.submittalPackage.findFirst.mockResolvedValue(pkg([item("sub-y", "party-y")]));
+      await expect(service.getPackage({ orgId: "org-1", projectId: "project-1", packageId: "pkg-1", projectAccess: partyX, viewerId: "user-x" })).rejects.toMatchObject({ code: "PROJECT_PARTY_RECORD_ACCESS_DENIED" });
+      await expect(service.updatePackage({ orgId: "org-1", projectId: "project-1", packageId: "pkg-1", payload: { description: "x" }, actor: { id: "user-x" }, projectAccess: partyX })).rejects.toMatchObject({ code: "PROJECT_PARTY_RECORD_ACCESS_DENIED" });
+      expect(mockPrisma.submittalPackage.update).not.toHaveBeenCalled();
+
+      // An empty package the member made is still theirs.
+      mockPrisma.submittalPackage.findFirst.mockResolvedValue(pkg([], "user-x"));
+      await expect(service.getPackage({ orgId: "org-1", projectId: "project-1", packageId: "pkg-1", projectAccess: partyX, viewerId: "user-x" })).resolves.toMatchObject({ id: "pkg-1", items: [] });
+    });
+
+    it("lists packages for a party member through their routed submittals only", async () => {
+      mockPrisma.submittalPackage.findMany.mockResolvedValue([pkg([item("sub-x", "party-x"), item("sub-y", "party-y")]), { ...pkg([item("sub-y2", "party-y")]), id: "pkg-2" }]);
+      const listed = await service.listPackages({ orgId: "org-1", projectId: "project-1", projectAccess: partyX, viewerId: "user-x" });
+      expect(listed.items.map((row) => [row.id, row.items.map((i) => i.id)])).toEqual([["pkg-1", ["sub-x"]]]);
+      expect(mockPrisma.submittalPackage.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ projectId: "project-1", OR: expect.any(Array) }) }));
+    });
+
+    it("lets a party member package and take out only their own submittals", async () => {
+      mockPrisma.submittalPackage.findFirst.mockResolvedValue(pkg([item("sub-x", "party-x"), item("sub-y", "party-y")]));
+      mockPrisma.submittal.findMany.mockResolvedValue([{ id: "sub-y", packageId: null, ownerPartyId: "party-y", reviewerPartyId: null, approverPartyId: null }]);
+      await expect(service.addPackageItems({ orgId: "org-1", projectId: "project-1", packageId: "pkg-1", submittalIds: ["sub-y"], actor: { id: "user-x" }, projectAccess: partyX })).rejects.toMatchObject({ code: "PROJECT_PARTY_RECORD_ACCESS_DENIED" });
+      mockPrisma.submittal.findFirst.mockResolvedValue({ id: "sub-y", ownerPartyId: "party-y", reviewerPartyId: null, approverPartyId: null });
+      await expect(service.removePackageItem({ orgId: "org-1", projectId: "project-1", packageId: "pkg-1", submittalId: "sub-y", actor: { id: "user-x" }, projectAccess: partyX })).rejects.toMatchObject({ code: "PROJECT_PARTY_RECORD_ACCESS_DENIED" });
+      expect(mockPrisma.submittal.updateMany).not.toHaveBeenCalled();
+      mockPrisma.submittal.findMany.mockResolvedValue([{ id: "sub-x2", packageId: null, ownerPartyId: "party-x", reviewerPartyId: null, approverPartyId: null }]);
+      await expect(service.addPackageItems({ orgId: "org-1", projectId: "project-1", packageId: "pkg-1", submittalIds: ["sub-x2"], actor: { id: "user-x" }, projectAccess: partyX })).resolves.toMatchObject({ id: "pkg-1" });
+      expect(mockPrisma.submittal.updateMany).toHaveBeenCalledWith({ where: { id: { in: ["sub-x2"] } }, data: { packageId: "pkg-1" } });
+    });
+  });
+
+  describe("review routes are the project team's (certification finding X-PARTY-2)", () => {
+    const partyX = { scope: "party", role: "external_party", assignmentRole: null, partyAccess: [{ projectPartyId: "party-x", role: "consultant" }] };
+    const staff = { scope: "assignment", role: "planning_eng", assignmentRole: "planning_eng", partyAccess: [] };
+    const payload = { name: "Self review", steps: [{ name: "Review", assignees: [{ type: "user", userId: "user-x" }] }] };
+
+    it("refuses whoever neither manages workflows nor reviews submittals for the company, and any external party on reviewing alone", async () => {
+      await expect(service.createTemplate({ orgId: "org-1", projectId: "project-1", payload, access: { projectAccess: staff, canManageWorkflows: false, canReviewSubmittals: false } })).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+      await expect(service.createTemplate({ orgId: "org-1", projectId: "project-1", payload, access: { projectAccess: partyX, canManageWorkflows: false, canReviewSubmittals: true } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(service.updateTemplate({ orgId: "org-1", projectId: "project-1", templateId: "tpl-1", payload, access: { projectAccess: partyX, canManageWorkflows: false, canReviewSubmittals: false } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(service.archiveTemplate({ orgId: "org-1", projectId: "project-1", templateId: "tpl-1", access: { projectAccess: partyX, canManageWorkflows: false, canReviewSubmittals: false } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      expect(mockPrisma.submittalWorkflowTemplate.create).not.toHaveBeenCalled();
+      expect(mockPrisma.submittalWorkflowTemplate.update).not.toHaveBeenCalled();
+      expect(mockPrisma.submittalWorkflowTemplate.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("allows the workflow manager, the company's own reviewers, and the company workspace", () => {
+      expect(() => service.assertCanManageRoutes({ projectAccess: partyX, canManageWorkflows: true, canReviewSubmittals: false })).not.toThrow();
+      expect(() => service.assertCanManageRoutes({ projectAccess: staff, canManageWorkflows: false, canReviewSubmittals: true })).not.toThrow();
+      expect(() => service.assertCanManageRoutes(null)).not.toThrow();
+    });
+  });
 });

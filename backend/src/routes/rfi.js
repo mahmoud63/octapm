@@ -26,6 +26,22 @@ const { boqFigureAccess, withheldAllocationLinks } = require("../utils/boq-figur
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The assistant's record routes (`/:rfiId/ai/*`) load the RFI themselves: its
+// party routing and draft privacy are checked here first, as on every other
+// by-id RFI route (certification finding L42). A malformed id is left to the
+// assistant route's own validator.
+router.use(
+  "/:rfiId/ai",
+  asyncHandler(async (req, _res, next) => {
+    if (UUID_PATTERN.test(req.params.rfiId || "")) {
+      await rfiWorkflow.assertRfiVisible({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, projectAccess: req.projectAccess, viewerId: req.user.id });
+    }
+    next();
+  }),
+);
 // OCTA-AI-RFI-029: `/ai/*` and `/:rfiId/ai/*` — registered before the record routes.
 router.use(require("./rfi-assistant"));
 
@@ -50,6 +66,12 @@ const actorArgs = (req) => ({
   userRole: getEffectiveRole(req),
   projectAccess: req.projectAccess,
 });
+
+// The caller's own transition check, for a status or answer sent straight to
+// create / update (certification finding L40): the service decides which
+// transition the change needs, this answers whether the caller holds it.
+const canTransition = (req) => (action, transition) => hasPermission(req, "rfi", action, { transition });
+const viewArgs = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, viewerId: req.user.id, projectAccess: req.projectAccess });
 
 router.get(
   "/",
@@ -142,6 +164,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
       projectAccess: req.projectAccess,
+      canTransition: canTransition(req),
     });
 
     return sendSuccess(res, row, 201);
@@ -155,7 +178,7 @@ router.get(
   requirePermission("rfi", "read"),
   [param("rfiId").isUUID(), validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(res, await rfiWorkflow.getRfi({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, viewerId: req.user.id })),
+    sendSuccess(res, await rfiWorkflow.getRfi(viewArgs(req))),
   ),
 );
 
@@ -164,7 +187,7 @@ router.get(
   requirePermission("rfi", "export"),
   [param("rfiId").isUUID(), validate],
   asyncHandler(async (req, res) => {
-    const result = await rfiWorkflow.exportRfiPdf({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, viewerId: req.user.id });
+    const result = await rfiWorkflow.exportRfiPdf(viewArgs(req));
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${result.fileName}"`);
     return res.status(200).send(result.buffer);
@@ -196,7 +219,7 @@ router.put(
       },
       ...actorArgs(req),
     });
-    return sendSuccess(res, await rfiWorkflow.getRfi({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, viewerId: req.user.id }));
+    return sendSuccess(res, await rfiWorkflow.getRfi(viewArgs(req)));
   }),
 );
 
@@ -205,7 +228,7 @@ router.get(
   requirePermission("rfi", "read"),
   [param("rfiId").isUUID(), validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(res, await rfiWorkflow.listResponses({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, viewerId: req.user.id })),
+    sendSuccess(res, await rfiWorkflow.listResponses(viewArgs(req))),
   ),
 );
 
@@ -279,7 +302,7 @@ router.post(
     validate,
   ],
   asyncHandler(async (req, res) => {
-    const converted = await rfiWorkflow.convertToChangeEvent({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, payload: req.body, userId: req.user.id, userRole: getEffectiveRole(req) });
+    const converted = await rfiWorkflow.convertToChangeEvent({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, payload: req.body, ...actorArgs(req) });
     // The change order it answers with is the register's own serializer: its
     // allocation links go without their BOQ row to a caller who may not read the BOQ.
     return sendSuccess(res, { ...converted, changeOrder: withheldAllocationLinks(converted.changeOrder, boqFigureAccess(req)) }, 201);
@@ -485,6 +508,7 @@ router.patch(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
       projectAccess: req.projectAccess,
+      canTransition: canTransition(req),
     });
 
     return sendSuccess(res, row);
@@ -500,8 +524,7 @@ router.delete(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       rfiId: req.params.rfiId,
-      userId: req.user.id,
-      userRole: getEffectiveRole(req),
+      ...actorArgs(req),
     });
 
     return sendSuccess(res, data);

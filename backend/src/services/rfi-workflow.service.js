@@ -1,5 +1,6 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
+const { assertPartyWorkflowAccess } = require("./company-party.service");
 const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const { RECORD_TYPES, attachWorkflowDetailsToRecords } = require("./workflow-support.service");
@@ -198,7 +199,15 @@ const isOverdue = (rfi) => {
   return Boolean(due) && new Date(due).getTime() < Date.now();
 };
 
-const loadRfi = async ({ orgId, projectId, rfiId }, tx = prisma) => {
+/**
+ * Every by-id RFI path reads the record through here. With the caller's
+ * `projectAccess` the party routing the list applies is applied here too: a
+ * party member reaches only an RFI routed to their company (owner, reviewer or
+ * approver party), whatever the route — detail, thread, export, assistant,
+ * change event (certification findings L42 / FILES-X1). Internal callers that
+ * already decided pass none.
+ */
+const loadRfi = async ({ orgId, projectId, rfiId, projectAccess = null }, tx = prisma) => {
   const project = await tx.project.findFirst({ where: { id: projectId, orgId }, select: { id: true, name: true } });
   if (!project) throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
   const rfi = await tx.rfi.findFirst({
@@ -210,11 +219,19 @@ const loadRfi = async ({ orgId, projectId, rfiId }, tx = prisma) => {
     },
   });
   if (!rfi) throw new HttpError(404, "RFI_NOT_FOUND", "RFI not found");
+  assertPartyWorkflowAccess({ projectAccess, record: rfi });
   return { project, rfi };
 };
 
-const getRfi = async ({ orgId, projectId, rfiId, viewerId = null }) => {
-  const { rfi } = await loadRfi({ orgId, projectId, rfiId });
+/** The caller may open this RFI at all: its party routing and draft privacy (the assistant's guard). */
+const assertRfiVisible = async ({ orgId, projectId, rfiId, projectAccess = null, viewerId = null }) => {
+  const { rfi } = await loadRfi({ orgId, projectId, rfiId, projectAccess });
+  assertDraftVisible(rfi, viewerId);
+  return { id: rfi.id };
+};
+
+const getRfi = async ({ orgId, projectId, rfiId, viewerId = null, projectAccess = null }) => {
+  const { rfi } = await loadRfi({ orgId, projectId, rfiId, projectAccess });
   assertDraftVisible(rfi, viewerId);
   const [people, responses, workflow] = await Promise.all([
     loadPeople({ rfiId }),
@@ -240,8 +257,8 @@ const getRfi = async ({ orgId, projectId, rfiId, viewerId = null }) => {
 
 // ─── Responses ────────────────────────────────────────────────────────────
 
-const listResponses = async ({ orgId, projectId, rfiId, viewerId = null }) => {
-  const { rfi } = await loadRfi({ orgId, projectId, rfiId });
+const listResponses = async ({ orgId, projectId, rfiId, viewerId = null, projectAccess = null }) => {
+  const { rfi } = await loadRfi({ orgId, projectId, rfiId, projectAccess });
   assertDraftVisible(rfi, viewerId);
   const rows = await prisma.rfiResponse.findMany({ where: { rfiId }, include: responseInclude, orderBy: { createdAt: "asc" } });
   return { items: rows.map(serializeResponse), officialResponseId: rfi.officialResponseId || null, revision: rfi.revision || 0 };
@@ -262,13 +279,13 @@ const recordOfficialResponse = async ({ tx = prisma, orgId, projectId, rfi, body
 const addResponse = async ({ orgId, projectId, rfiId, payload = {}, userId = null, userRole = null, projectAccess = null }) => {
   const body = trimOrNull(payload.body);
   if (!body) throw new HttpError(400, "RFI_RESPONSE_REQUIRED", "Write a response");
-  const { rfi } = await loadRfi({ orgId, projectId, rfiId });
+  const { rfi } = await loadRfi({ orgId, projectId, rfiId, projectAccess });
   assertDraftVisible(rfi, userId);
   if (rfi.status === "closed" || rfi.status === "archived") throw new HttpError(409, "RFI_ALREADY_CLOSED", "Reopen the RFI before responding");
   if (payload.isOfficial) {
     const rfiService = require("./rfi.service");
     await rfiService.answerRfi({ orgId, projectId, rfiId, payload: { response: body }, userId, userRole, projectAccess });
-    return getRfi({ orgId, projectId, rfiId, viewerId: userId });
+    return getRfi({ orgId, projectId, rfiId, viewerId: userId, projectAccess });
   }
   const row = await prisma.$transaction(async (tx) => {
     const created = await tx.rfiResponse.create({
@@ -301,11 +318,11 @@ const addResponse = async ({ orgId, projectId, rfiId, payload = {}, userId = nul
     title: `${rfi.ref}: new response`,
     message: body.slice(0, 200),
   });
-  return getRfi({ orgId, projectId, rfiId, viewerId: userId });
+  return getRfi({ orgId, projectId, rfiId, viewerId: userId, projectAccess });
 };
 
-const updateResponse = async ({ orgId, projectId, rfiId, responseId, payload = {}, userId = null, userRole = null }) => {
-  const { rfi } = await loadRfi({ orgId, projectId, rfiId });
+const updateResponse = async ({ orgId, projectId, rfiId, responseId, payload = {}, userId = null, userRole = null, projectAccess = null }) => {
+  const { rfi } = await loadRfi({ orgId, projectId, rfiId, projectAccess });
   const existing = await prisma.rfiResponse.findFirst({ where: { id: responseId, rfiId } });
   if (!existing) throw new HttpError(404, "RFI_RESPONSE_NOT_FOUND", "Response not found");
   if (existing.authorId && existing.authorId !== userId && userRole !== "pm") throw new HttpError(403, "RFI_RESPONSE_NOT_YOURS", "Only the author can edit this response");
@@ -327,11 +344,11 @@ const updateResponse = async ({ orgId, projectId, rfiId, responseId, payload = {
       metadata: { source: "document_control.rfi", responseId },
     });
   });
-  return getRfi({ orgId, projectId, rfiId, viewerId: userId });
+  return getRfi({ orgId, projectId, rfiId, viewerId: userId, projectAccess });
 };
 
-const deleteResponse = async ({ orgId, projectId, rfiId, responseId, userId = null, userRole = null }) => {
-  const { rfi } = await loadRfi({ orgId, projectId, rfiId });
+const deleteResponse = async ({ orgId, projectId, rfiId, responseId, userId = null, userRole = null, projectAccess = null }) => {
+  const { rfi } = await loadRfi({ orgId, projectId, rfiId, projectAccess });
   const existing = await prisma.rfiResponse.findFirst({ where: { id: responseId, rfiId } });
   if (!existing) throw new HttpError(404, "RFI_RESPONSE_NOT_FOUND", "Response not found");
   if (existing.isOfficial) throw new HttpError(409, "RFI_RESPONSE_OFFICIAL", "The official response cannot be removed; reopen the RFI instead");
@@ -356,14 +373,10 @@ const deleteResponse = async ({ orgId, projectId, rfiId, responseId, userId = nu
 
 /** Promotes a thread response to the official answer (answers the RFI when open). */
 const setOfficialResponse = async ({ orgId, projectId, rfiId, responseId, userId = null, userRole = null, projectAccess = null }) => {
-  const { rfi } = await loadRfi({ orgId, projectId, rfiId });
+  const { rfi } = await loadRfi({ orgId, projectId, rfiId, projectAccess });
   if (rfi.status === "closed" || rfi.status === "archived") throw new HttpError(409, "RFI_ALREADY_CLOSED", "Reopen the RFI before changing the official response");
   const target = await prisma.rfiResponse.findFirst({ where: { id: responseId, rfiId } });
   if (!target) throw new HttpError(404, "RFI_RESPONSE_NOT_FOUND", "Response not found");
-  await prisma.$transaction(async (tx) => {
-    await tx.rfiResponse.updateMany({ where: { rfiId, isOfficial: true }, data: { isOfficial: false } });
-    await tx.rfiResponse.update({ where: { id: responseId }, data: { isOfficial: true, revision: rfi.revision || 0 } });
-  });
   const rfiService = require("./rfi.service");
   if (rfi.status === "open" || rfi.status === "draft") {
     await rfiService.answerRfi({
@@ -386,7 +399,14 @@ const setOfficialResponse = async ({ orgId, projectId, rfiId, responseId, userId
       projectAccess,
     });
   }
-  return getRfi({ orgId, projectId, rfiId, viewerId: userId });
+  // The thread's flags follow the answer the RFI now carries: written only once
+  // the answer was accepted, so a refused answer changes nothing (finding L42 —
+  // a refused promotion used to leave the response flagged official).
+  await prisma.$transaction(async (tx) => {
+    await tx.rfiResponse.updateMany({ where: { rfiId, isOfficial: true }, data: { isOfficial: false } });
+    await tx.rfiResponse.update({ where: { id: responseId }, data: { isOfficial: true, revision: rfi.revision || 0 } });
+  });
+  return getRfi({ orgId, projectId, rfiId, viewerId: userId, projectAccess });
 };
 
 // ─── Schedule impact and change events ───────────────────────────────────
@@ -405,8 +425,8 @@ const applyScheduleImpact = async ({ tx = prisma, projectId, rfi }) => {
   });
 };
 
-const convertToChangeEvent = async ({ orgId, projectId, rfiId, payload = {}, userId = null, userRole = null }) => {
-  const { rfi } = await loadRfi({ orgId, projectId, rfiId });
+const convertToChangeEvent = async ({ orgId, projectId, rfiId, payload = {}, userId = null, userRole = null, projectAccess = null }) => {
+  const { rfi } = await loadRfi({ orgId, projectId, rfiId, projectAccess });
   if (rfi.changeOrderId) throw new HttpError(409, "RFI_ALREADY_CONVERTED", "This RFI already has a change event");
   const changeOrderService = require("./change-order.service");
   // The official response is one of THIS RFI's responses (certification finding L9: an id from
@@ -444,14 +464,14 @@ const convertToChangeEvent = async ({ orgId, projectId, rfiId, payload = {}, use
       metadata: { source: "document_control.rfi", changeOrderId: changeOrder.id },
     });
   });
-  return { changeOrder, rfi: await getRfi({ orgId, projectId, rfiId, viewerId: userId }) };
+  return { changeOrder, rfi: await getRfi({ orgId, projectId, rfiId, viewerId: userId, projectAccess }) };
 };
 
 // ─── PDF ──────────────────────────────────────────────────────────────────
 
-const exportRfiPdf = async ({ orgId, projectId, rfiId, viewerId = null }) => {
-  const { project } = await loadRfi({ orgId, projectId, rfiId });
-  const rfi = await getRfi({ orgId, projectId, rfiId, viewerId });
+const exportRfiPdf = async ({ orgId, projectId, rfiId, viewerId = null, projectAccess = null }) => {
+  const { project } = await loadRfi({ orgId, projectId, rfiId, projectAccess });
+  const rfi = await getRfi({ orgId, projectId, rfiId, viewerId, projectAccess });
   const doc = createPdf({ title: `${rfi.ref} ${rfi.subject}`, author: project.name, pageSize: "A4", footer: `${project.name} · ${rfi.ref} · rev ${rfi.revision || 0} · generated ${formatDate(new Date())}` });
   doc.heading(`${rfi.ref} · ${rfi.subject}`);
   doc.keyValues([
@@ -518,6 +538,7 @@ module.exports = {
   validateLocation,
   withDraftVisibility,
   assertDraftVisible,
+  assertRfiVisible,
   notifyAssigned,
   notifyDistribution,
   getRfi,

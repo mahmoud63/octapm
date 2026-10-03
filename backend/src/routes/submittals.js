@@ -3,7 +3,7 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param, query } = require("express-validator");
 const { authenticate } = require("../middleware/auth");
-const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
+const { getEffectiveRole, hasPermission, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const {
   assignmentReferenceValidators,
@@ -27,6 +27,18 @@ router.use(authenticate);
 const actorArgs = (req) => ({ userId: req.user.id, userRole: getEffectiveRole(req), projectAccess: req.projectAccess });
 const actor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffectiveRole(req) });
 const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
+// Party routing of packages and records (certification findings L42 / FILES-X1).
+const partyScope = (req) => ({ ...scope(req), projectAccess: req.projectAccess, viewerId: req.user.id });
+// The caller's own transition check, for a status or review outcome sent
+// straight to create / update (finding L40): the service decides which
+// transition the change needs, this answers whether the caller holds it.
+const canTransition = (req) => (action, transition) => hasPermission(req, "submittal", action, { transition });
+// Who may change the project's review routes (finding X-PARTY-2): the service decides from these.
+const routeAdmin = (req) => ({
+  projectAccess: req.projectAccess,
+  canManageWorkflows: hasPermission(req, "workflow", "update", { transition: "workflow.manage" }),
+  canReviewSubmittals: hasPermission(req, "submittal", "submit", { transition: "submittal.review" }),
+});
 
 // OCTA-PM-SUB-017 fields shared by create and update.
 const upgradeValidators = () => [
@@ -127,7 +139,7 @@ router.get(
   "/packages",
   requirePermission("submittal", "read"),
   [query("status").optional().isIn(["open", "submitted", "closed"]), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.listPackages({ ...scope(req), query: req.query }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.listPackages({ ...partyScope(req), query: req.query }))),
 );
 
 router.post(
@@ -143,14 +155,14 @@ router.post(
     body("submittalIds.*").isUUID(),
     validate,
   ],
-  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.createPackage({ ...scope(req), payload: req.body, actor: actor(req) }), 201)),
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.createPackage({ ...scope(req), payload: req.body, actor: actor(req), projectAccess: req.projectAccess }), 201)),
 );
 
 router.get(
   "/packages/:packageId",
   requirePermission("submittal", "read"),
   [param("packageId").isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.getPackage({ ...scope(req), packageId: req.params.packageId }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.getPackage({ ...partyScope(req), packageId: req.params.packageId }))),
 );
 
 router.patch(
@@ -165,21 +177,21 @@ router.patch(
     body("managerUserId").optional({ nullable: true }).isUUID(),
     validate,
   ],
-  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.updatePackage({ ...scope(req), packageId: req.params.packageId, payload: req.body, actor: actor(req) }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.updatePackage({ ...scope(req), packageId: req.params.packageId, payload: req.body, actor: actor(req), projectAccess: req.projectAccess }))),
 );
 
 router.post(
   "/packages/:packageId/items",
   requirePermission("submittal", "update"),
   [param("packageId").isUUID(), body("submittalIds").isArray({ min: 1, max: 200 }), body("submittalIds.*").isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.addPackageItems({ ...scope(req), packageId: req.params.packageId, submittalIds: req.body.submittalIds, actor: actor(req) }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.addPackageItems({ ...scope(req), packageId: req.params.packageId, submittalIds: req.body.submittalIds, actor: actor(req), projectAccess: req.projectAccess }))),
 );
 
 router.delete(
   "/packages/:packageId/items/:submittalId",
   requirePermission("submittal", "update"),
   [param("packageId").isUUID(), param("submittalId").isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.removePackageItem({ ...scope(req), packageId: req.params.packageId, submittalId: req.params.submittalId, actor: actor(req) }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.removePackageItem({ ...scope(req), packageId: req.params.packageId, submittalId: req.params.submittalId, actor: actor(req), projectAccess: req.projectAccess }))),
 );
 
 router.post(
@@ -193,7 +205,7 @@ router.post(
   "/packages/:packageId/decide",
   requirePermission("submittal", "submit", { transition: "submittal.review" }),
   [param("packageId").isUUID(), ...decisionValidators, validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.decidePackage({ ...scope(req), packageId: req.params.packageId, payload: req.body, userId: req.user.id, userRole: getEffectiveRole(req) }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.decidePackage({ ...scope(req), packageId: req.params.packageId, payload: req.body, ...actorArgs(req) }))),
 );
 
 router.get(
@@ -207,21 +219,21 @@ router.post(
   "/workflow-templates",
   requirePermission("submittal", "update"),
   [...templateValidators({ requireName: true }), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.createTemplate({ ...scope(req), payload: req.body, actor: actor(req) }), 201)),
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.createTemplate({ ...scope(req), payload: req.body, actor: actor(req), access: routeAdmin(req) }), 201)),
 );
 
 router.patch(
   "/workflow-templates/:templateId",
   requirePermission("submittal", "update"),
   [param("templateId").isUUID(), ...templateValidators(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.updateTemplate({ ...scope(req), templateId: req.params.templateId, payload: req.body, actor: actor(req) }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.updateTemplate({ ...scope(req), templateId: req.params.templateId, payload: req.body, actor: actor(req), access: routeAdmin(req) }))),
 );
 
 router.delete(
   "/workflow-templates/:templateId",
   requirePermission("submittal", "update"),
   [param("templateId").isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.archiveTemplate({ ...scope(req), templateId: req.params.templateId, actor: actor(req) }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.archiveTemplate({ ...scope(req), templateId: req.params.templateId, actor: actor(req), access: routeAdmin(req) }))),
 );
 
 router.post(
@@ -263,6 +275,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
       projectAccess: req.projectAccess,
+      canTransition: canTransition(req),
     });
 
     return sendSuccess(res, row, 201);
@@ -295,7 +308,7 @@ router.get(
   "/:submittalId",
   requirePermission("submittal", "read"),
   [param("submittalId").isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.getSubmittal({ ...scope(req), submittalId: req.params.submittalId }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.getSubmittal({ ...scope(req), submittalId: req.params.submittalId, projectAccess: req.projectAccess }))),
 );
 
 router.post(
@@ -324,7 +337,7 @@ router.put(
       payload: { managerUserId: req.body.managerUserId, distributionUserIds: req.body.distributionUserIds, comment: "People updated" },
       ...actorArgs(req),
     });
-    return sendSuccess(res, await submittalWorkflow.getSubmittal({ ...scope(req), submittalId: req.params.submittalId }));
+    return sendSuccess(res, await submittalWorkflow.getSubmittal({ ...scope(req), submittalId: req.params.submittalId, projectAccess: req.projectAccess }));
   }),
 );
 
@@ -505,6 +518,7 @@ router.patch(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
       projectAccess: req.projectAccess,
+      canTransition: canTransition(req),
     });
 
     return sendSuccess(res, row);
@@ -520,8 +534,7 @@ router.delete(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       submittalId: req.params.submittalId,
-      userId: req.user.id,
-      userRole: getEffectiveRole(req),
+      ...actorArgs(req),
     });
 
     return sendSuccess(res, data);

@@ -1,6 +1,7 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { normalizeRoleId } = require("../config/permissions");
+const { applyPartyWorkflowVisibility, assertPartyWorkflowAccess, isPartyScopedAccess } = require("./company-party.service");
 const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const { RECORD_TYPES, attachWorkflowDetailsToRecords } = require("./workflow-support.service");
@@ -113,6 +114,24 @@ const listTemplates = async ({ orgId, projectId = null, query = {} }) => {
   return { items: rows.map((row) => serializeTemplate(row, { projectId })) };
 };
 
+/**
+ * A project's review routes decide who reviews its submittals, so changing them
+ * is the project's own administration (certification finding X-PARTY-2: a
+ * subcontractor guest holding only submittal:update made itself the only
+ * reviewer of the default route). Allowed to whoever manages workflows
+ * (workflow.manage, as the generic engine's templates require), and to the
+ * company's own submittal reviewers (submittal.review); never to an external
+ * party's guest on that reviewer permission. `access` comes from the project
+ * routes; the company workspace (its own admin guard) and seeding give none.
+ */
+const assertCanManageRoutes = (access = null) => {
+  if (!access) return;
+  const { projectAccess = null, canManageWorkflows = false, canReviewSubmittals = false } = access;
+  if (canManageWorkflows) return;
+  if (canReviewSubmittals && !isPartyScopedAccess(projectAccess)) return;
+  throw new HttpError(403, "FORBIDDEN", "Submittal review routes are managed by the project team", { module: "workflow", action: "update", transition: "workflow.manage" });
+};
+
 const loadTemplate = async ({ orgId, templateId, projectId = undefined }, tx = prisma) => {
   const template = await tx.submittalWorkflowTemplate.findFirst({
     where: { id: templateId, orgId, ...(projectId === undefined ? {} : projectId === null ? { projectId: null } : { OR: [{ projectId }, { projectId: null }] }) },
@@ -121,7 +140,8 @@ const loadTemplate = async ({ orgId, templateId, projectId = undefined }, tx = p
   return template;
 };
 
-const createTemplate = async ({ orgId, projectId = null, payload = {}, actor = null }) => {
+const createTemplate = async ({ orgId, projectId = null, payload = {}, actor = null, access = null }) => {
+  assertCanManageRoutes(access);
   const name = trimOrNull(payload.name);
   if (!name) throw new HttpError(400, "SUBMITTAL_TEMPLATE_NAME_REQUIRED", "Give the workflow a name");
   const steps = normalizeSteps(payload.steps);
@@ -146,7 +166,8 @@ const createTemplate = async ({ orgId, projectId = null, payload = {}, actor = n
   return serializeTemplate(created, { projectId });
 };
 
-const updateTemplate = async ({ orgId, projectId = null, templateId, payload = {}, actor = null }) => {
+const updateTemplate = async ({ orgId, projectId = null, templateId, payload = {}, actor = null, access = null }) => {
+  assertCanManageRoutes(access);
   const existing = await loadTemplate({ orgId, templateId, projectId: projectId === null ? null : projectId });
   if (projectId && existing.projectId !== projectId) throw new HttpError(403, "SUBMITTAL_TEMPLATE_COMPANY_SCOPED", "Company workflows are edited from the company workspace");
   const data = { updatedBy: actor?.id || null };
@@ -181,8 +202,8 @@ const updateTemplate = async ({ orgId, projectId = null, templateId, payload = {
   return serializeTemplate(updated, { projectId });
 };
 
-const archiveTemplate = async ({ orgId, projectId = null, templateId, actor = null }) =>
-  updateTemplate({ orgId, projectId, templateId, payload: { status: "archived", isDefault: false }, actor });
+const archiveTemplate = async ({ orgId, projectId = null, templateId, actor = null, access = null }) =>
+  updateTemplate({ orgId, projectId, templateId, payload: { status: "archived", isDefault: false }, actor, access });
 
 const STARTER_TEMPLATES = [
   {
@@ -465,7 +486,13 @@ const afterStatusChange = async ({ orgId, projectId, submittal, patch = {}, acto
 
 // ─── Decisions ────────────────────────────────────────────────────────────
 
-const loadSubmittal = async ({ orgId, projectId, submittalId }, tx = prisma) => {
+/**
+ * With the caller's `projectAccess` the party routing the list applies is
+ * applied to the record too: a party member opens only a submittal routed to
+ * their company (certification findings L42 / FILES-X1). Internal callers —
+ * a review step already decided by its assignee — pass none.
+ */
+const loadSubmittal = async ({ orgId, projectId, submittalId, projectAccess = null }, tx = prisma) => {
   const project = await tx.project.findFirst({ where: { id: projectId, orgId }, select: { id: true, name: true } });
   if (!project) throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
   const submittal = await tx.submittal.findFirst({
@@ -479,6 +506,7 @@ const loadSubmittal = async ({ orgId, projectId, submittalId }, tx = prisma) => 
     },
   });
   if (!submittal) throw new HttpError(404, "SUBMITTAL_NOT_FOUND", "Submittal not found");
+  assertPartyWorkflowAccess({ projectAccess, record: submittal });
   return { project, submittal };
 };
 
@@ -582,8 +610,8 @@ const decideStep = async ({ orgId, projectId, submittalId, payload = {}, userId 
 
 // ─── Detail ───────────────────────────────────────────────────────────────
 
-const getSubmittal = async ({ orgId, projectId, submittalId }) => {
-  const { submittal } = await loadSubmittal({ orgId, projectId, submittalId });
+const getSubmittal = async ({ orgId, projectId, submittalId, projectAccess = null }) => {
+  const { submittal } = await loadSubmittal({ orgId, projectId, submittalId, projectAccess });
   const [enriched] = await attachWorkflowDetailsToRecords({ projectId, recordType: RECORD_TYPES.SUBMITTAL, records: [submittal] });
   const now = new Date();
   const distribution = distributionIds(submittal);
@@ -615,9 +643,42 @@ const getSubmittal = async ({ orgId, projectId, submittalId }) => {
 // ─── Packages ─────────────────────────────────────────────────────────────
 
 const packageInclude = {
-  submittals: { select: { id: true, ref: true, title: true, status: true, revision: true, revisionNumber: true, responseCode: true, responseCodeLabel: true, currentStepId: true, ballInCourtUserId: true, dueDate: true }, orderBy: { ref: "asc" } },
+  submittals: { select: { id: true, ref: true, title: true, status: true, revision: true, revisionNumber: true, responseCode: true, responseCodeLabel: true, currentStepId: true, ballInCourtUserId: true, dueDate: true, ownerPartyId: true, reviewerPartyId: true, approverPartyId: true }, orderBy: { ref: "asc" } },
   managerUser: { select: { id: true, name: true, email: true } },
   activity: { select: { id: true, name: true, startDate: true } },
+};
+
+// ─── Party routing of packages ────────────────────────────────────────────
+//
+// A package groups submittals; a party member sees, lists and changes a
+// package only through the submittals routed to their company — the rule the
+// submittal list applies (certification findings L42 / FILES-X1: another
+// company's package was listed with every item, opened and edited). A package
+// the member made and has not filled yet stays theirs.
+
+const routedToCaller = (projectAccess, record) => {
+  try {
+    assertPartyWorkflowAccess({ projectAccess, record });
+    return true;
+  } catch (error) {
+    if (error?.code === "PROJECT_PARTY_RECORD_ACCESS_DENIED") return false;
+    throw error;
+  }
+};
+
+/** The package as the caller may see it, or null when nothing in it is theirs. */
+const packageForCaller = (row, { projectAccess = null, viewerId = null } = {}) => {
+  if (!row || !isPartyScopedAccess(projectAccess)) return row;
+  const submittals = (row.submittals || []).filter((item) => routedToCaller(projectAccess, item));
+  if (!submittals.length && !(viewerId && row.createdBy === viewerId)) return null;
+  return { ...row, submittals };
+};
+
+/** The list filter matching packageForCaller, so a party member's page is not cut short by others' packages. */
+const packageVisibilityWhere = ({ projectAccess = null, viewerId = null } = {}) => {
+  if (!isPartyScopedAccess(projectAccess)) return {};
+  const routed = { submittals: { some: applyPartyWorkflowVisibility({}, projectAccess) } };
+  return { OR: viewerId ? [routed, { createdBy: viewerId }] : [routed] };
 };
 
 const packageStatusFor = (submittals) => {
@@ -640,7 +701,8 @@ const serializePackage = (row) => ({
   requiredOnSite: toIso(row.requiredOnSite),
   managerUserId: row.managerUserId,
   manager: person(row.managerUser),
-  items: (row.submittals || []).map((item) => ({ ...item, dueDate: toIso(item.dueDate), responseCodeLabel: item.responseCodeLabel || (item.responseCode ? RESPONSE_CODES[item.responseCode] : null) })),
+  // The routing fields serve packageForCaller; the answer keeps its shape.
+  items: (row.submittals || []).map(({ ownerPartyId, reviewerPartyId, approverPartyId, ...item }) => ({ ...item, dueDate: toIso(item.dueDate), responseCodeLabel: item.responseCodeLabel || (item.responseCode ? RESPONSE_CODES[item.responseCode] : null) })),
   summary: {
     total: (row.submittals || []).length,
     underReview: (row.submittals || []).filter((item) => item.status === "under_review").length,
@@ -657,11 +719,13 @@ const ensureProjectRow = async ({ orgId, projectId }, tx = prisma) => {
   return project;
 };
 
-const loadPackage = async ({ orgId, projectId, packageId }, tx = prisma) => {
+const loadPackage = async ({ orgId, projectId, packageId, projectAccess = null, viewerId = null }, tx = prisma) => {
   await ensureProjectRow({ orgId, projectId }, tx);
   const row = await tx.submittalPackage.findFirst({ where: { id: packageId, projectId }, include: packageInclude });
   if (!row) throw new HttpError(404, "SUBMITTAL_PACKAGE_NOT_FOUND", "Package not found");
-  return row;
+  const visible = packageForCaller(row, { projectAccess, viewerId });
+  if (!visible) throw new HttpError(403, "PROJECT_PARTY_RECORD_ACCESS_DENIED", "This package holds no submittal routed to your company");
+  return visible;
 };
 
 const refreshPackageStatus = async (tx, packageId) => {
@@ -673,22 +737,24 @@ const refreshPackageStatus = async (tx, packageId) => {
   return status;
 };
 
-const listPackages = async ({ orgId, projectId, query = {} }) => {
+const listPackages = async ({ orgId, projectId, query = {}, projectAccess = null, viewerId = null }) => {
   await ensureProjectRow({ orgId, projectId });
   const rows = await prisma.submittalPackage.findMany({
-    where: { projectId, ...(query.status && Object.values(PACKAGE_STATUS).includes(query.status) ? { status: query.status } : {}) },
+    where: { projectId, ...(query.status && Object.values(PACKAGE_STATUS).includes(query.status) ? { status: query.status } : {}), ...packageVisibilityWhere({ projectAccess, viewerId }) },
     include: packageInclude,
     orderBy: { number: "desc" },
     take: 200,
   });
-  return { items: rows.map(serializePackage) };
+  return { items: rows.map((row) => packageForCaller(row, { projectAccess, viewerId })).filter(Boolean).map(serializePackage) };
 };
 
-const attachSubmittals = async (tx, { projectId, packageId, submittalIds }) => {
+const attachSubmittals = async (tx, { projectId, packageId, submittalIds, projectAccess = null }) => {
   const ids = uniqueIds(submittalIds);
   if (!ids.length) return 0;
-  const rows = await tx.submittal.findMany({ where: { id: { in: ids }, projectId }, select: { id: true, packageId: true } });
+  const rows = await tx.submittal.findMany({ where: { id: { in: ids }, projectId }, select: { id: true, packageId: true, ownerPartyId: true, reviewerPartyId: true, approverPartyId: true } });
   if (rows.length !== ids.length) throw new HttpError(404, "SUBMITTAL_NOT_FOUND", "One or more submittals were not found");
+  // A party member packages only the submittals routed to their company.
+  for (const row of rows) assertPartyWorkflowAccess({ projectAccess, record: row });
   const taken = rows.filter((row) => row.packageId && row.packageId !== packageId);
   if (taken.length) throw new HttpError(409, "SUBMITTAL_IN_ANOTHER_PACKAGE", "A submittal can only be in one package");
   const result = await tx.submittal.updateMany({ where: { id: { in: ids } }, data: { packageId } });
@@ -702,7 +768,13 @@ const assertPackageReferences = async ({ orgId, projectId, activityId, managerUs
   if (managerUserId) await refs.assertMembers({ orgId, userIds: [managerUserId] });
 };
 
-const createPackage = async ({ orgId, projectId, payload = {}, actor = null }) => {
+/** The package after the caller's own change, as they may see it (their last routed item may just have left it). */
+const reloadForCaller = async ({ orgId, projectId, packageId, projectAccess = null, viewerId = null }) => {
+  const row = await loadPackage({ orgId, projectId, packageId });
+  return serializePackage(packageForCaller(row, { projectAccess, viewerId }) || { ...row, submittals: [] });
+};
+
+const createPackage = async ({ orgId, projectId, payload = {}, actor = null, projectAccess = null }) => {
   await ensureProjectRow({ orgId, projectId });
   await assertPackageReferences({ orgId, projectId, activityId: payload.activityId || null, managerUserId: payload.managerUserId || null });
   const name = trimOrNull(payload.name);
@@ -723,7 +795,7 @@ const createPackage = async ({ orgId, projectId, payload = {}, actor = null }) =
         createdBy: actor?.id || null,
       },
     });
-    await attachSubmittals(tx, { projectId, packageId: row.id, submittalIds: payload.submittalIds });
+    await attachSubmittals(tx, { projectId, packageId: row.id, submittalIds: payload.submittalIds, projectAccess });
     await refreshPackageStatus(tx, row.id);
     await auditService.recordEvent({
       tx,
@@ -738,11 +810,11 @@ const createPackage = async ({ orgId, projectId, payload = {}, actor = null }) =
     });
     return row;
   });
-  return serializePackage(await loadPackage({ orgId, projectId, packageId: created.id }));
+  return reloadForCaller({ orgId, projectId, packageId: created.id, projectAccess, viewerId: actor?.id || null });
 };
 
-const updatePackage = async ({ orgId, projectId, packageId, payload = {}, actor = null }) => {
-  const existing = await loadPackage({ orgId, projectId, packageId });
+const updatePackage = async ({ orgId, projectId, packageId, payload = {}, actor = null, projectAccess = null }) => {
+  const existing = await loadPackage({ orgId, projectId, packageId, projectAccess, viewerId: actor?.id || null });
   const data = {};
   if (payload.name !== undefined) {
     const name = trimOrNull(payload.name);
@@ -768,13 +840,13 @@ const updatePackage = async ({ orgId, projectId, packageId, payload = {}, actor 
       summary: { ref: existing.ref, name: data.name || existing.name, changed: Object.keys(data) },
     });
   });
-  return serializePackage(await loadPackage({ orgId, projectId, packageId }));
+  return reloadForCaller({ orgId, projectId, packageId, projectAccess, viewerId: actor?.id || null });
 };
 
-const addPackageItems = async ({ orgId, projectId, packageId, submittalIds = [], actor = null }) => {
-  const existing = await loadPackage({ orgId, projectId, packageId });
+const addPackageItems = async ({ orgId, projectId, packageId, submittalIds = [], actor = null, projectAccess = null }) => {
+  const existing = await loadPackage({ orgId, projectId, packageId, projectAccess, viewerId: actor?.id || null });
   await prisma.$transaction(async (tx) => {
-    const count = await attachSubmittals(tx, { projectId, packageId, submittalIds });
+    const count = await attachSubmittals(tx, { projectId, packageId, submittalIds, projectAccess });
     await refreshPackageStatus(tx, packageId);
     await auditService.recordEvent({
       tx,
@@ -788,11 +860,16 @@ const addPackageItems = async ({ orgId, projectId, packageId, submittalIds = [],
       summary: { ref: existing.ref, added: count },
     });
   });
-  return serializePackage(await loadPackage({ orgId, projectId, packageId }));
+  return reloadForCaller({ orgId, projectId, packageId, projectAccess, viewerId: actor?.id || null });
 };
 
-const removePackageItem = async ({ orgId, projectId, packageId, submittalId, actor = null }) => {
-  const existing = await loadPackage({ orgId, projectId, packageId });
+const removePackageItem = async ({ orgId, projectId, packageId, submittalId, actor = null, projectAccess = null }) => {
+  const existing = await loadPackage({ orgId, projectId, packageId, projectAccess, viewerId: actor?.id || null });
+  // A party member takes out only a submittal routed to their company.
+  if (isPartyScopedAccess(projectAccess)) {
+    const item = await prisma.submittal.findFirst({ where: { id: submittalId, projectId }, select: { id: true, ownerPartyId: true, reviewerPartyId: true, approverPartyId: true } });
+    if (item) assertPartyWorkflowAccess({ projectAccess, record: item });
+  }
   await prisma.$transaction(async (tx) => {
     await tx.submittal.updateMany({ where: { id: submittalId, packageId }, data: { packageId: null } });
     await refreshPackageStatus(tx, packageId);
@@ -808,12 +885,13 @@ const removePackageItem = async ({ orgId, projectId, packageId, submittalId, act
       summary: { ref: existing.ref, removed: submittalId },
     });
   });
-  return serializePackage(await loadPackage({ orgId, projectId, packageId }));
+  return reloadForCaller({ orgId, projectId, packageId, projectAccess, viewerId: actor?.id || null });
 };
 
 /** Sends every submittable member for review as one action. */
 const submitPackage = async ({ orgId, projectId, packageId, payload = {}, userId = null, userRole = null, projectAccess = null }) => {
-  const existing = await loadPackage({ orgId, projectId, packageId });
+  // A party member's package holds only the submittals routed to them: those are the ones sent.
+  const existing = await loadPackage({ orgId, projectId, packageId, projectAccess, viewerId: userId });
   const submittalService = require("./submittal.service");
   const results = [];
   for (const item of existing.submittals) {
@@ -842,13 +920,13 @@ const submitPackage = async ({ orgId, projectId, packageId, payload = {}, userId
       summary: { ref: existing.ref, submitted: results.filter((row) => row.submitted).length, failed: results.filter((row) => row.submitted === false).length },
     });
   });
-  return { package: serializePackage(await loadPackage({ orgId, projectId, packageId })), results };
+  return { package: await reloadForCaller({ orgId, projectId, packageId, projectAccess, viewerId: userId }), results };
 };
 
 /** Applies one decision to every member whose active step is waiting on the caller. */
-const decidePackage = async ({ orgId, projectId, packageId, payload = {}, userId = null, userRole = null }) => {
+const decidePackage = async ({ orgId, projectId, packageId, payload = {}, userId = null, userRole = null, projectAccess = null }) => {
   normalizeDecision(payload);
-  const existing = await loadPackage({ orgId, projectId, packageId });
+  const existing = await loadPackage({ orgId, projectId, packageId, projectAccess, viewerId: userId });
   const results = [];
   for (const item of existing.submittals) {
     if (item.status !== "under_review") {
@@ -865,10 +943,10 @@ const decidePackage = async ({ orgId, projectId, packageId, payload = {}, userId
   await prisma.$transaction(async (tx) => {
     await refreshPackageStatus(tx, packageId);
   });
-  return { package: serializePackage(await loadPackage({ orgId, projectId, packageId })), results };
+  return { package: await reloadForCaller({ orgId, projectId, packageId, projectAccess, viewerId: userId }), results };
 };
 
-const getPackage = async ({ orgId, projectId, packageId }) => serializePackage(await loadPackage({ orgId, projectId, packageId }));
+const getPackage = async ({ orgId, projectId, packageId, projectAccess = null, viewerId = null }) => serializePackage(await loadPackage({ orgId, projectId, packageId, projectAccess, viewerId }));
 
 module.exports = {
   RESPONSE_CODES,
@@ -882,6 +960,8 @@ module.exports = {
   PACKAGE_STATUS,
   STARTER_TEMPLATES,
   normalizeSteps,
+  assertCanManageRoutes,
+  packageForCaller,
   reviewDaysFor,
   computeSubmitBy,
   computeScheduleImpactDays,
