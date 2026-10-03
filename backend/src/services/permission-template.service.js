@@ -1093,13 +1093,29 @@ const addProjectMember = async ({
   actorId = null,
   actorRole = null,
 }) => {
-  const [project, user] = await Promise.all([
+  // A colleague is a member of this organisation, by membership as for every
+  // request (certification CERT-2): a person whose home workspace is another
+  // company but who belongs to this one is a colleague here, with the role and
+  // standing they hold here. A person with no membership row is read from the
+  // User columns (a workspace seeded before memberships).
+  const { findMembership, findUserInOrg } = require("./membership.service");
+  const [project, account, membership] = await Promise.all([
     prisma.project.findFirst({ where: { id: projectId, orgId }, select: { id: true } }),
-    prisma.user.findFirst({
-      where: { id: userId, orgId },
+    findUserInOrg({
+      orgId,
+      userId,
       select: { id: true, name: true, email: true, role: true, status: true, isCompanyAdmin: true },
     }),
+    findMembership({ orgId, userId }),
   ]);
+  const user = account && membership
+    ? {
+        ...account,
+        role: membership.role,
+        status: account.status === "active" ? membership.status : account.status,
+        isCompanyAdmin: Boolean(membership.isAdmin || membership.isOwner),
+      }
+    : account;
 
   if (!project) {
     throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");

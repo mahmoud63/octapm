@@ -341,10 +341,27 @@ const resolveMentionUsers = async ({ orgId, projectId, userIds }) => {
   }
   if (!ids.length) return [];
 
-  const users = await prisma.user.findMany({
-    where: { orgId, id: { in: ids }, status: "active" },
+  // Members by membership, as for every request (certification CERT-2): a
+  // person whose home workspace is another company is mentioned here with the
+  // role and standing they hold here.
+  const { userInOrgWhere } = require("./membership.service");
+  const accounts = await prisma.user.findMany({
+    where: userInOrgWhere({ orgId, where: { id: { in: ids }, status: "active" } }),
     select: { id: true, name: true, email: true, role: true, isCompanyAdmin: true },
   });
+  const memberships = prisma.organizationMembership?.findMany
+    ? await prisma.organizationMembership.findMany({
+        where: { orgId, userId: { in: ids } },
+        select: { userId: true, role: true, status: true, isAdmin: true, isOwner: true },
+      })
+    : [];
+  const membershipOf = new Map(memberships.map((row) => [row.userId, row]));
+  const users = accounts
+    .filter((account) => !membershipOf.has(account.id) || membershipOf.get(account.id).status === "active")
+    .map((account) => {
+      const row = membershipOf.get(account.id);
+      return row ? { ...account, role: row.role, isCompanyAdmin: Boolean(row.isAdmin || row.isOwner) } : account;
+    });
   if (users.length !== ids.length) {
     throw new HttpError(
       400,

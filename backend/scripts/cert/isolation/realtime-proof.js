@@ -96,7 +96,8 @@ const main = async () => {
     const email = `rt.shared.${STAMP.toLowerCase()}.${i}@${A.domain}`;
     const madeA = await aPm.send('POST', '/users', { name: `${STAMP} shared ${i}`, email, password, role: 'site_engineer' });
     const madeV = await vPm.send('POST', '/users', { name: `${STAMP} shared ${i}`, email, role: 'qs' });
-    const xId = madeV.body?.data?.id || madeA.body?.data?.id;
+    // The identity's id, from its own sign-in (adding an existing identity to V answers with V's record of it).
+    const xId = (await api.signIn(email, aOrg)).user?.id || madeA.body?.data?.id;
     const onTeam = await vPm.send('POST', `/projects/${pV.id}/team`, { userId: xId });
     check(`${tag} setup: a person of both companies, on V's project team`, madeA.status === 201 && [200, 201].includes(madeV.status) && [200, 201].includes(onTeam.status), `${said(madeA)} | ${said(madeV)} | ${said(onTeam)}`);
 
