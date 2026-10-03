@@ -12,7 +12,7 @@ change it) · Deferred (scheduled after launch) · Not a defect.
 
 ## Launch blockers now
 
-Open P0 and P1 rows of the register (6). Since the last update: the fifteen within-company party-visibility leads are fixed (two rounds with an independent review between; see the review-rounds section, which also lists the owner decisions R5, R22 and RFI drafts, and the P2/P3 left open). Every cross-company P0 and P1 is fixed except L38, which needs the owner.
+Open P0 and P1 rows of the register (6). Since the last update: the CERT-2 foreign-reference findings (eight P1 cross-company writes and three P3) are fixed and proven; see the CERT-2 section at the end. Before that: the fifteen within-company party-visibility leads are fixed (two rounds with an independent review between; see the review-rounds section, which also lists the owner decisions R5, R22 and RFI drafts, and the P2/P3 left open). Every cross-company P0 and P1 is fixed except L38, which needs the owner.
 
 - **L11 (P1)** — jobs-webhooks: A webhook subscribed to "*" or "job.progress" feeds on its own delivery jobs: WebhookDelivery and BackgroundJob grow without end from a single event
 - **L34 (P1)** — finance: Official AC to a cutoff is all-or-nothing per activity: one later-dated posting removes the activity's whole cost from AC, CPI and EAC, and a period l
@@ -130,3 +130,41 @@ and lead re-runs in process (30/30) and the backend suite passes (255 suites).
 | TASK-M | P3 | Recorded, not fixed | Files and comments of a colleague's task reach company members without project-wide task visibility through /attachments and comments | — |
 | UI-1 | P3 | Recorded, not fixed (CERT-6) | Web project form shows defaults for withheld terms; mobile shows an empty contract value; review-route buttons offered to roles refused | — |
 | DL-AI | P3 | Unverified lead | The daily-log assistant reads the day's photos without a viewer | — |
+
+## CERT-2 foreign-reference findings (2026-10-03)
+
+The first full CERT-2 run (`f7c0354`) refused every cross-company read and file
+attack, and replaying other companies' requests changed nothing; the
+foreign-reference injection (a company's own accepted write with one identifier
+replaced by another company's) stored 1,787 cross-company references across 32
+route/field pairs and answered 141 bid-line requests with the other company's
+identifiers. Five groups (`wf_b3f79c3b-51b`) reproduced each pair before fixing,
+and the main session closed the cross-group notes. Every fix has a live proof run
+in process (another company's id refused exactly as an id that exists nowhere,
+nothing stored, no e-mail, no 5xx, the victim's every-table fingerprint
+unchanged; the company's own id accepted and stored) and a mutation the proof
+catches. Severity follows the scale above: a stored reference to another
+company's record is a cross-company write (P1); an answer carrying another
+company's identifiers or records is a cross-company read.
+
+| ID | Sev | Route / field | Outcome | Proof |
+|---|---|---|---|---|
+| C2-BID | P1 | Bid package lines (POST and PATCH): `boqItemId`, `activityId`, `costCodeId`, `budgetLineId`; bid package `procurementPackageId` (POST/PATCH, not declared by the validators but stored) | Fixed. The 141 sweep "leaks" were identifiers only (the package detail echoes every line's internal ids); a nowhere `procurementPackageId` answered 500 | `procurement-bids-proof.js` |
+| C2-PO | P1 | Purchase-order `lines[].boqItemId`, `budgetLineId`, `costCodeId`, `materialMasterId`; activity material `materialMasterId` (it reached PO lines through the material fallback) | Fixed (`assertLineCoding`, `ensureMaterialMaster`); nowhere ids answered 500 | `procurement-bids-proof.js`, `material.service.test.js` |
+| C2-EVIDENCE | P1 | Progress, bulk progress and daily-report evidence `photos[].key` = another company's document | Fixed (`400 INVALID_SITE_PHOTO_REFERENCE`) | `progress-reports-proof.js` |
+| C2-WEEKLY | P1 | Weekly report `activitiesCompleted[]`, `activitiesInProgress[]` (POST and PATCH) | Fixed (ids validated; `404 ACTIVITY_NOT_FOUND`) | `progress-reports-proof.js` |
+| C2-ATTACH | P1 | `POST /attachments` `recordId` = another company's record (any record type; a nowhere id made orphan attachments, documents, audit and outbound rows) | Fixed for every record type; an unknown home fails closed | `documents-refs-proof.js` |
+| C2-INSURANCE | P1 | Commitment `insurance[].documentId` (PUT /insurance, POST and PATCH); any id counted as a certificate on file for the execution, close-out and pay-application gates | Fixed | `documents-refs-proof.js` |
+| C2-PEOPLE | P1 | Report schedule and run recipients; submittal and workflow template step assignees; workflow action-step users; permission-template assignees | Fixed (membership check) | `people-templates-proof.js` |
+| C2-PUNCH-BULK | P1 | `POST /punch/bulk` item location, activity, company and people (only the defaults were checked) — stored and returned another company's records, canary text and addresses | Fixed (found while reproducing; the corpus never reached it) | `punch-rfi-tasks-proof.js` |
+| C2-PUNCH | P3 | `POST /punch` answered an offline replay before checking references (the sweep's 201 stored nothing) | Fixed: references are checked before a replay is answered | `punch-rfi-tasks-proof.js` |
+| C2-ACTIVITY | P3 | Primary `activityId` on RFI, drawing, correspondence, defect, ITP and material-test create and update: beside activity links it was ignored unchecked; alone, an id that exists nowhere answered 500 where another company's answered 400 (an existence oracle) | Fixed (`assertActivityIdInProject`, `assertPayloadActivity`) | `punch-rfi-tasks-proof.js`, `workflow-activity-proof.js` |
+| C2-EXPORT | P3 | `POST /reports/export` with another company's body `projectId` answered 200 with an empty file | Fixed (404 as for preview) | `people-templates-proof.js` |
+| — | — | `specifications/index` foreign `documentIds[]`; `reports/preview` and `notifications/scan-due` body `projectId`; punch create and distribute; risks `activityId`; tasks body `projectId` | No effect (refused or acting on the caller's own data only; proven, guards pinned by mutation). The injection judge now counts the per-document "not found" answer as refused | as above |
+
+Recorded, not fixed (P2/P3, none cross-company):
+
+- **C2-N1 (P3)** `tenant-references` `idsOf` skips values that are not strings, so a reference sent as a number, array or object passes the helpers and reaches Prisma (500, nothing stored). Every reference field needs an `isUUID` validator; `/punch/bulk` now has them, other nested routes deserve the same audit.
+- **C2-N2 (P3)** Free-form evidence photo `url` and `uploadedBy` are kept as given (another project's API path, a non-member's id); nothing acts on them and downloads are scoped to the caller.
+- **C2-N3 (P2, functional)** `resolveAssignees` (submittal and workflow runtime) and punch distribution resolve people by `User.orgId`, while every reference check accepts by membership: a member whose home workspace is elsewhere is accepted on a template but not resolved at run time.
+- **C2-N4 (coverage)** Every `DocumentText` row of the certified population is pending (the extraction worker is off), so reads of ready document text were exercised only by the proofs; CERT-6.

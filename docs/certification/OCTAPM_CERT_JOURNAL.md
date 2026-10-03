@@ -309,3 +309,23 @@ Clean generation on HEAD (sequence in the evening entry): restart the API on HEA
 **Verdict so far**: cross-company reads ≠ 0 (141), cross-company writes ≠ 0 (stored references). Not a pass. Fix workflow `wf_b3f79c3b-51b` (five groups, 32 route/field pairs) is reproducing and fixing each with the tenant-reference helpers.
 
 **Next exact action**: verify and commit the fixes; regenerate the population from empty (the census baseline must be 0); re-run `run-cert2.js`; report.
+
+## 2026-10-03 (midday) — CERT-2 foreign-reference findings fixed; clean regeneration and second run started
+
+**State**
+
+| | |
+|---|---|
+| Branch / HEAD | `cert/full-saas-certification`, the commit adding this entry (after `89e2d9a`), pushed |
+| Checkpoint | CERT-2 not complete: fixes done; the second run on a freshly regenerated population is running |
+| Certification database | Being regenerated from empty by `C:\Temp\octapm-cert\regen-cert2.ps1 -Tag cert2b` (the first run's injected references made it a polluted proof bed) |
+| Services | Cert Postgres :55433; cert API :5190 (restarted by the sequence on HEAD); Stripe stand-in :5390 stopped until CERT-4 |
+
+**Done in this entry**
+
+1. Fix workflow `wf_b3f79c3b-51b` (five groups) reproduced each of the 32 injected route/field pairs before fixing: 22 fixed, 10 no effect (proven; guards pinned by mutation). New findings fixed while reproducing: `POST /punch/bulk` items (P1: stored and returned another company's location, activity, company and people), bid package `procurementPackageId`, PO `materialMasterId`, commitment insurance on POST/PATCH (and any id counted as a certificate on file), orphan attachments for every record type, report runs and schedule PATCH, workflow action-step users, permission-template assignees, `POST /reports/export`.
+2. Closed here from the groups' cross-group notes: activity material `materialMasterId` (`ensureMaterialMaster`; 4 unit tests, mutation caught); the primary `activityId` on RFI update and on correspondence, defect, ITP and material-test create/update (`assertPayloadActivity`): 24 failures reproduced by the new `workflow-activity-proof.js` before the fix, 72/72 after, 3/3 mutations caught. The injection judge now counts a batch answer refusing every item as not found as refused (`specifications/index`).
+3. Verified: backend suite 258/258 suites, 3,309 tests; every proof and lead in process (36 scripts; the runner now stages the lead scripts first and reads in-process invitation mail from each script's own output, which the regenerated population needs).
+4. Committed: `2fc776e` procurement/bids/materials, `e4f57e2` progress/reports, `5aa9c41` attachments/insurance, `99bdbc4` people/templates, `b820016` punch/activities, `89e2d9a` tooling. Register: a CERT-2 section (eight P1 cross-company writes and three P3, all fixed; C2-N1..N4 recorded).
+
+**Next exact action**: when `logs\regen-cert2b\status.txt` says DONE — check layer 1 compared IDENTICAL to run 1, 0 failed driver runs and lifecycles, the matrix, then triage `results\isolation\cert2b-summary.json` and write the "CERT-2 TENANT ISOLATION COMPLETE" report.
