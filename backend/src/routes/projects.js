@@ -34,6 +34,17 @@ const CONTRACT_TYPES = [
 ];
 
 const PROJECT_CALENDARS = ["five_day", "six_day", "seven_day", "custom"];
+
+// The project's commercial terms (contract value, LD rate, default
+// retention) go to a caller who may read them on that project — ipc:read,
+// the guard on GET /prime-contract, decided as that project's own routes
+// decide it (template, role, party). On a project route the request already
+// carries that project's access; across projects each is resolved on its own
+// (certification L25, project.service COMMERCIAL_TERMS).
+const commercialAccessOnRoute = (req) => async () =>
+  hasPermission(req, "ipc", "read");
+const commercialAccessPerProject = (req) => async (projectId) =>
+  hasPermission(await requestForProject(req, projectId), "ipc", "read");
 const nestedProjectAccess = [
   param("projectId").isUUID(),
   validate,
@@ -162,6 +173,7 @@ router.get(
       role: req.user.role,
       isCompanyAdmin: req.user.isCompanyAdmin,
       query: req.query,
+      commercialAccessFor: commercialAccessPerProject(req),
     });
 
     return sendSuccess(res, result);
@@ -218,7 +230,17 @@ router.get(
       accessFor: async (projectId) => exceptionService.exceptionAccessForView(await viewFor(projectId)),
     });
     const dashboard = withheldWorkspaceDashboard(result, (projectId) => access.get(projectId));
-    return sendSuccess(res, { ...dashboard, openExceptions });
+    // Each project's contract value, and their total, only where the caller
+    // may read the project's commercial terms (certification L25).
+    const withTerms = await projectService.withheldDashboardContractValues({
+      dashboard,
+      orgId: req.user.orgId,
+      userId: req.user.id,
+      role: req.user.role,
+      isCompanyAdmin: req.user.isCompanyAdmin,
+      commercialAccessFor: async (projectId) => hasPermission(await viewFor(projectId), "ipc", "read"),
+    });
+    return sendSuccess(res, { ...withTerms, openExceptions });
   }),
 );
 
@@ -233,6 +255,7 @@ router.post(
       userId: req.user.id,
       role: req.user.role,
       payload: req.body,
+      commercialAccessFor: commercialAccessPerProject(req),
     });
 
     return sendSuccess(res, result, 201);
@@ -249,6 +272,7 @@ router.get(
       userId: req.user.id,
       role: req.user.role,
       isCompanyAdmin: req.user.isCompanyAdmin,
+      commercialAccessFor: commercialAccessOnRoute(req),
     });
 
     return sendSuccess(res, result);
@@ -291,6 +315,7 @@ router.patch(
       userId: req.user.id,
       role: req.user.role,
       payload: req.body,
+      commercialAccessFor: commercialAccessOnRoute(req),
     });
 
     return sendSuccess(res, result);

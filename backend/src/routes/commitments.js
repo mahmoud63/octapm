@@ -240,6 +240,16 @@ router.post(
   asyncHandler(async (req, res) => sendSuccess(res, await commitmentService.createChangeOrder({ ...scope(req), commitmentId: req.params.commitmentId, payload: req.body, actor: actor(req) }), 201)),
 );
 
+// A part of a commitment — its scope, close-out, evaluation and agreement —
+// answers as the commitment itself does: 404 COMMITMENT_NOT_FOUND to a party
+// member whose company it is not (certification L44). The services behind
+// these routes load the commitment by project alone, so every route below,
+// read or write, passes through this first.
+const visibleCommitment = asyncHandler(async (req, _res, next) => {
+  await commitmentService.assertCommitmentVisible({ ...scope(req), commitmentId: req.params.commitmentId, viewer: viewer(req) });
+  next();
+});
+
 // ─── scope and responsibility (OCTA-SUB-SCOPE-054) ─────────────────────────
 
 const scopeService = require("../services/scope-matrix.service");
@@ -249,6 +259,7 @@ router.get(
   "/:commitmentId/scope",
   requirePermission("commitment", "read"),
   [param("commitmentId").isUUID(), validate],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -277,6 +288,7 @@ router.put(
     body("items.*.notes").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
     validate,
   ],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -295,6 +307,7 @@ router.post(
   "/:commitmentId/scope/agree",
   requirePermission("commitment", "approve", { transition: "scope.agree" }),
   [param("commitmentId").isUUID(), validate],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -315,6 +328,7 @@ router.post(
     body("reason").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
     validate,
   ],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -337,6 +351,7 @@ router.get(
   "/:commitmentId/closeout",
   requirePermission("commitment", "read"),
   [param("commitmentId").isUUID(), validate],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -366,6 +381,7 @@ router.patch(
     body("waivedReason").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
     validate,
   ],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -389,6 +405,7 @@ router.post(
     body("overrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
     validate,
   ],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -410,6 +427,7 @@ router.post(
     body("reason").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
     validate,
   ],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -435,6 +453,7 @@ router.get(
   "/:commitmentId/evaluation",
   requirePermission("commitment", "read"),
   [param("commitmentId").isUUID(), validate],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -459,6 +478,7 @@ router.patch(
     body("note").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
     validate,
   ],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -483,6 +503,7 @@ router.patch(
     body("summary").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
     validate,
   ],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -501,6 +522,7 @@ router.post(
   "/:commitmentId/evaluation/final",
   requirePermission("commitment", "approve", { transition: "evaluation.approve" }),
   [param("commitmentId").isUUID(), validate],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -521,6 +543,7 @@ router.post(
     body("reason").isString().trim().notEmpty().isLength({ max: 1000 }),
     validate,
   ],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -548,6 +571,7 @@ router.get(
   "/:commitmentId/agreement",
   requirePermission("commitment", "read"),
   [param("commitmentId").isUUID(), validate],
+  visibleCommitment,
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -564,6 +588,7 @@ router.get(
   "/:commitmentId/agreement.pdf",
   requirePermission("commitment", "export"),
   [param("commitmentId").isUUID(), validate],
+  visibleCommitment,
   asyncHandler(async (req, res) => {
     const { fileName, buffer } = await agreementService.exportAgreementPdf({
       ...scope(req),

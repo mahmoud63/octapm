@@ -210,6 +210,22 @@ const loadCommitment = async ({ projectId, commitmentId, viewer = null }, tx = p
   return row;
 };
 
+/**
+ * The party rule alone, for the routes that serve a part of a commitment —
+ * its scope matrix, close-out, evaluation and agreement — through services
+ * that load it by project only. A party member answered 404 on a commitment
+ * of another company was answered 200 on every one of its parts, the
+ * agreement PDF included (certification L44); now each part answers as the
+ * commitment itself does. Nobody the rule does not bind pays a query here:
+ * those services find (or refuse) the commitment themselves.
+ */
+const assertCommitmentVisible = async ({ orgId, projectId, commitmentId, viewer = null }) => {
+  if (!visibilityWhere(viewer)) return;
+  const row = await prisma.commitment.findFirst({ where: { id: commitmentId, projectId, orgId }, select: { id: true, vendorCompanyId: true, createdBy: true } });
+  if (!row) throw new HttpError(404, "COMMITMENT_NOT_FOUND", "Commitment not found");
+  assertVisible(row, viewer);
+};
+
 const getCommitment = async ({ orgId, projectId, commitmentId, viewer = null }) => {
   await ensureProject({ orgId, projectId });
   return serialize(await loadCommitment({ projectId, commitmentId, viewer }), { projectId, viewer });
@@ -976,6 +992,7 @@ module.exports = {
   activitiesWithExecutedCommitments,
   hasExecutedCommitmentOn,
   listCommitments,
+  assertCommitmentVisible,
   getCommitment,
   createCommitment,
   updateCommitment,

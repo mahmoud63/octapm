@@ -296,3 +296,27 @@ describe("Phase 21D — integrity (release challenge, fourteenth pass)", () => {
     await expect(service.updateCommitment({ orgId: "org-1", projectId: "project-1", commitmentId: "cm-1", payload: { title: "ours" }, actor: ownParty })).resolves.toBeTruthy();
   });
 });
+
+describe("certification L44 — a commitment's parts follow its party rule", () => {
+  beforeEach(() => jest.clearAllMocks());
+  const party = (companyId, id = "sub-x") => ({ id, role: "external_party", projectAccess: { partyScoped: true, partyAccess: [{ companyId }] } });
+  const scope = { orgId: "org-1", projectId: "project-1", commitmentId: "cm-1" };
+
+  it("answers 404 to a party member of another company, as the commitment itself does", async () => {
+    mockPrisma.commitment.findFirst.mockResolvedValue({ id: "cm-1", vendorCompanyId: "vendor-1", createdBy: "user-qs" });
+    await expect(service.assertCommitmentVisible({ ...scope, viewer: party("vendor-OTHER") })).rejects.toMatchObject({ status: 404, code: "COMMITMENT_NOT_FOUND" });
+    expect(mockPrisma.commitment.findFirst).toHaveBeenCalledWith({ where: { id: "cm-1", projectId: "project-1", orgId: "org-1" }, select: { id: true, vendorCompanyId: true, createdBy: true } });
+    mockPrisma.commitment.findFirst.mockResolvedValue(null);
+    await expect(service.assertCommitmentVisible({ ...scope, viewer: party("vendor-1") })).rejects.toMatchObject({ status: 404, code: "COMMITMENT_NOT_FOUND" });
+  });
+
+  it("lets the vendor's own party, the creator and the project team through", async () => {
+    mockPrisma.commitment.findFirst.mockResolvedValue({ id: "cm-1", vendorCompanyId: "vendor-1", createdBy: "sub-creator" });
+    await expect(service.assertCommitmentVisible({ ...scope, viewer: party("vendor-1") })).resolves.toBeUndefined();
+    await expect(service.assertCommitmentVisible({ ...scope, viewer: party("vendor-OTHER", "sub-creator") })).resolves.toBeUndefined();
+    mockPrisma.commitment.findFirst.mockClear();
+    await expect(service.assertCommitmentVisible({ ...scope, viewer: { id: "qs-1", role: "qs", projectAccess: {} } })).resolves.toBeUndefined();
+    await expect(service.assertCommitmentVisible({ ...scope, viewer: null })).resolves.toBeUndefined();
+    expect(mockPrisma.commitment.findFirst).not.toHaveBeenCalled();
+  });
+});

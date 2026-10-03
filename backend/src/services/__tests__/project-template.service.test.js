@@ -85,6 +85,8 @@ describe("create project from template", () => {
       orgId: "org-1",
       userId: "u1",
       role: "pm",
+      // No decision passed: the terms stay withheld (L25 fails safe).
+      commercialAccessFor: null,
       payload: expect.objectContaining({
         name: "Marina Heights",
         currency: "AED", // empty request value keeps the template default

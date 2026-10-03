@@ -139,6 +139,8 @@ describe('subscription gate route ordering', () => {
       userId: 'user-1',
       role: 'pm',
       payload: { name: 'Hospital Expansion' },
+      // L25: the route says, per project, whether this caller may see the commercial terms.
+      commercialAccessFor: expect.any(Function),
     });
   });
 

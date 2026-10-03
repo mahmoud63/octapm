@@ -73,6 +73,8 @@ describe("project service contract metadata", () => {
 
     const result = await projectService.createProject({
       orgId: "org-1",
+      // The creator may read the project's commercial terms (ipc:read).
+      commercialAccessFor: async () => true,
       payload: {
         name: "Tower A",
         clientName: "Client Co",
@@ -373,6 +375,7 @@ describe("project service contract metadata", () => {
       projectId: "project-1",
       userId: "pm-1",
       role: "pm",
+      commercialAccessFor: async () => true,
     });
 
     expect(result).toMatchObject({
@@ -429,6 +432,7 @@ describe("project service contract metadata", () => {
       projectId: "project-1",
       userId: "pm-1",
       role: "pm",
+      commercialAccessFor: async () => true,
       payload: {
         clientName: "",
         dataDate: null,
@@ -451,5 +455,190 @@ describe("project service contract metadata", () => {
       revisedCompletionDate: null,
       defaultRetentionRate: 5,
     });
+  });
+});
+
+describe("certification L25 — the project's commercial terms follow ipc:read", () => {
+  const priced = (overrides = {}) =>
+    buildProject({
+      contractValue: 78800000,
+      ldRatePerDay: 39400,
+      defaultRetentionRate: 7.5,
+      ...overrides,
+    });
+  const WITHHELD = {
+    contractValue: null,
+    ldRatePerDay: null,
+    defaultRetentionRate: null,
+    commercialTermsWithheld: true,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("withholds the terms from a caller who may not read them, and when nobody said", async () => {
+    mockPrisma.project.findFirst.mockResolvedValue(priced());
+    const refused = await projectService.getProjectById({
+      orgId: "org-1",
+      projectId: "project-1",
+      userId: "guest-1",
+      role: "site_engineer",
+      commercialAccessFor: async () => false,
+    });
+    expect(refused).toMatchObject({ ...WITHHELD, name: "Tower A", currency: "USD" });
+
+    const unsaid = await projectService.getProjectById({
+      orgId: "org-1",
+      projectId: "project-1",
+      userId: "guest-1",
+      role: "site_engineer",
+    });
+    expect(unsaid).toMatchObject(WITHHELD);
+
+    const allowed = await projectService.getProjectById({
+      orgId: "org-1",
+      projectId: "project-1",
+      userId: "pm-1",
+      role: "pm",
+      commercialAccessFor: async (projectId) => projectId === "project-1",
+    });
+    expect(allowed).toMatchObject({
+      contractValue: 78800000,
+      ldRatePerDay: 39400,
+      defaultRetentionRate: 7.5,
+      commercialTermsWithheld: false,
+    });
+  });
+
+  it("decides the list per project", async () => {
+    mockPrisma.project.findMany.mockResolvedValue([
+      priced({ id: "project-1" }),
+      priced({ id: "project-2", contractValue: 1000 }),
+    ]);
+    const decide = jest.fn(async (projectId) => projectId === "project-2");
+
+    const result = await projectService.listProjects({
+      orgId: "org-1",
+      userId: "qs-1",
+      role: "qs",
+      query: { limit: 20 },
+      commercialAccessFor: decide,
+    });
+
+    expect(decide).toHaveBeenCalledWith("project-1");
+    expect(decide).toHaveBeenCalledWith("project-2");
+    expect(result.items[0]).toMatchObject({ id: "project-1", ...WITHHELD });
+    expect(result.items[1]).toMatchObject({
+      id: "project-2",
+      contractValue: 1000,
+      commercialTermsWithheld: false,
+    });
+  });
+
+  it("an edit by a caller the terms are withheld from leaves them as they stand", async () => {
+    const existing = priced();
+    mockPrisma.project.findFirst.mockResolvedValue(existing);
+    mockPrisma.project.update.mockResolvedValue(existing);
+
+    const result = await projectService.updateProject({
+      orgId: "org-1",
+      projectId: "project-1",
+      userId: "planner-1",
+      role: "planning_eng",
+      commercialAccessFor: async () => false,
+      payload: {
+        name: "Tower A (renamed)",
+        contractValue: 1,
+        ldRatePerDay: 0,
+        defaultRetentionRate: 5,
+      },
+    });
+
+    expect(mockPrisma.project.update).toHaveBeenCalledWith({
+      where: { id: "project-1" },
+      data: { name: "Tower A (renamed)" },
+    });
+    expect(result).toMatchObject(WITHHELD);
+
+    mockPrisma.project.update.mockClear();
+    await expect(
+      projectService.updateProject({
+        orgId: "org-1",
+        projectId: "project-1",
+        userId: "planner-1",
+        role: "planning_eng",
+        commercialAccessFor: async () => false,
+        payload: { ldRatePerDay: 0 },
+      }),
+    ).rejects.toMatchObject({ status: 400, code: "NO_UPDATES" });
+    expect(mockPrisma.project.update).not.toHaveBeenCalled();
+  });
+
+  it("an edit by a caller who may read the terms changes them", async () => {
+    const existing = priced();
+    mockPrisma.project.findFirst.mockResolvedValue(existing);
+    mockPrisma.project.update.mockResolvedValue(existing);
+
+    await projectService.updateProject({
+      orgId: "org-1",
+      projectId: "project-1",
+      userId: "pm-1",
+      role: "pm",
+      commercialAccessFor: async () => true,
+      payload: { ldRatePerDay: 40000 },
+    });
+
+    expect(mockPrisma.project.update).toHaveBeenCalledWith({
+      where: { id: "project-1" },
+      data: { ldRatePerDay: 40000 },
+    });
+  });
+
+  it("the workspace dashboard states a contract value, and the total, only where the terms may be read", async () => {
+    mockPrisma.project.findMany.mockResolvedValue([
+      { id: "project-1", contractValue: 100 },
+      { id: "project-2", contractValue: 250 },
+    ]);
+    const dashboard = {
+      summary: { totalProjects: 2, totalContractValue: 350 },
+      projectHealth: [
+        { id: "project-1", contractValue: 100, overallScore: 70 },
+        { id: "project-2", contractValue: 250, overallScore: 80 },
+      ],
+    };
+    const call = (decide) =>
+      projectService.withheldDashboardContractValues({
+        dashboard,
+        orgId: "org-1",
+        userId: "u-1",
+        role: "qs",
+        commercialAccessFor: decide,
+      });
+
+    const partly = await call(async (projectId) => projectId === "project-2");
+    expect(partly.projectHealth[0]).toEqual({
+      id: "project-1",
+      contractValue: null,
+      contractValueWithheld: true,
+      overallScore: 70,
+    });
+    expect(partly.projectHealth[1]).toEqual(dashboard.projectHealth[1]);
+    expect(partly.summary).toEqual({
+      totalProjects: 2,
+      totalContractValue: 250,
+      totalContractValueWithheld: true,
+    });
+
+    const none = await call(async () => false);
+    expect(none.summary.totalContractValue).toBeNull();
+    expect(none.projectHealth.every((row) => row.contractValue === null)).toBe(true);
+
+    expect(await call(async () => true)).toBe(dashboard);
+    expect(mockPrisma.project.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ orgId: "org-1", archivedAt: null }),
+      }),
+    );
   });
 });

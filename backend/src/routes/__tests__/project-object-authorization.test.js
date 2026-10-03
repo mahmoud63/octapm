@@ -154,7 +154,13 @@ describe('project object authorization', () => {
       userId: 'site-1',
       role: 'site_engineer',
       query: {},
+      commercialAccessFor: expect.any(Function),
     });
+    // Certification L25: each row's commercial terms are decided on that
+    // project, as its own routes decide ipc:read — a site engineer has none.
+    mockProjectAccess({ assigned: true });
+    const { commercialAccessFor } = mockProjectService.listProjects.mock.calls[0][0];
+    await expect(commercialAccessFor(projectId)).resolves.toBe(false);
   });
 
   it('allows an assigned project user to get a project', async () => {
@@ -171,7 +177,28 @@ describe('project object authorization', () => {
       projectId,
       userId: 'site-1',
       role: 'site_engineer',
+      commercialAccessFor: expect.any(Function),
     });
+    const { commercialAccessFor } = mockProjectService.getProjectById.mock.calls[0][0];
+    await expect(commercialAccessFor(projectId)).resolves.toBe(false);
+  });
+
+  it('certification L25: the project record states its commercial terms to an ipc reader, not to a party guest', async () => {
+    mockProjectAccess({ assigned: true, assignmentRole: 'qs' });
+    const asQs = await request(app)
+      .get(`/api/v1/projects/${projectId}`)
+      .set('x-user-id', 'qs-1')
+      .set('x-role', 'qs');
+    expect(asQs.status).toBe(200);
+    await expect(mockProjectService.getProjectById.mock.calls[0][0].commercialAccessFor(projectId)).resolves.toBe(true);
+
+    mockProjectAccess({ assigned: false, party: true, partyRole: 'subcontractor' });
+    const asGuest = await request(app)
+      .get(`/api/v1/projects/${projectId}`)
+      .set('x-user-id', 'guest-1')
+      .set('x-role', 'site_engineer');
+    expect(asGuest.status).toBe(200);
+    await expect(mockProjectService.getProjectById.mock.calls[1][0].commercialAccessFor(projectId)).resolves.toBe(false);
   });
 
   it('returns 403 when a project user gets an unassigned project', async () => {

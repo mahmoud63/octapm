@@ -239,13 +239,19 @@ const serializeTemplate = (row) => ({
 
 const listTools = () => tools.TOOL_KEYS.map((key) => tools.describeTool(tools.getTool(key)));
 
-const listTemplates = async ({ orgId, projectId = null, tool = null, includeArchived = false, scope = "all" }) => {
+/**
+ * A route's rules (an amount threshold) and steps (who decides) are its
+ * tool's business: with a `viewer` (see visibleRunIds below) only the
+ * templates of tools whose module the viewer reads are listed (L41).
+ */
+const listTemplates = async ({ orgId, projectId = null, tool = null, includeArchived = false, scope = "all", viewer = null }) => {
   const where = { orgId, ...(tool ? { tool } : {}), ...(includeArchived ? {} : { status: "active" }) };
   if (scope === "company") where.projectId = null;
   else if (projectId) where.OR = [{ projectId }, { projectId: null }];
   else where.projectId = null;
   const rows = await prisma.workflowTemplate.findMany({ where, include: { _count: { select: { instances: true } } }, orderBy: [{ tool: "asc" }, { projectId: "desc" }, { priority: "desc" }, { name: "asc" }] });
-  return rows.map(serializeTemplate);
+  const shown = viewer ? rows.filter((row) => tools.getTool(row.tool) && viewer.canRead(tools.getTool(row.tool).module)) : rows;
+  return shown.map(serializeTemplate);
 };
 
 const getTemplateRow = async ({ orgId, templateId, projectId = null }) => {
@@ -626,9 +632,10 @@ const finishAfterCommit = async ({ result, actor, comment, pending }) => {
   if (result.done) await applyOutcome({ instance: result.instance, outcome: result.outcome, actor, comment });
 };
 
-const startInstance = async ({ orgId, projectId, tool: toolKey, recordId, templateId = null, actor = null, trigger = "manual" }) => {
+const startInstance = async ({ orgId, projectId, tool: toolKey, recordId, templateId = null, actor = null, trigger = "manual", viewer = null }) => {
   const tool = tools.getTool(toolKey);
   if (!tool) throw new HttpError(400, "WORKFLOW_TOOL_UNKNOWN", `Unknown tool: ${toolKey}`);
+  await assertRecordVisible({ tool, recordId, viewer });
   const pending = [];
   const result = await prisma.$transaction(async (tx) => {
     const record = await tool.load({ tx, projectId, recordId });
@@ -668,29 +675,100 @@ const maybeStart = async ({ orgId, projectId, tool: toolKey, recordId, actor = n
   }
 };
 
+// ─── who may see a run (certification L41) ───────────────────────────────────
+
+/**
+ * A run carries its record's figures — the context holds a change order's
+ * value, a certificate's net payable, another vendor's commitment sum and
+ * retention — and its approvers. It is shown as the record is: to someone
+ * assigned to one of its steps (the record was routed to them), or to someone
+ * who may read the record itself — its tool's module (change_order, ipc,
+ * cost, commitment, sub_pay_app, submittal, document_control) and, for a
+ * viewer a record's own rule binds (a party member), that rule: a commitment
+ * or payment application of their own company, a submittal routed to their
+ * party (document-text.service RECORD_RULES, the rule comments and
+ * attachments are read under). workflow:read alone listed every run of the
+ * project, with those figures, to every party guest.
+ *
+ * `viewer` is { userId, canRead(module), partyIds, companyIds } as the
+ * workflow routes build it; without one (internal callers) nothing is
+ * withheld.
+ */
+const assignedTo = (row, viewer) => Boolean(viewer.userId) && (row.assignments || []).some((assignment) => assignment.userId === viewer.userId);
+
+const readableTools = (viewer) => tools.TOOL_KEYS.filter((key) => viewer.canRead(tools.getTool(key).module));
+
+/** The narrowing a run list starts from: the tools whose module the viewer reads, and the runs they are assigned to. */
+const visibleRunsWhere = (viewer) => ({
+  OR: [{ tool: { in: readableTools(viewer) } }, ...(viewer.userId ? [{ assignments: { some: { userId: viewer.userId } } }] : [])],
+});
+
+/** The ids of the runs among `rows` this viewer may see (each row: id, tool, recordId, assignments). */
+const visibleRunIds = async ({ rows, viewer }) => {
+  if (!viewer) return new Set(rows.map((row) => row.id));
+  const visible = new Set();
+  const readable = [];
+  for (const row of rows) {
+    if (assignedTo(row, viewer)) visible.add(row.id);
+    else if (tools.getTool(row.tool) && viewer.canRead(tools.getTool(row.tool).module)) readable.push(row);
+  }
+  // Lazy: the document service's record rules, without an import cycle.
+  const { RECORD_RULES, recordRuleVisibleIds } = require("./document-text.service");
+  const binds = (row) => {
+    const rule = RECORD_RULES[row.tool];
+    return Boolean(rule) && (Array.isArray(viewer.partyIds) || !rule.party);
+  };
+  const ruled = readable.filter(binds);
+  const admitted = ruled.length
+    ? await recordRuleVisibleIds({ documents: [{ attachments: ruled.map((row) => ({ recordType: row.tool, recordId: row.recordId })) }], viewer })
+    : new Set();
+  for (const row of readable) {
+    if (!binds(row) || admitted.has(`${row.tool}:${row.recordId}`)) visible.add(row.id);
+  }
+  return visible;
+};
+
+/** A run this viewer may not see answers as a run that does not exist. */
+const assertRunVisible = async ({ row, viewer }) => {
+  if (!viewer) return row;
+  if (!(await visibleRunIds({ rows: [row], viewer })).has(row.id)) throw new HttpError(404, "WORKFLOW_INSTANCE_NOT_FOUND", "Workflow not found");
+  return row;
+};
+
+/** Starting a run on a record needs the record: a viewer who may not read it is answered as if it did not exist. */
+const assertRecordVisible = async ({ tool, recordId, viewer }) => {
+  if (!viewer) return;
+  if (!(await visibleRunIds({ rows: [{ id: recordId, tool: tool.key, recordId, assignments: [] }], viewer })).has(recordId)) {
+    throw new HttpError(404, "WORKFLOW_RECORD_NOT_FOUND", "Record not found");
+  }
+};
+
 const getInstanceRow = async ({ orgId, projectId, instanceId }) => {
   const row = await prisma.workflowInstance.findFirst({ where: { id: instanceId, orgId, projectId }, include: { ...instanceInclude, project: { select: { id: true, name: true } } } });
   if (!row) throw new HttpError(404, "WORKFLOW_INSTANCE_NOT_FOUND", "Workflow not found");
   return row;
 };
 
-const getInstance = async ({ orgId, projectId, instanceId, viewerId = null }) => {
-  const row = await getInstanceRow({ orgId, projectId, instanceId });
+const getInstance = async ({ orgId, projectId, instanceId, viewerId = null, viewer = null }) => {
+  const row = await assertRunVisible({ row: await getInstanceRow({ orgId, projectId, instanceId }), viewer });
   return serializeInstance(row, { viewerId, users: await usersFor({ rows: [row] }) });
 };
 
-const listInstances = async ({ orgId, projectId, tool = null, recordId = null, status = null, limit = 50, viewerId = null }) => {
+const listInstances = async ({ orgId, projectId, tool = null, recordId = null, status = null, limit = 50, viewerId = null, viewer = null }) => {
   const rows = await prisma.workflowInstance.findMany({
-    where: { orgId, projectId, ...(tool ? { tool } : {}), ...(recordId ? { recordId } : {}), ...(status ? { status } : {}) },
+    where: { orgId, projectId, ...(tool ? { tool } : {}), ...(recordId ? { recordId } : {}), ...(status ? { status } : {}), ...(viewer ? { AND: [visibleRunsWhere(viewer)] } : {}) },
     include: { ...instanceInclude, project: { select: { id: true, name: true } } },
     orderBy: [{ startedAt: "desc" }],
     take: Math.min(200, Math.max(1, Number(limit) || 50)),
   });
-  const users = await usersFor({ rows });
-  return rows.map((row) => serializeInstance(row, { viewerId, users }));
+  const visible = await visibleRunIds({ rows, viewer });
+  const shown = rows.filter((row) => visible.has(row.id));
+  const users = await usersFor({ rows: shown });
+  return shown.map((row) => serializeInstance(row, { viewerId, users }));
 };
 
-const respond = async ({ orgId, projectId, instanceId, actor, response, comment = null, canOverride = false }) => {
+const respond = async ({ orgId, projectId, instanceId, actor, response, comment = null, canOverride = false, viewer = null }) => {
+  if (viewer) await assertRunVisible({ row: await getInstanceRow({ orgId, projectId, instanceId }), viewer });
   const responseKey = trimOrNull(response);
   const note = trimOrNull(comment);
   const pending = [];
@@ -728,7 +806,8 @@ const respond = async ({ orgId, projectId, instanceId, actor, response, comment 
   return getInstance({ orgId, projectId, instanceId, viewerId: actor?.id || null });
 };
 
-const cancelInstance = async ({ orgId, projectId, instanceId, actor, reason = null }) => {
+const cancelInstance = async ({ orgId, projectId, instanceId, actor, reason = null, viewer = null }) => {
+  if (viewer) await assertRunVisible({ row: await getInstanceRow({ orgId, projectId, instanceId }), viewer });
   const note = trimOrNull(reason);
   await prisma.$transaction(async (tx) => {
     const instance = await tx.workflowInstance.findFirst({ where: { id: instanceId, orgId, projectId }, include: instanceInclude });
@@ -902,4 +981,5 @@ module.exports = {
   serializeTemplate,
   startInstance,
   updateTemplate,
+  visibleRunIds,
 };

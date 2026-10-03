@@ -74,6 +74,29 @@ const buildProjectAccess = ({ project, role, isCompanyAdmin = false }) => {
   };
 };
 
+/**
+ * The project's commercial terms: the main contract sum, the liquidated
+ * damages rate and the default retention. They are the client contract's
+ * figures, and GET /projects/:id/prime-contract states them only to a member
+ * who may read payment certificates there (ipc:read — template, role or
+ * party). The project record states them on the same terms (certification
+ * L25): every caller of this service says, per project, whether the person
+ * asking may read them (`commercialAccessFor(projectId)`); without that answer
+ * they are withheld. A caller they are withheld from gets the record with the
+ * three set to null and `commercialTermsWithheld: true`, and cannot change them
+ * through the project edit either: the edit form they were withheld from would
+ * otherwise write its blanks and defaults over the real figures.
+ */
+const COMMERCIAL_TERMS = Object.freeze([
+  "contractValue",
+  "defaultRetentionRate",
+  "ldRatePerDay",
+]);
+
+const mayReadCommercialTerms = async (commercialAccessFor, projectId) =>
+  typeof commercialAccessFor === "function" &&
+  (await commercialAccessFor(projectId)) === true;
+
 const projectAuditSummary = (project) => ({
   name: project.name,
   type: project.type || null,
@@ -90,6 +113,7 @@ const sanitizeProject = (project, options = {}) => {
     role: options.role,
     isCompanyAdmin: options.isCompanyAdmin,
   });
+  const commercial = options.commercial === true;
 
   return {
     id: project.id,
@@ -110,10 +134,12 @@ const sanitizeProject = (project, options = {}) => {
     revisedCompletionDate: project.revisedCompletionDate ?? null,
     duration: project.duration,
     durationUnit: project.durationUnit,
-    contractValue: project.contractValue,
-    defaultRetentionRate:
-      project.defaultRetentionRate ?? DEFAULT_RETENTION_RATE,
-    ldRatePerDay: project.ldRatePerDay,
+    contractValue: commercial ? project.contractValue : null,
+    defaultRetentionRate: commercial
+      ? project.defaultRetentionRate ?? DEFAULT_RETENTION_RATE
+      : null,
+    ldRatePerDay: commercial ? project.ldRatePerDay : null,
+    commercialTermsWithheld: !commercial,
     weatherAllowanceDays: project.weatherAllowanceDays,
     projectCalendar: project.projectCalendar ?? null,
     reportingCutoffDay:
@@ -253,7 +279,13 @@ const validateProjectDates = ({
   }
 };
 
-const createProject = async ({ orgId, userId, role, payload }) => {
+const createProject = async ({
+  orgId,
+  userId,
+  role,
+  payload,
+  commercialAccessFor = null,
+}) => {
   const data = buildProjectData(payload);
   const partySyncPayload = extractPartySyncPayload(payload);
   if (data.status === ARCHIVED_STATUS) {
@@ -318,7 +350,10 @@ const createProject = async ({ orgId, userId, role, payload }) => {
     where: { id: created.id, orgId },
     ...includeUserProjectAccess(userId),
   });
-  return sanitizeProject(project, { role });
+  return sanitizeProject(project, {
+    role,
+    commercial: await mayReadCommercialTerms(commercialAccessFor, project.id),
+  });
 };
 
 const findAccessibleProject = async ({
@@ -350,6 +385,7 @@ const listProjects = async ({
   role,
   isCompanyAdmin = false,
   query,
+  commercialAccessFor = null,
 }) => {
   const take = Math.min(Math.max(query.limit || 20, 1), 100);
 
@@ -396,9 +432,20 @@ const listProjects = async ({
     nextCursor = projects[projects.length - 1].id;
   }
 
+  // Decided per project, as each project's own routes decide it.
+  const commercial = await Promise.all(
+    projects.map((project) =>
+      mayReadCommercialTerms(commercialAccessFor, project.id),
+    ),
+  );
+
   return {
-    items: projects.map((project) =>
-      sanitizeProject(project, { role, isCompanyAdmin }),
+    items: projects.map((project, index) =>
+      sanitizeProject(project, {
+        role,
+        isCompanyAdmin,
+        commercial: commercial[index],
+      }),
     ),
     pagination: {
       limit: take,
@@ -413,6 +460,7 @@ const getProjectById = async ({
   userId,
   role,
   isCompanyAdmin = false,
+  commercialAccessFor = null,
 }) => {
   const project = await findAccessibleProject({
     orgId,
@@ -422,10 +470,88 @@ const getProjectById = async ({
     isCompanyAdmin,
   });
 
-  return sanitizeProject(project, { role, isCompanyAdmin });
+  return sanitizeProject(project, {
+    role,
+    isCompanyAdmin,
+    commercial: await mayReadCommercialTerms(commercialAccessFor, project.id),
+  });
 };
 
-const updateProject = async ({ orgId, projectId, userId, role, payload }) => {
+/**
+ * The workspace dashboard states the same contract value: each project's
+ * health row carries it and the summary adds them up over every project the
+ * caller can open. A row of a project whose terms are withheld from the caller
+ * (COMMERCIAL_TERMS) loses it (`contractValue: null, contractValueWithheld:
+ * true`), and the total counts only the projects whose terms the caller may
+ * read — null when there is none, `totalContractValueWithheld: true` when any
+ * was left out. The projects are the dashboard's own: the ones the caller can
+ * open, not archived (workspace-dashboard.service). Nothing changes for a
+ * caller who may read every project's terms.
+ */
+const withheldDashboardContractValues = async ({
+  dashboard,
+  orgId,
+  userId,
+  role,
+  isCompanyAdmin = false,
+  commercialAccessFor = null,
+}) => {
+  if (!dashboard || typeof dashboard !== "object") return dashboard;
+  const projects = await prisma.project.findMany({
+    where: {
+      orgId,
+      archivedAt: null,
+      ...getProjectAccessWhere({ userId, role, isCompanyAdmin }),
+    },
+    select: { id: true, contractValue: true },
+  });
+  const readable = new Set();
+  await Promise.all(
+    projects.map(async (project) => {
+      if (await mayReadCommercialTerms(commercialAccessFor, project.id)) {
+        readable.add(project.id);
+      }
+    }),
+  );
+  const rows = Array.isArray(dashboard.projectHealth)
+    ? dashboard.projectHealth
+    : [];
+  const withheldRows = rows.some((row) => !readable.has(row.id));
+  const withheldTotal = projects.some((project) => !readable.has(project.id));
+  if (!withheldRows && !withheldTotal) return dashboard;
+
+  const result = { ...dashboard };
+  if (withheldRows) {
+    result.projectHealth = rows.map((row) =>
+      readable.has(row.id)
+        ? row
+        : { ...row, contractValue: null, contractValueWithheld: true },
+    );
+  }
+  if (withheldTotal && dashboard.summary) {
+    const shown = projects.filter((project) => readable.has(project.id));
+    result.summary = {
+      ...dashboard.summary,
+      totalContractValue: shown.length
+        ? shown.reduce(
+            (sum, project) => sum + (Number(project.contractValue) || 0),
+            0,
+          )
+        : null,
+      totalContractValueWithheld: true,
+    };
+  }
+  return result;
+};
+
+const updateProject = async ({
+  orgId,
+  projectId,
+  userId,
+  role,
+  payload,
+  commercialAccessFor = null,
+}) => {
   const existingProject = await findAccessibleProject({
     orgId,
     projectId,
@@ -446,6 +572,14 @@ const updateProject = async ({ orgId, projectId, userId, role, payload }) => {
       "PROJECT_ARCHIVE_ACTION_REQUIRED",
       "Use the archive/delete endpoint to archive a project",
     );
+  }
+  // Terms withheld from this caller stay as they stand (COMMERCIAL_TERMS).
+  const commercial = await mayReadCommercialTerms(
+    commercialAccessFor,
+    projectId,
+  );
+  if (!commercial) {
+    for (const key of COMMERCIAL_TERMS) delete data[key];
   }
   if (Object.keys(data).length === 0 && !partySyncPayload) {
     throw new HttpError(
@@ -497,7 +631,7 @@ const updateProject = async ({ orgId, projectId, userId, role, payload }) => {
     ...includeUserProjectAccess(userId),
   });
 
-  return sanitizeProject(updatedProject, { role });
+  return sanitizeProject(updatedProject, { role, commercial });
 };
 
 const deleteProject = async ({ orgId, projectId, userId, role }) => {
@@ -567,6 +701,8 @@ module.exports = {
   getProjectById,
   updateProject,
   deleteProject,
+  withheldDashboardContractValues,
+  COMMERCIAL_TERMS,
   DEFAULT_RETENTION_RATE,
   DEFAULT_REPORTING_CUTOFF_DAY,
 };

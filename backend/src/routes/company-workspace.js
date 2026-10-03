@@ -3,7 +3,8 @@ const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
-const { getEffectiveRole, requireCompanyAdmin } = require("../middleware/rbac");
+const { getEffectiveRole, hasPermission, requireCompanyAdmin } = require("../middleware/rbac");
+const { requestForProject } = require("../middleware/project-access");
 const { subscriptionGate } = require("../middleware/subscription-gate");
 const { validate } = require("../middleware/validate");
 const { moneyBody } = require("../utils/money");
@@ -628,6 +629,9 @@ router.post(
         isCompanyAdmin: req.user.isCompanyAdmin,
         templateId: req.params.id,
         payload: req.body,
+        // The new project's commercial terms are shown to the creator on the
+        // same rule as GET /projects/:id (ipc:read on that project; L25).
+        commercialAccessFor: async (projectId) => hasPermission(await requestForProject(req, projectId), "ipc", "read"),
       }),
       201,
     ),

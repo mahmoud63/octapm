@@ -8,6 +8,7 @@ const { validate } = require("../middleware/validate");
 const engine = require("../services/workflow-engine.service");
 const tools = require("../services/workflow-tools");
 const primeContractService = require("../services/prime-contract.service");
+const { isPartyScopedAccess } = require("../services/company-party.service");
 const { boqFigureAccess, withheldWorkflowInstance } = require("../utils/boq-figures");
 
 /** Workflow engine (OCTA-PLAT-WF-024): `/projects/:projectId/workflows`. */
@@ -16,6 +17,22 @@ router.use(authenticate);
 
 const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
 const actor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffectiveRole(req) });
+
+// Who reads a run: the run is its record's, shown to someone assigned to it
+// or who may read the record — its module, and for a party member the
+// record's own rule (certification L41, workflow-engine visibleRunIds). The
+// same viewer the comment and attachment routes judge a record with.
+const viewer = (req) => {
+  const partyScoped = isPartyScopedAccess(req.projectAccess || {});
+  const parties = req.projectAccess?.partyAccess || [];
+  return {
+    id: req.user.id,
+    userId: req.user.id,
+    canRead: (moduleName) => hasPermission(req, moduleName, "read"),
+    partyIds: partyScoped ? parties.map((party) => party.projectPartyId).filter(Boolean) : null,
+    companyIds: partyScoped ? [...new Set(parties.map((party) => party.companyId).filter(Boolean))] : null,
+  };
+};
 
 // A payment-certificate run's context `amount` is the certificate's net
 // payable when the run started. The engine no longer stores it while the
@@ -54,7 +71,7 @@ router.get(
   "/templates",
   requirePermission("workflow", "read"),
   [query("tool").optional().isIn(tools.TOOL_KEYS), query("includeArchived").optional().isBoolean().toBoolean(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, { items: await engine.listTemplates({ ...scope(req), tool: req.query.tool || null, includeArchived: Boolean(req.query.includeArchived) }) })),
+  asyncHandler(async (req, res) => sendSuccess(res, { items: await engine.listTemplates({ ...scope(req), tool: req.query.tool || null, includeArchived: Boolean(req.query.includeArchived), viewer: viewer(req) }) })),
 );
 
 router.post(
@@ -89,7 +106,7 @@ router.get(
   requirePermission("workflow", "read"),
   [query("tool").optional().isIn(tools.TOOL_KEYS), query("recordId").optional({ values: "falsy" }).isUUID(), query("status").optional().isIn(Object.values(engine.INSTANCE_STATUS)), query("limit").optional().isInt({ min: 1, max: 200 }).toInt(), validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(res, { items: (await engine.listInstances({ ...scope(req), tool: req.query.tool || null, recordId: req.query.recordId || null, status: req.query.status || null, limit: req.query.limit || 50, viewerId: req.user.id })).map(await instanceView(req)) }),
+    sendSuccess(res, { items: (await engine.listInstances({ ...scope(req), tool: req.query.tool || null, recordId: req.query.recordId || null, status: req.query.status || null, limit: req.query.limit || 50, viewerId: req.user.id, viewer: viewer(req) })).map(await instanceView(req)) }),
   ),
 );
 
@@ -97,14 +114,14 @@ router.post(
   "/instances",
   requirePermission("workflow", "update", { transition: "workflow.manage" }),
   [body("tool").isIn(tools.TOOL_KEYS), body("recordId").isUUID(), body("templateId").optional({ nullable: true }).isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await viewed(req, await engine.startInstance({ ...scope(req), tool: req.body.tool, recordId: req.body.recordId, templateId: req.body.templateId || null, actor: actor(req), trigger: "manual" })), 201)),
+  asyncHandler(async (req, res) => sendSuccess(res, await viewed(req, await engine.startInstance({ ...scope(req), tool: req.body.tool, recordId: req.body.recordId, templateId: req.body.templateId || null, actor: actor(req), trigger: "manual", viewer: viewer(req) })), 201)),
 );
 
 router.get(
   "/instances/:instanceId",
   requirePermission("workflow", "read"),
   [param("instanceId").isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await viewed(req, await engine.getInstance({ ...scope(req), instanceId: req.params.instanceId, viewerId: req.user.id })))),
+  asyncHandler(async (req, res) => sendSuccess(res, await viewed(req, await engine.getInstance({ ...scope(req), instanceId: req.params.instanceId, viewerId: req.user.id, viewer: viewer(req) })))),
 );
 
 router.post(
@@ -114,7 +131,7 @@ router.post(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await viewed(req, await engine.respond({ ...scope(req), instanceId: req.params.instanceId, actor: actor(req), response: req.body.response, comment: req.body.comment || null, canOverride: hasPermission(req, "workflow", "update", { transition: "workflow.manage" }) })),
+      await viewed(req, await engine.respond({ ...scope(req), instanceId: req.params.instanceId, actor: actor(req), response: req.body.response, comment: req.body.comment || null, canOverride: hasPermission(req, "workflow", "update", { transition: "workflow.manage" }), viewer: viewer(req) })),
     ),
   ),
 );
@@ -123,7 +140,7 @@ router.post(
   "/instances/:instanceId/cancel",
   requirePermission("workflow", "update", { transition: "workflow.manage" }),
   [param("instanceId").isUUID(), body("reason").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await viewed(req, await engine.cancelInstance({ ...scope(req), instanceId: req.params.instanceId, actor: actor(req), reason: req.body.reason || null })))),
+  asyncHandler(async (req, res) => sendSuccess(res, await viewed(req, await engine.cancelInstance({ ...scope(req), instanceId: req.params.instanceId, actor: actor(req), reason: req.body.reason || null, viewer: viewer(req) })))),
 );
 
 module.exports = router;

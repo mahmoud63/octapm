@@ -16,6 +16,9 @@ const mockPrisma = {
   workflowStepAssignment: table(),
   approvalWorkflowEvent: { create: jest.fn(async ({ data }) => ({ id: "evt", ...data })) },
   changeOrder: { findFirst: jest.fn() },
+  // The record rules a party member's runs are judged by (certification L41).
+  commitment: { findMany: jest.fn(async () => []) },
+  subPayApp: { findMany: jest.fn(async () => []) },
   user: { findMany: jest.fn(async () => []) },
   projectAssignment: { findMany: jest.fn(async () => [{ userId: "pm-1", role: "pm" }, { userId: "fin-1", role: "finance" }, { userId: "qs-1", role: "qs" }]) },
   projectPartyMember: { findMany: jest.fn(async () => []) },
@@ -254,6 +257,80 @@ describe("workflow engine", () => {
     expect(created.filter((row) => row.isDefault).map((row) => row.tool).sort()).toEqual(Object.keys(engine.DEFAULT_TEMPLATES).sort());
     expect(created.find((row) => row.name === engine.EXAMPLE_TEMPLATE.name)).toMatchObject({ isDefault: false, rulesJson: [{ field: "amount", op: "gte", value: 50000 }] });
     expect(created.find((row) => row.tool === "sub_pay_app").stepsJson.map((step) => step.key)).toEqual(["qs_review", "pm_approval"]);
+  });
+});
+
+describe("certification L41 — a run is shown as its record is", () => {
+  const MODULE_READS = { site: ["workflow"], qs: ["workflow", "change_order", "ipc", "cost", "commitment", "sub_pay_app"], guest: ["workflow", "commitment", "sub_pay_app"] };
+  const viewerOf = (who, { userId = `${who}-1`, party = false } = {}) => ({
+    id: userId,
+    userId,
+    canRead: (moduleName) => MODULE_READS[who].includes(moduleName),
+    partyIds: party ? ["party-x"] : null,
+    companyIds: party ? ["company-x"] : null,
+  });
+  const run = (id, tool, recordId, assignees = ["pm-1"]) => ({ id, orgId: "org-1", projectId: "p1", tool, recordId, recordRef: id, status: "cancelled", contextJson: { ref: id, amount: 1000 }, stepsJson: [], assignments: assignees.map((userId, index) => ({ id: `${id}-as-${index}`, stepKey: "review", userId, status: "skipped" })), template: { id: "t", name: "t", tool } });
+  const rows = [
+    run("co-run", "change_order", "co-1"),
+    run("ipc-run", "ipc_certificate", "ipc-1"),
+    run("own-commitment-run", "commitment", "cm-own"),
+    run("foreign-commitment-run", "commitment", "cm-foreign"),
+    run("assigned-co-run", "change_order", "co-2", ["site-1"]),
+  ];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.commitment.findMany.mockImplementation(async ({ where }) => (where.id.in.includes("cm-own") ? [{ id: "cm-own" }] : []));
+  });
+
+  it("lists a run to its record's readers and its assignees only, the party rule included", async () => {
+    mockPrisma.workflowInstance.findMany.mockResolvedValue(rows);
+    const asGuest = await engine.listInstances({ orgId: "org-1", projectId: "p1", viewer: viewerOf("guest", { party: true }) });
+    expect(asGuest.map((row) => row.id)).toEqual(["own-commitment-run"]);
+    expect(mockPrisma.commitment.findMany).toHaveBeenCalledWith({ where: { id: { in: ["cm-own", "cm-foreign"] }, OR: [{ vendorCompanyId: { in: ["company-x"] } }, { createdBy: "guest-1" }] }, select: { id: true } });
+    // The query is narrowed to the tools the viewer reads and the runs assigned to them.
+    expect(mockPrisma.workflowInstance.findMany.mock.calls[0][0].where.AND).toEqual([{ OR: [{ tool: { in: ["commitment", "sub_pay_app"] } }, { assignments: { some: { userId: "guest-1" } } }] }]);
+
+    const asSite = await engine.listInstances({ orgId: "org-1", projectId: "p1", viewer: viewerOf("site") });
+    expect(asSite.map((row) => row.id)).toEqual(["assigned-co-run"]);
+
+    const asQs = await engine.listInstances({ orgId: "org-1", projectId: "p1", viewer: viewerOf("qs") });
+    expect(asQs.map((row) => row.id)).toEqual(rows.map((row) => row.id));
+
+    const internal = await engine.listInstances({ orgId: "org-1", projectId: "p1" });
+    expect(internal).toHaveLength(rows.length);
+    expect(mockPrisma.workflowInstance.findMany.mock.calls.at(-1)[0].where.AND).toBeUndefined();
+  });
+
+  it("answers a run the viewer may not see as one that does not exist", async () => {
+    const byId = (id) => async () => ({ ...rows.find((row) => row.id === id), project: { id: "p1", name: "Tower" } });
+    mockPrisma.workflowInstance.findFirst.mockImplementationOnce(byId("ipc-run"));
+    await expect(engine.getInstance({ orgId: "org-1", projectId: "p1", instanceId: "ipc-run", viewer: viewerOf("site") })).rejects.toMatchObject({ status: 404, code: "WORKFLOW_INSTANCE_NOT_FOUND" });
+    mockPrisma.workflowInstance.findFirst.mockImplementationOnce(byId("foreign-commitment-run"));
+    await expect(engine.getInstance({ orgId: "org-1", projectId: "p1", instanceId: "foreign-commitment-run", viewer: viewerOf("guest", { party: true }) })).rejects.toMatchObject({ status: 404 });
+    mockPrisma.workflowInstance.findFirst.mockImplementationOnce(byId("own-commitment-run"));
+    await expect(engine.getInstance({ orgId: "org-1", projectId: "p1", instanceId: "own-commitment-run", viewer: viewerOf("guest", { party: true }) })).resolves.toMatchObject({ id: "own-commitment-run", context: { amount: 1000 } });
+    mockPrisma.workflowInstance.findFirst.mockImplementationOnce(byId("assigned-co-run"));
+    await expect(engine.getInstance({ orgId: "org-1", projectId: "p1", instanceId: "assigned-co-run", viewer: viewerOf("site") })).resolves.toMatchObject({ id: "assigned-co-run" });
+  });
+
+  it("lists a tool's routes only to its module's readers", async () => {
+    const templates = [pmTemplate(), { ...pmTemplate(), id: "tpl-ipc", tool: "ipc_certificate" }, { ...pmTemplate(), id: "tpl-cm", tool: "commitment" }];
+    mockPrisma.workflowTemplate.findMany.mockResolvedValue(templates);
+    expect((await engine.listTemplates({ orgId: "org-1", projectId: "p1", viewer: viewerOf("guest", { party: true }) })).map((row) => row.id)).toEqual(["tpl-cm"]);
+    expect((await engine.listTemplates({ orgId: "org-1", projectId: "p1", viewer: viewerOf("qs") })).map((row) => row.id)).toEqual(["tpl-default", "tpl-ipc", "tpl-cm"]);
+    expect(await engine.listTemplates({ orgId: "org-1", projectId: "p1" })).toHaveLength(3);
+  });
+
+  it("refuses to start, decide or cancel a run on a record the viewer may not read, before anything moves", async () => {
+    await expect(engine.startInstance({ orgId: "org-1", projectId: "p1", tool: "change_order", recordId: "co-1", actor: { id: "site-1" }, viewer: viewerOf("site") })).rejects.toMatchObject({ status: 404, code: "WORKFLOW_RECORD_NOT_FOUND" });
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    mockPrisma.workflowInstance.findFirst.mockResolvedValueOnce({ ...run("running-co", "change_order", "co-1"), status: "running" });
+    await expect(engine.respond({ orgId: "org-1", projectId: "p1", instanceId: "running-co", actor: { id: "site-1" }, response: "approve", canOverride: true, viewer: viewerOf("site") })).rejects.toMatchObject({ status: 404, code: "WORKFLOW_INSTANCE_NOT_FOUND" });
+    mockPrisma.workflowInstance.findFirst.mockResolvedValueOnce({ ...run("running-co", "change_order", "co-1"), status: "running" });
+    await expect(engine.cancelInstance({ orgId: "org-1", projectId: "p1", instanceId: "running-co", actor: { id: "site-1" }, viewer: viewerOf("site") })).rejects.toMatchObject({ status: 404, code: "WORKFLOW_INSTANCE_NOT_FOUND" });
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.workflowStepAssignment.update).not.toHaveBeenCalled();
   });
 });
 

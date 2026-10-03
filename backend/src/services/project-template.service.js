@@ -308,6 +308,7 @@ const createProjectFromTemplate = async ({
   isCompanyAdmin = false,
   templateId,
   payload = {},
+  commercialAccessFor = null,
 }) => {
   const template = await requireTemplate({ orgId, templateId });
   if (template.status !== "active") {
@@ -324,7 +325,7 @@ const createProjectFromTemplate = async ({
   // Template parties are applied below with their permission templates.
   delete projectPayload.parties;
 
-  const project = await projectService.createProject({ orgId, userId, role, payload: projectPayload });
+  const project = await projectService.createProject({ orgId, userId, role, payload: projectPayload, commercialAccessFor });
   const applied = { parties: 0, folders: 0, locations: 0, assignments: 0 };
 
   await prisma.$transaction(async (tx) => {
@@ -384,7 +385,7 @@ const createProjectFromTemplate = async ({
     metadata: { projectId: project.id, applied },
   });
 
-  const fresh = await projectService.getProjectById({ orgId, projectId: project.id, userId, role, isCompanyAdmin });
+  const fresh = await projectService.getProjectById({ orgId, projectId: project.id, userId, role, isCompanyAdmin, commercialAccessFor });
   return { project: fresh, template: { id: template.id, name: template.name }, applied };
 };
 
