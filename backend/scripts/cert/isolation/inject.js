@@ -16,9 +16,12 @@
  *   ACCEPTED             the answer shows nothing, but a row of the attacker's
  *                        may now point at the other company's record — the
  *                        cross-company reference scan before and after says so.
- *   REFUSED_LATE         409 or another 4xx: the foreign identifier got past the
- *                        reference check and was stopped by business logic or a
- *                        constraint — a finding until triaged
+ *   REFUSED_OWN_STATE    409: the attacker's own record (in the path) refused on its
+ *                        own state before the reference was judged — a coverage gap,
+ *                        listed; the reference census still catches anything stored
+ *   REFUSED_OWN_BILLING  402 SUBSCRIPTION_REQUIRED: the caller's own billing gate
+ *   REFUSED_LATE         another 4xx: the foreign identifier got past the reference
+ *                        check and was stopped later — a finding until triaged
  *   SERVER_ERROR         5xx — typically a foreign-key constraint that stopped the
  *                        write: defense in depth, not authorization, so a finding
  *
@@ -150,6 +153,13 @@ const main = async () => {
     else if (canary || address || companyName || disclosed.length) verdict = 'LEAK';
     else if (res.status >= 500) verdict = 'SERVER_ERROR';
     else if ([400, 403, 404, 422].includes(res.status)) verdict = 'REFUSED';
+    // The caller's own billing gate, before the reference is looked at.
+    else if (res.status === 402 && res.body?.error?.code === 'SUBSCRIPTION_REQUIRED') verdict = 'REFUSED_OWN_BILLING';
+    // The path names the attacker's own record; a 409 is that record's own state
+    // (locked, approved, duplicate) refusing first. The foreign reference was not
+    // judged: listed as a coverage gap, and the reference census still catches
+    // anything stored.
+    else if (res.status === 409) verdict = 'REFUSED_OWN_STATE';
     else if (res.status >= 400) verdict = 'REFUSED_LATE';
     else verdict = 'ACCEPTED';
     return {

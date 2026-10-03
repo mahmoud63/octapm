@@ -17,6 +17,8 @@
  *   REFUSED_VALIDATION 400 — the outsider's request failed validation that the owner's
  *                      identical request passed. Usually a reference check (defense in
  *                      depth), not the access rule: listed for triage, never counted as a pass
+ *   REFUSED_OWN_BILLING 402 SUBSCRIPTION_REQUIRED: the caller's own company is lapsed and its
+ *                      billing gate stopped the request first — says nothing of the victim
  *   REFUSED_LATE       any other 4xx (409, 422, …): the request got past the access rule and
  *                      was stopped by business logic or a constraint acting on the victim's
  *                      record — a finding until triaged
@@ -164,6 +166,9 @@ const main = async () => {
     if (res.status >= 500) return { verdict: 'SERVER_ERROR' };
     if ([401, 403, 404].includes(res.status)) return { verdict: 'REFUSED' };
     if (res.status === 400) return { verdict: 'REFUSED_VALIDATION' };
+    // The billing gate reads the caller's own company, never the victim's: a
+    // lapsed attacker is stopped before the access rule. Listed, not a finding.
+    if (res.status === 402 && res.body?.error?.code === 'SUBSCRIPTION_REQUIRED') return { verdict: 'REFUSED_OWN_BILLING' };
     if (res.status >= 400) return { verdict: 'REFUSED_LATE' };
     if (write) return { verdict: 'WRITE_ACCEPTED' };
     // A read of the victim's own record that was not refused counts as a
