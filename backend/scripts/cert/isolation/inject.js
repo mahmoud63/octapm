@@ -161,6 +161,11 @@ const main = async () => {
     // anything stored.
     else if (res.status === 409) verdict = 'REFUSED_OWN_STATE';
     else if (res.status >= 400) verdict = 'REFUSED_LATE';
+    // A batch route that answers 2xx but refuses each item as not found — e.g.
+    // POST /specifications/index: { documents: [{ error: 'Document not found', sections: 0 }] }
+    // — refused the reference (proven NO_EFFECT in the CERT-2 fixes).
+    else if (Array.isArray(res.body?.data?.documents) && res.body.data.documents.length
+      && res.body.data.documents.every((d) => /not found/i.test(String(d?.error || '')) && !Number(d?.sections))) verdict = 'REFUSED';
     else verdict = 'ACCEPTED';
     return {
       attacker: attack.attacker,
