@@ -9,6 +9,13 @@ jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 jest.mock("../approval-workflow.service", () => ({
   listEventsForRecords: jest.fn(async () => new Map()),
 }));
+// who may link a document is decided in document-text.service (certification R29, R32)
+const mockDocumentText = {
+  assertDocumentsLinkable: jest.fn(async () => undefined),
+  documentWriterViewer: jest.fn(async () => null),
+  documentViewer: jest.fn(({ userId, canRead }) => ({ id: userId, userId, canRead, partyIds: null, companyIds: null })),
+};
+jest.mock("../document-text.service", () => mockDocumentText);
 
 const service = require("../workflow-support.service");
 
@@ -203,5 +210,114 @@ describe("assignmentUserIds and reference serialization", () => {
     expect(row.assigneeCompany).toEqual({ id: COMPANY, name: "Consult Co" });
     expect(row.ballInCourtUser).toEqual({ id: USER_B, name: null, email: null });
     expect(row.reviewerUser).toBeNull();
+  });
+});
+
+describe("certification R29 — a record's references name only documents its writer may read", () => {
+  const DOC = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const KEPT = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const txFor = (over = {}) => ({
+    workflowAttachment: {
+      findMany: jest.fn(async () => [{ storageKey: KEPT }]),
+      deleteMany: jest.fn(async () => ({})),
+      createMany: jest.fn(async () => ({})),
+    },
+    workflowActivityLink: { deleteMany: jest.fn(), createMany: jest.fn() },
+    ...over,
+  });
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockDocumentText.assertDocumentsLinkable.mockImplementation(async () => undefined);
+  });
+
+  it("asks the guard about every referenced key before any reference is replaced, with the record's own references kept", async () => {
+    const tx = txFor();
+    await service.syncWorkflowReferences({
+      tx,
+      projectId: "project-1",
+      recordType: "punch_item",
+      recordId: "punch-1",
+      payload: { attachmentRefs: [{ storageKey: DOC, fileName: "a.pdf" }, { storageKey: KEPT, fileName: "b.pdf" }] },
+      userId: USER_A,
+    });
+    const call = mockDocumentText.assertDocumentsLinkable.mock.calls[0][0];
+    expect(call).toMatchObject({ projectId: "project-1", keys: [DOC, KEPT] });
+    expect(await call.unchanged()).toEqual([KEPT]);
+    expect(await call.userId()).toBe(USER_A);
+    expect(call.refuse()).toMatchObject({ status: 404, code: "FILE_NOT_FOUND" });
+    expect(tx.workflowAttachment.createMany).toHaveBeenCalled();
+  });
+
+  it("a refused reference writes nothing", async () => {
+    const tx = txFor();
+    mockDocumentText.assertDocumentsLinkable.mockImplementation(async ({ refuse }) => { throw refuse(); });
+    await expect(service.syncWorkflowReferences({
+      tx, projectId: "project-1", recordType: "rfi", recordId: "rfi-1", payload: { attachmentRefs: [{ storageKey: DOC }] }, userId: USER_A,
+    })).rejects.toMatchObject({ code: "FILE_NOT_FOUND" });
+    expect(tx.workflowAttachment.deleteMany).not.toHaveBeenCalled();
+    expect(tx.workflowAttachment.createMany).not.toHaveBeenCalled();
+  });
+
+  it("on a create whose caller passes no user, the record's author is the writer", async () => {
+    const tx = txFor({ rfi: { findUnique: jest.fn(async () => ({ createdBy: USER_B })) } });
+    await service.syncWorkflowReferences({ tx, projectId: "project-1", recordType: "rfi", recordId: "rfi-1", payload: { attachmentRefs: [{ storageKey: DOC }] } });
+    expect(await mockDocumentText.assertDocumentsLinkable.mock.calls[0][0].userId()).toBe(USER_B);
+    const drawingTx = txFor();
+    await service.syncWorkflowReferences({ tx: drawingTx, projectId: "project-1", recordType: "drawing", recordId: "dwg-1", payload: { attachmentRefs: [{ storageKey: DOC }] } });
+    expect(await mockDocumentText.assertDocumentsLinkable.mock.calls[1][0].userId()).toBeNull();
+  });
+});
+
+describe("certification R32 — revisions filed through a record's payload", () => {
+  const DOC = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const txFor = (filed = []) => ({
+    documentRevision: {
+      findMany: jest.fn(async () => filed.map((revision) => ({ revision }))),
+      createMany: jest.fn(async () => ({})),
+    },
+  });
+  const record = { id: "dwg-1", status: "active", revision: null, title: "Plan" };
+  const write = (tx, payload, extra = {}) =>
+    service.recordDocumentRevisions({ tx, projectId: "project-1", recordType: "drawing", record, payload, userId: USER_A, ...extra });
+  const rowsOf = (tx) => tx.documentRevision.createMany.mock.calls[0][0].data;
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockDocumentText.assertDocumentsLinkable.mockImplementation(async () => undefined);
+  });
+
+  it("clamps an approved, latest or attributed revision to a plain uploaded one — approval is the doc-control route's", async () => {
+    const tx = txFor();
+    await write(tx, { revisions: [{ revision: "C", status: "approved", isLatest: true, approvedBy: USER_B, approvedAt: "2020-01-01", supersededBy: USER_B, projectDocumentId: DOC }] });
+    const row = rowsOf(tx).find((r) => r.revision === "C");
+    expect(row).toMatchObject({ status: "uploaded", isLatest: false, approvedBy: null, approvedAt: null, supersededBy: null, supersededAt: null });
+    expect(row).not.toHaveProperty("source");
+    expect(mockDocumentText.documentWriterViewer).not.toHaveBeenCalled(); // no writer identity needed to clamp
+  });
+
+  it("clamps the top-level revision fields too, and never files a latest revision", async () => {
+    const tx = txFor();
+    await write(tx, { revision: "E", status: "approved", isLatest: true, approvedBy: USER_B });
+    const row = rowsOf(tx).find((r) => r.revision === "E");
+    expect(row).toMatchObject({ status: "uploaded", isLatest: false, approvedBy: null, supersededBy: null });
+  });
+
+  it("the file each new revision names is put to the guard as the writer; a revision the record already has is neither judged nor written again", async () => {
+    const tx = txFor(["A"]);
+    await write(tx, { revisions: [{ revision: "A", status: "approved", projectDocumentId: "ffffffff-ffff-4fff-8fff-ffffffffffff" }, { revision: "B", projectDocumentId: DOC }] });
+    const call = mockDocumentText.assertDocumentsLinkable.mock.calls[0][0];
+    // revision B's id and storage key; "A" is already filed; the first revision "1" names no file
+    expect(call.keys.filter(Boolean)).toEqual([DOC, DOC]);
+    expect(call.userId).toBe(USER_A);
+    expect(call.refuse()).toMatchObject({ status: 404, code: "FILE_NOT_FOUND" });
+    mockDocumentText.assertDocumentsLinkable.mockImplementation(async ({ refuse }) => { throw refuse(); });
+    const refused = txFor();
+    await expect(write(refused, { revisions: [{ revision: "B", projectDocumentId: DOC }] })).rejects.toMatchObject({ code: "FILE_NOT_FOUND" });
+    expect(refused.documentRevision.createMany).not.toHaveBeenCalled();
+  });
+
+  it("on a create with no user, the record's author is the writer put to the file guard", async () => {
+    const tx = { ...txFor(), rfi: { findUnique: jest.fn(async () => ({ createdBy: USER_B })) } };
+    await service.recordDocumentRevisions({ tx, projectId: "project-1", recordType: "rfi", record: { id: "rfi-1", status: "open" }, payload: { revisions: [{ revision: "B", projectDocumentId: DOC }] } });
+    expect(mockDocumentText.assertDocumentsLinkable.mock.calls[0][0].userId).toBe(USER_B);
   });
 });

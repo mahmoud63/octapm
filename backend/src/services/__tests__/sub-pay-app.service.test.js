@@ -28,6 +28,9 @@ jest.mock("../audit.service", () => mockAudit);
 jest.mock("../notification.service", () => mockNotifications);
 jest.mock("../cash-flow.service", () => mockCashFlow);
 jest.mock("../company-party.service", () => ({ isPartyScopedAccess: (access) => Boolean(access?.partyScoped) }));
+// who may name a document as a waiver is decided in document-text.service (certification R29)
+const mockLinkable = jest.fn(async () => undefined);
+jest.mock("../document-text.service", () => ({ assertDocumentsLinkable: (...args) => mockLinkable(...args) }));
 
 const service = require("../sub-pay-app.service");
 
@@ -625,5 +628,36 @@ describe("Phase 21D — integrity (Codex round 9)", () => {
     // materials another counted application was paid for count too
     mockPrisma.subPayAppLine.findMany.mockImplementation(async ({ where } = {}) => (where?.payApp?.id?.not === "pa-F" ? [{ sovLineId: "sov-1", thisPeriodAmount: 0, materialsOnSite: 40000 }] : []));
     await expect(service.isFinalApplication({ existing: workOnly })).resolves.toBe(true);
+  });
+});
+
+describe("certification R29 — a lien waiver names only a file its writer may read", () => {
+  beforeEach(() => {
+    mockLinkable.mockReset();
+    mockLinkable.mockImplementation(async () => undefined);
+    mockPrisma.subPayApp.update.mockClear();
+    mockPrisma.subPayApp.update.mockImplementation(async ({ data }) => payApp({ status: "draft", ...data }));
+  });
+
+  it("asks about the new waiver as the writer, keeping the one already on file, before anything is written", async () => {
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "draft", waiverDocumentId: "waiver-old" }));
+    await service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", payload: { waiverDocumentId: "waiver-1" }, actor: { id: "sub-user" } });
+    const call = mockLinkable.mock.calls[0][0];
+    expect(call).toMatchObject({ orgId: "org-1", projectId: "project-1", keys: ["waiver-1"], unchanged: ["waiver-old"], userId: "sub-user" });
+    expect(call.refuse()).toMatchObject({ status: 404, code: "DOCUMENT_NOT_FOUND" });
+    expect(mockPrisma.subPayApp.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ waiverDocumentId: "waiver-1" }) }));
+  });
+
+  it("a refused waiver is answered as a missing one and the application is not changed", async () => {
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "draft", waiverDocumentId: null }));
+    mockLinkable.mockImplementation(async ({ refuse }) => { throw refuse(); });
+    await expect(service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", payload: { waiverDocumentId: "waiver-1" }, actor: { id: "sub-user" } })).rejects.toMatchObject({ status: 404, code: "DOCUMENT_NOT_FOUND" });
+    expect(mockPrisma.subPayApp.update).not.toHaveBeenCalled();
+  });
+
+  it("clearing the waiver names no document", async () => {
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "draft", waiverDocumentId: "waiver-old" }));
+    await service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", payload: { waiverDocumentId: null }, actor: { id: "sub-user" } });
+    expect(mockLinkable).not.toHaveBeenCalled();
   });
 });

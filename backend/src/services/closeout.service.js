@@ -383,11 +383,29 @@ const updateItem = async ({ orgId, projectId, commitmentId, key, payload = {}, u
 
   const documentId = trimOrNull(payload.documentId);
   if (documentId) {
+    const evidenceNotFound = () => new HttpError(404, "DOCUMENT_NOT_FOUND", "Evidence document not found");
     const document = await prisma.projectDocument.findFirst({
       where: { id: documentId, projectId },
       select: { id: true },
     });
-    if (!document) throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Evidence document not found");
+    if (!document) throw evidenceNotFound();
+    // Close-out evidence is a read grant to every reader of the commitment:
+    // it names only a file the writer may read, or their own new upload
+    // (certification R29). Refused as a missing file is.
+    const current = prisma.closeoutItem?.findUnique
+      ? await prisma.closeoutItem.findUnique({
+          where: { closeoutId_key: { closeoutId: record.id, key } },
+          select: { documentId: true },
+        })
+      : null;
+    await require("./document-text.service").assertDocumentsLinkable({
+      orgId,
+      projectId,
+      keys: [documentId],
+      unchanged: [current?.documentId],
+      userId,
+      refuse: evidenceNotFound,
+    });
   }
 
   const known = HANDOVER.find((item) => item.key === key);

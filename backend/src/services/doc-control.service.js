@@ -413,7 +413,15 @@ const assertRevisionActionType = (recordType) => {
   }
 };
 
-const resolveProjectDocument = async ({ orgId, projectId, payload }) => {
+/**
+ * The file a revision filing names. A file the filer may not read is answered
+ * as a file that does not exist, before anything about the file itself (its
+ * scan, its status) is told: a 409 for an unscanned or unavailable file
+ * answered, to a caller who may not read it, that the id exists
+ * (certification R36). A file the route has just stored for the filer is
+ * theirs (`storedForFiler`).
+ */
+const resolveProjectDocument = async ({ orgId, projectId, payload, reader = null, storedForFiler = false }) => {
   const key = trimOrNull(
     payload.projectDocumentId ||
       payload.documentId ||
@@ -442,6 +450,10 @@ const resolveProjectDocument = async ({ orgId, projectId, payload }) => {
       "FILE_NOT_FOUND",
       "Revision source file not found",
     );
+  }
+
+  if (!storedForFiler) {
+    await assertLinkedDocumentReadable({ orgId, projectId, document, reader });
   }
 
   if (document.scanStatus !== "clean") {
@@ -703,7 +715,29 @@ const assertRevisionFilingAllowed = async ({
     throw forbidden;
   }
   const record = await getRecord({ projectId, recordType, recordId, reader });
-  return { record, requestedStatus };
+  // The revision code, and that the record has no revision under it yet, are
+  // checked here too — before the upload route stores a file: a filing
+  // refused for them after the store left an unlinked document that every
+  // document-control reader could open (certification R37).
+  const revision = trimOrNull(payload.revision);
+  if (!revision) {
+    throw new HttpError(
+      400,
+      "DOCUMENT_REVISION_REQUIRED",
+      "Revision code is required",
+    );
+  }
+  const existing = await prisma.documentRevision.findFirst({
+    where: { projectId, recordType, recordId, revision },
+  });
+  if (existing) {
+    throw new HttpError(
+      409,
+      "DOCUMENT_REVISION_EXISTS",
+      "This revision already exists for the record",
+    );
+  }
+  return { record, requestedStatus, revision };
 };
 
 /**
@@ -736,7 +770,7 @@ const uploadDocumentRevision = async ({
   reader = null,
   storedForFiler = false,
 }) => {
-  const { record, requestedStatus } = await assertRevisionFilingAllowed({
+  const { record, requestedStatus, revision } = await assertRevisionFilingAllowed({
     orgId,
     projectId,
     recordType,
@@ -744,33 +778,9 @@ const uploadDocumentRevision = async ({
     payload,
     reader,
   });
-  const document = await resolveProjectDocument({ orgId, projectId, payload });
-  if (!storedForFiler) {
-    await assertLinkedDocumentReadable({ orgId, projectId, document, reader });
-  }
-  const revision = trimOrNull(payload.revision);
+  const document = await resolveProjectDocument({ orgId, projectId, payload, reader, storedForFiler });
   const metadata = documentMetadataFromPayload({ payload, recordType, record });
   const filedApproved = requestedStatus === "approved";
-
-  if (!revision) {
-    throw new HttpError(
-      400,
-      "DOCUMENT_REVISION_REQUIRED",
-      "Revision code is required",
-    );
-  }
-
-  const existing = await prisma.documentRevision.findFirst({
-    where: { projectId, recordType, recordId, revision },
-  });
-
-  if (existing) {
-    throw new HttpError(
-      409,
-      "DOCUMENT_REVISION_EXISTS",
-      "This revision already exists for the record",
-    );
-  }
 
   const created = await prisma.$transaction(async (tx) => {
     const row = await tx.documentRevision.create({

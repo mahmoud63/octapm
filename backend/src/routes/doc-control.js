@@ -251,6 +251,10 @@ router.post(
         file: req.file,
       });
 
+      // A filing that still fails once the file is stored (another filing
+      // took the revision code in between) leaves no unlinked document for
+      // every document-control reader to open: the stored file is rejected,
+      // as an import that fails rejects its upload (certification R37).
       const row = await uploadDocumentRevision({
         orgId: req.user.orgId,
         projectId: req.params.projectId,
@@ -264,6 +268,14 @@ router.post(
         userRole: getEffectiveRole(req),
         reader,
         storedForFiler: true,
+      }).catch(async (error) => {
+        await fileStorageService
+          .markDocumentRejected({
+            documentId: uploaded.documentId,
+            code: error?.code || "DOCUMENT_REVISION_REJECTED",
+          })
+          .catch(() => null);
+        throw error;
       });
 
       return sendSuccess(

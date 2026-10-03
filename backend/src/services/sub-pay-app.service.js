@@ -584,9 +584,22 @@ const updatePayApp = async ({ orgId, projectId, payAppId, payload = {}, actor = 
   if (payload.waiverRequired !== undefined) data.waiverRequired = Boolean(payload.waiverRequired);
   if (payload.waiverDocumentId !== undefined) {
     const documentId = trimOrNull(payload.waiverDocumentId);
+    const waiverNotFound = () => new HttpError(404, "DOCUMENT_NOT_FOUND", "Waiver document not found");
     if (documentId) {
       const document = await prisma.projectDocument.findFirst({ where: { id: documentId, projectId }, select: { id: true } });
-      if (!document) throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Waiver document not found");
+      if (!document) throw waiverNotFound();
+      // The waiver is a read grant to every reader of the application: it
+      // names only a file the writer may read, or their own new upload — a
+      // vendor's guest named another party's file as its waiver and read it
+      // (certification R29). Refused as a missing file is.
+      await require("./document-text.service").assertDocumentsLinkable({
+        orgId,
+        projectId,
+        keys: [documentId],
+        unchanged: [existing.waiverDocumentId],
+        userId: actor?.id || viewer?.id || null,
+        refuse: waiverNotFound,
+      });
     }
     data.waiverDocumentId = documentId || null;
   }

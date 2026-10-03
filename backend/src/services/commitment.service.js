@@ -730,8 +730,20 @@ const executeCommitment = async ({ orgId, projectId, commitmentId, actor = null,
     const document = await fileStorageService.uploadProjectDocument({ orgId, projectId, userId: actor?.id || null, file, documentType: fileStorageService.DOCUMENT_TYPES.WORKFLOW_ATTACHMENT, linkedEntityType: "commitment", linkedEntityId: commitmentId });
     executedDocumentId = document.id;
   } else if (executedDocumentId) {
+    const executedNotFound = () => new HttpError(404, "DOCUMENT_NOT_FOUND", "Executed document not found");
     const document = await prisma.projectDocument.findFirst({ where: { id: executedDocumentId, projectId }, select: { id: true } });
-    if (!document) throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Executed document not found");
+    if (!document) throw executedNotFound();
+    // The executed agreement is a read grant to every reader of the
+    // commitment: it names only a file the executor may read, or their own
+    // new upload (certification R29). Refused as a missing file is.
+    await require("./document-text.service").assertDocumentsLinkable({
+      orgId,
+      projectId,
+      keys: [executedDocumentId],
+      unchanged: [existing.executedDocumentId],
+      userId: actor?.id || null,
+      refuse: executedNotFound,
+    });
   }
   if (!executedDocumentId && !existing.executedDocumentId) throw new HttpError(400, "COMMITMENT_DOCUMENT_REQUIRED", "Attach the executed agreement");
   const problems = serializeInsurance(existing.insuranceJson).filter((entry) => entry.status === "missing" || entry.status === "expired");

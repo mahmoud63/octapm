@@ -416,6 +416,16 @@ const normalizeAttachmentRefs = (value, userId = null) => {
     .filter((entry) => entry.fileUrl || entry.storageKey || entry.fileName);
 };
 
+/**
+ * The revisions a record's payload files. Who approved or superseded a
+ * revision, and when, is never taken from the payload: a revision is approved
+ * or superseded through document control, which records who did it — a site
+ * engineer filed through POST /drawings a latest "approved" revision
+ * attributed to the PM (certification R32). `source` says where an entry
+ * came from (the payload's `revisions`, the record's own revision code, or
+ * the first revision every document record gets); recordDocumentRevisions
+ * reads it and does not store it.
+ */
 const normalizeRevisionRefs = (payload = {}, row = {}, userId = null) => {
   const explicit =
     payload.revisions !== undefined ? toArray(payload.revisions) : null;
@@ -425,6 +435,7 @@ const normalizeRevisionRefs = (payload = {}, row = {}, userId = null) => {
     rows.push(
       ...explicit
         .map((entry) => ({
+          source: "payload",
           projectDocumentId: trimOrNull(
             entry?.projectDocumentId || entry?.documentId,
           ),
@@ -444,10 +455,10 @@ const normalizeRevisionRefs = (payload = {}, row = {}, userId = null) => {
           isLatest: Boolean(entry?.isLatest),
           issuedBy: trimOrNull(entry?.issuedBy) || userId || null,
           issuedAt: maybeDate(entry?.issuedAt) || new Date(),
-          approvedBy: trimOrNull(entry?.approvedBy),
-          approvedAt: maybeDate(entry?.approvedAt),
-          supersededBy: trimOrNull(entry?.supersededBy),
-          supersededAt: maybeDate(entry?.supersededAt),
+          approvedBy: null,
+          approvedAt: null,
+          supersededBy: null,
+          supersededAt: null,
           notes: trimOrNull(entry?.notes),
         }))
         .filter((entry) => entry.revision),
@@ -457,6 +468,7 @@ const normalizeRevisionRefs = (payload = {}, row = {}, userId = null) => {
   const revision = trimOrNull(payload.revision ?? row.revision);
   if (revision) {
     rows.push({
+      source: "record",
       projectDocumentId: trimOrNull(
         payload.projectDocumentId || payload.documentId,
       ),
@@ -473,10 +485,10 @@ const normalizeRevisionRefs = (payload = {}, row = {}, userId = null) => {
       isLatest: Boolean(payload.isLatest),
       issuedBy: trimOrNull(payload.issuedBy) || userId || null,
       issuedAt: maybeDate(payload.issuedAt || payload.issueDate) || new Date(),
-      approvedBy: trimOrNull(payload.approvedBy),
-      approvedAt: maybeDate(payload.approvedAt),
-      supersededBy: trimOrNull(payload.supersededBy),
-      supersededAt: maybeDate(payload.supersededAt),
+      approvedBy: null,
+      approvedAt: null,
+      supersededBy: null,
+      supersededAt: null,
       notes: trimOrNull(
         payload.revisionNotes || payload.notes || payload.remarks,
       ),
@@ -485,6 +497,7 @@ const normalizeRevisionRefs = (payload = {}, row = {}, userId = null) => {
 
   if (!revision && row.id && DOCUMENT_RECORD_TYPES.has(row.recordType)) {
     rows.push({
+      source: "first",
       projectDocumentId: null,
       revision: "1",
       status: trimOrNull(row.status),
@@ -531,13 +544,48 @@ const ensureActivities = async ({ tx, projectId, links }) => {
   }
 };
 
+// Records whose author is on the row: on a create whose caller passes no
+// user, the author is the one writing its references.
+const RECORD_AUTHOR_MODELS = Object.freeze({
+  [RECORD_TYPES.RFI]: "rfi",
+  [RECORD_TYPES.SUBMITTAL]: "submittal",
+  [RECORD_TYPES.PUNCH_ITEM]: "punchItem",
+});
+
+/** Who writes a record's references: the caller's user, or — when the caller passes none — the record's author. */
+const referenceWriterId = async ({ tx, recordType, recordId, record = null, userId = null }) => {
+  if (userId) return userId;
+  if (record?.createdBy) return record.createdBy;
+  const model = RECORD_AUTHOR_MODELS[recordType];
+  if (!model || !recordId || !tx?.[model]?.findUnique) return null;
+  const row = await tx[model].findUnique({ where: { id: recordId }, select: { createdBy: true } });
+  return row?.createdBy || null;
+};
+
+/**
+ * The viewer a reader handed in by a route stands for (doc-control's reader:
+ * userId, projectAccess, canRead, mayApprove), or null.
+ */
+const viewerFromReader = (reader) => {
+  if (!reader?.canRead) return null;
+  const { documentViewer } = require("./document-text.service");
+  return {
+    ...documentViewer({ userId: reader.userId || null, projectAccess: reader.projectAccess || {}, canRead: reader.canRead }),
+    mayApprove: Boolean(reader.mayApprove),
+  };
+};
+
+const fileNotFound = () => new HttpError(404, "FILE_NOT_FOUND", "File not found");
+
 const syncWorkflowReferences = async ({
   tx,
+  orgId = null,
   projectId,
   recordType,
   recordId,
   payload = {},
   userId = null,
+  reader = null,
 }) => {
   const links = normalizeActivityLinks(payload);
   const attachments = normalizeAttachmentRefs(
@@ -575,6 +623,28 @@ const syncWorkflowReferences = async ({
   }
 
   if (attachments !== null) {
+    // A reference to a stored document is a read grant to every reader of
+    // the record (document-text.service documentLinks): it names only a
+    // document its writer may read, or the writer's own new upload; the
+    // references the record already holds stay as they are (certification
+    // R29 — a subcontractor named another vendor's lien waiver on its own
+    // punch item and read it).
+    const { assertDocumentsLinkable } = require("./document-text.service");
+    await assertDocumentsLinkable({
+      orgId,
+      projectId,
+      keys: attachments.map((attachment) => attachment.storageKey),
+      unchanged: async () =>
+        (
+          await tx.workflowAttachment.findMany({
+            where: { projectId, recordType, recordId },
+            select: { storageKey: true },
+          })
+        ).map((row) => row.storageKey),
+      viewer: viewerFromReader(reader),
+      userId: () => referenceWriterId({ tx, recordType, recordId, userId }),
+      refuse: fileNotFound,
+    });
     await tx.workflowAttachment.deleteMany({
       where: { projectId, recordType, recordId },
     });
@@ -625,8 +695,37 @@ const recordWorkflowHistory = async ({
   });
 };
 
+const revisionFileNotFound = () =>
+  new HttpError(404, "FILE_NOT_FOUND", "Revision source file not found");
+
+/**
+ * The revisions a record's own create or update files (POST/PATCH /rfi,
+ * /submittals, /drawings, /transmittals, /correspondence and the RFI and
+ * submittal transitions), held to the rules document control holds a filing
+ * to (doc-control.service assertRevisionFilingAllowed,
+ * assertLinkedDocumentReadable) — certification R32:
+ *  - a revision is never filed "approved", "the latest", or attributed to an
+ *    approver through a record's own route. Those are the document-control
+ *    approve action (document.revision.approve), which a record create or
+ *    update is not and does not check — a site engineer created a drawing
+ *    with a latest "approved" revision attributed to the PM. The status is
+ *    clamped to "uploaded", isLatest to false, and approvedBy/supersededBy to
+ *    null; approval goes through POST /doc-control/:type/:id/revisions, which
+ *    checks the approve right and records who approved it. A record route
+ *    passes no `reader` here, so this never depends on identifying the writer.
+ *  - the file a revision names (projectDocumentId or storage key) is one the
+ *    writer may read (certification R29) — a revision is served by its own
+ *    download route to every reader of the record. The writer is the caller,
+ *    or the record's author when the create passes no user; where no actor
+ *    can be named (a drawing create — no author column), only a file linked
+ *    from nowhere (a fresh upload) may be named, which is what a revision
+ *    cites in practice.
+ * A revision whose code the record already has is not written (createMany
+ * skips it), so it is not judged.
+ */
 const recordDocumentRevisions = async ({
   tx,
+  orgId = null,
   projectId,
   recordType,
   record,
@@ -641,8 +740,38 @@ const recordDocumentRevisions = async ({
   );
   if (!revisions.length) return { revisionCount: 0 };
 
+  // No record route files an approved, latest or attributed revision.
+  for (const revision of revisions) {
+    if (String(revision.status || "").toLowerCase() === "approved") revision.status = "uploaded";
+    revision.isLatest = false;
+    revision.approvedBy = null;
+    revision.approvedAt = null;
+    revision.supersededBy = null;
+    revision.supersededAt = null;
+  }
+
+  const filed = new Set(
+    tx.documentRevision?.findMany
+      ? (
+          await tx.documentRevision.findMany({
+            where: { projectId, recordType, recordId: record.id },
+            select: { revision: true },
+          })
+        ).map((row) => row.revision)
+      : [],
+  );
+  const added = revisions.filter((revision) => !filed.has(revision.revision));
+  const writerId = await referenceWriterId({ tx, recordType, recordId: record.id, record, userId });
+  await require("./document-text.service").assertDocumentsLinkable({
+    orgId,
+    projectId,
+    keys: added.flatMap((revision) => [revision.projectDocumentId, revision.storageKey]),
+    userId: writerId,
+    refuse: revisionFileNotFound,
+  });
+
   await tx.documentRevision.createMany({
-    data: revisions.map((revision) => ({
+    data: revisions.map(({ source, ...revision }) => ({
       projectId,
       recordType,
       recordId: record.id,

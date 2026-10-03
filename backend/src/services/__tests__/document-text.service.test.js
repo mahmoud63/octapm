@@ -45,6 +45,13 @@ jest.mock("../attachment.service", () => ({
   // commitment and sub_pay_app as attachment.service maps them: an executed agreement and a lien waiver are read under them (certification L24)
   RECORD_TYPE_MODULES: { rfi: "rfi", ipc: "ipc", ncr: "ncr", commitment: "commitment", sub_pay_app: "sub_pay_app" },
 }));
+// the writer of a link, rebuilt as a route would judge them (certification R29)
+const mockMembership = { resolveRequestPrincipal: jest.fn() };
+const mockProjectAccess = { requestForProject: jest.fn() };
+const mockRbac = { hasPermission: jest.fn() };
+jest.mock("../membership.service", () => mockMembership);
+jest.mock("../../middleware/project-access", () => mockProjectAccess);
+jest.mock("../../middleware/rbac", () => mockRbac);
 
 const service = require("../document-text.service");
 
@@ -467,8 +474,68 @@ describe("certification L2, L23, L24 — every place a document is filed is a li
     expect(service.documentVisible(revisionDoc, party, await service.recordRuleVisibleIds({ documents: [revisionDoc], viewer: party }))).toBe(false);
     mockPrisma.rfi.findMany.mockResolvedValue([{ id: "rfi-x" }]); // routed to the reader's party
     expect(service.documentVisible(revisionDoc, party, await service.recordRuleVisibleIds({ documents: [revisionDoc], viewer: party }))).toBe(true);
-    expect(service.documentVisible(revisionDoc, staff(["document_control"]), new Set())).toBe(false);
-    expect(service.documentVisible(revisionDoc, staff(["document_control", "rfi"]), new Set())).toBe(true);
+    // a member is judged by the RFI's draft rule (R35): the RFI is not someone else's draft here
+    const member = staff(["document_control", "rfi"]);
+    const memberRuled = await service.recordRuleVisibleIds({ documents: [revisionDoc], viewer: member });
+    expect(service.documentVisible(revisionDoc, staff(["document_control"]), memberRuled)).toBe(false);
+    expect(service.documentVisible(revisionDoc, member, memberRuled)).toBe(true);
+  });
+
+  it("R35: a file on someone else's draft RFI is withheld from every member, as GET /rfi withholds the draft; its author and manager keep it", async () => {
+    const draftDoc = doc({ attachments: [{ recordType: "rfi", recordId: "rfi-d", role: "attachment" }] });
+    const member = staff(["document_control", "rfi"]);
+    mockPrisma.rfi = { findMany: jest.fn(async () => []) }; // a colleague's draft
+    expect(service.documentVisible(draftDoc, member, await service.recordRuleVisibleIds({ documents: [draftDoc], viewer: member }))).toBe(false);
+    expect(mockPrisma.rfi.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: { in: ["rfi-d"] }, OR: [{ status: { not: "draft" } }, { createdBy: "u-1" }, { managerUserId: "u-1" }] },
+    }));
+    mockPrisma.rfi.findMany.mockResolvedValue([{ id: "rfi-d" }]); // the member's own draft, or one no longer a draft
+    expect(service.documentVisible(draftDoc, member, await service.recordRuleVisibleIds({ documents: [draftDoc], viewer: member }))).toBe(true);
+    // a party guest is held to both the routing and the draft rule
+    mockPrisma.rfi.findMany.mockClear();
+    await service.recordRuleVisibleIds({ documents: [draftDoc], viewer: party });
+    expect(mockPrisma.rfi.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: { in: ["rfi-d"] }, AND: [expect.objectContaining({ OR: expect.arrayContaining([{ ownerPartyId: { in: ["party-b"] } }]) }), { OR: [{ status: { not: "draft" } }, { createdBy: "sub-b" }, { managerUserId: "sub-b" }] }] },
+    }));
+  });
+
+  it("R34: the WorkflowAttachment row filed with a revision is read under the revision's modules, not the record's alone", () => {
+    const filed = doc({
+      documentRevisions: [{ id: "rev-1", recordType: "rfi", recordId: "rfi-x" }],
+      workflowAttachments: [{ projectId: "project-1", recordType: "rfi", recordId: "rfi-x", storageKey: "doc-1" }],
+    });
+    expect(service.documentLinks(filed).map((link) => link.modules)).toEqual([["document_control", "rfi"], ["document_control", "rfi"]]);
+    const rfiOnly = { canRead: (moduleName) => moduleName === "rfi" };
+    expect(service.documentVisible(filed, rfiOnly, null)).toBe(false);
+    // evidence on another record keeps its own module
+    const evidence = doc({ workflowAttachments: [{ projectId: "project-1", recordType: "ncr", recordId: "ncr-1", storageKey: "doc-1" }] });
+    expect(service.documentLinks(evidence)).toEqual([{ recordType: "ncr", recordId: "ncr-1", modules: ["ncr"] }]);
+  });
+
+  it("R38: a hit and the text endpoint describe only the revision and the links this viewer may see", async () => {
+    const shared = doc({
+      documentRevisions: [
+        { id: "rev-foreign", recordType: "rfi", recordId: "rfi-foreign", revision: "A", isLatest: true, title: "Foreign title", documentNumber: "F-1" },
+        { id: "rev-own", recordType: "rfi", recordId: "rfi-own", revision: "B", isLatest: false, title: "Own title", documentNumber: "O-1" },
+      ],
+      attachments: [{ recordType: "commitment", recordId: "c-foreign", role: "attachment" }, { recordType: "rfi", recordId: "rfi-own", role: "attachment" }],
+    });
+    const ruled = new Set(["rfi:rfi-own"]);
+    const hit = service.serializeHit({ document: shared, viewer: party, ruled });
+    expect(hit.revision.id).toBe("rev-own");
+    expect(hit.title).toBe("Own title");
+    expect(hit.records.map((row) => row.recordId)).toEqual(["rfi-own"]);
+    expect(JSON.stringify(hit)).not.toContain("rfi-foreign");
+    expect(JSON.stringify(hit)).not.toContain("c-foreign");
+    const everything = service.serializeHit({ document: shared });
+    expect(everything.revision.id).toBe("rev-foreign");
+    // the text endpoint judges with the viewer too
+    mockPrisma.projectDocument.findFirst = jest.fn(async () => ({ ...shared, text: null }));
+    mockPrisma.rfi = { findMany: jest.fn(async () => [{ id: "rfi-own" }]) };
+    mockPrisma.commitment = { findMany: jest.fn(async () => []) };
+    const text = await service.getDocumentText({ orgId: "org-1", projectId: "project-1", documentId: "doc-1", viewer: party });
+    expect(text.document.revision.id).toBe("rev-own");
+    expect(text.document.records.map((row) => row.recordId)).toEqual(["rfi-own"]);
   });
 
   it("L2/L24: evidence filed by reference (WorkflowAttachment) is found by the document's id or storage key and follows its record", async () => {
@@ -496,5 +563,101 @@ describe("certification L2, L23, L24 — every place a document is filed is a li
     expect(mockPrisma.photo.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["photo-1"] }, orgId: "org-1", projectId: "project-1" } }));
     const reader = await service.withheldDocumentJobs({ orgId: "org-1", projectId: "project-1", jobs, viewer: staff(["document_control", "ncr"]) });
     expect(reader[1]).toBe(jobs[1]);
+  });
+});
+
+describe("certification R29 — a link names only a document its writer may read", () => {
+  const VICTIM = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const OWN = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const KEPT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const refuse = () => Object.assign(new Error("not found"), { status: 404, code: "FILE_NOT_FOUND" });
+  const stored = (over = {}) => ({ id: VICTIM, projectId: "project-1", orgId: "org-1", storageKey: `${VICTIM.slice(0, 8)}-0000-4000-8000-000000000000`, documentType: "workflow_attachment", uploadedBy: "pm-1", documentRevisions: [], attachments: [], ...over });
+  const reader = (modules, over = {}) => ({ userId: "sub-1", canRead: (moduleName) => modules.includes(moduleName), ...over });
+  const scope = { orgId: "org-1", projectId: "project-1", refuse };
+
+  beforeEach(() => {
+    mockPrisma.projectDocument.findMany.mockReset();
+    mockPrisma.workflowAttachment.findMany.mockResolvedValue([]);
+    mockMembership.resolveRequestPrincipal.mockReset();
+    mockProjectAccess.requestForProject.mockReset();
+    mockRbac.hasPermission.mockReset();
+  });
+  afterEach(() => {
+    delete mockPrisma.commitment;
+    delete mockPrisma.project;
+  });
+
+  it("refuses a document linked only to a record the writer may not see, and passes one the writer may read", async () => {
+    const victim = stored({ attachments: [{ recordType: "commitment", recordId: "c-other", role: "attachment" }] });
+    mockPrisma.projectDocument.findMany.mockResolvedValue([victim]);
+    mockPrisma.commitment = { findMany: jest.fn(async () => []) }; // another vendor's commitment
+    const guest = reader(["commitment", "punch", "document_control"], { partyIds: ["party-y"], companyIds: ["co-y"] });
+    await expect(service.assertDocumentsLinkable({ ...scope, keys: [VICTIM], viewer: guest })).rejects.toMatchObject({ code: "FILE_NOT_FOUND" });
+    expect(mockPrisma.projectDocument.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { projectId: "project-1", orgId: "org-1", OR: [{ id: { in: [VICTIM] } }, { storageKey: { in: [VICTIM] } }] } }));
+    // the vendor's own guest may read it, so may link it
+    mockPrisma.commitment.findMany.mockResolvedValue([{ id: "c-other" }]);
+    await expect(service.assertDocumentsLinkable({ ...scope, keys: [VICTIM], viewer: guest })).resolves.toBeUndefined();
+  });
+
+  it("a key naming no document of the project is refused as a forbidden one is; a legacy name or URL is not a document key", async () => {
+    mockPrisma.projectDocument.findMany.mockResolvedValue([]);
+    await expect(service.assertDocumentsLinkable({ ...scope, keys: [VICTIM], viewer: reader(["document_control"]) })).rejects.toMatchObject({ code: "FILE_NOT_FOUND" });
+    mockPrisma.projectDocument.findMany.mockClear();
+    await expect(service.assertDocumentsLinkable({ ...scope, keys: ["legacy/mill-cert.pdf", "/api/v1/files/x.pdf"], viewer: reader([]) })).resolves.toBeUndefined();
+    expect(mockPrisma.projectDocument.findMany).not.toHaveBeenCalled();
+  });
+
+  it("what the record already names stays as it is, and is not looked up", async () => {
+    const unchanged = jest.fn(async () => [KEPT]);
+    await expect(service.assertDocumentsLinkable({ ...scope, keys: [KEPT], unchanged, viewer: reader([]) })).resolves.toBeUndefined();
+    expect(unchanged).toHaveBeenCalled();
+    expect(mockPrisma.projectDocument.findMany).not.toHaveBeenCalled();
+  });
+
+  it("the writer's own upload linked from nowhere is theirs to link; someone else's is not, unless the writer reads document control", async () => {
+    mockPrisma.projectDocument.findMany.mockResolvedValue([stored({ id: OWN, storageKey: null, uploadedBy: "sub-1" })]);
+    await expect(service.assertDocumentsLinkable({ ...scope, keys: [OWN], viewer: reader(["punch"]) })).resolves.toBeUndefined();
+    mockPrisma.projectDocument.findMany.mockResolvedValue([stored({ id: OWN, storageKey: null, uploadedBy: "pm-1" })]);
+    await expect(service.assertDocumentsLinkable({ ...scope, keys: [OWN], viewer: reader(["punch"]) })).rejects.toMatchObject({ code: "FILE_NOT_FOUND" });
+    await expect(service.assertDocumentsLinkable({ ...scope, keys: [OWN], viewer: reader(["punch", "document_control"]) })).resolves.toBeUndefined();
+  });
+
+  it("when nobody can say who writes, only a document linked from nowhere may be named", async () => {
+    mockPrisma.projectDocument.findMany.mockResolvedValue([stored({ id: OWN, storageKey: null })]);
+    await expect(service.assertDocumentsLinkable({ ...scope, keys: [OWN] })).resolves.toBeUndefined();
+    mockPrisma.projectDocument.findMany.mockResolvedValue([stored({ attachments: [{ recordType: "ncr", recordId: "ncr-1", role: "attachment" }] })]);
+    await expect(service.assertDocumentsLinkable({ ...scope, keys: [VICTIM] })).rejects.toMatchObject({ code: "FILE_NOT_FOUND" });
+    expect(mockMembership.resolveRequestPrincipal).not.toHaveBeenCalled();
+  });
+
+  it("a writer named by id is judged as the project's own routes judge them, and one with no standing reads nothing", async () => {
+    mockPrisma.project = { findUnique: jest.fn(async () => ({ orgId: "org-1" })) };
+    mockPrisma.projectDocument.findMany.mockResolvedValue([stored({ attachments: [{ recordType: "ncr", recordId: "ncr-1", role: "attachment" }] })]);
+    const view = { user: { id: "site-1" }, projectAccess: { role: "site_engineer" } };
+    mockMembership.resolveRequestPrincipal.mockResolvedValue({ id: "site-1", orgId: "org-1", role: "site_engineer" });
+    mockProjectAccess.requestForProject.mockResolvedValue(view);
+    mockRbac.hasPermission.mockImplementation((req, moduleName, action) => req === view && action === "read" && moduleName === "ncr");
+    await expect(service.assertDocumentsLinkable({ projectId: "project-1", refuse, keys: [VICTIM], userId: async () => "site-1" })).resolves.toBeUndefined();
+    expect(mockMembership.resolveRequestPrincipal).toHaveBeenCalledWith(expect.objectContaining({ userId: "site-1", orgId: "org-1" }));
+    expect(mockProjectAccess.requestForProject).toHaveBeenCalledWith(expect.objectContaining({ user: expect.objectContaining({ id: "site-1", orgId: "org-1" }) }), "project-1");
+    mockRbac.hasPermission.mockImplementation(() => false); // no NCR read
+    await expect(service.assertDocumentsLinkable({ projectId: "project-1", refuse, keys: [VICTIM], userId: "site-1" })).rejects.toMatchObject({ code: "FILE_NOT_FOUND" });
+    mockMembership.resolveRequestPrincipal.mockResolvedValue(null); // no standing in the organisation
+    mockRbac.hasPermission.mockImplementation((req) => Boolean(req?.user));
+    const viewer = await service.documentWriterViewer({ orgId: "org-1", projectId: "project-1", userId: "gone-1" });
+    expect(viewer.canRead("ncr")).toBe(false);
+    expect(viewer.mayApprove).toBe(false);
+  });
+});
+
+// Certification R14: a legacy subcontractor valuation is its subcontractor's.
+describe("RECORD_RULES.sub_valuation", () => {
+  const rule = service.RECORD_RULES.sub_valuation;
+  it("binds party readers to their own companies' valuations", () => {
+    expect(rule).toMatchObject({ model: "subValuation", party: true });
+    expect(rule.clauses({ companyIds: ["company-x"], userId: "u1" }).filter(Boolean)).toEqual([{ companyId: { in: ["company-x"] } }]);
+  });
+  it("leaves a party reader with no company nothing to read", () => {
+    expect(rule.clauses({ companyIds: [], userId: "u1" }).filter(Boolean)).toEqual([]);
   });
 });

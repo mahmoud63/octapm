@@ -509,16 +509,32 @@ const snippetText = (headline) => String(headline || "").replace(/\[\[|\]\]/g, "
  *
  * Each rule mirrors the record's own service; a clause whose input the
  * viewer lacks is left out, and a record with no clause left is not visible.
+ *
+ * `everyone` is the part of a record's own rule that binds every viewer, not
+ * only a party-scoped one: a draft RFI is its author's and its manager's
+ * (rfi-workflow.service withDraftVisibility), so a file filed on a
+ * colleague's draft reached through /attachments/documents, /workflow/uploads
+ * and the search what GET /rfi and the register hide (certification R35).
  */
 const some = (field, ids) => (Array.isArray(ids) && ids.length ? { [field]: { in: ids } } : null);
 const own = (field, userId) => (userId ? { [field]: userId } : null);
 const routed = ({ partyIds }) => [some("ownerPartyId", partyIds), some("reviewerPartyId", partyIds), some("approverPartyId", partyIds)];
+const draftOwn = ({ userId }) => (userId ? { OR: [{ status: { not: "draft" } }, { createdBy: userId }, { managerUserId: userId }] } : null);
+// A person assigned to one of a submittal's review steps reads it, as the
+// submittal's own detail admits them (submittal-workflow isStepReviewer,
+// certification R4) — and so its files, which they are there to review.
+const stepReviewer = ({ userId }) => (userId ? { steps: { some: { assignments: { some: { userId } } } } } : null);
 const RECORD_RULES = Object.freeze({
-  rfi: { model: "rfi", party: true, clauses: routed },
-  submittal: { model: "submittal", party: true, clauses: routed },
+  rfi: { model: "rfi", party: true, clauses: routed, everyone: draftOwn },
+  submittal: { model: "submittal", party: true, clauses: (viewer) => [...routed(viewer), stepReviewer(viewer)] },
   timesheet: { model: "timesheet", party: true, clauses: ({ companyIds, userId }) => [some("companyId", companyIds), own("createdBy", userId)] },
   sub_pay_app: { model: "subPayApp", party: true, clauses: ({ companyIds, userId }) => [companyIds?.length ? { commitment: { vendorCompanyId: { in: companyIds } } } : null, own("createdBy", userId)] },
   commitment: { model: "commitment", party: true, clauses: ({ companyIds, userId }) => [some("vendorCompanyId", companyIds), own("createdBy", userId)] },
+  // A subcontractor valuation is its subcontractor's: a client party holds
+  // ipc:read, the valuation's module, and was given every valuation of the
+  // project (certification R14). Valuations are retired — none can be made —
+  // so this binds the legacy rows a deployment may still hold.
+  sub_valuation: { model: "subValuation", party: true, clauses: ({ companyIds }) => [some("companyId", companyIds)] },
   commitment_change_order: { model: "commitmentChangeOrder", party: true, clauses: ({ companyIds, userId }) => [{ commitment: { OR: [...(companyIds?.length ? [{ vendorCompanyId: { in: companyIds } }] : []), ...(userId ? [{ createdBy: userId }] : [])] } }] },
   punch_item: { model: "punchItem", party: true, clauses: ({ companyIds, userId }) => [some("assigneeCompanyId", companyIds), own("createdBy", userId), own("assigneeUserId", userId)] },
   form_instance: { model: "formInstance", party: true, clauses: ({ companyIds, userId }) => [some("assigneeCompanyId", companyIds), own("createdBy", userId), own("assigneeUserId", userId), own("inspectorUserId", userId), own("approverUserId", userId)] },
@@ -527,8 +543,23 @@ const RECORD_RULES = Object.freeze({
   conversation: { model: "conversation", party: false, clauses: ({ userId }) => [userId ? { members: { some: { userId, leftAt: null } } } : null] },
 });
 
-/** Whether this viewer is judged by a record's own rule: a party-scoped viewer by all of them, anyone by the ones that bind everyone. */
-const ruleApplies = (rule, viewer) => Boolean(rule) && (Array.isArray(viewer?.partyIds) || !rule.party);
+/** Whether this viewer is judged by a record's own rule: a party-scoped viewer by all of them, anyone by the ones (or the part) that bind everyone. */
+const ruleApplies = (rule, viewer) =>
+  Boolean(rule) && (Array.isArray(viewer?.partyIds) || !rule.party || Boolean(rule.everyone?.(viewer || {})));
+
+/** The records of one rule this viewer may see, as a where: the party clauses (any one) for whom they bind, and the part that binds everyone; null when nothing is left to admit. */
+const ruleWhere = (rule, viewer) => {
+  const parts = [];
+  if (Array.isArray(viewer?.partyIds) || !rule.party) {
+    const clauses = rule.clauses(viewer).filter(Boolean);
+    if (!clauses.length) return null;
+    parts.push({ OR: clauses });
+  }
+  const always = rule.everyone?.(viewer || {}) || null;
+  if (always) parts.push(always);
+  if (!parts.length) return null;
+  return parts.length === 1 ? parts[0] : { AND: parts };
+};
 
 /** The module each linked record is read under: the attachment table's, and the commercial records' evidence types. */
 const LINK_MODULES = Object.freeze({ ...RECORD_TYPE_MODULES, eot_claim: "eot", ipc_item: "ipc" });
@@ -546,15 +577,24 @@ const linkModule = (recordType) => LINK_MODULES[recordType] || "document_control
  * (linkedEntityType / linkedEntityId) is the only link of some files — a
  * photo on a daily report — and counts when no table above names the same
  * record (certification L24).
+ *
+ * Filing a revision also writes a WorkflowAttachment row for the same record
+ * and file (doc-control.service uploadDocumentRevision). That row is the
+ * revision, not evidence of its own: it is read under the revision's modules,
+ * or a reader with RFI read and no document-control read got through
+ * /attachments/documents and /workflow/uploads the revision file that
+ * /doc-control/revisions/:id/download refuses them (certification R34).
  */
+const revisionModules = (recordType) => [...new Set(["document_control", linkModule(recordType)])];
 const documentLinks = (document) => {
   const links = [];
   const add = (recordType, recordId, modules) => {
     if (recordType && recordId) links.push({ recordType, recordId, modules });
   };
+  const revisionOf = new Set((document?.documentRevisions || []).map((row) => `${row.recordType}:${row.recordId}`));
   for (const row of document?.attachments || []) add(row.recordType, row.recordId, [linkModule(row.recordType)]);
-  for (const row of document?.documentRevisions || []) add(row.recordType, row.recordId, [...new Set(["document_control", linkModule(row.recordType)])]);
-  for (const row of document?.workflowAttachments || []) add(row.recordType, row.recordId, [linkModule(row.recordType)]);
+  for (const row of document?.documentRevisions || []) add(row.recordType, row.recordId, revisionModules(row.recordType));
+  for (const row of document?.workflowAttachments || []) add(row.recordType, row.recordId, revisionOf.has(`${row.recordType}:${row.recordId}`) ? revisionModules(row.recordType) : [linkModule(row.recordType)]);
   for (const row of document?.commercialAttachmentRefs || []) add(row.recordType, row.recordId, [linkModule(row.recordType)]);
   for (const row of document?.commitmentsExecuted || []) add("commitment", row.id, [linkModule("commitment")]);
   for (const row of document?.subPayAppWaivers || []) add("sub_pay_app", row.id, [linkModule("sub_pay_app")]);
@@ -598,9 +638,9 @@ const recordRuleVisibleIds = async ({ documents, viewer }) => {
   const visible = new Set();
   for (const [recordType, ids] of Object.entries(wanted)) {
     const rule = RECORD_RULES[recordType];
-    const clauses = rule.clauses(viewer).filter(Boolean);
-    if (!ids.size || !clauses.length || !prisma[rule.model]?.findMany) continue;
-    const rows = await prisma[rule.model].findMany({ where: { id: { in: [...ids] }, OR: clauses }, select: { id: true } });
+    const where = ruleWhere(rule, viewer);
+    if (!ids.size || !where || !prisma[rule.model]?.findMany) continue;
+    const rows = await prisma[rule.model].findMany({ where: { id: { in: [...ids] }, ...where }, select: { id: true } });
     for (const row of rows) visible.add(`${recordType}:${row.id}`);
   }
   return visible;
@@ -681,6 +721,95 @@ const documentViewer = ({ userId, projectAccess, canRead }) => {
   };
 };
 
+// ─── Who may link a document ─────────────────────────────────────────────
+
+const UUID_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The viewer a writer reads documents as, rebuilt from who they are, for a
+ * service that writes a link to a document but is not handed the request:
+ * the person's membership as it stands now, their access to this project
+ * and its permission template — the request requestForProject builds for a
+ * route, so `canRead(module)` and `mayApprove` (document.revision.approve)
+ * decide here as they decide on the project's own routes. An API key is not
+ * known here: its owner's decision stands in for the key's narrower scopes.
+ * A person with no standing in the project gets a viewer that reads nothing.
+ */
+const documentWriterViewer = async ({ orgId = null, projectId, userId }) => {
+  if (!userId || !projectId) return null;
+  const { resolveRequestPrincipal } = require("./membership.service");
+  const { requestForProject } = require("../middleware/project-access");
+  const { hasPermission } = require("../middleware/rbac");
+  const scopeOrgId =
+    orgId || (await prisma.project.findUnique({ where: { id: projectId }, select: { orgId: true } }))?.orgId || null;
+  const principal = scopeOrgId ? await resolveRequestPrincipal({ tx: prisma, userId, orgId: scopeOrgId }) : null;
+  const view = principal
+    ? await requestForProject({ user: { ...principal, id: userId, orgId: scopeOrgId } }, projectId)
+    : { user: null };
+  return {
+    ...documentViewer({
+      userId,
+      projectAccess: view.projectAccess || {},
+      canRead: (moduleName) => hasPermission(view, moduleName, "read"),
+    }),
+    mayApprove: hasPermission(view, "document_control", "approve", { transition: "document.revision.approve" }),
+  };
+};
+
+/**
+ * Refuses a write that would link a document its writer may not read
+ * (certification R29). Every place a document is linked from is a read grant
+ * (documentLinks), so writing one is granting the file to every reader of
+ * the record: the rule POST /attachments applies to documentIds — the writer
+ * must be able to read the document already — holds on every path that
+ * writes a link: a workflow record's attachment references, a revision named
+ * in a record's payload, a lien waiver, an executed agreement, a commercial
+ * record's evidence and a close-out's evidence. A subcontractor named another
+ * vendor's lien waiver on its own punch item, then read it.
+ *
+ * `keys` are the document ids or storage keys the write names; `unchanged`
+ * the ones the record already names in the place being written, which keep
+ * their link as they are. The writer is `viewer` (a route's own decision) or
+ * is rebuilt from `userId` (`unchanged` and `userId` may be functions, asked
+ * only when a document key is named); a file the writer uploaded that is linked from
+ * nowhere yet is theirs to link — the upload-then-attach of every form. When
+ * nobody can say who writes (a create whose caller passes no user), only a
+ * file linked from nowhere may be named. A key that names no document of the
+ * project is refused as a document the writer may not read is (`refuse`, the
+ * path's own "not found"), unless it is not a document key at all — a legacy
+ * file name or URL, which grants nothing.
+ */
+const assertDocumentsLinkable = async ({ orgId = null, projectId, keys = [], unchanged = [], viewer = null, userId = null, refuse }) => {
+  const asked = [
+    ...new Set((keys || []).filter((key) => typeof key === "string" && key.trim()).map((key) => key.trim())),
+  ].filter((key) => UUID_KEY.test(key));
+  if (!asked.length) return;
+  const kept = new Set(((typeof unchanged === "function" ? await unchanged() : unchanged) || []).filter(Boolean).map((key) => String(key).trim()));
+  const named = asked.filter((key) => !kept.has(key));
+  if (!named.length) return;
+  const writerId = typeof userId === "function" ? await userId() : userId;
+  const documents = await findDocumentsWithLinks({
+    projectId,
+    ...(orgId ? { orgId } : {}),
+    OR: [{ id: { in: named } }, { storageKey: { in: named } }],
+  });
+  const byKey = new Map();
+  for (const document of documents) {
+    byKey.set(document.id, document);
+    if (document.storageKey) byKey.set(document.storageKey, document);
+  }
+  const writer = viewer?.canRead ? viewer : await documentWriterViewer({ orgId, projectId, userId: writerId });
+  const ruled = writer ? await recordRuleVisibleIds({ documents, viewer: writer }) : null;
+  for (const key of named) {
+    const document = byKey.get(key);
+    if (!document) throw refuse();
+    if (writer && documentVisible(document, writer, ruled)) continue;
+    const linkedFromNowhere = documentLinks(document).length === 0;
+    if (linkedFromNowhere && (!writer || (document.uploadedBy && document.uploadedBy === writer.userId))) continue;
+    throw refuse();
+  }
+};
+
 /**
  * The document a background job works on, as it names it in its payload: a
  * text extraction its document, a photo job its photo's, a drawing-set job
@@ -734,9 +863,23 @@ const withheldDocumentJobs = async ({ orgId, projectId, jobs, viewer }) => {
   });
 };
 
+/**
+ * Whether one revision link is one this viewer may see: document control and
+ * its record's module, and — where the record's own rule binds the viewer —
+ * that rule. A hit admitted through one link described the first revision
+ * whatever its record — an RFI routed to other parties, its id, title,
+ * number and path (certification R38).
+ */
+const revisionVisible = (revision, viewer, ruled) => {
+  if (!viewer) return true;
+  if (ruled && ruleApplies(RECORD_RULES[revision.recordType], viewer) && !ruled.has(`${revision.recordType}:${revision.recordId}`)) return false;
+  return !viewer.canRead || revisionModules(revision.recordType).every((moduleName) => viewer.canRead(moduleName));
+};
+
 const serializeHit = ({ document, rank = 0, headline = null, semanticScore = null, matchedChunk = null, viewer = null, ruled = null }) => {
   const projectId = document.projectId;
-  const revision = document.documentRevisions?.[0] || null;
+  // the first revision, in documentInclude's order, among those the viewer may see (R38)
+  const revision = (document.documentRevisions || []).find((row) => revisionVisible(row, viewer, ruled)) || null;
   // Only the links this viewer may see are surfaced; an inaccessible record's
   // id and path are not disclosed, and an accessible link beyond the first
   // ten is not lost (Phase 21D, the note on CX21-530).
@@ -749,8 +892,7 @@ const serializeHit = ({ document, rank = 0, headline = null, semanticScore = nul
       role: attachment.role,
       path: recordWorkspacePath({ projectId, recordType: attachment.recordType, recordId: attachment.recordId }),
     }));
-  const revisionReadable = revision && (!viewer || !viewer.canRead || viewer.canRead("document_control"));
-  const path = revisionReadable
+  const path = revision
     ? recordWorkspacePath({ projectId, recordType: revision.recordType, recordId: revision.recordId })
     : records[0]?.path || null;
   const title =
@@ -947,7 +1089,8 @@ const getDocumentText = async ({ orgId, projectId, documentId, viewer = null, ma
     throw new HttpError(403, "FORBIDDEN", "You do not have permission to view this document");
   }
   return {
-    document: serializeHit({ document }),
+    // the links this viewer may see only — every Attachment link's record id and path were listed (R38)
+    document: serializeHit({ document, viewer, ruled: partyVisible }),
     text: serializeTextRow(document.text, { includeText: true, maxChars: maxChars || MAX_TEXT_RESPONSE_CHARS }),
     extractable: isExtractableDocument(document),
   };
@@ -956,9 +1099,11 @@ const getDocumentText = async ({ orgId, projectId, documentId, viewer = null, ma
 module.exports = {
   EMBEDDING_STATUS,
   TEXT_STATUS,
+  assertDocumentsLinkable,
   documentVisible,
   documentLinks,
   documentViewer,
+  documentWriterViewer,
   recordRuleVisibleIds,
   recordVisibleToViewer,
   documentReadableToViewer,

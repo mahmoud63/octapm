@@ -29,6 +29,9 @@ jest.mock("../audit.service", () => mockAudit);
 jest.mock("../notification.service", () => mockNotifications);
 jest.mock("../file-storage.service", () => mockFiles);
 jest.mock("../company-party.service", () => ({ isPartyScopedAccess: (access) => Boolean(access?.partyScoped) }));
+// who may name an existing document as the executed agreement is decided in document-text.service (certification R29)
+const mockLinkable = jest.fn(async () => undefined);
+jest.mock("../document-text.service", () => ({ assertDocumentsLinkable: (...args) => mockLinkable(...args) }));
 
 const service = require("../commitment.service");
 
@@ -318,5 +321,31 @@ describe("certification L44 — a commitment's parts follow its party rule", () 
     await expect(service.assertCommitmentVisible({ ...scope, viewer: { id: "qs-1", role: "qs", projectAccess: {} } })).resolves.toBeUndefined();
     await expect(service.assertCommitmentVisible({ ...scope, viewer: null })).resolves.toBeUndefined();
     expect(mockPrisma.commitment.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("certification R29 — an existing document executes a commitment only when the executor may read it", () => {
+  beforeEach(() => {
+    mockLinkable.mockReset();
+    mockLinkable.mockImplementation(async () => undefined);
+    mockPrisma.commitment.update.mockClear();
+  });
+
+  it("asks about the named document as the executor, keeping the agreement already on file, and refuses it as a missing one", async () => {
+    mockPrisma.commitment.findFirst.mockResolvedValue(commitment({ status: "approved", executedDocumentId: "doc-old", insuranceJson: [{ type: "general_liability", required: true }] }));
+    // passes the document check, then stops at the insurance — nothing executed
+    await expect(service.executeCommitment({ orgId: "org-1", projectId: "project-1", commitmentId: "cm-1", actor: { id: "pm" }, documentId: "doc-1" })).rejects.toMatchObject({ code: "COMMITMENT_INSURANCE_MISSING" });
+    const call = mockLinkable.mock.calls[0][0];
+    expect(call).toMatchObject({ orgId: "org-1", projectId: "project-1", keys: ["doc-1"], unchanged: ["doc-old"], userId: "pm" });
+    expect(call.refuse()).toMatchObject({ status: 404, code: "DOCUMENT_NOT_FOUND" });
+    mockLinkable.mockImplementation(async ({ refuse }) => { throw refuse(); });
+    await expect(service.executeCommitment({ orgId: "org-1", projectId: "project-1", commitmentId: "cm-1", actor: { id: "pm" }, documentId: "doc-1" })).rejects.toMatchObject({ status: 404, code: "DOCUMENT_NOT_FOUND" });
+    expect(mockPrisma.commitment.update).not.toHaveBeenCalled();
+  });
+
+  it("an agreement uploaded with the execution is the executor's own and is not asked about", async () => {
+    mockPrisma.commitment.findFirst.mockResolvedValue(commitment({ status: "approved", insuranceJson: [{ type: "general_liability", required: true }] }));
+    await expect(service.executeCommitment({ orgId: "org-1", projectId: "project-1", commitmentId: "cm-1", actor: { id: "pm" }, file: { path: "/tmp/x.pdf", originalname: "a.pdf", mimetype: "application/pdf", size: 10 } })).rejects.toMatchObject({ code: "COMMITMENT_INSURANCE_MISSING" });
+    expect(mockLinkable).not.toHaveBeenCalled();
   });
 });

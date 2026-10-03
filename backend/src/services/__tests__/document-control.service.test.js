@@ -614,4 +614,33 @@ describe("certification L23 and FILES-X2 — the reader's routing, module and ap
     await docControlService.uploadDocumentRevision({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: { revision: "D", projectDocumentId: "doc-other" }, userId: "sub-b", reader: party, storedForFiler: true });
     expect(mockPrisma.documentRevision.create).toHaveBeenCalled();
   });
+
+  it("R36: a file the filer may not read is not found, before its scan or status is told; a reader of it learns why it cannot be filed", async () => {
+    mockPrisma.rfi.findFirst.mockResolvedValue({ id: "rfi-1", ref: "RFI-001", subject: "Edge", status: "open", ownerPartyId: "party-b" });
+    mockPrisma.documentRevision.findFirst.mockResolvedValue(null);
+    for (const unavailable of [{ scanStatus: "pending", status: "available" }, { scanStatus: "clean", status: "rejected" }]) {
+      mockPrisma.projectDocument.findFirst.mockResolvedValue({ id: "doc-hidden", fileName: "h.pdf", mimeType: "application/pdf", sizeBytes: 1, ...unavailable });
+      mockDocumentReadableToViewer.mockResolvedValue(false);
+      await expect(docControlService.uploadDocumentRevision({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: { revision: "R", projectDocumentId: "doc-hidden" }, userId: "sub-b", reader: party })).rejects.toMatchObject({ status: 404, code: "FILE_NOT_FOUND" });
+      mockDocumentReadableToViewer.mockResolvedValue(true);
+      await expect(docControlService.uploadDocumentRevision({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: { revision: "R", projectDocumentId: "doc-hidden" }, userId: "sub-b", reader: party })).rejects.toMatchObject({ status: 409, code: "FILE_NOT_AVAILABLE" });
+    }
+    expect(mockPrisma.documentRevision.create).not.toHaveBeenCalled();
+  });
+
+  it("R37: the revision code and that the record has none under it are checked before the upload route stores a file", async () => {
+    mockPrisma.rfi.findFirst.mockResolvedValue({ id: "rfi-1", ref: "RFI-001", subject: "Edge", status: "open", ownerPartyId: "party-b" });
+    mockPrisma.documentRevision.findFirst.mockResolvedValue(null);
+    await expect(docControlService.assertRevisionFilingAllowed({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: {}, reader: pm })).rejects.toMatchObject({ status: 400, code: "DOCUMENT_REVISION_REQUIRED" });
+    mockPrisma.documentRevision.findFirst.mockResolvedValue({ id: "rev-a", revision: "A" });
+    await expect(docControlService.assertRevisionFilingAllowed({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: { revision: "A" }, reader: pm })).rejects.toMatchObject({ status: 409, code: "DOCUMENT_REVISION_EXISTS" });
+    expect(mockPrisma.documentRevision.findFirst).toHaveBeenCalledWith({ where: { projectId: "project-1", recordType: "rfi", recordId: "rfi-1", revision: "A" } });
+    mockPrisma.documentRevision.findFirst.mockResolvedValue(null);
+    await expect(docControlService.assertRevisionFilingAllowed({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: { revision: "B" }, reader: pm })).resolves.toMatchObject({ revision: "B", requestedStatus: "uploaded" });
+    // a record not routed to the filer is not found before its revisions are looked at
+    mockPrisma.rfi.findFirst.mockResolvedValue(null);
+    mockPrisma.documentRevision.findFirst.mockClear();
+    await expect(docControlService.assertRevisionFilingAllowed({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: { revision: "A" }, reader: party })).rejects.toMatchObject({ status: 404, code: "DOCUMENT_RECORD_NOT_FOUND" });
+    expect(mockPrisma.documentRevision.findFirst).not.toHaveBeenCalled();
+  });
 });

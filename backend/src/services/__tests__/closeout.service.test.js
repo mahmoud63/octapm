@@ -21,6 +21,9 @@ jest.mock("../audit.service", () => ({
   ACTIONS: { UPDATED: "updated", APPROVED: "approved" },
   recordEvent: jest.fn(async () => null),
 }));
+// who may name a document as close-out evidence is decided in document-text.service (certification R29)
+const mockLinkable = jest.fn(async () => undefined);
+jest.mock("../document-text.service", () => ({ assertDocumentsLinkable: (...args) => mockLinkable(...args) }));
 
 const service = require("../closeout.service");
 
@@ -261,5 +264,36 @@ describe("the gate", () => {
 
     const closeout = await service.buildCloseout(ARGS);
     expect(closeout.ready).toBe(true);
+  });
+});
+
+describe("certification R29 — close-out evidence names only a file its writer may read", () => {
+  beforeEach(() => {
+    mockLinkable.mockReset();
+    mockLinkable.mockImplementation(async () => undefined);
+    mockPrisma.closeoutItem.upsert.mockClear();
+  });
+  afterEach(() => {
+    delete mockPrisma.closeoutItem.findUnique;
+  });
+
+  it("asks about the evidence as the writer, keeping the item's current evidence, and refuses it as a missing one", async () => {
+    setup();
+    mockPrisma.closeoutItem.findUnique = jest.fn(async () => ({ documentId: "doc-old" }));
+    await service.updateItem({ ...ARGS, key: "training", payload: { status: "complete", documentId: "doc-1" }, userId: "qs-1" });
+    const call = mockLinkable.mock.calls[0][0];
+    expect(call).toMatchObject({ orgId: "org-1", projectId: "project-1", keys: ["doc-1"], unchanged: ["doc-old"], userId: "qs-1" });
+    expect(mockPrisma.closeoutItem.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { closeoutId_key: { closeoutId: "closeout-1", key: "training" } } }));
+    expect(call.refuse()).toMatchObject({ status: 404, code: "DOCUMENT_NOT_FOUND" });
+    mockPrisma.closeoutItem.upsert.mockClear();
+    mockLinkable.mockImplementation(async ({ refuse }) => { throw refuse(); });
+    await expect(service.updateItem({ ...ARGS, key: "training", payload: { status: "complete", documentId: "doc-1" }, userId: "qs-1" })).rejects.toMatchObject({ status: 404, code: "DOCUMENT_NOT_FOUND" });
+    expect(mockPrisma.closeoutItem.upsert).not.toHaveBeenCalled();
+  });
+
+  it("an item marked without evidence names no document", async () => {
+    setup();
+    await service.updateItem({ ...ARGS, key: "training", payload: { status: "complete" }, userId: "qs-1" });
+    expect(mockLinkable).not.toHaveBeenCalled();
   });
 });

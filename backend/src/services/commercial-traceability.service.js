@@ -201,6 +201,32 @@ const syncEvidenceReferences = async ({
     projectId,
     attachments: attachmentRefs || [],
   });
+  // Evidence is a read grant to every reader of the commercial record: it
+  // cites only a document its writer may read, or their own new upload; the
+  // evidence the record already cites stays as it is (certification R29).
+  // Refused as a missing document is.
+  if (documentById.size > 0) {
+    await require("./document-text.service").assertDocumentsLinkable({
+      projectId,
+      keys: [...documentById.keys()],
+      unchanged: async () =>
+        tx.commercialAttachmentRef?.findMany
+          ? (
+              await tx.commercialAttachmentRef.findMany({
+                where: { projectId, recordType, recordId },
+                select: { documentId: true },
+              })
+            ).map((row) => row.documentId)
+          : [],
+      userId,
+      refuse: () =>
+        new HttpError(
+          400,
+          "COMMERCIAL_DOCUMENT_NOT_FOUND",
+          "One or more supporting documents were not found, not clean, or outside this project",
+        ),
+    });
+  }
 
   const result = {
     correspondenceCount: null,
