@@ -47,6 +47,10 @@ const arg = (name, fallback = null) => process.argv.find((a) => a.startsWith(`--
 const NAME = arg('name', 'reads');
 const VICTIMS = arg('victims')?.split(',') || null;
 const CONCURRENCY = Number(arg('concurrency', 10));
+// --owner-only: each company's PM reads its own routes and nothing is attacked.
+// Run before the "before" fingerprint, it settles what a first read creates
+// (an evaluation, a checklist), so the attack pass is measured on its own.
+const OWNER_ONLY = process.argv.includes('--owner-only');
 const TRIES = Number(arg('tries', 4));
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
@@ -254,10 +258,11 @@ const main = async () => {
           continue;
         }
         results.push({ victim: victim.code, attacker: 'owner', template: route.path, route: bound, status: 200, verdict: 'OWNER_OK' });
+        if (OWNER_ONLY) continue;
         await attack('outsider', outsider, bound, route.path, ownerText);
         if (memberElsewhere) await attack('member-elsewhere', memberElsewhere, bound, route.path, ownerText);
         await attack('anonymous', null, bound, route.path, ownerText);
-      } else if (projectId) {
+      } else if (projectId && !OWNER_ONLY) {
         // No identifier in the path: name the victim's project and canary in the query instead.
         for (const query of [`projectId=${projectId}`, `q=${encodeURIComponent(canary)}`, `search=${encodeURIComponent(canary)}`]) {
           await attack('outsider-query', outsider, `${route.path}?${query}`, route.path);

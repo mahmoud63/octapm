@@ -46,7 +46,13 @@ const STEPS = [
   { name: 'prove-judging', args: [`${ISO}/prove-judging.js`], mustPass: true },
   { name: 'index-ids', args: [`${ISO}/index-ids.js`], mustPass: true },
   { name: 'links-start', args: [`${ISO}/cross-links.js`, 'take', `${TAG}-start`] },
+  // The owners' own first reads create what a first read creates (lazily made
+  // evaluations, checklists); measured apart, so the read sweep's fingerprint
+  // holds the attacks alone.
+  { name: 'fp-before-warmup', args: [`${ISO}/fingerprint.js`, 'take', `${TAG}-before-warmup`], mustPass: true },
+  { name: 'owner-warmup', args: [`${ISO}/read-sweep.js`, `--name=${TAG}-owner-warmup`, '--owner-only'] },
   { name: 'fp-before-reads', args: [`${ISO}/fingerprint.js`, 'take', `${TAG}-before-reads`], mustPass: true },
+  { name: 'fp-compare-warmup', args: [`${ISO}/fingerprint.js`, 'compare', `${TAG}-before-warmup`, `${TAG}-before-reads`] },
   { name: 'read-sweep', args: [`${ISO}/read-sweep.js`, `--name=${TAG}-reads`], result: `${TAG}-reads` },
   { name: 'fp-after-reads', args: [`${ISO}/fingerprint.js`, 'take', `${TAG}-after-reads`], mustPass: true },
   { name: 'fp-compare-reads', args: [`${ISO}/fingerprint.js`, 'compare', `${TAG}-before-reads`, `${TAG}-after-reads`] },
@@ -55,6 +61,8 @@ const STEPS = [
   { name: 'inject', args: [`${ISO}/inject.js`, `--name=${TAG}-inject`], result: `${TAG}-inject` },
   { name: 'links-end', args: [`${ISO}/cross-links.js`, 'take', `${TAG}-end`] },
   { name: 'links-compare', args: [`${ISO}/cross-links.js`, 'compare', `${TAG}-start`, `${TAG}-end`] },
+  // Last: it adds a person of two companies, tasks and comments to the pairs it uses.
+  { name: 'realtime', args: [`${ISO}/realtime-proof.js`, '--pairs=5'] },
 ];
 
 const main = () => {
