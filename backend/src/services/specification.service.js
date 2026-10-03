@@ -30,11 +30,54 @@ const { SPEC_BOQ_WITHHELD } = require("../utils/boq-figures");
  * check run without loading the bill — no BOQ row, row count, uncovered
  * row, "no_boq" gap or BOQ count, in the answer or in the model's prompt —
  * and `boqWithheld` / `boqItemsWithheld` with the reason.
+ *
+ * A specification is a document, and a document is its records' (document-
+ * text.service documentVisible): the routes pass the caller's `viewer`
+ * (documentViewer) and every door here — the document list, indexing, the
+ * section list, a section's text, the scope check, the conflict check and
+ * raising an RFI — admits only the documents that viewer may read, a hidden
+ * one answered as a missing one. A section's related RFIs are those the RFI
+ * register lists to the caller: none without RFI read, and for the rest the
+ * register's own where (party routing with `projectAccess`, drafts to their
+ * author and manager). The listing handed every document-control reader the
+ * text of executed subcontracts, lien waivers and other parties' RFI
+ * attachments, and the RFIs routed to other companies (certification R30,
+ * R7). Without a viewer (no caller) nothing is filtered.
  */
 
 /** Everything, as the service has always answered a BOQ reader. */
 const BOQ_READER = Object.freeze({ boq: true });
 const boqWithheld = () => ({ reason: SPEC_BOQ_WITHHELD });
+
+// ─── Who reads ────────────────────────────────────────────────────────────
+
+const documentText = () => require("./document-text.service");
+
+/** The ids among these documents the viewer may read; null (no filter) without a viewer. */
+const readableAmong = async ({ orgId, projectId, documentIds, viewer }) =>
+  viewer ? documentText().readableDocumentIds({ orgId, projectId, documentIds, viewer }) : null;
+
+/** Whether the viewer may read one document (always, without a viewer). */
+const documentReadable = async ({ orgId, projectId, documentId, viewer }) =>
+  !viewer || documentText().documentReadableToViewer({ orgId, projectId, documentId, viewer });
+
+/** The documents of the project's indexed sections the viewer may read; null without a viewer. */
+const readableSectionDocuments = async ({ orgId, projectId, viewer }) => {
+  if (!viewer) return null;
+  const rows = await prisma.specSection.findMany({ where: { orgId, projectId }, select: { documentId: true }, distinct: ["documentId"] });
+  return readableAmong({ orgId, projectId, documentIds: rows.map((row) => row.documentId), viewer });
+};
+const ofReadable = (readable) => (readable ? { documentId: { in: [...readable] } } : null);
+
+/** The RFIs a section may be related to for this caller: none without RFI read, else the register's where. */
+const relatedRfiWhere = ({ projectId, viewer, projectAccess }) => {
+  const where = { projectId, archivedAt: null };
+  if (!viewer) return where;
+  if (typeof viewer.canRead === "function" && !viewer.canRead("rfi")) return null;
+  const { applyPartyWorkflowVisibility } = require("./company-party.service");
+  const { withDraftVisibility } = require("./rfi-workflow.service");
+  return withDraftVisibility(applyPartyWorkflowVisibility(where, projectAccess || {}), viewer.userId || viewer.id || null);
+};
 
 const trimOrNull = (value) => {
   if (value === null || value === undefined) return null;
@@ -299,16 +342,17 @@ const documentOut = (document, counts = {}) => ({
   indexedAt: counts.indexedAt ?? null,
 });
 
-const loadText = async ({ orgId, projectId, documentId }) => {
+const loadText = async ({ orgId, projectId, documentId, viewer = null }) => {
   const document = await prisma.projectDocument.findFirst({ where: { id: documentId, orgId, projectId }, include: { text: true } });
-  if (!document) throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Document not found");
+  // One the caller may not read is answered as a missing one, before its text's state says it exists.
+  if (!document || !(await documentReadable({ orgId, projectId, documentId: document.id, viewer }))) throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Document not found");
   if (document.text?.status !== "ready" || !document.text.text) throw new HttpError(409, "SPEC_TEXT_NOT_READY", "The document's text has not been extracted yet — index the document first");
   return document;
 };
 
 /** Parses one document into sections and stores them (replacing earlier rows). */
-const indexDocument = async ({ orgId, projectId, documentId, userId = null }) => {
-  const document = await loadText({ orgId, projectId, documentId });
+const indexDocument = async ({ orgId, projectId, documentId, userId = null, viewer = null }) => {
+  const document = await loadText({ orgId, projectId, documentId, viewer });
   let sections = parseSections(document.text.text);
   if (sections.length && /pdf/i.test(document.mimeType)) {
     try {
@@ -330,16 +374,17 @@ const indexDocument = async ({ orgId, projectId, documentId, userId = null }) =>
 
 const SPEC_HINT_RE = /\b(SECTION\s+\d{2}\s?\d{2}\s?\d{2}|\d{2}\s\d{2}\s\d{2}\s+[A-Z]|SECTION\s+\d{5}\b|PART\s+[123]\s*[\-–—]\s*(GENERAL|PRODUCTS|EXECUTION)|END OF SECTION)/g;
 
-/** Every document with extracted text, with its section count and whether it reads like a specification. */
-const listDocuments = async ({ orgId, projectId }) => {
+/** Every document with extracted text the viewer may read, with its section count and whether it reads like a specification. */
+const listDocuments = async ({ orgId, projectId, viewer = null }) => {
   const [texts, counts] = await Promise.all([
     prisma.documentText.findMany({ where: { orgId, projectId, status: "ready" }, select: { documentId: true, wordCount: true, pageCount: true, excerpt: true, document: { select: { id: true, title: true, originalName: true, documentNumber: true, category: true, discipline: true, mimeType: true, uploadedAt: true } } }, orderBy: { updatedAt: "desc" }, take: 300 }),
     prisma.specSection.groupBy({ by: ["documentId"], where: { projectId }, _count: { _all: true }, _max: { updatedAt: true } }).catch(() => []),
   ]);
   const countById = new Map(counts.map((row) => [row.documentId, { sections: row._count._all, indexedAt: toIso(row._max.updatedAt) }]));
+  const readable = await readableAmong({ orgId, projectId, documentIds: texts.map((row) => row.documentId), viewer });
   return {
     items: texts
-      .filter((row) => row.document)
+      .filter((row) => row.document && (!readable || readable.has(row.documentId)))
       .map((row) => {
         const meta = countById.get(row.documentId) || {};
         const hints = (String(row.excerpt || "").match(SPEC_HINT_RE) || []).length;
@@ -349,17 +394,24 @@ const listDocuments = async ({ orgId, projectId }) => {
   };
 };
 
-/** Indexes the given documents, or every document that reads like a specification. */
-const scanProject = async ({ orgId, projectId, documentIds = null, userId = null }) => {
+/**
+ * Indexes the given documents, or every document that reads like a
+ * specification — of those the viewer may read: a named one it may not is
+ * answered as a missing one (loadText), and the scan neither indexes nor
+ * names one.
+ */
+const scanProject = async ({ orgId, projectId, documentIds = null, userId = null, viewer = null }) => {
   let ids = Array.isArray(documentIds) && documentIds.length ? documentIds : null;
   if (!ids) {
     const texts = await prisma.documentText.findMany({ where: { orgId, projectId, status: "ready", wordCount: { gte: 300 } }, select: { documentId: true, text: true }, take: 200 });
     ids = texts.filter((row) => (String(row.text || "").match(SPEC_HINT_RE) || []).length >= 3).map((row) => row.documentId);
+    const readable = await readableAmong({ orgId, projectId, documentIds: ids, viewer });
+    if (readable) ids = ids.filter((id) => readable.has(id));
   }
   const results = [];
   for (const documentId of ids) {
     try {
-      results.push({ ...(await indexDocument({ orgId, projectId, documentId, userId })), error: null });
+      results.push({ ...(await indexDocument({ orgId, projectId, documentId, userId, viewer })), error: null });
     } catch (error) {
       results.push({ documentId, sections: 0, error: error.message });
     }
@@ -386,12 +438,14 @@ const sectionOut = (row) => ({
 });
 
 // `withBoq: false` does not read the bill at all (a member who may not read the BOQ).
-const loadContext = async ({ orgId, projectId, withBoq = true }) => {
+// The RFIs are those the caller's RFI register lists (relatedRfiWhere).
+const loadContext = async ({ orgId, projectId, withBoq = true, viewer = null, projectAccess = null }) => {
+  const rfiWhere = relatedRfiWhere({ projectId, viewer, projectAccess });
   const [boqItems, sheets, activities, rfis] = await Promise.all([
     !withBoq ? [] : prisma.boqItem.findMany({ where: { projectId, isActive: true }, select: { id: true, code: true, description: true, unit: true, qty: true, section: true }, orderBy: { sortOrder: "asc" }, take: 5000 }),
     prisma.sheet.findMany({ where: { orgId, projectId, status: "current" }, select: { id: true, number: true, title: true, discipline: true, currentRevisionId: true }, orderBy: { sortKey: "asc" }, take: 3000 }),
     prisma.activity.findMany({ where: { projectId }, select: { id: true, name: true, activityCode: true, wbsCode: true }, take: 5000 }),
-    prisma.rfi.findMany({ where: { projectId, archivedAt: null }, select: { id: true, ref: true, subject: true, question: true, response: true, specSection: true, status: true }, take: 2000 }),
+    !rfiWhere ? [] : prisma.rfi.findMany({ where: rfiWhere, select: { id: true, ref: true, subject: true, question: true, response: true, specSection: true, status: true }, take: 2000 }),
   ]);
   return {
     boqItems: boqItems.map((item) => ({ ...item, keys: tokens(`${item.description} ${item.section || ""}`), codeKey: item.code ? item.code.replace(/[\s.\-]/g, "") : "" })),
@@ -458,13 +512,14 @@ const relateSection = (section, context) => {
   return { boqItems, sheets, activities, rfis, keywords: [...keys.title], disciplines };
 };
 
-const listSections = async ({ orgId, projectId, q = null, division = null, documentId = null }) => {
-  const where = { orgId, projectId, ...(division ? { division } : {}), ...(documentId ? { documentId } : {}) };
+const listSections = async ({ orgId, projectId, q = null, division = null, documentId = null, viewer = null }) => {
+  const readable = ofReadable(await readableSectionDocuments({ orgId, projectId, viewer }));
+  const where = { orgId, projectId, ...(division ? { division } : {}), ...(documentId ? { documentId } : {}), ...(readable ? { AND: [readable] } : {}) };
   const search = trimOrNull(q);
   if (search) where.OR = [{ title: { contains: search, mode: "insensitive" } }, { code: { contains: search, mode: "insensitive" } }, { codeKey: { contains: search.replace(/[\s.\-]/g, ""), mode: "insensitive" } }];
   const [rows, all] = await Promise.all([
     prisma.specSection.findMany({ where, include: { document: { select: { id: true, title: true, originalName: true } } }, orderBy: [{ division: "asc" }, { codeKey: "asc" }, { sortOrder: "asc" }], take: 2000 }),
-    prisma.specSection.groupBy({ by: ["division"], where: { orgId, projectId }, _count: { _all: true } }).catch(() => []),
+    prisma.specSection.groupBy({ by: ["division"], where: { orgId, projectId, ...(readable || {}) }, _count: { _all: true } }).catch(() => []),
   ]);
   const divisions = all.map((row) => ({ division: row.division, label: row.division ? DIVISION_LABELS[row.division] || null : null, count: row._count._all })).sort((a, b) => String(a.division || "zz").localeCompare(String(b.division || "zz")));
   return { items: rows.map(sectionOut), divisions, total: divisions.reduce((sum, row) => sum + row.count, 0) };
@@ -477,11 +532,17 @@ const relatedFor = (related, access) => {
   return { ...rest, boqItemsWithheld: boqWithheld() };
 };
 
-const getSection = async ({ orgId, projectId, sectionId, maxChars = 20000, access = BOQ_READER }) => {
-  const row = await prisma.specSection.findFirst({ where: { id: sectionId, orgId, projectId }, include: { document: { select: { id: true, title: true, originalName: true, text: { select: { text: true } } } } } });
-  if (!row) throw new HttpError(404, "SPEC_SECTION_NOT_FOUND", "Specification section not found");
+/** A section the viewer may open: its document readable to them, else answered as a missing section. */
+const findReadableSection = async ({ orgId, projectId, sectionId, viewer, include = undefined }) => {
+  const row = await prisma.specSection.findFirst({ where: { id: sectionId, orgId, projectId }, ...(include ? { include } : {}) });
+  if (!row || !(await documentReadable({ orgId, projectId, documentId: row.documentId, viewer }))) throw new HttpError(404, "SPEC_SECTION_NOT_FOUND", "Specification section not found");
+  return row;
+};
+
+const getSection = async ({ orgId, projectId, sectionId, maxChars = 20000, access = BOQ_READER, viewer = null, projectAccess = null }) => {
+  const row = await findReadableSection({ orgId, projectId, sectionId, viewer, include: { document: { select: { id: true, title: true, originalName: true, text: { select: { text: true } } } } } });
   const full = String(row.document?.text?.text || "").slice(row.charStart, row.charEnd);
-  const context = await loadContext({ orgId, projectId, withBoq: access.boq });
+  const context = await loadContext({ orgId, projectId, withBoq: access.boq, viewer, projectAccess });
   return { ...sectionOut(row), text: full.slice(0, maxChars), truncated: full.length > maxChars, totalChars: full.length, related: relatedFor(relateSection(row, context), access) };
 };
 
@@ -511,10 +572,11 @@ const withoutBoqCoverage = (gaps) => {
   };
 };
 
-const scopeGaps = async ({ orgId, projectId, access = BOQ_READER }) => {
+const scopeGaps = async ({ orgId, projectId, access = BOQ_READER, viewer = null, projectAccess = null }) => {
+  const readable = ofReadable(await readableSectionDocuments({ orgId, projectId, viewer }));
   const [rows, context] = await Promise.all([
-    prisma.specSection.findMany({ where: { orgId, projectId }, include: { document: { select: { id: true, title: true, originalName: true } } }, orderBy: [{ division: "asc" }, { codeKey: "asc" }] }),
-    loadContext({ orgId, projectId, withBoq: access.boq }),
+    prisma.specSection.findMany({ where: { orgId, projectId, ...(readable || {}) }, include: { document: { select: { id: true, title: true, originalName: true } } }, orderBy: [{ division: "asc" }, { codeKey: "asc" }] }),
+    loadContext({ orgId, projectId, withBoq: access.boq, viewer, projectAccess }),
   ]);
   const coveredBoq = new Set();
   const sections = rows.map((row) => {
@@ -576,8 +638,8 @@ const normalizeActions = (actions) =>
     .filter(Boolean)
     .slice(0, 4);
 
-const explainScopeGaps = async ({ orgId, projectId, user, access = BOQ_READER, transport = null }) => {
-  const gaps = await scopeGaps({ orgId, projectId, access });
+const explainScopeGaps = async ({ orgId, projectId, user, access = BOQ_READER, viewer = null, projectAccess = null, transport = null }) => {
+  const gaps = await scopeGaps({ orgId, projectId, access, viewer, projectAccess });
   const fallback = { headline: `${gaps.summary.withGaps} of ${gaps.summary.sections} sections have a coverage gap`, narrative: deterministicGapNarrative(gaps), actions: [] };
   const provider = aiProvider.describe();
   if (!transport && !provider.enabled) return { degraded: true, reason: "No AI provider is configured — showing the computed review.", gaps, review: fallback, message: null };
@@ -609,8 +671,8 @@ const sectionWindow = (text) => {
   return text.slice(0, limit);
 };
 
-const findConflicts = async ({ orgId, projectId, sectionId, user, payload = {}, access = BOQ_READER, transport = null }) => {
-  const section = await getSection({ orgId, projectId, sectionId, maxChars: 200000, access });
+const findConflicts = async ({ orgId, projectId, sectionId, user, payload = {}, access = BOQ_READER, viewer = null, projectAccess = null, transport = null }) => {
+  const section = await getSection({ orgId, projectId, sectionId, maxChars: 200000, access, viewer, projectAccess });
   const requested = Array.isArray(payload.sheetIds) && payload.sheetIds.length ? new Set(payload.sheetIds) : null;
   const candidates = requested ? section.related.sheets.filter((sheet) => requested.has(sheet.id)) : section.related.sheets;
   const sheets = candidates.filter((sheet) => sheet.currentRevisionId).slice(0, SPEC_SHEETS());
@@ -655,9 +717,8 @@ const findConflicts = async ({ orgId, projectId, sectionId, user, payload = {}, 
 };
 
 /** Raises a draft RFI from a conflict or gap, tagged with the section. */
-const raiseRfi = async ({ orgId, projectId, sectionId, user, projectAccess = null, payload = {} }) => {
-  const section = await prisma.specSection.findFirst({ where: { id: sectionId, orgId, projectId } });
-  if (!section) throw new HttpError(404, "SPEC_SECTION_NOT_FOUND", "Specification section not found");
+const raiseRfi = async ({ orgId, projectId, sectionId, user, projectAccess = null, payload = {}, viewer = null }) => {
+  const section = await findReadableSection({ orgId, projectId, sectionId, viewer });
   const subject = clip(payload.subject, 200);
   if (!subject) throw new HttpError(400, "SPEC_RFI_SUBJECT", "The RFI needs a subject");
   const rfiService = require("./rfi.service");

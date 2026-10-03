@@ -41,6 +41,26 @@ const clip = (value, max) => {
 const toIso = (value) => (value ? new Date(value).toISOString() : null);
 const pick = (value, allowed, fallback) => (allowed.includes(value) ? value : fallback);
 
+// ─── Who reads ────────────────────────────────────────────────────────────
+
+/**
+ * A photo the caller may work on: one whose document their `viewer`
+ * (document-text.service documentViewer) may read — else answered as a
+ * missing photo. Reading an analysis, analysing, applying a caption or tags,
+ * raising an observation (which attaches the photo to the new punch item, so
+ * to everyone who reads that item) and editing a photo all start here: each
+ * worked on any photo of the project, another party's RFI photo included
+ * (certification R31). Without a viewer (a background job) nothing is
+ * filtered.
+ */
+const readablePhoto = async ({ orgId, projectId, photoId, viewer = null }) => {
+  const photo = await attachments.getPhoto({ orgId, projectId, photoId });
+  if (viewer && !(await require("./document-text.service").documentReadableToViewer({ orgId, projectId, documentId: photo.documentId, viewer }))) {
+    throw new HttpError(404, "PHOTO_NOT_FOUND", "Photo not found");
+  }
+  return photo;
+};
+
 const PHOTO_PROMPT = `You inspect a construction site photo for the project team. Report ONLY what the image shows; if it is not a site photo, is blurred or shows nothing useful, say so with low confidence. Never identify or describe individual people beyond their role and equipment.
 1. Caption: one line — what is being done and where (use the location given when it fits).
 2. Tags: 3–8 lowercase words for trade, element and stage (e.g. "formwork", "rebar", "concrete pour", "scaffold", "excavation", "mep", "blockwork", "housekeeping", "delivery").
@@ -128,8 +148,8 @@ const parseStored = (message) => {
 };
 
 /** The latest stored analysis of a photo, if any. */
-const latestAnalysis = async ({ orgId, projectId, photoId }) => {
-  const photo = await attachments.getPhoto({ orgId, projectId, photoId });
+const latestAnalysis = async ({ orgId, projectId, photoId, viewer = null }) => {
+  const photo = await readablePhoto({ orgId, projectId, photoId, viewer });
   if (!prisma.assistantConversation?.findFirst) return { photo: photoOut(photo, projectId), analysis: null, message: null, analyzedAt: null };
   const row = await prisma.assistantConversation.findFirst({ where: { orgId, kind: KIND, recordType: "photo", recordId: photoId }, orderBy: { createdAt: "desc" }, include: { messages: { where: { role: "assistant" }, orderBy: { createdAt: "desc" }, take: 1 } } });
   const message = row?.messages?.[0] || null;
@@ -140,10 +160,10 @@ const latestAnalysis = async ({ orgId, projectId, photoId }) => {
  * Analyses one photo. `force` re-runs even when a fresh analysis exists;
  * `store` is skipped without a user (background jobs without a requester).
  */
-const analyzePhoto = async ({ orgId, projectId, photoId, user = null, transport = null, fetchImpl = null, force = false }) => {
-  const photo = await attachments.getPhoto({ orgId, projectId, photoId });
+const analyzePhoto = async ({ orgId, projectId, photoId, user = null, transport = null, fetchImpl = null, force = false, viewer = null }) => {
+  const photo = await readablePhoto({ orgId, projectId, photoId, viewer });
   if (!force && !transport) {
-    const existing = await latestAnalysis({ orgId, projectId, photoId });
+    const existing = await latestAnalysis({ orgId, projectId, photoId, viewer });
     if (existing.analysis && existing.analyzedAt && Date.now() - new Date(existing.analyzedAt).getTime() < FRESH_MS) return { ...existing, degraded: false, cached: true };
   }
   const provider = aiProvider.describe();
@@ -163,8 +183,12 @@ const analyzePhoto = async ({ orgId, projectId, photoId, user = null, transport 
   return { degraded: false, photo: photoOut(photo, projectId), analysis, analyzedAt: new Date().toISOString(), message: runMessage(stored), cached: false, image: { variant: image.variant, bytes: image.bytes } };
 };
 
-/** Analyses several photos (the day's uncaptioned ones by default), bounded by AI_PHOTO_BATCH. */
-const analyzeBatch = async ({ orgId, projectId, user, payload = {}, transport = null, fetchImpl = null }) => {
+/**
+ * Analyses several photos (the day's uncaptioned ones by default), bounded by
+ * AI_PHOTO_BATCH — of those the viewer may read: one they may not is left
+ * out, as a missing one is.
+ */
+const analyzeBatch = async ({ orgId, projectId, user, payload = {}, transport = null, fetchImpl = null, viewer = null }) => {
   const limit = Math.min(batchLimit(), Math.max(1, Number(payload.limit) || batchLimit()));
   const where = { projectId, orgId };
   if (Array.isArray(payload.photoIds) && payload.photoIds.length) where.id = { in: payload.photoIds.slice(0, 40) };
@@ -172,11 +196,14 @@ const analyzeBatch = async ({ orgId, projectId, user, payload = {}, transport = 
     if (payload.uncaptionedOnly !== false) where.caption = null;
     if (payload.from || payload.to) where.takenAt = { ...(payload.from ? { gte: new Date(payload.from) } : {}), ...(payload.to ? { lte: new Date(payload.to) } : {}) };
   }
-  const rows = prisma.photo?.findMany ? await prisma.photo.findMany({ where, select: { id: true }, orderBy: [{ takenAt: "desc" }, { createdAt: "desc" }], take: limit }) : [];
+  // With a viewer, read further than the batch so the photos they may not read do not take its places.
+  const found = prisma.photo?.findMany ? await prisma.photo.findMany({ where, select: { id: true, documentId: true }, orderBy: [{ takenAt: "desc" }, { createdAt: "desc" }], take: viewer ? Math.max(limit, 200) : limit }) : [];
+  const readable = viewer ? await require("./document-text.service").readableDocumentIds({ orgId, projectId, documentIds: found.map((row) => row.documentId), viewer }) : null;
+  const rows = (readable ? found.filter((row) => readable.has(row.documentId)) : found).slice(0, limit);
   const items = [];
   for (const row of rows) {
     try {
-      const result = await analyzePhoto({ orgId, projectId, photoId: row.id, user, transport, fetchImpl, force: Boolean(payload.force) });
+      const result = await analyzePhoto({ orgId, projectId, photoId: row.id, user, transport, fetchImpl, force: Boolean(payload.force), viewer });
       items.push({ photoId: row.id, ...result });
       if (result.degraded && !result.analysis) break;
     } catch (error) {
@@ -188,8 +215,8 @@ const analyzeBatch = async ({ orgId, projectId, user, payload = {}, transport = 
 
 // ─── Apply ────────────────────────────────────────────────────────────────
 
-const applyAnalysis = async ({ orgId, projectId, photoId, payload = {}, actor = null }) => {
-  const photo = await attachments.getPhoto({ orgId, projectId, photoId });
+const applyAnalysis = async ({ orgId, projectId, photoId, payload = {}, actor = null, viewer = null }) => {
+  const photo = await readablePhoto({ orgId, projectId, photoId, viewer });
   const data = {};
   const caption = clip(payload.caption, 300);
   if (caption && (!photo.caption || payload.overwrite)) data.caption = caption;
@@ -204,10 +231,11 @@ const applyAnalysis = async ({ orgId, projectId, photoId, payload = {}, actor = 
 const PRIORITY_BY_SEVERITY = Object.freeze({ low: "low", medium: "normal", high: "high" });
 
 /** Raises a safety observation on the punch engine from one finding, with the photo as evidence. */
-const raiseObservation = async ({ orgId, projectId, photoId, payload = {}, actor = null }) => {
+const raiseObservation = async ({ orgId, projectId, photoId, payload = {}, actor = null, viewer = null }) => {
   const hazard = clip(payload.hazard, 120);
   if (!hazard) throw new HttpError(400, "PHOTO_AI_HAZARD_REQUIRED", "The observation needs a hazard");
-  const photo = await attachments.getPhoto({ orgId, projectId, photoId });
+  // Before the punch item: attaching the photo to it would hand the photo to every reader of the item.
+  const photo = await readablePhoto({ orgId, projectId, photoId, viewer });
   const punch = require("./punch.service");
   const severity = pick(payload.severity, SEVERITIES, "medium");
   const item = await punch.createPunchItem({
@@ -253,4 +281,4 @@ const status = () => {
   return { enabled: Boolean(provider.enabled && provider.vision), provider: provider.provider, model: provider.model, autoOnUpload: String(process.env.AI_PHOTO_AUTO || "").toLowerCase() === "on", batchLimit: batchLimit() };
 };
 
-module.exports = { KIND, PHOTO_PROMPT, SEVERITIES, normalizeAnalysis, latestAnalysis, analyzePhoto, analyzeBatch, applyAnalysis, raiseObservation, runPhotoAnalyzeJob, status };
+module.exports = { KIND, PHOTO_PROMPT, SEVERITIES, normalizeAnalysis, readablePhoto, latestAnalysis, analyzePhoto, analyzeBatch, applyAnalysis, raiseObservation, runPhotoAnalyzeJob, status };

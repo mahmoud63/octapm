@@ -622,7 +622,22 @@ const parseDate = (value, endOfDay = false) => {
   return date;
 };
 
-const listPhotos = async ({ orgId, projectId, query = {} }) => {
+/**
+ * The gallery as a viewer (document-text.service documentViewer) may see it
+ * (certification R31): a photo is its document's, and its document its
+ * records' — a photo appears only when the viewer may read its document
+ * (readableDocumentIds), its `records` name only the links the viewer may
+ * see (attachmentVisible), a record filter matches only those, and the
+ * summary's total and tags count only the photos listed to them. The gallery
+ * handed every document-control reader the photos of other parties' RFIs,
+ * NCRs, safety incidents and commitments, and the records they hang on.
+ * Pages are filled from as many rows as it takes (at most PHOTO_SCAN_BATCHES
+ * batches a page); the cursor stays a photo id. Without a viewer, nothing
+ * is filtered.
+ */
+const PHOTO_SCAN_BATCHES = 25;
+const listPhotos = async ({ orgId, projectId, query = {}, viewer = null }) => {
+  if (viewer) return listPhotosForViewer({ orgId, projectId, query, viewer });
   await ensureProject({ orgId, projectId });
   const limit = Math.min(Math.max(Number(query.limit) || 60, 1), 200);
   const where = { projectId, orgId };
@@ -709,6 +724,133 @@ const listPhotos = async ({ orgId, projectId, query = {} }) => {
   };
 };
 
+const listPhotosForViewer = async ({ orgId, projectId, query = {}, viewer }) => {
+  await ensureProject({ orgId, projectId });
+  const docText = require("./document-text.service");
+  const limit = Math.min(Math.max(Number(query.limit) || 60, 1), 200);
+  const where = { projectId, orgId };
+
+  const from = parseDate(query.from);
+  const to = parseDate(query.to, true);
+  if (from || to) {
+    where.takenAt = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) };
+  }
+  if (query.locationId) {
+    const location = await prisma.location.findFirst({
+      where: { id: query.locationId, projectId },
+      select: { id: true, path: true },
+    });
+    if (!location) throw new HttpError(404, "LOCATION_NOT_FOUND", "Location not found");
+    const subtree = await prisma.location.findMany({
+      where: { projectId, OR: [{ id: location.id }, { path: { startsWith: `${location.path}/` } }] },
+      select: { id: true },
+    });
+    where.locationId = { in: subtree.map((row) => row.id) };
+  }
+  const tag = trimOrNull(query.tag)?.toLowerCase();
+  if (tag) where.tags = { has: tag };
+  const recordFilter = query.recordType
+    ? { recordType: query.recordType, ...(query.recordId ? { recordId: query.recordId } : {}) }
+    : null;
+  if (recordFilter) {
+    moduleForRecordType(query.recordType);
+    where.document = { attachments: { some: recordFilter } };
+  }
+  if (query.search) {
+    const search = String(query.search).trim();
+    where.OR = [
+      { caption: { contains: search, mode: "insensitive" } },
+      { document: { originalName: { contains: search, mode: "insensitive" } } },
+    ];
+  }
+
+  // The links of these photos' documents the viewer may see, by document.
+  const visibleLinks = async (documentIds) => {
+    const links = documentIds.length
+      ? await prisma.attachment.findMany({
+          where: { projectId, documentId: { in: documentIds } },
+          select: { documentId: true, recordType: true, recordId: true, role: true },
+        })
+      : [];
+    const pairs = [...new Map(links.map((link) => [`${link.recordType}:${link.recordId}`, { recordType: link.recordType, recordId: link.recordId }])).values()];
+    const ruled = await docText.recordRuleVisibleIds({ documents: [{ attachments: pairs }], viewer });
+    return links
+      .filter((link) => docText.attachmentVisible(link, viewer, ruled))
+      .reduce((map, link) => {
+        if (!map.has(link.documentId)) map.set(link.documentId, []);
+        map.get(link.documentId).push({ recordType: link.recordType, recordId: link.recordId, role: link.role });
+        return map;
+      }, new Map());
+  };
+  const matchesRecord = (records) =>
+    !recordFilter ||
+    records.some((record) => record.recordType === recordFilter.recordType && (!recordFilter.recordId || record.recordId === recordFilter.recordId));
+
+  const batch = Math.min(200, limit + 1);
+  const shown = [];
+  let cursor = query.cursor || null;
+  let exhausted = false;
+  let scanned = 0;
+  while (shown.length <= limit && !exhausted && scanned < PHOTO_SCAN_BATCHES) {
+    const rows = await prisma.photo.findMany({
+      where,
+      include: photoInclude,
+      orderBy: [{ takenAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+      take: batch,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+    scanned += 1;
+    exhausted = rows.length < batch;
+    if (rows.length) cursor = rows[rows.length - 1].id;
+    const readable = await docText.readableDocumentIds({ orgId, projectId, documentIds: rows.map((row) => row.documentId), viewer });
+    const candidates = rows.filter((row) => readable.has(row.documentId));
+    const links = await visibleLinks([...new Set(candidates.map((row) => row.documentId))]);
+    for (const photo of candidates) {
+      const records = links.get(photo.documentId) || [];
+      if (matchesRecord(records)) shown.push({ photo, records });
+    }
+  }
+  const hasMore = shown.length > limit || (!exhausted && scanned >= PHOTO_SCAN_BATCHES);
+  const page = shown.slice(0, limit);
+  // A page cut short by the scan bound continues after the last row read.
+  const nextCursor = shown.length > limit ? page[page.length - 1].photo.id : hasMore ? cursor : null;
+
+  // The summary counts the photos this viewer may see, judged a thousand at a time.
+  const summaryRows = await prisma.photo.findMany({
+    where: { projectId, orgId },
+    select: { documentId: true, tags: true },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+  });
+  let total = 0;
+  const tagCounts = {};
+  for (let start = 0; start < summaryRows.length; start += 1000) {
+    const slice = summaryRows.slice(start, start + 1000);
+    const readable = await docText.readableDocumentIds({ orgId, projectId, documentIds: slice.map((row) => row.documentId), viewer });
+    for (const row of slice) {
+      if (!readable.has(row.documentId)) continue;
+      total += 1;
+      if (total <= 2000) for (const value of row.tags || []) tagCounts[value] = (tagCounts[value] || 0) + 1;
+    }
+  }
+
+  return {
+    items: page.map(({ photo, records }) =>
+      serializePhoto(photo, projectId, {
+        document: serializeDocument(photo.document, projectId),
+        records,
+      }),
+    ),
+    pagination: { limit, nextCursor },
+    summary: {
+      total,
+      tags: Object.entries(tagCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 50)
+        .map(([value, count]) => ({ tag: value, count })),
+    },
+  };
+};
+
 const getPhoto = async ({ orgId, projectId, photoId }) => {
   const photo = await prisma.photo.findFirst({
     where: { id: photoId, projectId, orgId },
@@ -753,8 +895,17 @@ const updatePhoto = async ({ orgId, projectId, photoId, payload = {}, userId = n
   return serializePhoto(photo, projectId, { document: serializeDocument(photo.document, projectId) });
 };
 
-const getPhotoFile = async ({ orgId, projectId, photoId, variant = "original" }) => {
+/**
+ * A photo's original or thumbnail. With a viewer (documentViewer), only a
+ * photo whose document they may read — refused as a missing photo: the
+ * thumbnail and the original of another party's RFI photo were served to
+ * every document-control reader (certification R31).
+ */
+const getPhotoFile = async ({ orgId, projectId, photoId, variant = "original", viewer = null }) => {
   const photo = await getPhoto({ orgId, projectId, photoId });
+  if (viewer && !(await require("./document-text.service").documentReadableToViewer({ orgId, projectId, documentId: photo.documentId, viewer }))) {
+    throw new HttpError(404, "PHOTO_NOT_FOUND", "Photo not found");
+  }
   const key =
     variant === "thumbnail" && photo.thumbnailStatus === THUMBNAIL_STATUS.READY && photo.thumbnailKey
       ? photo.thumbnailKey

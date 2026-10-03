@@ -7,7 +7,7 @@ const photoRow = (overrides = {}) => ({ id: "ph-1", documentId: "doc-1", orgId: 
 const mockPrisma = {
   project: { findFirst: jest.fn(async () => ({ name: "Tower", type: "commercial" })) },
   attachment: { findMany: jest.fn(async () => [{ recordType: "daily_log", recordId: "dl-1", role: "photo" }]) },
-  photo: { findMany: jest.fn(async ({ where = {} }) => [{ id: "ph-1" }, { id: "ph-2" }].filter((row) => !where.id?.in || where.id.in.includes(row.id))) },
+  photo: { findMany: jest.fn(async ({ where = {} }) => [{ id: "ph-1", documentId: "doc-1" }, { id: "ph-2", documentId: "doc-2" }].filter((row) => !where.id?.in || where.id.in.includes(row.id))) },
   assistantConversation: {
     create: jest.fn(async ({ data }) => {
       const row = { id: nextId("conv"), createdAt: new Date(), ...data };
@@ -40,9 +40,16 @@ const mockPunch = { createPunchItem: jest.fn(async ({ payload }) => ({ id: "obs-
 const jpeg = Buffer.from("original-jpeg-bytes");
 const fetchImpl = jest.fn(async (url) => (url.includes("-original") ? { ok: true, arrayBuffer: async () => jpeg.buffer.slice(jpeg.byteOffset, jpeg.byteOffset + jpeg.byteLength) } : { ok: false }));
 
+// A viewer here carries the documents it may read (document-text.service decides for real).
+const mockDocText = {
+  readableDocumentIds: jest.fn(async ({ documentIds, viewer }) => new Set(documentIds.filter((id) => viewer.readable.includes(id)))),
+  documentReadableToViewer: jest.fn(async ({ documentId, viewer }) => viewer.readable.includes(documentId)),
+};
+
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 jest.mock("../attachment.service", () => mockAttachments);
 jest.mock("../punch.service", () => mockPunch);
+jest.mock("../document-text.service", () => mockDocText);
 
 const service = require("../photo-assistant.service");
 
@@ -150,6 +157,33 @@ describe("photo and safety intelligence", () => {
     expect(mockAttachments.createAttachments).toHaveBeenCalledWith(expect.objectContaining({ recordType: "punch_item", recordId: "obs-1", role: "evidence", documentIds: ["doc-1"], userId: "u-1" }));
     expect(raised).toMatchObject({ item: { ref: "OBS-007", kind: "observation", observationType: "safety" }, attached: true, url: "/projects/p1/quality/observations?recordId=obs-1" });
     await expect(service.raiseObservation({ ...scope, photoId: "ph-1", payload: {}, actor: { id: "u-1" } })).rejects.toMatchObject({ code: "PHOTO_AI_HAZARD_REQUIRED" });
+  });
+
+  // Certification R31: the assistant works only on a photo whose document the caller may read.
+  it("answers a photo the viewer may not read as a missing photo, on every door, and leaves it out of a batch", async () => {
+    const viewer = { userId: "u-2", readable: ["doc-2"] };
+    const transport = jest.fn(async () => modelAnswer());
+    const missing = { status: 404, code: "PHOTO_NOT_FOUND" };
+    await expect(service.readablePhoto({ ...scope, photoId: "ph-1", viewer })).rejects.toMatchObject(missing);
+    await expect(service.latestAnalysis({ ...scope, photoId: "ph-1", viewer })).rejects.toMatchObject(missing);
+    await expect(service.analyzePhoto({ ...scope, photoId: "ph-1", user, viewer, transport, fetchImpl, force: true })).rejects.toMatchObject(missing);
+    expect(transport).not.toHaveBeenCalled();
+    await expect(service.applyAnalysis({ ...scope, photoId: "ph-1", payload: { tags: ["x"] }, actor: { id: "u-2" }, viewer })).rejects.toMatchObject(missing);
+    expect(mockAttachments.updatePhoto).not.toHaveBeenCalled();
+    await expect(service.raiseObservation({ ...scope, photoId: "ph-1", payload: { hazard: "Open edge" }, actor: { id: "u-2" }, viewer })).rejects.toMatchObject(missing);
+    expect(mockPunch.createPunchItem).not.toHaveBeenCalled();
+    expect(mockAttachments.createAttachments).not.toHaveBeenCalled();
+    expect(mockDocText.documentReadableToViewer).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", projectId: "p1", documentId: "doc-1", viewer }));
+
+    const batch = await service.analyzeBatch({ ...scope, user, payload: { photoIds: ["ph-1", "ph-2"] }, transport, fetchImpl, viewer });
+    expect(batch.items.map((item) => item.photoId)).toEqual(["ph-2"]);
+    expect(mockPrisma.photo.findMany).toHaveBeenCalledWith(expect.objectContaining({ select: { id: true, documentId: true }, take: 200 }));
+
+    // the photo the viewer may read works on every door
+    await expect(service.latestAnalysis({ ...scope, photoId: "ph-2", viewer })).resolves.toMatchObject({ photo: { id: "ph-2" } });
+    await expect(service.applyAnalysis({ ...scope, photoId: "ph-2", payload: { tags: ["rebar"] }, actor: { id: "u-2" }, viewer })).resolves.toMatchObject({ applied: { tags: true } });
+    await expect(service.raiseObservation({ ...scope, photoId: "ph-2", payload: { hazard: "Open edge" }, actor: { id: "u-2" }, viewer })).resolves.toMatchObject({ attached: true });
+    expect(mockAttachments.createAttachments).toHaveBeenCalledWith(expect.objectContaining({ documentIds: ["doc-2"] }));
   });
 
   it("runs as a background job for the uploader", async () => {

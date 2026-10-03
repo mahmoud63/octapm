@@ -1,5 +1,5 @@
 const mockPrisma = {
-  project: { findMany: jest.fn() },
+  project: { findMany: jest.fn(), findFirst: jest.fn() },
   activity: { findMany: jest.fn() },
   scheduleRevision: { count: jest.fn(), findMany: jest.fn() },
   progressSubmission: { count: jest.fn(), findMany: jest.fn() },
@@ -542,5 +542,81 @@ describe("workspace dashboard service", () => {
         }),
       }),
     );
+  });
+
+  // Certification R7: the overdue RFI and submittal queues hold what the
+  // caller's own registers hold — party routing where they reach a project
+  // through a party, an RFI draft only to its author and manager.
+  // Certification N3: every queue is also kept to the projects where the
+  // caller may read its module; with no module reader, that is every project.
+  const inModuleProjects = (where, ids) => ({ AND: [where, { projectId: { in: ids } }] });
+
+  it("lists RFIs and submittals as each project's registers list them to the caller", async () => {
+    const PARTY_DRAFT = { OR: [{ status: { not: "draft" } }, { createdBy: "se-1" }, { managerUserId: "se-1" }] };
+    const routedTo = (ids) => ({ OR: [{ ownerPartyId: { in: ids } }, { reviewerPartyId: { in: ids } }, { approverPartyId: { in: ids } }] });
+    mockPrisma.project.findMany.mockResolvedValueOnce([project, { ...project, id: "project-2", name: "Harbour Works" }]);
+    // project-1 through a party only, project-2 by assignment
+    mockPrisma.project.findFirst.mockImplementation(async ({ where }) =>
+      where.id === "project-1"
+        ? { id: "project-1", orgId: "org-1", assignments: [], parties: [{ id: "pp-1", companyId: "co-1", role: "subcontractor", accessLevel: "collaborator", company: { id: "co-1", name: "Sub X", status: "active" }, members: [{ id: "m-1", role: "member", status: "active" }] }] }
+        : { id: "project-2", orgId: "org-1", assignments: [{ role: "site_engineer" }], parties: [] },
+    );
+
+    await workspaceDashboardService.getWorkspaceDashboard({ orgId: "org-1", userId: "se-1", role: "site_engineer" });
+
+    expect(mockPrisma.rfi.findMany.mock.calls[0][0].where).toEqual(inModuleProjects({
+      AND: [
+        { archivedAt: null, OR: [{ projectId: { in: ["project-2"] } }, { projectId: "project-1", AND: [routedTo(["pp-1"])] }] },
+        PARTY_DRAFT,
+      ],
+    }, ["project-1", "project-2"]));
+    expect(mockPrisma.submittal.findMany.mock.calls[0][0].where).toEqual(inModuleProjects({
+      archivedAt: null,
+      OR: [{ projectId: { in: ["project-2"] } }, { projectId: "project-1", AND: [routedTo(["pp-1"])] }],
+    }, ["project-1", "project-2"]));
+  });
+
+  it("keeps a PM's queues to the projects' records, with RFI drafts only their own, and a company-wide read unfiltered", async () => {
+    await workspaceDashboardService.getWorkspaceDashboard({ orgId: "org-1", userId: "pm-1", role: "pm" });
+    expect(mockPrisma.project.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.rfi.findMany.mock.calls[0][0].where).toEqual(inModuleProjects({
+      AND: [
+        { archivedAt: null, OR: [{ projectId: { in: ["project-1"] } }] },
+        { OR: [{ status: { not: "draft" } }, { createdBy: "pm-1" }, { managerUserId: "pm-1" }] },
+      ],
+    }, ["project-1"]));
+    expect(mockPrisma.submittal.findMany.mock.calls[0][0].where).toEqual(inModuleProjects({ archivedAt: null, OR: [{ projectId: { in: ["project-1"] } }] }, ["project-1"]));
+
+    jest.clearAllMocks();
+    mockPrisma.project.findMany.mockResolvedValueOnce([project]);
+    await workspaceDashboardService.getWorkspaceDashboard({ orgId: "org-1", userId: null, role: "pm", isCompanyAdmin: true, allProjects: true });
+    expect(mockPrisma.rfi.findMany.mock.calls[0][0].where).toEqual(inModuleProjects({ projectId: { in: ["project-1"] }, archivedAt: null }, ["project-1"]));
+    expect(mockPrisma.submittal.findMany.mock.calls[0][0].where).toEqual(inModuleProjects({ projectId: { in: ["project-1"] }, archivedAt: null }, ["project-1"]));
+  });
+
+  it("keeps every other queue to the projects where the caller may read its module, and tasks to the task list's rule (N3)", async () => {
+    mockPrisma.project.findMany.mockResolvedValueOnce([project, { ...project, id: "project-2", name: "Harbour Works" }]);
+    // project-1: a party guest who reads the schedule and progress only and sees only their own tasks;
+    // project-2: a member who reads every module and every task.
+    const moduleAccessFor = async (projectId) =>
+      projectId === "project-1"
+        ? { can: (moduleName) => ["schedule", "progress", "task", "rfi", "submittal"].includes(moduleName), projectWideTasks: false }
+        : { can: () => true, projectWideTasks: true };
+    await workspaceDashboardService.getWorkspaceDashboard({ orgId: "org-1", userId: "pm-1", role: "pm", moduleAccessFor });
+    const projectsOf = (model) => mockPrisma[model].findMany.mock.calls[0][0].where.projectId;
+    expect(projectsOf("changeOrder")).toEqual({ in: ["project-2"] });
+    expect(projectsOf("risk")).toEqual({ in: ["project-2"] });
+    expect(projectsOf("safetyIncident")).toEqual({ in: ["project-2"] });
+    expect(projectsOf("ncrRecord")).toEqual({ in: ["project-2"] });
+    expect(projectsOf("procurementOrder")).toEqual({ in: ["project-2"] });
+    expect(projectsOf("longLeadItem")).toEqual({ in: ["project-2"] });
+    expect(projectsOf("activity")).toEqual({ in: ["project-1", "project-2"] });
+    expect(mockPrisma.task.findMany.mock.calls[0][0].where).toEqual({
+      archivedAt: null,
+      OR: [
+        { projectId: { in: ["project-2"] } },
+        { projectId: { in: ["project-1"] }, OR: [{ assigneeId: "pm-1" }, { createdById: "pm-1" }] },
+      ],
+    });
   });
 });

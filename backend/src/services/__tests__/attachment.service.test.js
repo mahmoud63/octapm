@@ -35,8 +35,16 @@ const mockJobService = {
   enqueueJob: jest.fn(),
 };
 const mockReadImageMetadata = jest.fn();
+// A viewer here carries the documents and records it may read (document-text.service decides for real).
+const mockDocText = {
+  readableDocumentIds: jest.fn(async ({ documentIds, viewer }) => new Set(documentIds.filter((id) => viewer.readable.includes(id)))),
+  documentReadableToViewer: jest.fn(async ({ documentId, viewer }) => viewer.readable.includes(documentId)),
+  recordRuleVisibleIds: jest.fn(async ({ viewer }) => new Set(viewer.records)),
+  attachmentVisible: jest.fn((link, _viewer, ruled) => ruled.has(`${link.recordType}:${link.recordId}`)),
+};
 
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
+jest.mock("../document-text.service", () => mockDocText);
 jest.mock("../file-storage.service", () => mockFileStorage);
 jest.mock("../audit.service", () => mockAudit);
 jest.mock("../../jobs/job.service", () => mockJobService);
@@ -268,6 +276,57 @@ describe("attachment service", () => {
     });
     expect(result.summary).toEqual({ total: 2, tags: [{ tag: "concrete", count: 2 }, { tag: "rebar", count: 1 }] });
     expect(result.pagination.nextCursor).toBeNull();
+  });
+
+  // Certification R31: a photo is its document's, and its document its records'.
+  it("lists, pages and counts only the photos, records and tags a viewer may read", async () => {
+    const photo = (id, documentId, tags) => ({ id, projectId: "project-1", orgId: "org-1", documentId, tags, caption: null, takenAt: null, thumbnailStatus: "pending", thumbnailKey: null, document: { ...imageDocument, id: documentId }, createdAt: new Date(), updatedAt: new Date() });
+    const rows = [photo("ph-1", "doc-a", ["concrete"]), photo("ph-2", "doc-b", ["lien-waiver"]), photo("ph-3", "doc-c", ["rebar"])];
+    mockPrisma.photo.findMany.mockImplementation(async ({ select, take, cursor, skip = 0 }) => {
+      if (select) return rows.map((row) => ({ documentId: row.documentId, tags: row.tags }));
+      const start = cursor ? rows.findIndex((row) => row.id === cursor.id) + skip : 0;
+      return rows.slice(start, start + take);
+    });
+    mockPrisma.attachment.findMany.mockImplementation(async ({ where }) =>
+      [
+        { documentId: "doc-a", recordType: "ncr", recordId: "ncr-1", role: "photo" },
+        { documentId: "doc-a", recordType: "rfi", recordId: "rfi-9", role: "reference" },
+        { documentId: "doc-b", recordType: "sub_pay_app", recordId: "spa-1", role: "evidence" },
+        { documentId: "doc-c", recordType: "location", recordId: "loc-1", role: "photo" },
+      ].filter((link) => where.documentId.in.includes(link.documentId)),
+    );
+    const viewer = { userId: "user-2", readable: ["doc-a", "doc-c"], records: ["ncr:ncr-1", "location:loc-1"] };
+    const scope = { orgId: "org-1", projectId: "project-1" };
+
+    const first = await service.listPhotos({ ...scope, query: { limit: 1 }, viewer });
+    expect(first.items.map((item) => [item.id, item.records])).toEqual([["ph-1", [{ recordType: "ncr", recordId: "ncr-1", role: "photo" }]]]);
+    expect(first.pagination.nextCursor).toBe("ph-1");
+    expect(first.summary).toEqual({ total: 2, tags: [{ tag: "concrete", count: 1 }, { tag: "rebar", count: 1 }] });
+    const second = await service.listPhotos({ ...scope, query: { limit: 1, cursor: "ph-1" }, viewer });
+    expect(second.items.map((item) => item.id)).toEqual(["ph-3"]);
+    expect(second.pagination.nextCursor).toBeNull();
+
+    // a record filter matches only a link the viewer may see
+    const byHiddenRecord = await service.listPhotos({ ...scope, query: { recordType: "rfi", recordId: "rfi-9" }, viewer });
+    expect(byHiddenRecord.items).toEqual([]);
+    const byLocation = await service.listPhotos({ ...scope, query: { recordType: "location", recordId: "loc-1" }, viewer });
+    expect(byLocation.items.map((item) => item.id)).toEqual(["ph-3"]);
+
+    // the PM's viewer reads them all
+    const pm = await service.listPhotos({ ...scope, query: {}, viewer: { userId: "pm", readable: ["doc-a", "doc-b", "doc-c"], records: ["ncr:ncr-1", "rfi:rfi-9", "sub_pay_app:spa-1", "location:loc-1"] } });
+    expect(pm.items.map((item) => item.id)).toEqual(["ph-1", "ph-2", "ph-3"]);
+    expect(pm.summary.total).toBe(3);
+
+    // a photo's file: a hidden one is answered as a missing photo
+    mockPrisma.photo.findFirst.mockResolvedValue(rows[1]);
+    mockPrisma.projectDocument.findFirst.mockResolvedValue({ id: "doc-b", documentType: "workflow_attachment" });
+    mockFileStorage.getProjectDocumentFile.mockResolvedValue({ path: "/tmp/b.jpg", mimeType: "image/jpeg" });
+    await expect(service.getPhotoFile({ ...scope, photoId: "ph-2", viewer })).rejects.toMatchObject({ status: 404, code: "PHOTO_NOT_FOUND" });
+    expect(mockFileStorage.getProjectDocumentFile).not.toHaveBeenCalled();
+    await expect(service.getPhotoFile({ ...scope, photoId: "ph-2", variant: "thumbnail", viewer: { ...viewer, readable: ["doc-b"] } })).resolves.toEqual({ path: "/tmp/b.jpg", mimeType: "image/jpeg" });
+    await expect(service.getPhotoFile({ ...scope, photoId: "ph-2" })).resolves.toEqual({ path: "/tmp/b.jpg", mimeType: "image/jpeg" });
+    mockPrisma.photo.findMany.mockReset();
+    mockPrisma.attachment.findMany.mockReset();
   });
 
   it("marks thumbnails unavailable when the image codec is not installed", async () => {

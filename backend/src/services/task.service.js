@@ -1158,6 +1158,7 @@ module.exports = {
   createTask,
   deleteTask,
   getTaskById,
+  hasProjectWideTaskVisibility,
   listTasks,
   serializeTask,
   updateTask,

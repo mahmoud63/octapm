@@ -41,6 +41,8 @@ const PAGES = [
 ];
 
 const DOCUMENT = { id: "doc-1", orgId: "org-1", projectId: "p1", title: "Technical specification", originalName: "spec.pdf", documentNumber: "SPEC-001", category: "specification", discipline: null, mimeType: "application/pdf", uploadedAt: new Date("2026-08-01"), storageKey: "spec.pdf" };
+// A where's documentId: absent, one id, or { in: [...] }.
+const matchesDocument = (row, condition) => condition === undefined || (condition && Array.isArray(condition.in) ? condition.in.includes(row.documentId) : row.documentId === condition);
 
 const mockPrisma = {
   projectDocument: { findFirst: jest.fn(async ({ where }) => (where.id === "doc-1" ? { ...DOCUMENT, text: { status: "ready", text: SPEC_TEXT, wordCount: 200, pageCount: 5 } } : null)) },
@@ -66,14 +68,14 @@ const mockPrisma = {
       for (const row of data) store.sections.push({ id: nextId("sec"), createdAt: new Date(), updatedAt: new Date(), ...row });
       return { count: data.length };
     }),
-    findMany: jest.fn(async ({ where = {} }) => store.sections.filter((row) => row.projectId === where.projectId && (!where.division || row.division === where.division) && (!where.documentId || row.documentId === where.documentId)).map((row) => ({ ...row, document: { id: DOCUMENT.id, title: DOCUMENT.title, originalName: DOCUMENT.originalName } }))),
+    findMany: jest.fn(async ({ where = {} }) => store.sections.filter((row) => row.projectId === where.projectId && (!where.division || row.division === where.division) && matchesDocument(row, where.documentId) && (where.AND || []).every((clause) => matchesDocument(row, clause.documentId))).map((row) => ({ ...row, document: { id: DOCUMENT.id, title: DOCUMENT.title, originalName: DOCUMENT.originalName } }))),
     findFirst: jest.fn(async ({ where }) => {
       const row = store.sections.find((item) => item.id === where.id && item.projectId === where.projectId);
       return row ? { ...row, document: { id: DOCUMENT.id, title: DOCUMENT.title, originalName: DOCUMENT.originalName, text: { text: SPEC_TEXT } } } : null;
     }),
-    groupBy: jest.fn(async ({ by }) => {
+    groupBy: jest.fn(async ({ by, where = {} }) => {
       const groups = new Map();
-      for (const row of store.sections) {
+      for (const row of store.sections.filter((item) => matchesDocument(item, where.documentId))) {
         const key = row[by[0]];
         const group = groups.get(key) || { [by[0]]: key, _count: { _all: 0 }, _max: { updatedAt: row.updatedAt } };
         group._count._all += 1;
@@ -105,7 +107,12 @@ const mockPrisma = {
   },
   $transaction: jest.fn(async (fn) => fn(mockPrisma)),
 };
-const mockDocumentText = { readDocumentBytes: jest.fn(async () => Buffer.from("pdf")) };
+// A viewer here carries the documents it may read (document-text.service decides for real).
+const mockDocumentText = {
+  readDocumentBytes: jest.fn(async () => Buffer.from("pdf")),
+  readableDocumentIds: jest.fn(async ({ documentIds, viewer }) => new Set(documentIds.filter((id) => viewer.readable.includes(id)))),
+  documentReadableToViewer: jest.fn(async ({ documentId, viewer }) => viewer.readable.includes(documentId)),
+};
 const mockPdfPages = jest.fn(() => ({ encrypted: false, pageCount: PAGES.length, pages: PAGES }));
 const mockDrawingAssistant = { pageTextFor: jest.fn(async () => "GENERAL NOTES: 1. ALL STRUCTURAL CONCRETE GRADE C35/45 U.N.O. 2. REINFORCEMENT GRADE B500B. SEE S-501 FOR DETAILS.") };
 const mockRfi = { createRfi: jest.fn(async ({ payload }) => ({ id: "rfi-9", ref: "RFI-009", status: payload.status })) };
@@ -348,6 +355,84 @@ describe("specifications and scope intelligence", () => {
       expect(mockRfi.createRfi).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ specSection: "03 30 00", discipline: "Structural", status: "draft", priority: "high" }), userId: "u-1" }));
       expect(result).toEqual({ record: { id: "rfi-9", ref: "RFI-009", status: "draft" }, url: "/projects/p1/doc-control/rfi?recordId=rfi-9&source=rfi" });
       await expect(service.raiseRfi({ ...scope, sectionId: concreteId, user, payload: {} })).rejects.toMatchObject({ code: "SPEC_RFI_SUBJECT" });
+    });
+  });
+
+  // Certification R30 / R7: a specification is its document's, and its
+  // document its records'; a section's RFIs are the caller's RFI register's.
+  describe("who reads (R30, R7)", () => {
+    const reader = { userId: "u-1", id: "u-1", canRead: () => true, readable: ["doc-1", "doc-2"] };
+    const outsider = { userId: "u-2", id: "u-2", canRead: () => true, readable: [] };
+    let concreteId;
+    beforeEach(async () => {
+      await service.indexDocument({ ...scope, documentId: "doc-1" });
+      concreteId = store.sections.find((row) => row.code === "03 30 00").id;
+      jest.clearAllMocks();
+    });
+
+    it("lists only the documents the viewer may read", async () => {
+      expect((await service.listDocuments({ ...scope, viewer: reader })).items.map((row) => row.id)).toEqual(["doc-1", "doc-2"]);
+      expect((await service.listDocuments({ ...scope, viewer: { ...reader, readable: ["doc-2"] } })).items.map((row) => row.id)).toEqual(["doc-2"]);
+      expect(mockDocumentText.readableDocumentIds).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", projectId: "p1", documentIds: ["doc-1", "doc-2"] }));
+    });
+
+    it("indexes only a readable document: a hidden one is answered as a missing one, and a scan neither indexes nor names it", async () => {
+      const hidden = await service.scanProject({ ...scope, documentIds: ["doc-1"], viewer: outsider });
+      const missing = await service.scanProject({ ...scope, documentIds: ["doc-404"], viewer: outsider });
+      expect(hidden.documents).toEqual([{ documentId: "doc-1", sections: 0, error: "Document not found" }]);
+      expect(missing.documents).toEqual([{ documentId: "doc-404", sections: 0, error: "Document not found" }]);
+      await expect(service.indexDocument({ ...scope, documentId: "doc-1", viewer: outsider })).rejects.toMatchObject({ status: 404, code: "DOCUMENT_NOT_FOUND" });
+      const scan = await service.scanProject({ ...scope, viewer: outsider });
+      expect(scan.documents).toEqual([]);
+      expect(mockPrisma.specSection.createMany).not.toHaveBeenCalled();
+      const own = await service.scanProject({ ...scope, viewer: reader });
+      expect(own.documents.map((row) => [row.documentId, row.sections])).toEqual([["doc-1", 3]]);
+    });
+
+    it("lists, counts, opens, checks and raises from the sections of readable documents only", async () => {
+      const none = await service.listSections({ ...scope, viewer: outsider });
+      expect(none).toMatchObject({ items: [], divisions: [], total: 0 });
+      expect((await service.listSections({ ...scope, documentId: "doc-1", viewer: outsider })).items).toEqual([]);
+      const all = await service.listSections({ ...scope, viewer: reader });
+      expect(all.items).toHaveLength(3);
+      expect(all.total).toBe(3);
+
+      await expect(service.getSection({ ...scope, sectionId: concreteId, viewer: outsider })).rejects.toMatchObject({ status: 404, code: "SPEC_SECTION_NOT_FOUND" });
+      await expect(service.getSection({ ...scope, sectionId: "sec-404", viewer: outsider })).rejects.toMatchObject({ status: 404, code: "SPEC_SECTION_NOT_FOUND" });
+      await expect(service.findConflicts({ ...scope, sectionId: concreteId, user, viewer: outsider })).rejects.toMatchObject({ code: "SPEC_SECTION_NOT_FOUND" });
+      await expect(service.raiseRfi({ ...scope, sectionId: concreteId, user, payload: { subject: "Grade?" }, viewer: outsider })).rejects.toMatchObject({ code: "SPEC_SECTION_NOT_FOUND" });
+      expect(mockRfi.createRfi).not.toHaveBeenCalled();
+      expect((await service.getSection({ ...scope, sectionId: concreteId, viewer: reader })).text).toContain("grade C40/50");
+      await service.raiseRfi({ ...scope, sectionId: concreteId, user, payload: { subject: "Grade?" }, viewer: reader });
+      expect(mockRfi.createRfi).toHaveBeenCalledTimes(1);
+
+      expect((await service.scopeGaps({ ...scope, viewer: outsider })).sections).toEqual([]);
+      expect((await service.scopeGaps({ ...scope, viewer: reader })).sections).toHaveLength(3);
+    });
+
+    it("relates a section only to the RFIs the caller's register lists: none without RFI read, party routing and drafts as the register has them", async () => {
+      const noRfi = await service.getSection({ ...scope, sectionId: concreteId, viewer: { ...reader, canRead: (moduleName) => moduleName !== "rfi" } });
+      expect(noRfi.related.rfis).toEqual([]);
+      expect(mockPrisma.rfi.findMany).not.toHaveBeenCalled();
+
+      const projectAccess = { scope: "party", partyAccess: [{ projectPartyId: "pp-1", companyId: "co-1" }] };
+      await service.getSection({ ...scope, sectionId: concreteId, viewer: reader, projectAccess });
+      const partyWhere = mockPrisma.rfi.findMany.mock.calls[0][0].where;
+      expect(partyWhere).toEqual({
+        AND: [
+          { projectId: "p1", archivedAt: null, AND: [{ OR: [{ ownerPartyId: { in: ["pp-1"] } }, { reviewerPartyId: { in: ["pp-1"] } }, { approverPartyId: { in: ["pp-1"] } }] }] },
+          { OR: [{ status: { not: "draft" } }, { createdBy: "u-1" }, { managerUserId: "u-1" }] },
+        ],
+      });
+
+      mockPrisma.rfi.findMany.mockClear();
+      await service.scopeGaps({ ...scope, viewer: reader, projectAccess: { scope: "assignment", assignmentRole: "pm", partyAccess: [] } });
+      expect(mockPrisma.rfi.findMany.mock.calls[0][0].where).toEqual({ AND: [{ projectId: "p1", archivedAt: null }, { OR: [{ status: { not: "draft" } }, { createdBy: "u-1" }, { managerUserId: "u-1" }] }] });
+
+      // no caller (an internal read): unfiltered, as before
+      mockPrisma.rfi.findMany.mockClear();
+      await service.getSection({ ...scope, sectionId: concreteId });
+      expect(mockPrisma.rfi.findMany.mock.calls[0][0].where).toEqual({ projectId: "p1", archivedAt: null });
     });
   });
 });

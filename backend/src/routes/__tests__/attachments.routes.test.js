@@ -42,9 +42,14 @@ const mockService = {
   listPhotos: jest.fn(),
   updatePhoto: jest.fn(),
   getPhotoFile: jest.fn(),
+  getPhoto: jest.fn(),
 };
 jest.mock("../../services/attachment.service", () => mockService);
-jest.mock("../../services/document-text.service", () => ({ recordVisibleToViewer: jest.fn(async () => true), documentReadableToViewer: jest.fn(async () => true) }));
+jest.mock("../../services/document-text.service", () => ({
+  recordVisibleToViewer: jest.fn(async () => true),
+  documentReadableToViewer: jest.fn(async () => true),
+  documentViewer: jest.fn(({ userId, projectAccess, canRead }) => ({ id: userId, userId, canRead, partyIds: null, companyIds: null, projectAccess })),
+}));
 
 const attachmentsRouter = require("../attachments");
 const photosRouter = require("../photos");
@@ -75,6 +80,7 @@ describe("attachment routes", () => {
     mockService.getAttachment.mockResolvedValue({ id: ATTACHMENT_ID, recordType: "ipc" });
     mockService.listPhotos.mockResolvedValue({ items: [], pagination: {}, summary: {} });
     mockService.updatePhoto.mockResolvedValue({ id: PHOTO_ID });
+    mockService.getPhoto.mockResolvedValue({ id: PHOTO_ID, documentId: "doc-photo-1" });
   });
 
   it("reads attachments with the record module's read permission", async () => {
@@ -168,6 +174,49 @@ describe("attachment routes", () => {
 
     const badDate = await request(app).get("/projects/project-1/photos?from=not-a-date");
     expect(badDate.status).toBe(400);
+  });
+
+  it("R31: the gallery, a photo's files and an edit read as the caller's document viewer", async () => {
+    const docText = require("../../services/document-text.service");
+    const app = buildApp();
+    mockService.getPhotoFile.mockResolvedValue({ redirectUrl: "https://files.example/p.jpg" });
+
+    await request(app).get("/projects/project-1/photos").set("x-role", "finance");
+    const listed = mockService.listPhotos.mock.calls[0][0];
+    expect(listed.viewer).toEqual(expect.objectContaining({ userId: "user-1" }));
+    expect(listed.viewer.canRead("document_control")).toBe(true);
+    expect(listed.viewer.canRead("sub_pay_app")).toBe(true);
+    expect(listed.viewer.canRead("commitment")).toBe(true);
+
+    for (const variant of ["file", "thumbnail"]) {
+      await request(app).get(`/projects/project-1/photos/${PHOTO_ID}/${variant}`).set("x-role", "site_engineer");
+    }
+    const variants = mockService.getPhotoFile.mock.calls.map(([args]) => args);
+    expect(variants.map((args) => args.variant)).toEqual(["original", "thumbnail"]);
+    for (const args of variants) {
+      expect(args.viewer).toEqual(expect.objectContaining({ userId: "user-1" }));
+      expect(args.viewer.canRead("commitment")).toBe(false);
+    }
+
+    // an edit of a photo whose document the caller may not read is answered as a missing photo
+    docText.documentReadableToViewer.mockResolvedValueOnce(false);
+    const hidden = await request(app)
+      .patch(`/projects/project-1/photos/${PHOTO_ID}`)
+      .set("x-role", "site_engineer")
+      .send({ caption: "x" });
+    expect(hidden.status).toBe(404);
+    expect(hidden.body.error.code).toBe("PHOTO_NOT_FOUND");
+    expect(mockService.updatePhoto).not.toHaveBeenCalled();
+    expect(docText.documentReadableToViewer).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "project-1", documentId: "doc-photo-1", viewer: expect.objectContaining({ userId: "user-1" }) }),
+    );
+
+    const allowed = await request(app)
+      .patch(`/projects/project-1/photos/${PHOTO_ID}`)
+      .set("x-role", "site_engineer")
+      .send({ caption: "Grid B3" });
+    expect(allowed.status).toBe(200);
+    expect(mockService.updatePhoto).toHaveBeenCalledTimes(1);
   });
 });
 

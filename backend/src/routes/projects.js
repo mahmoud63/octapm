@@ -17,6 +17,7 @@ const { moneyBody } = require("../utils/money");
 const projectService = require("../services/project.service");
 const setupReadinessService = require("../services/project-setup-readiness.service");
 const workspaceDashboardService = require("../services/workspace-dashboard.service");
+const taskService = require("../services/task.service");
 
 const router = express.Router();
 
@@ -45,6 +46,10 @@ const commercialAccessOnRoute = (req) => async () =>
   hasPermission(req, "ipc", "read");
 const commercialAccessPerProject = (req) => async (projectId) =>
   hasPermission(await requestForProject(req, projectId), "ipc", "read");
+// A page of projects is decided in one go — the same rule, each project's
+// own view, without resolving access and template once per row (R28).
+const commercialAccessForPage = (req) => async (projectIds) =>
+  projectService.commercialTermsReadableIds({ req, projectIds });
 const nestedProjectAccess = [
   param("projectId").isUUID(),
   validate,
@@ -173,7 +178,7 @@ router.get(
       role: req.user.role,
       isCompanyAdmin: req.user.isCompanyAdmin,
       query: req.query,
-      commercialAccessFor: commercialAccessPerProject(req),
+      commercialAccessForProjects: commercialAccessForPage(req),
     });
 
     return sendSuccess(res, result);
@@ -205,6 +210,15 @@ router.get(
         const view = await viewFor(projectId);
         const certificates = hasPermission(view, "ipc", "read");
         return { certificates, lines: certificates && canReadBoq(view) };
+      },
+      // Every other queue, as that module's own routes decide it on that
+      // project (certification N3), and tasks under the task list's rule.
+      moduleAccessFor: async (projectId) => {
+        const view = await viewFor(projectId);
+        return {
+          can: (moduleName) => hasPermission(view, moduleName, "read"),
+          projectWideTasks: Boolean(view.user) && taskService.hasProjectWideTaskVisibility({ role: req.user.role, projectAccess: view.projectAccess }),
+        };
       },
     });
 

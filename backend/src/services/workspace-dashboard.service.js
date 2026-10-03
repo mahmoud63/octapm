@@ -421,6 +421,64 @@ async function getEvReports({ orgId, projects }) {
   }, new Map());
 }
 
+/**
+ * The RFIs and submittals this caller's own registers list on each project
+ * (rfi.service listRfis, submittal.service listSubmittals), as where clauses:
+ * on a project they reach through a party (company-party isPartyScopedAccess,
+ * the access requireProjectAccess resolves for that project's routes) only
+ * the records routed to their parties (applyPartyWorkflowVisibility), and an
+ * RFI draft only to its author and its manager (rfi-workflow
+ * withDraftVisibility). The overdue queues listed every project's RFIs and
+ * submittals — ref and subject — to a party guest, drafts included
+ * (certification R7); the queues, their counts and the scores built from
+ * them now hold what the registers hold, as the IPC queue does through
+ * ipcAccessFor. A company-wide read without a person (the portfolio
+ * snapshot) is not filtered.
+ */
+async function workflowRecordScopes({ orgId, userId, role, isCompanyAdmin, projectIds }) {
+  const base = { projectId: { in: projectIds }, archivedAt: null };
+  if (!userId) return { rfi: base, submittal: base };
+  const {
+    assertProjectAccess,
+    canAccessAllProjects,
+  } = require("./project-authorization.service");
+  const {
+    applyPartyWorkflowVisibility,
+    isPartyScopedAccess,
+  } = require("./company-party.service");
+  const { withDraftVisibility } = require("./rfi-workflow.service");
+
+  let open = projectIds;
+  let scoped = [];
+  // A PM who is no workspace admin reaches every project through the
+  // organisation (assertProjectAccess answers scope "org"): never a party.
+  if (!canAccessAllProjects(role, { isCompanyAdmin }) || isCompanyAdmin) {
+    const accesses = await Promise.all(
+      projectIds.map(async (projectId) => [
+        projectId,
+        await assertProjectAccess({ orgId, projectId, userId, role, isCompanyAdmin }).catch(() => null),
+      ]),
+    );
+    open = accesses
+      .filter(([, access]) => access && !isPartyScopedAccess(access))
+      .map(([projectId]) => projectId);
+    scoped = accesses.filter(([, access]) => access && isPartyScopedAccess(access));
+  }
+  const routed = () => ({
+    archivedAt: null,
+    OR: [
+      ...(open.length ? [{ projectId: { in: open } }] : []),
+      ...scoped.map(([projectId, access]) =>
+        applyPartyWorkflowVisibility({ projectId }, access),
+      ),
+    ],
+  });
+  return {
+    rfi: withDraftVisibility(routed(), userId),
+    submittal: routed(),
+  };
+}
+
 async function getWorkspaceDashboard({
   orgId,
   userId,
@@ -436,6 +494,15 @@ async function getWorkspaceDashboard({
   // company-wide read such as the portfolio snapshot), every project's
   // queue is counted.
   ipcAccessFor = null,
+  // Every other queue, as its own module's routes decide it (certification
+  // N3): async (projectId) => ({ can(moduleName), projectWideTasks }). A
+  // project's schedule, progress, procurement, NCR, inspection, safety,
+  // change-order, risk, RFI and submittal queues come only from where the
+  // caller may read that module, and its tasks under the task list's own
+  // rule (every task with project-wide task visibility, otherwise their
+  // own). Omitted (a company-wide read such as the portfolio snapshot),
+  // nothing is narrowed.
+  moduleAccessFor = null,
 }) {
   const projects = await prisma.project.findMany({
     where: {
@@ -500,6 +567,32 @@ async function getWorkspaceDashboard({
   }
   const ipcCertificateProjectFilter = { in: ipcCertificateProjectIds };
   const ipcLineProjectFilter = { in: ipcLineProjectIds };
+  // The other queues: per module, the projects whose module the caller may
+  // read there. A party guest refused a module on its routes (403) was shown
+  // that module's records here — change orders with their values, risks,
+  // safety and procurement items, other people's tasks (certification N3).
+  const QUEUE_MODULES = ["schedule", "progress", "procurement", "ncr", "inspection", "safety", "change_order", "risk", "task", "rfi", "submittal"];
+  let moduleProjectIds = Object.fromEntries(QUEUE_MODULES.map((moduleName) => [moduleName, projectIds]));
+  let ownTaskProjectIds = [];
+  if (typeof moduleAccessFor === "function") {
+    const decided = await Promise.all(projectIds.map(async (id) => [id, (await moduleAccessFor(id)) || null]));
+    const may = (access, moduleName) => Boolean(access && typeof access.can === "function" && access.can(moduleName));
+    moduleProjectIds = Object.fromEntries(
+      QUEUE_MODULES.map((moduleName) => [moduleName, decided.filter(([, access]) => may(access, moduleName)).map(([id]) => id)]),
+    );
+    ownTaskProjectIds = decided
+      .filter(([id, access]) => moduleProjectIds.task.includes(id) && !access.projectWideTasks)
+      .map(([id]) => id);
+  }
+  const inModule = (moduleName) => ({ in: moduleProjectIds[moduleName] });
+  const allTaskProjectIds = moduleProjectIds.task.filter((id) => !ownTaskProjectIds.includes(id));
+  const workflowScopes = await workflowRecordScopes({
+    orgId,
+    userId,
+    role,
+    isCompanyAdmin,
+    projectIds,
+  });
 
   const [
     activities,
@@ -530,7 +623,7 @@ async function getWorkspaceDashboard({
     tasks,
   ] = await Promise.all([
     prisma.activity.findMany({
-      where: { projectId: projectIdFilter, isActive: true },
+      where: { projectId: inModule("schedule"), isActive: true },
       select: {
         id: true,
         projectId: true,
@@ -549,10 +642,10 @@ async function getWorkspaceDashboard({
       },
     }),
     prisma.scheduleRevision.count({
-      where: { projectId: projectIdFilter, status: "under_review" },
+      where: { projectId: inModule("schedule"), status: "under_review" },
     }),
     prisma.scheduleRevision.findMany({
-      where: { projectId: projectIdFilter, status: "under_review" },
+      where: { projectId: inModule("schedule"), status: "under_review" },
       take: ACTION_LIMIT,
       orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }],
       select: {
@@ -566,10 +659,10 @@ async function getWorkspaceDashboard({
       },
     }),
     prisma.progressSubmission.count({
-      where: { projectId: projectIdFilter, status: "submitted" },
+      where: { projectId: inModule("progress"), status: "submitted" },
     }),
     prisma.progressSubmission.findMany({
-      where: { projectId: projectIdFilter, status: "submitted" },
+      where: { projectId: inModule("progress"), status: "submitted" },
       take: ACTION_LIMIT,
       orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }],
       select: {
@@ -582,10 +675,10 @@ async function getWorkspaceDashboard({
       },
     }),
     prisma.dailyReport.count({
-      where: { projectId: projectIdFilter, status: "submitted" },
+      where: { projectId: inModule("progress"), status: "submitted" },
     }),
     prisma.siteDiary.count({
-      where: { projectId: projectIdFilter, status: "submitted" },
+      where: { projectId: inModule("progress"), status: "submitted" },
     }),
     prisma.ipcCertificate.count({
       where: { projectId: ipcCertificateProjectFilter, status: "submitted" },
@@ -654,26 +747,26 @@ async function getWorkspaceDashboard({
       },
     }),
     prisma.procurementOrder.findMany({
-      where: { projectId: projectIdFilter },
+      where: { projectId: inModule("procurement") },
       include: {
         activity: { select: ACTIVITY_SELECT },
       },
     }),
     prisma.procurementPackage.findMany({
-      where: { projectId: projectIdFilter },
+      where: { projectId: inModule("procurement") },
       include: {
         activity: { select: ACTIVITY_SELECT },
       },
     }),
     prisma.procurementPoLine.findMany({
-      where: { projectId: projectIdFilter },
+      where: { projectId: inModule("procurement") },
       include: {
         order: { select: { id: true, ref: true, status: true } },
         activity: { select: ACTIVITY_SELECT },
       },
     }),
     prisma.activityMaterial.findMany({
-      where: { projectId: projectIdFilter },
+      where: { projectId: inModule("procurement") },
       include: {
         poLines: {
           orderBy: { createdAt: "desc" },
@@ -683,7 +776,7 @@ async function getWorkspaceDashboard({
       },
     }),
     prisma.longLeadItem.findMany({
-      where: { projectId: projectIdFilter },
+      where: { projectId: inModule("procurement") },
       include: {
         activity: {
           select: {
@@ -705,7 +798,7 @@ async function getWorkspaceDashboard({
       },
     }),
     prisma.ncrRecord.findMany({
-      where: { projectId: projectIdFilter },
+      where: { projectId: inModule("ncr") },
       select: {
         id: true,
         projectId: true,
@@ -718,7 +811,7 @@ async function getWorkspaceDashboard({
       },
     }),
     prisma.itpRecord.findMany({
-      where: { projectId: projectIdFilter },
+      where: { projectId: inModule("inspection") },
       select: {
         id: true,
         projectId: true,
@@ -730,7 +823,7 @@ async function getWorkspaceDashboard({
       },
     }),
     prisma.safetyIncident.findMany({
-      where: { projectId: projectIdFilter, archivedAt: null },
+      where: { projectId: inModule("safety"), archivedAt: null },
       select: {
         id: true,
         projectId: true,
@@ -744,7 +837,7 @@ async function getWorkspaceDashboard({
       },
     }),
     prisma.rfi.findMany({
-      where: { projectId: projectIdFilter, archivedAt: null },
+      where: { AND: [workflowScopes.rfi, { projectId: inModule("rfi") }] },
       select: {
         id: true,
         projectId: true,
@@ -757,7 +850,7 @@ async function getWorkspaceDashboard({
       },
     }),
     prisma.submittal.findMany({
-      where: { projectId: projectIdFilter, archivedAt: null },
+      where: { AND: [workflowScopes.submittal, { projectId: inModule("submittal") }] },
       select: {
         id: true,
         projectId: true,
@@ -770,7 +863,7 @@ async function getWorkspaceDashboard({
     }),
     prisma.changeOrder.findMany({
       where: {
-        projectId: projectIdFilter,
+        projectId: inModule("change_order"),
         archivedAt: null,
         status: { in: ["pending", "approved"] },
       },
@@ -789,7 +882,7 @@ async function getWorkspaceDashboard({
       },
     }),
     prisma.risk.findMany({
-      where: { projectId: projectIdFilter, archivedAt: null },
+      where: { projectId: inModule("risk"), archivedAt: null },
       select: {
         id: true,
         projectId: true,
@@ -817,7 +910,13 @@ async function getWorkspaceDashboard({
       },
     }),
     prisma.task.findMany({
-      where: { projectId: projectIdFilter, archivedAt: null },
+      where: {
+        archivedAt: null,
+        OR: [
+          { projectId: { in: allTaskProjectIds } },
+          { projectId: { in: ownTaskProjectIds }, OR: [{ assigneeId: userId || "" }, { createdById: userId || "" }] },
+        ],
+      },
       select: {
         id: true,
         projectId: true,
