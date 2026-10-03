@@ -165,6 +165,64 @@ const rawInprocess = async (method, route, { token = null, json, form, headers =
   return { status: res.status, headers: headerBag, text, body: parse(text) };
 };
 
+/**
+ * A request that got no answer at all (refused, reset, cut off) is sent again
+ * only when CERT_RETRY_AFTER_RESTART=1 (run-with-watchdog.js sets it) and only
+ * after the API has been replaced by a new process: the PID in api.pid has
+ * changed and the new API answers /api/health/ready. The old process is gone,
+ * so whatever it had not committed was rolled back with its connections, and
+ * sending the request again cannot duplicate a record. A request that got any
+ * HTTP answer is never sent again, and if the same API stays up and ready for
+ * two minutes the failure was not a dead API and is reported as it was.
+ */
+const API_PID_FILE = path.join(process.env.CERT_WORK_DIR || 'C:/Temp/octapm-cert', 'api.pid');
+const RESTART_WAIT_MS = Number(process.env.CERT_RESTART_WAIT_MS || 15 * 60_000);
+const SAME_API_GIVE_UP_MS = 2 * 60_000;
+const apiPid = () => {
+  try {
+    return fs.readFileSync(API_PID_FILE, 'utf8').trim();
+  } catch {
+    return null;
+  }
+};
+const apiReady = async () => {
+  try {
+    return (await fetch(`${BASE}/api/health/ready`, { signal: AbortSignal.timeout(5_000) })).status === 200;
+  } catch {
+    return false;
+  }
+};
+const waitForReplacement = async (before) => {
+  const started = Date.now();
+  let sameAndReadySince = null;
+  while (Date.now() - started < RESTART_WAIT_MS) {
+    const now = apiPid();
+    const isReady = await apiReady();
+    if (now && now !== before && isReady) return true;
+    if (now === before && isReady) {
+      sameAndReadySince = sameAndReadySince ?? Date.now();
+      if (Date.now() - sameAndReadySince > SAME_API_GIVE_UP_MS) return false;
+    } else {
+      sameAndReadySince = null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+  }
+  return false;
+};
+const fetchOnce = async (url, init, method, route) => {
+  const retry = process.env.CERT_RETRY_AFTER_RESTART === '1';
+  const before = retry ? apiPid() : null;
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    if (!retry) throw error;
+    console.error(`[api] ${method} ${route}: no answer (${error.cause?.code || error.message}); waiting for the API to be replaced`);
+    if (!(await waitForReplacement(before))) throw error;
+    console.error(`[api] ${method} ${route}: the API was replaced; sending again`);
+    return fetch(url, init);
+  }
+};
+
 const rawUncaptured = async (method, route, options = {}) => {
   if (process.env.CERT_INPROCESS === '1' && !route.startsWith('http')) return rawInprocess(method, route, options);
   const { token = null, json, form, headers = {}, binary = false } = options;
@@ -177,7 +235,7 @@ const rawUncaptured = async (method, route, options = {}) => {
   } else if (form) {
     init.body = form;
   }
-  const res = await fetch(url, init);
+  const res = await fetchOnce(url, init, method, route);
   if (binary && res.ok) {
     const buffer = Buffer.from(await res.arrayBuffer());
     return { status: res.status, headers: res.headers, buffer, body: null, text: null };
