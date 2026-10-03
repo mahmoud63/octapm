@@ -143,20 +143,34 @@ const serializeSnapshot = (snapshot, now) => {
   };
 };
 
-/** One row per project the caller can open; snapshots only, no recomputation. */
-const getPortfolio = async ({ orgId, user, projectIds = null, now = new Date() }) => {
+/**
+ * One row per project the caller can open; snapshots only, no recomputation.
+ *
+ * A project's contract value is one of its commercial terms, which the
+ * project record states only where the caller may read them there
+ * (project.service COMMERCIAL_TERMS: ipc:read on that project's own view).
+ * `commercialAccessForProjects(ids)` answers with the ids whose terms the
+ * caller may read; on any other row the value is withheld (`contractValue:
+ * null, contractValueWithheld: true`), and the summary adds up the readable
+ * rows only — null when there is none, `contractValueWithheld: true` when
+ * any was left out (certification R20). Without that answer every row's is
+ * withheld.
+ */
+const getPortfolio = async ({ orgId, user, projectIds = null, now = new Date(), commercialAccessForProjects = null }) => {
   const projects = await prisma.project.findMany({
     where: { orgId, archivedAt: null, ...(projectIds ? { id: { in: projectIds } } : {}), ...getProjectAccessWhere({ userId: user.id, role: user.role, isCompanyAdmin: user.isCompanyAdmin }) },
     select: { id: true, name: true, status: true, currency: true, contractValue: true, startDate: true, endDate: true, clientName: true, healthSnapshot: true },
     orderBy: { name: "asc" },
   });
+  const answered = typeof commercialAccessForProjects === "function" ? await commercialAccessForProjects(projects.map((project) => project.id)) : null;
+  const termsReadable = (projectId) => answered instanceof Set && answered.has(projectId);
   const rows = projects.map((project) => ({
     id: project.id,
     name: project.name,
     status: project.status,
     currency: project.currency,
     client: project.clientName || null,
-    contractValue: toNumber(project.contractValue),
+    ...(termsReadable(project.id) ? { contractValue: toNumber(project.contractValue) } : { contractValue: null, contractValueWithheld: true }),
     startDate: toIso(project.startDate),
     endDate: toIso(project.endDate),
     snapshot: serializeSnapshot(project.healthSnapshot, now),
@@ -167,6 +181,8 @@ const getPortfolio = async ({ orgId, user, projectIds = null, now = new Date() }
   const sum = (pick) => rows.reduce((total, row) => total + (row.snapshot ? toNumber(pick(row.snapshot)) : 0), 0);
   const computedAt = rows.reduce((latest, row) => (row.snapshot?.computedAt && (!latest || row.snapshot.computedAt > latest) ? row.snapshot.computedAt : latest), null);
   const refreshing = Boolean(await prisma.backgroundJob.findFirst({ where: { orgId, type: "portfolio.refresh", status: { in: ["queued", "running"] } }, select: { id: true } }));
+  const valued = rows.filter((row) => !row.contractValueWithheld);
+  const valueWithheld = valued.length < rows.length;
   return {
     generatedAt: now.toISOString(),
     computedAt,
@@ -174,7 +190,8 @@ const getPortfolio = async ({ orgId, user, projectIds = null, now = new Date() }
     summary: {
       projects: rows.length,
       active: rows.filter((row) => row.status === "active").length,
-      contractValue: Math.round(rows.reduce((total, row) => total + row.contractValue, 0) * 100) / 100,
+      contractValue: valueWithheld && !valued.length ? null : Math.round(valued.reduce((total, row) => total + row.contractValue, 0) * 100) / 100,
+      ...(valueWithheld ? { contractValueWithheld: true } : {}),
       averageHealth: scored.length ? Math.round(scored.reduce((total, row) => total + row.snapshot.overallScore, 0) / scored.length) : null,
       atRisk: scored.filter((row) => row.snapshot.overallScore < 60).length,
       spiWatch: rows.filter((row) => row.snapshot?.spi !== null && row.snapshot?.spi !== undefined && row.snapshot.spi < 0.9).length,

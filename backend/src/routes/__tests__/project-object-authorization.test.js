@@ -15,6 +15,7 @@ const mockProjectService = {
   createProject: jest.fn(),
   updateProject: jest.fn(),
   deleteProject: jest.fn(),
+  commercialTermsReadableIds: jest.fn(),
 };
 
 const mockScheduleService = {
@@ -154,13 +155,18 @@ describe('project object authorization', () => {
       userId: 'site-1',
       role: 'site_engineer',
       query: {},
-      commercialAccessFor: expect.any(Function),
+      commercialAccessForProjects: expect.any(Function),
     });
-    // Certification L25: each row's commercial terms are decided on that
-    // project, as its own routes decide ipc:read — a site engineer has none.
-    mockProjectAccess({ assigned: true });
-    const { commercialAccessFor } = mockProjectService.listProjects.mock.calls[0][0];
-    await expect(commercialAccessFor(projectId)).resolves.toBe(false);
+    // Certification L25 / R28: each row's commercial terms are decided on
+    // that project, as its own routes decide ipc:read — the whole page at
+    // once, by the service's batched rule, for the person asking.
+    const { commercialAccessForProjects } = mockProjectService.listProjects.mock.calls[0][0];
+    mockProjectService.commercialTermsReadableIds.mockResolvedValueOnce(new Set());
+    await expect(commercialAccessForProjects([projectId, otherProjectId])).resolves.toEqual(new Set());
+    expect(mockProjectService.commercialTermsReadableIds).toHaveBeenCalledWith({
+      req: expect.objectContaining({ user: expect.objectContaining({ id: 'site-1', role: 'site_engineer' }) }),
+      projectIds: [projectId, otherProjectId],
+    });
   });
 
   it('allows an assigned project user to get a project', async () => {

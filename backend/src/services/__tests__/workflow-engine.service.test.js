@@ -19,6 +19,10 @@ const mockPrisma = {
   // The record rules a party member's runs are judged by (certification L41).
   commitment: { findMany: jest.fn(async () => []) },
   subPayApp: { findMany: jest.fn(async () => []) },
+  // A document revision's run follows the revision's record (certification R25, R33).
+  documentRevision: { findMany: jest.fn(async () => []) },
+  rfi: { findMany: jest.fn(async () => []) },
+  submittal: { findMany: jest.fn(async () => []) },
   user: { findMany: jest.fn(async () => []) },
   projectAssignment: { findMany: jest.fn(async () => [{ userId: "pm-1", role: "pm" }, { userId: "fin-1", role: "finance" }, { userId: "qs-1", role: "qs" }]) },
   projectPartyMember: { findMany: jest.fn(async () => []) },
@@ -280,7 +284,11 @@ describe("certification L41 — a run is shown as its record is", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockPrisma.commitment.findMany.mockImplementation(async ({ where }) => (where.id.in.includes("cm-own") ? [{ id: "cm-own" }] : []));
+    // The project's commitments: cm-own is the guest's company's, cm-foreign another vendor's.
+    mockPrisma.commitment.findMany.mockImplementation(async ({ where }) => {
+      const admitted = where.OR.some((clause) => clause.vendorCompanyId?.in?.includes("company-x")) ? ["cm-own"] : [];
+      return (where.id ? admitted.filter((id) => where.id.in.includes(id)) : where.projectId === "p1" ? admitted : []).map((id) => ({ id }));
+    });
   });
 
   it("lists a run to its record's readers and its assignees only, the party rule included", async () => {
@@ -288,8 +296,13 @@ describe("certification L41 — a run is shown as its record is", () => {
     const asGuest = await engine.listInstances({ orgId: "org-1", projectId: "p1", viewer: viewerOf("guest", { party: true }) });
     expect(asGuest.map((row) => row.id)).toEqual(["own-commitment-run"]);
     expect(mockPrisma.commitment.findMany).toHaveBeenCalledWith({ where: { id: { in: ["cm-own", "cm-foreign"] }, OR: [{ vendorCompanyId: { in: ["company-x"] } }, { createdBy: "guest-1" }] }, select: { id: true } });
-    // The query is narrowed to the tools the viewer reads and the runs assigned to them.
-    expect(mockPrisma.workflowInstance.findMany.mock.calls[0][0].where.AND).toEqual([{ OR: [{ tool: { in: ["commitment", "sub_pay_app"] } }, { assignments: { some: { userId: "guest-1" } } }] }]);
+    // The query is narrowed to the runs assigned to the viewer and, of the
+    // tools they read, to the records their party rule admits — decided
+    // before the page is cut (certification R26).
+    expect(mockPrisma.workflowInstance.findMany.mock.calls[0][0].where.AND).toEqual([
+      { OR: [{ tool: "commitment", recordId: { in: ["cm-own"] } }, { tool: "sub_pay_app", recordId: { in: [] } }, { assignments: { some: { userId: "guest-1" } } }] },
+    ]);
+    expect(mockPrisma.commitment.findMany).toHaveBeenCalledWith({ where: { projectId: "p1", OR: [{ vendorCompanyId: { in: ["company-x"] } }, { createdBy: "guest-1" }] }, select: { id: true } });
 
     const asSite = await engine.listInstances({ orgId: "org-1", projectId: "p1", viewer: viewerOf("site") });
     expect(asSite.map((row) => row.id)).toEqual(["assigned-co-run"]);
@@ -320,6 +333,82 @@ describe("certification L41 — a run is shown as its record is", () => {
     expect((await engine.listTemplates({ orgId: "org-1", projectId: "p1", viewer: viewerOf("guest", { party: true }) })).map((row) => row.id)).toEqual(["tpl-cm"]);
     expect((await engine.listTemplates({ orgId: "org-1", projectId: "p1", viewer: viewerOf("qs") })).map((row) => row.id)).toEqual(["tpl-default", "tpl-ipc", "tpl-cm"]);
     expect(await engine.listTemplates({ orgId: "org-1", projectId: "p1" })).toHaveLength(3);
+  });
+
+  describe("certification R25 / R33 — a document revision's run follows the record it is filed on", () => {
+    // A small where-evaluator for the queries the rule asks (id in, AND, OR, not, equality).
+    const matches = (row, where) =>
+      Object.entries(where || {}).every(([key, condition]) => {
+        if (key === "AND") return condition.every((part) => matches(row, part));
+        if (key === "OR") return condition.some((part) => matches(row, part));
+        if (condition && typeof condition === "object" && "in" in condition) return condition.in.includes(row[key]);
+        if (condition && typeof condition === "object" && "not" in condition) return row[key] !== condition.not;
+        return row[key] === condition;
+      });
+    const revisions = [
+      { id: "rev-other", projectId: "p1", recordType: "rfi", recordId: "rfi-other" },
+      { id: "rev-own", projectId: "p1", recordType: "rfi", recordId: "rfi-own" },
+      { id: "rev-draft", projectId: "p1", recordType: "rfi", recordId: "rfi-draft" },
+      { id: "rev-drawing", projectId: "p1", recordType: "drawing", recordId: "drw-1" },
+      { id: "rev-sub", projectId: "p1", recordType: "submittal", recordId: "sub-other" },
+    ];
+    const rfis = [
+      { id: "rfi-other", projectId: "p1", status: "open", createdBy: "pm-1", managerUserId: null, ownerPartyId: "party-y", reviewerPartyId: "party-z", approverPartyId: null },
+      { id: "rfi-own", projectId: "p1", status: "open", createdBy: "pm-1", managerUserId: null, ownerPartyId: "party-x", reviewerPartyId: null, approverPartyId: null },
+      { id: "rfi-draft", projectId: "p1", status: "draft", createdBy: "pm-1", managerUserId: null, ownerPartyId: "party-x", reviewerPartyId: null, approverPartyId: null },
+    ];
+    const submittals = [{ id: "sub-other", projectId: "p1", ownerPartyId: "party-z", reviewerPartyId: null, approverPartyId: null }];
+    const revisionRuns = revisions.map((revision) => run(`run-${revision.id}`, "document_revision", revision.id, ["approver-9"]));
+    const reads = {
+      docGuest: ["workflow", "document_control", "rfi", "submittal"],
+      noRfi: ["workflow", "document_control", "submittal"],
+      member: ["workflow", "document_control", "rfi", "submittal"],
+    };
+    const viewer = (who, userId, party = false) => ({
+      id: userId,
+      userId,
+      canRead: (moduleName) => reads[who].includes(moduleName),
+      partyIds: party ? ["party-x"] : null,
+      companyIds: party ? ["company-x"] : null,
+    });
+    const ids = (rows) => rows.map((row) => row.id);
+
+    beforeEach(() => {
+      mockPrisma.documentRevision.findMany.mockImplementation(async ({ where }) => revisions.filter((row) => matches(row, where)));
+      mockPrisma.rfi.findMany.mockImplementation(async ({ where }) => rfis.filter((row) => matches(row, where)).map(({ id, projectId }) => ({ id, projectId })));
+      mockPrisma.submittal.findMany.mockImplementation(async ({ where }) => submittals.filter((row) => matches(row, where)).map(({ id, projectId }) => ({ id, projectId })));
+      mockPrisma.workflowInstance.findMany.mockResolvedValue(revisionRuns);
+    });
+
+    it("lists a revision's run only where its record is shown: module, party routing and an RFI's draft", async () => {
+      // A party guest with document_control, rfi and submittal read: its own RFI's revision and the drawing's,
+      // not the RFI routed to others, not a draft RFI it did not raise, not a submittal routed elsewhere.
+      expect(ids(await engine.listInstances({ orgId: "org-1", projectId: "p1", viewer: viewer("docGuest", "guest-1", true) }))).toEqual(["run-rev-own", "run-rev-drawing"]);
+      // A member whose template withholds rfi read: no RFI revision's run at all.
+      expect(ids(await engine.listInstances({ orgId: "org-1", projectId: "p1", viewer: viewer("noRfi", "site-1") }))).toEqual(["run-rev-drawing", "run-rev-sub"]);
+      // A member who reads every module: all but the draft RFI raised by someone else.
+      expect(ids(await engine.listInstances({ orgId: "org-1", projectId: "p1", viewer: viewer("member", "site-1") }))).toEqual(["run-rev-other", "run-rev-own", "run-rev-drawing", "run-rev-sub"]);
+      // The draft's creator sees its revision's run too; an internal caller everything.
+      expect(ids(await engine.listInstances({ orgId: "org-1", projectId: "p1", viewer: viewer("member", "pm-1") }))).toEqual(ids(revisionRuns));
+      expect(await engine.listInstances({ orgId: "org-1", projectId: "p1" })).toHaveLength(revisionRuns.length);
+    });
+
+    it("asks the database for the admitted revisions' runs only, before the page is cut (R26)", async () => {
+      await engine.listInstances({ orgId: "org-1", projectId: "p1", viewer: viewer("docGuest", "guest-1", true) });
+      const where = mockPrisma.workflowInstance.findMany.mock.calls[0][0].where;
+      expect(where.AND[0].OR).toContainEqual({ tool: "document_revision", recordId: { in: ["rev-own", "rev-drawing"] } });
+      expect(where.AND[0].OR).not.toContainEqual({ tool: "document_revision" });
+      expect(mockPrisma.documentRevision.findMany).toHaveBeenCalledWith({ where: { projectId: "p1" }, select: { id: true, projectId: true, recordType: true, recordId: true } });
+    });
+
+    it("answers a hidden revision's run as missing, and refuses to start one on it", async () => {
+      mockPrisma.workflowInstance.findFirst.mockImplementationOnce(async () => ({ ...revisionRuns[0], project: { id: "p1", name: "Tower" } }));
+      await expect(engine.getInstance({ orgId: "org-1", projectId: "p1", instanceId: "run-rev-other", viewer: viewer("docGuest", "guest-1", true) })).rejects.toMatchObject({ status: 404, code: "WORKFLOW_INSTANCE_NOT_FOUND" });
+      mockPrisma.workflowInstance.findFirst.mockImplementationOnce(async () => ({ ...revisionRuns[1], project: { id: "p1", name: "Tower" } }));
+      await expect(engine.getInstance({ orgId: "org-1", projectId: "p1", instanceId: "run-rev-own", viewer: viewer("docGuest", "guest-1", true) })).resolves.toMatchObject({ id: "run-rev-own" });
+      await expect(engine.startInstance({ orgId: "org-1", projectId: "p1", tool: "document_revision", recordId: "rev-other", actor: { id: "guest-1" }, viewer: viewer("docGuest", "guest-1", true) })).rejects.toMatchObject({ status: 404, code: "WORKFLOW_RECORD_NOT_FOUND" });
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
   });
 
   it("refuses to start, decide or cancel a run on a record the viewer may not read, before anything moves", async () => {

@@ -7,17 +7,23 @@ const { requirePermission } = require("../middleware/rbac");
 /** A key limited to some projects sees a portfolio of those projects only (Phase 21D, CX21-425). */
 const keyProjects = (req) => (req.apiClient?.projectIds?.length ? req.apiClient.projectIds : null);
 const service = require("../services/portfolio.service");
+const projectService = require("../services/project.service");
 
 /** Portfolio (OCTA-RPT-BUILDER-023): `/portfolio` — one health row per project from snapshots. */
 const router = express.Router();
 router.use(authenticate);
 
 const user = (req) => ({ id: req.user.id, role: req.user.role, isCompanyAdmin: Boolean(req.user.isCompanyAdmin) });
+// Each project's contract value only where the caller may read its
+// commercial terms, decided on that project's own view (R20, as GET
+// /projects/:id decides it).
+const commercialAccessForProjects = (req) => async (projectIds) => projectService.commercialTermsReadableIds({ req, projectIds });
+const portfolioFor = (req) => service.getPortfolio({ orgId: req.user.orgId, user: user(req), projectIds: keyProjects(req), commercialAccessForProjects: commercialAccessForProjects(req) });
 
 router.get(
   "/",
   requirePermission("portfolio", "read"),
-  asyncHandler(async (req, res) => sendSuccess(res, await service.getPortfolio({ orgId: req.user.orgId, user: user(req), projectIds: keyProjects(req) }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await portfolioFor(req))),
 );
 
 router.post(
@@ -30,7 +36,7 @@ router.get(
   "/export.xlsx",
   requirePermission("portfolio", "export"),
   asyncHandler(async (req, res) => {
-    const portfolio = await service.getPortfolio({ orgId: req.user.orgId, user: user(req), projectIds: keyProjects(req) });
+    const portfolio = await portfolioFor(req);
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "OctaPM";
     const sheet = workbook.addWorksheet("Portfolio");
@@ -62,7 +68,7 @@ router.get(
     sheet.getRow(1).font = { bold: true };
     for (const row of portfolio.rows) {
       const snapshot = row.snapshot || {};
-      sheet.addRow({ name: row.name, status: row.status, client: row.client, currency: row.currency, contractValue: row.contractValue, health: snapshot.overallScore ?? "", weakest: snapshot.weakestDimension ?? "", spi: snapshot.spi ?? "", cpi: snapshot.cpi ?? "", ev: snapshot.ev ?? "", pv: snapshot.pv ?? "", ac: snapshot.ac ?? "", eac: snapshot.eac ?? "", cashNet90: snapshot.cashNet90 ?? "", openRfis: snapshot.openRfis ?? "", openPunch: snapshot.openPunch ?? "", openNcrs: snapshot.openNcrs ?? "", pendingSubmittals: snapshot.pendingSubmittals ?? "", openTasks: snapshot.openTasks ?? "", overdueItems: snapshot.overdueItems ?? "", pendingChangeOrders: snapshot.pendingChangeOrders ?? "", delayedActivities: snapshot.delayedActivities ?? "", computedAt: snapshot.computedAt ?? "" });
+      sheet.addRow({ name: row.name, status: row.status, client: row.client, currency: row.currency, contractValue: row.contractValueWithheld ? "" : row.contractValue, health: snapshot.overallScore ?? "", weakest: snapshot.weakestDimension ?? "", spi: snapshot.spi ?? "", cpi: snapshot.cpi ?? "", ev: snapshot.ev ?? "", pv: snapshot.pv ?? "", ac: snapshot.ac ?? "", eac: snapshot.eac ?? "", cashNet90: snapshot.cashNet90 ?? "", openRfis: snapshot.openRfis ?? "", openPunch: snapshot.openPunch ?? "", openNcrs: snapshot.openNcrs ?? "", pendingSubmittals: snapshot.pendingSubmittals ?? "", openTasks: snapshot.openTasks ?? "", overdueItems: snapshot.overdueItems ?? "", pendingChangeOrders: snapshot.pendingChangeOrders ?? "", delayedActivities: snapshot.delayedActivities ?? "", computedAt: snapshot.computedAt ?? "" });
     }
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="portfolio-${new Date().toISOString().slice(0, 10)}.xlsx"`);

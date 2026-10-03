@@ -1906,7 +1906,12 @@ const components = {
       durationUnit: { type: "string", enum: ["days", "weeks", "months"] },
       contractValue: { ...money, nullable: true },
       defaultRetentionRate: { ...percent, nullable: true },
-      ldRatePerDay: money,
+      ldRatePerDay: {
+        ...money,
+        nullable: true,
+        description:
+          "Liquidated damages per day; null is stored as 0. The three commercial terms (contractValue, defaultRetentionRate, ldRatePerDay) are written only by a caller who may read them on the project (ipc:read); anyone else's values for them are not stored and are named in the answer's ignoredFields (certification R24).",
+      },
       weatherAllowanceDays: { type: "integer", minimum: 0 },
       projectCalendar: {
         type: "string",
@@ -1925,6 +1930,61 @@ const components = {
         enum: ["active", "on_hold", "completed", "cancelled"],
       },
       parties: arrayOf(ref("ProjectPartyMutation")),
+    }),
+    /**
+     * A project as GET /projects, GET / PATCH /projects/{projectId} and POST
+     * /projects answer with it. The three commercial terms are the client
+     * contract's figures (certification L25, R27): stated only to a caller who
+     * may read them on that project (ipc:read — template, role or party, the
+     * guard of GET /projects/{projectId}/prime-contract), null for anyone else
+     * with commercialTermsWithheld true.
+     */
+    Project: {
+      type: "object",
+      additionalProperties: true,
+      description:
+        "A project. The fields below are the ones a typed client must know are nullable or conditional; the rest are as ProjectMutation names them, plus parties, projectAccess and effectiveRole.",
+      properties: {
+        id: uuid,
+        name: { type: "string" },
+        status: { type: "string" },
+        currency: { type: "string" },
+        contractValue: {
+          ...money,
+          nullable: true,
+          description: "The main contract sum. null when the project has none, or when commercialTermsWithheld.",
+        },
+        defaultRetentionRate: {
+          ...percent,
+          nullable: true,
+          description: "Default retention per IPC period (5 when not set). null when commercialTermsWithheld.",
+        },
+        ldRatePerDay: {
+          ...money,
+          nullable: true,
+          description: "Liquidated damages per day. null when commercialTermsWithheld.",
+        },
+        commercialTermsWithheld: {
+          type: "boolean",
+          description:
+            "True when the caller may not read the project's commercial terms (no ipc:read on this project): contractValue, defaultRetentionRate and ldRatePerDay are then null — not zero, not unset — and an edit by this caller leaves them as they stand.",
+        },
+        ignoredFields: {
+          type: "array",
+          items: { type: "string", enum: ["contractValue", "defaultRetentionRate", "ldRatePerDay"] },
+          description:
+            "PATCH only, and only when it applies: the commercial terms this caller sent a value for that was not stored because the terms are withheld from them. The edit form's own blanks and defaults for the hidden terms (null, retention 5, LD rate 0) are not named. A PATCH that carried nothing else is refused 400 NO_UPDATES with error.details.ignoredFields.",
+        },
+        projectAccess: ref("GenericObject"),
+        effectiveRole: { type: "string", nullable: true },
+      },
+    },
+    ProjectPage: objectSchema({
+      items: arrayOf(ref("Project")),
+      pagination: objectSchema({
+        limit: { type: "integer" },
+        nextCursor: { type: "string", nullable: true },
+      }),
     }),
     /**
      * The only four things a buyer could sensibly change when raising the
@@ -3359,6 +3419,17 @@ const components = {
           "document.extract",
           "report.render",
           "notification.deliver",
+          "photo.thumbnail",
+          "photo.analyze",
+          "drawing.set_process",
+          "bim.parse",
+          "daily_log.weather",
+          "daily_log.distribute",
+          "portfolio.refresh",
+          "webhook.deliver",
+          "accounting.sync",
+          "accounting.poll",
+          "exceptions.evaluate",
         ],
       },
       status: {
@@ -3371,10 +3442,21 @@ const components = {
       payload: freeObject(
         "Job input; never contains secrets. A schedule.generate job's input carries the uploaded bill as rawText, which is left out for a caller who may not read the BOQ (see payloadWithheld).",
       ),
-      payloadWithheld: objectSchema({
-        keys: arrayOf({ type: "string" }),
-        reason: { type: "string" },
-      }),
+      payloadWithheld: {
+        ...objectSchema({
+          keys: arrayOf({ type: "string" }),
+          reason: { type: "string" },
+        }),
+        description:
+          "Present when part of the input was left out for this caller: a schedule.generate job's rawText (no boq:read), or — on a document job (document.extract and the photo and drawing-set jobs) whose document the caller may not read through any record it is linked from — the whole payload, which is then {} (keys names what it held). Absent otherwise.",
+      },
+      resultWithheld: {
+        ...objectSchema({
+          reason: { type: "string" },
+        }),
+        description:
+          "Present on a document job whose document the caller may not read: result is then null and error.details null (certification L2 / L24). Absent otherwise.",
+      },
       progress: freeObject(
         "Progress fields: step, currentStep, totalSteps, steps, progress (0-100), message.",
       ),
@@ -8036,7 +8118,7 @@ add(
     tag: "Projects",
     summary: "List projects accessible to the authenticated user.",
     description:
-      "PM users receive all projects in their organization. Other roles receive projects where they have a ProjectAssignment row or active ProjectParty membership.",
+      "PM users receive all projects in their organization. Other roles receive projects where they have a ProjectAssignment row or active ProjectParty membership. Each project's commercial terms (contractValue, defaultRetentionRate, ldRatePerDay) are stated only where the caller may read them on that project (ipc:read, decided per project as its own routes decide it); elsewhere they are null with commercialTermsWithheld true (see Project).",
     operationId: "listProjects",
     parameters: [
       ...cursorParams,
@@ -8046,7 +8128,7 @@ add(
         type: "string",
       }),
     ],
-    responseSchema: ref("CursorPage"),
+    responseSchema: ref("ProjectPage"),
   }),
 );
 
@@ -8062,6 +8144,7 @@ add(
       ref("ProjectMutation"),
       "Project metadata. name is required on create.",
     ),
+    responseSchema: ref("Project"),
     status: 201,
   }),
 );
@@ -8077,7 +8160,7 @@ add(
     tag: "Projects",
     summary: "Get workspace-level construction health and workflow queues.",
     description:
-      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview. Each projectHealth row carries bac (the official EV budget: the approved BOQ allocations), eac (bac / CPI), ev (approved allocations × % complete), pv (approved cost loading) and ac (the cost ledger's official actuals) only for a caller who may read the BOQ or the cost module on that project, decided as that project's own routes decide it (permission template, role, party); otherwise those keys are absent, not zero. The IPC queue (workflowQueues ipcActions, pendingReview ipcActions, each project's workflowActions) counts and lists a project's certificates only for a caller who may read its IPC (ipc:read, as GET /projects/{projectId}/ipc), and its certificate lines (target.source ipc_item: one per approved BOQ allocation, valued off the row) only for one who may also read its BOQ, as GET /projects/{projectId}/ipc/{period} withholds them; for anyone else those items are absent and not counted. A submitted certificate's item states its net payable in meta, except where the project's contract value is withheld from the caller (a boq_fallback or unestablished originalValueSource, no boq:read) and a retention cap is set: the net payable follows retention the cap may limit, so meta reads \"<currency> —\" and the item carries valueWithheld { keys, source, reason }, as GET /projects/{projectId}/ipc withholds it. Scores, spi and cpi are the same for every caller. dataFreshness.cutoffDate is the official cutoff: the latest EV cutoff among the projects' EV reports (each on its default basis), never a project data date — the answer's own time only when no project has an EV report; when it is a project's EV cutoff, dataFreshness also states cutoffLocalDate, cutoffTimeZone, cutoffTimeZoneSource and cutoffTimeZoneNote (null when that project's own zone applied, otherwise \"Project timezone is not configured; UTC is being used\" or the organisation default it names) — otherwise those are null. openExceptions (PC-7b) counts, org-wide over the projects the caller can open, the unresolved project exceptions they may read on each (total and bySeverity: open = not carried by a live change event and not snoozed; inChange; snoozed; basis): a BOQ-derived exception is not counted on a project whose BOQ the caller may not read, nor a module's kinds where they may not read that module, and withheld { reason, modules, projects: [{ projectId, name, reason, modules }] } then says so — which projects, and which kinds there — without a count." + DEFAULT_EV_PERIOD,
+      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview. Each projectHealth row carries bac (the official EV budget: the approved BOQ allocations), eac (bac / CPI), ev (approved allocations × % complete), pv (approved cost loading) and ac (the cost ledger's official actuals) only for a caller who may read the BOQ or the cost module on that project, decided as that project's own routes decide it (permission template, role, party); otherwise those keys are absent, not zero. Each projectHealth row's contractValue is the project's contract value, one of its commercial terms: on a project where the caller may not read them (no ipc:read there) the row carries contractValue null and contractValueWithheld true; summary.totalContractValue then adds up only the projects whose terms the caller may read — null when there is none — and summary.totalContractValueWithheld is true (both flags are absent when nothing was withheld). The IPC queue (workflowQueues ipcActions, pendingReview ipcActions, each project's workflowActions) counts and lists a project's certificates only for a caller who may read its IPC (ipc:read, as GET /projects/{projectId}/ipc), and its certificate lines (target.source ipc_item: one per approved BOQ allocation, valued off the row) only for one who may also read its BOQ, as GET /projects/{projectId}/ipc/{period} withholds them; for anyone else those items are absent and not counted. A submitted certificate's item states its net payable in meta, except where the project's contract value is withheld from the caller (a boq_fallback or unestablished originalValueSource, no boq:read) and a retention cap is set: the net payable follows retention the cap may limit, so meta reads \"<currency> —\" and the item carries valueWithheld { keys, source, reason }, as GET /projects/{projectId}/ipc withholds it. Scores, spi and cpi are the same for every caller. dataFreshness.cutoffDate is the official cutoff: the latest EV cutoff among the projects' EV reports (each on its default basis), never a project data date — the answer's own time only when no project has an EV report; when it is a project's EV cutoff, dataFreshness also states cutoffLocalDate, cutoffTimeZone, cutoffTimeZoneSource and cutoffTimeZoneNote (null when that project's own zone applied, otherwise \"Project timezone is not configured; UTC is being used\" or the organisation default it names) — otherwise those are null. openExceptions (PC-7b) counts, org-wide over the projects the caller can open, the unresolved project exceptions they may read on each (total and bySeverity: open = not carried by a live change event and not snoozed; inChange; snoozed; basis): a BOQ-derived exception is not counted on a project whose BOQ the caller may not read, nor a module's kinds where they may not read that module, and withheld { reason, modules, projects: [{ projectId, name, reason, modules }] } then says so — which projects, and which kinds there — without a count." + DEFAULT_EV_PERIOD,
     operationId: "getWorkspaceDashboard",
     responseSchema: ref("GenericObject"),
   }),
@@ -8090,7 +8173,10 @@ add(
     tag: "Projects",
     summary: "Get a project by id.",
     operationId: "getProject",
+    description:
+      "The project's commercial terms (contractValue, defaultRetentionRate, ldRatePerDay) are stated only to a caller who may read them here (ipc:read); for anyone else they are null and commercialTermsWithheld is true (see Project).",
     parameters: projectParams,
+    responseSchema: ref("Project"),
   }),
 );
 
@@ -8101,6 +8187,8 @@ add(
     tag: "Projects",
     summary: "Update project metadata.",
     operationId: "updateProject",
+    description:
+      "A caller who may not read the project's commercial terms (no ipc:read) cannot change them: values sent for contractValue, defaultRetentionRate or ldRatePerDay are not stored, and those that were not the edit form's own blanks or defaults are named in ignoredFields (see Project). A body that carried nothing else is refused 400 NO_UPDATES with error.details.ignoredFields.",
     parameters: projectParams,
     permissions: rolesPermission("pm", "planning_eng"),
     requestBody: jsonBody(
@@ -8108,6 +8196,7 @@ add(
       "Partial project metadata.",
       false,
     ),
+    responseSchema: ref("Project"),
   }),
 );
 
@@ -11680,28 +11769,30 @@ add(
   }),
 );
 
-add(
-  "/projects/{projectId}/workflow/uploads/{key}",
-  "get",
-  operation({
-    tag: "Workflow Uploads",
-    summary: "Download a workflow evidence attachment by storage key.",
-    operationId: "downloadWorkflowFile",
-    parameters: [
-      ...projectParams,
-      pathParam("key", "Workflow file storage key.", null),
-    ],
-    responses: {
-      200: binaryResponse(
-        "Workflow attachment stream when local storage is used.",
-        "application/octet-stream",
-      ),
-      302: redirectResponse(
-        "Redirects to a short-lived private S3 presigned URL when object storage is used.",
-      ),
-    },
-  }),
+const downloadWorkflowFile = operation({
+  tag: "Workflow Uploads",
+  summary: "Download a workflow evidence attachment by storage key.",
+  description:
+    "The file is served only to a caller who may read a record it is linked from (that record's module and, for a party member, the record's own rule — certification L2, FILES-X1). A key that names no stored file and a file the caller may not read are answered alike: 404 FILE_NOT_FOUND.",
+  operationId: "downloadWorkflowFile",
+  parameters: [
+    ...projectParams,
+    pathParam("key", "Workflow file storage key.", null),
+  ],
+  responses: {
+    200: binaryResponse(
+      "Workflow attachment stream when local storage is used.",
+      "application/octet-stream",
+    ),
+    302: redirectResponse(
+      "Redirects to a short-lived private S3 presigned URL when object storage is used.",
+    ),
+  },
+});
+downloadWorkflowFile.responses[404] = errorResponse(
+  "FILE_NOT_FOUND: no stored file has this key in the project, or the caller may not read any record it is linked from (the two are not told apart).",
 );
+add("/projects/{projectId}/workflow/uploads/{key}", "get", downloadWorkflowFile);
 
 const genericPayloadBody = (description, required = false) =>
   jsonBody(ref("GenericObject"), description, required);
@@ -12815,12 +12906,16 @@ addGenericRoute({
     method: "get",
     path: "/projects/{projectId}/budget-revisions",
     summary: "List budget revisions.",
+    description:
+      "rows, summary { originalBudget, netChange, currentBudget } and waterfall [{ ref, title, delta, cumulative }]. The revisions start from the project's contract value, one of its commercial terms (certification R21): for a caller who may not read them here (no ipc:read) summary.originalBudget, summary.currentBudget, every waterfall cumulative and every row's cumulativeBudget are null, summary.contractValueWithheld and each row's contractValueWithheld are true; the amounts, netChange and each delta stay. A created or edited revision is answered the same way.",
     operationId: "listBudgetRevisions",
   },
   {
     method: "post",
     path: "/projects/{projectId}/budget-revisions",
     summary: "Create a budget revision.",
+    description:
+      "The created row's cumulativeBudget (the contract value plus the approved changes) is null with contractValueWithheld true for a caller without ipc:read on the project.",
     operationId: "createBudgetRevision",
     requestBody: genericPayloadBody("Budget revision payload.", true),
     status: 201,
@@ -15757,7 +15852,7 @@ const workflowPermission = (action, transition = null) => modulePermission("work
 const workflowTemplateQuery = [queryParam("tool", "Only templates for this tool.", { type: "string", enum: workflowTools }), queryParam("includeArchived", "Include archived templates.", { type: "boolean" })];
 [
   { method: "get", path: "/company/workflow-tools", summary: "Tools a workflow can run on, with the context fields templates may test and the status that starts a run automatically.", operationId: "listCompanyWorkflowTools", parameters: [], permissions: { auth: "bearer", roles: ROLE_IDS, note: "Any authenticated user." }, responseSchema: workflowToolsResponse },
-  { method: "get", path: "/company/workflow-templates", summary: "Company workflow templates.", operationId: "listCompanyWorkflowTemplates", parameters: workflowTemplateQuery, permissions: { auth: "bearer", roles: ROLE_IDS, note: "Any authenticated user." }, responseSchema: objectSchema({ items: arrayOf(workflowTemplateSchema) }) },
+  { method: "get", path: "/company/workflow-templates", summary: "Company workflow templates. A template's rules (amount thresholds) and steps (approvers) are its tool's business: a member is listed the templates of the tools whose module their role may read (change_order, commitment, sub_pay_app, ipc, cost, submittal, document_control); company administrators, who write them, see them all; an API key only within its scopes (certification R23).", operationId: "listCompanyWorkflowTemplates", parameters: workflowTemplateQuery, permissions: { auth: "bearer", roles: ROLE_IDS, note: "Any member of the workspace; filtered by tool module as described." }, responseSchema: objectSchema({ items: arrayOf(workflowTemplateSchema) }) },
   { method: "post", path: "/company/workflow-templates", summary: "Create a company workflow template (company admin). Steps: response (assignees, days, responses → next / end), condition (branch on the record context) or action (notify).", operationId: "createCompanyWorkflowTemplate", parameters: [], permissions: companyAdminPermission, requestBody: jsonBody(workflowTemplateInput, "Template.", true), responseSchema: workflowTemplateSchema, status: 201 },
   { method: "post", path: "/company/workflow-templates/defaults", summary: "Seed one default template per tool that mirrors the built-in approval, plus a worked example with a rule and a condition (change orders ≥ 50,000).", operationId: "seedCompanyWorkflowDefaults", parameters: [], permissions: companyAdminPermission, responseSchema: objectSchema({ created: { type: "integer" }, templates: arrayOf(workflowTemplateSchema) }), status: 201 },
   { method: "patch", path: "/company/workflow-templates/{id}", summary: "Update or archive a company workflow template (company admin).", operationId: "updateCompanyWorkflowTemplate", parameters: [idParam], permissions: companyAdminPermission, requestBody: jsonBody(workflowTemplateInput, "Fields to change.", false), responseSchema: workflowTemplateSchema },
@@ -15769,9 +15864,9 @@ const workflowTemplateQuery = [queryParam("tool", "Only templates for this tool.
   { method: "patch", path: "/projects/{projectId}/workflows/templates/{templateId}", summary: "Update a project-level workflow template (PM).", operationId: "updateWorkflowTemplate", parameters: [...projectParams, workflowTemplateIdParam], permissions: workflowPermission("update", "workflow.manage"), requestBody: jsonBody(workflowTemplateInput, "Fields to change.", false), responseSchema: workflowTemplateSchema },
   { method: "delete", path: "/projects/{projectId}/workflows/templates/{templateId}", summary: "Archive a project-level workflow template (PM).", operationId: "archiveWorkflowTemplate", parameters: [...projectParams, workflowTemplateIdParam], permissions: workflowPermission("update", "workflow.manage"), responseSchema: workflowTemplateSchema },
   { method: "get", path: "/projects/{projectId}/workflows/my-steps", summary: "Workflow steps waiting on the caller in this project.", operationId: "listProjectWorkflowSteps", parameters: projectParams, permissions: workflowPermission("read"), responseSchema: objectSchema({ items: arrayOf(ref("GenericObject")) }) },
-  { method: "get", path: "/projects/{projectId}/workflows/instances", summary: "Workflow runs on this project.", operationId: "listWorkflowInstances", parameters: [...projectParams, queryParam("tool", "Filter by tool.", { type: "string", enum: workflowTools }), queryParam("recordId", "Filter by record.", uuid), queryParam("status", "Filter by status.", { type: "string", enum: ["running", "succeeded", "failed", "cancelled"] }), queryParam("limit", "Max rows (default 50).", { type: "integer" })], permissions: workflowPermission("read"), responseSchema: objectSchema({ items: arrayOf(workflowInstanceSchema) }) },
-  { method: "post", path: "/projects/{projectId}/workflows/instances", summary: "Start a workflow on a record by hand (PM). Without `templateId` the first template whose rules match the record's context is used, else the tool's default. 409 WORKFLOW_ALREADY_RUNNING / 404 WORKFLOW_NO_TEMPLATE / 409 WORKFLOW_STEP_UNASSIGNED.", operationId: "startWorkflowInstance", parameters: projectParams, permissions: workflowPermission("update", "workflow.manage"), requestBody: jsonBody(objectSchema({ tool: { type: "string", enum: workflowTools }, recordId: uuid, templateId: nullableUuid }, ["tool", "recordId"]), "Record."), responseSchema: workflowInstanceSchema, status: 201 },
-  { method: "get", path: "/projects/{projectId}/workflows/instances/{instanceId}", summary: "One workflow run with its steps and assignments.", operationId: "getWorkflowInstance", parameters: [...projectParams, workflowInstanceIdParam], permissions: workflowPermission("read"), responseSchema: workflowInstanceSchema },
+  { method: "get", path: "/projects/{projectId}/workflows/instances", summary: "Workflow runs on this project: the runs the caller is assigned to, and the runs on records they may read — the tool's module and, where a record rule binds them, that rule: a party member's own commitments, payment applications and routed submittals; a document revision under the module and routing of the record it is filed on (an RFI or submittal routed to the member's party; a draft RFI only for its creator or manager). The rule is applied before the page is cut, so limit counts only runs the caller may see (certification L41, R25, R26, R33).", operationId: "listWorkflowInstances", parameters: [...projectParams, queryParam("tool", "Filter by tool.", { type: "string", enum: workflowTools }), queryParam("recordId", "Filter by record.", uuid), queryParam("status", "Filter by status.", { type: "string", enum: ["running", "succeeded", "failed", "cancelled"] }), queryParam("limit", "Max rows (default 50).", { type: "integer" })], permissions: workflowPermission("read"), responseSchema: objectSchema({ items: arrayOf(workflowInstanceSchema) }) },
+  { method: "post", path: "/projects/{projectId}/workflows/instances", summary: "Start a workflow on a record by hand (PM). Without `templateId` the first template whose rules match the record's context is used, else the tool's default. 409 WORKFLOW_ALREADY_RUNNING / 404 WORKFLOW_NO_TEMPLATE / 409 WORKFLOW_STEP_UNASSIGNED; 404 WORKFLOW_RECORD_NOT_FOUND for a record the caller may not read (the rule of the run list), as for one that does not exist.", operationId: "startWorkflowInstance", parameters: projectParams, permissions: workflowPermission("update", "workflow.manage"), requestBody: jsonBody(objectSchema({ tool: { type: "string", enum: workflowTools }, recordId: uuid, templateId: nullableUuid }, ["tool", "recordId"]), "Record."), responseSchema: workflowInstanceSchema, status: 201 },
+  { method: "get", path: "/projects/{projectId}/workflows/instances/{instanceId}", summary: "One workflow run with its steps and assignments. A run the caller may not see (see the list) is answered 404 WORKFLOW_INSTANCE_NOT_FOUND, as a run that does not exist.", operationId: "getWorkflowInstance", parameters: [...projectParams, workflowInstanceIdParam], permissions: workflowPermission("read"), responseSchema: workflowInstanceSchema },
   { method: "post", path: "/projects/{projectId}/workflows/instances/{instanceId}/respond", summary: "Give your response on the current step. A negative response ends the step at once; with `requireAll` the step waits for every assignee otherwise. Reaching an end applies the outcome to the record through its own service.", operationId: "respondWorkflowInstance", parameters: [...projectParams, workflowInstanceIdParam], permissions: workflowPermission("submit", "workflow.respond"), requestBody: jsonBody(objectSchema({ response: { type: "string", description: "A response key of the current step." }, comment: { type: "string", nullable: true } }, ["response"]), "Response."), responseSchema: workflowInstanceSchema },
   { method: "post", path: "/projects/{projectId}/workflows/instances/{instanceId}/cancel", summary: "Cancel a running workflow (PM); the record's own approve / reject unlock.", operationId: "cancelWorkflowInstance", parameters: [...projectParams, workflowInstanceIdParam], permissions: workflowPermission("update", "workflow.manage"), requestBody: jsonBody(objectSchema({ reason: { type: "string", nullable: true } }), "Reason.", false), responseSchema: workflowInstanceSchema },
 ].forEach((route) => addGenericRoute({ tag: "Workflows", ...route }));
@@ -16088,9 +16183,9 @@ const reportPermission = (action, transition = null) => modulePermission("report
   { method: "post", path: "/reports/{reportId}/schedules", summary: "Schedule the report (daily / weekly / monthly at a local time); runs render as the schedule's owner and deliver in-app + email to users and roles, email to external addresses.", operationId: "createReportSchedule", parameters: [reportIdParam], permissions: reportPermission("update", "report.schedule"), requestBody: jsonBody(reportScheduleInput, "Schedule.", false), responseSchema: reportScheduleSchema, status: 201 },
   { method: "patch", path: "/reports/{reportId}/schedules/{scheduleId}", summary: "Change or pause a schedule.", operationId: "updateReportSchedule", parameters: [reportIdParam, reportScheduleIdParam], permissions: reportPermission("update", "report.schedule"), requestBody: jsonBody(reportScheduleInput, "Fields to change.", false), responseSchema: reportScheduleSchema },
   { method: "delete", path: "/reports/{reportId}/schedules/{scheduleId}", summary: "Remove a schedule.", operationId: "deleteReportSchedule", parameters: [reportIdParam, reportScheduleIdParam], permissions: reportPermission("update", "report.schedule"), responseSchema: objectSchema({ deleted: { type: "boolean" } }) },
-  { method: "get", path: "/portfolio", summary: "Portfolio: one row per project the caller can open, read from the latest health snapshot (health score + dimensions, SPI / CPI / EV / PV / AC / EAC, cash next 90 days, open and overdue items), with a summary and a `stale` flag when a snapshot is older than two hours.", operationId: "getPortfolio", parameters: [], permissions: modulePermission("portfolio", "read"), responseSchema: objectSchema({ generatedAt: dateString, computedAt: nullableDateString, refreshing: { type: "boolean" }, summary: ref("GenericObject"), rows: arrayOf(ref("GenericObject")) }) },
+  { method: "get", path: "/portfolio", summary: "Portfolio: one row per project the caller can open, read from the latest health snapshot (health score + dimensions, SPI / CPI / EV / PV / AC / EAC, cash next 90 days, open and overdue items), with a summary and a `stale` flag when a snapshot is older than two hours. A row's contractValue is the project's contract value, one of its commercial terms: where the caller may not read them on that project (no ipc:read there) the row has contractValue null and contractValueWithheld true, and summary.contractValue adds up the readable rows only — null when there is none — with summary.contractValueWithheld true (both flags absent when nothing was withheld). GET /portfolio/export.xlsx leaves the Contract value cell blank on those rows.", operationId: "getPortfolio", parameters: [], permissions: modulePermission("portfolio", "read"), responseSchema: objectSchema({ generatedAt: dateString, computedAt: nullableDateString, refreshing: { type: "boolean" }, summary: ref("GenericObject"), rows: arrayOf(ref("GenericObject")) }) },
   { method: "post", path: "/portfolio/refresh", summary: "Queue a snapshot refresh for the organisation (returns the running job when one is already queued).", operationId: "refreshPortfolio", parameters: [], permissions: modulePermission("portfolio", "read"), responseSchema: objectSchema({ jobId: uuid, status: { type: "string" }, queued: { type: "boolean" } }), status: 202 },
-  { method: "get", path: "/portfolio/export.xlsx", summary: "Portfolio table as XLSX.", operationId: "exportPortfolioXlsx", parameters: [], permissions: modulePermission("portfolio", "export"), responseSchema: { type: "string", format: "binary" } },
+  { method: "get", path: "/portfolio/export.xlsx", summary: "Portfolio table as XLSX. The Contract value cell is blank on a project whose commercial terms the caller may not read (see GET /portfolio, contractValueWithheld).", operationId: "exportPortfolioXlsx", parameters: [], permissions: modulePermission("portfolio", "export"), responseSchema: { type: "string", format: "binary" } },
 ].forEach((route) => addGenericRoute({ tag: "Reports", ...route }));
 
 // ─── Daily log (OCTA-FLD-DAILY-022) ────────────────────────────────────────

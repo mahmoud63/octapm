@@ -687,8 +687,10 @@ const maybeStart = async ({ orgId, projectId, tool: toolKey, recordId, actor = n
  * viewer a record's own rule binds (a party member), that rule: a commitment
  * or payment application of their own company, a submittal routed to their
  * party (document-text.service RECORD_RULES, the rule comments and
- * attachments are read under). workflow:read alone listed every run of the
- * project, with those figures, to every party guest.
+ * attachments are read under); a document revision, as document control
+ * shows it — under the rule of the record it is filed on (admittedRevisionIds
+ * below). workflow:read alone listed every run of the project, with those
+ * figures, to every party guest.
  *
  * `viewer` is { userId, canRead(module), partyIds, companyIds } as the
  * workflow routes build it; without one (internal callers) nothing is
@@ -698,10 +700,96 @@ const assignedTo = (row, viewer) => Boolean(viewer.userId) && (row.assignments |
 
 const readableTools = (viewer) => tools.TOOL_KEYS.filter((key) => viewer.canRead(tools.getTool(key).module));
 
-/** The narrowing a run list starts from: the tools whose module the viewer reads, and the runs they are assigned to. */
-const visibleRunsWhere = (viewer) => ({
-  OR: [{ tool: { in: readableTools(viewer) } }, ...(viewer.userId ? [{ assignments: { some: { userId: viewer.userId } } }] : [])],
-});
+// Lazy: the document services' record rules, without an import cycle.
+const recordRules = () => require("./document-text.service");
+
+/** The record rule (document-text.service RECORD_RULES) that binds this viewer on a tool's records, or null. */
+const bindingRule = (recordType, viewer) => {
+  const rule = recordRules().RECORD_RULES[recordType];
+  return rule && (Array.isArray(viewer.partyIds) || !rule.party) ? rule : null;
+};
+
+/**
+ * A document revision is filed on a record — an RFI, a submittal, a drawing,
+ * a transmittal, correspondence — and document control shows it only to a
+ * reader of that record (doc-control.service assertRevisionRecordVisible,
+ * certification L23): the record's module (rfi, submittal, else document
+ * control); for an RFI or a submittal, to a party member, its routing to one
+ * of their parties (RECORD_RULES); and an RFI still in draft to its creator
+ * or manager only (rfi-workflow withDraftVisibility). A run on a revision
+ * carries the revision's title, number and record type and is shown on the
+ * same terms: document_control read alone showed every revision run, and
+ * let a party guest start one, on RFIs routed to others (certification R25,
+ * R33). Returns the admitted revision ids among `revisionIds`, or among all
+ * the project's revisions when `revisionIds` is null.
+ */
+const REVISION_RECORD_MODELS = Object.freeze({ rfi: "rfi", submittal: "submittal" });
+
+const admittedRevisionIds = async ({ viewer, revisionIds = null, projectId = null }) => {
+  if (Array.isArray(revisionIds) && !revisionIds.length) return new Set();
+  const { RECORD_TYPE_MODULES } = require("./attachment.service");
+  const revisions = await prisma.documentRevision.findMany({
+    where: Array.isArray(revisionIds) ? { id: { in: revisionIds } } : { projectId },
+    select: { id: true, projectId: true, recordType: true, recordId: true },
+  });
+  const readable = revisions.filter((revision) => viewer.canRead(RECORD_TYPE_MODULES[revision.recordType] || "document_control"));
+  const shownRecords = new Map();
+  for (const [recordType, model] of Object.entries(REVISION_RECORD_MODELS)) {
+    const ids = [...new Set(readable.filter((revision) => revision.recordType === recordType).map((revision) => revision.recordId))];
+    if (!ids.length) continue;
+    let where = { id: { in: ids } };
+    const rule = bindingRule(recordType, viewer);
+    if (rule) {
+      const clauses = rule.clauses(viewer).filter(Boolean);
+      if (!clauses.length) {
+        shownRecords.set(recordType, new Set());
+        continue;
+      }
+      where = { AND: [where, { OR: clauses }] };
+    }
+    if (recordType === "rfi") where = require("./rfi-workflow.service").withDraftVisibility(where, viewer.userId || null);
+    const rows = await prisma[model].findMany({ where, select: { id: true, projectId: true } });
+    shownRecords.set(recordType, new Set(rows.map((row) => `${row.projectId}:${row.id}`)));
+  }
+  const admitted = readable.filter((revision) =>
+    // a drawing's, a transmittal's or correspondence's revision: its module is the whole rule
+    !REVISION_RECORD_MODELS[revision.recordType] ||
+    Boolean(shownRecords.get(revision.recordType)?.has(`${revision.projectId}:${revision.recordId}`)),
+  );
+  return new Set(admitted.map((revision) => revision.id));
+};
+
+/** The ids of a ruled tool's records in a project that this viewer's rule admits (RECORD_RULES). */
+const admittedRecordIds = async ({ rule, projectId, viewer }) => {
+  const clauses = rule.clauses(viewer).filter(Boolean);
+  if (!clauses.length || !prisma[rule.model]?.findMany) return [];
+  const rows = await prisma[rule.model].findMany({ where: { projectId, OR: clauses }, select: { id: true } });
+  return rows.map((row) => row.id);
+};
+
+/**
+ * What a run list asks the database for: the runs the viewer is assigned
+ * to, and the runs of each tool whose module they read — of a tool whose
+ * records have a rule binding the viewer (a party member's commitments,
+ * payment applications and submittals; anyone's document revisions), only
+ * the runs on the records that rule admits. The rule is decided before the
+ * page is cut: filtered after it, a party member's page of the newest runs
+ * could hold only other companies' and come back short or empty while their
+ * own older runs existed (certification R26).
+ */
+const visibleRunsWhere = async ({ viewer, projectId }) => {
+  const clauses = [];
+  for (const key of readableTools(viewer)) {
+    if (key === "document_revision") {
+      clauses.push({ tool: key, recordId: { in: [...(await admittedRevisionIds({ viewer, projectId }))] } });
+      continue;
+    }
+    const rule = bindingRule(key, viewer);
+    clauses.push(rule ? { tool: key, recordId: { in: await admittedRecordIds({ rule, projectId, viewer }) } } : { tool: key });
+  }
+  if (viewer.userId) clauses.push({ assignments: { some: { userId: viewer.userId } } });
+  return { OR: clauses };
+};
 
 /** The ids of the runs among `rows` this viewer may see (each row: id, tool, recordId, assignments). */
 const visibleRunIds = async ({ rows, viewer }) => {
@@ -712,18 +800,19 @@ const visibleRunIds = async ({ rows, viewer }) => {
     if (assignedTo(row, viewer)) visible.add(row.id);
     else if (tools.getTool(row.tool) && viewer.canRead(tools.getTool(row.tool).module)) readable.push(row);
   }
-  // Lazy: the document service's record rules, without an import cycle.
-  const { RECORD_RULES, recordRuleVisibleIds } = require("./document-text.service");
-  const binds = (row) => {
-    const rule = RECORD_RULES[row.tool];
-    return Boolean(rule) && (Array.isArray(viewer.partyIds) || !rule.party);
-  };
-  const ruled = readable.filter(binds);
+  const { recordRuleVisibleIds } = recordRules();
+  const revisions = readable.filter((row) => row.tool === "document_revision");
+  const ruled = readable.filter((row) => row.tool !== "document_revision" && bindingRule(row.tool, viewer));
   const admitted = ruled.length
     ? await recordRuleVisibleIds({ documents: [{ attachments: ruled.map((row) => ({ recordType: row.tool, recordId: row.recordId })) }], viewer })
     : new Set();
+  const admittedRevisions = revisions.length ? await admittedRevisionIds({ viewer, revisionIds: [...new Set(revisions.map((row) => row.recordId))] }) : new Set();
   for (const row of readable) {
-    if (!binds(row) || admitted.has(`${row.tool}:${row.recordId}`)) visible.add(row.id);
+    if (row.tool === "document_revision") {
+      if (admittedRevisions.has(row.recordId)) visible.add(row.id);
+    } else if (!bindingRule(row.tool, viewer) || admitted.has(`${row.tool}:${row.recordId}`)) {
+      visible.add(row.id);
+    }
   }
   return visible;
 };
@@ -756,7 +845,7 @@ const getInstance = async ({ orgId, projectId, instanceId, viewerId = null, view
 
 const listInstances = async ({ orgId, projectId, tool = null, recordId = null, status = null, limit = 50, viewerId = null, viewer = null }) => {
   const rows = await prisma.workflowInstance.findMany({
-    where: { orgId, projectId, ...(tool ? { tool } : {}), ...(recordId ? { recordId } : {}), ...(status ? { status } : {}), ...(viewer ? { AND: [visibleRunsWhere(viewer)] } : {}) },
+    where: { orgId, projectId, ...(tool ? { tool } : {}), ...(recordId ? { recordId } : {}), ...(status ? { status } : {}), ...(viewer ? { AND: [await visibleRunsWhere({ viewer, projectId })] } : {}) },
     include: { ...instanceInclude, project: { select: { id: true, name: true } } },
     orderBy: [{ startedAt: "desc" }],
     take: Math.min(200, Math.max(1, Number(limit) || 50)),

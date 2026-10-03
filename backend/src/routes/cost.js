@@ -3,7 +3,7 @@ const { body, param, query } = require('express-validator');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
-const { requirePermission } = require('../middleware/rbac');
+const { hasPermission, requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const { moneyBody } = require('../utils/money');
 const costService = require('../services/cost.service');
@@ -88,6 +88,8 @@ router.get(
     const result = await costService.getBurnRate({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
+      // The budget line restates the contract value: ipc:read, as GET /projects/:id (L25).
+      commercial: hasPermission(req, 'ipc', 'read'),
     });
     return sendSuccess(res, result);
   }),

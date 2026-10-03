@@ -37,7 +37,26 @@ const recomputeCumulative = async ({ projectId, baseBudget, tx = prisma }) => {
   }
 };
 
-const listBudgetRevisions = async ({ orgId, projectId }) => {
+/**
+ * The revisions start from the project's contract value: the original
+ * budget is that value, the current budget that value plus the approved
+ * changes, and every running total (a row's cumulativeBudget, a waterfall
+ * point's cumulative) carries it. The contract value is one of the project's
+ * commercial terms, which the project record states only to a reader who
+ * may read them there (project.service COMMERCIAL_TERMS: ipc:read); a cost
+ * reader without that right got it back here (certification R21). For such
+ * a reader (`contractValueReadable: false`) those figures are null and
+ * `contractValueWithheld: true` says why; the changes themselves — each
+ * revision's amount, the net change and each waterfall step's delta — stay.
+ * The routes always say; an internal reader (the data-quality rule) that
+ * does not reads the whole.
+ */
+const withheldRevisionRow = (row) =>
+  row && typeof row === 'object'
+    ? { ...row, cumulativeBudget: null, contractValueWithheld: true }
+    : row;
+
+const listBudgetRevisions = async ({ orgId, projectId, contractValueReadable = true }) => {
   const project = await ensureProject({ orgId, projectId });
 
   const rows = await prisma.budgetRevision.findMany({
@@ -74,6 +93,19 @@ const listBudgetRevisions = async ({ orgId, projectId }) => {
       },
     ).points;
 
+  if (!contractValueReadable) {
+    return {
+      rows: rows.map(withheldRevisionRow),
+      summary: {
+        originalBudget: null,
+        netChange,
+        currentBudget: null,
+        contractValueWithheld: true,
+      },
+      waterfall: waterfall.map((point) => ({ ...point, cumulative: null })),
+    };
+  }
+
   return {
     rows,
     summary: {
@@ -85,7 +117,7 @@ const listBudgetRevisions = async ({ orgId, projectId }) => {
   };
 };
 
-const createBudgetRevision = async ({ orgId, projectId, userId, payload, canApprove = false }) => {
+const createBudgetRevision = async ({ orgId, projectId, userId, payload, canApprove = false, contractValueReadable = true }) => {
   const project = await ensureProject({ orgId, projectId });
 
   const ref = await nextRef(prisma, { table: 'BudgetRevision', scopeColumn: 'projectId', scopeId: projectId, prefix: 'BR', pad: 2 });
@@ -131,7 +163,8 @@ const createBudgetRevision = async ({ orgId, projectId, userId, payload, canAppr
       .maybeStart({ orgId, projectId, tool: 'budget_revision', recordId: created.id, actor: { id: userId } })
       .catch(() => null);
   }
-  return created;
+  // The running total is the contract value plus the changes (R21).
+  return contractValueReadable ? created : withheldRevisionRow(created);
 };
 
 const updateBudgetRevision = async ({
@@ -142,6 +175,7 @@ const updateBudgetRevision = async ({
   payload,
   viaWorkflow = false,
   canApprove = viaWorkflow,
+  contractValueReadable = true,
 }) => {
   const project = await ensureProject({ orgId, projectId });
 
@@ -212,7 +246,8 @@ const updateBudgetRevision = async ({
       .catch(() => null);
   }
 
-  return updated;
+  // The running total is the contract value plus the changes (R21).
+  return contractValueReadable ? updated : withheldRevisionRow(updated);
   });
 };
 

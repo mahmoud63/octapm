@@ -103,3 +103,44 @@ describe("Phase 21D — integrity (release challenge, eighth pass)", () => {
     expect(retitled.status).toBe("approved");
   });
 });
+
+describe("certification R21 — the revisions state the contract value only to a reader of the terms", () => {
+  const rows = [
+    { id: "br-2", ref: "BR-02", title: "Extra steel", changeType: "addition", amount: 50000, status: "approved", cumulativeBudget: 1150000, effectiveDate: new Date("2027-02-01") },
+    { id: "br-1", ref: "BR-01", title: "Steel", changeType: "addition", amount: 100000, status: "approved", cumulativeBudget: 1100000, effectiveDate: new Date("2027-01-01") },
+    { id: "br-3", ref: "BR-03", title: "Omit paving", changeType: "deduction", amount: 20000, status: "draft", cumulativeBudget: 1150000, effectiveDate: new Date("2027-03-01") },
+  ];
+  beforeEach(() => {
+    jest.clearAllMocks();
+    existing = null;
+    mockPrisma.budgetRevision.findMany.mockResolvedValue(rows);
+  });
+
+  it("gives the reader of the terms the original and current budget and every running total", async () => {
+    const full = await service.listBudgetRevisions({ orgId: "org-1", projectId: "p1", contractValueReadable: true });
+    expect(full.summary).toEqual({ originalBudget: 1000000, netChange: 150000, currentBudget: 1150000 });
+    expect(full.waterfall.map((point) => [point.delta, point.cumulative])).toEqual([[100000, 1100000], [50000, 1150000]]);
+    expect(full.rows.map((row) => row.cumulativeBudget)).toEqual([1150000, 1100000, 1150000]);
+    // An internal reader (the data-quality rule) that does not say reads the whole.
+    expect((await service.listBudgetRevisions({ orgId: "org-1", projectId: "p1" })).summary.originalBudget).toBe(1000000);
+  });
+
+  it("withholds every figure built on the contract value from anyone else, and keeps the changes", async () => {
+    const withheld = await service.listBudgetRevisions({ orgId: "org-1", projectId: "p1", contractValueReadable: false });
+    expect(withheld.summary).toEqual({ originalBudget: null, netChange: 150000, currentBudget: null, contractValueWithheld: true });
+    expect(withheld.waterfall.map((point) => [point.ref, point.delta, point.cumulative])).toEqual([["BR-01", 100000, null], ["BR-02", 50000, null]]);
+    expect(withheld.rows.map((row) => [row.ref, row.amount, row.cumulativeBudget, row.contractValueWithheld])).toEqual([["BR-02", 50000, null, true], ["BR-01", 100000, null, true], ["BR-03", 20000, null, true]]);
+    expect(JSON.stringify(withheld)).not.toMatch(/1000000|1100000|1150000/);
+  });
+
+  it("answers a created or edited revision without its running total to a writer who may not read the terms", async () => {
+    const created = await service.createBudgetRevision({ ...base, payload: { title: "Steel", changeType: "addition", amount: 100000 }, contractValueReadable: false });
+    expect(created).toMatchObject({ cumulativeBudget: null, contractValueWithheld: true, amount: 100000 });
+    expect(mockPrisma.budgetRevision.create.mock.calls[0][0].data.cumulativeBudget).toBe(1000000);
+    const shown = await service.createBudgetRevision({ ...base, payload: { title: "Steel", changeType: "addition", amount: 100000 }, contractValueReadable: true });
+    expect(Number(shown.cumulativeBudget)).toBe(1000000);
+    existing = { id: "br-1", projectId: "p1", status: "draft", title: "Steel", changeType: "addition", amount: 100000, cumulativeBudget: 1000000, effectiveDate: new Date("2027-01-01"), approvedBy: null, approvedAt: null, notes: null, linkedChangeOrder: null };
+    const edited = await service.updateBudgetRevision({ ...base, revisionId: "br-1", payload: { title: "Steel (rev A)" }, contractValueReadable: false });
+    expect(edited).toMatchObject({ title: "Steel (rev A)", cumulativeBudget: null, contractValueWithheld: true });
+  });
+});

@@ -40,8 +40,17 @@ const mockTemplates = {
   archiveTemplate: jest.fn(),
   createProjectFromTemplate: jest.fn(),
 };
+const mockEngine = {
+  describeTools: jest.fn(),
+  listTemplates: jest.fn(),
+  createTemplate: jest.fn(),
+  updateTemplate: jest.fn(),
+  archiveTemplate: jest.fn(),
+  seedDefaultTemplates: jest.fn(),
+};
 jest.mock("../../services/company-workspace.service", () => mockWorkspace);
 jest.mock("../../services/project-template.service", () => mockTemplates);
+jest.mock("../../services/workflow-engine.service", () => mockEngine);
 
 const router = require("../company-workspace");
 
@@ -122,5 +131,25 @@ describe("company workspace routes", () => {
     expect((await request(app).post("/company/cost-codes/import").set("x-role", "pm").set("x-company-admin", "1").send({ rows: [] })).status).toBe(400);
     expect((await request(app).post(`/company/project-templates/${ID}/create-project`).set("x-role", "pm").set("x-company-admin", "1").send({})).status).toBe(400);
     expect((await request(app).patch("/company/vendors/not-a-uuid").set("x-role", "pm").set("x-company-admin", "1").send({ name: "x" })).status).toBe(400);
+  });
+
+  it("certification R23: lists a member the company workflow templates of the tools their role reads; an admin all", async () => {
+    const app = buildApp();
+    mockEngine.listTemplates.mockResolvedValue([]);
+    expect((await request(app).get("/company/workflow-templates").set("x-role", "site_engineer")).status).toBe(200);
+    const site = mockEngine.listTemplates.mock.calls[0][0];
+    expect(site).toMatchObject({ orgId: "org-1", projectId: null, scope: "company" });
+    expect(site.viewer.canRead("ipc")).toBe(false);
+    expect(site.viewer.canRead("commitment")).toBe(false);
+    expect(site.viewer.canRead("change_order")).toBe(false);
+    expect(site.viewer.canRead("document_control")).toBe(true);
+
+    await request(app).get("/company/workflow-templates").set("x-role", "qs");
+    const qs = mockEngine.listTemplates.mock.calls[1][0];
+    expect(qs.viewer.canRead("ipc")).toBe(true);
+    expect(qs.viewer.canRead("change_order")).toBe(true);
+
+    await request(app).get("/company/workflow-templates").set("x-role", "site_engineer").set("x-company-admin", "1");
+    expect(mockEngine.listTemplates.mock.calls[2][0].viewer).toBeNull();
   });
 });

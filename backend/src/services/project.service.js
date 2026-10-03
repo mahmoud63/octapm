@@ -97,6 +97,148 @@ const mayReadCommercialTerms = async (commercialAccessFor, projectId) =>
   typeof commercialAccessFor === "function" &&
   (await commercialAccessFor(projectId)) === true;
 
+/**
+ * The request as each of several projects' own routes see it — what
+ * middleware/project-access requestForProject builds for one project: the
+ * project access assertProjectAccess returns (assignment role, parties, the
+ * effective role) with the permission template attachTemplateContext adds —
+ * built for a whole page of projects in three queries instead of three or
+ * four per project (certification R28: GET /projects?limit=100 ran several
+ * hundred statements). A project the person cannot open, or one outside an
+ * API key's projects, gets a view with no person, and hasPermission then
+ * allows nothing there, as requestForProject leaves it.
+ */
+const requestsForProjects = async ({ req, projectIds = [] }) => {
+  const ids = [...new Set((projectIds || []).filter(Boolean))];
+  const user = req?.user || null;
+  const apiClient = req?.apiClient;
+  const views = new Map(
+    ids.map((projectId) => [
+      projectId,
+      { user: null, apiClient, params: { projectId } },
+    ]),
+  );
+  const keyProjects = apiClient?.projectIds?.length ? apiClient.projectIds : null;
+  const reachable = ids.filter(
+    (projectId) => !keyProjects || keyProjects.includes(projectId),
+  );
+  if (!user || !reachable.length) return views;
+
+  const isCompanyAdmin = Boolean(user.isCompanyAdmin);
+  // As assertProjectAccess: an org-wide reader's assignment and parties are
+  // read only when they are a company admin (templates and party rules apply
+  // to them); anyone else's always.
+  const orgWide = canAccessAllProjects(user.role, { isCompanyAdmin });
+  const withMembership = Boolean(user.id) && (!orgWide || isCompanyAdmin);
+  const projects = await prisma.project.findMany({
+    where: {
+      id: { in: reachable },
+      orgId: user.orgId,
+      ...getProjectAccessWhere({
+        userId: user.id,
+        role: user.role,
+        isCompanyAdmin,
+        orgId: user.orgId,
+      }),
+    },
+    select: {
+      id: true,
+      orgId: true,
+      ...(withMembership
+        ? {
+            assignments: {
+              where: { userId: user.id },
+              select: { role: true },
+              take: 1,
+            },
+            parties: projectPartyAccessSelect(user.id),
+          }
+        : {}),
+    },
+  });
+
+  const accesses = projects.map((project) => {
+    const assignmentRole =
+      normalizeRoleId(project.assignments?.[0]?.role) || null;
+    const partyAccess = serializePartyAccess(project.parties || []);
+    return {
+      id: project.id,
+      orgId: project.orgId,
+      role:
+        assignmentRole ||
+        (partyAccess.length ? "external_party" : normalizeRoleId(user.role)),
+      assignmentRole,
+      partyAccess,
+      isCompanyAdmin,
+      scope: assignmentRole
+        ? "assignment"
+        : partyAccess.length
+          ? "party"
+          : "org",
+    };
+  });
+
+  // Permission templates, as attachTemplateContext attaches them: a lookup
+  // that fails leaves the role and party policy in place, never an error.
+  let templates = new Map();
+  try {
+    const { templatesForProjects } = require("./permission-template.service");
+    templates = await templatesForProjects({
+      userId: user.id,
+      projects: accesses.map((access) => ({
+        id: access.id,
+        partyIds: access.partyAccess
+          .map((party) => party.projectPartyId)
+          .filter(Boolean),
+      })),
+    });
+  } catch (error) {
+    console.error("[permissions] template resolution failed", error);
+  }
+
+  for (const access of accesses) {
+    const template = templates.get(access.id);
+    if (template) access.template = template;
+    views.set(access.id, {
+      user,
+      apiClient,
+      params: { projectId: access.id },
+      projectAccess: access,
+    });
+  }
+  return views;
+};
+
+/**
+ * The ids among these projects whose commercial terms (COMMERCIAL_TERMS) the
+ * person may read: ipc:read there, decided on each project's own view
+ * (requestsForProjects) — the rule GET /projects/:id applies to one project.
+ */
+const commercialTermsReadableIds = async ({ req, projectIds = [] }) => {
+  // Lazy: the permission decision lives with the middleware.
+  const { hasPermission } = require("../middleware/rbac");
+  const views = await requestsForProjects({ req, projectIds });
+  return new Set(
+    [...views.entries()]
+      .filter(([, view]) => hasPermission(view, "ipc", "read"))
+      .map(([projectId]) => projectId),
+  );
+};
+
+/**
+ * Values the project form sends for terms it was not shown: blanks, and the
+ * defaults it puts in their place (retention 5, LD rate 0). An edit that
+ * carries only these did not try to set a withheld term.
+ */
+const isBlankOrFormDefault = (key, value) => {
+  if (value === null || value === undefined || value === "") return true;
+  if (key === "defaultRetentionRate") {
+    return Number(value) === DEFAULT_RETENTION_RATE;
+  }
+  if (key === "ldRatePerDay") return Number(value) === 0;
+  return false;
+};
+
 const projectAuditSummary = (project) => ({
   name: project.name,
   type: project.type || null,
@@ -386,6 +528,7 @@ const listProjects = async ({
   isCompanyAdmin = false,
   query,
   commercialAccessFor = null,
+  commercialAccessForProjects = null,
 }) => {
   const take = Math.min(Math.max(query.limit || 20, 1), 100);
 
@@ -432,12 +575,24 @@ const listProjects = async ({
     nextCursor = projects[projects.length - 1].id;
   }
 
-  // Decided per project, as each project's own routes decide it.
-  const commercial = await Promise.all(
-    projects.map((project) =>
-      mayReadCommercialTerms(commercialAccessFor, project.id),
-    ),
-  );
+  // Decided per project, as each project's own routes decide it — for the
+  // whole page at once when the caller can (`commercialAccessForProjects`,
+  // ids → the readable ids; certification R28), else one project at a time.
+  let commercial;
+  if (typeof commercialAccessForProjects === "function") {
+    const readable = await commercialAccessForProjects(
+      projects.map((project) => project.id),
+    );
+    commercial = projects.map(
+      (project) => readable instanceof Set && readable.has(project.id),
+    );
+  } else {
+    commercial = await Promise.all(
+      projects.map((project) =>
+        mayReadCommercialTerms(commercialAccessFor, project.id),
+      ),
+    );
+  }
 
   return {
     items: projects.map((project, index) =>
@@ -574,18 +729,28 @@ const updateProject = async ({
     );
   }
   // Terms withheld from this caller stay as they stand (COMMERCIAL_TERMS).
+  // A value the caller typed for one of them is not stored, and the answer
+  // says so (`ignoredFields`, certification R24) — the form's own blanks
+  // and defaults for terms it was not shown are not named.
   const commercial = await mayReadCommercialTerms(
     commercialAccessFor,
     projectId,
   );
+  const ignoredFields = [];
   if (!commercial) {
-    for (const key of COMMERCIAL_TERMS) delete data[key];
+    for (const key of COMMERCIAL_TERMS) {
+      if (data[key] !== undefined && !isBlankOrFormDefault(key, payload[key])) {
+        ignoredFields.push(key);
+      }
+      delete data[key];
+    }
   }
   if (Object.keys(data).length === 0 && !partySyncPayload) {
     throw new HttpError(
       400,
       "NO_UPDATES",
       "No valid fields provided for update",
+      ignoredFields.length ? { ignoredFields } : undefined,
     );
   }
 
@@ -631,7 +796,8 @@ const updateProject = async ({
     ...includeUserProjectAccess(userId),
   });
 
-  return sanitizeProject(updatedProject, { role, commercial });
+  const result = sanitizeProject(updatedProject, { role, commercial });
+  return ignoredFields.length ? { ...result, ignoredFields } : result;
 };
 
 const deleteProject = async ({ orgId, projectId, userId, role }) => {
@@ -702,6 +868,8 @@ module.exports = {
   updateProject,
   deleteProject,
   withheldDashboardContractValues,
+  requestsForProjects,
+  commercialTermsReadableIds,
   COMMERCIAL_TERMS,
   DEFAULT_RETENTION_RATE,
   DEFAULT_REPORTING_CUTOFF_DAY,

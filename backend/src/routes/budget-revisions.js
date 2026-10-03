@@ -14,6 +14,11 @@ const {
 
 const router = express.Router({ mergeParams: true });
 
+// The revisions run from the project's contract value, one of its
+// commercial terms: their totals go to a reader who may read those terms
+// here (ipc:read, as GET /projects/:id decides; certification R21).
+const contractValueReadable = (req) => hasPermission(req, "ipc", "read");
+
 router.get(
   "/",
   requirePermission("cost", "read"),
@@ -21,6 +26,7 @@ router.get(
     const data = await listBudgetRevisions({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
+      contractValueReadable: contractValueReadable(req),
     });
 
     return sendSuccess(res, data);
@@ -44,6 +50,7 @@ router.post(
     const row = await createBudgetRevision({
       orgId: req.user.orgId,
       canApprove: hasPermission(req, "cost", "approve"),
+      contractValueReadable: contractValueReadable(req),
       projectId: req.params.projectId,
       userId: req.user.id,
       payload: req.body,
@@ -70,6 +77,7 @@ router.patch(
     const row = await updateBudgetRevision({
       orgId: req.user.orgId,
       canApprove: hasPermission(req, "cost", "approve"),
+      contractValueReadable: contractValueReadable(req),
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
       userId: req.user.id,

@@ -53,12 +53,41 @@ describe("portfolio snapshots", () => {
       { id: "p3", name: "Depot", status: "on_hold", currency: "USD", contractValue: 100, startDate: null, endDate: null, clientName: null, healthSnapshot: { overallScore: 40, dimensionsJson: {}, weakestDimension: "schedule", spi: 0.7, cpi: 1.1, ev: 0, pv: 0, ac: 0, eac: 0, bac: 0, cashIn90: 0, cashOut90: 0, cashNet90: 0, cashNetToDate: 0, openRfis: 0, overdueRfis: 0, openPunch: 0, openNcrs: 0, pendingSubmittals: 0, openTasks: 0, overdueTasks: 0, pendingChangeOrders: 0, delayedActivities: 0, criticalActivities: 0, procurementRisks: 0, overdueItems: 0, computedAt: new Date("2026-09-05T08:00:00Z") } },
     ]);
     mockPrisma.backgroundJob.findFirst.mockResolvedValue({ id: "job-9" });
-    const portfolio = await service.getPortfolio({ orgId: "org-1", user: { id: "u", role: "pm" }, now });
+    const asked = [];
+    const portfolio = await service.getPortfolio({ orgId: "org-1", user: { id: "u", role: "pm" }, now, commercialAccessForProjects: async (ids) => (asked.push(ids), new Set(ids)) });
+    expect(asked).toEqual([["p1", "p2", "p3"]]);
+    expect(portfolio.rows.map((row) => [row.contractValue, row.contractValueWithheld])).toEqual([[5000000, undefined], [2000000, undefined], [100, undefined]]);
     expect(portfolio.refreshing).toBe(true);
     expect(portfolio.rows.map((row) => [row.name, row.stale])).toEqual([["Tower", false], ["Bridge", true], ["Depot", true]]);
     expect(portfolio.rows[0].snapshot).toMatchObject({ overallScore: 72, spi: 0.95, openItems: 19, overdueItems: 3, stale: false });
     expect(portfolio.summary).toEqual({ projects: 3, active: 2, contractValue: 7000100, averageHealth: 56, atRisk: 1, spiWatch: 1, cpiWatch: 1, openItems: 19, overdueItems: 3, cashNet90: -1, staleCount: 2 });
     expect(portfolio.computedAt).toBe("2026-09-05T11:30:00.000Z");
+  });
+
+  it("certification R20: states a contract value, and adds it to the total, only where the terms may be read", async () => {
+    const projects = [
+      { id: "p1", name: "Tower", status: "active", currency: "USD", contractValue: 5000000, startDate: null, endDate: null, clientName: null, healthSnapshot: null },
+      { id: "p2", name: "Bridge", status: "active", currency: "USD", contractValue: 2000000, startDate: null, endDate: null, clientName: null, healthSnapshot: null },
+    ];
+    mockPrisma.project.findMany.mockResolvedValue(projects);
+    const user = { id: "u", role: "planning_eng" };
+
+    const some = await service.getPortfolio({ orgId: "org-1", user, now, commercialAccessForProjects: async () => new Set(["p2"]) });
+    expect(some.rows.map((row) => [row.id, row.contractValue, row.contractValueWithheld])).toEqual([["p1", null, true], ["p2", 2000000, undefined]]);
+    expect(some.summary).toMatchObject({ contractValue: 2000000, contractValueWithheld: true });
+
+    const none = await service.getPortfolio({ orgId: "org-1", user, now, commercialAccessForProjects: async () => new Set() });
+    expect(none.rows.every((row) => row.contractValue === null && row.contractValueWithheld === true)).toBe(true);
+    expect(none.summary).toMatchObject({ contractValue: null, contractValueWithheld: true });
+
+    // Without an answer nothing is stated.
+    const unasked = await service.getPortfolio({ orgId: "org-1", user, now });
+    expect(unasked.rows.map((row) => row.contractValue)).toEqual([null, null]);
+    expect(unasked.summary.contractValue).toBeNull();
+
+    const all = await service.getPortfolio({ orgId: "org-1", user, now, commercialAccessForProjects: async (ids) => new Set(ids) });
+    expect(all.summary.contractValue).toBe(7000000);
+    expect(all.summary).not.toHaveProperty("contractValueWithheld");
   });
 
   it("queues a refresh job once", async () => {

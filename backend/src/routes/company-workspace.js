@@ -582,10 +582,20 @@ router.get(
   asyncHandler(async (req, res) => sendSuccess(res, { tools: await workflowEngine.describeTools({ orgId: req.user.orgId }) })),
 );
 
+// A company route's rules (an amount threshold) and steps (who decides) are
+// its tool's business, as on a project's own list (L41): a member sees the
+// company templates of the tools whose module their role reads; the company's
+// administrators — who write these templates — see them all, an API key only
+// within its scopes (certification R23).
+const companyTemplateViewer = (req) =>
+  req.user.isCompanyAdmin && !req.apiClient
+    ? null
+    : { userId: req.user.id, canRead: (moduleName) => hasPermission(req, moduleName, "read") };
+
 router.get(
   "/workflow-templates",
   [query("tool").optional().isIn(workflowTools.TOOL_KEYS), query("includeArchived").optional().isBoolean().toBoolean(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, { items: await workflowEngine.listTemplates({ orgId: req.user.orgId, projectId: null, tool: req.query.tool || null, includeArchived: Boolean(req.query.includeArchived), scope: "company" }) })),
+  asyncHandler(async (req, res) => sendSuccess(res, { items: await workflowEngine.listTemplates({ orgId: req.user.orgId, projectId: null, tool: req.query.tool || null, includeArchived: Boolean(req.query.includeArchived), scope: "company", viewer: companyTemplateViewer(req) }) })),
 );
 
 router.post(

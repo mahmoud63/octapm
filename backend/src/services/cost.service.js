@@ -751,7 +751,16 @@ const toProjectDurationDays = (project) => {
   return 30;
 };
 
-const getBurnRate = async ({ orgId, projectId }) => {
+/**
+ * The burn rate: actual spend by day beside the budget line, which is the
+ * contract value spread over the project's duration. That line multiplied by
+ * the duration gives the contract value back, so it follows the rule the
+ * project record follows for the value (certification L25): only a reader
+ * with ipc:read on the project (`commercial`) gets it; others get the actual
+ * spend with the budget line withheld (`budgetRate` and each point's `budget`
+ * null, `budgetWithheld: true`).
+ */
+const getBurnRate = async ({ orgId, projectId, commercial = false }) => {
   const project = await ensureProject({ orgId, projectId });
 
   const entries = await prisma.burnRateEntry.findMany({
@@ -766,8 +775,9 @@ const getBurnRate = async ({ orgId, projectId }) => {
   }
 
   const durationDays = toProjectDurationDays(project);
-  const budgetRate =
-    durationDays > 0 ? divideMoney(project.contractValue, durationDays) : 0;
+  const budgetRate = !commercial
+    ? null
+    : durationDays > 0 ? divideMoney(project.contractValue, durationDays) : 0;
 
   const data = Array.from(byDate.entries()).map(([date, actual]) => ({
     date,
@@ -775,7 +785,7 @@ const getBurnRate = async ({ orgId, projectId }) => {
     budget: budgetRate,
   }));
 
-  return { budgetRate, data };
+  return { budgetRate, data, ...(commercial ? {} : { budgetWithheld: true }) };
 };
 
 const addBurnRateEntry = async ({
