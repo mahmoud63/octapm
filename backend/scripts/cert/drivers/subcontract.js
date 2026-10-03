@@ -59,7 +59,12 @@ const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 const dayMs = (iso) => Date.parse(`${String(iso).slice(0, 10)}T00:00:00.000Z`);
 const shortRoute = (route) => String(route).replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, ':id').replace(/\?.*$/, '');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const isPermissionRefusal = (error) => error instanceof ApiError && error.status === 403 && PERMISSION_CODES.has(error.code);
+// A writer may name only a file it may read (certification R29): another
+// person's evidence is refused as missing, 404, so for asEither it is the same
+// as a permission refusal — the next person, who may read the file, is asked.
+const DOCUMENT_LINK_CODES = new Set(['DOCUMENT_NOT_FOUND', 'FILE_NOT_FOUND', 'COMMERCIAL_DOCUMENT_NOT_FOUND']);
+const isPermissionRefusal = (error) =>
+  error instanceof ApiError && ((error.status === 403 && PERMISSION_CODES.has(error.code)) || (error.status === 404 && DOCUMENT_LINK_CODES.has(error.code)));
 
 /** A one-page PDF that says `text`. */
 const pdfOf = (text) => {
