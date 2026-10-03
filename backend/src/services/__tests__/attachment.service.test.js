@@ -18,7 +18,14 @@ const mockPrisma = {
   },
   location: { findFirst: jest.fn(), findMany: jest.fn() },
   backgroundJob: { create: jest.fn() },
+  // The records attachments hang on: every one asked about is the project's unless a test says otherwise.
+  ncrRecord: { findMany: jest.fn() },
+  rfi: { findMany: jest.fn() },
+  bidPackage: { findMany: jest.fn() },
+  bid: { findFirst: jest.fn() },
+  formTemplate: { findFirst: jest.fn() },
 };
+const mockProjectRecords = async ({ where }) => where.id.in.map((id) => ({ id }));
 
 const mockFileStorage = {
   DOCUMENT_TYPES: { WORKFLOW_ATTACHMENT: "workflow_attachment", SITE_PHOTO: "site_photo" },
@@ -74,6 +81,7 @@ describe("attachment service", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+    for (const model of ["ncrRecord", "rfi", "bidPackage"]) mockPrisma[model].findMany.mockImplementation(mockProjectRecords);
     mockPrisma.attachment.count.mockResolvedValue(0);
     mockPrisma.attachment.upsert.mockImplementation(({ create, include }) =>
       Promise.resolve({
@@ -199,6 +207,53 @@ describe("attachment service", () => {
     await expect(
       service.createAttachments({ orgId: "org-1", projectId: "project-1", recordType: "rfi", recordId: "x", role: "boss", documentIds: [DOC_PDF] }),
     ).rejects.toMatchObject({ code: "ATTACHMENT_ROLE_INVALID" });
+  });
+
+  // Certification CERT-2: an attachment named another company's bid package, and its
+  // document, audit row and outbound event with it.
+  it("attaches only to a record of the caller's own project, refused before anything is stored", async () => {
+    const scope = { orgId: "org-1", projectId: "project-1", userId: "user-1" };
+    const file = { path: "/tmp/b.pdf", mimetype: "application/pdf", originalname: "spec.pdf" };
+    mockPrisma.bidPackage.findMany.mockResolvedValue([]); // not one of project-1's: another company's, another project's, or none
+    for (const recordId of ["bp-of-another-company", "bp-nowhere"]) {
+      await expect(service.createAttachments({ ...scope, recordType: "bid_package", recordId, files: [file] })).rejects.toMatchObject({ status: 404, code: "ATTACHMENT_RECORD_NOT_FOUND", message: "Record not found" });
+      await expect(service.createAttachments({ ...scope, recordType: "bid_package", recordId, documentIds: [DOC_PDF], clientRequestId: "replay-1" })).rejects.toMatchObject({ status: 404, code: "ATTACHMENT_RECORD_NOT_FOUND" });
+    }
+    expect(mockPrisma.bidPackage.findMany).toHaveBeenCalledWith({ where: { id: { in: ["bp-of-another-company"] }, projectId: "project-1" }, select: { id: true } });
+    // the project itself: only this one
+    await expect(service.createAttachments({ ...scope, recordType: "project", recordId: "project-of-another-company", files: [file] })).rejects.toMatchObject({ status: 404, code: "ATTACHMENT_RECORD_NOT_FOUND" });
+    // a record reached through its parent: a bid through its package's project, within the organisation
+    mockPrisma.bid.findFirst.mockResolvedValue(null);
+    await expect(service.createAttachments({ ...scope, recordType: "bid", recordId: "bid-elsewhere", files: [file] })).rejects.toMatchObject({ status: 404, code: "ATTACHMENT_RECORD_NOT_FOUND" });
+    expect(mockPrisma.bid.findFirst).toHaveBeenCalledWith({ where: { id: "bid-elsewhere", orgId: "org-1", package: { projectId: "project-1" } }, select: { id: true } });
+    // nothing uploaded, linked, stored, audited or queued; not even the offline replay was looked up
+    expect(mockFileStorage.uploadProjectDocument).not.toHaveBeenCalled();
+    expect(mockPrisma.projectDocument.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.attachment.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.attachment.upsert).not.toHaveBeenCalled();
+    expect(mockAudit.recordEvent).not.toHaveBeenCalled();
+    expect(mockJobService.enqueueJob).not.toHaveBeenCalled();
+
+    // the caller's own records are attached as before
+    mockPrisma.bidPackage.findMany.mockImplementation(mockProjectRecords);
+    await expect(service.createAttachments({ ...scope, recordType: "bid_package", recordId: "bp-own", files: [file] })).resolves.toMatchObject({ items: [expect.objectContaining({ recordType: "bid_package", recordId: "bp-own" })] });
+    await expect(service.createAttachments({ ...scope, recordType: "project", recordId: "project-1", files: [file] })).resolves.toMatchObject({ items: [expect.objectContaining({ recordType: "project" })] });
+    mockPrisma.formTemplate.findFirst.mockResolvedValue({ id: "tpl-library" });
+    await expect(service.createAttachments({ ...scope, recordType: "form_template", recordId: "tpl-library", files: [file] })).resolves.toMatchObject({ items: [expect.objectContaining({ recordType: "form_template" })] });
+    expect(mockPrisma.formTemplate.findFirst).toHaveBeenCalledWith({ where: { id: "tpl-library", orgId: "org-1", OR: [{ projectId: "project-1" }, { projectId: null }] }, select: { id: true } });
+  });
+
+  it("knows where every attachable record type lives", () => {
+    const { Prisma } = require("@prisma/client");
+    const models = new Map(Prisma.dmmf.datamodel.models.map((model) => [model.name.charAt(0).toLowerCase() + model.name.slice(1), model]));
+    for (const recordType of service.RECORD_TYPES) {
+      const home = service.RECORD_TYPE_MODELS[recordType] || service.RECORD_TYPE_SCOPES[recordType]?.model || (recordType === "project" ? "project" : null);
+      expect([recordType, Boolean(home && models.has(home))]).toEqual([recordType, true]);
+    }
+    // a type found by its own project column has one
+    for (const [recordType, model] of Object.entries(service.RECORD_TYPE_MODELS)) {
+      expect([recordType, models.get(model).fields.some((field) => field.name === "projectId" && field.kind === "scalar" && field.isRequired)]).toEqual([recordType, true]);
+    }
   });
 
   it("unlinks an attachment and audits the removal", async () => {

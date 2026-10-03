@@ -283,6 +283,19 @@ const normalizeInsurance = (entries) => {
   });
 };
 
+/**
+ * Every certificate an insurance list names is a document of the commitment's
+ * own project (certification CERT-2: a commitment's insurance named another
+ * company's document, and an id that existed nowhere counted as a certificate
+ * on file for execution, close-out and the pay-application gate). One that is
+ * not is refused as a missing document, before anything is written. An entry
+ * with no document is "missing", as it always was.
+ */
+const assertInsuranceDocuments = async ({ tx = prisma, projectId, insurance }) => {
+  if (!insurance?.length) return;
+  await require("./tenant-references.service").assertProjectRows({ tx, model: "projectDocument", projectId, ids: insurance.map((entry) => entry.documentId), code: "DOCUMENT_NOT_FOUND", message: "Insurance document not found" });
+};
+
 const normalizeLines = (entries) => {
   if (!Array.isArray(entries)) throw new HttpError(400, "COMMITMENT_LINES_INVALID", "lines must be a list");
   if (entries.length > MAX_LINES) throw new HttpError(400, "COMMITMENT_LINES_TOO_MANY", `At most ${MAX_LINES} lines`);
@@ -516,6 +529,7 @@ const createCommitment = async ({ orgId, projectId, payload = {}, actor = null }
   const type = normalizeType(payload.type);
   const data = commitmentData(payload, { project });
   const lines = payload.lines === undefined ? [] : normalizeLines(payload.lines);
+  await assertInsuranceDocuments({ projectId, insurance: data.insuranceJson });
   const created = await prisma.$transaction(async (tx) => {
     const vendor = await resolveVendor({ tx, orgId, projectId, payload });
     await validateLineReferences({ tx, orgId, projectId, lines });
@@ -535,6 +549,7 @@ const updateCommitment = async ({ orgId, projectId, commitmentId, payload = {}, 
   const existing = await loadCommitment({ projectId, commitmentId, viewer: actor });
   if (existing.status === STATUS.VOID) throw new HttpError(409, "COMMITMENT_VOID", "A void commitment cannot be changed");
   const data = commitmentData(payload, { project, existing });
+  await assertInsuranceDocuments({ projectId, insurance: data.insuranceJson });
   const updated = await prisma.$transaction(async (tx) => {
     const [fresh] = await tx.$queryRaw`SELECT status FROM "Commitment" WHERE id = ${commitmentId} FOR UPDATE`;
     if (fresh && fresh.status !== existing.status) throw new HttpError(409, "COMMITMENT_STATE_CHANGED", `The commitment is ${fresh.status} now; look again before editing it`);
@@ -575,6 +590,7 @@ const setInsurance = async ({ orgId, projectId, commitmentId, payload = {}, acto
   await ensureProject({ orgId, projectId });
   const existing = await loadCommitment({ projectId, commitmentId, viewer: actor });
   const insurance = normalizeInsurance(payload.insurance) || [];
+  await assertInsuranceDocuments({ projectId, insurance });
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.commitment.update({ where: { id: commitmentId }, data: { insuranceJson: insurance, updatedBy: actor?.id || null }, include });
     await audit({ tx, orgId, projectId, entityId: commitmentId, action: auditService.ACTIONS.UPDATED, actor, summary: { ref: existing.ref, insurance: insurance.map((entry) => `${entry.type}:${insuranceStatus(entry)}`) } });

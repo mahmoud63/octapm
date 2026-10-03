@@ -18,7 +18,7 @@ const mockPrisma = {
   commitmentSovLine: { findMany: jest.fn(async () => []), deleteMany: jest.fn(async () => ({ count: 0 })), create: jest.fn(async ({ data }) => ({ id: "line", ...data })) },
   commitmentChangeOrder: { aggregate: jest.fn(async () => ({ _max: { number: 0 } })), create: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
   changeOrder: { findFirst: jest.fn(async () => ({ id: "co-1", ref: "VO-01", value: 5000, description: "Extra excavation" })) },
-  projectDocument: { findFirst: jest.fn(async () => ({ id: "doc-1" })) },
+  projectDocument: { findFirst: jest.fn(async () => ({ id: "doc-1" })), findMany: jest.fn(async ({ where }) => (where.id?.in || []).map((id) => ({ id }))) },
 };
 const mockAudit = { ENTITY_TYPES: { COMMITMENT: "commitment", COMMITMENT_CHANGE_ORDER: "commitment_change_order" }, ACTIONS: { CREATED: "created", UPDATED: "updated", STATUS_CHANGED: "status_changed", APPROVED: "approved", REJECTED: "rejected" }, recordEvent: jest.fn(async () => ({})) };
 const mockNotifications = { NOTIFICATION_CATEGORIES: { APPROVAL: "approval", COMMERCIAL: "commercial" }, createNotifications: jest.fn(async () => ({ created: 1 })) };
@@ -86,6 +86,41 @@ describe("commitments", () => {
     expect(mockPrisma.commitment.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ number: 3, ref: "SC-003", retentionRate: 10, vendorCompanyId: "vendor-1", projectPartyId: "party-1", status: "draft" }) }));
     expect(created.ref).toBe("SC-003");
     expect(created.original).toBe(5000);
+  });
+
+  // Certification CERT-2: an insurance certificate is a document of the
+  // commitment's own project; another company's, or one that exists nowhere,
+  // is refused as a missing document before anything is written.
+  it("names only the project's own documents as insurance certificates", async () => {
+    const OWN = "doc-own";
+    const byDefault = mockPrisma.projectDocument.findMany.getMockImplementation();
+    mockPrisma.projectDocument.findMany.mockImplementation(async ({ where }) => (where.id.in || []).filter((id) => id === OWN && where.projectId === "project-1").map((id) => ({ id })));
+    const scope = { orgId: "org-1", projectId: "project-1", actor: { id: "user-qs", role: "qs" } };
+    const insured = (documentId) => ({ insurance: [{ type: "general_liability", required: true, documentId }, { type: "auto", required: false }] });
+    try {
+      for (const other of ["doc-of-another-company", "doc-nowhere"]) {
+        await expect(service.setInsurance({ ...scope, commitmentId: "cm-1", payload: insured(other) })).rejects.toMatchObject({ status: 404, code: "DOCUMENT_NOT_FOUND" });
+        await expect(service.createCommitment({ ...scope, payload: { title: "Insured package", ...insured(other) } })).rejects.toMatchObject({ status: 404, code: "DOCUMENT_NOT_FOUND" });
+        await expect(service.updateCommitment({ ...scope, commitmentId: "cm-1", payload: insured(other) })).rejects.toMatchObject({ status: 404, code: "DOCUMENT_NOT_FOUND" });
+      }
+      expect(mockPrisma.projectDocument.findMany).toHaveBeenCalledWith({ where: { id: { in: ["doc-of-another-company"] }, projectId: "project-1" }, select: { id: true } });
+      expect(mockPrisma.commitment.update).not.toHaveBeenCalled();
+      expect(mockPrisma.commitment.create).not.toHaveBeenCalled();
+      expect(mockAudit.recordEvent).not.toHaveBeenCalled();
+
+      const set = await service.setInsurance({ ...scope, commitmentId: "cm-1", payload: insured(OWN) });
+      expect(set.insurance.map((entry) => [entry.documentId, entry.status])).toEqual([[OWN, "ok"], [null, "optional"]]);
+      await service.createCommitment({ ...scope, payload: { title: "Insured package", ...insured(OWN) } });
+      await service.updateCommitment({ ...scope, commitmentId: "cm-1", payload: insured(OWN) });
+      expect(mockPrisma.commitment.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ insuranceJson: [expect.objectContaining({ documentId: OWN }), expect.objectContaining({ documentId: null })] }) }));
+      expect(mockPrisma.commitment.update).toHaveBeenCalledTimes(2);
+      // a list with no certificate asks nothing
+      mockPrisma.projectDocument.findMany.mockClear();
+      await service.setInsurance({ ...scope, commitmentId: "cm-1", payload: { insurance: [{ type: "bond", required: true }] } });
+      expect(mockPrisma.projectDocument.findMany).not.toHaveBeenCalled();
+    } finally {
+      mockPrisma.projectDocument.findMany.mockImplementation(byDefault);
+    }
   });
 
   it("party users only see their own commitments", () => {

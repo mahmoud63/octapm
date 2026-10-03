@@ -91,6 +91,101 @@ const RECORD_TYPE_MODULES = Object.freeze({
 });
 const RECORD_TYPES = Object.keys(RECORD_TYPE_MODULES);
 
+/**
+ * Where each record type's rows live, so an attachment names only a record of
+ * the caller's own project (certification CERT-2: a company's attachment —
+ * its document, audit row, history snapshot and outbound event — named
+ * another company's bid package). A type whose rows carry their project names
+ * its model; the rest say how a row reaches it: a form template of the
+ * organisation's library or of this project, a checklist answer through its
+ * inspection, a bid through its package, a conversation or inbound e-mail of
+ * this project or of none. `project` is the project itself.
+ */
+const RECORD_TYPE_MODELS = Object.freeze({
+  risk: "risk",
+  ncr: "ncrRecord",
+  itp: "itpRecord",
+  defect: "defectRecord",
+  punch_item: "punchItem",
+  form_instance: "formInstance",
+  material_test: "materialTest",
+  safety_incident: "safetyIncident",
+  rfi: "rfi",
+  submittal: "submittal",
+  drawing: "drawingRecord",
+  drawing_set: "drawingSet",
+  sheet: "sheet",
+  sheet_revision: "sheetRevision",
+  markup: "markup",
+  pin: "pin",
+  transmittal: "transmittal",
+  correspondence: "correspondence",
+  document: "projectDocument",
+  task: "task",
+  daily_report: "dailyReport",
+  site_diary: "siteDiary",
+  daily_log: "dailyLog",
+  timesheet: "timesheet",
+  progress_submission: "progressSubmission",
+  activity: "activity",
+  change_order: "changeOrder",
+  change_event: "changeEvent",
+  rfq: "rfq",
+  ipc: "ipcCertificate",
+  ipc_certificate: "ipcCertificate",
+  sub_valuation: "subValuation",
+  eot: "eotClaim",
+  weather_delay: "weatherDelay",
+  meeting: "meeting",
+  meeting_action: "meetingActionItem",
+  procurement_order: "procurementOrder",
+  procurement_package: "procurementPackage",
+  delivery_receipt: "deliveryReceipt",
+  commitment: "commitment",
+  commitment_change_order: "commitmentChangeOrder",
+  sub_pay_app: "subPayApp",
+  bid_package: "bidPackage",
+  cost_record: "costRecord",
+  direct_cost: "directCost",
+  lookahead: "lookahead",
+  bim_model: "bimModel",
+  boq_item: "boqItem",
+  location: "location",
+});
+const ofOrganisationOrProject = ({ orgId, projectId }) => ({ orgId, OR: [{ projectId }, { projectId: null }] });
+const RECORD_TYPE_SCOPES = Object.freeze({
+  form_template: { model: "formTemplate", where: ofOrganisationOrProject },
+  form_response: { model: "formItemResponse", where: ({ projectId }) => ({ instance: { projectId } }) },
+  bid: { model: "bid", where: ({ orgId, projectId }) => ({ orgId, package: { projectId } }) },
+  conversation: { model: "conversation", where: ofOrganisationOrProject },
+  inbound_email: { model: "inboundEmail", where: ofOrganisationOrProject },
+});
+
+/**
+ * Refuses a record that is not one of this project's — another company's,
+ * another project's, or one that exists nowhere — with the answer the route
+ * gives a record the caller may not see (404 ATTACHMENT_RECORD_NOT_FOUND), so
+ * it never tells whether the record exists elsewhere. A type with no known
+ * home is refused the same way.
+ */
+const assertRecordInProject = async ({ orgId, projectId, recordType, recordId }) => {
+  const notFound = () => new HttpError(404, "ATTACHMENT_RECORD_NOT_FOUND", "Record not found");
+  if (recordType === "project") {
+    if (recordId !== projectId) throw notFound();
+    return;
+  }
+  const model = RECORD_TYPE_MODELS[recordType];
+  if (model) {
+    await require("./tenant-references.service").assertProjectRows({ model, projectId, ids: [recordId], code: "ATTACHMENT_RECORD_NOT_FOUND", message: "Record not found" });
+    return;
+  }
+  const scope = RECORD_TYPE_SCOPES[recordType];
+  const row = scope && prisma[scope.model]?.findFirst
+    ? await prisma[scope.model].findFirst({ where: { id: recordId, ...scope.where({ orgId, projectId }) }, select: { id: true } })
+    : null;
+  if (!row) throw notFound();
+};
+
 const trimOrNull = (value) => {
   if (value === null || value === undefined) return null;
   const text = String(value).trim();
@@ -330,6 +425,8 @@ const createAttachments = async ({
   moduleForRecordType(recordType);
   const id = trimOrNull(recordId);
   if (!id) throw new HttpError(400, "ATTACHMENT_RECORD_ID_REQUIRED", "recordId is required");
+  // The record is one of this project's before anything is uploaded, stored, audited or queued.
+  await assertRecordInProject({ orgId, projectId, recordType, recordId: id });
   // Offline replay (OCTA-MOB-PWA-018): the same upload sent twice returns what the first one made.
   const replayKey = trimOrNull(clientRequestId)?.slice(0, 120) || null;
   if (replayKey && prisma.attachment?.findMany) {
@@ -1031,8 +1128,11 @@ module.exports = {
   searchProjectEvidence,
   ATTACHMENT_ROLES,
   RECORD_TYPES,
+  RECORD_TYPE_MODELS,
   RECORD_TYPE_MODULES,
+  RECORD_TYPE_SCOPES,
   THUMBNAIL_STATUS,
+  assertRecordInProject,
   createAttachments,
   deleteAttachment,
   ensurePhotoForDocument,
