@@ -6,6 +6,7 @@ const notificationService = require("./notification.service");
 const fileStorageService = require("./file-storage.service");
 const { sendEmail } = require("./email.service");
 const { isPartyScopedAccess } = require("./company-party.service");
+const { assertCompanies, assertMembers, assertProjectRows } = require("./tenant-references.service");
 const {
   RECORD_TYPES,
   attachWorkflowDetailsToRecords,
@@ -339,21 +340,20 @@ const normalizePayload = (payload = {}, { partial = false } = {}) => {
   return data;
 };
 
+/**
+ * The records an item (or every item of a batch) points at: its project's
+ * location, sheet and activity, and its company's directory and members
+ * (services/tenant-references.service.js). Another company's id and an id
+ * that exists nowhere get the same 404.
+ */
 const validateReferences = async ({ orgId, projectId, data }) => {
-  const checks = [];
-  if (data.locationId) checks.push(prisma.location.findFirst({ where: { id: data.locationId, projectId }, select: { id: true } }).then((row) => [row, "LOCATION_NOT_FOUND", "Location not found"]));
-  if (data.sheetId) checks.push(prisma.sheet.findFirst({ where: { id: data.sheetId, projectId }, select: { id: true } }).then((row) => [row, "SHEET_NOT_FOUND", "Sheet not found"]));
-  if (data.activityId) checks.push(prisma.activity.findFirst({ where: { id: data.activityId, projectId }, select: { id: true } }).then((row) => [row, "ACTIVITY_NOT_FOUND", "Activity not found"]));
-  if (data.assigneeCompanyId) checks.push(prisma.company.findFirst({ where: { id: data.assigneeCompanyId, orgId }, select: { id: true } }).then((row) => [row, "COMPANY_NOT_FOUND", "Company not found"]));
-  const userIds = uniqueIds([data.assigneeUserId, data.managerUserId, data.finalApproverUserId]);
-  if (userIds.length) {
-    checks.push(
-      prisma.user.findMany({ where: { id: { in: userIds }, orgId }, select: { id: true } }).then((rows) => [rows.length === userIds.length ? rows : null, "USER_NOT_FOUND", "One or more users were not found"]),
-    );
-  }
-  for (const [row, code, message] of await Promise.all(checks)) {
-    if (!row) throw new HttpError(404, code, message);
-  }
+  const rows = (Array.isArray(data) ? data : [data]).filter(Boolean);
+  const pick = (...keys) => rows.flatMap((row) => keys.map((key) => row[key]));
+  await assertProjectRows({ model: "location", projectId, ids: pick("locationId"), code: "LOCATION_NOT_FOUND", message: "Location not found" });
+  await assertProjectRows({ model: "sheet", projectId, ids: pick("sheetId"), code: "SHEET_NOT_FOUND", message: "Sheet not found" });
+  await assertProjectRows({ model: "activity", projectId, ids: pick("activityId"), code: "ACTIVITY_NOT_FOUND", message: "Activity not found" });
+  await assertCompanies({ orgId, companyIds: pick("assigneeCompanyId"), code: "COMPANY_NOT_FOUND", message: "Company not found" });
+  await assertMembers({ orgId, userIds: pick("assigneeUserId", "managerUserId", "finalApproverUserId"), code: "USER_NOT_FOUND", message: "One or more users were not found" });
 };
 
 const nextNumber = async (tx, projectId, kind = "punch") => {
@@ -419,13 +419,17 @@ const findByClientRequestId = async ({ projectId, clientRequestId }) => {
 
 const createPunchItem = async ({ orgId, projectId, payload = {}, actor = null }) => {
   await ensureProject({ orgId, projectId });
+  // The references are checked before a replay is answered (CERT-2): a request
+  // reusing an earlier item's offline key was answered 201 with that item and
+  // whatever ids it named were never looked at. A true replay names the same
+  // records as the original and still gets the original back.
+  const data = normalizePayload(payload);
+  await validateReferences({ orgId, projectId, data });
   const replay = await findByClientRequestId({ projectId, clientRequestId: payload.clientRequestId });
   if (replay) {
     const [row] = await enrich({ projectId, items: [replay] });
     return { ...row, replayed: true };
   }
-  const data = normalizePayload(payload);
-  await validateReferences({ orgId, projectId, data });
   const initialStatus = payload.status === STATUS.OPEN ? STATUS.OPEN : STATUS.DRAFT;
   const item = await prisma.$transaction(async (tx) => {
     const created = await createInTx(tx, { orgId, projectId, data, actor, initialStatus });
@@ -441,16 +445,20 @@ const bulkCreatePunchItems = async ({ orgId, projectId, items = [], defaults = {
   await ensureProject({ orgId, projectId });
   if (!Array.isArray(items) || !items.length) throw new HttpError(400, "PUNCH_ITEMS_REQUIRED", "Add at least one item");
   if (items.length > MAX_BULK) throw new HttpError(400, "PUNCH_BULK_TOO_LARGE", `Create at most ${MAX_BULK} items at once`);
+  // Every item's own references are checked, not only the defaults' (CERT-2:
+  // an item naming another company's activity, location, company or people
+  // was stored, and the answer showed their names and e-mail addresses) —
+  // before a replay is answered and before anything is written.
+  const normalized = items.map((entry) => normalizePayload({ ...defaults, ...entry }));
+  await validateReferences({ orgId, projectId, data: [normalizePayload({ title: "x", ...defaults }, { partial: true }), ...normalized] });
   // Items already created by an earlier replay of this batch are returned, not duplicated.
   const replayed = [];
-  const fresh = [];
-  for (const entry of items) {
+  const prepared = [];
+  for (const [index, entry] of items.entries()) {
     const existing = await findByClientRequestId({ projectId, clientRequestId: entry?.clientRequestId });
     if (existing) replayed.push(existing);
-    else fresh.push(entry);
+    else prepared.push(normalized[index]);
   }
-  const prepared = fresh.map((entry) => normalizePayload({ ...defaults, ...entry }));
-  await validateReferences({ orgId, projectId, data: normalizePayload({ title: "x", ...defaults }, { partial: true }) });
   const initialStatus = (defaults.status || items[0]?.status) === STATUS.OPEN ? STATUS.OPEN : STATUS.DRAFT;
   const created = prepared.length
     ? await prisma.$transaction(async (tx) => {
@@ -708,6 +716,13 @@ const listPunchItems = async ({ orgId, projectId, filters = {}, viewer = null })
 
 const distributePunchItems = async ({ orgId, projectId, itemIds = [], companyIds = [], userIds = [], message = null, kind = "punch", actor = null }) => {
   const project = await ensureProject({ orgId, projectId });
+  // Every item, company and person a distribution names is this project's or
+  // this company's (CERT-2): another company's punch item or person was
+  // dropped without a word. It is refused now, as an id that exists nowhere
+  // is, before anything is read, sent or written.
+  await assertProjectRows({ model: "punchItem", projectId, ids: itemIds, code: "PUNCH_ITEM_NOT_FOUND", message: "Punch item not found" });
+  await assertCompanies({ orgId, companyIds, code: "COMPANY_NOT_FOUND", message: "Company not found" });
+  await assertMembers({ orgId, userIds, code: "USER_NOT_FOUND", message: "One or more users were not found" });
   const listKind = KINDS.includes(kind) ? kind : "punch";
   const where = { orgId, projectId };
   if (itemIds.length) where.id = { in: itemIds };

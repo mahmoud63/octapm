@@ -751,6 +751,14 @@ const createTask = async ({
   if (!projectId) {
     throw new HttpError(400, "TASK_PROJECT_REQUIRED", "Task project is required");
   }
+  // On a project's own mount a body naming another project was ignored without
+  // a word (CERT-2). It names the route's project; any other — another
+  // company's, or one that exists nowhere — gets the 404 the /tasks mount
+  // gives a project it cannot find.
+  const bodyProjectId = trimToNull(payload.projectId);
+  if (routeProjectId && bodyProjectId && bodyProjectId.toLowerCase() !== String(routeProjectId).toLowerCase()) {
+    throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
+  }
   // A key limited to some projects creates tasks on those only (CX21-486).
   if (allowedProjectIds?.length && !allowedProjectIds.includes(projectId)) throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
 

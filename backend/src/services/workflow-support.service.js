@@ -544,6 +544,15 @@ const ensureActivities = async ({ tx, projectId, links }) => {
   }
 };
 
+// The body's activityId names one of this project's activities, checked
+// before anything is written (CERT-2): beside activity links it was ignored
+// unchecked, and alone it reached the row first, so an id that exists nowhere
+// answered 500 where another company's answered 400.
+const assertPayloadActivity = async ({ tx = prisma, projectId, payload = {} }) => {
+  if (typeof payload.activityId !== "string" || !payload.activityId) return;
+  await ensureActivities({ tx, projectId, links: [{ activityId: payload.activityId }] });
+};
+
 // Records whose author is on the row: on a create whose caller passes no
 // user, the author is the one writing its references.
 const RECORD_AUTHOR_MODELS = Object.freeze({
@@ -1095,6 +1104,7 @@ module.exports = {
   COMPANY_REF_FIELDS,
   RECORD_TYPES,
   USER_REF_FIELDS,
+  assertPayloadActivity,
   assignmentData,
   assignmentUserIds,
   attachAssignmentReferences,

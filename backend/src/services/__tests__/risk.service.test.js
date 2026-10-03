@@ -216,6 +216,34 @@ describe("risk service activity impact and closeout workflow", () => {
     );
   });
 
+  it("refuses an activityId beside activityLinks that is not this project's, before anything is written (CERT-2)", async () => {
+    const foreignActivity = "33333333-3333-4333-8333-333333333333";
+    // The project has only its own two activities; the third is another company's.
+    mockPrisma.activity.findMany.mockImplementation(({ where }) =>
+      Promise.resolve([activity, activityTwo].filter((row) => where.id.in.includes(row.id) && where.projectId === "project-1")),
+    );
+    const payload = {
+      description: "Late delivery of reinforcement",
+      probability: "low",
+      impact: "medium",
+      activityId: foreignActivity,
+      activityLinks: [{ activityId: activity.id, relationType: "affects" }],
+    };
+    await expect(riskService.createRisk({ orgId: "org-1", projectId: "project-1", payload, userId: "planner-1", userRole: "planning_eng" })).rejects.toMatchObject({
+      status: 400,
+      code: "RISK_ACTIVITY_INVALID",
+    });
+    expect(mockPrisma.activity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { projectId: "project-1", id: { in: [foreignActivity] }, isActive: true } }));
+    expect(mockPrisma.risk.create).not.toHaveBeenCalled();
+    expect(mockPrisma.riskActivityLink.createMany).not.toHaveBeenCalled();
+
+    mockPrisma.risk.findFirst.mockResolvedValue(riskRow());
+    await expect(
+      riskService.updateRisk({ orgId: "org-1", projectId: "project-1", riskId: "risk-1", payload: { mitigation: "x", activityId: foreignActivity, activityLinks: [{ activityId: activity.id }] }, userId: "planner-1", userRole: "planning_eng" }),
+    ).rejects.toMatchObject({ status: 400, code: "RISK_ACTIVITY_INVALID" });
+    expect(mockPrisma.risk.update).not.toHaveBeenCalled();
+  });
+
   it("submits and approves risk closeout with audit trail", async () => {
     const existing = riskRow();
     const submitted = riskRow({

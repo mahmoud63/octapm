@@ -5,6 +5,7 @@ const {
   RECORD_TYPES,
   workflowAssignmentData,
   attachWorkflowDetailsToRecords,
+  assertPayloadActivity,
   primaryActivityIdFromPayload,
   recordWorkflowHistory,
   syncWorkflowReferences,
@@ -50,6 +51,7 @@ const listDefects = async ({ orgId, projectId }) => {
 
 const createDefect = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
+  await assertPayloadActivity({ projectId, payload });
 
   const generatedRef = await nextRef(prisma, { table: 'DefectRecord', scopeColumn: 'projectId', scopeId: projectId, prefix: 'DEF' });
   const activityId = primaryActivityIdFromPayload(payload);
@@ -126,6 +128,7 @@ const updateDefect = async ({ orgId, projectId, defectId, payload, userId, userR
   }
 
   const nextStatus = payload.status ?? existing.status;
+  await assertPayloadActivity({ projectId, payload });
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
 
   const row = await prisma.$transaction(async (tx) => {

@@ -5,6 +5,7 @@ const {
   RECORD_TYPES,
   workflowAssignmentData,
   attachWorkflowDetailsToRecords,
+  assertPayloadActivity,
   primaryActivityIdFromPayload,
   recordDocumentRevisions,
   recordWorkflowHistory,
@@ -54,6 +55,7 @@ const resolveRecordTypeKey = async ({ orgId, key }) =>
 
 const createCorrespondence = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
+  await assertPayloadActivity({ projectId, payload });
 
   const generatedRef = await nextRef(prisma, { table: 'Correspondence', scopeColumn: 'projectId', scopeId: projectId, prefix: 'COR' });
   const activityId = primaryActivityIdFromPayload(payload);
@@ -149,6 +151,7 @@ const updateCorrespondence = async ({
   if (nextStatus !== existing.status && !viaWorkflow) {
     await require('./workflow-engine.service').assertNotLocked({ tool: 'correspondence', projectId, recordId: correspondenceId });
   }
+  await assertPayloadActivity({ projectId, payload });
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
 
   const row = await prisma.$transaction(async (tx) => {

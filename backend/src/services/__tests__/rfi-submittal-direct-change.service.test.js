@@ -11,6 +11,7 @@ const mockPrisma = {
   rfiResponse: { findFirst: jest.fn() },
   submittal: { findFirst: jest.fn(), update: jest.fn() },
   workflowInstance: { findFirst: jest.fn(async () => null) },
+  activity: { findMany: jest.fn(async () => []) },
 };
 const mockAuditService = { ENTITY_TYPES: { RFI: "rfi", SUBMITTAL: "submittal" }, ACTIONS: { ARCHIVED: "archived", UPDATED: "updated" }, recordEvent: jest.fn() };
 
@@ -68,6 +69,27 @@ describe("RFI decisions through create / update", () => {
     await expect(rfiService.createRfi({ orgId: "org-1", projectId: "project-1", payload: { subject: "s", status: "closed" }, userId: "user-x", canTransition: holds("rfi.submit") })).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(mockPrisma.rfi.update).not.toHaveBeenCalled();
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses an activityId beside activityLinks that is not this project's, as the links' check refuses one (CERT-2)", async () => {
+    const payload = { subject: "Founding level", question: "Which?", activityId: "foreign-activity", activityLinks: [{ activityId: "own-activity" }] };
+    await expect(rfiService.createRfi({ orgId: "org-1", projectId: "project-1", payload, userId: "user-x" })).rejects.toMatchObject({
+      status: 400,
+      code: "WORKFLOW_ACTIVITY_NOT_FOUND",
+    });
+    expect(mockPrisma.activity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["foreign-activity"] }, projectId: "project-1" } }));
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses another company's activityId on update before anything is written (CERT-2)", async () => {
+    mockPrisma.rfi.findFirst.mockResolvedValue(rfiRow());
+    await expect(rfiService.updateRfi({ orgId: "org-1", projectId: "project-1", rfiId: "rfi-1", payload: { activityId: "foreign-activity" }, userId: "user-x", userRole: "pm" })).rejects.toMatchObject({
+      status: 400,
+      code: "WORKFLOW_ACTIVITY_NOT_FOUND",
+    });
+    expect(mockPrisma.activity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["foreign-activity"] }, projectId: "project-1" } }));
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.rfi.update).not.toHaveBeenCalled();
   });
 
   it("archives an RFI only for a caller it is routed to", async () => {

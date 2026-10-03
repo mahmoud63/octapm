@@ -5,6 +5,7 @@ const {
   RECORD_TYPES,
   workflowAssignmentData,
   attachWorkflowDetailsToRecords,
+  assertPayloadActivity,
   primaryActivityIdFromPayload,
   recordWorkflowHistory,
   syncWorkflowReferences,
@@ -53,6 +54,7 @@ const listMaterialTests = async ({ orgId, projectId }) => {
 
 const createMaterialTest = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
+  await assertPayloadActivity({ projectId, payload });
 
   const generatedRef = await nextRef(prisma, { table: 'MaterialTest', scopeColumn: 'projectId', scopeId: projectId, prefix: 'MTEST' });
   const activityId = primaryActivityIdFromPayload(payload);
@@ -124,6 +126,7 @@ const updateMaterialTest = async ({ orgId, projectId, testId, payload, userId, u
   }
 
   const nextResult = payload.result ?? existing.result;
+  await assertPayloadActivity({ projectId, payload });
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
 
   const row = await prisma.$transaction(async (tx) => {

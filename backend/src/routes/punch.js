@@ -33,6 +33,8 @@ const actorFor = (req) => ({
   projectAccess: req.projectAccess || null,
 });
 
+const REFERENCE_FIELDS = Object.freeze(["locationId", "sheetId", "activityId", "assigneeCompanyId", "assigneeUserId", "managerUserId", "finalApproverUserId"]);
+
 const itemValidators = (partial = false) => [
   partial ? body("title").optional().isString().trim().isLength({ min: 1, max: 200 }) : body("title").isString().trim().isLength({ min: 1, max: 200 }),
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
@@ -179,6 +181,9 @@ router.post(
     body("items.*.title").isString().trim().isLength({ min: 1, max: 200 }),
     body("items.*.clientRequestId").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
     body("defaults").optional().isObject(),
+    // An item's references are identifiers, as on a single create; the service
+    // checks that each names this project's or this company's record.
+    ...REFERENCE_FIELDS.flatMap((field) => [body(`items.*.${field}`).optional({ nullable: true }).isUUID(), body(`defaults.${field}`).optional({ nullable: true }).isUUID()]),
     validate,
   ],
   asyncHandler(async (req, res) => {

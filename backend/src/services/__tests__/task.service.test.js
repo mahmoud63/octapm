@@ -184,6 +184,25 @@ describe("task service", () => {
     );
   });
 
+  it("refuses a body project other than the route's on a project's own mount, before anything is written (CERT-2)", async () => {
+    const routeProject = "22222222-2222-4222-8222-222222222222";
+    for (const bodyProject of ["99999999-9999-4999-8999-999999999999", "not-a-project"]) {
+      await expect(
+        taskService.createTask({ orgId: "org-1", projectId: routeProject, payload: { title: "Re-brief the lifting plan", projectId: bodyProject }, userId: "creator-1", userRole: "planning_eng" }),
+      ).rejects.toMatchObject({ status: 404, code: "PROJECT_NOT_FOUND" });
+    }
+    expect(mockAssertProjectAccess).not.toHaveBeenCalled();
+    expect(mockPrisma.task.create).not.toHaveBeenCalled();
+
+    // The route's own project in the body (any case) is the same request as none.
+    const created = taskRow();
+    mockPrisma.task.count.mockResolvedValue(0);
+    mockPrisma.task.create.mockResolvedValue(created);
+    mockPrisma.task.findUnique.mockResolvedValue(created);
+    await taskService.createTask({ orgId: "org-1", projectId: routeProject, payload: { title: created.title, projectId: routeProject.toUpperCase() }, userId: "creator-1", userRole: "planning_eng" });
+    expect(mockPrisma.task.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ projectId: routeProject }) }));
+  });
+
   it("limits non-PM workspace lists to assigned or created tasks", async () => {
     mockPrisma.task.findMany.mockResolvedValue([taskRow()]);
 

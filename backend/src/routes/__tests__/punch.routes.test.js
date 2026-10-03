@@ -91,6 +91,21 @@ describe("punch routes", () => {
     expect(mockService.bulkCreatePunchItems).toHaveBeenCalledWith(expect.objectContaining({ items: [{ title: "A" }, { title: "B" }], defaults: { trade: "Paint" } }));
   });
 
+  it("takes a bulk item's and the defaults' references only as identifiers (CERT-2)", async () => {
+    const app = buildApp();
+    for (const body of [
+      { items: [{ title: "A", activityId: 12345 }] },
+      { items: [{ title: "A" }, { title: "B", assigneeUserId: "not-an-id" }] },
+      { items: [{ title: "A" }], defaults: { locationId: { id: ITEM_ID } } },
+    ]) {
+      const res = await request(app).post("/projects/project-1/punch/bulk").send(body);
+      expect(res.status).toBe(400);
+    }
+    expect(mockService.bulkCreatePunchItems).not.toHaveBeenCalled();
+    const ok = await request(app).post("/projects/project-1/punch/bulk").send({ items: [{ title: "A", activityId: ITEM_ID, assigneeUserId: null }], defaults: { assigneeCompanyId: ITEM_ID } });
+    expect(ok.status).toBe(201);
+  });
+
   it("maps actions to transitions: subs submit for review, only PM closes or voids", async () => {
     const app = buildApp();
     const ready = await request(app).post(`/projects/project-1/punch/${ITEM_ID}/transition`).set("x-party", "subcontractor").send({ action: "ready_for_review" });

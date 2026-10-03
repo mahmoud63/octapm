@@ -213,6 +213,14 @@ const assertActivitiesInProject = async ({
   }
 };
 
+/**
+ * An `activityId` sent beside `activityLinks` / `activityIds` was neither
+ * stored (the links win) nor checked (CERT-2). It names one of this project's
+ * activities, refused as a missing linked activity is.
+ */
+const assertActivityIdInProject = ({ tx = prisma, projectId, activityId }) =>
+  assertActivitiesInProject({ tx, projectId, activityLinks: normalizeActivityLinks({ activityId }) || [] });
+
 const replaceRiskActivityLinks = async ({
   tx,
   projectId,
@@ -626,6 +634,7 @@ const createRisk = async ({
   }
 
   const activityLinks = normalizeActivityLinks(payload);
+  await assertActivityIdInProject({ projectId, activityId: payload.activityId });
   const generatedRef = await nextRef(prisma, { table: 'Risk', scopeColumn: 'projectId', scopeId: projectId, prefix: 'RSK', pad: 2 });
   const ref = generatedRef;
 
@@ -712,6 +721,7 @@ const updateRisk = async ({
   });
   const data = buildRiskData(payload, existing);
   await assertRiskReferences({ orgId, data });
+  await assertActivityIdInProject({ projectId, activityId: payload.activityId });
   const nextStatus = data.status ?? existing.status;
   assertDirectStatusUpdateAllowed({
     existingStatus: existing.status,

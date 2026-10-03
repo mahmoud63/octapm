@@ -23,6 +23,25 @@ const USER_A = "11111111-1111-4111-8111-111111111111";
 const USER_B = "22222222-2222-4222-8222-222222222222";
 const COMPANY = "33333333-3333-4333-8333-333333333333";
 
+describe("the body's primary activity (certification CERT-2)", () => {
+  const OWN = "44444444-4444-4444-8444-444444444444";
+  const OTHER = "55555555-5555-4555-8555-555555555555";
+  const tx = { activity: { findMany: jest.fn(async ({ where }) => (where.id.in.includes(OWN) && where.projectId === "project-1" ? [{ id: OWN }] : [])) } };
+
+  it("answers another company's activity, and one that exists nowhere, with the links' 400", async () => {
+    await expect(service.assertPayloadActivity({ tx, projectId: "project-1", payload: { activityId: OTHER } })).rejects.toMatchObject({ status: 400, code: "WORKFLOW_ACTIVITY_NOT_FOUND" });
+    expect(tx.activity.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: { projectId: "project-1", id: { in: [OTHER] } } }));
+  });
+
+  it("checks it beside activity links too, and passes the project's own or none", async () => {
+    await expect(service.assertPayloadActivity({ tx, projectId: "project-1", payload: { activityId: OTHER, activityLinks: [{ activityId: OWN }] } })).rejects.toMatchObject({ code: "WORKFLOW_ACTIVITY_NOT_FOUND" });
+    await expect(service.assertPayloadActivity({ tx, projectId: "project-1", payload: { activityId: OWN } })).resolves.toBeUndefined();
+    tx.activity.findMany.mockClear();
+    await expect(service.assertPayloadActivity({ tx, projectId: "project-1", payload: { activityId: null } })).resolves.toBeUndefined();
+    expect(tx.activity.findMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("ball in court", () => {
   it("routes to the reviewer while open and back to the originator after a decision", () => {
     const refs = { ownerUserId: USER_A, reviewerUserId: USER_B };

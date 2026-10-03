@@ -45,6 +45,19 @@ const ensureProject = async ({ orgId, projectId }) => {
   return project;
 };
 
+/**
+ * An `activityId` sent beside `activityLinks` / `activityIds` was neither
+ * stored (the links name the primary activity) nor checked (CERT-2). It names
+ * one of this project's activities; another company's activity and one that
+ * exists nowhere get the 400 the links' own check gives a missing activity.
+ */
+const assertActivityIdInProject = ({ projectId, activityId }) =>
+  require("./tenant-references.service")
+    .assertProjectRows({ model: "activity", projectId, ids: [activityId], code: "WORKFLOW_ACTIVITY_NOT_FOUND", message: "One or more linked activities were not found in this project" })
+    .catch((error) => {
+      throw error?.code === "WORKFLOW_ACTIVITY_NOT_FOUND" ? new HttpError(400, error.code, error.message) : error;
+    });
+
 const RFI_STATUSES = ["draft", "open", "answered", "closed", ARCHIVED_STATUS];
 const RFI_OPEN_STATUSES = ["draft", "open", "answered"];
 
@@ -345,6 +358,7 @@ const createRfi = async ({
 }) => {
   await ensureProject({ orgId, projectId });
   assertDirectRfiChange({ payload, canTransition });
+  await assertActivityIdInProject({ projectId, activityId: payload.activityId });
 
   const generatedRef = await nextRef(prisma, { table: 'Rfi', scopeColumn: 'projectId', scopeId: projectId, prefix: 'RFI' });
   const activityId = primaryActivityIdFromPayload(payload);
@@ -525,6 +539,8 @@ const updateRfi = async ({
     message: "Archived RFIs cannot be updated through normal workflow actions",
   });
   assertDirectRfiChange({ existing, payload, canTransition });
+  // As on create: checked before anything is written (CERT-2).
+  await assertActivityIdInProject({ projectId, activityId: payload.activityId });
 
   const nextStatus = payload.status ?? existing.status;
   if (nextStatus === ARCHIVED_STATUS && existing.status !== ARCHIVED_STATUS) {

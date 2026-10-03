@@ -5,6 +5,7 @@ const {
   RECORD_TYPES,
   workflowAssignmentData,
   attachWorkflowDetailsToRecords,
+  assertPayloadActivity,
   primaryActivityIdFromPayload,
   recordWorkflowHistory,
   syncWorkflowReferences,
@@ -48,6 +49,7 @@ const listItps = async ({ orgId, projectId }) => {
 
 const createItp = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
+  await assertPayloadActivity({ projectId, payload });
 
   const generatedRef = await nextRef(prisma, { table: 'ItpRecord', scopeColumn: 'projectId', scopeId: projectId, prefix: 'ITP' });
   const activityId = primaryActivityIdFromPayload(payload);
@@ -116,6 +118,7 @@ const updateItp = async ({ orgId, projectId, itpId, payload, userId, userRole })
   }
 
   const nextStatus = payload.status ?? existing.status;
+  await assertPayloadActivity({ projectId, payload });
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
 
   const row = await prisma.$transaction(async (tx) => {

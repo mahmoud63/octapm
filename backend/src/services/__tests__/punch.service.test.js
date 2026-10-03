@@ -3,10 +3,12 @@ const mockPrisma = {
   ...referenceCounterMock(),
   $transaction: jest.fn((fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn() },
-  location: { findFirst: jest.fn() },
-  sheet: { findFirst: jest.fn() },
-  activity: { findFirst: jest.fn() },
-  company: { findFirst: jest.fn() },
+  // The references an item names are checked through tenant-references.service (findMany by id).
+  location: { findMany: jest.fn() },
+  sheet: { findMany: jest.fn() },
+  activity: { findMany: jest.fn() },
+  company: { findMany: jest.fn() },
+  organizationMembership: { findMany: jest.fn() },
   user: { findMany: jest.fn() },
   punchItem: { aggregate: jest.fn(), create: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
   punchItemEvent: { create: jest.fn(async () => ({})), findMany: jest.fn(async () => []) },
@@ -98,7 +100,10 @@ describe("punch service", () => {
       state = { ...state, ...data };
       return Promise.resolve(item(state));
     });
-    mockPrisma.company.findFirst.mockResolvedValue({ id: "company-sub" });
+    // Every id asked for exists in this project / organisation unless a test says otherwise.
+    const found = ({ where }) => Promise.resolve((where.id?.in || []).map((id) => ({ id })));
+    for (const model of ["location", "sheet", "activity", "company"]) mockPrisma[model].findMany.mockImplementation(found);
+    mockPrisma.organizationMembership.findMany.mockImplementation(({ where }) => Promise.resolve((where.userId?.in || []).map((userId) => ({ userId }))));
     mockPrisma.user.findMany.mockImplementation(({ where }) => Promise.resolve((where.id?.in || []).map((id) => ({ id, name: id, email: `${id}@example.com` }))));
   });
 
@@ -152,8 +157,56 @@ describe("punch service", () => {
     it("rejects bad priorities, missing titles and unknown companies", async () => {
       await expect(service.createPunchItem({ orgId: ORG, projectId: PROJECT, payload: { title: "x", priority: "asap" }, actor: SITE })).rejects.toMatchObject({ code: "PUNCH_PRIORITY_INVALID" });
       await expect(service.createPunchItem({ orgId: ORG, projectId: PROJECT, payload: { title: "  " }, actor: SITE })).rejects.toMatchObject({ code: "PUNCH_TITLE_REQUIRED" });
-      mockPrisma.company.findFirst.mockResolvedValue(null);
+      mockPrisma.company.findMany.mockResolvedValue([]);
       await expect(service.createPunchItem({ orgId: ORG, projectId: PROJECT, payload: { title: "x", assigneeCompanyId: "nope" }, actor: SITE })).rejects.toMatchObject({ code: "COMPANY_NOT_FOUND" });
+    });
+
+    it("checks each reference in this project or organisation, people by membership (CERT-2)", async () => {
+      await service.createPunchItem({
+        orgId: ORG,
+        projectId: PROJECT,
+        actor: SITE,
+        payload: { title: "x", locationId: "loc-1", activityId: "act-1", assigneeCompanyId: "company-sub", assigneeUserId: "user-sub", managerUserId: "user-site" },
+      });
+      expect(mockPrisma.location.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["loc-1"] }, projectId: PROJECT } }));
+      expect(mockPrisma.activity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["act-1"] }, projectId: PROJECT } }));
+      expect(mockPrisma.company.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["company-sub"] }, orgId: ORG } }));
+      expect(mockPrisma.organizationMembership.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ orgId: ORG, userId: { in: ["user-sub", "user-site"] } }) }));
+      // Another company's (or no) activity, location or person: the same 404 as before, nothing written.
+      mockPrisma.punchItem.create.mockClear();
+      for (const [model, field, code] of [
+        ["location", "locationId", "LOCATION_NOT_FOUND"],
+        ["activity", "activityId", "ACTIVITY_NOT_FOUND"],
+        ["organizationMembership", "managerUserId", "USER_NOT_FOUND"],
+      ]) {
+        mockPrisma[model].findMany.mockResolvedValueOnce([]);
+        await expect(service.createPunchItem({ orgId: ORG, projectId: PROJECT, actor: SITE, payload: { title: "x", [field]: "foreign-1" } })).rejects.toMatchObject({ status: 404, code });
+      }
+      expect(mockPrisma.punchItem.create).not.toHaveBeenCalled();
+    });
+
+    it("checks the references before answering an offline replay (CERT-2)", async () => {
+      const original = item({ id: "item-1", clientRequestId: "offline-1" });
+      mockPrisma.punchItem.findFirst.mockResolvedValue(original);
+      const replay = await service.createPunchItem({ orgId: ORG, projectId: PROJECT, actor: SITE, payload: { title: "Crack in render", activityId: "act-1", clientRequestId: "offline-1" } });
+      expect(replay).toEqual(expect.objectContaining({ id: "item-1", replayed: true }));
+      // The same key with another company's activity: refused before the replay is looked up.
+      mockPrisma.punchItem.findFirst.mockClear();
+      mockPrisma.activity.findMany.mockResolvedValueOnce([]);
+      await expect(service.createPunchItem({ orgId: ORG, projectId: PROJECT, actor: SITE, payload: { title: "Crack in render", activityId: "foreign-act", clientRequestId: "offline-1" } })).rejects.toMatchObject({ status: 404, code: "ACTIVITY_NOT_FOUND" });
+      expect(mockPrisma.punchItem.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.punchItem.create).not.toHaveBeenCalled();
+    });
+
+    it("checks every bulk item's own references, not only the defaults' (CERT-2)", async () => {
+      mockPrisma.activity.findMany.mockImplementation(({ where }) => Promise.resolve(where.id.in.filter((id) => id !== "foreign-act").map((id) => ({ id }))));
+      await expect(
+        service.bulkCreatePunchItems({ orgId: ORG, projectId: PROJECT, items: [{ title: "Door closer" }, { title: "Seal joint", activityId: "foreign-act" }], defaults: { activityId: "act-1" }, actor: PM }),
+      ).rejects.toMatchObject({ status: 404, code: "ACTIVITY_NOT_FOUND" });
+      expect(mockPrisma.activity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["act-1", "foreign-act"] }, projectId: PROJECT } }));
+      mockPrisma.organizationMembership.findMany.mockResolvedValueOnce([]);
+      await expect(service.bulkCreatePunchItems({ orgId: ORG, projectId: PROJECT, items: [{ title: "Door closer", assigneeUserId: "foreign-user" }], actor: PM })).rejects.toMatchObject({ status: 404, code: "USER_NOT_FOUND" });
+      expect(mockPrisma.punchItem.create).not.toHaveBeenCalled();
     });
 
     it("bulk-creates with defaults and consecutive numbers", async () => {
@@ -263,6 +316,28 @@ describe("punch service", () => {
       expect(mockPrisma.punchItemEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ action: "distributed" }) }));
       expect(mockNotifications.createNotifications).toHaveBeenCalledWith(expect.objectContaining({ event: "punch.distributed", recipientUserIds: ["user-sub", "user-sub-2"] }));
       expect(result).toEqual(expect.objectContaining({ items: 2, recipients: expect.arrayContaining([expect.objectContaining({ delivered: true })]) }));
+    });
+
+    it("refuses another company's punch item, person or company before anything is read, sent or written (CERT-2)", async () => {
+      const own = [item({ id: "a" }), item({ id: "b", ref: "PL-008" })];
+      mockPrisma.punchItem.findMany.mockImplementation(({ where, select }) =>
+        Promise.resolve(select ? own.filter((row) => where.id.in.includes(row.id) && where.projectId === PROJECT).map((row) => ({ id: row.id })) : own),
+      );
+      await expect(service.distributePunchItems({ orgId: ORG, projectId: PROJECT, itemIds: ["a", "foreign-item"], userIds: ["user-sub"], actor: PM })).rejects.toMatchObject({ status: 404, code: "PUNCH_ITEM_NOT_FOUND" });
+      expect(mockPrisma.punchItem.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["a", "foreign-item"] }, projectId: PROJECT }, select: { id: true } }));
+      mockPrisma.organizationMembership.findMany.mockResolvedValueOnce([]);
+      await expect(service.distributePunchItems({ orgId: ORG, projectId: PROJECT, itemIds: ["a", "b"], userIds: ["foreign-user"], actor: PM })).rejects.toMatchObject({ status: 404, code: "USER_NOT_FOUND" });
+      mockPrisma.company.findMany.mockResolvedValueOnce([]);
+      await expect(service.distributePunchItems({ orgId: ORG, projectId: PROJECT, itemIds: ["a"], companyIds: ["foreign-company"], actor: PM })).rejects.toMatchObject({ status: 404, code: "COMPANY_NOT_FOUND" });
+      expect(mockSendEmail).not.toHaveBeenCalled();
+      expect(mockPrisma.punchItem.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.punchItemEvent.create).not.toHaveBeenCalled();
+      expect(mockNotifications.createNotifications).not.toHaveBeenCalled();
+      // The company's own items and people are distributed as before.
+      mockPrisma.punchItem.updateMany.mockResolvedValue({ count: 2 });
+      const result = await service.distributePunchItems({ orgId: ORG, projectId: PROJECT, itemIds: ["a", "b"], userIds: ["user-site"], actor: PM });
+      expect(result.items).toBe(2);
+      expect(mockSendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "user-site@example.com" }));
     });
 
     it("exports a grouped PDF and a CSV", async () => {
