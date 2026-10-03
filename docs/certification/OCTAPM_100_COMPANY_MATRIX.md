@@ -1,6 +1,6 @@
 # OctaPM certification — the hundred-company matrix
 
-Generated 2026-10-03T12:20:30.926Z by `backend/scripts/cert/matrix-report.js` from the certification database
+Generated 2026-10-03T20:06:06.100Z by `backend/scripts/cert/matrix-report.js` from the certification database
 (`octapm_cert`), read in one read-only transaction. The specification the population was built from is
 `backend/scripts/cert/lib/spec.js`; where the database differs from it, this document says so.
 
@@ -13,7 +13,7 @@ Generated 2026-10-03T12:20:30.926Z by `backend/scripts/cert/matrix-report.js` fr
 | Memberships | 3052 | 3052 |
 | Projects | 718 | 732 |
 | Project team assignments | — | 9256 |
-| Rows that belong to a company (all tables) | — | 2995962 |
+| Rows that belong to a company (all tables) | — | 2995633 |
 | Tables with rows | — | 198 of 241 that belong to a company |
 
 ## Projects against the specification
@@ -24,7 +24,7 @@ Every project was compared by name with its company's specification. Every diffe
   - 021: "Marina Residences" built by the lifecycle as "OCTA PHASE21 GREENFIELD C021" and "OCTA PHASE21 ISOLATION C021"
   - 027: "Lakeside Villas Phase 2" built by the lifecycle as "OCTA PHASE21 GREENFIELD C027" and "OCTA PHASE21 ISOLATION C027"
   - 033: "Northern Ring Road Section 4" built by the lifecycle as "OCTA PHASE21 GREENFIELD C033" and "OCTA PHASE21 ISOLATION C033"
-  - 039: "Fire Station" built by the lifecycle as "OCTA PHASE21 ISOLATION C039" and "OCTA PHASE21 GREENFIELD C039"
+  - 039: "Fire Station" built by the lifecycle as "OCTA PHASE21 GREENFIELD C039" and "OCTA PHASE21 ISOLATION C039"
   - 045: "Pedestrian Underpass" built by the lifecycle as "OCTA PHASE21 GREENFIELD C045" and "OCTA PHASE21 ISOLATION C045"
   - 051: "Data Centre Shell and Core" built by the lifecycle as "OCTA PHASE21 GREENFIELD C051" and "OCTA PHASE21 ISOLATION C051"
   - 057: "Business Bay Office Tower" built by the lifecycle as "OCTA PHASE21 GREENFIELD C057" and "OCTA PHASE21 ISOLATION C057"
@@ -32,7 +32,7 @@ Every project was compared by name with its company's specification. Every diffe
   - 069: "Logistics Park Warehouse B" built by the lifecycle as "OCTA PHASE21 GREENFIELD C069" and "OCTA PHASE21 ISOLATION C069"
   - 075: "Heritage Hotel Refurbishment" built by the lifecycle as "OCTA PHASE21 ISOLATION C075" and "OCTA PHASE21 GREENFIELD C075"
   - 081: "Pedestrian Underpass" built by the lifecycle as "OCTA PHASE21 GREENFIELD C081" and "OCTA PHASE21 ISOLATION C081"
-  - 087: "Industrial Estate Roads" built by the lifecycle as "OCTA PHASE21 ISOLATION C087" and "OCTA PHASE21 GREENFIELD C087"
+  - 087: "Industrial Estate Roads" built by the lifecycle as "OCTA PHASE21 GREENFIELD C087" and "OCTA PHASE21 ISOLATION C087"
   - 093: "School Campus Block C" built by the lifecycle as "OCTA PHASE21 GREENFIELD C093" and "OCTA PHASE21 ISOLATION C093"
   - 099: "Airport Cargo Terminal" built by the lifecycle as "OCTA PHASE21 GREENFIELD C099" and "OCTA PHASE21 ISOLATION C099"
 
@@ -90,105 +90,105 @@ A role in one company must grant nothing in another. `*` marks company administr
 | Code | Company | Size | People (active / not) | Roles | Admins | Plan / state / seats | Currency | Time zone | Projects (archived) | Rows | Record types |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 001 | Harbor Construction | small | 3 / 0 | 3 | 1 | individual / active / 2 | USD | Pacific/Honolulu | 1 (0) | 7228 | 195 |
-| 002 | Summit Engineering & Construction | small | 3 / 0 | 3 | 1 | trial / trialing / 1 | EGP | Africa/Cairo | 1 (0) | 7143 | 194 |
-| 003 | Ironbridge Civil Works | small | 4 / 0 | 4 | 1 | individual / expired / 5 | AED | Asia/Dubai | 3 (0) | 15105 | 197 |
-| 004 | Meridian Constructors | small | 8 / 0 | 5 | 2 | business / active / 5 | EUR | Europe/Madrid | 1 (0) | 7862 | 197 |
+| 002 | Summit Engineering & Construction | small | 3 / 0 | 3 | 1 | trial / trialing / 1 | EGP | Africa/Cairo | 1 (0) | 7142 | 194 |
+| 003 | Ironbridge Civil Works | small | 4 / 0 | 4 | 1 | individual / expired / 5 | AED | Asia/Dubai | 3 (0) | 15104 | 197 |
+| 004 | Meridian Constructors | small | 8 / 0 | 5 | 2 | business / active / 5 | EUR | Europe/Madrid | 1 (0) | 7861 | 197 |
 | 005 | Cedar Ridge Contracting | small | 3 / 0 | 3 | 1 | trial / expired / 1 | INR | Asia/Kolkata | 1 (0) | 7073 | 193 |
-| 006 | Atlas Infrastructure | small | 4 / 0 | 3 | 1 | business / active / 5 | AED | Asia/Dubai | 3 (0) | 14364 | 195 |
+| 006 | Atlas Infrastructure | small | 4 / 0 | 3 | 1 | business / active / 5 | AED | Asia/Dubai | 3 (0) | 14362 | 195 |
 | 007 | Northgate Building Group | small | 6 / 0 | 4 | 2 | individual / active / 5 | KWD | Asia/Kuwait | 1 (0) | 8086 | 197 |
 | 008 | Al Noor Builders | small | 6 / 0 | 5 | 1 | individual / active / 5 | NPR | Asia/Kathmandu | 2 (0) | 14564 | 197 |
 | 009 | Delta General Contractors | small | 3 / 0 | 3 | 1 | trial / trialing / 1 | AED | Asia/Dubai | 1 (0) | 6950 | 194 |
-| 010 | Keystone Developments | small | 5 / 0 | 4 | 1 | individual / active / 1 | GBP | Europe/London | 1 (0) | 7642 | 195 |
+| 010 | Keystone Developments | small | 5 / 0 | 4 | 1 | individual / active / 1 | GBP | Europe/London | 1 (0) | 7641 | 195 |
 | 011 | Granite Peak Construction | small | 4 / 0 | 4 | 1 | individual / active / 5 | INR | Asia/Kolkata | 2 (0) | 7224 | 196 |
-| 012 | Bluewater Engineering & Construction | small | 6 / 0 | 5 | 1 | trial / trialing / 1 | USD | — | 1 (0) | 7515 | 195 |
+| 012 | Bluewater Engineering & Construction | small | 6 / 0 | 5 | 1 | trial / trialing / 1 | USD | — | 1 (0) | 7514 | 195 |
 | 013 | Falcon Civil Works | small | 3 / 0 | 3 | 1 | trial / trialing / 1 | EUR | Europe/Berlin | 1 (0) | 6756 | 194 |
-| 014 | Redwood Constructors | small | 4 / 0 | 4 | 1 | individual / active / 5 | KWD | Asia/Kuwait | 2 (0) | 14267 | 195 |
-| 015 | Pinnacle Contracting | small | 4 / 0 | 4 | 1 | business / active / 2 | EGP | Africa/Cairo | 3 (1) | 14457 | 197 |
-| 016 | Crescent Infrastructure | small | 5 / 0 | 5 | 1 | individual / canceled / 5 | USD | Pacific/Honolulu | 1 (0) | 7544 | 197 |
+| 014 | Redwood Constructors | small | 4 / 0 | 4 | 1 | individual / active / 5 | KWD | Asia/Kuwait | 2 (0) | 14264 | 195 |
+| 015 | Pinnacle Contracting | small | 4 / 0 | 4 | 1 | business / active / 2 | EGP | Africa/Cairo | 3 (1) | 14456 | 197 |
+| 016 | Crescent Infrastructure | small | 5 / 0 | 5 | 1 | individual / canceled / 5 | USD | Pacific/Honolulu | 1 (0) | 7545 | 197 |
 | 017 | Orion Building Group | small | 2 / 0 | 2 | 1 | individual / active / 2 | NZD | Pacific/Auckland | 2 (0) | 13977 | 195 |
 | 018 | Sahara Builders | small | 3 / 0 | 3 | 1 | individual / active / 5 | USD | Pacific/Honolulu | 3 (0) | 14484 | 195 |
-| 019 | Nile Valley General Contractors | small | 5 / 0 | 4 | 1 | individual / past_due / 5 | USD | America/Chicago | 1 (0) | 7467 | 197 |
-| 020 | Gulf Horizon Developments | small | 5 / 0 | 5 | 1 | trial / trialing / 1 | SAR | Asia/Riyadh | 1 (0) | 7632 | 194 |
+| 019 | Nile Valley General Contractors | small | 5 / 0 | 4 | 1 | individual / past_due / 5 | USD | America/Chicago | 1 (0) | 7466 | 197 |
+| 020 | Gulf Horizon Developments | small | 5 / 0 | 5 | 1 | trial / trialing / 1 | SAR | Asia/Riyadh | 1 (0) | 7631 | 194 |
 | 021 | Thames Construction | medium | 10 / 0 | 9 | 2 | business / active / 10 | AED | Asia/Dubai | 4 (1) | 1296 | 116 |
-| 022 | Hudson Engineering & Construction | medium | 17 / 2 | 9 | 3 | business / expired / 25 | NZD | Pacific/Auckland | 4 (1) | 24984 | 198 |
-| 023 | Bayou Civil Works | medium | 22 / 3 | 9 | 2 | business / active / 25 | SAR | Asia/Riyadh | 5 (0) | 25609 | 198 |
-| 024 | Magnolia Constructors | medium | 11 / 0 | 9 | 2 | business / active / 10 | USD | — | 6 (0) | 24214 | 198 |
-| 025 | Lone Star Contracting | medium | 15 / 2 | 9 | 3 | business / active / 10 | USD | Pacific/Honolulu | 7 (1) | 25997 | 198 |
-| 026 | Cascade Infrastructure | medium | 21 / 3 | 9 | 2 | business / past_due / 25 | USD | America/Los_Angeles | 8 (1) | 25884 | 198 |
-| 027 | Sierra Building Group | medium | 11 / 0 | 9 | 2 | enterprise / active / 10 | USD | America/Los_Angeles | 10 (2) | 25177 | 198 |
-| 028 | Maple Leaf Builders | medium | 16 / 2 | 9 | 3 | business / active / 25 | USD | America/Los_Angeles | 10 (0) | 39973 | 198 |
-| 029 | Aurora General Contractors | medium | 22 / 3 | 9 | 2 | individual / active / 5 | EUR | Europe/Paris | 3 (0) | 16729 | 198 |
-| 030 | Stonebridge Developments | medium | 10 / 0 | 9 | 2 | enterprise / active / 5 | EGP | Africa/Cairo | 4 (0) | 24382 | 198 |
-| 031 | Kingsway Construction | medium | 15 / 2 | 9 | 3 | enterprise / active / 25 | AED | Asia/Dubai | 5 (0) | 16887 | 198 |
-| 032 | Blackrock Engineering & Construction | medium | 21 / 3 | 9 | 2 | enterprise / active / 25 | AED | Asia/Dubai | 6 (1) | 25840 | 198 |
-| 033 | Al Waha Civil Works | medium | 11 / 0 | 9 | 2 | business / active / 10 | AED | Asia/Dubai | 8 (2) | 23887 | 198 |
-| 034 | Corniche Constructors | medium | 16 / 2 | 9 | 3 | business / past_due / 25 | USD | America/Los_Angeles | 8 (0) | 34307 | 198 |
-| 035 | Riverbend Contracting | medium | 22 / 3 | 9 | 2 | business / active / 10 | INR | Asia/Kolkata | 9 (1) | 24104 | 198 |
-| 036 | Highland Infrastructure | medium | 11 / 0 | 9 | 2 | business / active / 10 | GBP | — | 10 (1) | 32521 | 198 |
-| 037 | Oakmont Building Group | medium | 17 / 2 | 9 | 3 | business / canceled / 25 | AUD | Australia/Perth | 3 (0) | 16288 | 198 |
-| 038 | Terra Firma Builders | medium | 21 / 3 | 9 | 2 | individual / active / 5 | EGP | Africa/Cairo | 3 (0) | 18121 | 198 |
-| 039 | Vanguard General Contractors | medium | 10 / 0 | 9 | 2 | business / canceled / 10 | AUD | Australia/Adelaide | 6 (2) | 16825 | 198 |
-| 040 | Zenith Developments | medium | 16 / 2 | 9 | 3 | business / active / 10 | SAR | Asia/Riyadh | 6 (0) | 24058 | 198 |
-| 041 | Petra Construction | medium | 21 / 3 | 9 | 2 | enterprise / active / 25 | EUR | Europe/Madrid | 7 (0) | 26238 | 198 |
-| 042 | Olympus Engineering & Construction | medium | 10 / 0 | 9 | 2 | business / active / 10 | USD | America/Los_Angeles | 8 (1) | 32601 | 198 |
-| 043 | Brightwater Civil Works | medium | 16 / 2 | 9 | 3 | business / active / 25 | AED | Asia/Dubai | 9 (1) | 32951 | 198 |
-| 044 | Copperfield Constructors | medium | 22 / 3 | 9 | 2 | business / active / 25 | EGP | Africa/Cairo | 10 (1) | 43793 | 198 |
-| 045 | Dunmore Contracting | medium | 11 / 0 | 9 | 2 | business / active / 5 | SAR | Asia/Riyadh | 4 (2) | 9114 | 198 |
-| 046 | Eastlake Infrastructure | medium | 15 / 2 | 9 | 3 | business / canceled / 25 | USD | America/New_York | 4 (0) | 23136 | 198 |
-| 047 | Fairmont Building Group | medium | 22 / 3 | 9 | 2 | enterprise / active / 25 | EUR | Europe/Athens | 5 (0) | 24593 | 198 |
-| 048 | Greystone Builders | medium | 11 / 0 | 9 | 2 | business / active / 10 | CAD | — | 6 (0) | 24362 | 198 |
+| 022 | Hudson Engineering & Construction | medium | 17 / 2 | 9 | 3 | business / expired / 25 | NZD | Pacific/Auckland | 4 (1) | 24966 | 198 |
+| 023 | Bayou Civil Works | medium | 22 / 3 | 9 | 2 | business / active / 25 | SAR | Asia/Riyadh | 5 (0) | 25596 | 198 |
+| 024 | Magnolia Constructors | medium | 11 / 0 | 9 | 2 | business / active / 10 | USD | — | 6 (0) | 24203 | 198 |
+| 025 | Lone Star Contracting | medium | 15 / 2 | 9 | 3 | business / active / 10 | USD | Pacific/Honolulu | 7 (1) | 25984 | 198 |
+| 026 | Cascade Infrastructure | medium | 21 / 3 | 9 | 2 | business / past_due / 25 | USD | America/Los_Angeles | 8 (1) | 25871 | 198 |
+| 027 | Sierra Building Group | medium | 11 / 0 | 9 | 2 | enterprise / active / 10 | USD | America/Los_Angeles | 10 (2) | 25168 | 198 |
+| 028 | Maple Leaf Builders | medium | 16 / 2 | 9 | 3 | business / active / 25 | USD | America/Los_Angeles | 10 (0) | 39963 | 198 |
+| 029 | Aurora General Contractors | medium | 22 / 3 | 9 | 2 | individual / active / 5 | EUR | Europe/Paris | 3 (0) | 16720 | 198 |
+| 030 | Stonebridge Developments | medium | 10 / 0 | 9 | 2 | enterprise / active / 5 | EGP | Africa/Cairo | 4 (0) | 24366 | 198 |
+| 031 | Kingsway Construction | medium | 15 / 2 | 9 | 3 | enterprise / active / 25 | AED | Asia/Dubai | 5 (0) | 16884 | 198 |
+| 032 | Blackrock Engineering & Construction | medium | 21 / 3 | 9 | 2 | enterprise / active / 25 | AED | Asia/Dubai | 6 (1) | 25836 | 198 |
+| 033 | Al Waha Civil Works | medium | 11 / 0 | 9 | 2 | business / active / 10 | AED | Asia/Dubai | 8 (2) | 23880 | 198 |
+| 034 | Corniche Constructors | medium | 16 / 2 | 9 | 3 | business / past_due / 25 | USD | America/Los_Angeles | 8 (0) | 34298 | 198 |
+| 035 | Riverbend Contracting | medium | 22 / 3 | 9 | 2 | business / active / 10 | INR | Asia/Kolkata | 9 (1) | 24095 | 198 |
+| 036 | Highland Infrastructure | medium | 11 / 0 | 9 | 2 | business / active / 10 | GBP | — | 10 (1) | 32519 | 198 |
+| 037 | Oakmont Building Group | medium | 17 / 2 | 9 | 3 | business / canceled / 25 | AUD | Australia/Perth | 3 (0) | 16281 | 198 |
+| 038 | Terra Firma Builders | medium | 21 / 3 | 9 | 2 | individual / active / 5 | EGP | Africa/Cairo | 3 (0) | 18116 | 198 |
+| 039 | Vanguard General Contractors | medium | 10 / 0 | 9 | 2 | business / canceled / 10 | AUD | Australia/Adelaide | 6 (2) | 16820 | 198 |
+| 040 | Zenith Developments | medium | 16 / 2 | 9 | 3 | business / active / 10 | SAR | Asia/Riyadh | 6 (0) | 24045 | 198 |
+| 041 | Petra Construction | medium | 21 / 3 | 9 | 2 | enterprise / active / 25 | EUR | Europe/Madrid | 7 (0) | 26221 | 198 |
+| 042 | Olympus Engineering & Construction | medium | 10 / 0 | 9 | 2 | business / active / 10 | USD | America/Los_Angeles | 8 (1) | 32584 | 198 |
+| 043 | Brightwater Civil Works | medium | 16 / 2 | 9 | 3 | business / active / 25 | AED | Asia/Dubai | 9 (1) | 32933 | 198 |
+| 044 | Copperfield Constructors | medium | 22 / 3 | 9 | 2 | business / active / 25 | EGP | Africa/Cairo | 10 (1) | 43781 | 198 |
+| 045 | Dunmore Contracting | medium | 11 / 0 | 9 | 2 | business / active / 5 | SAR | Asia/Riyadh | 4 (2) | 9111 | 198 |
+| 046 | Eastlake Infrastructure | medium | 15 / 2 | 9 | 3 | business / canceled / 25 | USD | America/New_York | 4 (0) | 23124 | 198 |
+| 047 | Fairmont Building Group | medium | 22 / 3 | 9 | 2 | enterprise / active / 25 | EUR | Europe/Athens | 5 (0) | 24582 | 198 |
+| 048 | Greystone Builders | medium | 11 / 0 | 9 | 2 | business / active / 10 | CAD | — | 6 (0) | 24348 | 198 |
 | 049 | Hawthorne General Contractors | medium | 15 / 2 | 9 | 3 | enterprise / active / 25 | EGP | Africa/Cairo | 7 (1) | 32829 | 198 |
-| 050 | Ibis Developments | medium | 21 / 3 | 9 | 2 | business / active / 10 | SAR | Asia/Riyadh | 8 (1) | 34422 | 198 |
-| 051 | Harbor Builders | medium | 10 / 0 | 9 | 2 | business / active / 10 | SAR | Asia/Riyadh | 10 (1) | 16552 | 198 |
-| 052 | Summit General Contractors | medium | 15 / 2 | 9 | 3 | business / active / 25 | USD | America/Chicago | 10 (1) | 38649 | 198 |
-| 053 | Ironbridge Developments | medium | 21 / 3 | 9 | 2 | business / past_due / 25 | USD | America/New_York | 3 (0) | 16961 | 198 |
-| 054 | Meridian Construction | medium | 12 / 0 | 9 | 2 | business / active / 10 | USD | America/Denver | 4 (0) | 23665 | 198 |
-| 055 | Cedar Ridge Engineering & Construction | medium | 15 / 2 | 9 | 3 | business / active / 10 | AED | Asia/Dubai | 5 (1) | 18610 | 198 |
-| 056 | Atlas Civil Works | medium | 24 / 3 | 9 | 2 | business / active / 25 | USD | America/Los_Angeles | 6 (1) | 30093 | 198 |
-| 057 | Northgate Constructors | medium | 10 / 0 | 9 | 2 | business / active / 10 | CAD | America/Vancouver | 8 (1) | 24300 | 198 |
-| 058 | Al Noor Contracting | medium | 16 / 2 | 9 | 3 | business / active / 25 | EUR | Europe/Athens | 8 (0) | 33325 | 198 |
-| 059 | Delta Infrastructure | medium | 21 / 3 | 9 | 2 | business / active / 25 | USD | America/Chicago | 9 (1) | 37015 | 198 |
-| 060 | Keystone Building Group | medium | 10 / 0 | 9 | 2 | business / active / 5 | SAR | — | 10 (1) | 39842 | 198 |
+| 050 | Ibis Developments | medium | 21 / 3 | 9 | 2 | business / active / 10 | SAR | Asia/Riyadh | 8 (1) | 34420 | 198 |
+| 051 | Harbor Builders | medium | 10 / 0 | 9 | 2 | business / active / 10 | SAR | Asia/Riyadh | 10 (1) | 16555 | 198 |
+| 052 | Summit General Contractors | medium | 15 / 2 | 9 | 3 | business / active / 25 | USD | America/Chicago | 10 (1) | 38643 | 198 |
+| 053 | Ironbridge Developments | medium | 21 / 3 | 9 | 2 | business / past_due / 25 | USD | America/New_York | 3 (0) | 16960 | 198 |
+| 054 | Meridian Construction | medium | 12 / 0 | 9 | 2 | business / active / 10 | USD | America/Denver | 4 (0) | 23666 | 198 |
+| 055 | Cedar Ridge Engineering & Construction | medium | 15 / 2 | 9 | 3 | business / active / 10 | AED | Asia/Dubai | 5 (1) | 18608 | 198 |
+| 056 | Atlas Civil Works | medium | 24 / 3 | 9 | 2 | business / active / 25 | USD | America/Los_Angeles | 6 (1) | 30092 | 198 |
+| 057 | Northgate Constructors | medium | 10 / 0 | 9 | 2 | business / active / 10 | CAD | America/Vancouver | 8 (1) | 24294 | 198 |
+| 058 | Al Noor Contracting | medium | 16 / 2 | 9 | 3 | business / active / 25 | EUR | Europe/Athens | 8 (0) | 33319 | 198 |
+| 059 | Delta Infrastructure | medium | 21 / 3 | 9 | 2 | business / active / 25 | USD | America/Chicago | 9 (1) | 37014 | 198 |
+| 060 | Keystone Building Group | medium | 10 / 0 | 9 | 2 | business / active / 5 | SAR | — | 10 (1) | 39832 | 198 |
 | 061 | Granite Peak Builders | medium | 15 / 2 | 9 | 3 | business / canceled / 25 | USD | America/Los_Angeles | 3 (0) | 8893 | 198 |
-| 062 | Bluewater General Contractors | medium | 22 / 3 | 9 | 2 | business / expired / 25 | AUD | Australia/Perth | 4 (1) | 24424 | 198 |
-| 063 | Falcon Developments | medium | 12 / 0 | 9 | 2 | business / active / 10 | EUR | Europe/Athens | 6 (1) | 17513 | 198 |
+| 062 | Bluewater General Contractors | medium | 22 / 3 | 9 | 2 | business / expired / 25 | AUD | Australia/Perth | 4 (1) | 24421 | 198 |
+| 063 | Falcon Developments | medium | 12 / 0 | 9 | 2 | business / active / 10 | EUR | Europe/Athens | 6 (1) | 17508 | 198 |
 | 064 | Redwood Construction | medium | 15 / 2 | 9 | 3 | business / canceled / 25 | SAR | Asia/Riyadh | 6 (0) | 25315 | 198 |
-| 065 | Pinnacle Engineering & Construction | medium | 22 / 3 | 9 | 2 | business / active / 10 | CAD | America/Vancouver | 7 (1) | 25402 | 198 |
-| 066 | Crescent Civil Works | medium | 10 / 0 | 9 | 2 | business / active / 10 | AED | Asia/Dubai | 8 (1) | 24243 | 198 |
+| 065 | Pinnacle Engineering & Construction | medium | 22 / 3 | 9 | 2 | business / active / 10 | CAD | America/Vancouver | 7 (1) | 25405 | 198 |
+| 066 | Crescent Civil Works | medium | 10 / 0 | 9 | 2 | business / active / 10 | AED | Asia/Dubai | 8 (1) | 24240 | 198 |
 | 067 | Orion Constructors | medium | 17 / 2 | 9 | 3 | business / active / 25 | USD | America/Denver | 9 (1) | 36817 | 198 |
 | 068 | Sahara Contracting | medium | 21 / 3 | 9 | 2 | enterprise / active / 25 | GBP | Europe/London | 10 (0) | 41411 | 198 |
 | 069 | Nile Valley Infrastructure | medium | 10 / 0 | 9 | 2 | business / active / 10 | GBP | Europe/London | 4 (1) | 8766 | 197 |
-| 070 | Gulf Horizon Building Group | medium | 15 / 2 | 9 | 3 | business / active / 10 | QAR | Asia/Qatar | 4 (0) | 23124 | 198 |
-| 071 | Thames Builders | large | 101 / 3 | 9 | 2 | business / active / 100 | USD | America/Los_Angeles | 17 (1) | 67768 | 198 |
-| 072 | Hudson General Contractors | large | 85 / 1 | 9 | 2 | business / past_due / 100 | SAR | — | 13 (2) | 66257 | 198 |
-| 073 | Bayou Developments | large | 45 / 2 | 9 | 3 | business / active / 50 | USD | Pacific/Honolulu | 14 (1) | 52856 | 198 |
-| 074 | Magnolia Construction | large | 33 / 3 | 9 | 2 | business / active / 50 | USD | America/Denver | 19 (2) | 71924 | 198 |
-| 075 | Lone Star Engineering & Construction | large | 86 / 1 | 9 | 2 | enterprise / active / 50 | KWD | Asia/Kuwait | 20 (3) | 68222 | 198 |
-| 076 | Cascade Civil Works | large | 40 / 2 | 9 | 3 | enterprise / active / 50 | QAR | Asia/Qatar | 6 (1) | 28358 | 198 |
-| 077 | Sierra Constructors | large | 90 / 3 | 9 | 2 | business / active / 100 | CAD | America/Vancouver | 11 (1) | 45134 | 198 |
-| 078 | Maple Leaf Contracting | large | 70 / 1 | 9 | 2 | enterprise / active / 100 | QAR | Asia/Qatar | 6 (0) | 31021 | 198 |
-| 079 | Aurora Infrastructure | large | 94 / 2 | 9 | 3 | business / active / 100 | GBP | Europe/London | 17 (2) | 68581 | 198 |
-| 080 | Stonebridge Building Group | large | 51 / 3 | 9 | 2 | business / past_due / 50 | AUD | Australia/Perth | 7 (1) | 36851 | 198 |
-| 081 | Kingsway Builders | large | 96 / 1 | 9 | 2 | business / expired / 100 | EGP | Africa/Cairo | 14 (2) | 44319 | 198 |
-| 082 | Blackrock General Contractors | large | 55 / 2 | 9 | 3 | enterprise / active / 100 | AUD | Australia/Adelaide | 18 (2) | 63563 | 198 |
-| 083 | Al Waha Developments | large | 39 / 3 | 9 | 2 | business / canceled / 50 | USD | America/Chicago | 11 (1) | 44656 | 198 |
-| 084 | Corniche Construction | large | 79 / 1 | 9 | 2 | enterprise / active / 100 | USD | — | 7 (0) | 41347 | 198 |
-| 085 | Riverbend Engineering & Construction | large | 109 / 2 | 9 | 3 | enterprise / active / 50 | USD | Pacific/Honolulu | 14 (2) | 62070 | 198 |
-| 086 | Highland Civil Works | large | 46 / 3 | 9 | 2 | enterprise / active / 50 | JPY | Asia/Tokyo | 20 (2) | 74073 | 198 |
-| 087 | Oakmont Constructors | large | 51 / 1 | 9 | 2 | enterprise / active / 100 | EGP | Africa/Cairo | 10 (2) | 33246 | 198 |
-| 088 | Terra Firma Contracting | large | 82 / 2 | 9 | 3 | business / active / 100 | GBP | Europe/London | 9 (0) | 45342 | 198 |
-| 089 | Vanguard Infrastructure | large | 51 / 3 | 9 | 2 | business / active / 100 | JPY | Asia/Tokyo | 13 (1) | 60530 | 198 |
-| 090 | Zenith Building Group | large | 65 / 1 | 9 | 2 | business / active / 50 | USD | America/Chicago | 18 (2) | 72299 | 198 |
-| 091 | Petra Builders | large | 30 / 2 | 9 | 3 | enterprise / active / 50 | QAR | Asia/Qatar | 11 (1) | 35759 | 198 |
-| 092 | Olympus General Contractors | large | 44 / 3 | 9 | 2 | enterprise / active / 50 | AED | Asia/Dubai | 10 (1) | 47597 | 198 |
-| 093 | Brightwater Developments | large | 91 / 1 | 9 | 2 | enterprise / active / 100 | SAR | Asia/Riyadh | 12 (2) | 46823 | 198 |
+| 070 | Gulf Horizon Building Group | medium | 15 / 2 | 9 | 3 | business / active / 10 | QAR | Asia/Qatar | 4 (0) | 23127 | 198 |
+| 071 | Thames Builders | large | 101 / 3 | 9 | 2 | business / active / 100 | USD | America/Los_Angeles | 17 (1) | 67771 | 198 |
+| 072 | Hudson General Contractors | large | 85 / 1 | 9 | 2 | business / past_due / 100 | SAR | — | 13 (2) | 66259 | 198 |
+| 073 | Bayou Developments | large | 45 / 2 | 9 | 3 | business / active / 50 | USD | Pacific/Honolulu | 14 (1) | 52857 | 198 |
+| 074 | Magnolia Construction | large | 33 / 3 | 9 | 2 | business / active / 50 | USD | America/Denver | 19 (2) | 71928 | 198 |
+| 075 | Lone Star Engineering & Construction | large | 86 / 1 | 9 | 2 | enterprise / active / 50 | KWD | Asia/Kuwait | 20 (3) | 68220 | 198 |
+| 076 | Cascade Civil Works | large | 40 / 2 | 9 | 3 | enterprise / active / 50 | QAR | Asia/Qatar | 6 (1) | 28361 | 198 |
+| 077 | Sierra Constructors | large | 90 / 3 | 9 | 2 | business / active / 100 | CAD | America/Vancouver | 11 (1) | 45139 | 198 |
+| 078 | Maple Leaf Contracting | large | 70 / 1 | 9 | 2 | enterprise / active / 100 | QAR | Asia/Qatar | 6 (0) | 31022 | 198 |
+| 079 | Aurora Infrastructure | large | 94 / 2 | 9 | 3 | business / active / 100 | GBP | Europe/London | 17 (2) | 68586 | 198 |
+| 080 | Stonebridge Building Group | large | 51 / 3 | 9 | 2 | business / past_due / 50 | AUD | Australia/Perth | 7 (1) | 36846 | 198 |
+| 081 | Kingsway Builders | large | 96 / 1 | 9 | 2 | business / expired / 100 | EGP | Africa/Cairo | 14 (2) | 44315 | 198 |
+| 082 | Blackrock General Contractors | large | 55 / 2 | 9 | 3 | enterprise / active / 100 | AUD | Australia/Adelaide | 18 (2) | 63558 | 198 |
+| 083 | Al Waha Developments | large | 39 / 3 | 9 | 2 | business / canceled / 50 | USD | America/Chicago | 11 (1) | 44653 | 198 |
+| 084 | Corniche Construction | large | 79 / 1 | 9 | 2 | enterprise / active / 100 | USD | — | 7 (0) | 41350 | 198 |
+| 085 | Riverbend Engineering & Construction | large | 109 / 2 | 9 | 3 | enterprise / active / 50 | USD | Pacific/Honolulu | 14 (2) | 62066 | 198 |
+| 086 | Highland Civil Works | large | 46 / 3 | 9 | 2 | enterprise / active / 50 | JPY | Asia/Tokyo | 20 (2) | 74075 | 198 |
+| 087 | Oakmont Constructors | large | 51 / 1 | 9 | 2 | enterprise / active / 100 | EGP | Africa/Cairo | 10 (2) | 33247 | 198 |
+| 088 | Terra Firma Contracting | large | 82 / 2 | 9 | 3 | business / active / 100 | GBP | Europe/London | 9 (0) | 45347 | 198 |
+| 089 | Vanguard Infrastructure | large | 51 / 3 | 9 | 2 | business / active / 100 | JPY | Asia/Tokyo | 13 (1) | 60535 | 198 |
+| 090 | Zenith Building Group | large | 65 / 1 | 9 | 2 | business / active / 50 | USD | America/Chicago | 18 (2) | 72300 | 198 |
+| 091 | Petra Builders | large | 30 / 2 | 9 | 3 | enterprise / active / 50 | QAR | Asia/Qatar | 11 (1) | 35761 | 198 |
+| 092 | Olympus General Contractors | large | 44 / 3 | 9 | 2 | enterprise / active / 50 | AED | Asia/Dubai | 10 (1) | 47596 | 198 |
+| 093 | Brightwater Developments | large | 91 / 1 | 9 | 2 | enterprise / active / 100 | SAR | Asia/Riyadh | 12 (2) | 46824 | 198 |
 | 094 | Copperfield Construction | large | 64 / 2 | 9 | 3 | enterprise / active / 100 | AED | Asia/Dubai | 10 (1) | 48751 | 198 |
-| 095 | Dunmore Engineering & Construction | large | 71 / 3 | 9 | 2 | enterprise / active / 50 | USD | America/New_York | 8 (1) | 33831 | 198 |
-| 096 | Eastlake Civil Works | large | 68 / 1 | 9 | 2 | business / active / 100 | GBP | — | 17 (2) | 63753 | 198 |
-| 097 | Fairmont Constructors | large | 59 / 2 | 9 | 3 | business / active / 100 | EUR | Europe/Berlin | 19 (2) | 75037 | 198 |
-| 098 | Greystone Contracting | large | 69 / 3 | 9 | 2 | enterprise / active / 100 | CAD | America/Toronto | 6 (0) | 33147 | 198 |
-| 099 | Hawthorne Infrastructure | large | 41 / 1 | 9 | 2 | enterprise / active / 50 | EUR | Europe/Berlin | 7 (2) | 23062 | 198 |
-| 100 | Ibis Building Group | large | 126 / 3 | 9 | 3 | business / active / 50 | GBP | Europe/London | 9 (1) | 46403 | 198 |
+| 095 | Dunmore Engineering & Construction | large | 71 / 3 | 9 | 2 | enterprise / active / 50 | USD | America/New_York | 8 (1) | 33830 | 198 |
+| 096 | Eastlake Civil Works | large | 68 / 1 | 9 | 2 | business / active / 100 | GBP | — | 17 (2) | 63749 | 198 |
+| 097 | Fairmont Constructors | large | 59 / 2 | 9 | 3 | business / active / 100 | EUR | Europe/Berlin | 19 (2) | 75028 | 198 |
+| 098 | Greystone Contracting | large | 69 / 3 | 9 | 2 | enterprise / active / 100 | CAD | America/Toronto | 6 (0) | 33143 | 198 |
+| 099 | Hawthorne Infrastructure | large | 41 / 1 | 9 | 2 | enterprise / active / 50 | EUR | Europe/Berlin | 7 (2) | 23063 | 198 |
+| 100 | Ibis Building Group | large | 126 / 3 | 9 | 3 | business / active / 50 | GBP | Europe/London | 9 (1) | 46399 | 198 |
 
 ## Record types and how many companies hold them
 
@@ -202,7 +202,7 @@ This is the ground the isolation tests stand on: a record type a company has no 
 | outbound_event | 362581 | 100 |
 | audit_event | 344273 | 100 |
 | record_history_snapshot | 344273 | 100 |
-| record_subscription | 110451 | 100 |
+| record_subscription | 110247 | 100 |
 | approval_workflow_event | 99729 | 100 |
 | workflow_status_history | 61088 | 100 |
 | ipc_item | 40496 | 100 |
@@ -266,10 +266,10 @@ This is the ground the isolation tests stand on: a record type a company has no 
 | correspondence | 2918 | 100 |
 | commercial_attachment_ref | 2915 | 100 |
 | budget_line_change | 2895 | 100 |
-| refresh_session | 2792 | 100 |
 | bid_package_line | 2748 | 100 |
 | warehouse_location | 2723 | 100 |
 | rfi_response | 2713 | 100 |
+| refresh_session | 2667 | 100 |
 | bid | 2642 | 100 |
 | procurement_lead_time_alert | 2594 | 100 |
 | budget_revision | 2589 | 100 |
