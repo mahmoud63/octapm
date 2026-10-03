@@ -14,8 +14,13 @@
  *   payment method ids starting  pm_foreign    → attach is refused (belongs to another customer)
  *   POST /__set { "subscriptionStatus": { "<sub id>": "canceled" } }   what GET /v1/subscriptions/<id> says
  *   POST /__set { "failNext": { "path": "/v1/subscriptions", "status": 500 } }
+ *        the next call whose path starts with "path" is answered with that failure (one slot, shared by everybody)
+ *   POST /__set { "failNext": { "path": "/v1/subscriptions", "customer": "cus_…", "status": 400 } }
+ *        the same, but only a call whose body names that customer consumes it: a creation of another
+ *        customer's subscription passes by and leaves the failure armed
  *   POST /__set { "periodDays": 30 }
- *   GET  /__calls            every request received (method, path, idempotency key, parsed body)
+ *   GET  /__calls            every request received (method, path, idempotency key, parsed body); the call that
+ *                            consumed a staged failure carries it as "staged": { status, code, message, customer }
  *   POST /__reset            forget everything
  *
  * It only listens on 127.0.0.1.
@@ -81,12 +86,19 @@ const handle = (req, res, raw) => {
 
   const body = parseForm(raw);
   const idempotencyKey = req.headers['idempotency-key'] || null;
-  state.calls.push({ at: Date.now(), method: req.method, path, idempotencyKey, body });
+  const call = { at: Date.now(), method: req.method, path, idempotencyKey, body };
+  state.calls.push(call);
 
-  if (state.failNext && path.startsWith(state.failNext.path)) {
-    const fail = state.failNext;
+  // A staged failure names a path prefix and, optionally, the customer whose call it is for.
+  const staged = state.failNext;
+  if (staged && path.startsWith(staged.path) && (!staged.customer || body.customer === staged.customer)) {
     state.failNext = null;
-    return error(res, fail.status || 500, fail.type || 'api_error', fail.code || 'fake_failure', fail.message || 'The fake was told to fail this call');
+    const status = staged.status || 500;
+    const code = staged.code || 'fake_failure';
+    const message = staged.message || 'The fake was told to fail this call';
+    // Recorded on the call that consumed it, so a suite can prove whose call received its failure.
+    call.staged = { status, code, message, customer: staged.customer || null };
+    return error(res, status, staged.type || 'api_error', code, message);
   }
 
   // Stripe replays the stored answer for a repeated idempotency key with the same parameters,

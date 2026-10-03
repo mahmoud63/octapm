@@ -17,6 +17,10 @@
  *   fake.calls() / set / reset the Stripe fake's log and switches
  *   db.subscription(orgId)     reads the subscription row (and db.set to stage a state no route produces)
  *   check(name, expected, actual) / finish()   named cases, exit code 0 only if all pass
+ *   fakeBase() / preflight(probe)   the fake's address (refused unless local) and the proof, before a suite
+ *                              runs, that the billing API's Stripe calls really reach that fake
+ *   ownIds(company)            re-stages provider ids another company already holds (after the fake restarted)
+ *   ownerDecision(id, …) / reportOwnerDecisions(suite)   a policy the owner has not decided: reported, not judged
  */
 
 const path = require('path');
@@ -129,6 +133,85 @@ const check = (name, expected, actual, note = '') => {
 };
 /** A case that records a known defect: passes when the product is right, fails (with the finding's id) when it is not. */
 const finding = (id, name, expected, actual, note = '') => check(`[${id}] ${name}`, expected, actual, note);
+
+/**
+ * A POLICY the product owner has not decided. It is neither passed nor failed and never counted: what the
+ * product does today is reported, here and again under "owner decisions" at the end of the run.
+ */
+const decisions = [];
+const ownerDecision = (id, question, observed, note = '') => {
+  const shown = typeof observed === 'string' ? observed : JSON.stringify(observed);
+  decisions.push({ id, question, observed: shown, note });
+  console.log(`OWNER DECISION  [${id}] ${question}\n        the product today: ${shown}${note ? `\n        ${note}` : ''}`);
+};
+const reportOwnerDecisions = (suite) => {
+  console.log(`\n${suite}: owner decisions — ${decisions.length} (not cases: a policy the product owner has not decided; what the product does today is shown)`);
+  for (const d of decisions) console.log(`  OWNER DECISION  [${d.id}] ${d.question}\n                  the product today: ${d.observed}${d.note ? `\n                  ${d.note}` : ''}`);
+  return decisions;
+};
+
+// ── the Stripe fake: only ever a local one, and proven to be the one the billing API talks to ──
+const LOCAL_FAKE_HOSTS = ['127.0.0.1', 'localhost'];
+/** The Stripe fake's base address, refused unless it is this machine (the fake only listens on 127.0.0.1). */
+const fakeBase = () => {
+  let host = null;
+  try {
+    host = new URL(FAKE).hostname;
+  } catch {
+    /* refused below */
+  }
+  if (!LOCAL_FAKE_HOSTS.includes(host)) throw new Error(`CERT_STRIPE_FAKE_BASE "${FAKE}" is not 127.0.0.1 or localhost: the billing suites only ever talk to a local Stripe fake.`);
+  return FAKE;
+};
+
+/**
+ * Before a billing suite runs anything: the Stripe fake answers on this machine, and the billing API's Stripe
+ * calls really reach THIS fake — not a real provider, not another fake. `probe` is a brand-new company of the
+ * calling suite (as onboard() returns it); its trial/start must leave, in this fake's log since the mark, the
+ * POST /v1/customers that carries its orgId. Anything else stops the run.
+ */
+const preflight = async (probe) => {
+  const base = fakeBase();
+  let health;
+  try {
+    const res = await fetch(`${base}/__health`, { signal: AbortSignal.timeout(5_000) });
+    health = res.status === 200 ? await res.json() : { status: res.status };
+  } catch (error) {
+    throw new Error(`preflight: the Stripe fake at ${base} does not answer (${error.cause?.code || error.message}); start it before the billing suites`);
+  }
+  if (health?.fake !== 'stripe') throw new Error(`preflight: ${base}/__health did not answer as the Stripe fake: ${JSON.stringify(health).slice(0, 200)}`);
+
+  const mark = Date.now();
+  const started = await probe.pm.send('POST', '/billing/trial/start', {});
+  if (started.status !== 200) throw new Error(`preflight: trial/start for the probe company answered ${started.status} ${started.body?.error?.code || ''} ${String(started.body?.error?.message || started.text || '').slice(0, 160)}`);
+  const customers = (await fake.since(mark)).filter((call) => call.method === 'POST' && call.path === '/v1/customers' && call.body?.metadata?.orgId === probe.orgId);
+  if (customers.length === 0) {
+    throw new Error(`preflight: the probe company's trial/start answered 200 but the fake at ${base} logged no POST /v1/customers carrying its orgId — the billing API's Stripe calls do not reach this fake (is the API started with stripe-redirect.js and CERT_STRIPE_FAKE_PORT on this fake's port?). Nothing was run.`);
+  }
+  console.log(`preflight: the Stripe fake at ${base} answers, and the billing API's Stripe calls reach it (probe: ${probe.name || probe.orgId})`);
+  return { customerCalls: customers.length };
+};
+
+/**
+ * The provider ids a company's billing is resolved by (customer, subscription) must be that company's alone. They
+ * are, unless the Stripe fake was restarted: its counter starts again and hands out ids the database already holds,
+ * and the webhook then refuses an event naming such an id as ambiguous. Fresh ids are then staged on this company's
+ * own row (and the fake is told a staged subscription is running). Returns the fields staged ({} when none).
+ */
+const ownIds = async (company, { tag = 'cert9xx' } = {}) => {
+  const client = await prisma();
+  const row = await db.subscription(company.orgId);
+  const data = {};
+  for (const [field, prefix] of [['stripeCustomerId', 'cus'], ['stripeSubscriptionId', 'sub']]) {
+    if (row?.[field] && (await client.subscription.count({ where: { [field]: row[field] } })) > 1) data[field] = `${prefix}_${tag}_${crypto.randomBytes(5).toString('hex')}`;
+  }
+  if (Object.keys(data).length === 0) return data;
+  console.log(`        (setup: ${company.name || company.orgId} was handed provider ids another company already holds — the Stripe fake was restarted; staged fresh ones for ${Object.keys(data).join(' and ')})`);
+  await db.set(company.orgId, data);
+  if (data.stripeSubscriptionId) await fake.set({ subscriptionStatus: { [data.stripeSubscriptionId]: 'active' } });
+  return data;
+};
+
 const finish = async (suite) => {
   const failed = cases.filter((c) => !c.ok);
   console.log(`\n${suite}: ${cases.length - failed.length} passed, ${failed.length} failed of ${cases.length}`);
@@ -138,4 +221,4 @@ const finish = async (suite) => {
   return { suite, passed: cases.length - failed.length, failed: failed.length, cases };
 };
 
-module.exports = { api, check, db, fake, finding, finish, onboard, webhook };
+module.exports = { api, check, db, fake, fakeBase, finding, finish, onboard, ownerDecision, ownIds, preflight, reportOwnerDecisions, webhook };
