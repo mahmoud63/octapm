@@ -12,6 +12,7 @@ const {
   computeProcurementRisk,
 } = require('./procurement-risk.service');
 const { toMoneyDecimal, toMoneyNumber } = require('../utils/money');
+const { assertProjectRows, idsOf } = require('./tenant-references.service');
 
 const ACTIVITY_SELECT = {
   id: true,
@@ -208,6 +209,30 @@ const ensureMaterialRequirement = async ({
     throw new HttpError(404, 'MATERIAL_NOT_FOUND', 'Material not found');
   }
   return material;
+};
+
+/**
+ * The cost coding a purchase-order line may carry: only this project's BOQ
+ * items, budget lines and material masters, and this organisation's cost
+ * codes (CERT-2 injection sweep: another company's were stored on
+ * procurement_po_line and answered back). A foreign id gets exactly the 404
+ * an id that exists nowhere gets, before the order is written.
+ */
+const assertLineCoding = async ({ tx = prisma, orgId, projectId, lines }) => {
+  const pick = (key) => lines.map((line) => line?.[key]);
+  await assertProjectRows({ tx, model: 'boqItem', projectId, ids: pick('boqItemId'), code: 'BOQ_ITEM_NOT_FOUND', message: 'BOQ item not found' });
+  await assertProjectRows({ tx, model: 'budgetLine', projectId, ids: pick('budgetLineId'), code: 'BUDGET_LINE_NOT_FOUND', message: 'Budget line not found' });
+  await assertProjectRows({ tx, model: 'materialMaster', projectId, ids: pick('materialMasterId'), code: 'MATERIAL_NOT_FOUND', message: 'Material not found' });
+  // Cost codes belong to the organisation, not to a project.
+  const costCodeIds = idsOf(pick('costCodeId'));
+  if (costCodeIds.length) {
+    const found = orgId && tx.costCode?.findMany
+      ? await tx.costCode.findMany({ where: { id: { in: costCodeIds }, orgId }, select: { id: true } })
+      : [];
+    if (found.length !== costCodeIds.length) {
+      throw new HttpError(404, 'COST_CODE_NOT_FOUND', 'Cost code not found');
+    }
+  }
 };
 
 const ensureOrder = async ({ tx = prisma, projectId, orderId }) => {
@@ -1031,6 +1056,7 @@ const createPurchaseOrder = async ({ orgId, projectId, actor, payload }) => {
       materialId: line.activityMaterialId,
     });
   }
+  await assertLineCoding({ orgId, projectId, lines: payload.lines });
 
   // A PO may draw down a purchase-order commitment (OCTA-FIN-COMMIT-020).
   if (payload.commitmentId && prisma.commitment?.findFirst) {

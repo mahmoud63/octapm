@@ -52,6 +52,11 @@ const mockPrisma = {
   recordHistorySnapshot: {
     create: jest.fn(),
   },
+  // What a PO line's cost coding may name (CERT-2).
+  boqItem: { findMany: jest.fn() },
+  budgetLine: { findMany: jest.fn() },
+  materialMaster: { findMany: jest.fn() },
+  costCode: { findMany: jest.fn() },
   $transaction: jest.fn((callback) => callback(mockPrisma)),
 };
 
@@ -214,6 +219,64 @@ describe('procurement service material workflow controls', () => {
     expect(mockPrisma.procurementOrder.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'planned' }) }),
     );
+  });
+
+  /**
+   * CERT-2 injection sweep: a PO line took another company's BOQ item, budget
+   * line and cost code, stored them on procurement_po_line and answered them
+   * back. Each is refused exactly as an id that exists nowhere is, before the
+   * order is written; the project's own are kept.
+   */
+  describe('what a PO line\'s cost coding may name (CERT-2)', () => {
+    const rows = {
+      boqItem: [{ id: 'boq-1', projectId: 'project-1' }, { id: 'boq-x', projectId: 'project-x' }],
+      budgetLine: [{ id: 'bl-1', projectId: 'project-1' }, { id: 'bl-x', projectId: 'project-x' }],
+      materialMaster: [{ id: 'mm-1', projectId: 'project-1' }, { id: 'mm-x', projectId: 'project-x' }],
+      costCode: [{ id: 'cc-1', orgId: 'org-1' }, { id: 'cc-x', orgId: 'org-x' }],
+    };
+    beforeEach(() => {
+      for (const [model, list] of Object.entries(rows)) {
+        mockPrisma[model].findMany.mockImplementation(async ({ where }) =>
+          list.filter((row) => where.id.in.includes(row.id) && (where.projectId ? row.projectId === where.projectId : row.orgId === where.orgId)),
+        );
+      }
+    });
+    afterEach(() => {
+      for (const model of Object.keys(rows)) mockPrisma[model].findMany.mockReset();
+      mockPrisma.procurementOrder.create.mockReset();
+    });
+    const order = (line) =>
+      procurementService.createPurchaseOrder({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        actor: { id: 'proc-1', role: 'procurement' },
+        payload: {
+          ref: 'PO-CERT2',
+          item: 'Switchgear',
+          lines: [{ description: 'Main switchgear', unit: 'PCS', orderedQty: 1, unitCost: 1, activityId: 'activity-1', ...line }],
+        },
+      });
+
+    test.each([
+      ['boqItemId', 'boq-1', 'boq-x', 'BOQ_ITEM_NOT_FOUND'],
+      ['budgetLineId', 'bl-1', 'bl-x', 'BUDGET_LINE_NOT_FOUND'],
+      ['costCodeId', 'cc-1', 'cc-x', 'COST_CODE_NOT_FOUND'],
+      ['materialMasterId', 'mm-1', 'mm-x', 'MATERIAL_NOT_FOUND'],
+    ])('%s: another company\'s is refused like one that exists nowhere; the project\'s own is kept', async (field, own, foreign, code) => {
+      await expect(order({ [field]: foreign })).rejects.toMatchObject({ status: 404, code });
+      await expect(order({ [field]: '00000000-0000-4000-8000-000000000000' })).rejects.toMatchObject({ status: 404, code });
+      expect(mockPrisma.procurementOrder.create).not.toHaveBeenCalled();
+      expect(mockPrisma.procurementPoLine.create).not.toHaveBeenCalled();
+      expect(mockPrisma.auditEvent.create).not.toHaveBeenCalled();
+
+      // The fake stops short of a full order; what matters is the line it was asked to store.
+      mockPrisma.procurementOrder.create.mockResolvedValue({ id: 'order-1', projectId: 'project-1', ref: 'PO-1', status: 'planned', leadWeeks: 0, requiredTiming: 'activity_start', needOffsetDays: 0, bufferDays: 14 });
+      const outcome = await order({ [field]: own }).catch((error) => error);
+      expect(outcome?.code).not.toBe(code);
+      expect(mockPrisma.procurementPoLine.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ [field]: own }) }),
+      );
+    });
   });
 
   test('refuses to create an order already declared approved or issued', async () => {

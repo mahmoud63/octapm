@@ -127,6 +127,21 @@ const ensurePackage = async ({ tx = prisma, projectId, packageId }) => {
   return row;
 };
 
+// A material's master entry must be one of this project's (certification
+// CERT-2): the column had only its foreign key, so another company's master
+// was stored, and reached purchase-order lines through the material fallback;
+// an id that exists nowhere answered 500. Both now answer as missing.
+const ensureMaterialMaster = async ({ tx = prisma, projectId, materialMasterId }) => {
+  if (!materialMasterId) return null;
+  const row = await tx.materialMaster.findFirst({
+    where: { id: materialMasterId, projectId },
+  });
+  if (!row) {
+    throw new HttpError(404, 'MATERIAL_NOT_FOUND', 'Material not found');
+  }
+  return row;
+};
+
 const parseNullableDate = (value) => {
   if (value === undefined) return undefined;
   if (value === null || value === '') return null;
@@ -221,6 +236,11 @@ const addMaterial = async ({ orgId, projectId, activityId, payload, actor }) => 
       projectId,
       packageId: payload.procurementPackageId,
     });
+    await ensureMaterialMaster({
+      tx,
+      projectId,
+      materialMasterId: payload.materialMasterId,
+    });
 
     const row = await tx.activityMaterial.create({
       data: {
@@ -284,6 +304,11 @@ const updateMaterial = async ({
       tx,
       projectId,
       packageId: payload.procurementPackageId,
+    });
+    await ensureMaterialMaster({
+      tx,
+      projectId,
+      materialMasterId: payload.materialMasterId,
     });
 
     const data = normalizeMaterialWrite(payload, material);

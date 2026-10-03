@@ -8,6 +8,7 @@ const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const emailService = require("./email.service");
 const prequalService = require("./vendor-prequalification.service");
+const refs = require("./tenant-references.service");
 const { normalizeCompanyName } = require("../utils/company-name");
 const { nextReference: nextReferenceNumber } = require("../utils/reference-number");
 
@@ -229,7 +230,7 @@ const packageData = (payload, { project, existing = null }) => {
   // Which procurement package these quotes are being sought for, when the
   // enquiry started from Procurement. Set once, at creation, by that route.
   if (payload.procurementPackageId !== undefined) {
-    data.procurementPackageId = payload.procurementPackageId || null;
+    data.procurementPackageId = trimOrNull(payload.procurementPackageId);
   }
   if (payload.commitmentType !== undefined || !existing) {
     const type = String(payload.commitmentType || existing?.commitmentType || "subcontract").toLowerCase();
@@ -238,6 +239,30 @@ const packageData = (payload, { project, existing = null }) => {
   }
   if (payload.boqSections !== undefined) data.boqSections = [...new Set((Array.isArray(payload.boqSections) ? payload.boqSections : []).map((item) => String(item ?? "").trim()))];
   return data;
+};
+
+/**
+ * What a package or a line may point at: only its own project's procurement
+ * package, BOQ item, activity and budget line, and its own organisation's cost
+ * code (CERT-2 injection sweep). Unchecked, another company's ids were stored
+ * on the line, served back in the package, and carried into the awarded
+ * commitment's schedule of values. A foreign id gets exactly the 404 an id
+ * that exists nowhere gets, before anything is written.
+ */
+const assertPackageReferences = async ({ tx = prisma, projectId, data }) => {
+  await refs.assertProjectRows({ tx, model: "procurementPackage", projectId, ids: data.procurementPackageId, code: "PROCUREMENT_PACKAGE_NOT_FOUND", message: "Procurement package not found" });
+};
+
+const assertLineReferences = async ({ tx = prisma, orgId, projectId, data }) => {
+  await refs.assertProjectRows({ tx, model: "boqItem", projectId, ids: data.boqItemId, code: "BOQ_ITEM_NOT_FOUND", message: "BOQ item not found" });
+  await refs.assertProjectRows({ tx, model: "activity", projectId, ids: data.activityId, code: "ACTIVITY_NOT_FOUND", message: "Activity not found" });
+  await refs.assertProjectRows({ tx, model: "budgetLine", projectId, ids: data.budgetLineId, code: "BUDGET_LINE_NOT_FOUND", message: "Budget line not found" });
+  // Cost codes belong to the organisation, not to a project.
+  const costCodeIds = refs.idsOf(data.costCodeId);
+  if (costCodeIds.length) {
+    const found = orgId && tx.costCode?.findMany ? await tx.costCode.findMany({ where: { id: { in: costCodeIds }, orgId }, select: { id: true } }) : [];
+    if (found.length !== costCodeIds.length) throw new HttpError(404, "COST_CODE_NOT_FOUND", "Cost code not found");
+  }
 };
 
 /**
@@ -326,6 +351,7 @@ const linesFromBoq = async ({ tx, projectId, sections = null, boqItemIds = null,
 const createPackage = async ({ orgId, projectId, payload = {}, actor = null }) => {
   const project = await ensureProject({ orgId, projectId });
   const data = packageData(payload, { project });
+  await assertPackageReferences({ projectId, data });
   const created = await prisma.$transaction(async (tx) => {
     // Phase 20 moved this off `count + 1`, which collided after any deletion,
     // onto MAX + 1 — which closes the gap but not the race: two requests
@@ -358,6 +384,7 @@ const updatePackage = async ({ orgId, projectId, packageId, payload = {}, actor 
   assertEditable(existing);
   const data = packageData(payload, { project, existing });
   delete data.boqSections;
+  await assertPackageReferences({ projectId, data });
   const row = await prisma.bidPackage.update({ where: { id: existing.id }, data: { ...data, updatedBy: actor?.id || null }, include: detailInclude });
   await audit({ orgId, projectId, packageId: row.id, action: auditService.ACTIONS.UPDATED, actor, summary: { ref: row.ref, fields: Object.keys(payload) } });
   if (existing.status === STATUS.OPEN && data.dueAt && (!existing.dueAt || new Date(existing.dueAt).getTime() !== data.dueAt.getTime())) {
@@ -423,6 +450,7 @@ const addLine = async ({ orgId, projectId, packageId, payload = {}, actor = null
   assertEditable(pkg);
   if (pkg._count.lines >= MAX_LINES) throw new HttpError(400, "BID_LINES_TOO_MANY", `At most ${MAX_LINES} lines per package`);
   const data = lineData(payload);
+  await assertLineReferences({ orgId, projectId, data });
   await prisma.$transaction(async (tx) => {
     const lineNumber = await nextLineNumber({ tx, packageId });
     await tx.bidPackageLine.create({ data: { orgId, packageId, lineNumber, sortOrder: lineNumber - 1, qty: data.qty ?? 1, ...data } });
@@ -436,7 +464,9 @@ const updateLine = async ({ orgId, projectId, packageId, lineId, payload = {}, a
   assertEditable(pkg);
   const existing = await prisma.bidPackageLine.findFirst({ where: { id: lineId, packageId } });
   if (!existing) throw new HttpError(404, "BID_LINE_NOT_FOUND", "Line not found");
-  await prisma.bidPackageLine.update({ where: { id: existing.id }, data: lineData(payload, existing) });
+  const data = lineData(payload, existing);
+  await assertLineReferences({ orgId, projectId, data });
+  await prisma.bidPackageLine.update({ where: { id: existing.id }, data });
   await audit({ orgId, projectId, packageId, action: auditService.ACTIONS.UPDATED, actor, summary: { ref: pkg.ref, lineUpdated: existing.lineNumber, fields: Object.keys(payload) } });
   return getPackage({ orgId, projectId, packageId });
 };

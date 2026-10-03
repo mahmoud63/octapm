@@ -97,13 +97,27 @@ const BOQ = [
   { id: "boq-1", projectId: "p1", section: "02 Substructure", code: "2.1", description: "Bored piles 600mm", unit: "m", qty: 1000, rate: 120, amount: 120000, isActive: true, supersededAt: null, sortOrder: 1 },
   { id: "boq-2", projectId: "p1", section: "02 Substructure", code: "2.2", description: "Pile caps", unit: "m3", qty: 150, rate: 200, amount: 30000, isActive: true, supersededAt: null, sortOrder: 2 },
   { id: "boq-3", projectId: "p1", section: "03 Concrete", code: "3.1", description: "Slab on grade", unit: "m3", qty: 400, rate: 200, amount: 80000, isActive: true, supersededAt: null, sortOrder: 3 },
+  // Another company's project, in a section of the same name.
+  { id: "boq-x", projectId: "p-other", section: "02 Substructure", code: "2.1", description: "Their piles", unit: "m", qty: 1, rate: 1, amount: 1, isActive: true, supersededAt: null, sortOrder: 1 },
 ];
+
+/** Records a bid line or package may point at: this project's (org-1, p1) and another company's (org-2, p-other). */
+const REFS = {
+  activities: [{ id: "act-1", projectId: "p1" }, { id: "act-x", projectId: "p-other" }],
+  budgetLines: [{ id: "bl-1", orgId: "org-1", projectId: "p1" }, { id: "bl-x", orgId: "org-2", projectId: "p-other" }],
+  costCodes: [{ id: "cc-1", orgId: "org-1" }, { id: "cc-x", orgId: "org-2" }],
+  procurementPackages: [{ id: "pp-1", projectId: "p1" }, { id: "pp-x", projectId: "p-other" }],
+};
 
 const mockPrisma = {
   ...referenceCounterMock(),
   $transaction: jest.fn((fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn(async ({ where }) => (where.id === "p1" ? { id: "p1", name: "Tower", currency: "USD", orgId: "org-1" } : null)) },
-  boqItem: { ...table(BOQ, "boq"), findMany: jest.fn(async ({ where }) => BOQ.filter((item) => item.isActive && (!where.section || where.section.in.includes(item.section)) && (!where.id || where.id.in.includes(item.id)))) },
+  boqItem: { ...table(BOQ, "boq"), findMany: jest.fn(async ({ where }) => BOQ.filter((item) => item.isActive && (!where.projectId || item.projectId === where.projectId) && (!where.section || where.section.in.includes(item.section)) && (!where.id || where.id.in.includes(item.id)))) },
+  activity: table(REFS.activities, "act"),
+  budgetLine: table(REFS.budgetLines, "bl"),
+  costCode: table(REFS.costCodes, "cc"),
+  procurementPackage: table(REFS.procurementPackages, "pp"),
   bidPackage: table(store.packages, "pkg", "package"),
   bidPackageLine: table(store.lines, "line"),
   bidInvitation: table(store.invitations, "inv", "invitation"),
@@ -281,6 +295,63 @@ describe("bid management", () => {
     expect(mockEmail.sendEmail).toHaveBeenCalledTimes(2);
     expect(mockEmail.sendEmail.mock.calls.map((call) => call[0].subject).sort()).toEqual(["BP-001 Piling subcontract: award decision", "BP-001 Piling subcontract: you have been awarded the work"]);
     await expect(service.confirmAward({ orgId: ORG, projectId: PROJECT, packageId: pkg.id, payload: {}, actor })).rejects.toMatchObject({ code: "BID_PACKAGE_LOCKED" });
+  });
+
+  /**
+   * CERT-2 injection sweep: a bid line took another company's BOQ item,
+   * activity, cost code and budget line, stored them and served them back in
+   * the package. Each is refused exactly as an id that exists nowhere is,
+   * before anything is written, and the project's own still work.
+   */
+  describe("what a line or a package may point at (CERT-2)", () => {
+    const FIELDS = [
+      ["boqItemId", "boq-1", "boq-x", "BOQ_ITEM_NOT_FOUND"],
+      ["activityId", "act-1", "act-x", "ACTIVITY_NOT_FOUND"],
+      ["costCodeId", "cc-1", "cc-x", "COST_CODE_NOT_FOUND"],
+      ["budgetLineId", "bl-1", "bl-x", "BUDGET_LINE_NOT_FOUND"],
+    ];
+    const scope = { orgId: ORG, projectId: PROJECT, actor };
+
+    it.each(FIELDS)("a line's %s: another company's is refused like one that exists nowhere; the project's own is kept", async (field, own, foreign, code) => {
+      const pkg = await service.createPackage({ ...scope, payload: { title: "Coding" } });
+      mockPrisma.bidPackageLine.create.mockClear();
+      mockAudit.recordEvent.mockClear();
+
+      await expect(service.addLine({ ...scope, packageId: pkg.id, payload: { description: "Theirs", [field]: foreign } })).rejects.toMatchObject({ status: 404, code });
+      await expect(service.addLine({ ...scope, packageId: pkg.id, payload: { description: "Nobody's", [field]: "00000000-0000-4000-8000-000000000000" } })).rejects.toMatchObject({ status: 404, code });
+      expect(mockPrisma.bidPackageLine.create).not.toHaveBeenCalled();
+      expect(mockAudit.recordEvent).not.toHaveBeenCalled();
+      expect(store.lines.some((line) => line[field] === foreign)).toBe(false);
+
+      const added = await service.addLine({ ...scope, packageId: pkg.id, payload: { description: "Ours", [field]: own } });
+      const line = added.lines.find((row) => row.description === "Ours");
+      expect(line[field]).toBe(own);
+
+      mockPrisma.bidPackageLine.update.mockClear();
+      await expect(service.updateLine({ ...scope, packageId: pkg.id, lineId: line.id, payload: { [field]: foreign } })).rejects.toMatchObject({ status: 404, code });
+      expect(mockPrisma.bidPackageLine.update).not.toHaveBeenCalled();
+      expect(store.lines.find((row) => row.id === line.id)[field]).toBe(own);
+      await expect(service.updateLine({ ...scope, packageId: pkg.id, lineId: line.id, payload: { [field]: own, qty: 3 } })).resolves.toBeTruthy();
+    });
+
+    it("a package's procurement package: another project's is refused like one that exists nowhere; the project's own is kept", async () => {
+      mockPrisma.bidPackage.create.mockClear();
+      await expect(service.createPackage({ ...scope, payload: { title: "Quotes", procurementPackageId: "pp-x" } })).rejects.toMatchObject({ status: 404, code: "PROCUREMENT_PACKAGE_NOT_FOUND" });
+      await expect(service.createPackage({ ...scope, payload: { title: "Quotes", procurementPackageId: "00000000-0000-4000-8000-000000000000" } })).rejects.toMatchObject({ status: 404, code: "PROCUREMENT_PACKAGE_NOT_FOUND" });
+      expect(mockPrisma.bidPackage.create).not.toHaveBeenCalled();
+
+      const pkg = await service.createPackage({ ...scope, payload: { title: "Quotes", procurementPackageId: "pp-1" } });
+      expect(store.packages.find((row) => row.id === pkg.id).procurementPackageId).toBe("pp-1");
+      mockPrisma.bidPackage.update.mockClear();
+      await expect(service.updatePackage({ ...scope, packageId: pkg.id, payload: { procurementPackageId: "pp-x" } })).rejects.toMatchObject({ status: 404, code: "PROCUREMENT_PACKAGE_NOT_FOUND" });
+      expect(mockPrisma.bidPackage.update).not.toHaveBeenCalled();
+      expect(store.packages.find((row) => row.id === pkg.id).procurementPackageId).toBe("pp-1");
+    });
+
+    it("a package built from BOQ sections takes only its own project's items", async () => {
+      const pkg = await service.createPackage({ ...scope, payload: { title: "Piling", boqSections: ["02 Substructure"] } });
+      expect(pkg.lines.map((line) => line.boqItemId)).toEqual(["boq-1", "boq-2"]);
+    });
   });
 
   /**
