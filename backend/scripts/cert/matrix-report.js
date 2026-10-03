@@ -50,9 +50,10 @@ const main = async () => {
         from "OrganizationMembership" m join "User" u on u.id = m."userId" join "Organisation" o on o.id = m."orgId"
        group by u.email having count(*) > 1 order by count(*) desc, u.email`);
     const totals = (await one(`select (select count(*)::int from "User") as users, (select count(*)::int from "OrganizationMembership") as memberships, (select count(*)::int from "Project") as projects, (select count(*)::int from "ProjectAssignment") as assignments, (select count(*)::int from "Invoice") as invoices, (select count(*)::int from "PaymentMethod") as cards`))[0];
+    const projectNames = await one(`select "orgId"::text as "orgId", name from "Project"`);
     const built = await buildIndex(db);
     await db.query('rollback');
-    facts = { orgs, statuses, membershipStates, multi, totals, coverage: built.coverage, ids: Object.keys(built.index).length, index: built.index };
+    facts = { orgs, statuses, membershipStates, multi, totals, projectNames, coverage: built.coverage, ids: Object.keys(built.index).length, index: built.index };
   } finally {
     await db.end();
   }
@@ -95,6 +96,35 @@ const main = async () => {
   add(`| Project team assignments | — | ${facts.totals.assignments} |`);
   add(`| Rows that belong to a company (all tables) | — | ${facts.ids} |`);
   add(`| Tables with rows | — | ${populated.length} of ${Object.keys(facts.coverage).length} that belong to a company |`);
+  add();
+  // Every project against the specification, by name and company. The certified
+  // project of a certified company is not loaded: the known-answer lifecycle
+  // builds its own (OCTA PHASE21 GREENFIELD Cnnn) and a second one its security
+  // stage tests isolation on (OCTA PHASE21 ISOLATION Cnnn). Anything else is
+  // listed as unexplained.
+  const LIFECYCLE = /^OCTA PHASE21 (GREENFIELD|ISOLATION) C\d{3}$/;
+  const namesByOrg = new Map();
+  for (const p of facts.projectNames) (namesByOrg.get(p.orgId) || namesByOrg.set(p.orgId, []).get(p.orgId)).push(p.name);
+  const realised = [];
+  const unexplained = [];
+  for (const company of population.companies) {
+    const inDb = namesByOrg.get(company.id) || [];
+    const specified = company.projects.map((p) => p.name);
+    const extra = inDb.filter((name) => !specified.includes(name));
+    const missing = company.projects.filter((p) => !inDb.includes(p.name));
+    const lifecycle = extra.filter((name) => LIFECYCLE.test(name));
+    const certifiedMissing = missing.filter((p) => p.depth === 'certified');
+    if (lifecycle.length || certifiedMissing.length) realised.push(`${company.code}: "${certifiedMissing.map((p) => p.name).join('", "')}" built by the lifecycle as ${lifecycle.map((n) => `"${n}"`).join(' and ')}`);
+    for (const name of extra.filter((n) => !LIFECYCLE.test(n))) unexplained.push(`${company.code}: "${name}" is in the database, not in the specification`);
+    for (const p of missing.filter((m) => m.depth !== 'certified')) unexplained.push(`${company.code}: "${p.name}" (${p.depth}) is in the specification, not in the database`);
+  }
+  add('## Projects against the specification');
+  add();
+  add(`Every project was compared by name with its company's specification. ${unexplained.length ? `**${unexplained.length} difference(s) are unexplained** (listed below).` : 'Every difference is explained.'}`);
+  add();
+  add(`- The certified project of each certified company (${realised.length}) is built by the known-answer lifecycle under its own name, with a second project its security stage tests isolation on — one specified project, two in the database, hence ${facts.totals.projects} against ${spec.projects}:`);
+  for (const line of realised) add(`  - ${line}`);
+  for (const line of unexplained) add(`- UNEXPLAINED — ${line}`);
   add();
   add('## By size');
   add();

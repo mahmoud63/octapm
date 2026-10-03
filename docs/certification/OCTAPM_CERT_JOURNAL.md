@@ -268,3 +268,25 @@ When the driver workflow reports: read each report, run every driver on every co
 **Next exact action**
 
 Clean generation on HEAD (sequence in the evening entry): restart the API on HEAD; move `state/` and `corpus/` aside; reset; layer 1 twice with `layer1-fingerprint.js` take/compare; `load-projects.js`; records detached under the watchdog; `run-lifecycles.js`; `finalize-population.js --apply`; `matrix-report.js`; then `run-cert2.js` detached.
+
+## 2026-10-03 — CERT-1 COMPLETE: the certified hundred-company population
+
+**State**
+
+| | |
+|---|---|
+| Branch / HEAD | `cert/full-saas-certification`, the commit adding this entry (after `970dd01`), pushed |
+| Checkpoint | **CERT-1 complete.** CERT-2 next |
+| Certification database | The certified population, generated from empty on `970dd01`; nothing may write to it outside the sweeps |
+| Services | Cert Postgres :55433; cert API :5190 (restarted fresh before CERT-2); Stripe stand-in :5390 |
+
+**Evidence**
+
+1. Layer 1 generated from an empty database three times (`layer1-fingerprint.js`): runs 1, 2 and 3 identical row for row — 100 companies (20 small / 50 medium / 30 large), 3,008 people, 3,052 memberships, 100 subscriptions.
+2. 704 projects and 8,840 team assignments through the API, 0 notes.
+3. Records through the API, detached under the watchdog: 3,895 driver runs, 0 failed, 0 API restarts (an earlier attempt failed the subcontract driver in all 325 projects after round 2's R29 — correct product behaviour; the driver was fixed, `970dd01`, and the whole population regenerated rather than re-running on half-made records).
+4. The 14 certified lifecycles (021…099): 18/18 stages each, 496 known-answer checks each, 6,944 passed, 0 failed.
+5. `finalize-population.js --apply`: 183 project stages, 142 deactivations, 120 invitations, user C suspended in 100, all 100 billing states (99 cards, 273 invoices).
+6. `OCTAPM_100_COMPANY_MATRIX.md`: 100 companies, 2,995,962+ company rows in 198 tables; every difference from the specification explained (the 14 certified projects built by the lifecycle as a greenfield and an isolation project each). No durable data touched: the guard, a separate cluster, and the naming rule.
+
+**Next exact action**: CERT-2 — `start-detached.ps1 -Name cert2 -Script scripts/cert/run-with-watchdog.js -ScriptArgs "scripts/cert/run-cert2.js --tag=cert2"`, then the "CERT-2 TENANT ISOLATION COMPLETE" report.
