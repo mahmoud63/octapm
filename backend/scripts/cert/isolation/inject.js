@@ -9,12 +9,18 @@
  * same kind: another company's activity, vendor, cost code, user, document,
  * warehouse… one field at a time, so the unchecked field is named exactly.
  *
- * The product must refuse (any 4xx). If it accepts:
+ * The product must refuse the reference: 400, 403, 404 or 422 (for a
+ * reference, the reference check IS the rule). Anything else is examined:
  *   LEAK                 the answer shows the other company's data (its
  *                        canary text, its people's addresses, its identifiers)
  *   ACCEPTED             the answer shows nothing, but a row of the attacker's
  *                        may now point at the other company's record — the
  *                        cross-company reference scan before and after says so.
+ *   REFUSED_LATE         409 or another 4xx: the foreign identifier got past the
+ *                        reference check and was stopped by business logic or a
+ *                        constraint — a finding until triaged
+ *   SERVER_ERROR         5xx — typically a foreign-key constraint that stopped the
+ *                        write: defense in depth, not authorization, so a finding
  *
  *   node scripts/cert/isolation/inject.js --name=inject1
  *   node scripts/cert/isolation/inject.js --name=t --attackers=022,023 --per-field=1
@@ -143,7 +149,8 @@ const main = async () => {
     if (res.status === 0) verdict = 'NOT_SENT';
     else if (canary || address || companyName || disclosed.length) verdict = 'LEAK';
     else if (res.status >= 500) verdict = 'SERVER_ERROR';
-    else if (res.status >= 400) verdict = 'REFUSED';
+    else if ([400, 403, 404, 422].includes(res.status)) verdict = 'REFUSED';
+    else if (res.status >= 400) verdict = 'REFUSED_LATE';
     else verdict = 'ACCEPTED';
     return {
       attacker: attack.attacker,
@@ -184,8 +191,8 @@ const main = async () => {
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, `${NAME}.json`), JSON.stringify({ summary, newLinks, results }));
   console.log(JSON.stringify(summary, null, 1));
-  const concerning = results.filter((r) => ['LEAK', 'ACCEPTED', 'SERVER_ERROR'].includes(r.verdict));
-  for (const [kind, n] of Object.entries(tally(concerning, (r) => `${r.verdict} ${r.method} ${r.template} [${r.field} = another company's ${r.type}] -> ${r.status}`)).sort((a, b) => b[1] - a[1]).slice(0, 80)) console.log(`  ${n}×  ${kind}`);
+  const concerning = results.filter((r) => ['LEAK', 'ACCEPTED', 'SERVER_ERROR', 'REFUSED_LATE'].includes(r.verdict));
+  for (const [kind, n] of Object.entries(tally(concerning, (r) => `${r.verdict} ${r.method} ${r.template} [${r.field} = another company's ${r.type}] -> ${r.status} ${r.code || ''}`)).sort((a, b) => b[1] - a[1]).slice(0, 80)) console.log(`  ${n}×  ${kind}`);
   process.exitCode = concerning.length || newLinks.length ? 2 : 0;
 };
 

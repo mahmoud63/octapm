@@ -13,10 +13,20 @@
  * Because the body is one the product is known to accept, a refusal cannot be
  * a validation accident: it is the access rule. Every answer is examined:
  *
- *   REFUSED            401, 403 or 404
- *   REFUSED_OTHER      another 4xx (the request never reached the point of being allowed)
- *   SERVER_ERROR       5xx — a finding on its own
- *   NO_VICTIM_DATA     2xx whose body holds nothing of the victim's (reads only)
+ *   REFUSED            401, 403 or 404 — the access rule
+ *   REFUSED_VALIDATION 400 — the outsider's request failed validation that the owner's
+ *                      identical request passed. Usually a reference check (defense in
+ *                      depth), not the access rule: listed for triage, never counted as a pass
+ *   REFUSED_LATE       any other 4xx (409, 422, …): the request got past the access rule and
+ *                      was stopped by business logic or a constraint acting on the victim's
+ *                      record — a finding until triaged
+ *   SERVER_ERROR       5xx — a finding on its own (a database constraint that stopped the
+ *                      write is defense in depth, not authorization)
+ *   FILTERED           2xx read, byte-identical to the answer for a random id in the
+ *                      victim's place: the caller's own company filter, no data, no oracle
+ *   ANSWERED           any other 2xx read of a path bound to the victim's record —
+ *                      a cross-company read until triaged
+ *   NO_VICTIM_DATA     2xx read of a path with no victim identifier, holding nothing of the victim's
  *   LEAK               2xx/4xx whose body holds the victim's identifiers or canary text
  *   WRITE_ACCEPTED     a write answered 2xx — a cross-company write unless proven otherwise
  *
@@ -33,6 +43,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '..', '..', '.env') 
 
 const fs = require('fs');
 const guard = require('../lib/cert-env');
+const { canaryDisclosed, controlRoute, sameAnswer } = require('./judging');
 const { as, raw, multipart, pool } = require('../lib/api');
 const { buildMatcher } = require('../lib/routes');
 const { buildPopulation } = require('../lib/spec');
@@ -142,18 +153,22 @@ const main = async () => {
   // ── the sweep ────────────────────────────────────────────────────────────
   const judge = (attack, res) => {
     const text = res.text ?? (res.body ? JSON.stringify(res.body) : '');
-    const victimCanary = new RegExp(`CANARY-${attack.victim}-[A-Za-z0-9]`).test(text);
+    const sentText = `${attack.example.route} ${JSON.stringify(attack.example.json || {})}`;
+    // Canary text or an identifier the attacker sent comes back in echoes and validation errors; it is not a disclosure.
+    const victimCanary = canaryDisclosed(text, sentText, attack.victim);
     const victimIds = [...new Set((text.match(UUID) || []).filter((id) => ownerOf(id) === attack.victim))];
-    // An identifier the attacker sent comes back in validation errors and echoes; it is not a disclosure.
-    const sent = new Set((`${attack.example.route} ${JSON.stringify(attack.example.json || {})}`.match(UUID) || []).map((id) => id.toLowerCase()));
+    const sent = new Set((sentText.match(UUID) || []).map((id) => id.toLowerCase()));
     const disclosed = victimIds.filter((id) => !sent.has(id.toLowerCase()));
     const write = attack.example.method !== 'GET';
     if (victimCanary || disclosed.length) return { verdict: 'LEAK', evidence: { canary: victimCanary, ids: disclosed.slice(0, 5).map((id) => `${id} (${index[id.toLowerCase()][1]})`) } };
     if (res.status >= 500) return { verdict: 'SERVER_ERROR' };
     if ([401, 403, 404].includes(res.status)) return { verdict: 'REFUSED' };
-    if (res.status >= 400) return { verdict: 'REFUSED_OTHER' };
+    if (res.status === 400) return { verdict: 'REFUSED_VALIDATION' };
+    if (res.status >= 400) return { verdict: 'REFUSED_LATE' };
     if (write) return { verdict: 'WRITE_ACCEPTED' };
-    return { verdict: 'NO_VICTIM_DATA' };
+    // A read of the victim's own record that was not refused counts as a
+    // cross-company read until the random-id control below clears it.
+    return { verdict: attack.example.victimIdInPath ? 'ANSWERED' : 'NO_VICTIM_DATA' };
   };
 
   let done = 0;
@@ -171,7 +186,17 @@ const main = async () => {
     }
     done += 1;
     if (done % 5000 === 0) console.log(`  ${done}/${attacks.length}`);
-    const judged = res.status === 0 ? { verdict: 'NOT_SENT' } : judge(attack, res);
+    let judged = res.status === 0 ? { verdict: 'NOT_SENT' } : judge(attack, res);
+    // The random-id control (judging.js): the same answer for a random id in the
+    // victim's place means the caller's own company filter answered.
+    if (judged.verdict === 'ANSWERED') {
+      const victimIds = [...new Set((example.route.match(UUID) || []).filter((id) => ownerOf(id) === attack.victim))];
+      if (victimIds.length) {
+        const control = controlRoute(example.route, victimIds);
+        const other = await (attacker.session ? attacker.session().send('GET', control.route) : raw('GET', control.route)).catch(() => null);
+        if (sameAnswer(res, other, control.swaps)) judged = { verdict: 'FILTERED', evidence: { sameAsRandomId: true } };
+      }
+    }
     return {
       victim: attack.victim,
       attacker: attacker.kind,
@@ -211,9 +236,16 @@ const main = async () => {
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, `${NAME}.json`), JSON.stringify({ summary, changes: realChanges, results }, null, 0));
   console.log(JSON.stringify(summary, null, 1));
-  const concerning = results.filter((r) => ['LEAK', 'WRITE_ACCEPTED', 'SERVER_ERROR'].includes(r.verdict));
-  const kinds = tally(concerning, (r) => `${r.verdict} ${r.attacker} ${r.method} ${r.template} -> ${r.status}`);
+  const concerning = results.filter((r) => ['LEAK', 'WRITE_ACCEPTED', 'SERVER_ERROR', 'REFUSED_LATE', 'ANSWERED'].includes(r.verdict));
+  const kinds = tally(concerning, (r) => `${r.verdict} ${r.attacker} ${r.method} ${r.template} -> ${r.status} ${r.code || ''}`);
   for (const [kind, n] of Object.entries(kinds).sort((a, b) => b[1] - a[1]).slice(0, 60)) console.log(`  ${n}×  ${kind}`);
+  // Validation refusals are not passes: each route/code pair is triaged by hand
+  // (access rule missing and a reference check caught it, or a genuine pass).
+  const triage = tally(results.filter((r) => r.verdict === 'REFUSED_VALIDATION'), (r) => `${r.method} ${r.template} -> 400 ${r.code || ''}`);
+  if (Object.keys(triage).length) {
+    console.log(`\nREFUSED_VALIDATION to triage (${Object.keys(triage).length} route/code pairs):`);
+    for (const [kind, n] of Object.entries(triage).sort((a, b) => b[1] - a[1])) console.log(`  ${n}×  ${kind}`);
+  }
   process.exitCode = concerning.length || realChanges.length ? 2 : 0;
 };
 

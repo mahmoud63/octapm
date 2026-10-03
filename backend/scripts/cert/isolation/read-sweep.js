@@ -16,6 +16,19 @@
  * Also tried, on routes that take no identifier in the path: the victim's
  * project id and canary text as query parameters (projectId=, q=, search=).
  *
+ * Verdicts on each outsider answer:
+ *   REFUSED             401, 403, 404 — the access rule
+ *   LEAK                the victim's identifiers or canary text, the owner's own
+ *                       informative answer, or the owner's distinctive figures
+ *   FILTERED            2xx, byte-identical to the answer for a random id in the
+ *                       victim's place: the caller's company filter, no data, no
+ *                       existence oracle
+ *   ANSWERED            any other 2xx on a route bound to the victim's record —
+ *                       counted as a cross-company read until triaged
+ *   REFUSED_VALIDATION  400, listed for triage; REFUSED_LATE other 4xx and
+ *                       SERVER_ERROR 5xx are findings
+ *   NO_VICTIM_DATA      2xx to a query-parameter probe, holding nothing of the victim's
+ *
  *   node scripts/cert/isolation/read-sweep.js --name=reads1
  *   node scripts/cert/isolation/read-sweep.js --name=t --victims=022,023
  */
@@ -25,6 +38,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '..', '..', '.env') 
 
 const fs = require('fs');
 const { as, raw, pool } = require('../lib/api');
+const { canaryDisclosed, controlRoute, sameAnswer } = require('./judging');
 const { buildMatcher } = require('../lib/routes');
 const { buildPopulation } = require('../lib/spec');
 
@@ -170,24 +184,49 @@ const main = async () => {
     // The victim's canaries continue after the company code (CANARY-022-P01-…); the bare prefix is what the sweep itself sends and a search echoes back.
     const victimCanary = new RegExp(`CANARY-${victim.code}-[A-Za-z0-9]`);
 
-    const judge = (res, sentPath) => {
+    // Figures leak without identifiers: a body that repeats the owner's
+    // distinctive numbers (five or more digits, or three or more decimals) is
+    // the victim's data even with no id or canary in it.
+    const NUMBER = /-?\d+(?:\.\d+)?/g;
+    const distinctive = (text) => new Set((String(text).replace(UUID, ' ').match(NUMBER) || []).filter((n) => n.replace(/[-.]/g, '').replace(/^0+/, '').length >= 5 || /\.\d{3,}$/.test(n)));
+    const judge = (res, sentPath, { ownerText = null, query = false } = {}) => {
       const text = res.text ?? '';
       const sent = new Set((sentPath.match(UUID) || []).map((id) => id.toLowerCase()));
       const disclosed = [...new Set((text.match(UUID) || []).filter((id) => ownerOf(id) === victim.code && !sent.has(id.toLowerCase())))];
-      if (victimCanary.test(text) || disclosed.length) return { verdict: 'LEAK', evidence: { canary: victimCanary.test(text), ids: disclosed.slice(0, 5).map((id) => `${id} (${index[id.toLowerCase()][1]})`) } };
+      const canaryShown = victimCanary.test(text) && canaryDisclosed(text, sentPath, victim.code);
+      if (canaryShown || disclosed.length) return { verdict: 'LEAK', evidence: { canary: canaryShown, ids: disclosed.slice(0, 5).map((id) => `${id} (${index[id.toLowerCase()][1]})`) } };
       if (res.status >= 500) return { verdict: 'SERVER_ERROR' };
       if ([401, 403, 404].includes(res.status)) return { verdict: 'REFUSED' };
-      if (res.status >= 400) return { verdict: 'REFUSED_OTHER' };
-      return { verdict: 'NO_VICTIM_DATA' };
+      if (res.status === 400) return { verdict: 'REFUSED_VALIDATION' };
+      if (res.status >= 400) return { verdict: 'REFUSED_LATE' };
+      if (ownerText && text.length > 20 && text === ownerText) return { verdict: 'LEAK', evidence: { identicalToOwner: true } };
+      if (ownerText) {
+        const sentFigures = distinctive(sentPath);
+        const answerFigures = distinctive(text);
+        const shared = [...distinctive(ownerText)].filter((n) => !sentFigures.has(n) && answerFigures.has(n));
+        if (shared.length) return { verdict: 'LEAK', evidence: { ownerFigures: shared.slice(0, 5) } };
+      }
+      // A route bound to the victim's record answered at all: the access rule did not refuse.
+      return { verdict: query ? 'NO_VICTIM_DATA' : 'ANSWERED' };
     };
-    const attack = async (kind, session, route, template) => {
+    const attack = async (kind, session, route, template, ownerText = null) => {
       let res;
       try {
         res = session ? await session.send('GET', route) : await raw('GET', route);
       } catch (error) {
         res = { status: 0, text: String(error.message) };
       }
-      const judged = res.status === 0 ? { verdict: 'NOT_SENT' } : judge(res, route);
+      let judged = res.status === 0 ? { verdict: 'NOT_SENT' } : judge(res, route, { ownerText, query: kind === 'outsider-query' });
+      // The random-id control (judging.js): the same answer for a random id in
+      // the victim's place means the caller's own company filter answered.
+      if (judged.verdict === 'ANSWERED' || (judged.verdict === 'LEAK' && judged.evidence?.identicalToOwner)) {
+        const victimIds = [...new Set((route.match(UUID) || []).filter((id) => ownerOf(id) === victim.code))];
+        if (victimIds.length) {
+          const control = controlRoute(route, victimIds);
+          const other = await (session ? session.send('GET', control.route) : raw('GET', control.route)).catch(() => null);
+          if (sameAnswer(res, other, control.swaps)) judged = { verdict: 'FILTERED', evidence: { sameAsRandomId: true } };
+        }
+      }
       results.push({ victim: victim.code, attacker: kind, template, route, status: res.status, code: res.body?.error?.code || null, ...judged, ...(judged.verdict === 'REFUSED' ? {} : { sample: String(res.text ?? '').slice(0, 240) }) });
     };
 
@@ -196,12 +235,14 @@ const main = async () => {
       if (hasParam) {
         const candidates = candidatesFor(route.path, victim.code, projectId);
         let bound = null;
+        let ownerText = null;
         let lastStatus = null;
         for (const candidate of candidates) {
           const res = await owner.send('GET', candidate).catch((error) => ({ status: 0, text: String(error.message) }));
           lastStatus = res.status;
           if (res.status >= 200 && res.status < 300) {
             bound = candidate;
+            ownerText = res.text ?? null;
             break;
           }
         }
@@ -213,9 +254,9 @@ const main = async () => {
           continue;
         }
         results.push({ victim: victim.code, attacker: 'owner', template: route.path, route: bound, status: 200, verdict: 'OWNER_OK' });
-        await attack('outsider', outsider, bound, route.path);
-        if (memberElsewhere) await attack('member-elsewhere', memberElsewhere, bound, route.path);
-        await attack('anonymous', null, bound, route.path);
+        await attack('outsider', outsider, bound, route.path, ownerText);
+        if (memberElsewhere) await attack('member-elsewhere', memberElsewhere, bound, route.path, ownerText);
+        await attack('anonymous', null, bound, route.path, ownerText);
       } else if (projectId) {
         // No identifier in the path: name the victim's project and canary in the query instead.
         for (const query of [`projectId=${projectId}`, `q=${encodeURIComponent(canary)}`, `search=${encodeURIComponent(canary)}`]) {
@@ -248,10 +289,16 @@ const main = async () => {
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, `${NAME}.json`), JSON.stringify({ summary, neverBound: Object.fromEntries(neverBound), results }));
   console.log(JSON.stringify(summary, null, 1));
-  const concerning = attacks.filter((r) => ['LEAK', 'SERVER_ERROR'].includes(r.verdict));
-  for (const [kind, n] of Object.entries(tally(concerning, (r) => `${r.verdict} ${r.attacker} ${r.template} -> ${r.status}`)).sort((a, b) => b[1] - a[1]).slice(0, 60)) console.log(`  ${n}×  ${kind}`);
-  const answered = attacks.filter((r) => r.verdict === 'NO_VICTIM_DATA' && r.attacker !== 'outsider-query');
-  for (const [kind, n] of Object.entries(tally(answered, (r) => `ANSWERED ${r.attacker} ${r.template}`)).sort((a, b) => b[1] - a[1]).slice(0, 40)) console.log(`  ${n}×  ${kind}`);
+  // ANSWERED (a victim-bound route that did not refuse) and REFUSED_LATE count
+  // against "cross-company reads = 0" until each is triaged; REFUSED_VALIDATION
+  // is listed for triage and never counted as a pass.
+  const concerning = attacks.filter((r) => ['LEAK', 'SERVER_ERROR', 'REFUSED_LATE', 'ANSWERED'].includes(r.verdict));
+  for (const [kind, n] of Object.entries(tally(concerning, (r) => `${r.verdict} ${r.attacker} ${r.template} -> ${r.status} ${r.code || ''}`)).sort((a, b) => b[1] - a[1]).slice(0, 80)) console.log(`  ${n}×  ${kind}`);
+  const triage = attacks.filter((r) => r.verdict === 'REFUSED_VALIDATION');
+  if (triage.length) {
+    console.log(`\nREFUSED_VALIDATION to triage (${triage.length}):`);
+    for (const [kind, n] of Object.entries(tally(triage, (r) => `${r.attacker} ${r.template} -> 400 ${r.code || ''}`)).sort((a, b) => b[1] - a[1])) console.log(`  ${n}×  ${kind}`);
+  }
   process.exitCode = concerning.length ? 2 : 0;
 };
 
