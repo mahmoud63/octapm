@@ -64,7 +64,9 @@ const readCheckFor = async ({ user, projectId, projectAccess = null }) => {
       const { assertProjectAccess } = require("./project-authorization.service");
       access = await assertProjectAccess({ orgId: user.orgId, projectId, userId: user.id, role: user.role, isCompanyAdmin: user.isCompanyAdmin });
     } catch {
-      access = null;
+      // A project the caller cannot open grants nothing: no falling back to
+      // the company role (certification L46, defence in depth).
+      return () => false;
     }
   }
   let template = null;
@@ -157,6 +159,13 @@ const retrieve = async ({ orgId, user, projectId = null, query, limit = DEFAULT_
   const ranked = [...unique.values()].sort((a, b) => b.score - a.score || String(b.date || "").localeCompare(String(a.date || ""))).slice(0, limit);
   for (const source of ranked) if (source.kind === "record" && !source.text) source.text = await loadBody(source);
   const projects = await projectSummaries({ orgId, projectIds: [...new Set([...(projectId ? [projectId] : []), ...ranked.map((source) => source.projectId).filter(Boolean)])] });
+  // The contract sum reaches the model only for a reader who may read it on
+  // that project — ipc:read, the rule GET /projects/:id follows (certification
+  // L25); otherwise a party guest or a planner could be told it in an answer.
+  for (const summary of projects.values()) {
+    const readCheck = await readCheckFor({ user: { ...user, orgId }, projectId: summary.id, projectAccess: summary.id === projectId ? projectAccess : null });
+    if (!readCheck("ipc")) summary.contractValue = null;
+  }
   const sources = ranked.map((source, index) => ({ n: index + 1, ...source, projectName: source.projectName || projects.get(source.projectId)?.name || null }));
   return { query: text, sources, projects: [...projects.values()], searchedProjects: search.meta?.authorizedProjectCount ?? null, mode: search.meta?.mode || null };
 };

@@ -156,6 +156,49 @@ describe("project knowledge assistant", () => {
     expect(aiProvider.describe()).toMatchObject({ enabled: false, provider: null, model: null, vision: false });
   });
 
+  it("decides the caller's access to the project before it stores, retrieves or asks a model (certification L46)", async () => {
+    mockSearch.globalSearch.mockResolvedValue(hits());
+    const transport = jest.fn();
+    const denied = (code, status) => Object.assign(new Error(code), { status, code });
+
+    // The route's decision for a project other than its own refuses: nothing has run.
+    const refuse = jest.fn(async () => {
+      throw denied("PROJECT_ACCESS_DENIED", 403);
+    });
+    await expect(service.ask({ orgId: "org-1", user, projectId: "p-other", question: "What is the contract value?", accessFor: refuse, transport })).rejects.toMatchObject({ code: "PROJECT_ACCESS_DENIED" });
+    expect(refuse).toHaveBeenCalledWith("p-other");
+    expect(mockPrisma.assistantConversation.create).not.toHaveBeenCalled();
+    expect(mockPrisma.assistantMessage.create).not.toHaveBeenCalled();
+    expect(mockSearch.globalSearch).not.toHaveBeenCalled();
+    expect(mockDocumentText.searchDocuments).not.toHaveBeenCalled();
+    expect(mockPrisma.project.findMany).not.toHaveBeenCalled();
+    expect(transport).not.toHaveBeenCalled();
+
+    // Without a route decision the project access rule decides (a project of another company: 404).
+    mockAccess.assertProjectAccess.mockRejectedValueOnce(denied("PROJECT_NOT_FOUND", 404));
+    await expect(service.ask({ orgId: "org-1", user, projectId: "p-foreign", question: "Who is the client?", transport })).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+    expect(mockAccess.assertProjectAccess).toHaveBeenCalledWith({ orgId: "org-1", projectId: "p-foreign", userId: "u-1", role: "pm", isCompanyAdmin: false });
+    expect(store.conversations).toHaveLength(0);
+    expect(transport).not.toHaveBeenCalled();
+
+    // The route's own project is decided already: its access is used as it is, and retrieval reads with it.
+    const own = { id: "p1", role: "site_engineer", partyAccess: [] };
+    const notAsked = jest.fn();
+    const answered = await service.ask({ orgId: "org-1", user, projectId: "p1", question: "pile caps?", projectAccess: own, accessFor: notAsked });
+    expect(notAsked).not.toHaveBeenCalled();
+    expect(answered.projectId).toBe("p1");
+    expect(mockDocumentText.searchDocuments).toHaveBeenCalledWith(expect.objectContaining({ projectId: "p1", viewer: expect.objectContaining({ projectAccess: own }) }));
+
+    // A follow-up is decided on its conversation's project, whatever the route's.
+    const elsewhere = jest.fn(async () => {
+      throw denied("PROJECT_ACCESS_DENIED", 403);
+    });
+    const messages = store.messages.length;
+    await expect(service.ask({ orgId: "org-1", user, conversationId: answered.conversationId, question: "and then?", projectAccess: { id: "p2" }, accessFor: elsewhere })).rejects.toMatchObject({ code: "PROJECT_ACCESS_DENIED" });
+    expect(elsewhere).toHaveBeenCalledWith("p1");
+    expect(store.messages).toHaveLength(messages);
+  });
+
   it("runs suggested actions through the record services as drafts", async () => {
     const rfi = await service.executeAction({ orgId: "org-1", user, projectId: "p1", action: { type: "create_rfi", subject: "Pile cap link size", question: "Confirm T16 vs T12" } });
     expect(mockRfiService.createRfi).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", projectId: "p1", payload: expect.objectContaining({ subject: "Pile cap link size", status: "draft" }), userId: "u-1" }));

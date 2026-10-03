@@ -205,16 +205,37 @@ const buildMessages = ({ history, question, sources, projects }) => {
 };
 
 /**
- * Answers a question inside a conversation (new when `conversationId` is
- * null). `transport` lets tests inject a fake model.
+ * The caller's access to the project an answer is scoped to. The project
+ * comes from the route, the request body or the conversation followed up;
+ * the organisation-mounted assistant took it from the body and retrieved
+ * on, stored a conversation against, and would have sent a model the
+ * context of a project the caller is refused everywhere else (certification
+ * L46). `projectAccess` is the route's own (already decided for its
+ * project); `accessFor(projectId)` is the route's decision for any other
+ * — the project's own access and assistant permission — and refuses by
+ * throwing. Without one, the project access rule alone decides.
  */
-const ask = async ({ orgId, user, projectId = null, conversationId = null, question, projectAccess = null, transport = null, readsBoq = READS_NO_BOQ }) => {
+const projectAccessFor = async ({ orgId, user, projectId, projectAccess = null, accessFor = null }) => {
+  if (projectAccess?.id && projectAccess.id === projectId) return projectAccess;
+  if (accessFor) return accessFor(projectId);
+  const { assertProjectAccess } = require("./project-authorization.service");
+  return assertProjectAccess({ orgId, projectId, userId: user.id, role: user.role, isCompanyAdmin: Boolean(user.isCompanyAdmin) });
+};
+
+/**
+ * Answers a question inside a conversation (new when `conversationId` is
+ * null). `transport` lets tests inject a fake model. Nothing is stored,
+ * retrieved or sent to a model before the caller's access to the
+ * conversation's project is decided (projectAccessFor).
+ */
+const ask = async ({ orgId, user, projectId = null, conversationId = null, question, projectAccess = null, accessFor = null, transport = null, readsBoq = READS_NO_BOQ }) => {
   const text = trimOrNull(question);
   if (!text) throw new HttpError(400, "ASSISTANT_QUESTION_REQUIRED", "Ask a question");
   if (text.length > MAX_QUESTION) throw new HttpError(400, "ASSISTANT_QUESTION_TOO_LONG", `Keep the question under ${MAX_QUESTION} characters`);
   if (!tablesReady()) throw new HttpError(503, "ASSISTANT_UNAVAILABLE", "The assistant tables are not available");
   let conversation = conversationId ? await loadConversation({ orgId, user, conversationId }) : null;
   const scopeProjectId = conversation?.projectId ?? projectId ?? null;
+  const scopeAccess = scopeProjectId ? await projectAccessFor({ orgId, user, projectId: scopeProjectId, projectAccess, accessFor }) : null;
   if (!conversation) {
     conversation = await prisma.assistantConversation.create({ data: { orgId, projectId: scopeProjectId, userId: user.id, kind: "chat", title: text.slice(0, 120), lastMessageAt: new Date() }, include: { project: { select: { id: true, name: true } }, messages: true } });
   }
@@ -223,7 +244,7 @@ const ask = async ({ orgId, user, projectId = null, conversationId = null, quest
   const history = (await withholdsRun(conversation, readsBoq)) ? [] : (conversation.messages || []).slice(-MAX_HISTORY).map((message) => ({ role: message.role, content: message.content }));
   const userMessage = await prisma.assistantMessage.create({ data: { orgId, conversationId: conversation.id, role: "user", content: text } });
 
-  const retrieved = await retrieval.retrieve({ orgId, user, projectId: scopeProjectId, query: text, projectAccess });
+  const retrieved = await retrieval.retrieve({ orgId, user, projectId: scopeProjectId, query: text, projectAccess: scopeAccess });
   const sources = retrieved.sources;
   let answer;
   let citations;

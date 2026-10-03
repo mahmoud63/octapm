@@ -3,15 +3,28 @@ const { query } = require('express-validator');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
-const { requirePermission } = require('../middleware/rbac');
+const { hasPermission, requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const auditService = require('../services/audit.service');
+const { documentViewer } = require('../services/document-text.service');
 const primeContractService = require('../services/prime-contract.service');
 const { boqFigureAccess, exceptionAccess, withheldAuditHistory } = require('../utils/boq-figures');
 
 const router = express.Router({ mergeParams: true });
 
 router.use(authenticate);
+
+// The reader, as every door to a record reads them: the module decision this
+// request makes (role, template, party, API key) and, for a party-scoped
+// person, their parties and companies, which the records' own rules read.
+// The history gives each event only to a reader who may read its record
+// (audit.service historyVisibility; certification L43).
+const readerOf = (req) =>
+  documentViewer({
+    userId: req.user.id,
+    projectAccess: req.projectAccess || null,
+    canRead: (moduleName) => hasPermission(req, moduleName, 'read'),
+  });
 
 // The history is the project's, and every audit reader's — except the
 // bill's figures in it (§12, utils/boq-figures): the history of the BOQ's
@@ -50,6 +63,7 @@ router.get(
       cursor: req.query.cursor || null,
       limit: req.query.limit || 50,
       order: req.query.order || 'asc',
+      viewer: readerOf(req),
     });
     // modules: what the exceptions list reads per module, so an exception's
     // events go where the exception goes (PC-7b, withheldExceptionEvent).

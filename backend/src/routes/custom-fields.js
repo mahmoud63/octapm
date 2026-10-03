@@ -7,6 +7,7 @@ const { authenticate } = require("../middleware/auth");
 const { requirePermission, hasPermission, getEffectiveRole } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const service = require("../services/custom-field.service");
+const { documentViewer } = require("../services/document-text.service");
 
 /** Custom fields on a project (OCTA-PLAT-FIELDS-025): `/projects/:projectId/custom-fields`. */
 const router = express.Router({ mergeParams: true });
@@ -14,6 +15,17 @@ router.use(authenticate);
 
 const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
 const actor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffectiveRole(req) });
+// The reader of a record's values, as every door to a record reads them: the
+// module decision this request makes and, for a party-scoped person, their
+// parties and companies — values are given and taken only for a record of
+// this project the reader may see (custom-field.service recordsOnProject;
+// certification L45).
+const viewerOf = (req) =>
+  documentViewer({
+    userId: req.user.id,
+    projectAccess: req.projectAccess || null,
+    canRead: (moduleName) => hasPermission(req, moduleName, "read"),
+  });
 const manage = requirePermission("custom_field", "update", { transition: "custom_field.manage" });
 
 /** Values follow the record's own module: read to see them, update to change them. */
@@ -107,7 +119,7 @@ router.get(
   requireRecordAccess("read"),
   asyncHandler(async (req, res) => {
     const recordIds = String(req.query.recordIds).split(",").map((item) => item.trim()).filter(Boolean).slice(0, 500);
-    const values = await service.valuesForRecords({ orgId: req.user.orgId, recordType: req.query.recordType, recordIds });
+    const values = await service.valuesForProjectRecords({ ...scope(req), recordType: req.query.recordType, recordIds, viewer: viewerOf(req) });
     return sendSuccess(res, { items: Object.fromEntries(values) });
   }),
 );
@@ -116,7 +128,7 @@ router.get(
   "/values/:recordType/:recordId",
   [param("recordType").isIn(service.RECORD_TYPE_KEYS), param("recordId").isUUID(), query("recordTypeKey").optional().isString().trim(), validate],
   requireRecordAccess("read"),
-  asyncHandler(async (req, res) => sendSuccess(res, await service.getValues({ ...scope(req), recordType: req.params.recordType, recordId: req.params.recordId, recordTypeKey: req.query.recordTypeKey || null }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await service.getValues({ ...scope(req), recordType: req.params.recordType, recordId: req.params.recordId, recordTypeKey: req.query.recordTypeKey || null, viewer: viewerOf(req) }))),
 );
 
 router.put(
@@ -124,7 +136,7 @@ router.put(
   [param("recordType").isIn(service.RECORD_TYPE_KEYS), param("recordId").isUUID(), body("values").isObject(), body("recordTypeKey").optional({ nullable: true }).isString().trim(), body("partial").optional().isBoolean().toBoolean(), body("context").optional().isObject(), validate],
   requireRecordAccess("update"),
   asyncHandler(async (req, res) =>
-    sendSuccess(res, await service.setValues({ ...scope(req), recordType: req.params.recordType, recordId: req.params.recordId, values: req.body.values, recordTypeKey: req.body.recordTypeKey || null, context: req.body.context || {}, partial: Boolean(req.body.partial), actor: actor(req) })),
+    sendSuccess(res, await service.setValues({ ...scope(req), recordType: req.params.recordType, recordId: req.params.recordId, values: req.body.values, recordTypeKey: req.body.recordTypeKey || null, context: req.body.context || {}, partial: Boolean(req.body.partial), actor: actor(req), viewer: viewerOf(req) })),
   ),
 );
 

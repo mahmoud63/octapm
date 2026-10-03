@@ -69,7 +69,26 @@ describe('audit route permissions', () => {
       cursor: null,
       limit: 10,
       order: 'asc',
+      viewer: expect.objectContaining({ userId: 'user-1', partyIds: null, companyIds: null }),
     });
+  });
+
+  it("hands the service the reader: the module reads of the caller's role (certification L43)", async () => {
+    const readsOf = async (role) => {
+      mockAuditService.listEvents.mockClear();
+      const res = await request(buildApp()).get('/projects/project-1/audit').set('x-role', role);
+      expect(res.status).toBe(200);
+      const { viewer } = mockAuditService.listEvents.mock.calls[0][0];
+      return (moduleName) => viewer.canRead(moduleName);
+    };
+    const site = await readsOf('site_engineer');
+    expect(site('rfi')).toBe(true);
+    expect(site('change_order')).toBe(false);
+    expect(site('ipc')).toBe(false);
+    expect(site('commitment')).toBe(false);
+    const pm = await readsOf('pm');
+    expect(pm('change_order')).toBe(true);
+    expect(pm('ipc')).toBe(true);
   });
 
   it('blocks roles outside the audit read policy', async () => {

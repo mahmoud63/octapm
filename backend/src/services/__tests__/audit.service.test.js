@@ -4,7 +4,11 @@ const mockPrisma = {
   auditEvent: {
     create: jest.fn(),
     findMany: jest.fn(),
+    findFirst: jest.fn(),
   },
+  // The record rules a reader is judged by (document-text.service RECORD_RULES).
+  rfi: { findMany: jest.fn() },
+  conversation: { findMany: jest.fn() },
   approvalWorkflowEvent: {
     findMany: jest.fn(),
   },
@@ -34,6 +38,129 @@ describe('audit service', () => {
     mockPrisma.workflowAttachment.findMany.mockResolvedValue([]);
     mockPrisma.commercialAttachmentRef.findMany.mockResolvedValue([]);
     mockPrisma.user.findMany.mockResolvedValue([]);
+    mockPrisma.rfi.findMany.mockResolvedValue([]);
+    mockPrisma.conversation.findMany.mockResolvedValue([]);
+  });
+
+  const at = (iso) => new Date(iso);
+  const auditRow = (id, occurredAt, extra = {}) => ({ id, orgId: 'org-1', projectId: 'project-1', entityType: 'rfi', entityId: 'rfi-x', action: 'updated', actorId: null, occurredAt, createdAt: occurredAt, summaryJson: {}, attachmentsJson: [], metadataJson: {}, ...extra });
+  const approvalRow = (id, createdAt, extra = {}) => ({ id, orgId: 'org-1', projectId: 'project-1', recordType: 'rfi', recordId: 'rfi-x', workflowType: 'rfi', action: 'approved', decision: 'approved', actorId: null, metadataJson: {}, createdAt, ...extra });
+  const statusRow = (id, createdAt, extra = {}) => ({ id, projectId: 'project-1', recordType: 'rfi', recordId: 'rfi-x', oldStatus: 'open', newStatus: 'answered', createdBy: null, createdAt, ...extra });
+  const whereOf = (mock) => mock.mock.calls[mock.mock.calls.length - 1][0].where;
+
+  it('gives a party reader only the history of the records its modules and its own rules admit (certification L43)', async () => {
+    mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1' });
+    mockPrisma.rfi.findMany.mockResolvedValue([{ id: 'rfi-x' }]);
+    const t = at('2026-09-01T10:00:00.000Z');
+    // What the database answers after the where below; the events whose content names a record are judged after.
+    mockPrisma.auditEvent.findMany.mockResolvedValue([
+      auditRow('a-rfi-x', t),
+      auditRow('a-activity', t, { entityType: 'activity', entityId: 'act-1' }),
+      auditRow('a-file-x', t, { entityType: 'attachment', entityId: 'att-1', summaryJson: { recordType: 'rfi', recordId: 'rfi-x', fileName: 'x.pdf' } }),
+      auditRow('a-file-y', t, { entityType: 'attachment', entityId: 'att-2', summaryJson: { recordType: 'rfi', recordId: 'rfi-y', fileName: 'y.pdf' } }),
+      auditRow('a-file-co', t, { entityType: 'attachment', entityId: 'att-3', metadataJson: { recordType: 'change_order', recordId: 'co-1' } }),
+      auditRow('a-revision-y', t, { entityType: 'document_revision', entityId: 'rev-1', summaryJson: { recordType: 'rfi', recordId: 'rfi-y', revision: 'B' } }),
+      auditRow('a-contract', t, { entityType: 'project', entityId: 'project-1', summaryJson: { transition: 'contract.manage', ref: 'PC-1' } }),
+    ]);
+    const viewer = { id: 'guest-x', userId: 'guest-x', canRead: (moduleName) => !['change_order', 'ipc', 'cost', 'commitment', 'sub_pay_app'].includes(moduleName), partyIds: ['party-x'], companyIds: ['company-x'] };
+
+    const result = await auditService.listEvents({ orgId: 'org-1', projectId: 'project-1', source: 'all', limit: 50, order: 'asc', viewer });
+
+    // The routed RFIs of the guest's party, on this project.
+    expect(mockPrisma.rfi.findMany).toHaveBeenCalledWith({
+      where: { projectId: 'project-1', OR: [{ ownerPartyId: { in: ['party-x'] } }, { reviewerPartyId: { in: ['party-x'] } }, { approverPartyId: { in: ['party-x'] } }] },
+      select: { id: true },
+    });
+    const auditWhere = whereOf(mockPrisma.auditEvent.findMany);
+    expect(auditWhere).toMatchObject({ orgId: 'org-1', projectId: 'project-1' });
+    const [notIn, onlyIn, ruled] = auditWhere.AND;
+    expect(notIn.entityType.notIn).toEqual(expect.arrayContaining(['change_order', 'ipc_certificate', 'cost_record', 'direct_cost', 'commitment', 'sub_pay_app', 'budget_line', 'burn_rate_entry']));
+    expect(notIn.entityType.notIn).not.toContain('rfi');
+    // A party reader is given only the types of a module it reads; a type of no known module is not.
+    expect(onlyIn.entityType.in).toEqual(expect.arrayContaining(['rfi', 'activity', 'attachment', 'document_revision']));
+    expect(onlyIn.entityType.in).not.toContain('change_order');
+    expect(onlyIn.entityType.in).not.toContain('background_job');
+    expect(ruled.OR).toEqual(expect.arrayContaining([{ entityType: 'rfi', entityId: { in: ['rfi-x'] } }, { entityType: 'submittal', entityId: { in: [] } }]));
+    expect(ruled.OR[0].entityType.notIn).toEqual(expect.arrayContaining(['rfi', 'submittal', 'task']));
+    // The other sources name the record as recordType / recordId.
+    expect(whereOf(mockPrisma.approvalWorkflowEvent.findMany).AND[2].OR).toEqual(expect.arrayContaining([{ recordType: 'rfi', recordId: { in: ['rfi-x'] } }]));
+    expect(whereOf(mockPrisma.workflowStatusHistory.findMany).AND[0].recordType.notIn).toContain('change_order');
+
+    // A file of company Y's RFI, a file of a change order, Y's RFI's revision and the client contract's change are left out.
+    expect(result.events.map((event) => event.id)).toEqual(['a-rfi-x', 'a-activity', 'a-file-x']);
+  });
+
+  it('gives a company member the history of the modules its role reads, with no party rule (certification L43)', async () => {
+    mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1' });
+    mockPrisma.auditEvent.findMany.mockResolvedValue([auditRow('a-contract', at('2026-09-01T10:00:00.000Z'), { entityType: 'project', entityId: 'project-1', summaryJson: { transition: 'contract.manage' } })]);
+    const site = { id: 'site-1', userId: 'site-1', canRead: (moduleName) => !['change_order', 'ipc', 'cost', 'commitment', 'sub_pay_app', 'bid', 'eot'].includes(moduleName), partyIds: null, companyIds: null };
+
+    const result = await auditService.listEvents({ orgId: 'org-1', projectId: 'project-1', source: 'audit', viewer: site });
+
+    const where = whereOf(mockPrisma.auditEvent.findMany);
+    expect(where.AND[0].entityType.notIn).toEqual(expect.arrayContaining(['change_order', 'ipc_certificate', 'commitment', 'bid_package', 'eot_claim']));
+    expect(where.AND.some((clause) => clause.entityType?.in)).toBe(false);
+    // Only the rule that binds everyone (a conversation's members) is read; the party rules are not.
+    expect(mockPrisma.rfi.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.conversation.findMany).toHaveBeenCalledWith({ where: { projectId: 'project-1', OR: [{ members: { some: { userId: 'site-1', leftAt: null } } }] }, select: { id: true } });
+    // The client contract's change is the contract's: not for a reader without its module.
+    expect(result.events).toEqual([]);
+    const pm = { ...site, canRead: () => true };
+    expect((await auditService.listEvents({ orgId: 'org-1', projectId: 'project-1', source: 'audit', viewer: pm })).events).toHaveLength(1);
+  });
+
+  it('pages every source by its position in the one timeline (certification X-PARTY-1)', async () => {
+    mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1' });
+    const t9 = at('2026-09-01T09:00:00.000Z');
+    const t10 = at('2026-09-01T10:00:00.000Z');
+    const t11 = at('2026-09-01T11:00:00.000Z');
+    mockPrisma.auditEvent.findMany.mockResolvedValueOnce([auditRow('a1', t10), auditRow('a2', t11)]);
+    mockPrisma.approvalWorkflowEvent.findMany.mockResolvedValueOnce([approvalRow('p1', t10)]);
+    mockPrisma.workflowStatusHistory.findMany.mockResolvedValueOnce([statusRow('s1', t9)]);
+
+    const first = await auditService.listEvents({ orgId: 'org-1', projectId: 'project-1', source: 'all', limit: 2, order: 'asc' });
+    // At the same instant the audit row comes before the approval row.
+    expect(first.events.map((event) => event.id)).toEqual(['status:s1', 'a1']);
+    expect(first.nextCursor).toMatch(/^h1\./);
+
+    mockPrisma.auditEvent.findMany.mockResolvedValueOnce([auditRow('a2', t11)]);
+    mockPrisma.approvalWorkflowEvent.findMany.mockResolvedValueOnce([approvalRow('p1', t10)]);
+    mockPrisma.workflowStatusHistory.findMany.mockResolvedValueOnce([]);
+    const second = await auditService.listEvents({ orgId: 'org-1', projectId: 'project-1', source: 'all', limit: 2, order: 'asc', cursor: first.nextCursor });
+    // Every source is asked from the cursor's position: its own source after the row, the later sources from the same instant.
+    expect(whereOf(mockPrisma.auditEvent.findMany).AND).toEqual([{ OR: [{ occurredAt: { gt: t10 } }, { occurredAt: t10, id: { gt: 'a1' } }] }]);
+    expect(whereOf(mockPrisma.approvalWorkflowEvent.findMany).AND).toEqual([{ createdAt: { gte: t10 } }]);
+    expect(whereOf(mockPrisma.workflowStatusHistory.findMany).AND).toEqual([{ createdAt: { gte: t10 } }]);
+    expect(second.events.map((event) => event.id)).toEqual(['approval:p1', 'a2']);
+    expect(second.nextCursor).toBeNull();
+
+    // Newest first, the order at one instant is reversed, and so are the bounds.
+    mockPrisma.auditEvent.findMany.mockResolvedValueOnce([auditRow('a1', t10)]);
+    mockPrisma.approvalWorkflowEvent.findMany.mockResolvedValueOnce([approvalRow('p1', t10)]);
+    mockPrisma.workflowStatusHistory.findMany.mockResolvedValueOnce([statusRow('s1', t10)]);
+    const newest = await auditService.listEvents({ orgId: 'org-1', projectId: 'project-1', source: 'all', limit: 2, order: 'desc' });
+    expect(newest.events.map((event) => event.id)).toEqual(['status:s1', 'approval:p1']);
+    mockPrisma.auditEvent.findMany.mockResolvedValueOnce([]);
+    mockPrisma.approvalWorkflowEvent.findMany.mockResolvedValueOnce([]);
+    mockPrisma.workflowStatusHistory.findMany.mockResolvedValueOnce([]);
+    await auditService.listEvents({ orgId: 'org-1', projectId: 'project-1', source: 'all', limit: 2, order: 'desc', cursor: newest.nextCursor });
+    expect(whereOf(mockPrisma.auditEvent.findMany).AND).toEqual([{ occurredAt: { lte: t10 } }]);
+    expect(whereOf(mockPrisma.approvalWorkflowEvent.findMany).AND).toEqual([{ OR: [{ createdAt: { lt: t10 } }, { createdAt: t10, id: { lt: 'p1' } }] }]);
+    expect(whereOf(mockPrisma.workflowStatusHistory.findMany).AND).toEqual([{ createdAt: { lt: t10 } }]);
+  });
+
+  it("reads a cursor of the earlier form as its audit event's position and refuses one that names no position", async () => {
+    mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1' });
+    const t10 = at('2026-09-01T10:00:00.000Z');
+    mockPrisma.auditEvent.findFirst.mockResolvedValueOnce({ id: 'a1', occurredAt: t10 });
+    mockPrisma.auditEvent.findMany.mockResolvedValueOnce([]);
+    await auditService.listEvents({ orgId: 'org-1', projectId: 'project-1', source: 'audit', order: 'desc', cursor: 'a1' });
+    expect(mockPrisma.auditEvent.findFirst).toHaveBeenCalledWith({ where: { id: 'a1', orgId: 'org-1', projectId: 'project-1' }, select: { id: true, occurredAt: true } });
+    expect(whereOf(mockPrisma.auditEvent.findMany).AND).toEqual([{ OR: [{ occurredAt: { lt: t10 } }, { occurredAt: t10, id: { lt: 'a1' } }] }]);
+
+    mockPrisma.auditEvent.findFirst.mockResolvedValueOnce(null);
+    await expect(auditService.listEvents({ orgId: 'org-1', projectId: 'project-1', cursor: 'not-an-event' })).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+    await expect(auditService.listEvents({ orgId: 'org-1', projectId: 'project-1', cursor: `h1.${Buffer.from('garbage').toString('base64url')}` })).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
   });
 
   it('names the actor on every event, in one batched lookup, and carries no name (the UI shows "Former user") for an account that no longer exists', async () => {

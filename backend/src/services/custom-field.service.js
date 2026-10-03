@@ -12,27 +12,30 @@ const auditService = require("./audit.service");
  * Instruction" correspondence) shows and which are required.
  */
 
+// `model`: the Prisma model that holds the record type's rows, each with its
+// project — a value is read and written only for a record of the project it
+// is asked on (recordsOnProject below; certification L45).
 const RECORD_TYPES = Object.freeze({
-  rfi: { label: "RFIs", module: "rfi" },
-  submittal: { label: "Submittals", module: "submittal" },
-  punch_item: { label: "Punch items & observations", module: "punch" },
-  form_instance: { label: "Inspections & forms", module: "inspection" },
-  ncr: { label: "NCRs", module: "ncr" },
-  material_test: { label: "Material tests", module: "ncr" },
-  safety_incident: { label: "Safety incidents", module: "safety" },
-  drawing: { label: "Drawings", module: "document_control" },
-  transmittal: { label: "Transmittals", module: "document_control" },
-  correspondence: { label: "Correspondence", module: "document_control", recordTypes: true },
-  change_order: { label: "Change orders", module: "change_order" },
-  commitment: { label: "Commitments", module: "commitment" },
-  sub_pay_app: { label: "Pay applications", module: "sub_pay_app" },
-  ipc_certificate: { label: "Payment certificates", module: "ipc" },
-  task: { label: "Tasks", module: "task" },
-  risk: { label: "Risks", module: "risk" },
-  procurement_order: { label: "Purchase orders", module: "procurement" },
-  meeting: { label: "Meetings", module: "meeting" },
-  daily_log: { label: "Daily logs", module: "progress" },
-  activity: { label: "Activities", module: "schedule" },
+  rfi: { label: "RFIs", module: "rfi", model: "rfi" },
+  submittal: { label: "Submittals", module: "submittal", model: "submittal" },
+  punch_item: { label: "Punch items & observations", module: "punch", model: "punchItem" },
+  form_instance: { label: "Inspections & forms", module: "inspection", model: "formInstance" },
+  ncr: { label: "NCRs", module: "ncr", model: "ncrRecord" },
+  material_test: { label: "Material tests", module: "ncr", model: "materialTest" },
+  safety_incident: { label: "Safety incidents", module: "safety", model: "safetyIncident" },
+  drawing: { label: "Drawings", module: "document_control", model: "drawingRecord" },
+  transmittal: { label: "Transmittals", module: "document_control", model: "transmittal" },
+  correspondence: { label: "Correspondence", module: "document_control", recordTypes: true, model: "correspondence" },
+  change_order: { label: "Change orders", module: "change_order", model: "changeOrder" },
+  commitment: { label: "Commitments", module: "commitment", model: "commitment" },
+  sub_pay_app: { label: "Pay applications", module: "sub_pay_app", model: "subPayApp" },
+  ipc_certificate: { label: "Payment certificates", module: "ipc", model: "ipcCertificate" },
+  task: { label: "Tasks", module: "task", model: "task" },
+  risk: { label: "Risks", module: "risk", model: "risk" },
+  procurement_order: { label: "Purchase orders", module: "procurement", model: "procurementOrder" },
+  meeting: { label: "Meetings", module: "meeting", model: "meeting" },
+  daily_log: { label: "Daily logs", module: "progress", model: "dailyLog" },
+  activity: { label: "Activities", module: "schedule", model: "activity" },
 });
 const RECORD_TYPE_KEYS = Object.freeze(Object.keys(RECORD_TYPES));
 const TOOLS_WITH_RECORD_TYPES = Object.freeze(RECORD_TYPE_KEYS.filter((key) => RECORD_TYPES[key].recordTypes));
@@ -658,7 +661,42 @@ const valueRowsToMap = (rows, byFieldId) => {
   return out;
 };
 
-const getValues = async ({ orgId, projectId, recordType, recordId, recordTypeKey = null }) => {
+/**
+ * The records among `recordIds` that are records of `recordType` on
+ * `projectId` and — with a `viewer` (document-text.service documentViewer) —
+ * that the viewer may see: the record type's module read and, for a viewer
+ * a record's own rule binds (a party's RFIs and submittals, a vendor's
+ * commitments and pay applications), the records that rule admits. Values
+ * were read and written by { orgId, recordType, recordId } alone: through a
+ * project they were on, a member confined to other projects read and
+ * overwrote the values of a record of a project they could not open
+ * (certification L45).
+ */
+const recordsOnProject = async ({ tx = prisma, projectId, recordType, recordIds, viewer = null }) => {
+  const meta = getRecordType(recordType);
+  const ids = [...new Set((recordIds || []).filter((id) => typeof id === "string" && id))];
+  if (!ids.length || !projectId || !tx[meta.model]?.findMany) return [];
+  const rows = await tx[meta.model].findMany({ where: { id: { in: ids }, projectId }, select: { id: true } });
+  const found = rows.map((row) => row.id);
+  if (!viewer || !found.length) return found;
+  if (viewer.canRead && !viewer.canRead(meta.module)) return [];
+  const { RECORD_RULES, recordRuleVisibleIds } = require("./document-text.service");
+  const rule = RECORD_RULES[recordType];
+  // A rule binds a party-scoped viewer always, anyone else when it says so.
+  if (!rule || (rule.party && !Array.isArray(viewer.partyIds))) return found;
+  const visible = await recordRuleVisibleIds({ documents: [{ attachments: found.map((recordId) => ({ recordType, recordId })) }], viewer });
+  return found.filter((recordId) => visible.has(`${recordType}:${recordId}`));
+};
+
+/** One record of the project the viewer may see, or a 404 that does not say whether it exists elsewhere. */
+const assertRecordOnProject = async ({ tx = prisma, projectId, recordType, recordId, viewer = null }) => {
+  const [found] = await recordsOnProject({ tx, projectId, recordType, recordIds: [recordId], viewer });
+  if (!found) throw new HttpError(404, "CUSTOM_FIELD_RECORD_NOT_FOUND", "Record not found on this project");
+  return found;
+};
+
+const getValues = async ({ orgId, projectId, recordType, recordId, recordTypeKey = null, viewer = null }) => {
+  await assertRecordOnProject({ projectId, recordType, recordId, viewer });
   const schema = await schemaFor({ orgId, projectId, recordType, recordTypeKey });
   if (!prisma.customFieldValue?.findMany) return { ...schema, values: {} };
   const rows = await prisma.customFieldValue.findMany({ where: { orgId, recordType, recordId } });
@@ -666,9 +704,10 @@ const getValues = async ({ orgId, projectId, recordType, recordId, recordTypeKey
   return { ...schema, values: valueRowsToMap(rows, byFieldId) };
 };
 
-/** Writes a values map for one record (upsert; null removes), audited on the record itself. */
-const setValues = async ({ orgId, projectId, recordType, recordId, values = {}, actor = null, recordTypeKey = null, context = {}, partial = false, tx = null }) => {
+/** Writes a values map for one record of the project (upsert; null removes), audited on the record itself. */
+const setValues = async ({ orgId, projectId, recordType, recordId, values = {}, actor = null, recordTypeKey = null, context = {}, partial = false, tx = null, viewer = null }) => {
   const client = tx || prisma;
+  await assertRecordOnProject({ tx: client, projectId, recordType, recordId, viewer });
   const schema = await schemaFor({ orgId, projectId, recordType, recordTypeKey });
   if (!schema.fields.length) {
     if (isPlainObject(values) && Object.keys(values).length) throw new HttpError(400, "CUSTOM_FIELD_INVALID", "This record type has no custom fields", { problems: [] });
@@ -708,6 +747,12 @@ const valuesForRecords = async ({ orgId, recordType, recordIds }) => {
     out.set(row.recordId, entry);
   }
   return out;
+};
+
+/** Values for the records of one project the viewer may see (the project's GET /custom-fields/values); other ids are left out. */
+const valuesForProjectRecords = async ({ orgId, projectId, recordType, recordIds, viewer = null }) => {
+  const ids = await recordsOnProject({ projectId, recordType, recordIds, viewer });
+  return valuesForRecords({ orgId, recordType, recordIds: ids });
 };
 
 /** Active definitions for reports: every scope, keys are unique per record type. */
@@ -804,9 +849,11 @@ module.exports = {
   setProjectFieldset,
   schemaFor,
   validateValues,
+  recordsOnProject,
   getValues,
   setValues,
   valuesForRecords,
+  valuesForProjectRecords,
   reportColumns,
   attachValues,
   contextFor,

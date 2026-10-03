@@ -8,7 +8,28 @@ const { requirePermission, hasPermission, noApiKey } = require("../middleware/rb
 const { validate } = require("../middleware/validate");
 const service = require("../services/assistant.service");
 const { requestForProject } = require("../middleware/project-access");
+const { throwProjectNotFoundOrAccessDenied } = require("../services/project-authorization.service");
 const { canReadBoq } = require("../utils/boq-figures");
+
+/**
+ * The caller's access to a project an answer is asked about, decided as that
+ * project's own assistant route decides it: the project opened by the caller
+ * (403 PROJECT_ACCESS_DENIED, or 404 PROJECT_NOT_FOUND for a project not of
+ * this company) and the assistant readable there (template, role, party).
+ * The organisation-mounted assistant took the project from the body with no
+ * such decision (certification L46); assistant.service ask asks this before
+ * it stores, retrieves or calls a model.
+ */
+const assistantAccessFor = (req) => async (projectId) => {
+  const view = await requestForProject(req, projectId);
+  if (!view.user) await throwProjectNotFoundOrAccessDenied({ orgId: req.user.orgId, projectId });
+  if (!hasPermission(view, "assistant", "read")) {
+    const forbidden = new HttpError(403, "FORBIDDEN", "You cannot use the assistant on this project");
+    forbidden.details = { module: "assistant", action: "read" };
+    throw forbidden;
+  }
+  return view.projectAccess;
+};
 
 /**
  * Whether the caller may read the BOQ on a project now, as that project's
@@ -62,6 +83,7 @@ const build = ({ withActions }) => {
           conversationId: req.body.conversationId || null,
           question: req.body.question,
           projectAccess: req.projectAccess || null,
+          accessFor: assistantAccessFor(req),
           readsBoq: readsBoqFor(req),
         }),
       ),

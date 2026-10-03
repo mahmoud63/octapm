@@ -121,12 +121,16 @@ pv.main(async () => {
         hidden = list.length;
         verdict = `module refused to the guest (GET /${rule[1]} → 403)`;
       } else verdict = `GET /${rule[1]} → ${status}`;
-    } else if (type === 'commitment') {
-      hidden = list.filter((e) => !myCommitments.has(e.entityId)).length;
-      verdict = `${hidden} of ${list.length} on commitments of other vendors`;
-    } else if (type === 'sub_pay_app') {
-      hidden = list.filter((e) => !myPayApps.has(e.entityId)).length;
-      verdict = `${hidden} of ${list.length} on pay applications of other vendors`;
+    } else if (type === 'commitment' || type === 'sub_pay_app') {
+      // The default lists hide void records the guest may still open by id, so
+      // a record missing from the list is only a candidate: the detail route
+      // decides whether the guest may read it.
+      const [mine, route, noun] = type === 'commitment' ? [myCommitments, 'commitments', 'commitments'] : [myPayApps, 'pay-apps', 'pay applications'];
+      const candidates = list.filter((e) => !mine.has(e.entityId));
+      let refusedAtDetail = 0;
+      for (const e of candidates) if ((await probe(`${route}/${e.entityId}`)) !== 200) refusedAtDetail += 1;
+      hidden = refusedAtDetail;
+      verdict = `${hidden} of ${list.length} on ${noun} the guest cannot open (${candidates.length - hidden} more are missing from the default list but open to the guest by id)`;
     } else if (type === 'rfi') {
       hidden = list.filter((e) => !myRfis.has(e.entityId)).length;
       verdict = `${hidden} of ${list.length} on RFIs not routed to the guest's company`;

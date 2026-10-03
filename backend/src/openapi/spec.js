@@ -891,6 +891,8 @@ const components = {
         "COST_RECORD_MONEY_INVALID",
         "COST_RECORD_NOT_FOUND",
         "CPM_DEPENDENCY_CYCLE",
+        // Certification L45: custom-field values only for a record of the route's project the caller may see.
+        "CUSTOM_FIELD_RECORD_NOT_FOUND",
         "DAILY_REPORT_LINK_INVALID",
         "DAILY_REPORT_NOT_FOUND",
         "DEFECT_NOT_FOUND",

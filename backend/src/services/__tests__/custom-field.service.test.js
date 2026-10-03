@@ -1,4 +1,4 @@
-const store = { definitions: [], fieldsets: [], projectFieldsets: [], recordTypes: [], values: [] };
+const store = { definitions: [], fieldsets: [], projectFieldsets: [], recordTypes: [], values: [], rfis: [], changeOrders: [] };
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${(seq += 1)}`;
 const matches = (row, where = {}) =>
@@ -60,6 +60,10 @@ mockPrisma.customFieldset = table(store.fieldsets, "fieldset");
 mockPrisma.projectFieldset = table(store.projectFieldsets, "pfs", { include: (row) => ({ ...row, fieldset: store.fieldsets.find((item) => item.id === row.fieldsetId) || null }) });
 mockPrisma.recordTypeDefinition = table(store.recordTypes, "rt", { include: (row) => ({ ...row, fieldset: row.fieldsetId ? store.fieldsets.find((item) => item.id === row.fieldsetId) || null : null }) });
 mockPrisma.customFieldValue = table(store.values, "val", { include: (row) => ({ ...row, field: store.definitions.find((item) => item.id === row.fieldId) || null }) });
+// The records values are written for: a value is read and written only for a
+// record of the route's project (certification L45).
+mockPrisma.rfi = table(store.rfis, "rfi");
+mockPrisma.changeOrder = table(store.changeOrders, "co");
 mockPrisma.user = { findMany: jest.fn(async ({ where }) => where.id.in.map((id) => ({ id, name: `User ${id}`, email: null }))) };
 mockPrisma.company = { findMany: jest.fn(async ({ where }) => where.id.in.map((id) => ({ id, name: `Company ${id}` }))) };
 const mockAudit = { ENTITY_TYPES: { CUSTOM_FIELD: "custom_field", CUSTOM_FIELDSET: "custom_fieldset", RECORD_TYPE: "record_type" }, ACTIONS: { CREATED: "created", UPDATED: "updated" }, recordEvent: jest.fn(async () => ({})) };
@@ -73,11 +77,18 @@ const ORG = "org-1";
 const PROJECT = "11111111-1111-4111-8111-111111111111";
 const RECORD = "22222222-2222-4222-8222-222222222222";
 const USER = "33333333-3333-4333-8333-333333333333";
+const OTHER_PROJECT = "44444444-4444-4444-8444-444444444444";
+const OTHER_RECORD = "55555555-5555-4555-8555-555555555555";
+const Y_RECORD = "66666666-6666-4666-8666-666666666666";
 const actor = { id: "pm-1", role: "pm" };
 
 const reset = () => {
   for (const rows of Object.values(store)) rows.length = 0;
   jest.clearAllMocks();
+  // RECORD is company X's RFI (and a change order) on PROJECT; Y_RECORD company
+  // Y's RFI on PROJECT; OTHER_RECORD an RFI of another project of the company.
+  store.rfis.push({ id: RECORD, projectId: PROJECT, ownerPartyId: "party-x" }, { id: Y_RECORD, projectId: PROJECT, ownerPartyId: "party-y" }, { id: OTHER_RECORD, projectId: OTHER_PROJECT, ownerPartyId: "party-x" });
+  store.changeOrders.push({ id: RECORD, projectId: PROJECT });
 };
 
 describe("custom fields", () => {
@@ -184,5 +195,50 @@ describe("custom fields", () => {
     const catalogue = await service.describeRecordTypes({ orgId: ORG });
     expect(catalogue.find((item) => item.key === "change_order")).toMatchObject({ fieldCount: 2, supportsRecordTypes: false });
     expect(catalogue.find((item) => item.key === "correspondence").supportsRecordTypes).toBe(true);
+  });
+
+  it("reads and writes values only for a record of the project they are asked on (certification L45)", async () => {
+    await service.createDefinition({ orgId: ORG, recordType: "rfi", payload: { label: "Probe", type: "text" }, actor });
+    // OTHER_RECORD is an RFI of another project: asked through PROJECT it is not found, and nothing is written.
+    await expect(service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: OTHER_RECORD })).rejects.toMatchObject({ status: 404, code: "CUSTOM_FIELD_RECORD_NOT_FOUND" });
+    await expect(service.setValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: OTHER_RECORD, values: { probe: "written-through-another-project" }, partial: true, actor })).rejects.toMatchObject({ status: 404, code: "CUSTOM_FIELD_RECORD_NOT_FOUND" });
+    expect(store.values).toHaveLength(0);
+    expect(mockAudit.recordEvent).not.toHaveBeenCalledWith(expect.objectContaining({ entityId: OTHER_RECORD }));
+    // A record type's own table decides: a change order id is not an RFI.
+    await expect(service.getValues({ orgId: ORG, projectId: OTHER_PROJECT, recordType: "change_order", recordId: RECORD })).rejects.toMatchObject({ code: "CUSTOM_FIELD_RECORD_NOT_FOUND" });
+
+    // Through its own project it is read and written.
+    const own = await service.setValues({ orgId: ORG, projectId: OTHER_PROJECT, recordType: "rfi", recordId: OTHER_RECORD, values: { probe: "own" }, partial: true, actor });
+    expect(own.values).toEqual({ probe: "own" });
+    expect((await service.getValues({ orgId: ORG, projectId: OTHER_PROJECT, recordType: "rfi", recordId: OTHER_RECORD })).values).toEqual({ probe: "own" });
+    await service.setValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: RECORD, values: { probe: "here" }, partial: true, actor });
+
+    // The bulk read leaves out every id that is not a record of the project.
+    const bulk = await service.valuesForProjectRecords({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordIds: [RECORD, OTHER_RECORD, "not-a-record"] });
+    expect(Object.fromEntries(bulk)).toEqual({ [RECORD]: { probe: "here" } });
+  });
+
+  it("gives a reader only the values of records its module and its party's rule admit (certification L45)", async () => {
+    await service.createDefinition({ orgId: ORG, recordType: "rfi", payload: { label: "Probe", type: "text" }, actor });
+    await service.setValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: Y_RECORD, values: { probe: "y-only" }, partial: true, actor });
+    await service.setValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: RECORD, values: { probe: "x" }, partial: true, actor });
+    const guestX = { id: "guest-x", userId: "guest-x", canRead: () => true, partyIds: ["party-x"], companyIds: ["company-x"] };
+
+    // Company Y's RFI is not routed to company X's guest: not found, read or written.
+    await expect(service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: Y_RECORD, viewer: guestX })).rejects.toMatchObject({ code: "CUSTOM_FIELD_RECORD_NOT_FOUND" });
+    await expect(service.setValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: Y_RECORD, values: { probe: "x-wrote" }, partial: true, actor, viewer: guestX })).rejects.toMatchObject({ code: "CUSTOM_FIELD_RECORD_NOT_FOUND" });
+    expect((await service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: Y_RECORD })).values).toEqual({ probe: "y-only" });
+    const bulk = await service.valuesForProjectRecords({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordIds: [RECORD, Y_RECORD], viewer: guestX });
+    expect([...bulk.keys()]).toEqual([RECORD]);
+
+    // Its own company's RFI is read and written.
+    expect((await service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: RECORD, viewer: guestX })).values).toEqual({ probe: "x" });
+    await expect(service.setValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: RECORD, values: { probe: "x2" }, partial: true, actor, viewer: guestX })).resolves.toMatchObject({ values: { probe: "x2" } });
+
+    // A company member is not bound by the party rule; a reader without the module reads nothing.
+    const member = { id: "member", userId: "member", canRead: () => true, partyIds: null, companyIds: null };
+    expect((await service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: Y_RECORD, viewer: member })).values).toEqual({ probe: "y-only" });
+    const noRfi = { ...member, canRead: (moduleName) => moduleName !== "rfi" };
+    await expect(service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: RECORD, viewer: noRfi })).rejects.toMatchObject({ code: "CUSTOM_FIELD_RECORD_NOT_FOUND" });
   });
 });

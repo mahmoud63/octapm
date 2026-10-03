@@ -282,6 +282,14 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "cost",
     message: "Every cost record figure must be an amount of 0 or more",
   },
+  // Certification L45: custom-field values are read and written only for a
+  // record of the route's project that the caller may see; a record of
+  // another project — or one its own rule withholds — is not found here.
+  CUSTOM_FIELD_RECORD_NOT_FOUND: {
+    status: 404,
+    category: "custom_field",
+    message: "Record not found on this project",
+  },
   // PC-7a review: a locked reporting period's figures (its EV cost loading,
   // its budget snapshot taken at the lock) cannot be written again; the code
   // was already answered by earned-value.service and is registered here.
