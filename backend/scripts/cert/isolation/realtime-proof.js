@@ -139,21 +139,32 @@ const main = async () => {
     const vJoin = await join(sV.socket, pV.id);
     check(`${tag} control: V's PM joins V's project room`, vJoin.ok === true, ackSaid(vJoin));
 
-    // ── V's activity ─────────────────────────────────────────────────────
+    const pA = projectOf(A.code);
+    const aOwnJoin = await join(sA.socket, pA.id);
+    check(`${tag} control: A's PM joins A's project room`, aOwnJoin.ok === true, ackSaid(aOwnJoin));
+
+    // ── both companies act at the same time ──────────────────────────────
     const seen = { sA: record(sA.socket), sXA: record(sXA.socket), sXV: record(sXV.socket), sV: record(sV.socket) };
-    const task = await vPm.send('POST', `/projects/${pV.id}/tasks`, { title: `${STAMP} task ${i}` });
-    const taskId = task.body?.data?.id;
-    const comment = taskId ? await vPm.send('POST', `/projects/${pV.id}/comments`, { recordType: 'task', recordId: taskId, body: `${STAMP} please look`, mentionUserIds: [xId] }) : { status: 0 };
-    check(`${tag} setup: V's PM creates a task and mentions the shared person`, task.status === 201 && [200, 201].includes(comment.status), `${said(task)} | ${said(comment)}`);
+    const actV = async () => {
+      const task = await vPm.send('POST', `/projects/${pV.id}/tasks`, { title: `${STAMP} task ${i}` });
+      const taskId = task.body?.data?.id;
+      const comment = taskId ? await vPm.send('POST', `/projects/${pV.id}/comments`, { recordType: 'task', recordId: taskId, body: `${STAMP} please look`, mentionUserIds: [xId] }) : { status: 0 };
+      return { task, taskId, comment };
+    };
+    const [{ task, taskId, comment }, aTask] = await Promise.all([actV(), aPm.send('POST', `/projects/${pA.id}/tasks`, { title: `${STAMP} own task ${i}` })]);
+    check(`${tag} setup: V's PM creates a task and mentions the shared person; A's PM creates a task at the same time`, task.status === 201 && [200, 201].includes(comment.status) && aTask.status === 201, `${said(task)} | ${said(comment)} | ${said(aTask)}`);
     await sleep(WINDOW_MS);
 
     const ofV = (e) => e.orgId === vOrg || e.projectId === pV.id || (taskId && e.entityId === taskId);
+    const ofA = (e) => e.orgId === aOrg || e.projectId === pA.id || e.entityId === aTask.body?.data?.id;
     check(`${tag} control: V's PM's socket received V's project events`, seen.sV.some((e) => e.projectId === pV.id), `${seen.sV.length} event(s)`);
     check(`${tag} control: the shared person's socket in V received the mention`, seen.sXV.some((e) => e.type === 'notification.created' && e.orgId === vOrg), `${seen.sXV.map((e) => e.type).join(',') || 'none'}`);
+    check(`${tag} control: A's PM's socket received A's project events`, seen.sA.some((e) => e.projectId === pA.id), `${seen.sA.length} event(s)`);
     check(`${tag} A's PM's socket received nothing of V`, !seen.sA.some(ofV), `${seen.sA.filter(ofV).length} of ${seen.sA.length}`);
     check(`${tag} the shared person's socket in A received nothing of V (not the mention either)`, !seen.sXA.some(ofV), `${seen.sXA.filter(ofV).map((e) => e.type).join(',') || 'none'} of ${seen.sXA.length}`);
-    const foreign = [...seen.sA, ...seen.sXA].filter((e) => e.orgId && e.orgId !== aOrg);
-    check(`${tag} no socket connected in A received any other company's event`, !foreign.length, foreign.map((e) => `${e.type} ${e.orgId}`).join(', '));
+    check(`${tag} V's sockets (its PM, and the shared person connected in V) received nothing of A`, ![...seen.sV, ...seen.sXV].some(ofA), [...seen.sV, ...seen.sXV].filter(ofA).map((e) => `${e.type} ${e.orgId}`).join(', '));
+    const foreign = [...seen.sA.map((e) => [aOrg, e]), ...seen.sXA.map((e) => [aOrg, e]), ...seen.sV.map((e) => [vOrg, e]), ...seen.sXV.map((e) => [vOrg, e])].filter(([org, e]) => e.orgId && e.orgId !== org);
+    check(`${tag} no socket received an event of a company other than the one it is connected in`, !foreign.length, foreign.map(([, e]) => `${e.type} ${e.orgId}`).join(', '));
 
     Object.values(sockets).forEach((s) => s.socket.close());
   }
