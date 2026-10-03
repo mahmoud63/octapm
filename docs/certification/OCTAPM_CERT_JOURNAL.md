@@ -290,3 +290,22 @@ Clean generation on HEAD (sequence in the evening entry): restart the API on HEA
 6. `OCTAPM_100_COMPANY_MATRIX.md`: 100 companies, 2,995,962+ company rows in 198 tables; every difference from the specification explained (the 14 certified projects built by the lifecycle as a greenfield and an isolation project each). No durable data touched: the guard, a separate cluster, and the naming rule.
 
 **Next exact action**: CERT-2 — `start-detached.ps1 -Name cert2 -Script scripts/cert/run-with-watchdog.js -ScriptArgs "scripts/cert/run-cert2.js --tag=cert2"`, then the "CERT-2 TENANT ISOLATION COMPLETE" report.
+
+## 2026-10-03 — CERT-2 first full run on the certified population: cross-company references found; fixing
+
+**State**: HEAD after `7d887ee`. The certified population was attacked by `run-cert2.js` (tag `cert2`, 83 min, 0 API restarts); it now holds the injection sweep's 1,787 cross-company references and will be regenerated after the fixes. Results: `C:\Temp\octapm-cert\results\isolation\cert2-*.json`, logs `logs\cert2\`.
+
+**Measured**
+
+| Sweep | Attacks | Outcome |
+|---|---|---|
+| Instruments | prove-tools, prove-judging | pass |
+| Read sweep (all GET routes × 100 victims × outsider / member elsewhere / anonymous) | 73,708 | 56,206 refused, 302 filtered (proven no data), 17,200 query probes empty; **0 leaks, 0 answered, 0 server errors** |
+| Fingerprint around the read sweep | — | changes in 100 companies, every created row attributed to the company's **own PM** (the sweep's owner-binding reads: GET creates notification preferences, scope matrices, closeout sheets, evaluations lazily) — no cross-company write; GET-with-side-effects recorded as P3 |
+| File attacks (9 stored-file routes, real files of every company) | 5,914 | **all refused** |
+| Replay (every captured request as outsider / member elsewhere / anonymous) | 234,974 | **victim data changed: 0**. 527 "writes accepted" are /reports/preview and /notifications/scan-due (act on the caller's own company); 6,892 "late" are all 402 SUBSCRIPTION_REQUIRED (the caller's own lapsed billing); 4 answered (inventory analytics/summary, caller's own figures — to confirm) |
+| Foreign-reference injection (another company's ids in each company's own requests) | 28,811 | **1,787 cross-company references stored** across 18 kinds (bid lines, PO lines, progress/daily/weekly evidence and activities, commitment insurance, attachments on another company's bid package, report schedules and review/workflow templates naming another company's people); **141 leaks** (a bid line created with a foreign activity, cost code or budget line returns it); ~3,800 refused by the caller's own record locks before the reference check (coverage note) |
+
+**Verdict so far**: cross-company reads ≠ 0 (141), cross-company writes ≠ 0 (stored references). Not a pass. Fix workflow `wf_b3f79c3b-51b` (five groups, 32 route/field pairs) is reproducing and fixing each with the tenant-reference helpers.
+
+**Next exact action**: verify and commit the fixes; regenerate the population from empty (the census baseline must be 0); re-run `run-cert2.js`; report.
