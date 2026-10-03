@@ -194,3 +194,30 @@ When the driver workflow reports: read each report, run every driver on every co
 1. Apply the drivers' must-fix items (structure L421, procurement L728/L765, inventory L535, quality-field L586, client-billing L229/L611, change-cost L543) and review collaboration-admin.js; then run every driver on six companies outside the development set and read `node scripts/cert/inventory-report.js`.
 2. Restart the certification API on the current code; clean generation from an empty database (reset → layer 1 → projects → records → certified lifecycles on the companies whose first project is `certified` → finalize); regenerate a second time from empty and compare shapes; `isolation/index-ids.js`; `matrix-report.js`; CERT-1 complete.
 3. CERT-2 from zero on the certified population; fix the cross-company findings (L3, L4, L6-L10, L38, L39 and whatever the sweeps add) until cross-company reads and writes are 0.
+
+## 2026-10-02 (evening) — cross-company P0/P1 fixed; clean CERT-1 generation stopped by a dead database engine; party-visibility fixes under way
+
+**State**
+
+| | |
+|---|---|
+| Branch / HEAD | `cert/full-saas-certification`, the commit that adds this entry (after `6d1185c`); first push of the branch to `origin` with this entry (no workflow triggers on this branch name — deploy runs on `main` only) |
+| Checkpoint | CERT-0 complete. CERT-1 NOT complete: the clean generation started at 16:09 is not certifiable (below) and will be redone on the fixed code. CERT-2 not started |
+| Certification database | Reset at 16:09, then layer 1 (100 companies, 3,008 people, 3,052 memberships), 704 projects and 8,840 team assignments, records for companies 001-067 complete (0 driver failures). 068-087 partial, 088-100 not started — a re-run would duplicate the half-made drivers, so this database is now only a PROOF BED for the party-visibility fixes (companies 026, 031, 041, 072; two guests of 072-01 created through the invitation flow). It will be reset |
+| Services | Certification Postgres :55433; certification API :5190 restarted at 20:40 on `6d1185c` (PID in `api.pid`); Stripe stand-in :5390. Billing API :5191 stopped (restart with `start-node.ps1 -Billing` when CERT-4 needs it). Shared environment (:5000, :5173, :55432) untouched |
+
+**Done in this entry**
+
+1. Cross-company fixes, each reproduced, fixed, proved in process on the working tree and mutation-proved: L3, L4, L6, L7, L8 (P0), L9 (P0) — `cff20b2`; L10 SSO takeover (P0) — `733046a` (+ route test `6d1185c`); L39 home-admin takeover — `af77a38`. Drivers reviewed, fixed and proven re-runnable — `da8265a`.
+2. Clean CERT-1 generation, attempt 1: records reached company 087 in two runs of the loader; at 17:35 the API's Prisma engine died (tokio I/O driver panic, Windows error 1450 "Insufficient system resources" — the workstation had about 1.3 GB free and 1.5 GB of non-paged pool). The Node process lived on: every database request hung for ever (256 requests), three transactions stayed idle in transaction holding row locks for 2 h 46 m, `/api/health` and `/api/health/live` kept answering 200, `/api/health/ready` 503. Proved on the live process through its inspector (app client and a fresh PrismaClient both hang; thread pool, fs, DNS and a plain `pg` connection fine). Recorded as OPS-1 (P2, owner decision on operations); evidence `C:\Temp\octapm-cert\logs\api-wedge-2026-10-02-excerpt.log`.
+3. Generation hardening (tooling, committed here): `scripts/cert/run-with-watchdog.js` replaces a certification API whose readiness fails three times running, keeps the dead API's log and records `logs/watchdog.jsonl`; `scripts/cert/layer1-fingerprint.js` hashes layer 1 (companies, people, memberships, subscriptions) for the §6 reproducibility proof; `C:\Temp\octapm-cert\start-detached.ps1` starts a run through WMI so it outlives the agent's two-hour task limit (killing the loader mid-driver would also leave duplicates). Staged, applied after the fix workflow: `lib/api.js` re-sends a request that got no answer only after the API process was replaced (scratchpad `api-retry.snippet.md`).
+4. Party-visibility fix workflow running (`wf_22798df3-17f`): documents (L2, L23, L24, FILES-X2), RFI/submittal routing (L40, L42, FILES-X1, X-PARTY-2), commercial figures (L25, L41, L44), audit/custom fields/assistant (L43, L45, L46, X-PARTY-1). L25 re-confirmed on the fresh population: a subcontractor guest refused the prime contract reads 78,800,000 SAR and the LD rate from `GET /projects/:id` and `GET /projects`.
+
+**Open launch blockers: 18 P0/P1** (register). Owner-needed: C0-3 rotation, L38, NEW-3, OPS-1.
+
+**Next exact action**
+
+1. When `wf_22798df3-17f` finishes: review every diff as untrusted, run the unit suites and each proof, commit per area, push.
+2. Apply the `lib/api.js` retry; restart the API on the fixed code.
+3. Clean generation: move `state/` and `corpus/` aside; `reset-population.js --apply`; `generate-population.js --apply`; `layer1-fingerprint.js take run1`; reset and generate again; `take run2`; `compare run1 run2` (must be IDENTICAL); `load-projects.js`; then `start-detached.ps1 -Name gen-records -Script scripts/cert/run-with-watchdog.js -ScriptArgs "scripts/cert/load-records.js --concurrency=8"`; the 14 certified lifecycles (021,027,033,039,045,051,057,063,069,075,081,087,093,099); `finalize-population.js --apply`; `matrix-report.js`; `isolation/index-ids.js`.
+4. CERT-2 on that population (fingerprint before/after; replay, read-sweep, inject, cross-links).
