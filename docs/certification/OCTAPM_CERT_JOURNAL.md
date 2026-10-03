@@ -244,3 +244,27 @@ When the driver workflow reports: read each report, run every driver on every co
 
 1. When round 2 reports: verify independently (unit suites, every proof in process, full suite), adjudicate REFUTED/PRODUCT_DECISION verdicts by reading the code, commit per area, update the register (round-1 leads fixed; review findings with their verdicts).
 2. Then the clean generation and CERT-2, exactly as in the evening entry's next action (now with `run-with-watchdog.js` and `start-detached.ps1`).
+
+## 2026-10-03 (early) — party-visibility round 2 committed; clean CERT-1 generation next
+
+**State**
+
+| | |
+|---|---|
+| Branch / HEAD | `cert/full-saas-certification`, the commit adding this entry (after `ada413a`), pushed |
+| Checkpoint | CERT-1 not complete (generation next). CERT-2 not started |
+| Certification database | The proof bed (to be reset now) |
+| Services | Cert Postgres :55433; cert API :5190 (PID in `api.pid`, round-1 code — restart on HEAD before generation); Stripe stand-in :5390 |
+
+**Done in this entry**
+
+1. Round 2 (`wf_add102be-96d`) on the 39 review findings: 10 P1 confirmed and fixed (R29 and R4 had been introduced by round 1), R1/R2/R6 refuted against the approval-workflow table, R12/R18 not reproducible, R5/R22 and RFI drafts left as owner decisions. Verified here: full suite 255/255, every proof and lead in process 30/30.
+2. Fixed here from round 2's notes: N3 (P1, workspace dashboard queues to readers refused those modules; 3/3 mutations), burn-rate budget line (P2; 2/2), submittal step reviewers' files (2/2), R14 rule (latent; unit).
+3. A mutation restore inside the OneDrive worktree read back truncated (`audit.service.js`); recovered byte-exact from the jest transform cache (the only cached source the truncated text prefixes) and verified; `scratchpad/cert/mutate.js` now backs up and re-verifies every restore.
+4. Committed: `1059c6b` documents, `5966119` RFI/submittal, `3676356` commercial + burn rate, `3102c23` specs/photos + N3, `ada413a` audit/assistant. Register: fifteen leads marked fixed; a review-rounds section with every finding's verdict.
+
+**Open launch blockers: 6 P0/P1** — L38 (cross-company, owner), L11 (jobs, CERT-6), L34-L37 (finance, CERT-5). Owner decisions: C0-3 rotation, L38, NEW-3, OPS-1, R5, R22, RFI drafts.
+
+**Next exact action**
+
+Clean generation on HEAD (sequence in the evening entry): restart the API on HEAD; move `state/` and `corpus/` aside; reset; layer 1 twice with `layer1-fingerprint.js` take/compare; `load-projects.js`; records detached under the watchdog; `run-lifecycles.js`; `finalize-population.js --apply`; `matrix-report.js`; then `run-cert2.js` detached.
