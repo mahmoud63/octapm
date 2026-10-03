@@ -798,10 +798,27 @@ const deleteDefinition = async ({ orgId, user, reportId }) => {
   return { deleted: true };
 };
 
+/**
+ * The project an unsaved definition (the preview, the export) names, decided
+ * before anything is read — as the report assistant decides it
+ * (assertRunProject): an API key only on its own projects, 404
+ * PROJECT_NOT_FOUND for an id that is not one of this company's projects
+ * (another company's included), 403 PROJECT_ACCESS_DENIED for one of its
+ * projects the caller cannot open. Another company's project used to be
+ * answered 200 with no rows: nothing of it was read, but the reference was
+ * taken rather than refused (CERT-2 injection sweep).
+ */
+const assertDefinitionProject = async ({ orgId, user, projectId, apiClient = null }) => {
+  if (!projectId) return;
+  if (apiClient?.projectIds?.length && !apiClient.projectIds.includes(projectId)) throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+  await assertProjectAccess({ orgId, projectId, userId: user.id, role: user.role, isCompanyAdmin: Boolean(user.isCompanyAdmin) });
+};
+
 /** Ad-hoc run of an unsaved definition (the builder's preview). */
 const preview = async ({ orgId, user, payload = {}, limit = PREVIEW_LIMIT, offset = 0, apiClient = null }) => {
   const normalized = await normalizeDefinition({ orgId, payload });
   const projectId = trimOrNull(payload.projectId);
+  await assertDefinitionProject({ orgId, user, projectId, apiClient });
   return runQuery({ orgId, user, definition: { ...normalized, projectId }, limit: Math.min(MAX_LIMIT, limit), offset, apiClient });
 };
 
@@ -814,6 +831,7 @@ const runDefinition = async ({ orgId, user, reportId, limit = PREVIEW_LIMIT, off
 
 const renderDefinition = async ({ orgId, user, reportId = null, definition = null, format = "pdf", apiClient = null }) => {
   const row = reportId ? await getDefinitionRow({ orgId, user, reportId }) : null;
+  if (!row) await assertDefinitionProject({ orgId, user, projectId: trimOrNull(definition?.projectId), apiClient });
   const report = row
     ? { id: row.id, name: row.name, description: row.description, source: row.source, columns: row.columnsJson, filters: row.filtersJson, sort: row.sortJson, groupBy: row.groupBy, aggregates: row.aggregatesJson, projectId: row.projectId }
     : { id: null, name: trimOrNull(definition?.name) || "Report", description: trimOrNull(definition?.description), ...(await normalizeDefinition({ orgId, payload: definition || {} })), projectId: trimOrNull(definition?.projectId) };
@@ -878,6 +896,14 @@ const normalizeRecipients = (value = {}) => {
   return { userIds: [...new Set(list(value.userIds))], roles: [...new Set(list(value.roles).map(normalizeRoleId))], emails: [...new Set(emails)] };
 };
 
+/**
+ * The people a delivery names must be members of the company, checked before
+ * the schedule or run is written (404 USER_NOT_FOUND, as for an id that exists
+ * nowhere). A schedule used to be stored naming another company's person: the
+ * delivery then skipped them, but the reference stayed (CERT-2 injection sweep).
+ */
+const assertRecipients = ({ orgId, recipients }) => require("./tenant-references.service").assertMembers({ orgId, userIds: recipients?.userIds || [] });
+
 const serializeSchedule = (row) => ({
   id: row.id,
   reportId: row.reportId,
@@ -934,6 +960,7 @@ const scheduleData = (payload, existing = null) => {
 const createSchedule = async ({ orgId, user, reportId, payload = {} }) => {
   const report = await getDefinitionRow({ orgId, user, reportId });
   const data = scheduleData(payload);
+  await assertRecipients({ orgId, recipients: data.recipientsJson });
   const recipients = data.recipientsJson;
   if (!recipients.userIds.length && !recipients.roles.length && !recipients.emails.length) recipients.userIds = [user.id];
   const row = await prisma.reportSchedule.create({ data: { orgId, reportId: report.id, ...data, nextRunAt: data.enabled ? computeNextRun({ ...data, from: new Date() }) : null, createdBy: user.id } });
@@ -946,6 +973,7 @@ const updateSchedule = async ({ orgId, user, reportId, scheduleId, payload = {} 
   if (!existing) throw new HttpError(404, "REPORT_SCHEDULE_NOT_FOUND", "Schedule not found");
   if (existing.createdBy !== user.id && !canManage({ user, row: report })) throw new HttpError(403, "REPORT_FORBIDDEN", "Only the schedule's owner or a project manager can change it");
   const data = scheduleData(payload, existing);
+  if (payload.recipients !== undefined) await assertRecipients({ orgId, recipients: data.recipientsJson });
   const row = await prisma.reportSchedule.update({ where: { id: existing.id }, data: { ...data, nextRunAt: data.enabled ? computeNextRun({ ...data, from: new Date() }) : null } });
   return serializeSchedule(row);
 };
@@ -1093,6 +1121,7 @@ const createRun = async ({ orgId, user, reportId, format = "pdf", recipients = n
   const report = await getDefinitionRow({ orgId, user, reportId });
   if (!FORMATS.includes(format)) throw new HttpError(400, "REPORT_SCHEDULE_FORMAT", "Format must be pdf, xlsx or both");
   const normalizedRecipients = deliver ? normalizeRecipients(recipients || { userIds: [user.id] }) : { userIds: [], roles: [], emails: [] };
+  if (deliver && recipients) await assertRecipients({ orgId, recipients: normalizedRecipients });
   const run = await prisma.reportRun.create({ data: { orgId, reportId: report.id, status: "queued", trigger: "manual", format, recipientsJson: normalizedRecipients, requestedBy: user.id } });
   return executeRun({ runId: run.id });
 };

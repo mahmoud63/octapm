@@ -10,6 +10,8 @@ const mockPrisma = {
   reportSchedule: table(),
   reportRun: table(),
   user: { findFirst: jest.fn(async () => ({ id: "pm-1", name: "Pat PM", email: "pat@example.com", role: "pm", isCompanyAdmin: false })) },
+  // The shared reference check (tenant-references.service) reads memberships.
+  organizationMembership: { findMany: jest.fn(async () => []) },
 };
 const mockAccess = { assertProjectAccess: jest.fn(), getProjectAccessWhere: jest.fn(() => ({})) };
 const mockTemplates = { resolveTemplateContext: jest.fn(async () => null), templateAllows: jest.fn(() => null) };
@@ -272,5 +274,73 @@ describe("Phase 21D — integrity (release challenge, fifth pass)", () => {
     expect(reader.totals).toEqual({ count: 2, sum_budget: 20000, max_variance: 6000 });
     expect("withheld" in reader).toBe(false);
     expect(reader.columns.every((column) => !("withheld" in column))).toBe(true);
+  });
+});
+
+describe("CERT-2 injection sweep — a delivery names only the company's people, an unsaved definition only its projects", () => {
+  const { HttpError } = require("../../utils/http-error");
+  const members = (ids) => mockPrisma.organizationMembership.findMany.mockImplementation(async ({ where }) => where.userId.in.filter((id) => ids.includes(id)).map((userId) => ({ userId })));
+  const report = { id: "r1", orgId: "org-1", name: "Open RFIs", source: "rfi", visibility: "org", createdBy: "pm-1", projectId: null, columnsJson: ["ref"], filtersJson: [], aggregatesJson: [], project: null, _count: { schedules: 0 } };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.project.findMany.mockResolvedValue(projects);
+    mockAccess.assertProjectAccess.mockImplementation(async ({ projectId, role }) => staffAccess(projectId, role));
+    mockPrisma.reportDefinition.findFirst.mockResolvedValue(report);
+    members(["pm-1", "qs-1"]);
+  });
+
+  it("refuses a schedule naming another company's person before it is written, and stores the company's own", async () => {
+    await expect(service.createSchedule({ orgId: "org-1", user: pm, reportId: "r1", payload: { recipients: { userIds: ["qs-1", "other-company-user"] } } })).rejects.toMatchObject({ status: 404, code: "USER_NOT_FOUND" });
+    expect(mockPrisma.reportSchedule.create).not.toHaveBeenCalled();
+    expect(mockPrisma.organizationMembership.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ orgId: "org-1", userId: { in: ["qs-1", "other-company-user"] } }) }));
+    const created = await service.createSchedule({ orgId: "org-1", user: pm, reportId: "r1", payload: { recipients: { userIds: ["qs-1"] } } });
+    expect(created.recipients.userIds).toEqual(["qs-1"]);
+    // No recipients given: the caller, not checked against anything.
+    mockPrisma.organizationMembership.findMany.mockClear();
+    const own = await service.createSchedule({ orgId: "org-1", user: pm, reportId: "r1", payload: {} });
+    expect(own.recipients.userIds).toEqual(["pm-1"]);
+    expect(mockPrisma.organizationMembership.findMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses an edit naming another company's person; an edit that leaves the recipients alone is not checked", async () => {
+    mockPrisma.reportSchedule.findFirst.mockResolvedValue({ id: "s1", reportId: "r1", createdBy: "pm-1", frequency: "weekly", format: "pdf", timezone: "UTC", dayOfWeek: 1, dayOfMonth: 1, hour: 7, minute: 0, enabled: false, recipientsJson: { userIds: ["pm-1"], roles: [], emails: [] } });
+    await expect(service.updateSchedule({ orgId: "org-1", user: pm, reportId: "r1", scheduleId: "s1", payload: { recipients: { userIds: ["other-company-user"] } } })).rejects.toMatchObject({ status: 404, code: "USER_NOT_FOUND" });
+    expect(mockPrisma.reportSchedule.update).not.toHaveBeenCalled();
+    mockPrisma.organizationMembership.findMany.mockClear();
+    await service.updateSchedule({ orgId: "org-1", user: pm, reportId: "r1", scheduleId: "s1", payload: { hour: 9 } });
+    expect(mockPrisma.organizationMembership.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.reportSchedule.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ hour: 9, recipientsJson: { userIds: ["pm-1"], roles: [], emails: [] } }) }));
+  });
+
+  it("refuses a delivered run naming another company's person before the run is stored", async () => {
+    await expect(service.createRun({ orgId: "org-1", user: pm, reportId: "r1", format: "pdf", deliver: true, recipients: { userIds: ["other-company-user"] } })).rejects.toMatchObject({ status: 404, code: "USER_NOT_FOUND" });
+    expect(mockPrisma.reportRun.create).not.toHaveBeenCalled();
+    await service.createRun({ orgId: "org-1", user: pm, reportId: "r1", format: "pdf", deliver: true, recipients: { userIds: ["qs-1"] } }).catch(() => null);
+    expect(mockPrisma.reportRun.create).toHaveBeenCalledWith({ data: expect.objectContaining({ recipientsJson: { userIds: ["qs-1"], roles: [], emails: [] } }) });
+  });
+
+  it("refuses a preview or an export of a project that is not one of the company's before anything is read", async () => {
+    mockAccess.assertProjectAccess.mockRejectedValueOnce(new HttpError(404, "PROJECT_NOT_FOUND", "Project not found"));
+    await expect(service.preview({ orgId: "org-1", user: pm, payload: { source: "rfi", projectId: "other-company-project" } })).rejects.toMatchObject({ status: 404, code: "PROJECT_NOT_FOUND" });
+    expect(mockAccess.assertProjectAccess).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", projectId: "other-company-project", userId: "pm-1" }));
+    expect(mockPrisma.project.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.rfi.findMany).not.toHaveBeenCalled();
+
+    mockAccess.assertProjectAccess.mockRejectedValueOnce(new HttpError(404, "PROJECT_NOT_FOUND", "Project not found"));
+    await expect(service.renderDefinition({ orgId: "org-1", user: pm, definition: { source: "rfi", projectId: "other-company-project" }, format: "xlsx" })).rejects.toMatchObject({ status: 404, code: "PROJECT_NOT_FOUND" });
+    expect(mockPrisma.rfi.findMany).not.toHaveBeenCalled();
+
+    // A key limited to its own projects is refused on any other first, as the run would refuse it.
+    mockAccess.assertProjectAccess.mockClear();
+    await expect(service.preview({ orgId: "org-1", user: pm, payload: { source: "rfi", projectId: "p2" }, apiClient: { scopes: ["*:read"], projectIds: ["p1"] } })).rejects.toMatchObject({ status: 403, code: "FORBIDDEN_PROJECT" });
+    expect(mockAccess.assertProjectAccess).not.toHaveBeenCalled();
+
+    // The company's own project is previewed as before.
+    mockPrisma.project.findMany.mockResolvedValue([projects[0]]);
+    mockPrisma.rfi.findMany.mockResolvedValueOnce([rfi()]);
+    const result = await service.preview({ orgId: "org-1", user: pm, payload: { source: "rfi", projectId: "p1", columns: ["ref"] } });
+    expect(result.rows.map((row) => row.ref)).toEqual(["RFI-001"]);
+    expect(result.projects).toEqual({ inScope: 1, queried: 1, denied: 0 });
   });
 });

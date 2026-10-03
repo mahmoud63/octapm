@@ -55,7 +55,7 @@ const normalizeAssignee = (entry, stepName) => {
   const type = ASSIGNEE_TYPES.includes(entry?.type) ? entry.type : null;
   if (!type) throw new HttpError(400, "SUBMITTAL_TEMPLATE_ASSIGNEE_INVALID", `Step "${stepName}": assignee type must be user, party_role or role`);
   if (type === "user") {
-    // Existence in the org is checked when the step is resolved.
+    // Membership of the company is checked before the route is written (assertRoutePeople).
     const userId = trimOrNull(entry.userId);
     if (!userId) throw new HttpError(400, "SUBMITTAL_TEMPLATE_ASSIGNEE_INVALID", `Step "${stepName}": user assignee needs a userId`);
     return { type, userId };
@@ -81,6 +81,15 @@ const normalizeSteps = (steps) => {
     return { sortOrder: index, name: name.slice(0, 120), mode, days, assignees };
   });
 };
+
+/**
+ * The people a route names must be members of the company, checked before the
+ * route is written (404 USER_NOT_FOUND, as for an id that exists nowhere). A
+ * route used to be stored naming another company's person; starting a review
+ * then skipped them, but the reference stayed (CERT-2 injection sweep).
+ */
+const assertRoutePeople = ({ orgId, steps }) =>
+  require("./tenant-references.service").assertMembers({ orgId, userIds: steps.flatMap((step) => step.assignees.filter((entry) => entry.type === "user").map((entry) => entry.userId)) });
 
 const reviewDaysFor = (steps) => (Array.isArray(steps) ? steps.reduce((sum, step) => sum + (Number(step.days) || 0), 0) : 0);
 
@@ -145,6 +154,7 @@ const createTemplate = async ({ orgId, projectId = null, payload = {}, actor = n
   const name = trimOrNull(payload.name);
   if (!name) throw new HttpError(400, "SUBMITTAL_TEMPLATE_NAME_REQUIRED", "Give the workflow a name");
   const steps = normalizeSteps(payload.steps);
+  await assertRoutePeople({ orgId, steps });
   const created = await prisma.$transaction(async (tx) => {
     if (payload.isDefault) await tx.submittalWorkflowTemplate.updateMany({ where: { orgId, projectId, isDefault: true }, data: { isDefault: false } });
     const row = await tx.submittalWorkflowTemplate.create({
@@ -183,6 +193,7 @@ const updateTemplate = async ({ orgId, projectId = null, templateId, payload = {
     data.status = payload.status;
   }
   if (payload.isDefault !== undefined) data.isDefault = Boolean(payload.isDefault);
+  if (data.stepsJson) await assertRoutePeople({ orgId, steps: data.stepsJson });
   const updated = await prisma.$transaction(async (tx) => {
     if (data.isDefault) await tx.submittalWorkflowTemplate.updateMany({ where: { orgId, projectId: existing.projectId, isDefault: true, id: { not: templateId } }, data: { isDefault: false } });
     const row = await tx.submittalWorkflowTemplate.update({ where: { id: templateId }, data });

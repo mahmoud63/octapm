@@ -13,6 +13,8 @@ const mockPrisma = {
   submittalWorkflowTemplate: { findFirst: jest.fn(), findMany: jest.fn(async () => []), create: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
   submittalPackage: { findFirst: jest.fn(), findUnique: jest.fn(async () => ({ projectId: "project-1" })), findMany: jest.fn(async () => []), aggregate: jest.fn(async () => ({ _max: { number: 2 } })), create: jest.fn(), update: jest.fn(async () => ({})) },
   workflowActivityLink: { upsert: jest.fn(async (args) => args.create) },
+  // The shared reference check (tenant-references.service): everyone but "other-company-*" is a member.
+  organizationMembership: { findMany: jest.fn(async ({ where }) => (where.userId?.in || []).filter((id) => !id.startsWith("other-company-")).map((userId) => ({ userId }))) },
 };
 const mockAudit = { ENTITY_TYPES: { SUBMITTAL: "submittal", SUBMITTAL_PACKAGE: "submittal_package", SUBMITTAL_WORKFLOW_TEMPLATE: "submittal_workflow_template" }, ACTIONS: { CREATED: "created", UPDATED: "updated", STATUS_CHANGED: "status_changed" }, recordEvent: jest.fn(async () => ({})) };
 const mockNotifications = { NOTIFICATION_CATEGORIES: { APPROVAL: "approval", ASSIGNMENT: "assignment" }, createNotifications: jest.fn(async () => ({ created: 1 })) };
@@ -341,6 +343,36 @@ describe("submittal workflow", () => {
       expect(() => service.assertCanManageRoutes({ projectAccess: partyX, canManageWorkflows: true, canReviewSubmittals: false })).not.toThrow();
       expect(() => service.assertCanManageRoutes({ projectAccess: staff, canManageWorkflows: false, canReviewSubmittals: true })).not.toThrow();
       expect(() => service.assertCanManageRoutes(null)).not.toThrow();
+    });
+  });
+
+  describe("a route names only the company's people (CERT-2 injection sweep)", () => {
+    const steps = (userId) => [
+      { name: "Technical check", mode: "sequential", days: 5, assignees: [{ type: "user", userId }] },
+      { name: "Project manager", mode: "sequential", days: 3, assignees: [{ type: "role", role: "pm" }] },
+    ];
+
+    it("refuses another company's person before anything is written, and stores the company's own", async () => {
+      await expect(service.createTemplate({ orgId: "org-1", projectId: "project-1", payload: { name: "Route", steps: steps("other-company-user") } })).rejects.toMatchObject({ status: 404, code: "USER_NOT_FOUND" });
+      expect(mockPrisma.organizationMembership.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ orgId: "org-1", userId: { in: ["other-company-user"] } }) }));
+      expect(mockPrisma.submittalWorkflowTemplate.create).not.toHaveBeenCalled();
+      expect(mockAudit.recordEvent).not.toHaveBeenCalled();
+
+      mockPrisma.submittalWorkflowTemplate.create.mockImplementationOnce(async ({ data }) => ({ id: "tpl-9", ...data }));
+      const made = await service.createTemplate({ orgId: "org-1", projectId: "project-1", payload: { name: "Route", steps: steps("user-eng") } });
+      expect(made.steps[0].assignees).toEqual([{ type: "user", userId: "user-eng" }]);
+    });
+
+    it("refuses an edit that names another company's person; an edit that leaves the steps alone is not checked", async () => {
+      mockPrisma.submittalWorkflowTemplate.findFirst.mockResolvedValue({ ...TEMPLATE, projectId: "project-1" });
+      await expect(service.updateTemplate({ orgId: "org-1", projectId: "project-1", templateId: "tpl-1", payload: { steps: steps("other-company-user") } })).rejects.toMatchObject({ status: 404, code: "USER_NOT_FOUND" });
+      expect(mockPrisma.submittalWorkflowTemplate.update).not.toHaveBeenCalled();
+
+      mockPrisma.organizationMembership.findMany.mockClear();
+      mockPrisma.submittalWorkflowTemplate.update.mockImplementationOnce(async ({ data }) => ({ ...TEMPLATE, projectId: "project-1", ...data }));
+      await service.updateTemplate({ orgId: "org-1", projectId: "project-1", templateId: "tpl-1", payload: { description: "Renamed" } });
+      expect(mockPrisma.organizationMembership.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.submittalWorkflowTemplate.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ description: "Renamed" }) }));
     });
   });
 });

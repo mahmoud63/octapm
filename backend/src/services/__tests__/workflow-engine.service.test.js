@@ -27,6 +27,9 @@ const mockPrisma = {
   projectAssignment: { findMany: jest.fn(async () => [{ userId: "pm-1", role: "pm" }, { userId: "fin-1", role: "finance" }, { userId: "qs-1", role: "qs" }]) },
   projectPartyMember: { findMany: jest.fn(async () => []) },
   projectUserPermission: { findMany: jest.fn(async () => []) },
+  // What a template names is the company's own (CERT-2): everyone and everything but "other-company-*".
+  organizationMembership: { findMany: jest.fn(async ({ where }) => (where.userId?.in || []).filter((id) => !id.startsWith("other-company-")).map((userId) => ({ userId }))) },
+  permissionTemplate: { findMany: jest.fn(async ({ where }) => (where.id?.in || []).filter((id) => !id.startsWith("other-company-")).map((id) => ({ id }))) },
 };
 const mockNotifications = { NOTIFICATION_CATEGORIES: { APPROVAL: "approval", WORKFLOW: "workflow", OVERDUE: "overdue" }, createNotifications: jest.fn(async () => ({ created: 1 })) };
 const mockAudit = { ENTITY_TYPES: { WORKFLOW_TEMPLATE: "workflow_template" }, ACTIONS: { CREATED: "created", UPDATED: "updated" }, recordEvent: jest.fn(async () => ({})) };
@@ -431,5 +434,50 @@ describe("Phase 21D — integrity (release challenge, ninth pass)", () => {
     mockPrisma.workflowStepAssignment.findMany.mockResolvedValueOnce([]);
     await engine.myAssignments({ orgId: "org-1", userId: "u1" });
     expect(mockPrisma.workflowStepAssignment.findMany.mock.calls.at(-1)[0].where.projectId).toBeUndefined();
+  });
+});
+
+describe("CERT-2 injection sweep — a template names only the company's people and permission templates", () => {
+  const response = (key, assignees, next = "end_success") => ({ key, name: key, type: "response", assignees, days: 3, responses: [{ key: "ok", label: "OK", next, tone: "positive" }] });
+  const tell = (userIds) => ({ key: "tell", name: "Tell", type: "action", action: { type: "notify", userIds }, next: "end_success" });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("refuses another company's person (assignee or action recipient) or permission template before anything is written", async () => {
+    const cases = [
+      [[response("review", [{ type: "user", userId: "other-company-user" }])], "USER_NOT_FOUND"],
+      [[response("review", [{ type: "role", role: "pm" }], "tell"), tell(["other-company-user"])], "USER_NOT_FOUND"],
+      [[response("review", [{ type: "permission_template", templateId: "other-company-template" }])], "PERMISSION_TEMPLATE_NOT_FOUND"],
+    ];
+    for (const [steps, code] of cases) {
+      await expect(engine.createTemplate({ orgId: "org-1", projectId: "p1", payload: { tool: "change_order", name: "Route", steps }, actor: { id: "pm-1" } })).rejects.toMatchObject({ status: 404, code });
+    }
+    expect(mockPrisma.organizationMembership.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ orgId: "org-1", userId: { in: ["other-company-user"] } }) }));
+    expect(mockPrisma.permissionTemplate.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["other-company-template"] }, orgId: "org-1" } }));
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.workflowTemplate.create).not.toHaveBeenCalled();
+    expect(mockAudit.recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("stores the company's own; an edit is checked only when it changes the steps", async () => {
+    const own = [response("review", [{ type: "user", userId: "pm-1" }, { type: "permission_template", templateId: "tpl-perm-1" }], "tell"), tell(["qs-1"])];
+    const made = await engine.createTemplate({ orgId: "org-1", projectId: "p1", payload: { tool: "change_order", name: "Route", steps: own }, actor: { id: "pm-1" } });
+    expect(made.steps.map((step) => step.key)).toEqual(["review", "tell"]);
+    expect(mockPrisma.workflowTemplate.create).toHaveBeenCalledTimes(1);
+
+    // A template stored before the check, naming another company's person, can still be renamed or archived.
+    const legacy = { id: "tpl-1", orgId: "org-1", projectId: "p1", tool: "change_order", name: "Route", status: "active", isDefault: false, priority: 0, rulesJson: [], startStep: "review", stepsJson: engine.normalizeTemplate({ tool: "change_order", name: "Route", steps: [response("review", [{ type: "user", userId: "other-company-user" }])] }).stepsJson };
+    mockPrisma.workflowTemplate.findFirst.mockResolvedValue(legacy);
+    await expect(engine.updateTemplate({ orgId: "org-1", projectId: "p1", templateId: "tpl-1", payload: { steps: [response("review", [{ type: "user", userId: "other-company-user" }])] }, actor: { id: "pm-1" } })).rejects.toMatchObject({ status: 404, code: "USER_NOT_FOUND" });
+    expect(mockPrisma.workflowTemplate.update).not.toHaveBeenCalled();
+    mockPrisma.organizationMembership.findMany.mockClear();
+    await engine.archiveTemplate({ orgId: "org-1", projectId: "p1", templateId: "tpl-1", actor: { id: "pm-1" } });
+    expect(mockPrisma.organizationMembership.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.workflowTemplate.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "archived" }) }));
+    await engine.updateTemplate({ orgId: "org-1", projectId: "p1", templateId: "tpl-1", payload: { steps: [response("review", [{ type: "user", userId: "pm-1" }])] }, actor: { id: "pm-1" } });
+    expect(mockPrisma.organizationMembership.findMany).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.workflowTemplate.update).toHaveBeenCalledTimes(2);
   });
 });

@@ -1991,6 +1991,11 @@ const runDueNotificationScan = async ({
         where: { orgId, archivedAt: null, status: { not: "cancelled" } },
         select: { id: true, orgId: true },
       });
+  // A project named that is not one of this company's (another company's
+  // included) is refused as an id that exists nowhere is, rather than
+  // answered "0 projects" (CERT-2 injection sweep: nothing was scanned or
+  // created, but the reference was taken rather than refused).
+  if (projectId && !projects.length) throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
 
   let created = 0;
   for (const project of projects) {

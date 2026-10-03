@@ -293,4 +293,27 @@ describe("notification service", () => {
       }),
     });
   });
+
+  it("refuses a due scan of a project that is not one of the company's before anything is scanned or created, and scans its own (CERT-2 injection sweep)", async () => {
+    mockPrisma.project.findMany.mockResolvedValueOnce([]);
+    await expect(
+      notificationService.runDueNotificationScan({ orgId: "org-1", projectId: "other-company-project", now }),
+    ).rejects.toMatchObject({ status: 404, code: "PROJECT_NOT_FOUND" });
+    expect(mockPrisma.project.findMany).toHaveBeenCalledWith({ where: { id: "other-company-project", orgId: "org-1" } });
+    expect(mockPrisma.task.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+
+    mockPrisma.project.findMany.mockResolvedValueOnce([{ id: "project-1", orgId: "org-1" }]);
+    mockPrisma.rfi.findMany.mockResolvedValue([]);
+    await expect(
+      notificationService.runDueNotificationScan({ orgId: "org-1", projectId: "project-1", now }),
+    ).resolves.toEqual({ projects: 1, created: 0 });
+    expect(mockPrisma.task.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ projectId: "project-1" }) }),
+    );
+
+    // No project named: every live project of the company, as before.
+    mockPrisma.project.findMany.mockResolvedValueOnce([]);
+    await expect(notificationService.runDueNotificationScan({ orgId: "org-1", now })).resolves.toEqual({ projects: 0, created: 0 });
+  });
 });

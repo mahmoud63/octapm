@@ -260,11 +260,30 @@ const getTemplateRow = async ({ orgId, templateId, projectId = null }) => {
   return row;
 };
 
+/**
+ * What a template's steps name must be the company's own, checked before the
+ * template is written: its people (response-step assignees and action-step
+ * recipients) members of the company (404 USER_NOT_FOUND), its permission
+ * templates the company's (404 PERMISSION_TEMPLATE_NOT_FOUND) — answered as
+ * for an id that exists nowhere. A template used to be stored naming another
+ * company's person or permission template; running it then skipped them, but
+ * the reference stayed (CERT-2 injection sweep).
+ */
+const assertTemplateReferences = async ({ orgId, steps }) => {
+  const refs = require("./tenant-references.service");
+  await refs.assertMembers({ orgId, userIds: steps.flatMap((step) => [...(step.assignees || []).filter((entry) => entry.type === "user").map((entry) => entry.userId), ...(step.action?.userIds || [])]) });
+  const templateIds = refs.idsOf(steps.flatMap((step) => (step.assignees || []).filter((entry) => entry.type === "permission_template").map((entry) => entry.templateId)));
+  if (!templateIds.length) return;
+  const found = await prisma.permissionTemplate.findMany({ where: { id: { in: templateIds }, orgId }, select: { id: true } });
+  if (found.length !== templateIds.length) throw new HttpError(404, "PERMISSION_TEMPLATE_NOT_FOUND", "Permission template not found");
+};
+
 const clearOtherDefaults = async ({ tx, orgId, projectId, tool, exceptId }) =>
   tx.workflowTemplate.updateMany({ where: { orgId, projectId: projectId ?? null, tool, isDefault: true, ...(exceptId ? { id: { not: exceptId } } : {}) }, data: { isDefault: false } });
 
 const createTemplate = async ({ orgId, projectId = null, payload = {}, actor = null }) => {
   const data = normalizeTemplate(payload);
+  await assertTemplateReferences({ orgId, steps: data.stepsJson });
   const row = await prisma.$transaction(async (tx) => {
     if (data.isDefault) await clearOtherDefaults({ tx, orgId, projectId, tool: data.tool });
     return tx.workflowTemplate.create({ data: { orgId, projectId, ...data, createdBy: actor?.id || null } });
@@ -277,6 +296,7 @@ const updateTemplate = async ({ orgId, projectId = null, templateId, payload = {
   const existing = await getTemplateRow({ orgId, templateId });
   if ((existing.projectId || null) !== (projectId || null)) throw new HttpError(403, "WORKFLOW_TEMPLATE_SCOPE", existing.projectId ? "This template belongs to a project" : "Company templates are edited under Company › Workflows");
   const data = normalizeTemplate(payload, existing);
+  if (payload.steps !== undefined) await assertTemplateReferences({ orgId, steps: data.stepsJson });
   const status = payload.status !== undefined ? (payload.status === "archived" ? "archived" : "active") : existing.status;
   const row = await prisma.$transaction(async (tx) => {
     if (data.isDefault) await clearOtherDefaults({ tx, orgId, projectId: existing.projectId, tool: data.tool, exceptId: existing.id });
