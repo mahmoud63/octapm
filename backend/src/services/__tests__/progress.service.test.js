@@ -19,6 +19,8 @@ const mockPrisma = {
   // PC-6 integration: a typed quantity submission mints one entry at approval.
   quantityProgressEntry: { count: jest.fn(async () => 0), findMany: jest.fn(async () => []), create: jest.fn(async ({ data }) => ({ id: 'entry-minted', ...data })), updateMany: jest.fn() },
   activityBoqAllocation: { findMany: jest.fn(async () => []) },
+  // The documents a submission's photo evidence names (CERT-2 isolation).
+  projectDocument: { findMany: jest.fn(async () => []) },
 };
 const mockAuditService = {
   ACTIONS: { APPROVED: 'approved', CREATED: 'created', REJECTED: 'rejected' },
@@ -201,6 +203,69 @@ describe('progress service', () => {
       }),
     ).rejects.toMatchObject({ code: 'PROGRESS_EVIDENCE_REQUIRED' });
     expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
+  });
+
+  describe('photo evidence names documents of this project only (CERT-2 isolation)', () => {
+    const submit = (evidence) =>
+      progressService.createProgressSubmission({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        activityId: 'activity-1',
+        userId: 'pm-1',
+        userRole: 'pm',
+        payload: { method: 'percent', pctComplete: 40, evidence },
+      });
+
+    beforeEach(() => {
+      mockPrisma.progressSubmission.create.mockImplementation(({ data }) =>
+        Promise.resolve({ id: 'submission-evidence', createdAt: new Date('2026-01-01T00:00:00.000Z'), updatedAt: new Date('2026-01-01T00:00:00.000Z'), ...data }),
+      );
+    });
+
+    it('refuses a key that is not a document of this project before anything is written', async () => {
+      mockPrisma.projectDocument.findMany.mockResolvedValue([]);
+      await expect(submit({ photos: [{ key: 'foreign-doc' }] })).rejects.toMatchObject({
+        status: 400,
+        code: 'INVALID_SITE_PHOTO_REFERENCE',
+        details: { missing: ['foreign-doc'] },
+      });
+      // The lookup is scoped to the caller's organisation and this project.
+      expect(mockPrisma.projectDocument.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            projectId: 'project-1',
+            orgId: 'org-1',
+            OR: [{ id: { in: ['foreign-doc'] } }, { storageKey: { in: ['foreign-doc'] } }],
+          },
+        }),
+      );
+      expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
+      expect(mockAuditService.recordEvent).not.toHaveBeenCalled();
+    });
+
+    it('checks every document field of a photo, not only its key', async () => {
+      mockPrisma.projectDocument.findMany.mockResolvedValue([{ id: 'own-doc', storageKey: 'own-storage' }]);
+      await expect(submit({ photos: [{ key: 'own-doc', documentId: 'foreign-doc' }] })).rejects.toMatchObject({
+        code: 'INVALID_SITE_PHOTO_REFERENCE',
+        details: { missing: ['foreign-doc'] },
+      });
+      await expect(submit([{ storageKey: 'foreign-doc' }])).rejects.toMatchObject({ code: 'INVALID_SITE_PHOTO_REFERENCE' });
+      expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
+    });
+
+    it('accepts the project\'s own documents, by id or by storage key, and stores the evidence as given', async () => {
+      mockPrisma.projectDocument.findMany.mockResolvedValue([{ id: 'own-doc', storageKey: 'own-storage' }]);
+      const evidence = { photos: [{ key: 'own-doc', documentId: 'own-doc', storageKey: 'own-doc', url: '/x' }, { key: 'own-storage' }] };
+      const submission = await submit(evidence);
+      expect(submission.id).toBe('submission-evidence');
+      expect(mockPrisma.progressSubmission.create).toHaveBeenCalledWith({ data: expect.objectContaining({ evidenceJson: evidence }) });
+    });
+
+    it('does not look documents up for evidence that names none (a URL, notes)', async () => {
+      await submit({ photos: [{ url: 'https://example.test/photo.jpg' }, 'https://example.test/b.jpg'], notes: 'see photos' });
+      expect(mockPrisma.projectDocument.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.progressSubmission.create).toHaveBeenCalled();
+    });
   });
 
   it('creates an approved ActivityProgress row when a submission is approved', async () => {

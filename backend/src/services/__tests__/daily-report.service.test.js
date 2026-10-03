@@ -272,6 +272,51 @@ describe('daily report service', () => {
     expect(mockPrisma.dailyReport.create).not.toHaveBeenCalled();
   });
 
+  it('refuses linked progress evidence naming a document that is not this project\'s, as it refuses the report\'s own photos (CERT-2 isolation)', async () => {
+    const createdAt = new Date('2026-01-01T00:00:00.000Z');
+    mockPrisma.projectDocument.findMany.mockResolvedValue([]);
+    mockPrisma.dailyReport.create.mockResolvedValue({
+      id: 'report-evidence',
+      projectId: 'project-1',
+      activityId: 'activity-1',
+      date: createdAt,
+      pctProgress: 0,
+      photosJson: [],
+      status: 'submitted',
+    });
+
+    await expect(
+      dailyReportService.createDailyReport({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        userId: 'user-1',
+        userRole: 'pm',
+        payload: {
+          activityId: 'activity-1',
+          date: '2026-01-01',
+          progress: {
+            method: 'percent',
+            pctComplete: 20,
+            evidence: { photos: [{ key: 'foreign-doc-id' }] },
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: 'INVALID_SITE_PHOTO_REFERENCE',
+    });
+
+    // The lookup is this organisation's, this project's; the refusal comes
+    // inside the report's transaction, before the submission or any audit row.
+    expect(mockPrisma.projectDocument.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ projectId: 'project-1', orgId: 'org-1' }),
+      }),
+    );
+    expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
+    expect(mockPrisma.auditEvent.create).not.toHaveBeenCalled();
+  });
+
   it('approves a submitted report and linked progress submission', async () => {
     const now = new Date('2026-01-02T00:00:00.000Z');
     mockPrisma.dailyReport.findFirst.mockResolvedValueOnce({

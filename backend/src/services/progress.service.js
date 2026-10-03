@@ -2,6 +2,7 @@ const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const { toMoneyNumber } = require('../utils/money');
 const auditService = require('./audit.service');
+const { idsOf } = require('./tenant-references.service');
 
 const PROGRESS_METHODS = [
   'percent',
@@ -112,6 +113,58 @@ const hasEvidence = (evidence) => {
   if (Array.isArray(evidence)) return evidence.length > 0;
   if (Array.isArray(evidence.photos)) return evidence.photos.length > 0;
   return Object.keys(evidence).length > 0;
+};
+
+/**
+ * The documents a submission's photo evidence names must be documents of the
+ * submission's own project (CERT-2 isolation sweep). A key was stored as
+ * given, so a submission — made directly, in a bulk batch or through a daily
+ * report — could name another company's document; approving it copied the
+ * reference onto the activity's official progress. A photo names its document
+ * by `key`, and the product's own upload answer repeats the id as
+ * `documentId` and `storageKey`; each is matched by the document's id or its
+ * storage key, as a daily report's own photos are. A key naming another
+ * company's document and one naming nothing get the same 400 — the refusal a
+ * daily report's photos get — before anything is written.
+ */
+const EVIDENCE_DOCUMENT_FIELDS = ['key', 'documentId', 'storageKey'];
+
+const evidenceDocumentKeys = (evidence) => {
+  const photos = Array.isArray(evidence)
+    ? evidence
+    : Array.isArray(evidence?.photos)
+      ? evidence.photos
+      : [];
+  return idsOf(
+    photos.flatMap((photo) =>
+      photo && typeof photo === 'object'
+        ? EVIDENCE_DOCUMENT_FIELDS.map((field) => photo[field])
+        : [],
+    ),
+  );
+};
+
+const assertEvidenceDocuments = async ({ orgId = null, projectId, evidence }, tx = prisma) => {
+  const keys = evidenceDocumentKeys(evidence);
+  if (!keys.length) return;
+  const documents = await tx.projectDocument.findMany({
+    where: {
+      projectId,
+      ...(orgId ? { orgId } : {}),
+      OR: [{ id: { in: keys } }, { storageKey: { in: keys } }],
+    },
+    select: { id: true, storageKey: true },
+  });
+  const known = new Set(documents.flatMap((document) => [document.id, document.storageKey]));
+  const missing = keys.filter((key) => !known.has(key));
+  if (missing.length) {
+    throw new HttpError(
+      400,
+      'INVALID_SITE_PHOTO_REFERENCE',
+      'Photo evidence must reference documents uploaded to this project',
+      { missing },
+    );
+  }
 };
 
 const getEvidenceAttachments = (evidence) => {
@@ -1049,6 +1102,7 @@ const buildSubmissionData = async ({
   }
 
   const evidence = normalizeEvidence(payload, fallbackPhotos);
+  await assertEvidenceDocuments({ orgId, projectId, evidence }, tx);
   if (
     status !== 'draft' &&
     methodConfig.evidenceRequired &&

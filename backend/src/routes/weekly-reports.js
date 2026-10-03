@@ -9,6 +9,7 @@ const { validate } = require('../middleware/validate');
 const { prisma } = require('../config/db');
 const { workingDayToDate } = require('../services/cpm.service');
 const { nextRef } = require("../utils/reference-number");
+const weeklyReportService = require('../services/weekly-report.service');
 
 const router = express.Router({ mergeParams: true });
 
@@ -158,6 +159,12 @@ router.post(
     body('weatherDelayDays').optional().isInt({ min: 0 }),
     body('manpowerCount').optional().isInt({ min: 0 }),
     body('status').optional().isIn(['draft', 'submitted', 'approved']),
+    // The activity lists are lists of activity ids (weekly-report.service
+    // checks that each is an activity of this project).
+    body('activitiesCompleted').optional({ nullable: true }).isArray(),
+    body('activitiesCompleted.*').isUUID(),
+    body('activitiesInProgress').optional({ nullable: true }).isArray(),
+    body('activitiesInProgress.*').isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -167,6 +174,11 @@ router.post(
     if (!project) {
       throw new HttpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
     }
+
+    await weeklyReportService.assertReportActivities({
+      projectId: req.params.projectId,
+      payload: req.body,
+    });
 
     const generatedRef = await nextRef(prisma, {
       table: "WeeklyReport",
@@ -213,6 +225,10 @@ router.patch(
     body('weatherDelayDays').optional().isInt({ min: 0 }),
     body('manpowerCount').optional().isInt({ min: 0 }),
     body('status').optional().isIn(['draft', 'submitted', 'approved']),
+    body('activitiesCompleted').optional({ nullable: true }).isArray(),
+    body('activitiesCompleted.*').isUUID(),
+    body('activitiesInProgress').optional({ nullable: true }).isArray(),
+    body('activitiesInProgress.*').isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -226,6 +242,11 @@ router.patch(
     if (!existing) {
       throw new HttpError(404, 'NOT_FOUND', 'Report not found');
     }
+
+    await weeklyReportService.assertReportActivities({
+      projectId: req.params.projectId,
+      payload: req.body,
+    });
 
     const report = await prisma.weeklyReport.update({
       where: { id: req.params.id },
