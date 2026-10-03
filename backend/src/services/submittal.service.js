@@ -20,6 +20,7 @@ const {
 const {
   applyPartyWorkflowVisibility,
   assertPartyWorkflowAccess,
+  isPartyScopedAccess,
   withDefaultOwnerParty,
 } = require("./company-party.service");
 const auditService = require("./audit.service");
@@ -48,6 +49,19 @@ const assertSubmittalReferences = async ({ orgId, projectId, upgrade }) => {
     if (!template) throw new HttpError(404, "SUBMITTAL_TEMPLATE_NOT_FOUND", "Workflow template not found");
   }
   await refs.assertMembers({ orgId, userIds: [upgrade.managerUserId, ...(Array.isArray(upgrade.distributionJson) ? upgrade.distributionJson : [])] });
+};
+
+/**
+ * A party member files a submittal only into a package they can already open
+ * (review finding R10: PATCH packageId put a guest's submittal into another
+ * company's package, which then opened to the guest and took their edits).
+ * The package rule is the one its own routes apply (submittal-workflow
+ * getPackage: 404 when missing, 403 when not theirs). Internal callers file
+ * into any package of the project.
+ */
+const assertPackageReachable = async ({ orgId, projectId, packageId, currentPackageId = null, projectAccess = null, viewerId = null }) => {
+  if (!packageId || packageId === currentPackageId || !isPartyScopedAccess(projectAccess)) return;
+  await submittalWorkflow.getPackage({ orgId, projectId, packageId, projectAccess, viewerId });
 };
 
 /** Fields added by OCTA-PM-SUB-017 (packages, workflow, lead time, people). */
@@ -240,6 +254,21 @@ const directSubmittalTransition = (fromStatus, toStatus) => {
   return null;
 };
 
+/**
+ * A decision's stamp is its reviewer's (review finding R8): the review date of
+ * a decided submittal, and the notes an approval stands with. A returned
+ * submittal's notes stay the submitter's until it is sent again.
+ */
+const SUBMITTAL_DECIDED_STATUSES = Object.freeze(["approved", "rejected", "resubmit"]);
+const decisionStampFields = (status) => [
+  ...(SUBMITTAL_DECIDED_STATUSES.includes(status) ? ["reviewedOn"] : []),
+  ...(status === "approved" ? ["remarks"] : []),
+];
+const sameStampValue = (field, next, current) => {
+  if (field === "reviewedOn") return (next ? new Date(next).getTime() : null) === (current ? new Date(current).getTime() : null);
+  return trimToNull(next) === trimToNull(current);
+};
+
 const assertDirectSubmittalChange = ({ existing = null, payload = {}, canTransition = null }) => {
   if (typeof canTransition !== "function") return;
   const fromStatus = existing ? existing.status : null;
@@ -252,7 +281,32 @@ const assertDirectSubmittalChange = ({ existing = null, payload = {}, canTransit
   if (outcomeFields.length && !canTransition("approve", "submittal.approve")) {
     throw new HttpError(403, "FORBIDDEN", "A submittal's review outcome is set by its reviewers; use the review actions", { module: "submittal", action: "approve", transition: "submittal.approve", fields: outcomeFields });
   }
+  const stampFields = decisionStampFields(fromStatus).filter((field) => payload[field] !== undefined && !sameStampValue(field, payload[field], existing[field]));
+  if (stampFields.length && !canTransition("approve", "submittal.approve")) {
+    throw new HttpError(403, "FORBIDDEN", "A decided submittal's review date and approval notes are its reviewer's", { module: "submittal", action: "approve", transition: "submittal.approve", fields: stampFields });
+  }
 };
+
+/**
+ * The fields each action route takes from its body (review finding R3: /submit,
+ * /resubmit and /review spread the whole body into the update, past every check
+ * PATCH makes — a guest's /submit stamped an "approved" response code that the
+ * later rejection kept, and filed the submittal into another company's
+ * package; a planner's /review stamped a code without submittal.approve). The
+ * rest of the body is ignored.
+ */
+const SUBMISSION_FIELDS = Object.freeze([
+  // the revision evidence (ensureRevisionEvidence, the revision and attachment registers)
+  "revision", "revisions", "projectDocumentId", "documentId", "storageKey", "key", "fileName", "fileUrl", "revisionNotes", "notes", "attachments", "attachmentRefs",
+  // the links and routing it is sent with
+  "activityId", "activityIds", "activityLinks", "ownerPartyId", "reviewerPartyId", "approverPartyId",
+  // the submitter's own words and date
+  "remarks", "comment", "statusComment", "reason", "submittedOn",
+]);
+const REVIEW_FIELDS = Object.freeze(["comment", "statusComment", "remarks", "reviewedOn"]);
+const RETURN_FIELDS = Object.freeze(["reason", "comment", "statusComment", "remarks", "reviewedOn"]);
+const actionFields = (payload = {}, fields) =>
+  Object.fromEntries(fields.filter((field) => payload[field] !== undefined).map((field) => [field, payload[field]]));
 
 const countByStatus = (counts) =>
   counts.reduce(
@@ -337,6 +391,7 @@ const createSubmittal = async ({
   const assignmentPayload = withDefaultOwnerParty(payload, projectAccess);
   const upgrade = upgradeFields(payload);
   await assertSubmittalReferences({ orgId, projectId, upgrade });
+  await assertPackageReachable({ orgId, projectId, packageId: upgrade.packageId, projectAccess, viewerId: userId });
   const submitBy = await submitByFor({ projectId, record: { ...upgrade, activityId } });
 
   const { row, patch } = await prisma.$transaction(async (tx) => {
@@ -542,6 +597,7 @@ const updateSubmittal = async ({
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
   const upgrade = upgradeFields(payload);
   await assertSubmittalReferences({ orgId, projectId, upgrade });
+  await assertPackageReachable({ orgId, projectId, packageId: upgrade.packageId, currentPackageId: existing.packageId, projectAccess, viewerId: userId });
   const datesTouched = ["leadTimeWeeks", "reviewDays", "requiredOnSite", "workflowTemplateId"].some((key) => key in upgrade) || activityId !== existing.activityId;
   const submitBy = datesTouched ? await submitByFor({ projectId, record: { ...existing, ...upgrade, activityId } }) : undefined;
 
@@ -703,22 +759,23 @@ const submitSubmittal = async ({
       "Only pending, resubmit, or rejected submittals can be submitted",
     );
   }
-  await ensureRevisionEvidence({ projectId, submittalId, payload });
+  const submission = actionFields(payload, SUBMISSION_FIELDS);
+  await ensureRevisionEvidence({ projectId, submittalId, payload: submission });
 
   return updateSubmittal({
     orgId,
     projectId,
     submittalId,
     payload: {
-      ...payload,
+      ...submission,
       status: "under_review",
-      submittedOn: payload.submittedOn || new Date().toISOString(),
+      submittedOn: submission.submittedOn || new Date().toISOString(),
       comment:
-        payload.comment || payload.remarks || "Submittal submitted for review",
+        submission.comment || submission.remarks || "Submittal submitted for review",
       statusComment:
-        payload.statusComment ||
-        payload.comment ||
-        payload.remarks ||
+        submission.statusComment ||
+        submission.comment ||
+        submission.remarks ||
         "Submittal submitted for review",
     },
     userId,
@@ -760,7 +817,7 @@ const reviewSubmittal = async ({
     projectId,
     submittalId,
     payload: {
-      ...payload,
+      ...actionFields(payload, REVIEW_FIELDS),
       status: "under_review",
       reviewedOn: payload.reviewedOn || new Date().toISOString(),
       remarks: payload.remarks || comment,
@@ -808,7 +865,7 @@ const resubmitSubmittal = async ({
       projectId,
       submittalId,
       payload: {
-        ...payload,
+        ...actionFields(payload, RETURN_FIELDS),
         status: "resubmit",
         reviewedOn: payload.reviewedOn || new Date().toISOString(),
         reason,
@@ -830,24 +887,25 @@ const resubmitSubmittal = async ({
     );
   }
 
-  await ensureRevisionEvidence({ projectId, submittalId, payload });
+  const submission = actionFields(payload, SUBMISSION_FIELDS);
+  await ensureRevisionEvidence({ projectId, submittalId, payload: submission });
 
   return updateSubmittal({
     orgId,
     projectId,
     submittalId,
     payload: {
-      ...payload,
+      ...submission,
       status: "under_review",
-      submittedOn: payload.submittedOn || new Date().toISOString(),
+      submittedOn: submission.submittedOn || new Date().toISOString(),
       comment:
-        payload.comment ||
-        payload.remarks ||
+        submission.comment ||
+        submission.remarks ||
         "Submittal resubmitted for review",
       statusComment:
-        payload.statusComment ||
-        payload.comment ||
-        payload.remarks ||
+        submission.statusComment ||
+        submission.comment ||
+        submission.remarks ||
         "Submittal resubmitted for review",
     },
     userId,

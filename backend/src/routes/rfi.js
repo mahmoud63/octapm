@@ -31,12 +31,21 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 // The assistant's record routes (`/:rfiId/ai/*`) load the RFI themselves: its
 // party routing and draft privacy are checked here first, as on every other
-// by-id RFI route (certification finding L42). A malformed id is left to the
+// by-id RFI route (certification finding L42) — but only for a caller the
+// route itself lets through. A caller without the route's permissions gets
+// the route's own refusal, whether the RFI exists or not (review finding R11:
+// a missing id answered 404 and an existing one 403). An assistant record
+// route not listed here is guarded on rfi read. A malformed id is left to the
 // assistant route's own validator.
+const ASSISTANT_RECORD_RFI_ACTIONS = Object.freeze({ "/summary": "read", "/response": "submit" });
+const assistantRecordAllowed = (req) => {
+  const route = String(req.path || "").replace(/\/+$/, "").toLowerCase();
+  return hasPermission(req, "assistant", "read") && hasPermission(req, "rfi", ASSISTANT_RECORD_RFI_ACTIONS[route] || "read");
+};
 router.use(
   "/:rfiId/ai",
   asyncHandler(async (req, _res, next) => {
-    if (UUID_PATTERN.test(req.params.rfiId || "")) {
+    if (UUID_PATTERN.test(req.params.rfiId || "") && assistantRecordAllowed(req)) {
       await rfiWorkflow.assertRfiVisible({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, projectAccess: req.projectAccess, viewerId: req.user.id });
     }
     next();

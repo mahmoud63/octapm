@@ -75,6 +75,37 @@ describe("RFI decisions through create / update", () => {
     await expect(rfiService.deleteRfi({ orgId: "org-1", projectId: "project-1", rfiId: "rfi-1", userId: "user-y", projectAccess: partyY })).rejects.toMatchObject({ code: "PROJECT_PARTY_RECORD_ACCESS_DENIED" });
     expect(mockPrisma.rfi.update).not.toHaveBeenCalled();
   });
+
+  it("starts a new revision through PATCH only for rfi.reopen (review finding R9)", () => {
+    const sub = holds("rfi.submit");
+    expect(() => assert({ existing: rfiRow({ status: "answered", officialResponseId: "resp-1" }), payload: { bumpRevision: true }, canTransition: sub })).toThrow(expect.objectContaining({ code: "FORBIDDEN", status: 403, details: expect.objectContaining({ transition: "rfi.reopen", fields: ["bumpRevision"] }) }));
+    expect(() => assert({ payload: { subject: "s", bumpRevision: true }, canTransition: sub })).toThrow(expect.objectContaining({ code: "FORBIDDEN" }));
+    expect(() => assert({ existing: rfiRow(), payload: { bumpRevision: false, discipline: "Civil" }, canTransition: sub })).not.toThrow();
+    expect(() => assert({ existing: rfiRow({ status: "answered" }), payload: { bumpRevision: true }, canTransition: holds("rfi.reopen") })).not.toThrow();
+  });
+
+  it("keeps a closed RFI's impact figures to whoever closes RFIs (review finding R8)", () => {
+    const sub = holds("rfi.submit", "rfi.answer");
+    // the stored amount comes back from the database as a Decimal (a string here)
+    const closed = rfiRow({ status: "closed", costImpact: true, costImpactAmount: "1100", scheduleImpact: 3, scheduleImpactFlag: true });
+    for (const payload of [{ costImpactAmount: 999999 }, { scheduleImpact: 40 }, { costImpact: false }, { scheduleImpactFlag: false }, { costImpactAmount: null }]) {
+      expect(() => assert({ existing: closed, payload, canTransition: sub })).toThrow(expect.objectContaining({ code: "FORBIDDEN", details: expect.objectContaining({ transition: "rfi.close", fields: Object.keys(payload) }) }));
+    }
+    expect(() => assert({ existing: closed, payload: { discipline: "Civil", costImpact: true, costImpactAmount: 1100, scheduleImpact: "3", scheduleImpactFlag: true }, canTransition: sub })).not.toThrow();
+    expect(() => assert({ existing: closed, payload: { costImpactAmount: 1200 }, canTransition: holds("rfi.close") })).not.toThrow();
+    expect(() => assert({ existing: rfiRow({ costImpact: true, costImpactAmount: "1100" }), payload: { costImpactAmount: 1500 }, canTransition: sub })).not.toThrow();
+    // reopened in the same request (rfi.reopen), the figures are open again
+    expect(() => assert({ existing: closed, payload: { status: "open", costImpactAmount: 1500 }, canTransition: holds("rfi.reopen") })).not.toThrow();
+  });
+
+  it("leaves no edge into draft, nor from closed to answered: the transition table refuses them before anything is kept (review findings R1, R6 — refuted)", async () => {
+    const everything = holds("rfi.submit", "rfi.answer", "rfi.reopen", "rfi.reject", "rfi.close");
+    for (const [from, payload] of [["closed", { status: "draft" }], ["answered", { status: "draft" }], ["open", { status: "draft" }], ["closed", { status: "answered", response: "rewritten" }]]) {
+      mockPrisma.rfi.findFirst.mockResolvedValue(rfiRow({ status: from }));
+      mockPrisma.rfi.update.mockImplementation(async ({ data }) => ({ ...rfiRow({ status: from }), ...data }));
+      await expect(rfiService.updateRfi({ orgId: "org-1", projectId: "project-1", rfiId: "rfi-1", payload, userId: "user-x", userRole: "pm", canTransition: everything })).rejects.toMatchObject({ code: "APPROVAL_WORKFLOW_INVALID_TRANSITION", status: 409, details: expect.objectContaining({ fromStatus: from, toStatus: payload.status }) });
+    }
+  });
 });
 
 describe("submittal decisions through create / update", () => {
@@ -110,5 +141,31 @@ describe("submittal decisions through create / update", () => {
     mockPrisma.submittal.findFirst.mockResolvedValue(submittalRow());
     await expect(submittalService.deleteSubmittal({ orgId: "org-1", projectId: "project-1", submittalId: "sub-1", userId: "user-y", projectAccess: partyY })).rejects.toMatchObject({ code: "PROJECT_PARTY_RECORD_ACCESS_DENIED" });
     expect(mockPrisma.submittal.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps a decided submittal's review stamp to submittal.approve (review finding R8)", () => {
+    const sub = holds("submittal.submit", "submittal.resubmit");
+    const reviewedOn = new Date("2026-10-01T00:00:00Z");
+    const approvedRow = submittalRow({ status: "approved", responseCode: "approved", reviewedOn, remarks: "Approved as drawn" });
+    expect(() => assert({ existing: approvedRow, payload: { reviewedOn: "2020-01-01T00:00:00Z" }, canTransition: sub })).toThrow(expect.objectContaining({ code: "FORBIDDEN", details: expect.objectContaining({ transition: "submittal.approve", fields: ["reviewedOn"] }) }));
+    expect(() => assert({ existing: approvedRow, payload: { remarks: "Approved without comment" }, canTransition: sub })).toThrow(expect.objectContaining({ details: expect.objectContaining({ fields: ["remarks"] }) }));
+    for (const status of ["rejected", "resubmit"]) {
+      expect(() => assert({ existing: submittalRow({ status, reviewedOn }), payload: { reviewedOn: null }, canTransition: sub })).toThrow(expect.objectContaining({ details: expect.objectContaining({ fields: ["reviewedOn"] }) }));
+      // a returned submittal's notes are the submitter's until it is sent again
+      expect(() => assert({ existing: submittalRow({ status, reviewedOn, remarks: "Wrong glass" }), payload: { remarks: "Glass changed to spec" }, canTransition: sub })).not.toThrow();
+    }
+    expect(() => assert({ existing: approvedRow, payload: { reviewedOn: reviewedOn.toISOString(), remarks: " Approved as drawn ", discipline: "Civil" }, canTransition: sub })).not.toThrow();
+    expect(() => assert({ existing: approvedRow, payload: { remarks: "PM note" }, canTransition: holds("submittal.approve") })).not.toThrow();
+    expect(() => assert({ existing: submittalRow(), payload: { reviewedOn: "2026-10-02T00:00:00Z" }, canTransition: sub })).not.toThrow();
+  });
+
+  it("leaves no edge out of a decision or out of review to pending: the transition table refuses them (review finding R2 — refuted)", async () => {
+    const everything = holds("submittal.submit", "submittal.resubmit", "submittal.approve", "submittal.reject");
+    for (const [from, to] of [["approved", "pending"], ["approved", "under_review"], ["under_review", "pending"], ["rejected", "pending"], ["resubmit", "pending"]]) {
+      const row = submittalRow({ status: from, activityId: null, revision: null });
+      mockPrisma.submittal.findFirst.mockResolvedValue(row);
+      mockPrisma.submittal.update.mockImplementation(async ({ data }) => ({ ...row, ...data }));
+      await expect(submittalService.updateSubmittal({ orgId: "org-1", projectId: "project-1", submittalId: "sub-1", payload: { status: to }, userId: "user-x", userRole: "pm", canTransition: everything })).rejects.toMatchObject({ code: "APPROVAL_WORKFLOW_INVALID_TRANSITION", status: 409, details: expect.objectContaining({ fromStatus: from, toStatus: to }) });
+    }
   });
 });

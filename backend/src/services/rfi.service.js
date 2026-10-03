@@ -229,6 +229,21 @@ const sameAnswerValue = (field, next, current) => {
   return trimToNull(next) === trimToNull(current);
 };
 
+/**
+ * The figures a close approves: the schedule impact is written onto the
+ * activity link when the RFI closes, and convert-to-change prices the change
+ * order from them. Once closed they change only for whoever closes RFIs
+ * (review finding R8: a subcontractor rewrote a closed RFI's cost and days,
+ * and the change order converted from it later took the rewritten figures).
+ */
+const RFI_IMPACT_FIELDS = Object.freeze(["costImpact", "costImpactAmount", "scheduleImpact", "scheduleImpactFlag"]);
+
+const sameImpactValue = (field, next, current) => {
+  if (field === "costImpact" || field === "scheduleImpactFlag") return Boolean(next) === Boolean(current);
+  if (field === "costImpactAmount") return toMoney(next) === (current === null || current === undefined ? null : Number(current));
+  return (Number(next) || 0) === (Number(current) || 0);
+};
+
 const assertDirectRfiChange = ({ existing = null, payload = {}, canTransition = null }) => {
   if (typeof canTransition !== "function") return;
   const fromStatus = existing ? existing.status : null;
@@ -240,6 +255,17 @@ const assertDirectRfiChange = ({ existing = null, payload = {}, canTransition = 
   const answerFields = RFI_ANSWER_FIELDS.filter((field) => payload[field] !== undefined && !sameAnswerValue(field, payload[field], existing ? existing[field] : null));
   if (answerFields.length && !canTransition("submit", "rfi.answer")) {
     throw new HttpError(403, "FORBIDDEN", "Answering an RFI needs the rfi.answer permission; use the answer action", { module: "rfi", action: "submit", transition: "rfi.answer", fields: answerFields });
+  }
+  // A new revision is the reopen's: it clears the official answer (review
+  // finding R9 — bumpRevision sent through PATCH did that with no decision).
+  if (payload.bumpRevision && !canTransition("approve", "rfi.reopen")) {
+    throw new HttpError(403, "FORBIDDEN", "A new RFI revision starts when the RFI is reopened; use the reopen action", { module: "rfi", action: "approve", transition: "rfi.reopen", fields: ["bumpRevision"] });
+  }
+  if (fromStatus === "closed" && toStatus === "closed") {
+    const impactFields = RFI_IMPACT_FIELDS.filter((field) => payload[field] !== undefined && !sameImpactValue(field, payload[field], existing[field]));
+    if (impactFields.length && !canTransition("approve", "rfi.close")) {
+      throw new HttpError(403, "FORBIDDEN", "A closed RFI's impact figures are the ones its close approved; reopen it to change them", { module: "rfi", action: "approve", transition: "rfi.close", fields: impactFields });
+    }
   }
 };
 

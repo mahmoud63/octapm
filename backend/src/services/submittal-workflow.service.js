@@ -427,7 +427,8 @@ const onStatusChange = async ({ tx = prisma, orgId, projectId, existing = {}, up
   const patch = {};
   if (!updated || !tx.submittalStep?.findMany) return patch;
   const revision = updated.revisionNumber || 0;
-  if (updated.status === "under_review" && existing.status !== "under_review" && updated.workflowTemplateId) {
+  const entersReview = updated.status === "under_review" && existing.status !== "under_review";
+  if (entersReview && updated.workflowTemplateId) {
     const template = await tx.submittalWorkflowTemplate.findFirst({ where: { id: updated.workflowTemplateId, orgId } });
     if (template) {
       const currentSteps = await tx.submittalStep.findMany({ where: { submittalId: updated.id, revisionNumber: revision } });
@@ -445,6 +446,16 @@ const onStatusChange = async ({ tx = prisma, orgId, projectId, existing = {}, up
       patch.ballInCourtUserId = started.first.ballInCourtUserId;
       patch.pendingStepNotification = { step: started.first.step };
     }
+  }
+  // A new review cycle starts with no outcome: the last cycle's code does not
+  // carry into it, with or without a review route (found reproducing review
+  // finding R3 — a submittal returned "Rejected", resubmitted and approved
+  // kept the "Rejected" code, and its approval went out under that label).
+  // A code set together with the new cycle stays.
+  if (entersReview && existing.status && patch.responseCode === undefined && updated.responseCode && updated.responseCode === existing.responseCode) {
+    await tx.submittal.update({ where: { id: updated.id }, data: { responseCode: null, responseCodeLabel: null } });
+    patch.responseCode = null;
+    patch.responseCodeLabel = null;
   }
   if (["approved", "resubmit", "rejected"].includes(updated.status) && existing.status !== updated.status) {
     await tx.submittalStep.updateMany({ where: { submittalId: updated.id, revisionNumber: revision, status: { in: [STEP_STATUS.PENDING, STEP_STATUS.ACTIVE] } }, data: { status: STEP_STATUS.SKIPPED, completedAt: new Date() } });
@@ -487,12 +498,24 @@ const afterStatusChange = async ({ orgId, projectId, submittal, patch = {}, acto
 // ─── Decisions ────────────────────────────────────────────────────────────
 
 /**
+ * The reviewers the submittal's own review route named — a step assignment in
+ * any of its review cycles — reach it whatever their company's routing (review
+ * finding R4: a consultant assigned through a party-role step, no reviewing
+ * party on the record, was asked to review a submittal it could then neither
+ * open nor decide in its package). Review routes are the project team's to set
+ * (finding X-PARTY-2), so an assignment is the team's own grant.
+ */
+const isStepReviewer = (record, viewerId) =>
+  Boolean(viewerId) && (record?.steps || []).some((step) => (step.assignments || []).some((row) => row.userId === viewerId));
+
+/**
  * With the caller's `projectAccess` the party routing the list applies is
  * applied to the record too: a party member opens only a submittal routed to
- * their company (certification findings L42 / FILES-X1). Internal callers —
- * a review step already decided by its assignee — pass none.
+ * their company, or one its review route names them on (certification
+ * findings L42 / FILES-X1, review finding R4). Internal callers — a review
+ * step already decided by its assignee — pass none.
  */
-const loadSubmittal = async ({ orgId, projectId, submittalId, projectAccess = null }, tx = prisma) => {
+const loadSubmittal = async ({ orgId, projectId, submittalId, projectAccess = null, viewerId = null }, tx = prisma) => {
   const project = await tx.project.findFirst({ where: { id: projectId, orgId }, select: { id: true, name: true } });
   if (!project) throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
   const submittal = await tx.submittal.findFirst({
@@ -506,7 +529,7 @@ const loadSubmittal = async ({ orgId, projectId, submittalId, projectAccess = nu
     },
   });
   if (!submittal) throw new HttpError(404, "SUBMITTAL_NOT_FOUND", "Submittal not found");
-  assertPartyWorkflowAccess({ projectAccess, record: submittal });
+  if (!isStepReviewer(submittal, viewerId)) assertPartyWorkflowAccess({ projectAccess, record: submittal });
   return { project, submittal };
 };
 
@@ -530,11 +553,14 @@ const normalizeDecision = (payload = {}) => {
 
 /**
  * A reviewer decides on the active step. Parallel steps need everyone;
- * the first rejection stops the step and sends the submittal back.
+ * the first rejection stops the step and sends the submittal back. The
+ * caller's routing is checked before anything about the submittal is told:
+ * a party member neither routed nor named on its review route gets the
+ * refusal the detail gives, whatever its status (review finding R11).
  */
-const decideStep = async ({ orgId, projectId, submittalId, payload = {}, userId = null, userRole = null }) => {
+const decideStep = async ({ orgId, projectId, submittalId, payload = {}, userId = null, userRole = null, projectAccess = null }) => {
   const { decision, responseCode, label, comment } = normalizeDecision(payload);
-  const { submittal } = await loadSubmittal({ orgId, projectId, submittalId });
+  const { submittal } = await loadSubmittal({ orgId, projectId, submittalId, projectAccess, viewerId: userId });
   if (submittal.status !== "under_review") throw new HttpError(409, "SUBMITTAL_NOT_UNDER_REVIEW", "Only submittals under review can be decided");
   const step = activeStepOf(submittal);
   if (!step) throw new HttpError(409, "SUBMITTAL_NO_ACTIVE_STEP", "This submittal has no active review step; use the approve / reject actions");
@@ -610,8 +636,8 @@ const decideStep = async ({ orgId, projectId, submittalId, payload = {}, userId 
 
 // ─── Detail ───────────────────────────────────────────────────────────────
 
-const getSubmittal = async ({ orgId, projectId, submittalId, projectAccess = null }) => {
-  const { submittal } = await loadSubmittal({ orgId, projectId, submittalId, projectAccess });
+const getSubmittal = async ({ orgId, projectId, submittalId, projectAccess = null, viewerId = null }) => {
+  const { submittal } = await loadSubmittal({ orgId, projectId, submittalId, projectAccess, viewerId });
   const [enriched] = await attachWorkflowDetailsToRecords({ projectId, recordType: RECORD_TYPES.SUBMITTAL, records: [submittal] });
   const now = new Date();
   const distribution = distributionIds(submittal);
@@ -643,7 +669,7 @@ const getSubmittal = async ({ orgId, projectId, submittalId, projectAccess = nul
 // ─── Packages ─────────────────────────────────────────────────────────────
 
 const packageInclude = {
-  submittals: { select: { id: true, ref: true, title: true, status: true, revision: true, revisionNumber: true, responseCode: true, responseCodeLabel: true, currentStepId: true, ballInCourtUserId: true, dueDate: true, ownerPartyId: true, reviewerPartyId: true, approverPartyId: true }, orderBy: { ref: "asc" } },
+  submittals: { select: { id: true, ref: true, title: true, status: true, revision: true, revisionNumber: true, responseCode: true, responseCodeLabel: true, currentStepId: true, ballInCourtUserId: true, dueDate: true, ownerPartyId: true, reviewerPartyId: true, approverPartyId: true, steps: { select: { assignments: { select: { userId: true } } } } }, orderBy: { ref: "asc" } },
   managerUser: { select: { id: true, name: true, email: true } },
   activity: { select: { id: true, name: true, startDate: true } },
 };
@@ -654,9 +680,11 @@ const packageInclude = {
 // package only through the submittals routed to their company — the rule the
 // submittal list applies (certification findings L42 / FILES-X1: another
 // company's package was listed with every item, opened and edited). A package
-// the member made and has not filled yet stays theirs.
+// the member made and has not filled yet stays theirs. A submittal whose
+// review route names the member counts as theirs too (review finding R4).
 
-const routedToCaller = (projectAccess, record) => {
+const routedToCaller = (projectAccess, record, viewerId = null) => {
+  if (isStepReviewer(record, viewerId)) return true;
   try {
     assertPartyWorkflowAccess({ projectAccess, record });
     return true;
@@ -669,7 +697,7 @@ const routedToCaller = (projectAccess, record) => {
 /** The package as the caller may see it, or null when nothing in it is theirs. */
 const packageForCaller = (row, { projectAccess = null, viewerId = null } = {}) => {
   if (!row || !isPartyScopedAccess(projectAccess)) return row;
-  const submittals = (row.submittals || []).filter((item) => routedToCaller(projectAccess, item));
+  const submittals = (row.submittals || []).filter((item) => routedToCaller(projectAccess, item, viewerId));
   if (!submittals.length && !(viewerId && row.createdBy === viewerId)) return null;
   return { ...row, submittals };
 };
@@ -678,7 +706,9 @@ const packageForCaller = (row, { projectAccess = null, viewerId = null } = {}) =
 const packageVisibilityWhere = ({ projectAccess = null, viewerId = null } = {}) => {
   if (!isPartyScopedAccess(projectAccess)) return {};
   const routed = { submittals: { some: applyPartyWorkflowVisibility({}, projectAccess) } };
-  return { OR: viewerId ? [routed, { createdBy: viewerId }] : [routed] };
+  if (!viewerId) return { OR: [routed] };
+  const reviewing = { submittals: { some: { steps: { some: { assignments: { some: { userId: viewerId } } } } } } };
+  return { OR: [routed, { createdBy: viewerId }, reviewing] };
 };
 
 const packageStatusFor = (submittals) => {
@@ -701,8 +731,8 @@ const serializePackage = (row) => ({
   requiredOnSite: toIso(row.requiredOnSite),
   managerUserId: row.managerUserId,
   manager: person(row.managerUser),
-  // The routing fields serve packageForCaller; the answer keeps its shape.
-  items: (row.submittals || []).map(({ ownerPartyId, reviewerPartyId, approverPartyId, ...item }) => ({ ...item, dueDate: toIso(item.dueDate), responseCodeLabel: item.responseCodeLabel || (item.responseCode ? RESPONSE_CODES[item.responseCode] : null) })),
+  // The routing fields and review steps serve packageForCaller; the answer keeps its shape.
+  items: (row.submittals || []).map(({ ownerPartyId, reviewerPartyId, approverPartyId, steps, ...item }) => ({ ...item, dueDate: toIso(item.dueDate), responseCodeLabel: item.responseCodeLabel || (item.responseCode ? RESPONSE_CODES[item.responseCode] : null) })),
   summary: {
     total: (row.submittals || []).length,
     underReview: (row.submittals || []).filter((item) => item.status === "under_review").length,
@@ -934,7 +964,7 @@ const decidePackage = async ({ orgId, projectId, packageId, payload = {}, userId
       continue;
     }
     try {
-      await decideStep({ orgId, projectId, submittalId: item.id, payload, userId, userRole });
+      await decideStep({ orgId, projectId, submittalId: item.id, payload, userId, userRole, projectAccess });
       results.push({ submittalId: item.id, ref: item.ref, decided: true });
     } catch (error) {
       results.push({ submittalId: item.id, ref: item.ref, decided: false, error: error?.code || error?.message || "failed" });

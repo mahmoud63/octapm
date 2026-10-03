@@ -251,6 +251,77 @@ describe("submittal workflow", () => {
     });
   });
 
+  describe("review-step reviewers and the decide route (review findings R4, R11)", () => {
+    // The consultant's party is not on the record: it was assigned through a party-role step.
+    const consultant = { scope: "party", role: "external_party", assignmentRole: null, partyAccess: [{ projectPartyId: "party-c", role: "consultant" }] };
+    const routedElsewhere = (overrides = {}) => submittal({ ownerPartyId: "party-x", reviewerPartyId: null, approverPartyId: null, ...overrides });
+
+    it("opens a submittal to a reviewer its review route names, and to nobody else outside its routing", async () => {
+      mockPrisma.submittal.findFirst.mockResolvedValue(routedElsewhere());
+      await expect(service.getSubmittal({ orgId: "org-1", projectId: "project-1", submittalId: "sub-1", projectAccess: consultant, viewerId: "user-arch" })).resolves.toMatchObject({ id: "sub-1", activeStep: expect.objectContaining({ id: "step-2" }) });
+      await expect(service.getSubmittal({ orgId: "org-1", projectId: "project-1", submittalId: "sub-1", projectAccess: consultant, viewerId: "user-other" })).rejects.toMatchObject({ code: "PROJECT_PARTY_RECORD_ACCESS_DENIED", status: 403 });
+      await expect(service.getSubmittal({ orgId: "org-1", projectId: "project-1", submittalId: "sub-1", projectAccess: consultant })).rejects.toMatchObject({ code: "PROJECT_PARTY_RECORD_ACCESS_DENIED" });
+    });
+
+    it("refuses an unrouted, unassigned party member's decision the same whatever the status, before anything is written", async () => {
+      for (const overrides of [{ status: "pending", steps: [] }, { status: "under_review", steps: [] }, { status: "under_review" }]) {
+        mockPrisma.submittal.findFirst.mockResolvedValue(routedElsewhere(overrides));
+        await expect(service.decideStep({ orgId: "org-1", projectId: "project-1", submittalId: "sub-1", payload: { decision: "approve" }, userId: "user-other", userRole: "external_party", projectAccess: consultant })).rejects.toMatchObject({ code: "PROJECT_PARTY_RECORD_ACCESS_DENIED", status: 403 });
+      }
+      expect(mockPrisma.submittalStepAssignment.update).not.toHaveBeenCalled();
+      expect(mockPrisma.submittalStepAssignment.create).not.toHaveBeenCalled();
+      // internal callers keep the plain answers
+      mockPrisma.submittal.findFirst.mockResolvedValue(routedElsewhere({ status: "pending", steps: [] }));
+      await expect(service.decideStep({ orgId: "org-1", projectId: "project-1", submittalId: "sub-1", payload: { decision: "approve" }, userId: "user-pm", userRole: "pm", projectAccess: { scope: "assignment", assignmentRole: "pm", partyAccess: [] } })).rejects.toMatchObject({ code: "SUBMITTAL_NOT_UNDER_REVIEW" });
+    });
+
+    it("lets the named reviewer decide alone and in a package, with the party access the routes send", async () => {
+      mockPrisma.submittal.findFirst.mockResolvedValue(routedElsewhere());
+      await service.decideStep({ orgId: "org-1", projectId: "project-1", submittalId: "sub-1", payload: { decision: "approve" }, userId: "user-arch", userRole: "external_party", projectAccess: consultant });
+      expect(mockPrisma.submittalStepAssignment.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "asg-user-arch" } }));
+
+      jest.clearAllMocks();
+      const item = { id: "sub-1", ref: "SUB-004", status: "under_review", ownerPartyId: "party-x", reviewerPartyId: null, approverPartyId: null, steps: [{ assignments: [{ userId: "user-arch" }] }] };
+      const other = { id: "sub-9", ref: "SUB-009", status: "under_review", ownerPartyId: "party-x", reviewerPartyId: null, approverPartyId: null, steps: [{ assignments: [{ userId: "user-eng" }] }] };
+      mockPrisma.submittalPackage.findFirst.mockResolvedValue({ id: "pkg-1", projectId: "project-1", ref: "PKG-001", name: "Facade", status: "submitted", createdBy: "user-site", submittals: [item, other], managerUser: null, activity: null });
+      mockPrisma.submittal.findFirst.mockResolvedValue(routedElsewhere());
+      const decided = await service.decidePackage({ orgId: "org-1", projectId: "project-1", packageId: "pkg-1", payload: { decision: "approve" }, userId: "user-arch", userRole: "external_party", projectAccess: consultant });
+      expect(decided.results).toEqual([{ submittalId: "sub-1", ref: "SUB-004", decided: true }]);
+      expect(decided.package.items.map((row) => row.id)).toEqual(["sub-1"]);
+      expect(decided.package.items[0]).not.toHaveProperty("steps");
+      await expect(service.getPackage({ orgId: "org-1", projectId: "project-1", packageId: "pkg-1", projectAccess: consultant, viewerId: "user-nobody" })).rejects.toMatchObject({ code: "PROJECT_PARTY_RECORD_ACCESS_DENIED" });
+    });
+
+    it("lists a package to the reviewer its items name", async () => {
+      mockPrisma.submittalPackage.findMany.mockResolvedValue([]);
+      await service.listPackages({ orgId: "org-1", projectId: "project-1", projectAccess: consultant, viewerId: "user-arch" });
+      const where = mockPrisma.submittalPackage.findMany.mock.calls[0][0].where;
+      expect(where.OR).toEqual(expect.arrayContaining([{ createdBy: "user-arch" }, { submittals: { some: { steps: { some: { assignments: { some: { userId: "user-arch" } } } } } } }]));
+    });
+  });
+
+  describe("a new review cycle carries no response code of the last one (found reproducing review finding R3)", () => {
+    it("clears the last cycle's code when a returned submittal is sent again, with or without a review route", async () => {
+      for (const workflowTemplateId of [null, "tpl-1"]) {
+        jest.clearAllMocks();
+        mockPrisma.submittalStep.findMany.mockResolvedValue([]);
+        const existing = submittal({ status: "rejected", responseCode: "rejected", responseCodeLabel: "Rejected", workflowTemplateId, steps: [] });
+        const patch = await service.onStatusChange({ orgId: "org-1", projectId: "project-1", existing, updated: { ...existing, status: "under_review" } });
+        expect(patch).toMatchObject({ responseCode: null, responseCodeLabel: null });
+        expect(mockPrisma.submittal.update).toHaveBeenCalledWith({ where: { id: "sub-1" }, data: { responseCode: null, responseCodeLabel: null } });
+      }
+    });
+
+    it("keeps a code set together with the new cycle, and touches nothing on creation or within a cycle", async () => {
+      const existing = submittal({ status: "rejected", responseCode: "rejected", workflowTemplateId: null, steps: [] });
+      expect(await service.onStatusChange({ orgId: "org-1", projectId: "project-1", existing, updated: { ...existing, status: "under_review", responseCode: "approved_as_noted" } })).not.toHaveProperty("responseCode");
+      expect(await service.onStatusChange({ orgId: "org-1", projectId: "project-1", existing: {}, updated: { ...existing, status: "under_review" } })).not.toHaveProperty("responseCode");
+      const inReview = submittal({ responseCode: "custom", workflowTemplateId: null });
+      expect(await service.onStatusChange({ orgId: "org-1", projectId: "project-1", existing: inReview, updated: { ...inReview } })).toEqual({});
+      expect(mockPrisma.submittal.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe("review routes are the project team's (certification finding X-PARTY-2)", () => {
     const partyX = { scope: "party", role: "external_party", assignmentRole: null, partyAccess: [{ projectPartyId: "party-x", role: "consultant" }] };
     const staff = { scope: "assignment", role: "planning_eng", assignmentRole: "planning_eng", partyAccess: [] };

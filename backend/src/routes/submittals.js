@@ -308,7 +308,7 @@ router.get(
   "/:submittalId",
   requirePermission("submittal", "read"),
   [param("submittalId").isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.getSubmittal({ ...scope(req), submittalId: req.params.submittalId, projectAccess: req.projectAccess }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.getSubmittal({ ...partyScope(req), submittalId: req.params.submittalId }))),
 );
 
 router.post(
@@ -316,7 +316,7 @@ router.post(
   requirePermission("submittal", "submit", { transition: "submittal.review" }),
   [param("submittalId").isUUID(), ...decisionValidators, validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(res, await submittalWorkflow.decideStep({ ...scope(req), submittalId: req.params.submittalId, payload: req.body, userId: req.user.id, userRole: getEffectiveRole(req) })),
+    sendSuccess(res, await submittalWorkflow.decideStep({ ...scope(req), submittalId: req.params.submittalId, payload: req.body, ...actorArgs(req) })),
   ),
 );
 
@@ -337,7 +337,7 @@ router.put(
       payload: { managerUserId: req.body.managerUserId, distributionUserIds: req.body.distributionUserIds, comment: "People updated" },
       ...actorArgs(req),
     });
-    return sendSuccess(res, await submittalWorkflow.getSubmittal({ ...scope(req), submittalId: req.params.submittalId, projectAccess: req.projectAccess }));
+    return sendSuccess(res, await submittalWorkflow.getSubmittal({ ...partyScope(req), submittalId: req.params.submittalId }));
   }),
 );
 
