@@ -8,11 +8,12 @@ const { HttpError } = require("../utils/http-error");
 const { uploadLimiter } = require("../middleware/rate-limit");
 const { body, param, query } = require("express-validator");
 const { authenticate } = require("../middleware/auth");
-const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
+const { getEffectiveRole, hasPermission, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const fileStorageService = require("../services/file-storage.service");
 const {
   approveDocumentRevision,
+  assertRevisionFilingAllowed,
   getDocControlDashboard,
   getRevisionDownloadFile,
   getRevisionPreviewFile,
@@ -27,6 +28,19 @@ router.use(authenticate);
 
 const DOCUMENT_RECORD_TYPES = ["rfi", "submittal", "drawing", "transmittal"];
 const REGISTER_RECORD_TYPES = [...DOCUMENT_RECORD_TYPES, "correspondence"];
+
+// Who reads or files through document control: the caller's own module
+// decisions and approve right, and the project access whose parties route
+// RFIs and submittals — the service filters and refuses by it
+// (certification L23, FILES-X2).
+const readerFor = (req) => ({
+  userId: req.user.id,
+  projectAccess: req.projectAccess || {},
+  canRead: (moduleName) => hasPermission(req, moduleName, "read"),
+  mayApprove: hasPermission(req, "document_control", "approve", {
+    transition: "document.revision.approve",
+  }),
+});
 
 const safeDownloadName = (value) =>
   String(value || "document")
@@ -94,6 +108,7 @@ router.get(
     const data = await getDocControlDashboard({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
+      reader: readerFor(req),
     });
 
     return sendSuccess(res, data);
@@ -117,6 +132,7 @@ router.get(
       projectId: req.params.projectId,
       query: req.query,
       userRole: getEffectiveRole(req),
+      reader: readerFor(req),
     });
 
     return sendSuccess(res, data);
@@ -195,6 +211,7 @@ router.post(
       payload: req.body,
       userId: req.user.id,
       userRole: getEffectiveRole(req),
+      reader: readerFor(req),
     });
 
     return sendSuccess(res, row, 201);
@@ -215,6 +232,18 @@ router.post(
         throw new HttpError(400, "NO_FILE", "No revision file uploaded");
       }
 
+      // refused before the file is stored: a record not routed to the
+      // caller, or a status the caller may not set (certification FILES-X2)
+      const reader = readerFor(req);
+      await assertRevisionFilingAllowed({
+        orgId: req.user.orgId,
+        projectId: req.params.projectId,
+        recordType: req.params.recordType,
+        recordId: req.params.recordId,
+        payload: req.body,
+        reader,
+      });
+
       const uploaded = await fileStorageService.uploadDocumentControlFile({
         orgId: req.user.orgId,
         projectId: req.params.projectId,
@@ -233,6 +262,8 @@ router.post(
         },
         userId: req.user.id,
         userRole: getEffectiveRole(req),
+        reader,
+        storedForFiler: true,
       });
 
       return sendSuccess(
@@ -278,6 +309,7 @@ router.post(
       reviewDueAt: req.body.reviewDueAt,
       userId: req.user.id,
       userRole: getEffectiveRole(req),
+      reader: readerFor(req),
     });
 
     return sendSuccess(res, row);
@@ -306,6 +338,7 @@ router.post(
       comment: req.body.comment,
       userId: req.user.id,
       userRole: getEffectiveRole(req),
+      reader: readerFor(req),
     });
 
     return sendSuccess(res, row);
@@ -330,6 +363,7 @@ router.post(
       reason: req.body.reason,
       userId: req.user.id,
       userRole: getEffectiveRole(req),
+      reader: readerFor(req),
     });
 
     return sendSuccess(res, row);
@@ -348,6 +382,7 @@ router.get(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
       accessAction: "downloaded",
+      reader: readerFor(req),
     });
 
     return sendRevisionFile(res, file, "attachment");
@@ -366,6 +401,7 @@ router.get(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
       accessAction: "previewed",
+      reader: readerFor(req),
     });
 
     return sendRevisionFile(res, file, "inline");

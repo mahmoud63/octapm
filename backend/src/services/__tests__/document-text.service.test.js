@@ -18,6 +18,8 @@ const mockPrisma = {
     update: jest.fn(),
     findMany: jest.fn(),
   },
+  // evidence filed by reference is a link the visibility rule reads (certification L2, L24)
+  workflowAttachment: { findMany: jest.fn(async () => []) },
 };
 const mockFileStorage = {
   DOCUMENT_TYPES: { SITE_PHOTO: "site_photo", WORKFLOW_ATTACHMENT: "workflow_attachment" },
@@ -40,7 +42,8 @@ jest.mock("../file-storage.service", () => mockFileStorage);
 jest.mock("../../jobs/job.service", () => mockJobs);
 jest.mock("../embedding.service", () => mockEmbeddings);
 jest.mock("../attachment.service", () => ({
-  RECORD_TYPE_MODULES: { rfi: "rfi", ipc: "ipc", ncr: "ncr" },
+  // commitment and sub_pay_app as attachment.service maps them: an executed agreement and a lien waiver are read under them (certification L24)
+  RECORD_TYPE_MODULES: { rfi: "rfi", ipc: "ipc", ncr: "ncr", commitment: "commitment", sub_pay_app: "sub_pay_app" },
 }));
 
 const service = require("../document-text.service");
@@ -407,5 +410,91 @@ describe("Phase 21D — integrity (release challenge, fourteenth pass)", () => {
     expect(mockPrisma.commitmentChangeOrder.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["cco-b"] }, OR: [{ commitment: { OR: [{ vendorCompanyId: { in: ["co-a"] } }, { createdBy: "u" }] } }] } }));
     mockPrisma.commitmentChangeOrder.findMany.mockResolvedValue([{ id: "cco-b" }]); // parent is the party's
     expect(service.documentVisible(doc, party, await service.recordRuleVisibleIds({ documents: [doc], viewer: party }))).toBe(true);
+  });
+});
+
+describe("certification L2, L23, L24 — every place a document is filed is a link to its record", () => {
+  afterEach(() => {
+    delete mockPrisma.commitment;
+    delete mockPrisma.rfi;
+    delete mockPrisma.photo;
+    mockPrisma.workflowAttachment.findMany.mockResolvedValue([]);
+  });
+  const doc = (over = {}) => ({ id: "doc-1", projectId: "project-1", orgId: "org-1", storageKey: "key-1", documentType: "workflow_attachment", originalName: "x.pdf", fileName: "x.pdf", mimeType: "application/pdf", uploadedAt: new Date(), text: null, documentRevisions: [], attachments: [], ...over });
+  const staff = (modules) => ({ userId: "u-1", canRead: (moduleName) => modules.includes(moduleName) });
+  const party = { userId: "sub-b", canRead: () => true, partyIds: ["party-b"], companyIds: ["co-b"] };
+
+  it("L24: a file of a tool of its own follows that tool — the uploaded bill needs the BOQ, a generation source the schedule and the BOQ", () => {
+    const bill = doc({ documentType: "boq_upload" });
+    expect(service.documentVisible(bill, staff(["document_control"]), new Set())).toBe(false);
+    expect(service.documentVisible(bill, staff(["boq"]), new Set())).toBe(true);
+    const source = doc({ documentType: "schedule_generation_source" });
+    expect(service.documentVisible(source, staff(["schedule", "document_control"]), new Set())).toBe(false);
+    expect(service.documentVisible(source, staff(["schedule", "boq"]), new Set())).toBe(true);
+  });
+
+  it("L24: an executed agreement follows its commitment — the module, and the vendor rule for a party; a file linked from nowhere stays under document control", async () => {
+    const agreement = doc({ commitmentsExecuted: [{ id: "c-1" }] });
+    expect(service.documentVisible(agreement, staff(["document_control"]), new Set())).toBe(false);
+    expect(service.documentVisible(agreement, staff(["commitment"]), new Set())).toBe(true);
+    mockPrisma.commitment = { findMany: jest.fn(async () => []) }; // another vendor's
+    expect(service.documentVisible(agreement, party, await service.recordRuleVisibleIds({ documents: [agreement], viewer: party }))).toBe(false);
+    expect(mockPrisma.commitment.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: { in: ["c-1"] }, OR: expect.arrayContaining([{ vendorCompanyId: { in: ["co-b"] } }]) }) }));
+    mockPrisma.commitment.findMany.mockResolvedValue([{ id: "c-1" }]); // the party's own company is the vendor
+    expect(service.documentVisible(agreement, party, await service.recordRuleVisibleIds({ documents: [agreement], viewer: party }))).toBe(true);
+    expect(service.documentVisible(doc(), staff(["document_control"]), new Set())).toBe(true);
+    expect(service.documentVisible(doc(), staff(["commitment"]), new Set())).toBe(false);
+  });
+
+  it("L24: a lien waiver, commercial evidence and the document's own pointer are links; the pointer does not repeat a link a table gives", () => {
+    const waiver = doc({ subPayAppWaivers: [{ id: "spa-1" }] });
+    expect(service.documentVisible(waiver, staff(["document_control"]), new Set())).toBe(false);
+    expect(service.documentVisible(waiver, staff(["sub_pay_app"]), new Set())).toBe(true);
+    const evidence = doc({ commercialAttachmentRefs: [{ recordType: "eot_claim", recordId: "eot-1" }] });
+    expect(service.documentVisible(evidence, staff(["document_control"]), new Set())).toBe(false);
+    expect(service.documentVisible(evidence, staff(["eot"]), new Set())).toBe(true);
+    const pointed = doc({ linkedEntityType: "ncr", linkedEntityId: "ncr-1" }); // e.g. a photo filed on a record by its pointer only
+    expect(service.documentVisible(pointed, staff(["document_control"]), new Set())).toBe(false);
+    expect(service.documentVisible(pointed, staff(["ncr"]), new Set())).toBe(true);
+    expect(service.documentLinks(doc({ linkedEntityType: "rfi", linkedEntityId: "r-1", documentRevisions: [{ recordType: "rfi", recordId: "r-1" }] }))).toEqual([
+      { recordType: "rfi", recordId: "r-1", modules: ["document_control", "rfi"] },
+    ]);
+  });
+
+  it("L23: a document-control revision follows its record — the RFI's routing for a party, the RFI's module besides document control", async () => {
+    const revisionDoc = doc({ documentRevisions: [{ id: "rev-1", recordType: "rfi", recordId: "rfi-x", revision: "A", isLatest: false }] });
+    mockPrisma.rfi = { findMany: jest.fn(async () => []) }; // routed to other parties
+    expect(service.documentVisible(revisionDoc, party, await service.recordRuleVisibleIds({ documents: [revisionDoc], viewer: party }))).toBe(false);
+    mockPrisma.rfi.findMany.mockResolvedValue([{ id: "rfi-x" }]); // routed to the reader's party
+    expect(service.documentVisible(revisionDoc, party, await service.recordRuleVisibleIds({ documents: [revisionDoc], viewer: party }))).toBe(true);
+    expect(service.documentVisible(revisionDoc, staff(["document_control"]), new Set())).toBe(false);
+    expect(service.documentVisible(revisionDoc, staff(["document_control", "rfi"]), new Set())).toBe(true);
+  });
+
+  it("L2/L24: evidence filed by reference (WorkflowAttachment) is found by the document's id or storage key and follows its record", async () => {
+    mockPrisma.projectDocument.findMany.mockResolvedValue([doc()]);
+    mockPrisma.workflowAttachment.findMany.mockResolvedValue([{ projectId: "project-1", recordType: "ncr", recordId: "ncr-1", storageKey: "key-1" }]);
+    const scope = { orgId: "org-1", projectId: "project-1" };
+    expect((await service.readableDocumentIds({ ...scope, documentIds: ["doc-1"], viewer: staff(["document_control"]) })).has("doc-1")).toBe(false);
+    expect(mockPrisma.workflowAttachment.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { projectId: { in: ["project-1"] }, storageKey: { in: ["doc-1", "key-1"] } } }));
+    expect(await service.documentReadableToViewer({ ...scope, documentId: "doc-1", viewer: staff(["ncr"]) })).toBe(true);
+    expect(await service.documentReadableToViewer({ ...scope, documentId: "doc-1", viewer: staff(["document_control"]) })).toBe(false);
+  });
+
+  it("L2: a job on a document the viewer may not read comes without its payload and result; a job on a readable one and other jobs are untouched", async () => {
+    mockPrisma.photo = { findMany: jest.fn(async () => [{ id: "photo-1", documentId: "doc-2" }]) };
+    mockPrisma.projectDocument.findMany.mockResolvedValue([doc(), doc({ id: "doc-2", storageKey: "key-2", attachments: [{ recordType: "ncr", recordId: "n-1", role: "photo" }] })]);
+    const jobs = [
+      { id: "j1", type: "document.extract", payload: { documentId: "doc-1", force: false }, result: { status: "ready" }, error: null },
+      { id: "j2", type: "photo.thumbnail", payload: { photoId: "photo-1" }, result: { thumbnailDocumentId: "t-1" }, error: { code: "X", message: "m", details: { documentId: "doc-2" } } },
+      { id: "j3", type: "boq.parse", payload: { documentId: "doc-9" }, result: { rows: 3 }, error: null },
+    ];
+    const out = await service.withheldDocumentJobs({ orgId: "org-1", projectId: "project-1", jobs, viewer: staff(["document_control"]) });
+    expect(out[0]).toBe(jobs[0]); // linked from nowhere: document control reads it
+    expect(out[1]).toMatchObject({ id: "j2", payload: {}, result: null, error: { code: "X", details: null }, payloadWithheld: { keys: ["photoId"] } });
+    expect(out[2]).toBe(jobs[2]); // not a document job
+    expect(mockPrisma.photo.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["photo-1"] }, orgId: "org-1", projectId: "project-1" } }));
+    const reader = await service.withheldDocumentJobs({ orgId: "org-1", projectId: "project-1", jobs, viewer: staff(["document_control", "ncr"]) });
+    expect(reader[1]).toBe(jobs[1]);
   });
 });

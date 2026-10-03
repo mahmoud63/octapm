@@ -40,6 +40,14 @@ const mockJobService = {
 
 jest.mock("../../jobs/job.service", () => mockJobService);
 
+// A job on a document is withheld by document-text.service (certification L2);
+// here it passes every job through unless a test says otherwise.
+const mockWithheldDocumentJobs = jest.fn(async ({ jobs }) => jobs);
+jest.mock("../../services/document-text.service", () => ({
+  documentViewer: (viewer) => viewer,
+  withheldDocumentJobs: (...args) => mockWithheldDocumentJobs(...args),
+}));
+
 const jobsRouter = require("../jobs");
 
 const JOB_ID = "11111111-1111-4111-8111-111111111111";
@@ -190,5 +198,30 @@ describe("Phase 21D — integrity (release challenge, thirteenth pass)", () => {
     mockJobService.getJob.mockResolvedValue({ id: JOB_ID, type: "something.new" });
     expect((await request(app).get(`/projects/${P}/jobs/${JOB_ID}`).set("x-role", "pm")).status).toBe(404);
     expect((await request(app).post(`/projects/${P}/jobs/${JOB_ID}/cancel`).set("x-role", "pm")).status).toBe(403);
+  });
+});
+
+describe("certification L2 — a job on a document carries it only to a reader of that document", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("the list and one job go through the document rule with the caller's own viewer, and answer what it returns", async () => {
+    const app = buildApp();
+    const P = "22222222-2222-4222-8222-222222222222";
+    const extract = { id: JOB_ID, type: "document.extract", payload: { documentId: "doc-other-party" }, result: { status: "ready" } };
+    const withheld = { ...extract, payload: {}, result: null, payloadWithheld: { keys: ["documentId"], reason: "x" } };
+    mockWithheldDocumentJobs.mockImplementation(async ({ jobs }) => jobs.map((job) => (job.type === "document.extract" ? withheld : job)));
+    mockJobService.listJobs.mockResolvedValue({ items: [extract, { id: "b1", type: "bim.parse" }], summary: {} });
+    const list = await request(app).get(`/projects/${P}/jobs`).set("x-role", "site_engineer");
+    expect(list.status).toBe(200);
+    expect(list.body.data.items).toEqual([withheld, { id: "b1", type: "bim.parse" }]);
+    const [{ orgId, projectId, viewer }] = mockWithheldDocumentJobs.mock.calls[0];
+    expect({ orgId, projectId, userId: viewer.userId }).toEqual({ orgId: "org-1", projectId: P, userId: "user-1" });
+    expect(viewer.canRead("document_control")).toBe(true);
+    expect(viewer.canRead("commitment")).toBe(false); // the site engineer's own reads
+    mockJobService.getJob.mockResolvedValue(extract);
+    const one = await request(app).get(`/projects/${P}/jobs/${JOB_ID}`).set("x-role", "site_engineer");
+    expect(one.status).toBe(200);
+    expect(one.body.data).toEqual(withheld);
+    mockWithheldDocumentJobs.mockImplementation(async ({ jobs }) => jobs);
   });
 });

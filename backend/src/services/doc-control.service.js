@@ -292,7 +292,65 @@ const registerRowForRecord = ({ projectId, recordType, record, userRole }) => {
   };
 };
 
-const getRecord = async ({ tx = prisma, projectId, recordType, recordId }) => {
+/**
+ * Who reads or files through document control (certification L23, FILES-X2):
+ * `canRead(module)` and `mayApprove` are the caller's own permission
+ * decisions (role, project template, API-key scopes), `projectAccess` holds
+ * the parties that RFIs and submittals are routed between and `userId` the
+ * person a draft RFI belongs to. The routes pass one; a caller with no
+ * reader (the workflow engine acting on its own) is not filtered.
+ *
+ * Each record type is read under its own module and its own list's rule:
+ * an RFI under `rfi` — routed to one of the reader's parties when the reader
+ * is party-scoped, and a draft only by its creator or manager — a submittal
+ * under `submittal` and its routing, as GET /rfi and GET /submittals answer
+ * (rfi.service listRfis, submittal.service listSubmittals). The register,
+ * the dashboard and the revision download gave a subcontractor every RFI
+ * and submittal of the project, routed or not. Drawings, transmittals and
+ * correspondence carry no party routing and are read under document
+ * control, as their own lists are (routes/drawings.js, transmittals.js,
+ * correspondence.js).
+ */
+const READ_MODULE_BY_RECORD_TYPE = Object.freeze({
+  [RECORD_TYPES.RFI]: "rfi",
+  [RECORD_TYPES.SUBMITTAL]: "submittal",
+  [RECORD_TYPES.DRAWING]: "document_control",
+  [RECORD_TYPES.TRANSMITTAL]: "document_control",
+  [RECORD_TYPES.CORRESPONDENCE]: "document_control",
+});
+
+const readerMayReadType = (reader, recordType) =>
+  !reader?.canRead ||
+  reader.canRead(READ_MODULE_BY_RECORD_TYPE[recordType] || "document_control");
+
+const visibleRecordWhere = ({ reader, recordType, where }) => {
+  if (!reader) return where;
+  // Lazy: both services reach the workflow layer this one is part of.
+  const { applyPartyWorkflowVisibility } = require("./company-party.service");
+  if (recordType === RECORD_TYPES.RFI) {
+    const { withDraftVisibility } = require("./rfi-workflow.service");
+    return withDraftVisibility(
+      applyPartyWorkflowVisibility(where, reader.projectAccess || {}),
+      reader.userId || null,
+    );
+  }
+  if (recordType === RECORD_TYPES.SUBMITTAL) {
+    return applyPartyWorkflowVisibility(where, reader.projectAccess || {});
+  }
+  return where;
+};
+
+const recordNotFound = () =>
+  new HttpError(
+    404,
+    "DOCUMENT_RECORD_NOT_FOUND",
+    "Linked document-control record was not found",
+  );
+
+const revisionNotFound = () =>
+  new HttpError(404, "DOCUMENT_REVISION_NOT_FOUND", "Document revision not found");
+
+const getRecord = async ({ tx = prisma, projectId, recordType, recordId, reader = null }) => {
   const delegate = RECORD_DELEGATES[recordType];
   if (!delegate || !tx[delegate]?.findFirst) {
     throw new HttpError(
@@ -302,19 +360,47 @@ const getRecord = async ({ tx = prisma, projectId, recordType, recordId }) => {
     );
   }
 
+  // a record the reader may not read is answered as one that does not exist
+  if (!readerMayReadType(reader, recordType)) throw recordNotFound();
+
   const record = await tx[delegate].findFirst({
-    where: { id: recordId, projectId },
+    where: visibleRecordWhere({ reader, recordType, where: { id: recordId, projectId } }),
   });
 
-  if (!record) {
-    throw new HttpError(
-      404,
-      "DOCUMENT_RECORD_NOT_FOUND",
-      "Linked document-control record was not found",
-    );
-  }
+  if (!record) throw recordNotFound();
 
   return record;
+};
+
+/**
+ * The record a revision belongs to, for a reader: a revision of a record the
+ * reader may not see is answered as a revision that does not exist.
+ */
+const getRevisionRecord = async ({ projectId, revision, reader = null }) => {
+  try {
+    return await getRecord({
+      projectId,
+      recordType: revision.recordType,
+      recordId: revision.recordId,
+      reader,
+    });
+  } catch (error) {
+    if (reader && error?.code === "DOCUMENT_RECORD_NOT_FOUND") throw revisionNotFound();
+    throw error;
+  }
+};
+
+/**
+ * Whether a reader may receive a revision's file: the record's module, and
+ * for an RFI or a submittal its routing — the register's own rule. Drawings,
+ * transmittals and correspondence have no rule beyond the route's document
+ * control read, so their record is not looked up.
+ */
+const assertRevisionRecordVisible = async ({ projectId, revision, reader = null }) => {
+  if (!reader) return;
+  if (!readerMayReadType(reader, revision.recordType)) throw revisionNotFound();
+  if (![RECORD_TYPES.RFI, RECORD_TYPES.SUBMITTAL].includes(revision.recordType)) return;
+  await getRevisionRecord({ projectId, revision, reader });
 };
 
 const assertRevisionActionType = (recordType) => {
@@ -390,17 +476,25 @@ const revisionSummary = (revision) => ({
   fileName: revision.fileName || null,
 });
 
-const getDocControlDashboard = async ({ orgId, projectId }) => {
+/** The records of one register type this reader may see (READ_MODULE_BY_RECORD_TYPE, visibleRecordWhere). */
+const findVisibleRecords = async ({ projectId, recordType, reader = null, orderBy }) => {
+  if (!readerMayReadType(reader, recordType)) return [];
+  return prisma[RECORD_DELEGATES[recordType]].findMany({
+    where: visibleRecordWhere({ reader, recordType, where: { projectId } }),
+    ...(orderBy ? { orderBy } : {}),
+  });
+};
+
+const getDocControlDashboard = async ({ orgId, projectId, reader = null }) => {
   await ensureProject({ orgId, projectId });
 
+  // the metrics count only the records this reader may see (certification L23)
   const [rfis, submittals, drawings, transmittals, correspondence] =
-    await Promise.all([
-      prisma.rfi.findMany({ where: { projectId } }),
-      prisma.submittal.findMany({ where: { projectId } }),
-      prisma.drawingRecord.findMany({ where: { projectId } }),
-      prisma.transmittal.findMany({ where: { projectId } }),
-      prisma.correspondence.findMany({ where: { projectId } }),
-    ]);
+    await Promise.all(
+      REGISTER_RECORD_TYPES.map((recordType) =>
+        findVisibleRecords({ projectId, recordType, reader }),
+      ),
+    );
 
   const now = Date.now();
   const avgRfiTurnaroundDays = (() => {
@@ -457,6 +551,7 @@ const listDocumentRegister = async ({
   projectId,
   query = {},
   userRole = null,
+  reader = null,
 }) => {
   await ensureProject({ orgId, projectId });
 
@@ -466,11 +561,13 @@ const listDocumentRegister = async ({
       ? [requestedType]
       : REGISTER_RECORD_TYPES;
 
+  // only the records this reader may see, each under its own list's rule (certification L23)
   const recordSets = await Promise.all(
     recordTypes.map(async (recordType) => {
-      const delegate = RECORD_DELEGATES[recordType];
-      const records = await prisma[delegate].findMany({
-        where: { projectId },
+      const records = await findVisibleRecords({
+        projectId,
+        recordType,
+        reader,
         orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
       });
       return attachWorkflowDetailsToRecords({
@@ -560,6 +657,74 @@ const listDocumentRegister = async ({
   };
 };
 
+const REVISION_FILING_STATUSES = ["uploaded", "submitted", "approved"];
+
+/**
+ * Whether this reader may file a revision on this record, with the status it
+ * asks for (certification FILES-X2) — checked before a file is stored, and
+ * again when the revision is written. The record must be one the reader may
+ * see (its module and, for an RFI or a submittal, its routing): a
+ * subcontractor filed a revision on an RFI routed between two other parties.
+ * A revision is filed "approved" only by someone who may approve revisions
+ * (document_control approve, document.revision.approve): a submitter filed
+ * one already approved, past the approve route that refuses them.
+ */
+const assertRevisionFilingAllowed = async ({
+  orgId,
+  projectId,
+  recordType,
+  recordId,
+  payload = {},
+  reader = null,
+}) => {
+  assertRevisionActionType(recordType);
+  await ensureProject({ orgId, projectId });
+  const requestedStatus = trimOrNull(payload.status) || "uploaded";
+  if (!REVISION_FILING_STATUSES.includes(requestedStatus)) {
+    const invalid = new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      `A revision is filed as ${REVISION_FILING_STATUSES.join(", ")}`,
+    );
+    invalid.details = [{ field: "status", value: requestedStatus }];
+    throw invalid;
+  }
+  if (requestedStatus === "approved" && reader && !reader.mayApprove) {
+    const forbidden = new HttpError(
+      403,
+      "FORBIDDEN",
+      "Only someone who may approve revisions can file a revision as approved",
+    );
+    forbidden.details = {
+      module: "document_control",
+      action: "approve",
+      transition: "document.revision.approve",
+    };
+    throw forbidden;
+  }
+  const record = await getRecord({ projectId, recordType, recordId, reader });
+  return { record, requestedStatus };
+};
+
+/**
+ * A file named by id (the JSON route) becomes readable to everyone who may
+ * read the record once it is filed as a revision, so the filer must be able
+ * to read it already — the rule POST /attachments applies to documentIds. A
+ * file the route has just stored for the filer is theirs.
+ */
+const assertLinkedDocumentReadable = async ({ orgId, projectId, document, reader }) => {
+  if (!reader?.canRead) return;
+  const documentText = require("./document-text.service");
+  const viewer = documentText.documentViewer({
+    userId: reader.userId || null,
+    projectAccess: reader.projectAccess || {},
+    canRead: reader.canRead,
+  });
+  if (!(await documentText.documentReadableToViewer({ orgId, projectId, documentId: document.id, viewer }))) {
+    throw new HttpError(404, "FILE_NOT_FOUND", "Revision source file not found");
+  }
+};
+
 const uploadDocumentRevision = async ({
   orgId,
   projectId,
@@ -568,14 +733,24 @@ const uploadDocumentRevision = async ({
   payload,
   userId = null,
   userRole = null,
+  reader = null,
+  storedForFiler = false,
 }) => {
-  assertRevisionActionType(recordType);
-  await ensureProject({ orgId, projectId });
-  const record = await getRecord({ projectId, recordType, recordId });
+  const { record, requestedStatus } = await assertRevisionFilingAllowed({
+    orgId,
+    projectId,
+    recordType,
+    recordId,
+    payload,
+    reader,
+  });
   const document = await resolveProjectDocument({ orgId, projectId, payload });
+  if (!storedForFiler) {
+    await assertLinkedDocumentReadable({ orgId, projectId, document, reader });
+  }
   const revision = trimOrNull(payload.revision);
   const metadata = documentMetadataFromPayload({ payload, recordType, record });
-  const requestedStatus = trimOrNull(payload.status) || "uploaded";
+  const filedApproved = requestedStatus === "approved";
 
   if (!revision) {
     throw new HttpError(
@@ -621,6 +796,9 @@ const uploadDocumentRevision = async ({
         issuedAt: payload.issuedAt ? new Date(payload.issuedAt) : new Date(),
         submittedBy: requestedStatus === "submitted" ? userId || null : null,
         submittedAt: requestedStatus === "submitted" ? new Date() : null,
+        // filed approved by an approver: who approved it and when, as the approve route records
+        approvedBy: filedApproved ? userId || null : null,
+        approvedAt: filedApproved ? new Date() : null,
         reviewDueAt: metadata.reviewDueAt,
         notes: trimOrNull(payload.notes),
       },
@@ -708,6 +886,7 @@ const submitDocumentRevisionForReview = async ({
   reviewDueAt = null,
   userId = null,
   userRole = null,
+  reader = null,
 }) => {
   await ensureProject({ orgId, projectId });
   const existing = await prisma.documentRevision.findFirst({
@@ -721,6 +900,8 @@ const submitDocumentRevisionForReview = async ({
       "Document revision not found",
     );
   }
+  // a revision of a record routed to other parties is not this reader's to act on (certification FILES-X2)
+  await assertRevisionRecordVisible({ projectId, revision: existing, reader });
 
   if (statusLabel(existing.status) === "superseded") {
     throw new HttpError(
@@ -805,6 +986,7 @@ const approveDocumentRevision = async ({
   userId = null,
   userRole = null,
   viaWorkflow = false,
+  reader = null,
 }) => {
   await ensureProject({ orgId, projectId });
   const existing = await prisma.documentRevision.findFirst({
@@ -818,6 +1000,7 @@ const approveDocumentRevision = async ({
       "Document revision not found",
     );
   }
+  await assertRevisionRecordVisible({ projectId, revision: existing, reader });
 
   if (statusLabel(existing.status) === "superseded") {
     throw new HttpError(
@@ -925,6 +1108,7 @@ const supersedeDocumentRevision = async ({
   reason,
   userId = null,
   userRole = null,
+  reader = null,
 }) => {
   const supersedeReason = trimOrNull(reason);
   if (!supersedeReason) {
@@ -947,6 +1131,7 @@ const supersedeDocumentRevision = async ({
       "Document revision not found",
     );
   }
+  await assertRevisionRecordVisible({ projectId, revision: existing, reader });
 
   if (statusLabel(existing.status) === "superseded") {
     throw new HttpError(
@@ -1039,6 +1224,7 @@ const getRevisionFile = async ({
   userId = null,
   userRole = null,
   accessAction = null,
+  reader = null,
 }) => {
   await ensureProject({ orgId, projectId });
   const revision = await prisma.documentRevision.findFirst({
@@ -1053,6 +1239,10 @@ const getRevisionFile = async ({
     );
   }
 
+  // the file of a revision of an RFI or submittal routed to other parties is
+  // not served: the download and preview gave it to a subcontractor the RFI
+  // was not routed to (certification L23)
+  await assertRevisionRecordVisible({ projectId, revision, reader });
   assertRevisionReadableForRole({ revision, userRole });
 
   const key = revision.projectDocumentId || revision.storageKey;
@@ -1092,6 +1282,7 @@ const getRevisionDownloadFile = (params) => getRevisionFile(params);
 const getRevisionPreviewFile = (params) => getRevisionFile(params);
 
 module.exports = {
+  assertRevisionFilingAllowed,
   getDocControlDashboard,
   listDocumentRegister,
   uploadDocumentRevision,

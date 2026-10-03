@@ -47,6 +47,12 @@ const mockFileStorageService = {
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 jest.mock("../audit.service", () => mockAuditService);
 jest.mock("../file-storage.service", () => mockFileStorageService);
+// A file named by id is filed only by someone who may read it (certification FILES-X2).
+const mockDocumentReadableToViewer = jest.fn(async () => true);
+jest.mock("../document-text.service", () => ({
+  documentViewer: (viewer) => viewer,
+  documentReadableToViewer: (...args) => mockDocumentReadableToViewer(...args),
+}));
 
 const docControlService = require("../doc-control.service");
 
@@ -498,5 +504,114 @@ describe("document-control register and revision controls", () => {
       where: { id: "rev-1", projectId: "project-2" },
     });
     expect(mockFileStorageService.getWorkflowFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("certification L23 and FILES-X2 — the reader's routing, module and approve right", () => {
+  const scope = { orgId: "org-1", projectId: "project-1" };
+  const party = {
+    userId: "sub-b",
+    projectAccess: { scope: "party", partyAccess: [{ projectPartyId: "party-b", companyId: "co-b" }] },
+    canRead: () => true,
+    mayApprove: false,
+  };
+  const pm = { userId: "pm-1", projectAccess: { scope: "assignment", assignmentRole: "pm" }, canRead: () => true, mayApprove: true };
+  const routedTo = (where, partyId) => JSON.stringify(where).includes(`"ownerPartyId":{"in":["${partyId}"]}`);
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+    for (const model of ["rfi", "submittal", "drawingRecord", "transmittal", "correspondence"]) mockPrisma[model].findMany.mockResolvedValue([]);
+    mockPrisma.workflowAttachment.findMany.mockResolvedValue([]);
+    mockPrisma.workflowStatusHistory.findMany.mockResolvedValue([]);
+    mockPrisma.workflowActivityLink.findMany.mockResolvedValue([]);
+    mockPrisma.documentRevision.findMany.mockResolvedValue([]);
+    mockAuditService.recordEvent.mockResolvedValue({ id: "audit-1" });
+    mockDocumentReadableToViewer.mockResolvedValue(true);
+  });
+
+  it("L23: the register and the dashboard ask for the RFIs and submittals routed to a party-scoped reader — drafts only its own — and drawings as their own list does", async () => {
+    await docControlService.listDocumentRegister({ ...scope, query: {}, reader: party });
+    const rfiWhere = mockPrisma.rfi.findMany.mock.calls[0][0].where;
+    expect(routedTo(rfiWhere, "party-b")).toBe(true);
+    expect(JSON.stringify(rfiWhere)).toContain('"createdBy":"sub-b"'); // a draft only its creator's
+    expect(routedTo(mockPrisma.submittal.findMany.mock.calls[0][0].where, "party-b")).toBe(true);
+    expect(mockPrisma.drawingRecord.findMany.mock.calls[0][0].where).toEqual({ projectId: "project-1" });
+
+    jest.clearAllMocks();
+    await docControlService.getDocControlDashboard({ ...scope, reader: party });
+    expect(routedTo(mockPrisma.rfi.findMany.mock.calls[0][0].where, "party-b")).toBe(true);
+    expect(routedTo(mockPrisma.submittal.findMany.mock.calls[0][0].where, "party-b")).toBe(true);
+
+    // a member of the project is not filtered by routing; a system caller with no reader is not filtered at all
+    jest.clearAllMocks();
+    await docControlService.listDocumentRegister({ ...scope, query: { recordType: "submittal" }, reader: pm });
+    expect(mockPrisma.submittal.findMany.mock.calls[0][0].where).toEqual({ projectId: "project-1" });
+    jest.clearAllMocks();
+    await docControlService.getDocControlDashboard(scope);
+    expect(mockPrisma.rfi.findMany).toHaveBeenCalledWith({ where: { projectId: "project-1" } });
+  });
+
+  it("L23: a reader who may not read RFIs gets no RFI rows and no RFI count, and the other types still", async () => {
+    const noRfi = { ...pm, canRead: (moduleName) => moduleName !== "rfi" };
+    const register = await docControlService.listDocumentRegister({ ...scope, query: {}, reader: noRfi });
+    expect(mockPrisma.rfi.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.submittal.findMany).toHaveBeenCalled();
+    expect(register.rows).toEqual([]);
+    jest.clearAllMocks();
+    const dashboard = await docControlService.getDocControlDashboard({ ...scope, reader: noRfi });
+    expect(mockPrisma.rfi.findMany).not.toHaveBeenCalled();
+    expect(dashboard.metrics.rfiOpen).toBe(0);
+  });
+
+  it("L23: the file of a revision of an RFI routed to other parties is answered as a revision that does not exist; the routed reader gets it", async () => {
+    mockPrisma.documentRevision.findFirst.mockResolvedValue({ id: "rev-1", projectId: "project-1", projectDocumentId: "doc-1", recordType: "rfi", recordId: "rfi-1", revision: "A", status: "uploaded", isLatest: false });
+    mockPrisma.rfi.findFirst.mockResolvedValue(null);
+    await expect(docControlService.getRevisionDownloadFile({ ...scope, revisionId: "rev-1", userRole: "external_party", reader: party })).rejects.toMatchObject({ status: 404, code: "DOCUMENT_REVISION_NOT_FOUND" });
+    expect(routedTo(mockPrisma.rfi.findFirst.mock.calls[0][0].where, "party-b")).toBe(true);
+    expect(mockFileStorageService.getWorkflowFile).not.toHaveBeenCalled();
+
+    mockPrisma.rfi.findFirst.mockResolvedValue({ id: "rfi-1", status: "open", ownerPartyId: "party-b" });
+    mockFileStorageService.getWorkflowFile.mockResolvedValue({ path: "/tmp/rev.pdf", mimeType: "application/pdf", fileName: "rev.pdf" });
+    await expect(docControlService.getRevisionPreviewFile({ ...scope, revisionId: "rev-1", userRole: "external_party", reader: party })).resolves.toMatchObject({ path: "/tmp/rev.pdf" });
+  });
+
+  it("FILES-X2: a party files no revision on, and sends none for review from, an RFI routed to other parties", async () => {
+    mockPrisma.rfi.findFirst.mockResolvedValue(null);
+    await expect(docControlService.uploadDocumentRevision({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: { revision: "X", projectDocumentId: "doc-1" }, userId: "sub-b", reader: party })).rejects.toMatchObject({ status: 404, code: "DOCUMENT_RECORD_NOT_FOUND" });
+    expect(mockPrisma.documentRevision.create).not.toHaveBeenCalled();
+    mockPrisma.documentRevision.findFirst.mockResolvedValue({ id: "rev-1", projectId: "project-1", recordType: "rfi", recordId: "rfi-1", revision: "A", status: "uploaded" });
+    await expect(docControlService.submitDocumentRevisionForReview({ ...scope, revisionId: "rev-1", userId: "sub-b", reader: party })).rejects.toMatchObject({ status: 404, code: "DOCUMENT_REVISION_NOT_FOUND" });
+    expect(mockPrisma.documentRevision.update).not.toHaveBeenCalled();
+  });
+
+  it("FILES-X2: only an approver files a revision as approved — stamped with who approved it; an unknown status is refused", async () => {
+    mockPrisma.rfi.findFirst.mockResolvedValue({ id: "rfi-1", ref: "RFI-001", subject: "Edge", status: "open", ownerPartyId: "party-b" });
+    mockPrisma.projectDocument.findFirst.mockResolvedValue({ id: "doc-1", fileName: "a.pdf", mimeType: "application/pdf", sizeBytes: 1, scanStatus: "clean", status: "available" });
+    mockPrisma.documentRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.documentRevision.create.mockImplementation(async ({ data }) => ({ id: "rev-9", ...data }));
+
+    await expect(docControlService.uploadDocumentRevision({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: { revision: "A", status: "approved", projectDocumentId: "doc-1" }, userId: "sub-b", reader: party })).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
+    await expect(docControlService.assertRevisionFilingAllowed({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: { status: "published" }, reader: pm })).rejects.toMatchObject({ status: 400, code: "VALIDATION_ERROR" });
+    expect(mockPrisma.documentRevision.create).not.toHaveBeenCalled();
+
+    const filed = await docControlService.uploadDocumentRevision({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: { revision: "A", status: "approved", projectDocumentId: "doc-1" }, userId: "pm-1", reader: pm });
+    expect(mockPrisma.documentRevision.create).toHaveBeenCalledWith({ data: expect.objectContaining({ status: "approved", approvedBy: "pm-1", approvedAt: expect.any(Date) }) });
+    expect(filed.approvedBy).toBe("pm-1");
+    const party2 = await docControlService.uploadDocumentRevision({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: { revision: "B", projectDocumentId: "doc-1" }, userId: "sub-b", reader: party });
+    expect(party2.status).toBe("uploaded"); // the routed party files an ordinary revision
+  });
+
+  it("FILES-X2: a file named by id is filed only by someone who may read it; a file the route stored for the filer is theirs", async () => {
+    mockPrisma.rfi.findFirst.mockResolvedValue({ id: "rfi-1", ref: "RFI-001", subject: "Edge", status: "open", ownerPartyId: "party-b" });
+    mockPrisma.projectDocument.findFirst.mockResolvedValue({ id: "doc-other", fileName: "w.pdf", mimeType: "application/pdf", sizeBytes: 1, scanStatus: "clean", status: "linked" });
+    mockPrisma.documentRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.documentRevision.create.mockImplementation(async ({ data }) => ({ id: "rev-9", ...data }));
+    mockDocumentReadableToViewer.mockResolvedValue(false);
+    await expect(docControlService.uploadDocumentRevision({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: { revision: "C", projectDocumentId: "doc-other" }, userId: "sub-b", reader: party })).rejects.toMatchObject({ status: 404, code: "FILE_NOT_FOUND" });
+    expect(mockDocumentReadableToViewer).toHaveBeenCalledWith(expect.objectContaining({ documentId: "doc-other", viewer: expect.objectContaining({ userId: "sub-b" }) }));
+    expect(mockPrisma.documentRevision.create).not.toHaveBeenCalled();
+    await docControlService.uploadDocumentRevision({ ...scope, recordType: "rfi", recordId: "rfi-1", payload: { revision: "D", projectDocumentId: "doc-other" }, userId: "sub-b", reader: party, storedForFiler: true });
+    expect(mockPrisma.documentRevision.create).toHaveBeenCalled();
   });
 });

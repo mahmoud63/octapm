@@ -428,9 +428,10 @@ const documentInclude = {
       embeddingStatus: true,
     },
   },
+  // every revision: each is a link to its record and the visibility rule reads
+  // them all (certification L23); the first, in this order, is the hit's own
   documentRevisions: {
     orderBy: [{ isLatest: "desc" }, { issuedAt: "desc" }],
-    take: 1,
     select: {
       id: true,
       recordType: true,
@@ -447,7 +448,45 @@ const documentInclude = {
     // every link — the visibility rule reads them all; ten hid an accessible one (the thirteenth pass's note on CX21-530)
     select: { recordType: true, recordId: true, role: true },
   },
+  // The places a document is filed outside the Attachment table (certification
+  // L24): an executed agreement, a lien waiver, a commercial record's evidence,
+  // a subcontract close-out's evidence, a daily log's PDF, a task's file and a
+  // signature. Each is a link to its record like an Attachment row.
+  commitmentsExecuted: { select: { id: true } },
+  subPayAppWaivers: { select: { id: true } },
+  commercialAttachmentRefs: { select: { recordType: true, recordId: true } },
+  closeoutEvidence: { select: { closeout: { select: { commitmentId: true } } } },
+  dailyLogPdfs: { select: { id: true } },
+  taskAttachments: { select: { taskId: true } },
+  signatures: { select: { recordType: true, recordId: true } },
 };
+
+/**
+ * Workflow evidence (NCR, safety, punch, RFI, submittal, drawing, transmittal
+ * and correspondence references, and every document-control revision) is
+ * filed in WorkflowAttachment by the document's id or storage key, not by a
+ * relation; those rows are links too (certification L2, L24).
+ */
+const withWorkflowLinks = async (documents) => {
+  const list = (documents || []).filter(Boolean);
+  if (!list.length) return documents;
+  const keys = [...new Set(list.flatMap((document) => [document.id, document.storageKey].filter(Boolean)))];
+  const projectIds = [...new Set(list.map((document) => document.projectId).filter(Boolean))];
+  const rows = keys.length && projectIds.length
+    ? await prisma.workflowAttachment.findMany({
+      where: { projectId: { in: projectIds }, storageKey: { in: keys } },
+      select: { projectId: true, recordType: true, recordId: true, storageKey: true },
+    })
+    : [];
+  for (const document of list) {
+    document.workflowAttachments = rows.filter((row) => row.projectId === document.projectId && (row.storageKey === document.id || (document.storageKey && row.storageKey === document.storageKey)));
+  }
+  return documents;
+};
+
+/** Documents with every link the visibility rule reads. */
+const findDocumentsWithLinks = async (where, include = documentInclude) =>
+  withWorkflowLinks(await prisma.projectDocument.findMany({ where, include }));
 
 const snippetText = (headline) => String(headline || "").replace(/\[\[|\]\]/g, "");
 
@@ -491,14 +530,69 @@ const RECORD_RULES = Object.freeze({
 /** Whether this viewer is judged by a record's own rule: a party-scoped viewer by all of them, anyone by the ones that bind everyone. */
 const ruleApplies = (rule, viewer) => Boolean(rule) && (Array.isArray(viewer?.partyIds) || !rule.party);
 
-/** The ruled records among these documents' attachments that the viewer may see; null when there is no viewer. */
+/** The module each linked record is read under: the attachment table's, and the commercial records' evidence types. */
+const LINK_MODULES = Object.freeze({ ...RECORD_TYPE_MODULES, eot_claim: "eot", ipc_item: "ipc" });
+const linkModule = (recordType) => LINK_MODULES[recordType] || "document_control";
+
+/**
+ * Every place a document is linked from, each `{ recordType, recordId,
+ * modules }` — the modules a reader needs, all of them, besides the record's
+ * own rule. An Attachment row, a WorkflowAttachment row, a commercial
+ * evidence reference, an executed agreement, a lien waiver, a close-out's
+ * evidence, a daily log's PDF, a task's file and a signature are read under
+ * their record's module; a document-control revision under document control
+ * and its record's module, so a revision of an RFI follows the RFI's routing
+ * (certification L23). The document's own pointer to what it was filed for
+ * (linkedEntityType / linkedEntityId) is the only link of some files — a
+ * photo on a daily report — and counts when no table above names the same
+ * record (certification L24).
+ */
+const documentLinks = (document) => {
+  const links = [];
+  const add = (recordType, recordId, modules) => {
+    if (recordType && recordId) links.push({ recordType, recordId, modules });
+  };
+  for (const row of document?.attachments || []) add(row.recordType, row.recordId, [linkModule(row.recordType)]);
+  for (const row of document?.documentRevisions || []) add(row.recordType, row.recordId, [...new Set(["document_control", linkModule(row.recordType)])]);
+  for (const row of document?.workflowAttachments || []) add(row.recordType, row.recordId, [linkModule(row.recordType)]);
+  for (const row of document?.commercialAttachmentRefs || []) add(row.recordType, row.recordId, [linkModule(row.recordType)]);
+  for (const row of document?.commitmentsExecuted || []) add("commitment", row.id, [linkModule("commitment")]);
+  for (const row of document?.subPayAppWaivers || []) add("sub_pay_app", row.id, [linkModule("sub_pay_app")]);
+  for (const row of document?.closeoutEvidence || []) add("commitment", row.closeout?.commitmentId, [linkModule("commitment")]);
+  for (const row of document?.dailyLogPdfs || []) add("daily_log", row.id, [linkModule("daily_log")]);
+  for (const row of document?.taskAttachments || []) add("task", row.taskId, [linkModule("task")]);
+  for (const row of document?.signatures || []) add(row.recordType, row.recordId, [linkModule(row.recordType)]);
+  const pointer = { recordType: document?.linkedEntityType, recordId: document?.linkedEntityId };
+  if (pointer.recordType && pointer.recordId && !links.some((link) => link.recordType === pointer.recordType && link.recordId === pointer.recordId)) {
+    add(pointer.recordType, pointer.recordId, [linkModule(pointer.recordType)]);
+  }
+  return links;
+};
+
+/**
+ * A file uploaded for a tool of its own is that tool's whatever it is linked
+ * to: the bill of quantities needs BOQ read (routes/boq.js), a schedule
+ * generation's source the schedule and the BOQ (routes/schedule.js), a
+ * schedule or progress import the schedule (routes/import.js), a model BIM
+ * (routes/bim.js) — under document control a member whose template withholds
+ * the BOQ read the uploaded bill (certification L24).
+ */
+const DOCUMENT_TYPE_TOOLS = Object.freeze({
+  boq_upload: ["boq"],
+  schedule_generation_source: ["schedule", "boq"],
+  schedule_import: ["schedule"],
+  progress_import: ["schedule"],
+  bim_model: ["bim"],
+});
+
+/** The ruled records among these documents' links that the viewer may see; null when there is no viewer. */
 const recordRuleVisibleIds = async ({ documents, viewer }) => {
   if (!viewer) return null;
   const wanted = {};
   for (const document of documents) {
-    for (const attachment of document?.attachments || []) {
-      if (!ruleApplies(RECORD_RULES[attachment.recordType], viewer)) continue;
-      (wanted[attachment.recordType] ||= new Set()).add(attachment.recordId);
+    for (const link of documentLinks(document)) {
+      if (!ruleApplies(RECORD_RULES[link.recordType], viewer)) continue;
+      (wanted[link.recordType] ||= new Set()).add(link.recordId);
     }
   }
   const visible = new Set();
@@ -512,21 +606,24 @@ const recordRuleVisibleIds = async ({ documents, viewer }) => {
   return visible;
 };
 
+/**
+ * A document is visible through at least one place it is linked from: that
+ * link's modules readable and — for a viewer a record's rule binds — the
+ * record admitted by its rule. A file of a tool of its own follows that tool
+ * (DOCUMENT_TYPE_TOOLS). Only a document linked from nowhere falls under
+ * document control; one linked only to records the viewer may not open is
+ * not visible.
+ */
 const documentVisible = (document, viewer, ruled = null) => {
   if (!viewer?.canRead) return true;
-  const modules = new Set();
-  if (document.documentRevisions?.length) modules.add("document_control");
-  let withheld = 0;
-  for (const attachment of document.attachments || []) {
-    const rule = RECORD_RULES[attachment.recordType];
-    if (ruled && ruleApplies(rule, viewer) && !ruled.has(`${attachment.recordType}:${attachment.recordId}`)) { withheld += 1; continue; }
-    modules.add(RECORD_TYPE_MODULES[attachment.recordType] || "document_control");
-  }
-  if (!modules.size) {
-    if (withheld) return false; // linked only to records the viewer may not open
-    modules.add("document_control");
-  }
-  return [...modules].some((moduleName) => viewer.canRead(moduleName));
+  const tools = DOCUMENT_TYPE_TOOLS[document.documentType];
+  if (tools) return tools.every((moduleName) => viewer.canRead(moduleName));
+  const links = documentLinks(document);
+  if (!links.length) return viewer.canRead("document_control");
+  return links.some((link) => {
+    if (ruled && ruleApplies(RECORD_RULES[link.recordType], viewer) && !ruled.has(`${link.recordType}:${link.recordId}`)) return false;
+    return link.modules.every((moduleName) => viewer.canRead(moduleName));
+  });
 };
 
 const recordModuleName = (recordType) => RECORD_TYPE_MODULES[recordType] || "document_control";
@@ -549,13 +646,92 @@ const recordVisibleToViewer = async ({ recordType, recordId, viewer }) => {
   return ruled.has(`${recordType}:${recordId}`);
 };
 
+/** The ids among these documents of one project that a viewer may read, each judged as documentReadableToViewer judges one. */
+const readableDocumentIds = async ({ orgId, projectId, documentIds, viewer }) => {
+  const ids = [...new Set((documentIds || []).filter((id) => typeof id === "string" && id))];
+  if (!ids.length) return new Set();
+  const documents = await findDocumentsWithLinks({ id: { in: ids }, orgId, projectId });
+  if (!viewer) return new Set(documents.map((document) => document.id));
+  const ruled = await recordRuleVisibleIds({ documents, viewer });
+  return new Set(documents.filter((document) => documentVisible(document, viewer, ruled)).map((document) => document.id));
+};
+
 /** Whether a viewer may read a document's bytes: it must be visible through a place it is linked from (CX21-551, the download path). */
 const documentReadableToViewer = async ({ orgId, projectId, documentId, viewer }) => {
   if (!viewer) return true;
-  const document = await prisma.projectDocument.findFirst({ where: { id: documentId, orgId, projectId }, include: documentInclude });
-  if (!document) return false;
-  const ruled = await recordRuleVisibleIds({ documents: [document], viewer });
-  return documentVisible(document, viewer, ruled);
+  return (await readableDocumentIds({ orgId, projectId, documentIds: [documentId], viewer })).has(documentId);
+};
+
+/**
+ * The viewer a request reads documents as: `canRead(module)` is the caller's
+ * own permission decision (role, project template, API-key scopes); a
+ * party-scoped person also carries its parties and companies, which the
+ * records' own rules read. Every door to a document builds it the same way.
+ */
+const documentViewer = ({ userId, projectAccess, canRead }) => {
+  const { isPartyScopedAccess } = require("./company-party.service");
+  const partyScoped = isPartyScopedAccess(projectAccess || {});
+  const parties = projectAccess?.partyAccess || [];
+  return {
+    id: userId,
+    userId,
+    canRead,
+    partyIds: partyScoped ? parties.map((party) => party.projectPartyId).filter(Boolean) : null,
+    companyIds: partyScoped ? [...new Set(parties.map((party) => party.companyId).filter(Boolean))] : null,
+  };
+};
+
+/**
+ * The document a background job works on, as it names it in its payload: a
+ * text extraction its document, a photo job its photo's, a drawing-set job
+ * its set's source file.
+ */
+const DOCUMENT_JOB_TYPES = Object.freeze({
+  [jobService.JOB_TYPES?.DOCUMENT_EXTRACT || "document.extract"]: "document",
+  [jobService.JOB_TYPES?.PHOTO_THUMBNAIL || "photo.thumbnail"]: "photo",
+  [jobService.JOB_TYPES?.PHOTO_ANALYZE || "photo.analyze"]: "photo",
+  [jobService.JOB_TYPES?.DRAWING_SET_PROCESS || "drawing.set_process"]: "drawing_set",
+});
+const JOB_DOCUMENT_WITHHELD = "The job's document is not one you may read";
+
+/**
+ * Jobs as this viewer may receive them: a job on a document the viewer may
+ * not read comes without its payload and result — the jobs list gave every
+ * document-control reader the ids, and the outcome, of other parties' and
+ * other tools' files (certification L2). Other jobs are returned unchanged.
+ */
+const withheldDocumentJobs = async ({ orgId, projectId, jobs, viewer }) => {
+  const list = jobs || [];
+  const kinds = list.map((job) => DOCUMENT_JOB_TYPES[job?.type] || null);
+  if (!viewer || !kinds.some(Boolean)) return list;
+  const idOf = (job, key) => (typeof job?.payload?.[key] === "string" ? job.payload[key] : null);
+  const photoIds = [...new Set(list.filter((job, index) => kinds[index] === "photo").map((job) => idOf(job, "photoId")).filter(Boolean))];
+  const setIds = [...new Set(list.filter((job, index) => kinds[index] === "drawing_set").map((job) => idOf(job, "setId")).filter(Boolean))];
+  const [photos, sets] = await Promise.all([
+    photoIds.length ? prisma.photo.findMany({ where: { id: { in: photoIds }, orgId, projectId }, select: { id: true, documentId: true } }) : [],
+    setIds.length ? prisma.drawingSet.findMany({ where: { id: { in: setIds }, projectId }, select: { id: true, sourceDocumentId: true } }) : [],
+  ]);
+  const photoDocument = new Map(photos.map((row) => [row.id, row.documentId]));
+  const setDocument = new Map(sets.map((row) => [row.id, row.sourceDocumentId]));
+  const documentOf = (job, kind) => {
+    if (kind === "document") return idOf(job, "documentId");
+    if (kind === "photo") return photoDocument.get(idOf(job, "photoId")) || null;
+    if (kind === "drawing_set") return setDocument.get(idOf(job, "setId")) || null;
+    return null;
+  };
+  const documentIds = list.map((job, index) => (kinds[index] ? documentOf(job, kinds[index]) : null));
+  const readable = await readableDocumentIds({ orgId, projectId, documentIds, viewer });
+  return list.map((job, index) => {
+    if (!kinds[index] || (documentIds[index] && readable.has(documentIds[index]))) return job;
+    return {
+      ...job,
+      payload: {},
+      result: null,
+      error: job.error ? { ...job.error, details: null } : job.error,
+      payloadWithheld: { keys: Object.keys(job.payload || {}), reason: JOB_DOCUMENT_WITHHELD },
+      resultWithheld: { reason: JOB_DOCUMENT_WITHHELD },
+    };
+  });
 };
 
 const serializeHit = ({ document, rank = 0, headline = null, semanticScore = null, matchedChunk = null, viewer = null, ruled = null }) => {
@@ -682,10 +858,7 @@ const searchDocuments = async ({
     };
   }
 
-  const documents = await prisma.projectDocument.findMany({
-    where: { id: { in: ids }, orgId, projectId },
-    include: documentInclude,
-  });
+  const documents = await findDocumentsWithLinks({ id: { in: ids }, orgId, projectId });
   const byId = new Map(documents.map((document) => [document.id, document]));
   const maxRank = Math.max(...rows.map((row) => Number(row.rank) || 0), 0.000001);
 
@@ -740,10 +913,7 @@ const searchDocumentContent = async ({ orgId, projectIds, q, limit = 10, viewerF
   if (!query || !ids.length || !prisma.$queryRaw) return [];
   const rows = await fullTextRows({ orgId, projectIds: ids, query, take: clampLimit(limit, 10) });
   if (!rows.length) return [];
-  const documents = await prisma.projectDocument.findMany({
-    where: { id: { in: rows.map((row) => row.documentId) }, orgId },
-    include: documentInclude,
-  });
+  const documents = await findDocumentsWithLinks({ id: { in: rows.map((row) => row.documentId) }, orgId });
   const byId = new Map(documents.map((document) => [document.id, document]));
   // each project's ruled records for its viewer (CX21-530, CX21-540)
   const partyVisibleByProject = new Map();
@@ -771,6 +941,7 @@ const getDocumentText = async ({ orgId, projectId, documentId, viewer = null, ma
     include: { ...documentInclude, text: true },
   });
   if (!document) throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Document not found");
+  await withWorkflowLinks([document]);
   const partyVisible = await recordRuleVisibleIds({ documents: [document], viewer });
   if (!documentVisible(document, viewer, partyVisible)) {
     throw new HttpError(403, "FORBIDDEN", "You do not have permission to view this document");
@@ -786,11 +957,16 @@ module.exports = {
   EMBEDDING_STATUS,
   TEXT_STATUS,
   documentVisible,
+  documentLinks,
+  documentViewer,
   recordRuleVisibleIds,
   recordVisibleToViewer,
   documentReadableToViewer,
+  readableDocumentIds,
+  withheldDocumentJobs,
   attachmentVisible,
   RECORD_RULES,
+  DOCUMENT_TYPE_TOOLS,
   enqueueExtraction,
   getDocumentText,
   getIndexStatus,

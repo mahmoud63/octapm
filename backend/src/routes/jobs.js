@@ -7,6 +7,7 @@ const { authenticate } = require("../middleware/auth");
 const { hasPermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const jobService = require("../jobs/job.service");
+const documentTextService = require("../services/document-text.service");
 const { boqFigureAccess, withheldJob } = require("../utils/boq-figures");
 
 /**
@@ -53,9 +54,25 @@ const canReadJob = (req, job) => {
 
 // A job as this caller may receive it: a job whose input is the uploaded
 // bill (schedule.generate) comes without the bill to a member who may not
-// read the BOQ (§12) — utils/boq-figures decides. Every answer that carries
-// a serialized job goes through here: the list, one job, retry and cancel.
-const jobView = (req, job) => withheldJob(job, boqFigureAccess(req));
+// read the BOQ (§12) — utils/boq-figures decides. A job on a document — a
+// text extraction, a photo, a drawing set — comes without its payload and
+// result to a caller who may not read that document, judged as
+// /attachments/documents judges it: the list gave every document-control
+// reader the ids of other parties' and other tools' files (certification
+// L2) — document-text.service decides. Every answer that carries a
+// serialized job goes through here: the list, one job, retry and cancel.
+const jobViews = (req, jobs) =>
+  documentTextService.withheldDocumentJobs({
+    orgId: req.user.orgId,
+    projectId: req.params.projectId,
+    jobs: jobs.map((job) => withheldJob(job, boqFigureAccess(req))),
+    viewer: documentTextService.documentViewer({
+      userId: req.user.id,
+      projectAccess: req.projectAccess,
+      canRead: (moduleName) => hasPermission(req, moduleName, "read"),
+    }),
+  });
+const jobView = async (req, job) => (await jobViews(req, [job]))[0];
 
 const assertCanManageJob = (req, job) => {
   const moduleName = moduleOfJob(job);
@@ -88,9 +105,7 @@ router.get(
       projectId: req.params.projectId,
       query: req.query,
     });
-    const items = (result.items || [])
-      .filter((job) => canReadJob(req, job))
-      .map((job) => jobView(req, job));
+    const items = await jobViews(req, (result.items || []).filter((job) => canReadJob(req, job)));
     return sendSuccess(res, { ...result, items });
   }),
 );
@@ -107,7 +122,7 @@ router.get(
     if (!job || !canReadJob(req, job)) {
       throw new HttpError(404, "JOB_NOT_FOUND", "Job not found or expired");
     }
-    return sendSuccess(res, jobView(req, job));
+    return sendSuccess(res, await jobView(req, job));
   }),
 );
 
@@ -131,7 +146,7 @@ router.post(
       jobId: req.params.jobId,
       userId: req.user.id,
     });
-    return sendSuccess(res, jobView(req, result), 202);
+    return sendSuccess(res, await jobView(req, result), 202);
   }),
 );
 
@@ -155,7 +170,7 @@ router.post(
       jobId: req.params.jobId,
       userId: req.user.id,
     });
-    return sendSuccess(res, jobView(req, result));
+    return sendSuccess(res, await jobView(req, result));
   }),
 );
 

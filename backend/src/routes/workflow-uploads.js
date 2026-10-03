@@ -8,6 +8,7 @@ const { HttpError } = require('../utils/http-error');
 const { uploadLimiter } = require('../middleware/rate-limit');
 const { hasPermission } = require('../middleware/rbac');
 const fileStorageService = require('../services/file-storage.service');
+const documentTextService = require('../services/document-text.service');
 
 const router = express.Router({ mergeParams: true });
 
@@ -88,9 +89,34 @@ router.post(
   }),
 );
 
+/**
+ * A workflow document is served only to a caller who may read it through a
+ * record it is linked from — the module, the record's own party or company
+ * rule, an API key's scopes — the decision /attachments/documents makes. This
+ * door served any workflow document of the project to anyone with project
+ * access: another party's RFI attachment, a lien waiver, an executed
+ * subcontract (certification L2). A legacy file with no document row cannot
+ * be judged by its links and needs document control read. Refused as not
+ * found, as the other door refuses.
+ */
+const assertWorkflowFileReadable = async (req) => {
+  const scope = { orgId: req.user.orgId, projectId: req.params.projectId };
+  const document = await fileStorageService.findWorkflowDocument({ ...scope, key: req.params.key });
+  const viewer = documentTextService.documentViewer({
+    userId: req.user.id,
+    projectAccess: req.projectAccess,
+    canRead: (moduleName) => hasPermission(req, moduleName, 'read'),
+  });
+  const allowed = document
+    ? await documentTextService.documentReadableToViewer({ ...scope, documentId: document.id, viewer })
+    : hasPermission(req, 'document_control', 'read');
+  if (!allowed) throw new HttpError(404, 'FILE_NOT_FOUND', 'File not found');
+};
+
 router.get(
   '/uploads/:key',
   asyncHandler(async (req, res) => {
+    await assertWorkflowFileReadable(req);
     const file = await fileStorageService.getWorkflowFile({
       orgId: req.user.orgId,
       projectId: req.params.projectId,

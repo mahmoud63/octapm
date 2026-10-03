@@ -945,6 +945,19 @@ const getSiteReportingFile = ({ orgId, projectId, key }) =>
     documentType: DOCUMENT_TYPES.SITE_PHOTO,
   });
 
+/**
+ * The workflow document a public key (its id or its storage key) names in
+ * this project, or null — so a download route can ask whether the caller may
+ * read that document before serving it (certification L2).
+ */
+const findWorkflowDocument = ({ orgId, projectId, key }) =>
+  getDocumentByPublicKey({
+    orgId,
+    projectId,
+    documentType: DOCUMENT_TYPES.WORKFLOW_ATTACHMENT,
+    key,
+  });
+
 const getWorkflowFile = ({ orgId, projectId, key }) =>
   getProjectDocumentFile({
     orgId,
@@ -1039,6 +1052,7 @@ module.exports = {
   buildPrivateObjectKey,
   cleanupTempFiles,
   ensureTempUploadDirSync,
+  findWorkflowDocument,
   getBimModelFile,
   getBoqUploadFile,
   getImportUploadFile,
