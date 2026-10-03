@@ -22,6 +22,9 @@ const mockPrisma = {
 };
 
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
+// The project a run is scoped to is decided by the project access rule (certification R19).
+const mockAccess = { assertProjectAccess: jest.fn() };
+jest.mock("../project-authorization.service", () => ({ ...jest.requireActual("../project-authorization.service"), assertProjectAccess: (...args) => mockAccess.assertProjectAccess(...args) }));
 
 const reportBuilder = require("../report-builder.service");
 const service = require("../report-assistant.service");
@@ -61,6 +64,7 @@ describe("natural-language reporting", () => {
     delete process.env.GEMINI_API_KEY;
     runQuery = jest.spyOn(reportBuilder, "runQuery").mockResolvedValue(previewResult());
     preview = jest.spyOn(reportBuilder, "preview").mockResolvedValue(previewResult());
+    mockAccess.assertProjectAccess.mockImplementation(async ({ projectId }) => ({ id: projectId, role: "pm", partyAccess: [] }));
   });
   afterEach(() => {
     runQuery.mockRestore();
@@ -120,6 +124,33 @@ describe("natural-language reporting", () => {
     expect(recovered.definition.source).toBe("rfi");
 
     await expect(service.ask({ orgId: "org-1", user, question: " " })).rejects.toMatchObject({ code: "REPORT_NL_QUESTION_REQUIRED" });
+  });
+
+  it("decides the run's project before it reads, asks a model or stores anything (certification R19)", async () => {
+    const P = "11111111-1111-4111-8111-111111111111";
+    const transport = jest.fn(async () => ({ text: JSON.stringify({ name: "Open RFIs", source: "rfi", columns: ["ref"] }), usage: null }));
+    const refuse = (code, status) => Object.assign(new Error(code), { status, code });
+    for (const [code, status] of [["PROJECT_ACCESS_DENIED", 403], ["PROJECT_NOT_FOUND", 404]]) {
+      mockAccess.assertProjectAccess.mockRejectedValueOnce(refuse(code, status));
+      await expect(service.ask({ orgId: "org-1", user, question: "open RFIs", projectId: P, transport })).rejects.toMatchObject({ code });
+      mockAccess.assertProjectAccess.mockRejectedValueOnce(refuse(code, status));
+      await expect(service.narrate({ orgId: "org-1", user, payload: { source: "rfi", projectId: P }, transport })).rejects.toMatchObject({ code });
+    }
+    expect(mockAccess.assertProjectAccess).toHaveBeenCalledWith({ orgId: "org-1", projectId: P, userId: "u-1", role: "pm", isCompanyAdmin: false });
+    expect(transport).not.toHaveBeenCalled();
+    expect(runQuery).not.toHaveBeenCalled();
+    expect(preview).not.toHaveBeenCalled();
+    expect(store.conversations).toHaveLength(0);
+    // An API key only on its own projects.
+    await expect(service.ask({ orgId: "org-1", user, question: "open RFIs", projectId: P, transport, apiClient: { projectIds: ["other"] } })).rejects.toMatchObject({ status: 403, code: "FORBIDDEN_PROJECT" });
+    expect(store.conversations).toHaveLength(0);
+
+    // A project the caller opens: the run is stored against it.
+    const asked = await service.ask({ orgId: "org-1", user, question: "open RFIs", projectId: P, transport });
+    expect(asked.message).toEqual(expect.objectContaining({ id: expect.any(String) }));
+    const told = await service.narrate({ orgId: "org-1", user, payload: { source: "rfi", projectId: P }, transport: jest.fn(async () => ({ text: JSON.stringify({ headline: "h", summary: "s", highlights: [], caveats: [] }) })) });
+    expect(told.message).toEqual(expect.objectContaining({ id: expect.any(String) }));
+    expect(store.conversations.map((row) => [row.kind, row.projectId])).toEqual([["report_nl", P], ["report_narrative", P]]);
   });
 
   it("narrates a preview from the numbers, and through the model", async () => {

@@ -42,7 +42,11 @@ const mockPrisma = {
   submittal: { findFirst: jest.fn(async () => null) },
 };
 const mockSearch = { globalSearch: jest.fn(async () => ({ items: [], meta: { authorizedProjectCount: 1, mode: "text" } })) };
-const mockDocumentText = { searchDocuments: jest.fn(async () => ({ items: [] })) };
+const mockDocumentText = {
+  searchDocuments: jest.fn(async () => ({ items: [] })),
+  // The reader as every door to a document builds it (certification R15): the real one.
+  documentViewer: (...args) => jest.requireActual("../document-text.service").documentViewer(...args),
+};
 const mockEmbeddings = { isEnabled: jest.fn(() => false), describe: jest.fn(() => ({ enabled: false })) };
 const mockRfiService = { createRfi: jest.fn(async ({ payload }) => ({ id: "rfi-new", ref: "RFI-013", status: payload.status })) };
 const mockTaskService = { createTask: jest.fn(async ({ payload }) => ({ id: "task-new", taskNumber: 41, status: "todo", title: payload.title })) };
@@ -95,7 +99,7 @@ describe("project knowledge assistant", () => {
     expect(result.sources[0].text).toContain("Answer: Use T16 per S-201 revision C.");
     expect(result.sources[1].snippet).toBe("Links to pile caps shall be T12 at 200 centres unless noted on the drawings.");
     expect(result.projects[0]).toMatchObject({ name: "Tower", contractValue: 12000000 });
-    expect(mockDocumentText.searchDocuments).toHaveBeenCalledWith(expect.objectContaining({ projectId: "p1", semantic: false, viewer: expect.objectContaining({ id: "u-1", canRead: expect.any(Function) }) }));
+    expect(mockDocumentText.searchDocuments).toHaveBeenCalledWith(expect.objectContaining({ projectId: "p1", semantic: false, viewer: expect.objectContaining({ id: "u-1", userId: "u-1", canRead: expect.any(Function), partyIds: null, companyIds: null }) }));
     const formatted = retrieval.formatSources(result.sources);
     expect(formatted).toContain("[1] RFI RFI-012 — Pile cap reinforcement (Tower, answered)");
     expect(formatted).toContain("[2] Document SPEC-S-01 — Structural specification rev B");
@@ -187,7 +191,11 @@ describe("project knowledge assistant", () => {
     const answered = await service.ask({ orgId: "org-1", user, projectId: "p1", question: "pile caps?", projectAccess: own, accessFor: notAsked });
     expect(notAsked).not.toHaveBeenCalled();
     expect(answered.projectId).toBe("p1");
-    expect(mockDocumentText.searchDocuments).toHaveBeenCalledWith(expect.objectContaining({ projectId: "p1", viewer: expect.objectContaining({ projectAccess: own }) }));
+    expect(mockDocumentText.searchDocuments).toHaveBeenCalledWith(expect.objectContaining({ projectId: "p1", viewer: expect.objectContaining({ userId: "u-1", partyIds: null, companyIds: null }) }));
+    // Read as the route's access says (a site engineer there), not as the company role (a PM, who reads payment certificates).
+    const { viewer: ownViewer } = mockDocumentText.searchDocuments.mock.calls[mockDocumentText.searchDocuments.mock.calls.length - 1][0];
+    expect(ownViewer.canRead("rfi")).toBe(true);
+    expect(ownViewer.canRead("ipc")).toBe(false);
 
     // A follow-up is decided on its conversation's project, whatever the route's.
     const elsewhere = jest.fn(async () => {

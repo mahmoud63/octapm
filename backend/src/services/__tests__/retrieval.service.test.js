@@ -59,6 +59,31 @@ describe("retrieval: the contract sum in a prompt", () => {
     expect(valueOf(result, A)).toBeNull();
   });
 
+  it("reads a document as its record's own rule reads the guest: no text of a file on another party's RFI (certification R15)", async () => {
+    const document = {
+      id: "doc-y", orgId: "org-1", projectId: A, fileName: "y.pdf", originalName: "y.pdf", mimeType: "application/pdf", documentType: "attachment", storageKey: "key-y", uploadedAt: new Date("2026-09-01"),
+      text: { status: "ready", extractor: "pdf", wordCount: 9, pageCount: 1, excerpt: null, embeddingStatus: "none" },
+      documentRevisions: [], attachments: [{ recordType: "rfi", recordId: "rfi-y", role: null }], commitmentsExecuted: [], subPayAppWaivers: [], commercialAttachmentRefs: [], closeoutEvidence: [], dailyLogPdfs: [], taskAttachments: [], signatures: [],
+    };
+    mockSearch.globalSearch.mockResolvedValue({ items: [], meta: {} });
+    mockPrisma.$queryRaw = jest.fn(async () => [{ documentId: "doc-y", projectId: A, rank: 0.9, headline: "the [[cobalt]] valve is priced at 41,000" }]);
+    mockPrisma.projectDocument = { findMany: jest.fn(async () => [{ ...document }]) };
+    mockPrisma.workflowAttachment = { findMany: jest.fn(async () => []) };
+    // Company Y's RFI is routed to party Y only.
+    mockPrisma.rfi = { findMany: jest.fn(async ({ where }) => (JSON.stringify(where).includes('"party-y"') ? [{ id: "rfi-y" }] : [])) };
+    const guest = (party, company) => ({ id: A, role: "external_party", assignmentRole: null, scope: "party", partyAccess: [{ projectPartyId: party, companyId: company, role: "subcontractor" }] });
+    const askAs = (userId, access) => retrieve({ orgId: "org-1", user: { id: userId, role: "site_engineer" }, projectId: A, query: "cobalt", projectAccess: access });
+
+    const x = await askAs("guest-x", guest("party-x", "company-x"));
+    expect(x.sources.find((source) => source.id === "doc-y")).toBeUndefined();
+    // The RFI's own rule was asked, as the guest of party X.
+    expect(mockPrisma.rfi.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: { in: ["rfi-y"] } }) }));
+    expect(JSON.stringify(mockPrisma.rfi.findMany.mock.calls[0][0].where)).toContain('"party-x"');
+
+    const y = await askAs("guest-y", guest("party-y", "company-y"));
+    expect(y.sources.find((source) => source.id === "doc-y")).toMatchObject({ kind: "document", text: expect.stringContaining("cobalt") });
+  });
+
   it("grants nothing from a project the reader cannot open — no fallback to the company role", async () => {
     mockAuthorization.assertProjectAccess.mockImplementation(async ({ projectId }) => {
       if (projectId === B) throw Object.assign(new Error("Project not found"), { status: 404 });

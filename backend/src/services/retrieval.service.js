@@ -55,20 +55,24 @@ const loadBody = async (item) => {
   }
 };
 
+/** The caller's access to one project, as the project's routes decide it; null for a project they cannot open. */
+const projectAccessOf = async ({ user, projectId, projectAccess = null }) => {
+  if (projectAccess) return projectAccess;
+  try {
+    const { assertProjectAccess } = require("./project-authorization.service");
+    return await assertProjectAccess({ orgId: user.orgId, projectId, userId: user.id, role: user.role, isCompanyAdmin: user.isCompanyAdmin });
+  } catch {
+    return null;
+  }
+};
+
 /** The read decision `requirePermission` would make for this caller on one project. */
 const readCheckFor = async ({ user, projectId, projectAccess = null }) => {
   const { can, canParty, normalizeRoleId } = require("../config/permissions");
-  let access = projectAccess;
-  if (!access) {
-    try {
-      const { assertProjectAccess } = require("./project-authorization.service");
-      access = await assertProjectAccess({ orgId: user.orgId, projectId, userId: user.id, role: user.role, isCompanyAdmin: user.isCompanyAdmin });
-    } catch {
-      // A project the caller cannot open grants nothing: no falling back to
-      // the company role (certification L46, defence in depth).
-      return () => false;
-    }
-  }
+  const access = await projectAccessOf({ user, projectId, projectAccess });
+  // A project the caller cannot open grants nothing: no falling back to the
+  // company role (certification L46, defence in depth).
+  if (!access) return () => false;
   let template = null;
   try {
     const { resolveTemplateContext } = require("./permission-template.service");
@@ -134,7 +138,19 @@ const retrieve = async ({ orgId, user, projectId = null, query, limit = DEFAULT_
     try {
       const documentText = require("./document-text.service");
       const embeddings = require("./embedding.service");
-      const viewer = { id: user.id, role: user.role, isCompanyAdmin: Boolean(user.isCompanyAdmin), projectAccess: projectAccess || null, canRead: await readCheckFor({ user: { ...user, orgId }, projectId, projectAccess }) };
+      // The reader as every door to a document builds it (document-text
+      // documentViewer): the module decision, and — for a party guest — its
+      // parties and companies, which the records' own rules read. The viewer
+      // built here had neither, so a subcontractor's question was answered
+      // with the text of a file on another party's RFI or pay application
+      // (certification R15). A project the caller cannot open reads nothing.
+      const scopeUser = { ...user, orgId };
+      const access = await projectAccessOf({ user: scopeUser, projectId, projectAccess });
+      const viewer = documentText.documentViewer({
+        userId: user.id,
+        projectAccess: access || {},
+        canRead: access ? await readCheckFor({ user: scopeUser, projectId, projectAccess: access }) : () => false,
+      });
       const docs = await documentText.searchDocuments({ orgId, projectId, q: text, limit: 6, viewer, semantic: embeddings.isEnabled() });
       for (const hit of docs.items || []) {
         const existing = candidates.find((candidate) => candidate.kind === "document" && candidate.id === (hit.documentId || hit.id));

@@ -12,8 +12,12 @@ jest.mock('../../middleware/auth', () => ({
   },
 }));
 
+jest.mock('../../config/db', () => ({ prisma: {} }));
+
 const mockAuditService = {
   listEvents: jest.fn(),
+  // The task routes' rule, as the service decides it (certification R16).
+  projectWideTaskVisibility: (...args) => jest.requireActual('../../services/audit.service').projectWideTaskVisibility(...args),
 };
 
 jest.mock('../../services/audit.service', () => mockAuditService);
@@ -89,6 +93,19 @@ describe('audit route permissions', () => {
     const pm = await readsOf('pm');
     expect(pm('change_order')).toBe(true);
     expect(pm('ipc')).toBe(true);
+  });
+
+  it('tells the service whether the reader sees every task, as GET /tasks decides it (certification R16)', async () => {
+    const wideFor = async (role) => {
+      mockAuditService.listEvents.mockClear();
+      const res = await request(buildApp()).get('/projects/project-1/audit').set('x-role', role);
+      expect(res.status).toBe(200);
+      return mockAuditService.listEvents.mock.calls[0][0].viewer.projectWideTasks;
+    };
+    expect(await wideFor('qs')).toBe(false);
+    expect(await wideFor('site_engineer')).toBe(false);
+    expect(await wideFor('pm')).toBe(true);
+    expect(await wideFor('planning_eng')).toBe(true);
   });
 
   it('blocks roles outside the audit read policy', async () => {

@@ -198,10 +198,31 @@ const definitionOut = ({ proposal, normalized, projectId }) => ({
 
 const runMessage = (stored) => (stored?.message ? { id: stored.message.id, provider: stored.message.provider, model: stored.message.model, feedback: stored.message.feedback } : null);
 
+/**
+ * The project a run is scoped to, decided before anything is read, sent to
+ * a model or stored — as the assistant decides its project (assistant
+ * routes, certification L46): 403 PROJECT_ACCESS_DENIED for a project of the
+ * company the caller cannot open, 404 PROJECT_NOT_FOUND for any other id,
+ * and an API key only on its own projects (report-builder runQuery). The
+ * project came from the body unchecked: the preview was filtered, but the
+ * run was stored against a project of the company the caller cannot open,
+ * and whether a message came back told whether the id names one
+ * (certification R19).
+ */
+const assertRunProject = async ({ orgId, user, projectId, apiClient = null }) => {
+  if (!projectId) return null;
+  if (apiClient?.projectIds?.length && !apiClient.projectIds.includes(projectId)) {
+    throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+  }
+  const { assertProjectAccess } = require("./project-authorization.service");
+  return assertProjectAccess({ orgId, projectId, userId: user.id, role: user.role, isCompanyAdmin: Boolean(user.isCompanyAdmin) });
+};
+
 const ask = async ({ orgId, user, question, projectId = null, transport = null, apiClient = null }) => {
   const text = trimOrNull(question);
   if (!text) throw new HttpError(400, "REPORT_NL_QUESTION_REQUIRED", "Ask for a report in a sentence");
   if (text.length > MAX_QUESTION) throw new HttpError(400, "REPORT_NL_QUESTION_TOO_LONG", `Keep the question under ${MAX_QUESTION} characters`);
+  await assertRunProject({ orgId, user, projectId, apiClient });
   const sourceList = await reportBuilder.listSources({ orgId });
   let proposal;
   let degraded = false;
@@ -278,6 +299,7 @@ const deterministicNarrative = (result) => {
 };
 
 const narrate = async ({ orgId, user, payload = {}, transport = null, apiClient = null }) => {
+  await assertRunProject({ orgId, user, projectId: trimOrNull(payload.projectId), apiClient });
   const result = await reportBuilder.preview({ orgId, user, payload, limit: 200, apiClient });
   const fallback = deterministicNarrative(result);
   const digest = digestOf(result);

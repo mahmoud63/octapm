@@ -131,12 +131,15 @@ pv.main(async () => {
       for (const e of candidates) if ((await probe(`${route}/${e.entityId}`)) !== 200) refusedAtDetail += 1;
       hidden = refusedAtDetail;
       verdict = `${hidden} of ${list.length} on ${noun} the guest cannot open (${candidates.length - hidden} more are missing from the default list but open to the guest by id)`;
-    } else if (type === 'rfi') {
-      hidden = list.filter((e) => !myRfis.has(e.entityId)).length;
-      verdict = `${hidden} of ${list.length} on RFIs not routed to the guest's company`;
-    } else if (type === 'submittal') {
-      hidden = list.filter((e) => !mySubmittals.has(e.entityId)).length;
-      verdict = `${hidden} of ${list.length} on submittals not routed to the guest's company`;
+    } else if (type === 'rfi' || type === 'submittal') {
+      // The list is one page of 100: a record missing from it is only a
+      // candidate, and the detail route decides whether it is routed to the guest.
+      const [mine, route, noun] = type === 'rfi' ? [myRfis, 'rfi', 'RFIs'] : [mySubmittals, 'submittals', 'submittals'];
+      const candidates = [...new Set(list.filter((e) => !mine.has(e.entityId)).map((e) => e.entityId))];
+      const refusedIds = new Set();
+      for (const id of candidates) if ((await probe(`${route}/${id}`)) !== 200) refusedIds.add(id);
+      hidden = list.filter((e) => refusedIds.has(e.entityId)).length;
+      verdict = `${hidden} of ${list.length} on ${noun} not routed to the guest's company (${candidates.length - refusedIds.size} record(s) past the first list page are open to the guest by id)`;
     }
     console.log(`  ${String(list.length).padStart(4)}  ${type.padEnd(30)} ${verdict}`);
     if (hidden) unreadable.push({ type, hidden, sample: list.find((e) => e.summary && Object.keys(e.summary).length) || list[0] });

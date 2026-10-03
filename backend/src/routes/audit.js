@@ -18,13 +18,16 @@ router.use(authenticate);
 // request makes (role, template, party, API key) and, for a party-scoped
 // person, their parties and companies, which the records' own rules read.
 // The history gives each event only to a reader who may read its record
-// (audit.service historyVisibility; certification L43).
-const readerOf = (req) =>
-  documentViewer({
+// (audit.service historyVisibility; certification L43) — a task only to a
+// reader GET /tasks would show it to (certification R16).
+const readerOf = (req) => ({
+  ...documentViewer({
     userId: req.user.id,
     projectAccess: req.projectAccess || null,
     canRead: (moduleName) => hasPermission(req, moduleName, 'read'),
-  });
+  }),
+  projectWideTasks: auditService.projectWideTaskVisibility({ role: req.user.role, projectAccess: req.projectAccess || null }),
+});
 
 // The history is the project's, and every audit reader's — except the
 // bill's figures in it (§12, utils/boq-figures): the history of the BOQ's

@@ -666,13 +666,15 @@ const valueRowsToMap = (rows, byFieldId) => {
  * `projectId` and — with a `viewer` (document-text.service documentViewer) —
  * that the viewer may see: the record type's module read and, for a viewer
  * a record's own rule binds (a party's RFIs and submittals, a vendor's
- * commitments and pay applications), the records that rule admits. Values
- * were read and written by { orgId, recordType, recordId } alone: through a
- * project they were on, a member confined to other projects read and
- * overwrote the values of a record of a project they could not open
+ * commitments and pay applications; for a company member too, a colleague's
+ * draft RFI and — without project-wide task visibility — a colleague's task:
+ * audit.service recordRuleFor, certification R16), the records that rule
+ * admits. Values were read and written by { orgId, recordType, recordId }
+ * alone: through a project they were on, a member confined to other projects
+ * read and overwrote the values of a record of a project they could not open
  * (certification L45).
  */
-const recordsOnProject = async ({ tx = prisma, projectId, recordType, recordIds, viewer = null }) => {
+const recordsOnProject = async ({ tx = prisma, orgId = null, projectId, recordType, recordIds, viewer = null }) => {
   const meta = getRecordType(recordType);
   const ids = [...new Set((recordIds || []).filter((id) => typeof id === "string" && id))];
   if (!ids.length || !projectId || !tx[meta.model]?.findMany) return [];
@@ -680,23 +682,24 @@ const recordsOnProject = async ({ tx = prisma, projectId, recordType, recordIds,
   const found = rows.map((row) => row.id);
   if (!viewer || !found.length) return found;
   if (viewer.canRead && !viewer.canRead(meta.module)) return [];
-  const { RECORD_RULES, recordRuleVisibleIds } = require("./document-text.service");
-  const rule = RECORD_RULES[recordType];
-  // A rule binds a party-scoped viewer always, anyone else when it says so.
-  if (!rule || (rule.party && !Array.isArray(viewer.partyIds))) return found;
-  const visible = await recordRuleVisibleIds({ documents: [{ attachments: found.map((recordId) => ({ recordType, recordId })) }], viewer });
-  return found.filter((recordId) => visible.has(`${recordType}:${recordId}`));
+  const reader = recordType === "task" ? await auditService.withTaskVisibility({ orgId, projectId, viewer }) : viewer;
+  const scope = auditService.recordRuleFor(recordType, reader);
+  if (!scope) return found;
+  if (!scope.where || !tx[scope.model]?.findMany) return [];
+  const visible = await tx[scope.model].findMany({ where: { id: { in: found }, projectId, ...scope.where }, select: { id: true } });
+  const admitted = new Set(visible.map((row) => row.id));
+  return found.filter((recordId) => admitted.has(recordId));
 };
 
 /** One record of the project the viewer may see, or a 404 that does not say whether it exists elsewhere. */
-const assertRecordOnProject = async ({ tx = prisma, projectId, recordType, recordId, viewer = null }) => {
-  const [found] = await recordsOnProject({ tx, projectId, recordType, recordIds: [recordId], viewer });
+const assertRecordOnProject = async ({ tx = prisma, orgId = null, projectId, recordType, recordId, viewer = null }) => {
+  const [found] = await recordsOnProject({ tx, orgId, projectId, recordType, recordIds: [recordId], viewer });
   if (!found) throw new HttpError(404, "CUSTOM_FIELD_RECORD_NOT_FOUND", "Record not found on this project");
   return found;
 };
 
 const getValues = async ({ orgId, projectId, recordType, recordId, recordTypeKey = null, viewer = null }) => {
-  await assertRecordOnProject({ projectId, recordType, recordId, viewer });
+  await assertRecordOnProject({ orgId, projectId, recordType, recordId, viewer });
   const schema = await schemaFor({ orgId, projectId, recordType, recordTypeKey });
   if (!prisma.customFieldValue?.findMany) return { ...schema, values: {} };
   const rows = await prisma.customFieldValue.findMany({ where: { orgId, recordType, recordId } });
@@ -707,7 +710,7 @@ const getValues = async ({ orgId, projectId, recordType, recordId, recordTypeKey
 /** Writes a values map for one record of the project (upsert; null removes), audited on the record itself. */
 const setValues = async ({ orgId, projectId, recordType, recordId, values = {}, actor = null, recordTypeKey = null, context = {}, partial = false, tx = null, viewer = null }) => {
   const client = tx || prisma;
-  await assertRecordOnProject({ tx: client, projectId, recordType, recordId, viewer });
+  await assertRecordOnProject({ tx: client, orgId, projectId, recordType, recordId, viewer });
   const schema = await schemaFor({ orgId, projectId, recordType, recordTypeKey });
   if (!schema.fields.length) {
     if (isPlainObject(values) && Object.keys(values).length) throw new HttpError(400, "CUSTOM_FIELD_INVALID", "This record type has no custom fields", { problems: [] });
@@ -751,7 +754,7 @@ const valuesForRecords = async ({ orgId, recordType, recordIds }) => {
 
 /** Values for the records of one project the viewer may see (the project's GET /custom-fields/values); other ids are left out. */
 const valuesForProjectRecords = async ({ orgId, projectId, recordType, recordIds, viewer = null }) => {
-  const ids = await recordsOnProject({ projectId, recordType, recordIds, viewer });
+  const ids = await recordsOnProject({ orgId, projectId, recordType, recordIds, viewer });
   return valuesForRecords({ orgId, recordType, recordIds: ids });
 };
 

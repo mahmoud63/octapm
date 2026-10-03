@@ -277,6 +277,10 @@ const compareTimeline = (a, b, direction = "asc") => {
   return (sourceRank(a.source) - sourceRank(b.source)) * multiplier;
 };
 
+// How many rows of each source one read may take while a page is filled
+// past events the reader is not given (listEvents).
+const MAX_SCAN_ROWS = 500;
+
 const CURSOR_VERSION = "h1";
 const CURSOR_PATTERN = /^(\d{1,15})\.([0-9])\.(.+)$/;
 
@@ -422,6 +426,90 @@ const HISTORY_ONLY_RULES = Object.freeze({
   },
 });
 
+/**
+ * The records' own rules bind a company member too where the record's own
+ * service binds them (certification R16), applied here, where the records
+ * are read. A task is its assignee's and its creator's for a reader without
+ * project-wide task visibility: GET /tasks/:id answers a QS 404 for a
+ * colleague's task (task.service taskVisibilityWhere), yet the history gave
+ * that QS every task's title, assignee, status changes and comments, and the
+ * custom-field routes its values. document-text.service RECORD_RULES binds
+ * party members with its clauses and everyone with a rule's `everyone` part
+ * (a draft RFI is its author's and its manager's); both are applied as it
+ * states them. A viewer that does not say it sees every task
+ * (`projectWideTasks`, the routes' decision: projectWideTaskVisibility, or
+ * withTaskVisibility for a caller handed no request) sees its own.
+ */
+const PROJECT_WIDE_TASK_ROLES = new Set(["pm", "planning_eng"]);
+const MEMBER_BOUND = Object.freeze({
+  task: (viewer) => viewer?.projectWideTasks !== true,
+});
+
+/** Whether a reader sees every task of the project, as task.service hasProjectWideTaskVisibility decides it for GET /tasks. */
+const projectWideTaskVisibility = ({ role, projectAccess }) => {
+  const { normalizeRoleId } = require("../config/permissions");
+  const { canAccessAllProjects } = require("./project-authorization.service");
+  const effectiveRole = normalizeRoleId(projectAccess?.role || role);
+  return PROJECT_WIDE_TASK_ROLES.has(effectiveRole) || canAccessAllProjects(effectiveRole);
+};
+
+/**
+ * The viewer with `projectWideTasks` decided, for a caller that did not say:
+ * rebuilt from the person's membership and their access to the project, as
+ * the task routes see them. A person with no standing in the project, or
+ * one that cannot be resolved, sees only their own tasks.
+ */
+const withTaskVisibility = async ({ orgId, projectId, viewer }) => {
+  if (!viewer || typeof viewer.projectWideTasks === "boolean") return viewer;
+  let wide = false;
+  if (!Array.isArray(viewer.partyIds) && viewer.userId && orgId && projectId) {
+    try {
+      const { resolveRequestPrincipal } = require("./membership.service");
+      const { assertProjectAccess } = require("./project-authorization.service");
+      const principal = await resolveRequestPrincipal({ userId: viewer.userId, orgId });
+      if (principal) {
+        const projectAccess = await assertProjectAccess({ orgId, projectId, userId: viewer.userId, role: principal.role, isCompanyAdmin: principal.isCompanyAdmin });
+        wide = projectWideTaskVisibility({ role: principal.role, projectAccess });
+      }
+    } catch {
+      wide = false;
+    }
+  }
+  return { ...viewer, projectWideTasks: wide };
+};
+
+let recordRules = null;
+const allRecordRules = () => {
+  if (!recordRules) {
+    const { RECORD_RULES } = require("./document-text.service");
+    recordRules = Object.freeze({ ...(RECORD_RULES || {}), ...HISTORY_ONLY_RULES });
+  }
+  return recordRules;
+};
+
+/**
+ * A record type's own rule as it binds one viewer: null when it does not
+ * bind them; otherwise its `model` and `where`, the records of the type it
+ * admits (null: none) — the clauses that name what is the viewer's (a
+ * party's, a vendor's, a person's own) where they bind, and the part that
+ * binds everyone (no colleague's draft).
+ */
+const recordRuleFor = (recordType, viewer) => {
+  const rule = allRecordRules()[recordType];
+  if (!rule || !viewer) return null;
+  const clausesBind = Array.isArray(viewer.partyIds) || !rule.party || Boolean(MEMBER_BOUND[recordType]?.(viewer));
+  const everyone = rule.everyone ? rule.everyone(viewer) || null : null;
+  if (!clausesBind && !everyone) return null;
+  const parts = [];
+  if (clausesBind) {
+    const clauses = (rule.clauses(viewer) || []).filter(Boolean);
+    if (!clauses.length) return { model: rule.model, where: null };
+    parts.push({ OR: clauses });
+  }
+  if (everyone) parts.push(everyone);
+  return { model: rule.model, where: parts.length === 1 ? parts[0] : { AND: parts } };
+};
+
 // Events about a file on a record: the file's record decides as well.
 const LINKED_RECORD_TYPES = new Set(["attachment", "document_revision"]);
 // The client contract's changes are recorded on the project
@@ -446,10 +534,11 @@ const moduleOfRecordType = (recordType) =>
 /**
  * What one reader may be given of a project's history. `viewer` is
  * document-text.service documentViewer's: `canRead(module)` (role, template,
- * party, API key) and, for a party-scoped reader, its parties and companies.
+ * party, API key) and, for a party-scoped reader, its parties and companies;
+ * `projectWideTasks` says whether the reader sees every task (absent: only its own).
  * Returns the record types refused outright, for a party-scoped reader the
  * only types given (a type of no known module is not), and the ids each
- * record rule admits on this project.
+ * record rule that binds the reader admits on this project.
  */
 const historyVisibility = async ({ projectId, viewer }) => {
   if (!viewer || typeof viewer.canRead !== "function") return null;
@@ -465,15 +554,18 @@ const historyVisibility = async ({ projectId, viewer }) => {
     if (LINKED_RECORD_TYPES.has(recordType)) continue;
     (canRead(moduleName) ? allowed : denied).push(recordType);
   }
-  const { RECORD_RULES } = require("./document-text.service");
   const ruled = {};
-  for (const [recordType, rule] of Object.entries({ ...(RECORD_RULES || {}), ...HISTORY_ONLY_RULES })) {
-    // A rule binds a party-scoped reader always, anyone else when it says so.
-    if (!rule || (rule.party && !partyScoped)) continue;
+  for (const recordType of Object.keys(allRecordRules())) {
     if (denied.includes(recordType)) continue;
-    const clauses = (rule.clauses(viewer) || []).filter(Boolean);
-    const rows = clauses.length && prisma[rule.model]?.findMany
-      ? await prisma[rule.model].findMany({ where: { projectId, OR: clauses }, select: { id: true } })
+    // A rule binds a party-scoped reader always, a company member where it (or its everyone-part) says so.
+    const scope = recordRuleFor(recordType, viewer);
+    if (!scope) continue;
+    const model = prisma[scope.model];
+    // The records admitted are named, never the ones left out: NOT over a
+    // nullable column (an RFI's manager) leaves out the rows where it is
+    // null, so a colleague's draft with no manager would not be left out.
+    const rows = scope.where && model?.findMany
+      ? await model.findMany({ where: { projectId, ...scope.where }, select: { id: true } })
       : [];
     ruled[recordType] = toArray(rows).map((row) => row.id);
   }
@@ -979,8 +1071,6 @@ const listEvents = async ({
   }
   const position = await decodeCursor({ cursor, orgId, projectId });
   const visibility = await historyVisibility({ projectId, viewer });
-  const after = (sourceName, timeField) =>
-    afterPosition({ position, source: sourceName, timeField, direction });
 
   const auditWhere = { orgId, projectId };
   if (entityType) auditWhere.entityType = entityType;
@@ -1003,82 +1093,107 @@ const listEvents = async ({
   if (entityType) commentWhere.recordType = entityType;
   if (entityId) commentWhere.recordId = entityId;
 
-  const [auditRows, approvalRows, statusRows, commentRows] = await Promise.all([
-    sources.has(HISTORY_SOURCES.AUDIT) && prisma.auditEvent?.findMany
-      ? prisma.auditEvent.findMany({
-          where: withConditions(
-            auditWhere,
-            visibleWhere(visibility, "entityType", "entityId"),
-            after(HISTORY_SOURCES.AUDIT, "occurredAt"),
-          ),
-          orderBy: [{ occurredAt: direction }, { id: direction }],
-          take: safeLimit + 1,
-        })
-      : Promise.resolve([]),
-    sources.has(HISTORY_SOURCES.APPROVAL) &&
-    prisma.approvalWorkflowEvent?.findMany
-      ? prisma.approvalWorkflowEvent.findMany({
-          where: withConditions(
-            workflowWhere,
-            visibleWhere(visibility, "recordType", "recordId"),
-            after(HISTORY_SOURCES.APPROVAL, "createdAt"),
-          ),
-          orderBy: [{ createdAt: direction }, { id: direction }],
-          take: safeLimit + 1,
-        })
-      : Promise.resolve([]),
-    sources.has(HISTORY_SOURCES.STATUS) &&
-    includeStatus &&
-    prisma.workflowStatusHistory?.findMany
-      ? prisma.workflowStatusHistory.findMany({
-          where: withConditions(
-            statusWhere,
-            visibleWhere(visibility, "recordType", "recordId"),
-            after(HISTORY_SOURCES.STATUS, "createdAt"),
-          ),
-          orderBy: [{ createdAt: direction }, { id: direction }],
-          take: safeLimit + 1,
-        })
-      : Promise.resolve([]),
-    sources.has(HISTORY_SOURCES.COMMENT) &&
-    includeComments &&
-    prisma.comment?.findMany
-      ? prisma.comment.findMany({
-          where: withConditions(
-            commentWhere,
-            visibleWhere(visibility, "recordType", "recordId"),
-            after(HISTORY_SOURCES.COMMENT, "createdAt"),
-          ),
-          include: {
-            author: { select: { id: true, name: true } },
-            mentions: {
-              include: { user: { select: { id: true, name: true } } },
+  // The timeline's next `take` rows after a position, in order, and whether more follow.
+  const readRows = async (from, take) => {
+    const after = (sourceName, timeField) =>
+      afterPosition({ position: from, source: sourceName, timeField, direction });
+    const [auditRows, approvalRows, statusRows, commentRows] = await Promise.all([
+      sources.has(HISTORY_SOURCES.AUDIT) && prisma.auditEvent?.findMany
+        ? prisma.auditEvent.findMany({
+            where: withConditions(
+              auditWhere,
+              visibleWhere(visibility, "entityType", "entityId"),
+              after(HISTORY_SOURCES.AUDIT, "occurredAt"),
+            ),
+            orderBy: [{ occurredAt: direction }, { id: direction }],
+            take: take + 1,
+          })
+        : Promise.resolve([]),
+      sources.has(HISTORY_SOURCES.APPROVAL) &&
+      prisma.approvalWorkflowEvent?.findMany
+        ? prisma.approvalWorkflowEvent.findMany({
+            where: withConditions(
+              workflowWhere,
+              visibleWhere(visibility, "recordType", "recordId"),
+              after(HISTORY_SOURCES.APPROVAL, "createdAt"),
+            ),
+            orderBy: [{ createdAt: direction }, { id: direction }],
+            take: take + 1,
+          })
+        : Promise.resolve([]),
+      sources.has(HISTORY_SOURCES.STATUS) &&
+      includeStatus &&
+      prisma.workflowStatusHistory?.findMany
+        ? prisma.workflowStatusHistory.findMany({
+            where: withConditions(
+              statusWhere,
+              visibleWhere(visibility, "recordType", "recordId"),
+              after(HISTORY_SOURCES.STATUS, "createdAt"),
+            ),
+            orderBy: [{ createdAt: direction }, { id: direction }],
+            take: take + 1,
+          })
+        : Promise.resolve([]),
+      sources.has(HISTORY_SOURCES.COMMENT) &&
+      includeComments &&
+      prisma.comment?.findMany
+        ? prisma.comment.findMany({
+            where: withConditions(
+              commentWhere,
+              visibleWhere(visibility, "recordType", "recordId"),
+              after(HISTORY_SOURCES.COMMENT, "createdAt"),
+            ),
+            include: {
+              author: { select: { id: true, name: true } },
+              mentions: {
+                include: { user: { select: { id: true, name: true } } },
+              },
             },
-          },
-          orderBy: [{ createdAt: direction }, { id: direction }],
-          take: safeLimit + 1,
-        })
-      : Promise.resolve([]),
-  ]);
+            orderBy: [{ createdAt: direction }, { id: direction }],
+            take: take + 1,
+          })
+        : Promise.resolve([]),
+    ]);
 
-  // Concatenated in source order, so the stable sort keeps each source's own
-  // order among rows of the same instant (compareTimeline).
-  const combined = [
-    ...toArray(auditRows).map(serializeEvent),
-    ...toArray(approvalRows).map(serializeApprovalEvent),
-    ...toArray(statusRows).map((row) => serializeStatusHistory({ orgId, row })),
-    ...toArray(commentRows).map(serializeCommentEvent),
-  ].sort((a, b) => compareTimeline(a, b, direction));
+    // Concatenated in source order, so the stable sort keeps each source's own
+    // order among rows of the same instant (compareTimeline).
+    const combined = [
+      ...toArray(auditRows).map(serializeEvent),
+      ...toArray(approvalRows).map(serializeApprovalEvent),
+      ...toArray(statusRows).map((row) => serializeStatusHistory({ orgId, row })),
+      ...toArray(commentRows).map(serializeCommentEvent),
+    ].sort((a, b) => compareTimeline(a, b, direction));
+    // Each source read take + 1 rows, so the first take + 1 of the merge are
+    // in the timeline's order whichever source they came from, and a source
+    // that filled its take may hold more. When none did, every row there is
+    // has been read, and all of them are in order.
+    const more = [auditRows, approvalRows, statusRows, commentRows].some((rows) => toArray(rows).length > take);
+    return { rows: more ? combined.slice(0, take + 1) : combined, more };
+  };
 
-  const hasMore = combined.length > safeLimit;
-  const page = combined.slice(0, safeLimit);
-  // The cursor is the page's last position before the events whose content
-  // names a record of its own are judged, so a page short of those still
-  // leads to the next.
-  const nextCursor = hasMore && page.length ? encodeCursor(page[page.length - 1]) : null;
-  const visible = page.filter((event) => eventVisible(visibility, event));
-  await attachActorNames(visible);
-  const events = await loadRecordAttachments({ projectId, events: visible });
+  // The events whose content names a record of its own (a file's record, the
+  // client contract) are judged after they are read. The page is filled with
+  // the events the reader is given, reading on past the ones withheld, and
+  // the cursor is the position of the last event given: it was the last row
+  // read, so it carried the id and the time of an event the reader is
+  // refused, and a page of withheld events came back empty with a cursor
+  // (certification R17). One event given past the page says whether another
+  // page holds anything for this reader.
+  const given = [];
+  let from = position;
+  let take = safeLimit;
+  for (;;) {
+    const { rows, more } = await readRows(from, take);
+    for (const event of rows) if (eventVisible(visibility, event)) given.push(event);
+    if (given.length > safeLimit || !more || !rows.length) break;
+    const last = rows[rows.length - 1];
+    from = { time: new Date(dateValue(last.occurredAt)), rank: sourceRank(last.source), id: last.rawId };
+    take = Math.min(take * 2, MAX_SCAN_ROWS);
+  }
+  const page = given.slice(0, safeLimit);
+  const nextCursor = given.length > safeLimit ? encodeCursor(page[page.length - 1]) : null;
+  await attachActorNames(page);
+  const events = await loadRecordAttachments({ projectId, events: page });
 
   return { events, nextCursor };
 };
@@ -1091,7 +1206,10 @@ module.exports = {
   buildChangeSet,
   compactJson,
   listEvents,
+  projectWideTaskVisibility,
   recordEvent,
+  recordRuleFor,
   serializeCommentEvent,
   serializeEvent,
+  withTaskVisibility,
 };

@@ -1,9 +1,11 @@
-const store = { definitions: [], fieldsets: [], projectFieldsets: [], recordTypes: [], values: [], rfis: [], changeOrders: [] };
+const store = { definitions: [], fieldsets: [], projectFieldsets: [], recordTypes: [], values: [], rfis: [], changeOrders: [], tasks: [] };
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${(seq += 1)}`;
 const matches = (row, where = {}) =>
   Object.entries(where).every(([key, expected]) => {
     if (key === "OR") return expected.some((clause) => matches(row, clause));
+    if (key === "AND") return expected.every((clause) => matches(row, clause));
+    if (key === "NOT") return !matches(row, expected);
     if (expected && typeof expected === "object" && !Array.isArray(expected) && !(expected instanceof Date)) {
       if ("in" in expected) return expected.in.includes(row[key]);
       if ("not" in expected) return row[key] !== expected.not;
@@ -64,9 +66,17 @@ mockPrisma.customFieldValue = table(store.values, "val", { include: (row) => ({ 
 // record of the route's project (certification L45).
 mockPrisma.rfi = table(store.rfis, "rfi");
 mockPrisma.changeOrder = table(store.changeOrders, "co");
+mockPrisma.task = table(store.tasks, "task");
 mockPrisma.user = { findMany: jest.fn(async ({ where }) => where.id.in.map((id) => ({ id, name: `User ${id}`, email: null }))) };
 mockPrisma.company = { findMany: jest.fn(async ({ where }) => where.id.in.map((id) => ({ id, name: `Company ${id}` }))) };
-const mockAudit = { ENTITY_TYPES: { CUSTOM_FIELD: "custom_field", CUSTOM_FIELDSET: "custom_fieldset", RECORD_TYPE: "record_type" }, ACTIONS: { CREATED: "created", UPDATED: "updated" }, recordEvent: jest.fn(async () => ({})) };
+const mockAudit = {
+  ENTITY_TYPES: { CUSTOM_FIELD: "custom_field", CUSTOM_FIELDSET: "custom_fieldset", RECORD_TYPE: "record_type" },
+  ACTIONS: { CREATED: "created", UPDATED: "updated" },
+  recordEvent: jest.fn(async () => ({})),
+  // The records' own rules as they bind a reader: the real ones (certification R16).
+  recordRuleFor: (...args) => jest.requireActual("../audit.service").recordRuleFor(...args),
+  withTaskVisibility: (...args) => jest.requireActual("../audit.service").withTaskVisibility(...args),
+};
 
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 jest.mock("../audit.service", () => mockAudit);
@@ -240,5 +250,38 @@ describe("custom fields", () => {
     expect((await service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: Y_RECORD, viewer: member })).values).toEqual({ probe: "y-only" });
     const noRfi = { ...member, canRead: (moduleName) => moduleName !== "rfi" };
     await expect(service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: RECORD, viewer: noRfi })).rejects.toMatchObject({ code: "CUSTOM_FIELD_RECORD_NOT_FOUND" });
+  });
+
+  it("keeps a company member to the tasks the task routes show them and to the drafts that are theirs (certification R16)", async () => {
+    const OWN_TASK = "77777777-7777-4777-8777-777777777777";
+    const OTHER_TASK = "88888888-8888-4888-8888-888888888888";
+    const DRAFT = "99999999-9999-4999-8999-999999999999";
+    await service.createDefinition({ orgId: ORG, recordType: "task", payload: { label: "Probe", type: "text" }, actor });
+    await service.createDefinition({ orgId: ORG, recordType: "rfi", payload: { label: "Probe", type: "text" }, actor });
+    store.tasks.push({ id: OWN_TASK, projectId: PROJECT, assigneeId: "qs-1", createdById: "pm-1" }, { id: OTHER_TASK, projectId: PROJECT, assigneeId: "site-1", createdById: "pm-1" });
+    store.rfis.push({ id: DRAFT, projectId: PROJECT, status: "draft", createdBy: "pm-1", managerUserId: null });
+    await service.setValues({ orgId: ORG, projectId: PROJECT, recordType: "task", recordId: OTHER_TASK, values: { probe: "theirs" }, partial: true, actor });
+    await service.setValues({ orgId: ORG, projectId: PROJECT, recordType: "task", recordId: OWN_TASK, values: { probe: "mine" }, partial: true, actor });
+    await service.setValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: DRAFT, values: { probe: "draft" }, partial: true, actor });
+    const qs = { id: "qs-1", userId: "qs-1", canRead: () => true, partyIds: null, companyIds: null, projectWideTasks: false };
+
+    // A colleague's task: not found, read or written; the bulk read leaves it out.
+    await expect(service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "task", recordId: OTHER_TASK, viewer: qs })).rejects.toMatchObject({ status: 404, code: "CUSTOM_FIELD_RECORD_NOT_FOUND" });
+    await expect(service.setValues({ orgId: ORG, projectId: PROJECT, recordType: "task", recordId: OTHER_TASK, values: { probe: "qs-wrote" }, partial: true, actor, viewer: qs })).rejects.toMatchObject({ code: "CUSTOM_FIELD_RECORD_NOT_FOUND" });
+    const bulk = await service.valuesForProjectRecords({ orgId: ORG, projectId: PROJECT, recordType: "task", recordIds: [OWN_TASK, OTHER_TASK], viewer: qs });
+    expect([...bulk.keys()]).toEqual([OWN_TASK]);
+    // Their own task is read and written.
+    expect((await service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "task", recordId: OWN_TASK, viewer: qs })).values).toEqual({ probe: "mine" });
+    // A PM sees every task.
+    const pm = { ...qs, id: "pm-1", userId: "pm-1", projectWideTasks: true };
+    expect((await service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "task", recordId: OTHER_TASK, viewer: pm })).values).toEqual({ probe: "theirs" });
+    // A reader that does not say is decided as the task routes would; one that cannot be resolved sees its own.
+    const unsaid = { id: "qs-1", userId: "qs-1", canRead: () => true, partyIds: null, companyIds: null };
+    await expect(service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "task", recordId: OTHER_TASK, viewer: unsaid })).rejects.toMatchObject({ code: "CUSTOM_FIELD_RECORD_NOT_FOUND" });
+
+    // A colleague's draft RFI is its author's: not the QS's; the author reads it, and a sent RFI is everyone's.
+    await expect(service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: DRAFT, viewer: qs })).rejects.toMatchObject({ code: "CUSTOM_FIELD_RECORD_NOT_FOUND" });
+    expect((await service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: DRAFT, viewer: pm })).values).toEqual({ probe: "draft" });
+    await expect(service.getValues({ orgId: ORG, projectId: PROJECT, recordType: "rfi", recordId: RECORD, viewer: qs })).resolves.toMatchObject({ recordType: "rfi" });
   });
 });
