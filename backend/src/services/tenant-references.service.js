@@ -17,9 +17,11 @@ const { HttpError } = require("../utils/http-error");
  * no other.
  */
 
+const listOf = (values) => (Array.isArray(values) ? values : values instanceof Set ? [...values] : [values]);
+
 const idsOf = (values) => [
   ...new Set(
-    (Array.isArray(values) ? values : [values])
+    listOf(values)
       .filter((value) => typeof value === "string" && value.trim() !== "")
       .map((value) => value.trim()),
   ),
@@ -29,8 +31,18 @@ const refuse = (code, message) => {
   throw new HttpError(404, code, message);
 };
 
+// A value that is not an identifier — an array, a number, an object — names
+// no record, so it is refused like a missing one rather than dropped: a
+// dropped value skipped the check while the code that stored or looked it up
+// read it differently (certification CERT-2: ["<another company's id>"]
+// passed every helper and reached the write, or a 500 from the database).
+const assertIdentifiers = (values, code, message) => {
+  if (listOf(values).some((value) => value !== null && value !== undefined && typeof value !== "string")) refuse(code, message);
+};
+
 /** People who are members of the organisation (any membership that has not ended). */
 const assertMembers = async ({ tx = prisma, orgId, userIds, code = "USER_NOT_FOUND", message = "One or more people are not members of this organisation" }) => {
+  assertIdentifiers(userIds, code, message);
   const wanted = idsOf(userIds);
   if (!wanted.length) return [];
   if (!orgId) refuse(code, message);
@@ -44,6 +56,7 @@ const assertMembers = async ({ tx = prisma, orgId, userIds, code = "USER_NOT_FOU
 
 /** Companies of the organisation's directory. */
 const assertCompanies = async ({ tx = prisma, orgId, companyIds, code = "COMPANY_NOT_FOUND", message = "Company not found" }) => {
+  assertIdentifiers(companyIds, code, message);
   const wanted = idsOf(companyIds);
   if (!wanted.length) return [];
   if (!orgId) refuse(code, message);
@@ -54,6 +67,7 @@ const assertCompanies = async ({ tx = prisma, orgId, companyIds, code = "COMPANY
 
 /** Rows of a project-scoped model that belong to the given project. */
 const assertProjectRows = async ({ tx = prisma, model, projectId, ids, code, message }) => {
+  assertIdentifiers(ids, code, message);
   const wanted = idsOf(ids);
   if (!wanted.length) return [];
   if (!projectId || !tx[model]?.findMany) refuse(code, message);
