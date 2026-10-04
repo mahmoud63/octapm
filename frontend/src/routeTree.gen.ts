@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as LandingRouteImport } from './routes/landing'
+import { Route as PlatformRouteRouteImport } from './routes/_platform/route'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as RfqTokenRouteImport } from './routes/rfq.$token'
@@ -35,6 +36,7 @@ import { Route as authForgotPasswordRouteImport } from './routes/(auth)/forgot-p
 import { Route as authAcceptInviteRouteImport } from './routes/(auth)/accept-invite'
 import { Route as AuthenticatedSettingsRouteRouteImport } from './routes/_authenticated/settings/route'
 import { Route as AuthenticatedCompanyRouteRouteImport } from './routes/_authenticated/company/route'
+import { Route as PlatformPlatformAdminIndexRouteImport } from './routes/_platform/platform-admin/index'
 import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authenticated/users/index'
 import { Route as AuthenticatedTasksIndexRouteImport } from './routes/_authenticated/tasks/index'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
@@ -45,6 +47,13 @@ import { Route as AuthenticatedMessagesIndexRouteImport } from './routes/_authen
 import { Route as AuthenticatedHelpCenterIndexRouteImport } from './routes/_authenticated/help-center/index'
 import { Route as AuthenticatedCompanyIndexRouteImport } from './routes/_authenticated/company/index'
 import { Route as AuthenticatedBillingIndexRouteImport } from './routes/_authenticated/billing/index'
+import { Route as PlatformPlatformAdminUsersRouteImport } from './routes/_platform/platform-admin/users'
+import { Route as PlatformPlatformAdminSubscriptionsRouteImport } from './routes/_platform/platform-admin/subscriptions'
+import { Route as PlatformPlatformAdminProjectsRouteImport } from './routes/_platform/platform-admin/projects'
+import { Route as PlatformPlatformAdminHealthRouteImport } from './routes/_platform/platform-admin/health'
+import { Route as PlatformPlatformAdminAuditRouteImport } from './routes/_platform/platform-admin/audit'
+import { Route as PlatformPlatformAdminAnalyticsRouteImport } from './routes/_platform/platform-admin/analytics'
+import { Route as PlatformPlatformAdminAiUsageRouteImport } from './routes/_platform/platform-admin/ai-usage'
 import { Route as AuthenticatedSettingsSecurityRouteImport } from './routes/_authenticated/settings/security'
 import { Route as AuthenticatedSettingsPermissionsRouteImport } from './routes/_authenticated/settings/permissions'
 import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes/_authenticated/settings/notifications'
@@ -69,8 +78,10 @@ import { Route as AuthenticatedCompanyCostCodesRouteImport } from './routes/_aut
 import { Route as AuthenticatedBillingCheckoutRouteImport } from './routes/_authenticated/billing/checkout'
 import { Route as authSsoCompleteRouteImport } from './routes/(auth)/sso.complete'
 import { Route as AuthenticatedOOrgSlugRouteRouteImport } from './routes/_authenticated/o/$orgSlug/route'
+import { Route as PlatformPlatformAdminCompaniesIndexRouteImport } from './routes/_platform/platform-admin/companies/index'
 import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated/projects/$projectId/index'
 import { Route as AuthenticatedOOrgSlugIndexRouteImport } from './routes/_authenticated/o/$orgSlug/index'
+import { Route as PlatformPlatformAdminCompaniesOrgIdRouteImport } from './routes/_platform/platform-admin/companies/$orgId'
 import { Route as AuthenticatedOOrgSlugVendorsRouteImport } from './routes/_authenticated/o/$orgSlug/vendors'
 import { Route as AuthenticatedOOrgSlugInventoryRouteImport } from './routes/_authenticated/o/$orgSlug/inventory'
 import { Route as AuthenticatedOOrgSlugDirectoryRouteImport } from './routes/_authenticated/o/$orgSlug/directory'
@@ -129,6 +140,10 @@ const PrivacyRoute = PrivacyRouteImport.update({
 const LandingRoute = LandingRouteImport.update({
   id: '/landing',
   path: '/landing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlatformRouteRoute = PlatformRouteRouteImport.update({
+  id: '/_platform',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
@@ -247,6 +262,12 @@ const AuthenticatedCompanyRouteRoute =
     path: '/company',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const PlatformPlatformAdminIndexRoute =
+  PlatformPlatformAdminIndexRouteImport.update({
+    id: '/platform-admin/',
+    path: '/platform-admin/',
+    getParentRoute: () => PlatformRouteRoute,
+  } as any)
 const AuthenticatedUsersIndexRoute = AuthenticatedUsersIndexRouteImport.update({
   id: '/users/',
   path: '/users/',
@@ -304,6 +325,48 @@ const AuthenticatedBillingIndexRoute =
     id: '/billing/',
     path: '/billing/',
     getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const PlatformPlatformAdminUsersRoute =
+  PlatformPlatformAdminUsersRouteImport.update({
+    id: '/platform-admin/users',
+    path: '/platform-admin/users',
+    getParentRoute: () => PlatformRouteRoute,
+  } as any)
+const PlatformPlatformAdminSubscriptionsRoute =
+  PlatformPlatformAdminSubscriptionsRouteImport.update({
+    id: '/platform-admin/subscriptions',
+    path: '/platform-admin/subscriptions',
+    getParentRoute: () => PlatformRouteRoute,
+  } as any)
+const PlatformPlatformAdminProjectsRoute =
+  PlatformPlatformAdminProjectsRouteImport.update({
+    id: '/platform-admin/projects',
+    path: '/platform-admin/projects',
+    getParentRoute: () => PlatformRouteRoute,
+  } as any)
+const PlatformPlatformAdminHealthRoute =
+  PlatformPlatformAdminHealthRouteImport.update({
+    id: '/platform-admin/health',
+    path: '/platform-admin/health',
+    getParentRoute: () => PlatformRouteRoute,
+  } as any)
+const PlatformPlatformAdminAuditRoute =
+  PlatformPlatformAdminAuditRouteImport.update({
+    id: '/platform-admin/audit',
+    path: '/platform-admin/audit',
+    getParentRoute: () => PlatformRouteRoute,
+  } as any)
+const PlatformPlatformAdminAnalyticsRoute =
+  PlatformPlatformAdminAnalyticsRouteImport.update({
+    id: '/platform-admin/analytics',
+    path: '/platform-admin/analytics',
+    getParentRoute: () => PlatformRouteRoute,
+  } as any)
+const PlatformPlatformAdminAiUsageRoute =
+  PlatformPlatformAdminAiUsageRouteImport.update({
+    id: '/platform-admin/ai-usage',
+    path: '/platform-admin/ai-usage',
+    getParentRoute: () => PlatformRouteRoute,
   } as any)
 const AuthenticatedSettingsSecurityRoute =
   AuthenticatedSettingsSecurityRouteImport.update({
@@ -448,6 +511,12 @@ const AuthenticatedOOrgSlugRouteRoute =
     path: '/o/$orgSlug',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const PlatformPlatformAdminCompaniesIndexRoute =
+  PlatformPlatformAdminCompaniesIndexRouteImport.update({
+    id: '/platform-admin/companies/',
+    path: '/platform-admin/companies/',
+    getParentRoute: () => PlatformRouteRoute,
+  } as any)
 const AuthenticatedProjectsProjectIdIndexRoute =
   AuthenticatedProjectsProjectIdIndexRouteImport.update({
     id: '/',
@@ -459,6 +528,12 @@ const AuthenticatedOOrgSlugIndexRoute =
     id: '/',
     path: '/',
     getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const PlatformPlatformAdminCompaniesOrgIdRoute =
+  PlatformPlatformAdminCompaniesOrgIdRouteImport.update({
+    id: '/platform-admin/companies/$orgId',
+    path: '/platform-admin/companies/$orgId',
+    getParentRoute: () => PlatformRouteRoute,
   } as any)
 const AuthenticatedOOrgSlugVendorsRoute =
   AuthenticatedOOrgSlugVendorsRouteImport.update({
@@ -775,6 +850,13 @@ export interface FileRoutesByFullPath {
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/settings/permissions': typeof AuthenticatedSettingsPermissionsRoute
   '/settings/security': typeof AuthenticatedSettingsSecurityRoute
+  '/platform-admin/ai-usage': typeof PlatformPlatformAdminAiUsageRoute
+  '/platform-admin/analytics': typeof PlatformPlatformAdminAnalyticsRoute
+  '/platform-admin/audit': typeof PlatformPlatformAdminAuditRoute
+  '/platform-admin/health': typeof PlatformPlatformAdminHealthRoute
+  '/platform-admin/projects': typeof PlatformPlatformAdminProjectsRoute
+  '/platform-admin/subscriptions': typeof PlatformPlatformAdminSubscriptionsRoute
+  '/platform-admin/users': typeof PlatformPlatformAdminUsersRoute
   '/billing/': typeof AuthenticatedBillingIndexRoute
   '/company/': typeof AuthenticatedCompanyIndexRoute
   '/help-center/': typeof AuthenticatedHelpCenterIndexRoute
@@ -785,14 +867,17 @@ export interface FileRoutesByFullPath {
   '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/tasks/': typeof AuthenticatedTasksIndexRoute
   '/users/': typeof AuthenticatedUsersIndexRoute
+  '/platform-admin/': typeof PlatformPlatformAdminIndexRoute
   '/o/$orgSlug/company': typeof AuthenticatedOOrgSlugCompanyRouteRouteWithChildren
   '/o/$orgSlug/settings': typeof AuthenticatedOOrgSlugSettingsRouteRouteWithChildren
   '/o/$orgSlug/cost-codes': typeof AuthenticatedOOrgSlugCostCodesRoute
   '/o/$orgSlug/directory': typeof AuthenticatedOOrgSlugDirectoryRoute
   '/o/$orgSlug/inventory': typeof AuthenticatedOOrgSlugInventoryRoute
   '/o/$orgSlug/vendors': typeof AuthenticatedOOrgSlugVendorsRoute
+  '/platform-admin/companies/$orgId': typeof PlatformPlatformAdminCompaniesOrgIdRoute
   '/o/$orgSlug/': typeof AuthenticatedOOrgSlugIndexRoute
   '/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
+  '/platform-admin/companies/': typeof PlatformPlatformAdminCompaniesIndexRoute
   '/o/$orgSlug/billing/checkout': typeof AuthenticatedOOrgSlugBillingCheckoutRoute
   '/o/$orgSlug/company/cost-codes': typeof AuthenticatedOOrgSlugCompanyCostCodesRoute
   '/o/$orgSlug/company/custom-fields': typeof AuthenticatedOOrgSlugCompanyCustomFieldsRoute
@@ -833,6 +918,7 @@ export interface FileRoutesByFullPath {
   '/o/$orgSlug/projects/$projectId/$module/': typeof AuthenticatedOOrgSlugProjectsProjectIdModuleIndexRoute
 }
 export interface FileRoutesByTo {
+  '/': typeof AuthenticatedIndexRoute
   '/landing': typeof LandingRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
@@ -855,7 +941,6 @@ export interface FileRoutesByTo {
   '/vendors': typeof AuthenticatedVendorsRoute
   '/bid/$token': typeof BidTokenRoute
   '/rfq/$token': typeof RfqTokenRoute
-  '/': typeof AuthenticatedIndexRoute
   '/sso/complete': typeof authSsoCompleteRoute
   '/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
   '/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
@@ -878,6 +963,13 @@ export interface FileRoutesByTo {
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/settings/permissions': typeof AuthenticatedSettingsPermissionsRoute
   '/settings/security': typeof AuthenticatedSettingsSecurityRoute
+  '/platform-admin/ai-usage': typeof PlatformPlatformAdminAiUsageRoute
+  '/platform-admin/analytics': typeof PlatformPlatformAdminAnalyticsRoute
+  '/platform-admin/audit': typeof PlatformPlatformAdminAuditRoute
+  '/platform-admin/health': typeof PlatformPlatformAdminHealthRoute
+  '/platform-admin/projects': typeof PlatformPlatformAdminProjectsRoute
+  '/platform-admin/subscriptions': typeof PlatformPlatformAdminSubscriptionsRoute
+  '/platform-admin/users': typeof PlatformPlatformAdminUsersRoute
   '/billing': typeof AuthenticatedBillingIndexRoute
   '/company': typeof AuthenticatedCompanyIndexRoute
   '/help-center': typeof AuthenticatedHelpCenterIndexRoute
@@ -888,12 +980,15 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthenticatedSettingsIndexRoute
   '/tasks': typeof AuthenticatedTasksIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
+  '/platform-admin': typeof PlatformPlatformAdminIndexRoute
   '/o/$orgSlug/cost-codes': typeof AuthenticatedOOrgSlugCostCodesRoute
   '/o/$orgSlug/directory': typeof AuthenticatedOOrgSlugDirectoryRoute
   '/o/$orgSlug/inventory': typeof AuthenticatedOOrgSlugInventoryRoute
   '/o/$orgSlug/vendors': typeof AuthenticatedOOrgSlugVendorsRoute
+  '/platform-admin/companies/$orgId': typeof PlatformPlatformAdminCompaniesOrgIdRoute
   '/o/$orgSlug': typeof AuthenticatedOOrgSlugIndexRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdIndexRoute
+  '/platform-admin/companies': typeof PlatformPlatformAdminCompaniesIndexRoute
   '/o/$orgSlug/billing/checkout': typeof AuthenticatedOOrgSlugBillingCheckoutRoute
   '/o/$orgSlug/company/cost-codes': typeof AuthenticatedOOrgSlugCompanyCostCodesRoute
   '/o/$orgSlug/company/custom-fields': typeof AuthenticatedOOrgSlugCompanyCustomFieldsRoute
@@ -935,6 +1030,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/_platform': typeof PlatformRouteRouteWithChildren
   '/landing': typeof LandingRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
@@ -984,6 +1080,13 @@ export interface FileRoutesById {
   '/_authenticated/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/_authenticated/settings/permissions': typeof AuthenticatedSettingsPermissionsRoute
   '/_authenticated/settings/security': typeof AuthenticatedSettingsSecurityRoute
+  '/_platform/platform-admin/ai-usage': typeof PlatformPlatformAdminAiUsageRoute
+  '/_platform/platform-admin/analytics': typeof PlatformPlatformAdminAnalyticsRoute
+  '/_platform/platform-admin/audit': typeof PlatformPlatformAdminAuditRoute
+  '/_platform/platform-admin/health': typeof PlatformPlatformAdminHealthRoute
+  '/_platform/platform-admin/projects': typeof PlatformPlatformAdminProjectsRoute
+  '/_platform/platform-admin/subscriptions': typeof PlatformPlatformAdminSubscriptionsRoute
+  '/_platform/platform-admin/users': typeof PlatformPlatformAdminUsersRoute
   '/_authenticated/billing/': typeof AuthenticatedBillingIndexRoute
   '/_authenticated/company/': typeof AuthenticatedCompanyIndexRoute
   '/_authenticated/help-center/': typeof AuthenticatedHelpCenterIndexRoute
@@ -994,14 +1097,17 @@ export interface FileRoutesById {
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/tasks/': typeof AuthenticatedTasksIndexRoute
   '/_authenticated/users/': typeof AuthenticatedUsersIndexRoute
+  '/_platform/platform-admin/': typeof PlatformPlatformAdminIndexRoute
   '/_authenticated/o/$orgSlug/company': typeof AuthenticatedOOrgSlugCompanyRouteRouteWithChildren
   '/_authenticated/o/$orgSlug/settings': typeof AuthenticatedOOrgSlugSettingsRouteRouteWithChildren
   '/_authenticated/o/$orgSlug/cost-codes': typeof AuthenticatedOOrgSlugCostCodesRoute
   '/_authenticated/o/$orgSlug/directory': typeof AuthenticatedOOrgSlugDirectoryRoute
   '/_authenticated/o/$orgSlug/inventory': typeof AuthenticatedOOrgSlugInventoryRoute
   '/_authenticated/o/$orgSlug/vendors': typeof AuthenticatedOOrgSlugVendorsRoute
+  '/_platform/platform-admin/companies/$orgId': typeof PlatformPlatformAdminCompaniesOrgIdRoute
   '/_authenticated/o/$orgSlug/': typeof AuthenticatedOOrgSlugIndexRoute
   '/_authenticated/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
+  '/_platform/platform-admin/companies/': typeof PlatformPlatformAdminCompaniesIndexRoute
   '/_authenticated/o/$orgSlug/billing/checkout': typeof AuthenticatedOOrgSlugBillingCheckoutRoute
   '/_authenticated/o/$orgSlug/company/cost-codes': typeof AuthenticatedOOrgSlugCompanyCostCodesRoute
   '/_authenticated/o/$orgSlug/company/custom-fields': typeof AuthenticatedOOrgSlugCompanyCustomFieldsRoute
@@ -1093,6 +1199,13 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/settings/permissions'
     | '/settings/security'
+    | '/platform-admin/ai-usage'
+    | '/platform-admin/analytics'
+    | '/platform-admin/audit'
+    | '/platform-admin/health'
+    | '/platform-admin/projects'
+    | '/platform-admin/subscriptions'
+    | '/platform-admin/users'
     | '/billing/'
     | '/company/'
     | '/help-center/'
@@ -1103,14 +1216,17 @@ export interface FileRouteTypes {
     | '/settings/'
     | '/tasks/'
     | '/users/'
+    | '/platform-admin/'
     | '/o/$orgSlug/company'
     | '/o/$orgSlug/settings'
     | '/o/$orgSlug/cost-codes'
     | '/o/$orgSlug/directory'
     | '/o/$orgSlug/inventory'
     | '/o/$orgSlug/vendors'
+    | '/platform-admin/companies/$orgId'
     | '/o/$orgSlug/'
     | '/projects/$projectId/'
+    | '/platform-admin/companies/'
     | '/o/$orgSlug/billing/checkout'
     | '/o/$orgSlug/company/cost-codes'
     | '/o/$orgSlug/company/custom-fields'
@@ -1151,6 +1267,7 @@ export interface FileRouteTypes {
     | '/o/$orgSlug/projects/$projectId/$module/'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/'
     | '/landing'
     | '/privacy'
     | '/terms'
@@ -1173,7 +1290,6 @@ export interface FileRouteTypes {
     | '/vendors'
     | '/bid/$token'
     | '/rfq/$token'
-    | '/'
     | '/sso/complete'
     | '/billing/checkout'
     | '/company/cost-codes'
@@ -1196,6 +1312,13 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/settings/permissions'
     | '/settings/security'
+    | '/platform-admin/ai-usage'
+    | '/platform-admin/analytics'
+    | '/platform-admin/audit'
+    | '/platform-admin/health'
+    | '/platform-admin/projects'
+    | '/platform-admin/subscriptions'
+    | '/platform-admin/users'
     | '/billing'
     | '/company'
     | '/help-center'
@@ -1206,12 +1329,15 @@ export interface FileRouteTypes {
     | '/settings'
     | '/tasks'
     | '/users'
+    | '/platform-admin'
     | '/o/$orgSlug/cost-codes'
     | '/o/$orgSlug/directory'
     | '/o/$orgSlug/inventory'
     | '/o/$orgSlug/vendors'
+    | '/platform-admin/companies/$orgId'
     | '/o/$orgSlug'
     | '/projects/$projectId'
+    | '/platform-admin/companies'
     | '/o/$orgSlug/billing/checkout'
     | '/o/$orgSlug/company/cost-codes'
     | '/o/$orgSlug/company/custom-fields'
@@ -1252,6 +1378,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_authenticated'
+    | '/_platform'
     | '/landing'
     | '/privacy'
     | '/terms'
@@ -1301,6 +1428,13 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/notifications'
     | '/_authenticated/settings/permissions'
     | '/_authenticated/settings/security'
+    | '/_platform/platform-admin/ai-usage'
+    | '/_platform/platform-admin/analytics'
+    | '/_platform/platform-admin/audit'
+    | '/_platform/platform-admin/health'
+    | '/_platform/platform-admin/projects'
+    | '/_platform/platform-admin/subscriptions'
+    | '/_platform/platform-admin/users'
     | '/_authenticated/billing/'
     | '/_authenticated/company/'
     | '/_authenticated/help-center/'
@@ -1311,14 +1445,17 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/'
     | '/_authenticated/tasks/'
     | '/_authenticated/users/'
+    | '/_platform/platform-admin/'
     | '/_authenticated/o/$orgSlug/company'
     | '/_authenticated/o/$orgSlug/settings'
     | '/_authenticated/o/$orgSlug/cost-codes'
     | '/_authenticated/o/$orgSlug/directory'
     | '/_authenticated/o/$orgSlug/inventory'
     | '/_authenticated/o/$orgSlug/vendors'
+    | '/_platform/platform-admin/companies/$orgId'
     | '/_authenticated/o/$orgSlug/'
     | '/_authenticated/projects/$projectId/'
+    | '/_platform/platform-admin/companies/'
     | '/_authenticated/o/$orgSlug/billing/checkout'
     | '/_authenticated/o/$orgSlug/company/cost-codes'
     | '/_authenticated/o/$orgSlug/company/custom-fields'
@@ -1361,6 +1498,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  PlatformRouteRoute: typeof PlatformRouteRouteWithChildren
   LandingRoute: typeof LandingRoute
   PrivacyRoute: typeof PrivacyRoute
   TermsRoute: typeof TermsRoute
@@ -1401,6 +1539,13 @@ declare module '@tanstack/react-router' {
       path: '/landing'
       fullPath: '/landing'
       preLoaderRoute: typeof LandingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_platform': {
+      id: '/_platform'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof PlatformRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated': {
@@ -1564,6 +1709,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCompanyRouteRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_platform/platform-admin/': {
+      id: '/_platform/platform-admin/'
+      path: '/platform-admin'
+      fullPath: '/platform-admin/'
+      preLoaderRoute: typeof PlatformPlatformAdminIndexRouteImport
+      parentRoute: typeof PlatformRouteRoute
+    }
     '/_authenticated/users/': {
       id: '/_authenticated/users/'
       path: '/users'
@@ -1633,6 +1785,55 @@ declare module '@tanstack/react-router' {
       fullPath: '/billing/'
       preLoaderRoute: typeof AuthenticatedBillingIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_platform/platform-admin/users': {
+      id: '/_platform/platform-admin/users'
+      path: '/platform-admin/users'
+      fullPath: '/platform-admin/users'
+      preLoaderRoute: typeof PlatformPlatformAdminUsersRouteImport
+      parentRoute: typeof PlatformRouteRoute
+    }
+    '/_platform/platform-admin/subscriptions': {
+      id: '/_platform/platform-admin/subscriptions'
+      path: '/platform-admin/subscriptions'
+      fullPath: '/platform-admin/subscriptions'
+      preLoaderRoute: typeof PlatformPlatformAdminSubscriptionsRouteImport
+      parentRoute: typeof PlatformRouteRoute
+    }
+    '/_platform/platform-admin/projects': {
+      id: '/_platform/platform-admin/projects'
+      path: '/platform-admin/projects'
+      fullPath: '/platform-admin/projects'
+      preLoaderRoute: typeof PlatformPlatformAdminProjectsRouteImport
+      parentRoute: typeof PlatformRouteRoute
+    }
+    '/_platform/platform-admin/health': {
+      id: '/_platform/platform-admin/health'
+      path: '/platform-admin/health'
+      fullPath: '/platform-admin/health'
+      preLoaderRoute: typeof PlatformPlatformAdminHealthRouteImport
+      parentRoute: typeof PlatformRouteRoute
+    }
+    '/_platform/platform-admin/audit': {
+      id: '/_platform/platform-admin/audit'
+      path: '/platform-admin/audit'
+      fullPath: '/platform-admin/audit'
+      preLoaderRoute: typeof PlatformPlatformAdminAuditRouteImport
+      parentRoute: typeof PlatformRouteRoute
+    }
+    '/_platform/platform-admin/analytics': {
+      id: '/_platform/platform-admin/analytics'
+      path: '/platform-admin/analytics'
+      fullPath: '/platform-admin/analytics'
+      preLoaderRoute: typeof PlatformPlatformAdminAnalyticsRouteImport
+      parentRoute: typeof PlatformRouteRoute
+    }
+    '/_platform/platform-admin/ai-usage': {
+      id: '/_platform/platform-admin/ai-usage'
+      path: '/platform-admin/ai-usage'
+      fullPath: '/platform-admin/ai-usage'
+      preLoaderRoute: typeof PlatformPlatformAdminAiUsageRouteImport
+      parentRoute: typeof PlatformRouteRoute
     }
     '/_authenticated/settings/security': {
       id: '/_authenticated/settings/security'
@@ -1802,6 +2003,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedOOrgSlugRouteRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_platform/platform-admin/companies/': {
+      id: '/_platform/platform-admin/companies/'
+      path: '/platform-admin/companies'
+      fullPath: '/platform-admin/companies/'
+      preLoaderRoute: typeof PlatformPlatformAdminCompaniesIndexRouteImport
+      parentRoute: typeof PlatformRouteRoute
+    }
     '/_authenticated/projects/$projectId/': {
       id: '/_authenticated/projects/$projectId/'
       path: '/'
@@ -1815,6 +2023,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/o/$orgSlug/'
       preLoaderRoute: typeof AuthenticatedOOrgSlugIndexRouteImport
       parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_platform/platform-admin/companies/$orgId': {
+      id: '/_platform/platform-admin/companies/$orgId'
+      path: '/platform-admin/companies/$orgId'
+      fullPath: '/platform-admin/companies/$orgId'
+      preLoaderRoute: typeof PlatformPlatformAdminCompaniesOrgIdRouteImport
+      parentRoute: typeof PlatformRouteRoute
     }
     '/_authenticated/o/$orgSlug/vendors': {
       id: '/_authenticated/o/$orgSlug/vendors'
@@ -2442,8 +2657,42 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
 const AuthenticatedRouteRouteWithChildren =
   AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
 
+interface PlatformRouteRouteChildren {
+  PlatformPlatformAdminAiUsageRoute: typeof PlatformPlatformAdminAiUsageRoute
+  PlatformPlatformAdminAnalyticsRoute: typeof PlatformPlatformAdminAnalyticsRoute
+  PlatformPlatformAdminAuditRoute: typeof PlatformPlatformAdminAuditRoute
+  PlatformPlatformAdminHealthRoute: typeof PlatformPlatformAdminHealthRoute
+  PlatformPlatformAdminProjectsRoute: typeof PlatformPlatformAdminProjectsRoute
+  PlatformPlatformAdminSubscriptionsRoute: typeof PlatformPlatformAdminSubscriptionsRoute
+  PlatformPlatformAdminUsersRoute: typeof PlatformPlatformAdminUsersRoute
+  PlatformPlatformAdminIndexRoute: typeof PlatformPlatformAdminIndexRoute
+  PlatformPlatformAdminCompaniesOrgIdRoute: typeof PlatformPlatformAdminCompaniesOrgIdRoute
+  PlatformPlatformAdminCompaniesIndexRoute: typeof PlatformPlatformAdminCompaniesIndexRoute
+}
+
+const PlatformRouteRouteChildren: PlatformRouteRouteChildren = {
+  PlatformPlatformAdminAiUsageRoute: PlatformPlatformAdminAiUsageRoute,
+  PlatformPlatformAdminAnalyticsRoute: PlatformPlatformAdminAnalyticsRoute,
+  PlatformPlatformAdminAuditRoute: PlatformPlatformAdminAuditRoute,
+  PlatformPlatformAdminHealthRoute: PlatformPlatformAdminHealthRoute,
+  PlatformPlatformAdminProjectsRoute: PlatformPlatformAdminProjectsRoute,
+  PlatformPlatformAdminSubscriptionsRoute:
+    PlatformPlatformAdminSubscriptionsRoute,
+  PlatformPlatformAdminUsersRoute: PlatformPlatformAdminUsersRoute,
+  PlatformPlatformAdminIndexRoute: PlatformPlatformAdminIndexRoute,
+  PlatformPlatformAdminCompaniesOrgIdRoute:
+    PlatformPlatformAdminCompaniesOrgIdRoute,
+  PlatformPlatformAdminCompaniesIndexRoute:
+    PlatformPlatformAdminCompaniesIndexRoute,
+}
+
+const PlatformRouteRouteWithChildren = PlatformRouteRoute._addFileChildren(
+  PlatformRouteRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  PlatformRouteRoute: PlatformRouteRouteWithChildren,
   LandingRoute: LandingRoute,
   PrivacyRoute: PrivacyRoute,
   TermsRoute: TermsRoute,
