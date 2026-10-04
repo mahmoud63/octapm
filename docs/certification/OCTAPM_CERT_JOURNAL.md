@@ -329,3 +329,32 @@ Clean generation on HEAD (sequence in the evening entry): restart the API on HEA
 4. Committed: `2fc776e` procurement/bids/materials, `e4f57e2` progress/reports, `5aa9c41` attachments/insurance, `99bdbc4` people/templates, `b820016` punch/activities, `89e2d9a` tooling. Register: a CERT-2 section (eight P1 cross-company writes and three P3, all fixed; C2-N1..N4 recorded).
 
 **Next exact action**: when `logs\regen-cert2b\status.txt` says DONE — check layer 1 compared IDENTICAL to run 1, 0 failed driver runs and lifecycles, the matrix, then triage `results\isolation\cert2b-summary.json` and write the "CERT-2 TENANT ISOLATION COMPLETE" report.
+
+## 2026-10-03 (evening) — second CERT-2 run clean on its sweeps; coverage triage found 40 unjudged pairs; three fix rounds
+
+**State**
+
+| | |
+|---|---|
+| Branch / HEAD | `cert/full-saas-certification`, after `2e3dbe6`, pushed; round 3 of fixes in the working tree (uncommitted) |
+| Checkpoint | CERT-2 not complete: fixing what the coverage triage and the reviews found; a final regeneration and run on the final code follow |
+| Certification database | The `cert2b` population, now carrying residue rows from the fix rounds' reproductions and reviews (to be regenerated) |
+| Services | Cert Postgres :55433 and cert API :5190 restarted at 19:25 CDT after both received a console Ctrl-C at 18:46 (OPS-2, recorded); Stripe stand-in stopped |
+
+**Measured on `cert2b` (population regenerated from empty on `8c445dc`; layer 1 identical to run 1; 704 projects, 8,840 assignments; 3,895 driver runs, 0 failed; 14 lifecycles × 496 checks, 0 failed)**
+
+| Sweep | Attacks | Result |
+|---|---|---|
+| Read sweep (after an owners-only warm-up) | 73,708 | 56,206 refused, 302 filtered, 17,200 query probes empty; 0 leaks, 0 answered |
+| Read-window fingerprint | — | 1,212 rows changed, every one attributed row by row to a member of its own company (`attribute-changes.js`): each company PM's own notification preferences (outsider-query reading its own settings), owners' own document download/preview audit. 0 rows naming anyone outside their company. Warm-up window likewise (evaluations, checklists, scope matrices) |
+| File attacks | 5,910 | all refused; data changed 0 |
+| Replay | 234,974 | 0 accepted writes, 0 answered; data changed 0; all 501 routes judged by the product's own refusal |
+| Injection | 28,811 | 0 accepted, 0 leaks; 0 new cross-company references (census start = end = 0) |
+| Injection, victims fingerprinted (odd→even, even→odd) | 28,811 | victim companies changed 0, attackers' own 0, new references 0 |
+| Realtime + workspace switching (`realtime-proof.js`, 5 pairs) | 117 checks | 117 passed after the membership fixes below; controls delivered |
+
+**Coverage triage** (`cert2-coverage.js`): 40 of 292 injection route/field pairs were refused only by the attacker's own record state (409) or billing (402) — never judged. Driving them on fresh open records (`wf_9475ec24-3af`, six groups, each independently reviewed) found real cross-company writes the sweep could not reach: daily-log entry company (stored and served back), goods-receipt bin (stored; another company's bin and canary then served by the item scan), change-event RFQ vendor, timesheet crew foreman; plus PO-line lock on another company's row, bid-invitation ordering, change-order activity oracle. Round 2 (`wf_815f0072-f13`): crew party, worker person/company (create/update/import), timesheet company, daily-log distribution people, inventory reads scoped to the company, goods-receipt daily report (operator injection), a re-runnable inventory proof, and a systematic **shape sweep** (each id sent as an array, nested array, object, number, boolean, operator): 185 5xx at baseline. Round 3 (`wf_c8cd2d06-ada`, running): daily-report engineer (stored), progress evidence in other shapes (stored), workflow-record activity links checked before the write (oracle), the remaining 5xx.
+
+**Fixed here**: project team add and comment mentions by membership (`94bef49`, a person of two companies could not be placed or mentioned in the second); the tenant-reference helpers refuse non-identifiers instead of dropping them (`2e3dbe6`; the root of several reviewer findings).
+
+**Next exact action**: when round 3 reports — review, full backend suite, every proof in process, commit; regenerate the population from empty on the final code (`regen-cert2.ps1 -Tag cert2c`, with the shape sweep, the victim-state injection and the gap proofs added to the run); report "CERT-2 TENANT ISOLATION COMPLETE" if every count is 0.
