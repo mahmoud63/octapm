@@ -127,12 +127,17 @@ call written by the AI service layer — feature, model, input/output tokens,
 cost (tokens × price table of the day), latency, outcome/error code, feedback;
 identifiers and counts only, never prompts or answers.
 
-## 8. Database (migration `20261005070000_platform_admin`)
+## 8. Database (migrations `20261005070000_platform_admin`, `20261005070100_audit_event_occurred_at_idx`)
 
-Additive: `PlatformUserAccess`, `PlatformAuditEvent`, `ProductEvent`,
-`PlatformErrorEvent`, and `AuditEvent_occurredAt_idx` (for cross-company time
-windows; on a large production table build it `CONCURRENTLY` first — the
-migration uses `IF NOT EXISTS`). No existing column, constraint or row changes.
+070000 (one transaction): `PlatformUserAccess`, `PlatformAuditEvent`,
+`ProductEvent`, `PlatformErrorEvent`. 070100 (single statement, outside a
+transaction): `CREATE INDEX CONCURRENTLY "AuditEvent_occurredAt_idx"` for
+cross-company time windows — writes to AuditEvent continue during the build;
+no `IF NOT EXISTS`, so a retry after an interrupted build fails loudly instead
+of keeping an INVALID index. No existing column, constraint or row changes.
+Preflight, scale test and recovery procedure:
+`OCTAPM_SUPERADMIN_MIGRATION_PREFLIGHT.md`; after deploy run
+`node scripts/db/check-invalid-indexes.js`.
 
 ## 9. Known limits (V1)
 
