@@ -1,6 +1,6 @@
 -- Platform Superadmin V1 (docs/platform/OCTAPM_SUPERADMIN_DESIGN.md).
--- Additive only: four new tables and one new index on AuditEvent. No existing
--- column, constraint or row changes. Hand-written from `prisma migrate diff`
+-- Additive only: four new tables. No existing table, column, constraint or row
+-- changes (the AuditEvent index is the next migration). Hand-written from `prisma migrate diff`
 -- (the rest of that diff is pre-existing drift; see the schema-drift note).
 
 -- CreateTable
@@ -102,10 +102,10 @@ CREATE INDEX "PlatformErrorEvent_code_occurredAt_idx" ON "PlatformErrorEvent"("c
 CREATE INDEX "PlatformErrorEvent_orgId_occurredAt_idx" ON "PlatformErrorEvent"("orgId", "occurredAt");
 CREATE INDEX "PlatformErrorEvent_module_occurredAt_idx" ON "PlatformErrorEvent"("module", "occurredAt");
 
--- Record-activity windows across organisations (no occurredAt-only index existed).
--- On a large production AuditEvent this is a locking CREATE INDEX: build it
--- CONCURRENTLY by hand first in a maintenance window (the IF NOT EXISTS then skips).
-CREATE INDEX IF NOT EXISTS "AuditEvent_occurredAt_idx" ON "AuditEvent"("occurredAt");
+-- The AuditEvent("occurredAt") index is NOT built here: this file runs as one
+-- transaction, and a plain CREATE INDEX holds a SHARE lock that blocks every
+-- write to AuditEvent for the whole build. It is its own migration,
+-- 20261005070100_audit_event_occurred_at_idx, built CONCURRENTLY.
 
 -- AddForeignKey
 ALTER TABLE "PlatformUserAccess" ADD CONSTRAINT "PlatformUserAccess_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
