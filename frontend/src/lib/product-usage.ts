@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import type { AxiosRequestConfig } from 'axios'
 import { useLocation } from '@tanstack/react-router'
 import { apiClient } from '@/services/api/client'
 import { useAuthStore } from '@/stores/auth-store'
@@ -108,11 +109,18 @@ const flush = () => {
   for (let i = queue.length - 1; i >= 0; i -= 1) {
     if (!samePrincipal(now, queue[i].principal)) queue.splice(i, 1)
   }
-  if (!queue.length) return
+  if (!queue.length || !now) return
   const events = queue
     .splice(0, MAX_BATCH)
     .map(({ name, projectId }) => (projectId ? { name, projectId } : { name }))
-  apiClient.post('/telemetry/events', { events }).catch(() => undefined)
+  // The batch names its workspace (the server drops it if the token is now
+  // another one), and is never retried after a 401: a refresh re-binds to the
+  // CURRENT workspace, which may no longer be the one that produced it.
+  apiClient
+    .post('/telemetry/events', { events, workspaceId: now.orgId }, {
+      _retry: true,
+    } as AxiosRequestConfig & { _retry: boolean })
+    .catch(() => undefined)
   if (queue.length) timer = setTimeout(flush, FLUSH_MS)
 }
 

@@ -18210,6 +18210,11 @@ add("/telemetry/events", "post", operation({
                 ["name"],
               ),
             },
+            workspaceId: {
+              type: "string",
+              format: "uuid",
+              description: "The workspace (organisation id) the events were recorded in. When it is not the token's workspace the whole batch is dropped.",
+            },
           },
           ["events"],
         ),

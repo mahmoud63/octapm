@@ -28,9 +28,17 @@ router.post(
     body("events").isArray({ min: 1, max: MAX_EVENTS }),
     body("events.*.name").isString().isLength({ max: 64 }),
     body("events.*.projectId").optional({ nullable: true }).isUUID(),
+    body("workspaceId").optional().isUUID(),
   ],
   validate,
   asyncHandler(async (req, res) => {
+    // A batch says which workspace produced it. If the token now belongs to a
+    // different one (the person switched while the batch was in flight), the
+    // batch is dropped, never attributed to the current workspace (pre-merge
+    // review CX-4). Clients that do not declare one keep the token's.
+    if (req.body.workspaceId && req.body.workspaceId !== req.user.orgId) {
+      return sendSuccess(res, { accepted: 0, dropped: req.body.events.length }, 202);
+    }
     const events = req.body.events.filter((e) => Object.prototype.hasOwnProperty.call(CLIENT_EVENTS, e.name));
     const projectIds = [...new Set(events.map((e) => e.projectId).filter(Boolean))];
     const own = projectIds.length

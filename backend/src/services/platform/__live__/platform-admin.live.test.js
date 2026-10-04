@@ -428,6 +428,15 @@ liveDescribe("Platform Superadmin V1", () => {
       }
     });
 
+    it("CX-4: a batch declaring another workspace than its token's is dropped whole", async () => {
+      const token = bearer(mintAccessToken(pmA));
+      const foreign = await api.post("/api/v1/telemetry/events", { events: [{ name: "boq.opened" }, { name: "rfi.opened" }], workspaceId: orgB.org.id }, token);
+      expect([foreign.status, foreign.body.data]).toEqual([202, { accepted: 0, dropped: 2 }]);
+      const own = await api.post("/api/v1/telemetry/events", { events: [{ name: "boq.opened" }], workspaceId: orgA.org.id }, token);
+      expect(own.body.data).toEqual({ accepted: 1, dropped: 0 });
+      expect((await api.post("/api/v1/telemetry/events", { events: [{ name: "boq.opened" }], workspaceId: "not-a-uuid" }, token)).status).toBe(400);
+    });
+
     it("CX-8: a page past the end still reports the real total", async () => {
       for (const list of ["users", "projects", "subscriptions"]) {
         const first = (await asOperator(`/api/v1/platform-admin/${list}?pageSize=1`)).body.data.page;
