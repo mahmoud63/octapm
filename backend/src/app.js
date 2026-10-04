@@ -35,6 +35,7 @@ const {
   resolveRequestLogFormat,
 } = require("./middleware/request-log");
 const { createHealthRouter } = require("./routes/service-health");
+const { platformTelemetry } = require("./middleware/platform-telemetry");
 const {
   apiRateLimiter,
   stripeWebhookLimiter,
@@ -93,6 +94,9 @@ const createApp = () => {
   app.use("/api/docs", swaggerDocsMiddleware());
   app.use("/api/v1/docs", swaggerDocsMiddleware());
   app.use("/api/v1", apiRateLimiter);
+  // Usage + error counts for the platform console, recorded when a response
+  // finishes; never delays or fails a request (middleware/platform-telemetry.js).
+  app.use("/api/v1", platformTelemetry);
 
   app.use(
     "/api/v1/webhooks/stripe",
@@ -124,6 +128,12 @@ const createApp = () => {
 
   app.use("/api/v1/auth", authRoutes);
   app.use("/api/v1/organisations", require("./routes/organisations"));
+  // OctaPM staff only, gated by platform access — never by a membership
+  // (routes/platform-admin.js). Not under /o/{slug}: it has no tenant.
+  app.use("/api/v1/platform-admin", require("./routes/platform-admin"));
+  // Screen-open usage events from the clients, attributed to the caller's
+  // current workspace (any member or guest).
+  app.use("/api/v1/telemetry", requireOrganizationMembership(), require("./routes/telemetry"));
   app.use("/api/v1/projects", projectRoutes);
   app.use("/api/v1/companies", membersOnly, companyRoutes);
   app.use("/api/v1/users", membersOnly, userRoutes);
