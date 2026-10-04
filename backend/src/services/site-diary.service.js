@@ -1,6 +1,8 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const auditService = require('./audit.service');
+const { assertMembers } = require('./tenant-references.service');
+const { assertLineReferences, checkedPhotos } = require('./daily-report.service');
 
 const DIARY_STATUSES = ['draft', 'submitted', 'approved', 'rejected'];
 const CREATE_STATUSES = ['draft', 'submitted'];
@@ -169,6 +171,24 @@ const ensureProjectPhotoKeys = async ({ tx, orgId, projectId, photos }) => {
   }
 };
 
+/**
+ * What a site diary names is this company's and this project's (certification
+ * CERT-2), as a daily report's is. The diary stored its engineer, its photos —
+ * an uploader (a person), a bare id as a link, a link into another company's
+ * project — and its equipment and material lines as given, and served them
+ * back; an engineer who exists nowhere answered 500 from the database's foreign
+ * key, another company's person 201, which told the two apart. The engineer is
+ * now a member of this organisation (another company's person and a nowhere
+ * id get the same 404); the photos take the shape progress evidence takes and
+ * name this project's files only, each uploader read from its document
+ * (daily-report.service checkedPhotos, progress.service prepareEvidence); the
+ * lines name this project's equipment and materials (daily-report.service
+ * assertLineReferences). Each is checked when the request sends it, so a
+ * diary can still be edited for anything else.
+ */
+const assertEngineer = ({ tx, orgId, engineerId }) =>
+  assertMembers({ tx, orgId, userIds: [engineerId], code: 'USER_NOT_FOUND', message: 'The engineer is not a member of this organisation' });
+
 const linkPhotoDocuments = async ({
   tx,
   orgId,
@@ -307,9 +327,10 @@ const buildDiaryData = ({ payload, projectId, userId, existing = null }) => ({
     payload.equipment !== undefined
       ? normalizeList(payload.equipment)
       : existing?.equipmentJson || [],
-  photosJson: normalizePhotos(
-    payload.photos !== undefined ? payload.photos : existing?.photosJson,
-  ),
+  photosJson:
+    payload.photos !== undefined
+      ? normalizePhotos(payload.photos)
+      : existing?.photosJson || [],
   notes:
     payload.notes !== undefined ? trimOrNull(payload.notes) : existing?.notes,
   clientRequestId:
@@ -385,13 +406,16 @@ const createSiteDiary = async ({ orgId, projectId, userId, payload }) =>
       );
     }
 
+    if (payload.engineerId) await assertEngineer({ tx, orgId, engineerId: payload.engineerId });
     const data = buildDiaryData({ payload, projectId, userId });
+    await assertLineReferences({ tx, projectId, equipment: data.equipmentJson, materials: data.materialsJson, record: 'Site diary' });
     await ensureProjectPhotoKeys({
       tx,
       orgId,
       projectId,
       photos: data.photosJson,
     });
+    data.photosJson = await checkedPhotos({ tx, orgId, projectId, photos: data.photosJson });
 
     const now = new Date();
     const row = await tx.siteDiary.create({
@@ -460,13 +484,26 @@ const updateSiteDiary = async ({
       );
     }
 
+    if (payload.engineerId && payload.engineerId !== existing.engineerId) {
+      await assertEngineer({ tx, orgId, engineerId: payload.engineerId });
+    }
     const data = buildDiaryData({ payload, projectId, userId, existing });
-    await ensureProjectPhotoKeys({
+    await assertLineReferences({
       tx,
-      orgId,
       projectId,
-      photos: data.photosJson,
+      equipment: payload.equipment !== undefined ? data.equipmentJson : [],
+      materials: payload.materials !== undefined ? data.materialsJson : [],
+      record: 'Site diary',
     });
+    if (payload.photos !== undefined) {
+      await ensureProjectPhotoKeys({
+        tx,
+        orgId,
+        projectId,
+        photos: data.photosJson,
+      });
+      data.photosJson = await checkedPhotos({ tx, orgId, projectId, photos: data.photosJson });
+    }
 
     const row = await tx.siteDiary.update({
       where: { id: diaryId },

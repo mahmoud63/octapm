@@ -61,7 +61,7 @@ router.put(
     param("sheetId").isUUID(),
     shapesValidator(),
     body("name").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
-    body("sheetRevisionId").optional({ nullable: true }).isUUID(),
+    body("sheetRevisionId").optional({ nullable: true }).isString().isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {

@@ -76,6 +76,8 @@ const table = (name, { hydrate = (row) => row } = {}) => ({
 const PROJECT = { id: "p1", orgId: "org-1", name: "Tower", currency: "AED" };
 const ACTIVITIES = [{ id: "act-1", projectId: "p1", name: "Pour slab L1", activityCode: "A100", wbsCode: "1.2" }, { id: "act-2", projectId: "p1", name: "MEP rough-in", activityCode: "A200", wbsCode: "1.3" }];
 const COMMITMENTS = [{ id: "cmt-1", projectId: "p1", ref: "SC-001", title: "Electrical works", vendorCompanyId: "co-2", vendorCompany: { id: "co-2", name: "Sparks LLC", email: "quotes@sparks.example", contactName: "Sam Spark" }, projectParty: null }];
+// The organisation's directory (org-1) and another company's vendor (org-2).
+const COMPANIES = [{ id: "co-2", orgId: "org-1" }, { id: "co-x", orgId: "org-2" }];
 
 const hydrateLine = (row) => ({ ...row, costCode: row.costCodeId ? { id: row.costCodeId, code: "26-100", name: "Electrical" } : null, activity: ACTIVITIES.find((activity) => activity.id === row.activityId) || null, commitment: row.commitmentId ? { id: row.commitmentId, ref: "SC-001", title: "Electrical works", vendorCompany: { name: "Sparks LLC" } } : null });
 const hydrateRfq = (row) => ({ ...row, commitment: row.commitmentId ? { id: row.commitmentId, ref: "SC-001", title: "Electrical works" } : null, commitmentChangeOrder: row.commitmentChangeOrderId ? store.commitmentChangeOrders.find((co) => co.id === row.commitmentChangeOrderId) || null : null });
@@ -89,6 +91,7 @@ const mockPrisma = {
   location: { findFirst: jest.fn(async () => null) },
   projectCostCode: { findMany: jest.fn(async ({ where }) => where.costCodeId.in.filter((id) => id === "cc-1").map((id) => ({ costCodeId: id }))) },
   commitment: { findMany: jest.fn(async ({ where, include }) => COMMITMENTS.filter((row) => where.id.in.includes(row.id)).map((row) => (include ? row : { id: row.id }))) },
+  company: { findMany: jest.fn(async ({ where }) => COMPANIES.filter((row) => where.id.in.includes(row.id) && row.orgId === where.orgId).map((row) => ({ id: row.id }))) },
   changeEvent: table("events", { hydrate: hydrateEvent }),
   changeEventLine: table("lines", { hydrate: hydrateLine }),
   rfq: table("rfqs", { hydrate: (row) => (store.events.some((event) => event.id === row.changeEventId) ? hydratePortalRfq(row) : hydrateRfq(row)) }),
@@ -184,6 +187,30 @@ describe("change events and RFQs", () => {
     const declined = await service.portalDecline(tokenOf(store.emails[1]), { reason: "Fully booked" });
     expect(declined.rfq).toMatchObject({ status: "declined", declinedReason: "Fully booked" });
     expect(store.notifications.at(-1)).toMatchObject({ event: "rfq.declined" });
+  });
+
+  /**
+   * CERT-2 (own-state pairs): an RFQ recipient's vendorCompanyId was stored
+   * unchecked — another company's id landed on the RFQ and was served back with
+   * the change event; one that exists nowhere failed on the foreign key (500).
+   */
+  it("an RFQ recipient's directory vendor: another company's is refused like one that exists nowhere, nothing written or sent", async () => {
+    const event = await createEvent();
+    mockPrisma.rfq.create.mockClear();
+    for (const vendorCompanyId of ["co-x", "00000000-0000-4000-8000-000000000000"]) {
+      const refused = await service.sendRfqs({ ...scope, actor, changeEventId: event.id, payload: { recipients: [{ vendorCompanyId, companyName: "Their Sparks", contactEmail: "quotes@their.example" }] } }).catch((error) => error);
+      expect(refused).toMatchObject({ status: 404, code: "VENDOR_NOT_FOUND" });
+      expect(JSON.stringify({ message: refused.message, details: refused.details ?? null })).not.toContain(vendorCompanyId);
+    }
+    await expect(service.sendRfqs({ ...scope, actor, changeEventId: event.id, payload: { recipients: [{ vendorCompanyId: "co-2", companyName: "Sparks LLC", contactEmail: "a@sparks.example" }, { vendorCompanyId: "co-x", companyName: "Their Sparks", contactEmail: "b@their.example" }] } })).rejects.toMatchObject({ status: 404, code: "VENDOR_NOT_FOUND" });
+    expect(mockPrisma.rfq.create).not.toHaveBeenCalled();
+    expect(store.rfqs).toEqual([]);
+    expect(store.emails).toEqual([]);
+    expect(store.events[0].status).toBe("open");
+
+    const sent = await service.sendRfqs({ ...scope, actor, changeEventId: event.id, payload: { recipients: [{ vendorCompanyId: "co-2", companyName: "Sparks LLC", contactEmail: "quotes@sparks.example" }] } });
+    expect(sent.rfqs[0]).toMatchObject({ vendorCompanyId: "co-2", companyName: "Sparks LLC" });
+    expect(store.rfqs.map((row) => row.vendorCompanyId)).toEqual(["co-2"]);
   });
 
   it("accepts a quote onto the lines, drafts a commitment change order, converts to a prime change order and links it", async () => {

@@ -73,17 +73,17 @@ const assertRecordRead = (req, recordType) => {
 
 const mentionValidators = () => [
   body("mentionUserIds").optional().isArray({ max: commentService.MAX_MENTIONS }),
-  body("mentionUserIds.*").isUUID(),
+  body("mentionUserIds.*").isString().isUUID(),
 ];
 
 router.get(
   "/",
   [
-    query("recordType").isIn(commentService.RECORD_TYPES),
+    query("recordType").isString().isIn(commentService.RECORD_TYPES),
     query("recordId").isString().trim().notEmpty(),
     query("cursor").optional().isString().trim().isLength({ max: 120 }),
-    query("limit").optional().isInt({ min: 1, max: 200 }).toInt(),
-    query("order").optional().isIn(["asc", "desc"]),
+    query("limit").isString().optional().isInt({ min: 1, max: 200 }).toInt(),
+    query("order").isString().optional().isIn(["asc", "desc"]),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -109,7 +109,7 @@ router.post(
     body("recordType").isIn(commentService.RECORD_TYPES),
     body("recordId").isString().trim().notEmpty(),
     body("body").isString().trim().isLength({ min: 1, max: commentService.MAX_BODY_LENGTH }),
-    body("parentId").optional({ nullable: true }).isUUID(),
+    body("parentId").optional({ nullable: true }).isString().isUUID(),
     ...mentionValidators(),
     validate,
   ],

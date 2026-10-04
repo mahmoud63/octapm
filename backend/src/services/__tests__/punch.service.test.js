@@ -33,8 +33,10 @@ jest.mock("../notification.service", () => mockNotifications);
 jest.mock("../file-storage.service", () => ({ getProjectDocumentFile: jest.fn() }));
 jest.mock("../email.service", () => ({ sendEmail: (...args) => mockSendEmail(...args) }));
 jest.mock("../company-party.service", () => ({ isPartyScopedAccess: (...args) => mockIsPartyScoped(...args) }));
+const mockAssertPayloadActivity = jest.fn(async () => {});
 jest.mock("../workflow-support.service", () => ({
   RECORD_TYPES: { PUNCH_ITEM: "punch_item" },
+  assertPayloadActivity: (...args) => mockAssertPayloadActivity(...args),
   attachWorkflowDetailsToRecords: async ({ records }) => records.map((row) => ({ ...row, attachments: [], activityLinks: [], history: [] })),
   syncWorkflowReferences: jest.fn(async () => ({})),
 }));
@@ -183,6 +185,25 @@ describe("punch service", () => {
         await expect(service.createPunchItem({ orgId: ORG, projectId: PROJECT, actor: SITE, payload: { title: "x", [field]: "foreign-1" } })).rejects.toMatchObject({ status: 404, code });
       }
       expect(mockPrisma.punchItem.create).not.toHaveBeenCalled();
+    });
+
+    it("checks every linked activity through assertPayloadActivity, as every other workflow route does (CERT-2)", async () => {
+      // On create and on update the payload goes to the shared guard, which
+      // refuses an array/object shape or another company's activity exactly as
+      // transmittals, rfi, ncr … do (a 400 that reaches here, nothing written).
+      await service.createPunchItem({ orgId: ORG, projectId: PROJECT, actor: SITE, payload: { title: "x", activityLinks: [{ activityId: "act-1" }] } });
+      expect(mockAssertPayloadActivity).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT, payload: expect.objectContaining({ activityLinks: [{ activityId: "act-1" }] }) }));
+
+      mockAssertPayloadActivity.mockRejectedValueOnce(Object.assign(new Error("no"), { status: 400, code: "WORKFLOW_ACTIVITY_NOT_FOUND" }));
+      mockPrisma.punchItem.create.mockClear();
+      await expect(service.createPunchItem({ orgId: ORG, projectId: PROJECT, actor: SITE, payload: { title: "x", activityLinks: [{ id: ["act-1"] }] } })).rejects.toMatchObject({ status: 400, code: "WORKFLOW_ACTIVITY_NOT_FOUND" });
+      expect(mockPrisma.punchItem.create).not.toHaveBeenCalled();
+
+      mockPrisma.punchItem.findFirst.mockResolvedValue(item({ status: "open" }));
+      mockAssertPayloadActivity.mockRejectedValueOnce(Object.assign(new Error("no"), { status: 400, code: "WORKFLOW_ACTIVITY_NOT_FOUND" }));
+      mockPrisma.punchItem.update.mockClear();
+      await expect(service.updatePunchItem({ orgId: ORG, projectId: PROJECT, itemId: "item-1", actor: SITE, payload: { activityLinks: [{ activityId: " act-1 " }] } })).rejects.toMatchObject({ status: 400, code: "WORKFLOW_ACTIVITY_NOT_FOUND" });
+      expect(mockPrisma.punchItem.update).not.toHaveBeenCalled();
     });
 
     it("checks the references before answering an offline replay (CERT-2)", async () => {

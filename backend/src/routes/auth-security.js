@@ -36,8 +36,8 @@ const register = (router, { sendSession, getRequestContext }) => {
   router.post("/mfa/backup-codes", authenticate, noApiKey, [body("code").isString().trim().isLength({ min: 6, max: 8 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await mfaService.regenerateBackupCodes({ userId: req.user.id, code: req.body.code, context: getRequestContext(req) }))));
 
   // ── SSO ──
-  router.get("/sso/lookup", [query("email").isEmail(), validate], asyncHandler(async (req, res) => sendSuccess(res, await ssoService.lookup({ email: req.query.email }))));
-  router.post("/sso/start", loginLimiter, [body("email").optional({ nullable: true }).isEmail(), body("orgId").optional({ nullable: true }).isUUID(), body("redirectTo").optional({ nullable: true }).isString().isLength({ max: 500 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await ssoService.start({ email: req.body.email || null, orgId: req.body.orgId || null, redirectTo: req.body.redirectTo || null }))));
+  router.get("/sso/lookup", [query("email").isString().isEmail(), validate], asyncHandler(async (req, res) => sendSuccess(res, await ssoService.lookup({ email: req.query.email }))));
+  router.post("/sso/start", loginLimiter, [body("email").optional({ nullable: true }).isEmail(), body("orgId").optional({ nullable: true }).isString().isUUID(), body("redirectTo").optional({ nullable: true }).isString().isLength({ max: 500 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await ssoService.start({ email: req.body.email || null, orgId: req.body.orgId || null, redirectTo: req.body.redirectTo || null }))));
   router.get(
     "/sso/callback",
     asyncHandler(async (req, res) => {

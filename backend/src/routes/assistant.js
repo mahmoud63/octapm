@@ -69,8 +69,8 @@ const build = ({ withActions }) => {
     requirePermission("assistant", "read"),
     [
       body("question").isString().trim().notEmpty().isLength({ max: 2000 }),
-      body("conversationId").optional({ nullable: true }).isUUID(),
-      body("projectId").optional({ nullable: true }).isUUID(),
+      body("conversationId").optional({ nullable: true }).isString().isUUID(),
+      body("projectId").optional({ nullable: true }).isString().isUUID(),
       validate,
     ],
     asyncHandler(async (req, res) =>
@@ -93,7 +93,7 @@ const build = ({ withActions }) => {
   router.get(
     "/conversations",
     requirePermission("assistant", "read"),
-    [query("limit").optional().isInt({ min: 1, max: 100 }).toInt(), validate],
+    [query("limit").isString().optional().isInt({ min: 1, max: 100 }).toInt(), validate],
     asyncHandler(async (req, res) =>
       sendSuccess(res, {
         items: await service.listConversations({

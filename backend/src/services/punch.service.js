@@ -9,6 +9,7 @@ const { isPartyScopedAccess } = require("./company-party.service");
 const { assertCompanies, assertMembers, assertProjectRows } = require("./tenant-references.service");
 const {
   RECORD_TYPES,
+  assertPayloadActivity,
   attachWorkflowDetailsToRecords,
   syncWorkflowReferences,
 } = require("./workflow-support.service");
@@ -425,6 +426,10 @@ const createPunchItem = async ({ orgId, projectId, payload = {}, actor = null })
   // records as the original and still gets the original back.
   const data = normalizePayload(payload);
   await validateReferences({ orgId, projectId, data });
+  // Every activity the item links (activityId, activityIds[], activityLinks[]),
+  // as every other workflow route checks them — before a replay is answered
+  // and before anything is written (CERT-2).
+  await assertPayloadActivity({ projectId, payload });
   const replay = await findByClientRequestId({ projectId, clientRequestId: payload.clientRequestId });
   if (replay) {
     const [row] = await enrich({ projectId, items: [replay] });
@@ -494,6 +499,7 @@ const updatePunchItem = async ({ orgId, projectId, itemId, payload = {}, actor =
   }
   const data = normalizePayload(payload, { partial: true });
   await validateReferences({ orgId, projectId, data });
+  await assertPayloadActivity({ projectId, payload });
   const item = await prisma.$transaction(async (tx) => {
     const updated = await tx.punchItem.update({ where: { id: existing.id }, data: { ...data, updatedBy: actor?.id || null }, include });
     const withBall = await tx.punchItem.update({ where: { id: existing.id }, data: { ballInCourtUserId: ballInCourtFor(updated) }, include });

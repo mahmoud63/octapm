@@ -24,14 +24,14 @@ router.get(
 router.get(
   "/syncs",
   requirePermission("sub_pay_app", "read"),
-  [query("recordId").optional().isUUID(), query("status").optional().isIn(["pending", "synced", "paid", "failed"]), validate],
+  [query("recordId").isString().optional().isUUID(), query("status").isString().optional().isIn(["pending", "synced", "paid", "failed"]), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await accounting.listSyncs({ ...scope(req), recordId: req.query.recordId || null, status: req.query.status || null }) })),
 );
 
 router.post(
   "/pay-apps/:payAppId/sync",
   accountingApprover,
-  [param("payAppId").isUUID(), query("provider").optional().isIn(accounting.PROVIDER_KEYS), validate],
+  [param("payAppId").isUUID(), query("provider").isString().optional().isIn(accounting.PROVIDER_KEYS), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await accounting.queuePayAppSync({ ...scope(req), payAppId: req.params.payAppId, provider: req.query.provider || null, actor: actor(req) }) }, 202)),
 );
 
@@ -45,7 +45,7 @@ router.post(
 router.get(
   "/export",
   requirePermission("sub_pay_app", "export"),
-  [query("format").optional().isIn(["xlsx", "csv"]), query("provider").optional().isIn(accounting.PROVIDER_KEYS), query("from").optional().isISO8601(), query("to").optional().isISO8601(), validate],
+  [query("format").isString().optional().isIn(["xlsx", "csv"]), query("provider").isString().optional().isIn(accounting.PROVIDER_KEYS), query("from").isString().optional().isISO8601(), query("to").isString().optional().isISO8601(), validate],
   asyncHandler(async (req, res) => {
     const file = await accounting.renderExport({ ...scope(req), from: req.query.from || null, to: req.query.to || null, provider: req.query.provider || null, format: req.query.format || "xlsx" });
     res.setHeader("Content-Type", file.mimeType);

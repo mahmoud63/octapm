@@ -100,8 +100,26 @@ const ACTIVITIES = [
 const COMPANIES = [
   { id: "co-1", orgId: "org-1", name: "Main Contractor" },
   { id: "co-2", orgId: "org-1", name: "Steel Fixers Ltd" },
+  // Another organisation's company (CERT-2): never a reference of org-1.
+  { id: "co-x", orgId: "org-2", name: "Other Org Builders" },
+];
+// The parties of each project (CERT-2): party-elsewhere is a party of another project.
+const PARTIES = [
+  { id: "party-1", projectId: "p1" },
+  { id: "party-2", projectId: "p1" },
+  { id: "party-elsewhere", projectId: "p-other" },
 ];
 
+// Who belongs to which organisation, by membership (CERT-2): u-guest's home workspace is another
+// organisation's, u-other is org-2's only, u-left has left org-1.
+const MEMBERSHIPS = [
+  { orgId: "org-1", userId: "u-foreman", status: "active" },
+  { orgId: "org-1", userId: "u-pm", status: "active" },
+  { orgId: "org-1", userId: "u-guest", status: "active" },
+  { orgId: "org-1", userId: "u-left", status: "left" },
+  { orgId: "org-2", userId: "u-other", status: "active" },
+  { orgId: "org-2", userId: "u-guest", status: "active" },
+];
 const hydrateWorker = (row) => ({ ...row, company: COMPANIES.find((company) => company.id === row.companyId) || null });
 const hydrateEntry = (row) => ({ ...row, worker: hydrateWorker(clone(store.workers.find((worker) => worker.id === row.workerId))), activity: ACTIVITIES.find((activity) => activity.id === row.activityId) || null, costCode: row.costCodeId ? { id: row.costCodeId, code: "03-100", name: "Concrete labour" } : null, location: null });
 const hydrateTimesheet = (row) => ({ ...row, crew: store.crews.find((crew) => crew.id === row.crewId) ? { id: row.crewId, name: store.crews.find((crew) => crew.id === row.crewId).name, foremanUserId: store.crews.find((crew) => crew.id === row.crewId).foremanUserId } : null, entries: store.entries.filter((entry) => entry.timesheetId === row.id).sort((a, b) => a.sortOrder - b.sortOrder).map((entry) => hydrateEntry(clone(entry))), _count: { entries: store.entries.filter((entry) => entry.timesheetId === row.id).length } });
@@ -109,10 +127,12 @@ const hydrateCrew = (row) => ({ ...row, company: COMPANIES.find((company) => com
 
 const mockPrisma = {
   project: { findFirst: jest.fn(async ({ where }) => (where.id === "p1" ? { id: "p1", name: "Tower" } : null)) },
-  company: { findFirst: jest.fn(async ({ where }) => COMPANIES.find((company) => company.id === where.id) || null), findMany: jest.fn(async () => COMPANIES) },
+  company: { findFirst: jest.fn(async ({ where }) => COMPANIES.find((company) => company.id === where.id && (!where.orgId || company.orgId === where.orgId)) || null), findMany: jest.fn(async ({ where } = {}) => COMPANIES.filter((company) => !where?.orgId || company.orgId === where.orgId)) },
+  projectParty: { findFirst: jest.fn(async ({ where }) => PARTIES.find((party) => party.id === where.id && party.projectId === where.projectId) || null) },
   activity: { findMany: jest.fn(async ({ where }) => ACTIVITIES.filter((activity) => activity.projectId === where.projectId && (!where.id?.in || where.id.in.includes(activity.id))).map((activity) => ({ id: activity.id }))), findFirst: jest.fn(async ({ where }) => ACTIVITIES.find((activity) => activity.id === where.id && activity.projectId === where.projectId) || null) },
   projectCostCode: { findMany: jest.fn(async ({ where }) => (where.costCodeId?.in || []).filter((id) => id === "cc-1").map((id) => ({ costCodeId: id }))), findFirst: jest.fn(async ({ where }) => (where.costCodeId === "cc-1" ? { id: "pcc-1" } : null)) },
   location: { findMany: jest.fn(async () => []) },
+  organizationMembership: { findMany: jest.fn(async ({ where }) => MEMBERSHIPS.filter((row) => row.orgId === where.orgId && where.userId.in.includes(row.userId) && row.status !== where.status?.not).map((row) => ({ userId: row.userId }))) },
   activityProgress: { findMany: jest.fn(async ({ where }) => ACTIVITIES.filter((activity) => where.activityId.in.includes(activity.id)).map((activity) => ({ activityId: activity.id, pctComplete: activity.physComplete, updatedAt: new Date() }))) },
   worker: table("workers", { hydrate: hydrateWorker }),
   crew: table("crews", { hydrate: hydrateCrew }),
@@ -297,6 +317,222 @@ describe("timesheets and crews", () => {
     await expect(service.createCrew({ ...scope, payload: { name: "formwork a" }, actor: pm, viewer: pm })).rejects.toMatchObject({ code: "CREW_NAME_EXISTS" });
     await service.createTimesheet({ ...scope, payload: { date: "2026-09-07", crewId: "crew-1" }, actor: pm, viewer: pm });
     await expect(service.deleteCrew({ ...scope, crewId: "crew-1", actor: pm, viewer: pm })).rejects.toMatchObject({ code: "CREW_IN_USE" });
+  });
+});
+
+describe("CERT-2 — a crew's foreman is a member of the organisation", () => {
+  beforeEach(() => {
+    seed();
+    jest.clearAllMocks();
+  });
+
+  it("refuses another organisation's person exactly as one who exists nowhere, and stores nothing", async () => {
+    const answers = [];
+    for (const [name, foremanUserId] of [["Steel C", "u-other"], ["Steel D", "u-that-exists-nowhere"], ["Steel E", "u-left"]]) {
+      const error = await service.createCrew({ ...scope, payload: { name, foremanUserId }, actor: pm, viewer: pm }).catch((caught) => caught);
+      expect(error).toMatchObject({ status: 404, code: "USER_NOT_FOUND", message: "The foreman is not a member of this organisation" });
+      answers.push(JSON.stringify({ status: error.status, code: error.code, message: error.message, details: error.details ?? null }));
+    }
+    expect(new Set(answers).size).toBe(1);
+    expect(mockPrisma.organizationMembership.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ orgId: "org-1", userId: { in: ["u-other"] } }) }));
+    expect(store.crews.map((crew) => crew.name)).toEqual(["Formwork A"]);
+  });
+
+  it("accepts a member — including one whose home workspace is another organisation — and stores them", async () => {
+    const own = await service.createCrew({ ...scope, payload: { name: "Steel F", foremanUserId: "u-foreman" }, actor: pm, viewer: pm });
+    expect(own.foremanUserId).toBe("u-foreman");
+    const guest = await service.createCrew({ ...scope, payload: { name: "Steel G", foremanUserId: "u-guest" }, actor: pm, viewer: pm });
+    expect(guest.foremanUserId).toBe("u-guest");
+    expect(store.crews.find((crew) => crew.name === "Steel G").foremanUserId).toBe("u-guest");
+  });
+
+  it("the edit route: another organisation's person is refused and the crew keeps its foreman; other edits are not held up by a foreman who has since left", async () => {
+    await expect(service.updateCrew({ ...scope, crewId: "crew-1", payload: { foremanUserId: "u-other" }, actor: pm, viewer: pm })).rejects.toMatchObject({ status: 404, code: "USER_NOT_FOUND" });
+    expect(store.crews.find((crew) => crew.id === "crew-1").foremanUserId).toBe("u-foreman");
+    const moved = await service.updateCrew({ ...scope, crewId: "crew-1", payload: { foremanUserId: "u-guest" }, actor: pm, viewer: pm });
+    expect(moved.foremanUserId).toBe("u-guest");
+    store.crews[0].foremanUserId = "u-left";
+    mockPrisma.organizationMembership.findMany.mockClear();
+    const renamed = await service.updateCrew({ ...scope, crewId: "crew-1", payload: { name: "Formwork A1" }, actor: pm, viewer: pm });
+    expect(renamed).toMatchObject({ name: "Formwork A1", foremanUserId: "u-left" });
+    expect(mockPrisma.organizationMembership.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("CERT-2 — a crew's party is a party of this project", () => {
+  beforeEach(() => {
+    seed();
+    jest.clearAllMocks();
+  });
+
+  it("refuses another project's party exactly as one that exists nowhere, and stores nothing", async () => {
+    const answers = [];
+    for (const [name, partyId] of [["Steel P1", "party-elsewhere"], ["Steel P2", "party-that-exists-nowhere"]]) {
+      const error = await service.createCrew({ ...scope, payload: { name, partyId }, actor: pm, viewer: pm }).catch((caught) => caught);
+      expect(error).toMatchObject({ status: 400, code: "CREW_PARTY_INVALID", message: "The party is not on this project" });
+      answers.push(JSON.stringify({ status: error.status, code: error.code, message: error.message, details: error.details ?? null }));
+    }
+    expect(answers[0]).toBe(answers[1]);
+    expect(mockPrisma.projectParty.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "party-elsewhere", projectId: "p1" } }));
+    expect(store.crews.map((crew) => crew.name)).toEqual(["Formwork A"]);
+  });
+
+  it("accepts a party of the project, stores it, and the crew's timesheets are booked to it", async () => {
+    const crew = await service.createCrew({ ...scope, payload: { name: "Steel P3", partyId: "party-1", workerIds: ["w-1"] }, actor: pm, viewer: pm });
+    expect(crew.partyId).toBe("party-1");
+    expect(store.crews.find((row) => row.name === "Steel P3").partyId).toBe("party-1");
+    const sheet = await service.createTimesheet({ ...scope, payload: { date: "2026-09-09", crewId: crew.id }, actor: pm, viewer: pm });
+    expect(sheet.partyId).toBe("party-1");
+  });
+
+  it("the edit route: another project's party is refused and the crew keeps its own; an edit that leaves the party as it was is not looked up again", async () => {
+    store.crews[0].partyId = "party-1";
+    for (const partyId of ["party-elsewhere", "party-that-exists-nowhere"]) {
+      await expect(service.updateCrew({ ...scope, crewId: "crew-1", payload: { partyId }, actor: pm, viewer: pm })).rejects.toMatchObject({ status: 400, code: "CREW_PARTY_INVALID", message: "The party is not on this project" });
+    }
+    expect(mockPrisma.crew.update).not.toHaveBeenCalled();
+    expect(store.crews[0].partyId).toBe("party-1");
+    const moved = await service.updateCrew({ ...scope, crewId: "crew-1", payload: { partyId: "party-2" }, actor: pm, viewer: pm });
+    expect(moved.partyId).toBe("party-2");
+    store.crews[0].partyId = "party-since-removed";
+    mockPrisma.projectParty.findFirst.mockClear();
+    const renamed = await service.updateCrew({ ...scope, crewId: "crew-1", payload: { name: "Formwork A2" }, actor: pm, viewer: pm });
+    expect(renamed).toMatchObject({ name: "Formwork A2", partyId: "party-since-removed" });
+    expect(mockPrisma.projectParty.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * CERT-2 (bodies-4): a worker's hourly rate is no larger than its columns hold
+ * — the worker's Decimal(18,2), and on approval the labour's unit cost
+ * (Decimal(18,4)) beside a day's amount (Decimal(18,2)). 1e20 failed at the
+ * write with a 500.
+ */
+describe("CERT-2 — a worker's hourly rate fits its columns", () => {
+  beforeEach(() => {
+    seed();
+    jest.clearAllMocks();
+  });
+
+  it("the bound: a day's hours at the highest overtime multiplier stay under 10^16, and the rate under 10^14", () => {
+    expect(service.RATE_MAX * 24 * 5).toBeLessThan(1e16);
+    expect(service.RATE_MAX).toBeLessThan(1e14);
+    expect(service.RATE_MAX * 100).toBeLessThan(Number.MAX_SAFE_INTEGER);
+  });
+
+  it.each([[1e20], [service.RATE_MAX + 1], [-1], ["abc"]])("hourlyRate %j is a 400 WORKER_RATE_INVALID on create and edit, and nothing is written", async (hourlyRate) => {
+    await expect(service.createWorker({ orgId: "org-1", payload: { name: "Rate probe", hourlyRate }, actor: pm, viewer: pm })).rejects.toMatchObject({ status: 400, code: "WORKER_RATE_INVALID" });
+    const existing = store.workers[0];
+    await expect(service.updateWorker({ orgId: "org-1", workerId: existing.id, payload: { hourlyRate }, viewer: pm })).rejects.toMatchObject({ status: 400, code: "WORKER_RATE_INVALID" });
+    expect(mockPrisma.worker.create).not.toHaveBeenCalled();
+    expect(mockPrisma.worker.update).not.toHaveBeenCalled();
+  });
+
+  it("the largest rate, a rate in text, none and an edit of something else are accepted", async () => {
+    const top = await service.createWorker({ orgId: "org-1", payload: { name: "Top rate", hourlyRate: service.RATE_MAX }, actor: pm, viewer: pm });
+    expect(top.hourlyRate).toBe(service.RATE_MAX);
+    const text = await service.createWorker({ orgId: "org-1", payload: { name: "Text rate", hourlyRate: "45.50" }, actor: pm, viewer: pm });
+    expect(text.hourlyRate).toBe(45.5);
+    const none = await service.createWorker({ orgId: "org-1", payload: { name: "No rate", hourlyRate: null }, actor: pm, viewer: pm });
+    expect(none.hourlyRate).toBeNull();
+    await expect(service.updateWorker({ orgId: "org-1", workerId: store.workers[0].id, payload: { trade: "Fixer" }, viewer: pm })).resolves.toMatchObject({ trade: "Fixer" });
+  });
+
+  it("an import row with a rate of 1e20 is reported as that row's error and stored nowhere; the other rows are", async () => {
+    const result = await service.importWorkers({ orgId: "org-1", rows: [{ name: "Overflow", employeeNumber: "E-RATE-1", hourlyRate: 1e20 }, { name: "Fine", employeeNumber: "E-RATE-2", hourlyRate: 30 }], actor: pm, viewer: pm });
+    expect(result.errors).toEqual([expect.objectContaining({ row: 1, message: expect.stringMatching(/hourly rate/) })]);
+    expect(result.created).toBe(1);
+    expect(store.workers.some((worker) => worker.name === "Overflow")).toBe(false);
+  });
+});
+
+describe("CERT-2 — a worker's person and company belong to the organisation", () => {
+  beforeEach(() => {
+    seed();
+    jest.clearAllMocks();
+  });
+
+  it("refuses another organisation's person exactly as one who exists nowhere (or has left), and stores nothing; a member is accepted", async () => {
+    const answers = [];
+    for (const userId of ["u-other", "u-that-exists-nowhere", "u-left"]) {
+      const error = await service.createWorker({ orgId: "org-1", payload: { name: `Linked ${userId}`, userId }, actor: pm, viewer: pm }).catch((caught) => caught);
+      expect(error).toMatchObject({ status: 404, code: "USER_NOT_FOUND", message: "The person is not a member of this organisation" });
+      answers.push(JSON.stringify({ status: error.status, code: error.code, message: error.message, details: error.details ?? null }));
+    }
+    expect(new Set(answers).size).toBe(1);
+    expect(mockPrisma.organizationMembership.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ orgId: "org-1", userId: { in: ["u-other"] } }) }));
+    expect(mockPrisma.worker.create).not.toHaveBeenCalled();
+    expect(store.workers).toHaveLength(3);
+    // A member whose home workspace is another organisation is a colleague here too.
+    const guest = await service.createWorker({ orgId: "org-1", payload: { name: "Guest worker", userId: "u-guest" }, actor: pm, viewer: pm });
+    expect(guest.userId).toBe("u-guest");
+    await expect(service.createWorker({ orgId: "org-1", payload: { name: "Foreign co", companyId: "co-x" }, actor: pm, viewer: pm })).rejects.toMatchObject({ status: 400, code: "WORKER_COMPANY_INVALID", message: "Unknown company" });
+  });
+
+  it("the edit route: another organisation's person or company is refused as one that exists nowhere and the worker is unchanged; a person who has since left does not hold up other edits", async () => {
+    for (const userId of ["u-other", "u-that-exists-nowhere"]) {
+      await expect(service.updateWorker({ orgId: "org-1", workerId: "w-1", payload: { userId }, viewer: pm })).rejects.toMatchObject({ status: 404, code: "USER_NOT_FOUND", message: "The person is not a member of this organisation" });
+    }
+    for (const companyId of ["co-x", "co-that-exists-nowhere"]) {
+      await expect(service.updateWorker({ orgId: "org-1", workerId: "w-1", payload: { companyId }, viewer: pm })).rejects.toMatchObject({ status: 400, code: "WORKER_COMPANY_INVALID", message: "Unknown company" });
+    }
+    expect(mockPrisma.worker.update).not.toHaveBeenCalled();
+    expect(store.workers[0].companyId).toBe("co-1");
+    expect(store.workers[0].userId).toBeUndefined();
+    const linked = await service.updateWorker({ orgId: "org-1", workerId: "w-1", payload: { userId: "u-foreman", companyId: "co-2" }, viewer: pm });
+    expect(linked).toMatchObject({ userId: "u-foreman", companyId: "co-2" });
+    store.workers[0].userId = "u-left";
+    mockPrisma.organizationMembership.findMany.mockClear();
+    mockPrisma.company.findFirst.mockClear();
+    const edited = await service.updateWorker({ orgId: "org-1", workerId: "w-1", payload: { hourlyRate: 30 }, viewer: pm });
+    expect(edited).toMatchObject({ hourlyRate: 30, userId: "u-left", companyId: "co-2" });
+    expect(mockPrisma.organizationMembership.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.company.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("import: a row naming another organisation's person or company is refused exactly as one naming nothing — that row only; the matched worker is not changed", async () => {
+    const result = await service.importWorkers({
+      orgId: "org-1",
+      rows: [
+        { name: "Row foreign person", userId: "u-other" },
+        { name: "Row nowhere person", userId: "u-that-exists-nowhere" },
+        { name: "Row foreign company", companyId: "co-x" },
+        { name: "Row nowhere company", companyId: "co-that-exists-nowhere" },
+        { name: "Row own", userId: "u-guest", companyId: "co-2" },
+        { name: "Ali H.", employeeNumber: "E-001", userId: "u-other" },
+      ],
+      actor: pm,
+      viewer: pm,
+    });
+    expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0 });
+    expect(result.errors).toEqual([
+      { row: 1, message: "The person is not a member of this organisation" },
+      { row: 2, message: "The person is not a member of this organisation" },
+      { row: 3, message: "Unknown company" },
+      { row: 4, message: "Unknown company" },
+      { row: 6, message: "The person is not a member of this organisation" },
+    ]);
+    expect(store.workers.map((row) => row.name)).toEqual(["Ali Hassan", "Ben Okoro", "Carla Reyes", "Row own"]);
+    expect(store.workers.find((row) => row.name === "Row own")).toMatchObject({ userId: "u-guest", companyId: "co-2" });
+    expect(mockPrisma.worker.update).not.toHaveBeenCalled();
+  });
+
+  it("import: the database's own text never reaches the answer", async () => {
+    mockPrisma.worker.create.mockImplementationOnce(async () => {
+      throw Object.assign(new Error("\nInvalid `prisma.worker.create()` invocation in\nC:\\app\\src\\services\\timesheet.service.js:265:29\nForeign key constraint violated on the constraint: `Worker_userId_fkey`"), { code: "P2003" });
+    });
+    const result = await service.importWorkers({ orgId: "org-1", rows: [{ name: "Row one" }, { name: "Row two" }], actor: pm, viewer: pm });
+    expect(result).toMatchObject({ created: 1, errors: [{ row: 1, message: "The row could not be imported" }] });
+    expect(JSON.stringify(result)).not.toMatch(/prisma|constraint|timesheet\.service/i);
+  });
+
+  it("a timesheet is booked to a company of the organisation's directory only", async () => {
+    for (const companyId of ["co-x", "co-that-exists-nowhere"]) {
+      await expect(service.createTimesheet({ ...scope, payload: { date: "2026-09-10", companyId }, actor: pm, viewer: pm })).rejects.toMatchObject({ status: 400, code: "TIMESHEET_COMPANY_INVALID", message: "Unknown company" });
+    }
+    expect(store.timesheets).toHaveLength(0);
+    const sheet = await service.createTimesheet({ ...scope, payload: { date: "2026-09-10", companyId: "co-2" }, actor: pm, viewer: pm });
+    expect(sheet.companyId).toBe("co-2");
   });
 });
 

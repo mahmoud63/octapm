@@ -146,7 +146,7 @@ router.post(
   '/upload',
   authenticate,
   CAN_MODIFY,
-  [query('dryRun').optional().isBoolean().toBoolean(), validate],
+  [query('dryRun').isString().optional().isBoolean().toBoolean(), validate],
   uploadLimiter,
   aiGenerationLimiterUnlessDryRun,
   upload.single('file'),
@@ -317,7 +317,7 @@ router.get(
   requirePermission('boq', 'read'),
   [
     param('itemId').isUUID().withMessage('The BOQ item id is not valid'),
-    query('cutoffDate').optional().isISO8601().withMessage('cutoffDate must be an ISO 8601 date'),
+    query('cutoffDate').isString().optional().isISO8601().withMessage('cutoffDate must be an ISO 8601 date'),
     validate,
   ],
   asyncHandler(async (req, res) => {

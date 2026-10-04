@@ -35,12 +35,12 @@ const riskPayloadValidators = ({ requireDescription = false } = {}) => [
   body("escalationLevel").optional().isIn(["none", "watch", "escalated"]),
   body("escalationNotes").optional({ nullable: true }).isString().trim(),
   body("status").optional().isIn(["open", "monitoring"]),
-  body("activityId").optional({ nullable: true }).isUUID(),
+  body("activityId").optional({ nullable: true }).isString().isUUID(),
   body("activityIds").optional().isArray(),
-  body("activityIds.*").optional().isUUID(),
+  body("activityIds.*").optional().isString().isUUID(),
   body("activityLinks").optional().isArray(),
-  body("activityLinks.*.activityId").optional().isUUID(),
-  body("activityLinks.*.id").optional().isUUID(),
+  body("activityLinks.*.activityId").optional().isString().isUUID(),
+  body("activityLinks.*.id").optional().isString().isUUID(),
   body("activityLinks.*.relationType").optional().isString().trim(),
   body("activityLinks.*.scheduleImpactDays").optional().isInt().toInt(),
   body("activityLinks.*.costImpact").optional().isFloat({ min: 0 }).toFloat(),
@@ -64,10 +64,10 @@ router.get(
   "/",
   requirePermission("risk", "read"),
   [
-    query("status")
+    query("status").isString()
       .optional()
       .isIn(["open", "monitoring", "submitted", "closed", "archived"]),
-    query("includeArchived").optional().isBoolean().toBoolean(),
+    query("includeArchived").isString().optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) => {

@@ -30,6 +30,7 @@ const {
 const { requireOrganizationMembership } = require("./middleware/auth");
 const { errorHandler, notFoundHandler } = require("./middleware/error-handler");
 const { requestId } = require("./middleware/request-id");
+const { rejectNullBytes } = require("./middleware/reject-null-bytes");
 const {
   requestLog,
   resolveRequestLogFormat,
@@ -109,6 +110,9 @@ const createApp = () => {
     require("./routes/inbound-email-webhook"),
   );
   app.use(express.json({ limit: "10mb" }));
+  // A NUL (U+0000) in any field reaches Postgres and answers 500 (22P05); no
+  // client sends one, so the whole request is refused here (CERT-2).
+  app.use(rejectNullBytes);
 
   app.use("/api/health", createHealthRouter({ release }));
 

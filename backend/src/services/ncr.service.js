@@ -2,6 +2,7 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const {
   RECORD_TYPES,
+  assertPayloadActivity,
   workflowAssignmentData,
   attachWorkflowDetailsToRecords,
   normalizeAttachmentRefs,
@@ -202,6 +203,11 @@ const createNcr = async ({
   userRole = null,
 }) => {
   await ensureProject({ orgId, projectId });
+  // Every activity the NCR will name (activityId, activityIds, activityLinks),
+  // before anything is written: the row carries the primary activity, so an
+  // activity that exists nowhere failed its foreign key (500) where another
+  // company's was refused 400 by the links (CERT-2).
+  await assertPayloadActivity({ projectId, payload });
 
   const activityId = primaryActivityIdFromPayload(payload);
   const status = payload.status || NCR_STATUS.OPEN;
@@ -344,6 +350,8 @@ const updateNcr = async ({
     existingStatus: existing.status,
     nextStatus,
   });
+  // As on create: checked before anything is written (CERT-2).
+  await assertPayloadActivity({ projectId, payload });
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
 
   const row = await prisma.$transaction(async (tx) => {

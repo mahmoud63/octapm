@@ -44,10 +44,10 @@ const elementFilters = [
   query("storeyGlobalId").optional().isString().isLength({ max: 60 }),
   query("typeName").optional().isString().isLength({ max: 200 }),
   query("q").optional().isString().isLength({ max: 200 }),
-  query("linked").optional().isIn(["true", "false"]),
+  query("linked").isString().optional().isIn(["true", "false"]),
 ];
 
-router.get("/models", requirePermission("bim", "read"), [query("status").optional().isIn(Object.values(service.STATUS)), query("discipline").optional().isIn(service.DISCIPLINES), query("current").optional().isIn(["true", "false"]), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listModels({ ...scope(req), query: req.query }))));
+router.get("/models", requirePermission("bim", "read"), [query("status").isString().optional().isIn(Object.values(service.STATUS)), query("discipline").isString().optional().isIn(service.DISCIPLINES), query("current").isString().optional().isIn(["true", "false"]), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listModels({ ...scope(req), query: req.query }))));
 
 router.post(
   "/models",
@@ -76,7 +76,7 @@ router.patch("/models/:modelId", requirePermission("bim", "update"), [...modelPa
 router.delete("/models/:modelId", requirePermission("bim", "delete"), [...modelParam, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.deleteModel({ ...scope(req), modelId: req.params.modelId, actor: actorFor(req) }))));
 router.post("/models/:modelId/reparse", requirePermission("bim", "update"), [...modelParam, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.reparseModel({ ...scope(req), modelId: req.params.modelId, actor: actorFor(req) }), 202)));
 router.get("/models/:modelId/spatial", requirePermission("bim", "read"), [...modelParam, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.spatialTree({ ...scope(req), modelId: req.params.modelId }))));
-router.get("/models/:modelId/quantities", requirePermission("bim", "read"), [...modelParam, ...elementFilters, query("groupBy").optional().isIn(["type", "storey"]), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.quantitySummary({ ...scope(req), modelId: req.params.modelId, query: req.query }))));
+router.get("/models/:modelId/quantities", requirePermission("bim", "read"), [...modelParam, ...elementFilters, query("groupBy").isString().optional().isIn(["type", "storey"]), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.quantitySummary({ ...scope(req), modelId: req.params.modelId, query: req.query }))));
 
 router.get(
   "/models/:modelId/elements/export.xlsx",
@@ -91,10 +91,10 @@ router.get(
   }),
 );
 
-router.get("/models/:modelId/elements", requirePermission("bim", "read"), [...modelParam, ...elementFilters, query("cursor").optional().isUUID(), query("limit").optional().isInt({ min: 1, max: 500 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listElements({ ...scope(req), modelId: req.params.modelId, query: req.query }))));
+router.get("/models/:modelId/elements", requirePermission("bim", "read"), [...modelParam, ...elementFilters, query("cursor").isString().optional().isUUID(), query("limit").isString().optional().isInt({ min: 1, max: 500 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listElements({ ...scope(req), modelId: req.params.modelId, query: req.query }))));
 router.get("/models/:modelId/elements/:elementId", requirePermission("bim", "read"), [...modelParam, param("elementId").isUUID(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.getElement({ ...scope(req), modelId: req.params.modelId, elementId: req.params.elementId }))));
 
-router.get("/models/:modelId/links", requirePermission("bim", "read"), [...modelParam, query("recordType").optional().isIn(service.LINK_RECORD_TYPES), query("recordId").optional().isString(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listLinks({ ...scope(req), modelId: req.params.modelId, query: req.query }))));
+router.get("/models/:modelId/links", requirePermission("bim", "read"), [...modelParam, query("recordType").isString().optional().isIn(service.LINK_RECORD_TYPES), query("recordId").optional().isString(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listLinks({ ...scope(req), modelId: req.params.modelId, query: req.query }))));
 router.post(
   "/models/:modelId/links",
   requirePermission("bim", "update", { transition: "bim.link" }),
@@ -104,7 +104,7 @@ router.post(
     body("recordId").isString().trim().notEmpty(),
     body("relationType").optional().isIn(service.RELATION_TYPES),
     body("elementIds").optional().isArray({ max: 5000 }),
-    body("elementIds.*").isUUID(),
+    body("elementIds.*").isString().isUUID(),
     body("filter").optional().isObject(),
     body("notes").optional({ nullable: true }).isString().isLength({ max: 1000 }),
     validate,

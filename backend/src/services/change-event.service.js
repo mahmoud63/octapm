@@ -7,6 +7,7 @@ const notificationService = require("./notification.service");
 const emailService = require("./email.service");
 const { nextNumber: nextCounterNumber } = require("../utils/reference-number");
 const { CHANGE_EVENT_EXCEPTION_WITHHELD, changeEventPrefillProvenance, changeEventWithheldFields } = require("../utils/boq-figures");
+const refs = require("./tenant-references.service");
 
 /**
  * Change events and RFQs (OCTA-COM-CE-038).
@@ -677,6 +678,11 @@ const sendRfqs = async ({ orgId, projectId, changeEventId, payload = {}, actor =
   assertEditable(event);
   const recipients = Array.isArray(payload.recipients) ? payload.recipients : [];
   if (!recipients.length) throw new HttpError(400, "RFQ_RECIPIENTS_REQUIRED", "Add at least one vendor to send the RFQ to");
+  // A recipient's directory vendor is this organisation's (CERT-2). Unchecked,
+  // another company's id was stored on the RFQ and served back with the change
+  // event, while one that exists nowhere failed on the foreign key with a 500.
+  // Either is now the 404 a missing vendor gets, before anything is written.
+  await refs.assertCompanies({ orgId, companyIds: recipients.map((recipient) => recipient?.vendorCompanyId), code: "VENDOR_NOT_FOUND", message: "Vendor company not found" });
   const dueDate = optionalDate(payload.dueDate, "dueDate");
   const instructions = trimOrNull(payload.instructions)?.slice(0, 4000) || null;
   const lineIds = uniqueIds(Array.isArray(payload.lineIds) ? payload.lineIds : []).filter((id) => event.lines.some((line) => line.id === id));

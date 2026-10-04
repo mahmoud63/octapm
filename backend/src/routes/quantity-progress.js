@@ -29,7 +29,7 @@ const ROUTE_SOURCES = ["manual", "import"];
 const ROUTE_STATUSES = ["draft", "submitted"];
 
 const optionalText = (field, max = 2000) => body(field).optional({ nullable: true }).isString().trim().isLength({ max });
-const optionalUuid = (field) => body(field).optional({ nullable: true }).isUUID();
+const optionalUuid = (field) => body(field).optional({ nullable: true }).isString().isUUID();
 const dateField = (chain) => chain.isString().trim().matches(DATE_ONLY).withMessage("must be a calendar date (YYYY-MM-DD)");
 
 const router = express.Router({ mergeParams: true });
@@ -43,8 +43,8 @@ const canApprove = (req) => hasPermission(req, "progress", "approve", { transiti
 const entryValidators = (prefix) => {
   const field = (name) => (prefix ? body(`${prefix}${name}`) : body(name).if(body("entries").not().exists()));
   return [
-    field("activityId").isUUID(),
-    field("boqItemId").isUUID(),
+    field("activityId").isString().isUUID(),
+    field("boqItemId").isString().isUUID(),
     field("quantity").exists({ checkNull: true }).custom((value) => {
       const number = Number(value);
       if (typeof value === "boolean" || value === "" || !Number.isFinite(number)) throw new Error("must be a number");
@@ -54,8 +54,8 @@ const entryValidators = (prefix) => {
     dateField(field("date")),
     field("unitCode").optional({ nullable: true }).isString().trim().isLength({ max: 32 }),
     field("unit").optional({ nullable: true }).isString().trim().isLength({ max: 32 }),
-    field("allocationId").optional({ nullable: true }).isUUID(),
-    field("locationId").optional({ nullable: true }).isUUID(),
+    field("allocationId").optional({ nullable: true }).isString().isUUID(),
+    field("locationId").optional({ nullable: true }).isString().isUUID(),
     field("note").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
     field("clientRequestId").optional({ nullable: true }).isString().trim().isLength({ max: 128 }),
     field("status").optional().isIn(ROUTE_STATUSES),
@@ -68,15 +68,15 @@ router.get(
   "/",
   requirePermission("progress", "read"),
   [
-    query("activityId").optional().isUUID(),
-    query("boqItemId").optional().isUUID(),
-    query("locationId").optional().isUUID(),
-    query("submissionId").optional().isUUID(),
-    query("dailyLogId").optional().isUUID(),
-    query("status").optional().isIn(quantityProgressService.ENTRY_STATUSES),
-    query("source").optional().isIn(quantityProgressService.ENTRY_SOURCES),
-    dateField(query("from").optional()),
-    dateField(query("to").optional()),
+    query("activityId").isString().optional().isUUID(),
+    query("boqItemId").isString().optional().isUUID(),
+    query("locationId").isString().optional().isUUID(),
+    query("submissionId").isString().optional().isUUID(),
+    query("dailyLogId").isString().optional().isUUID(),
+    query("status").isString().optional().isIn(quantityProgressService.ENTRY_STATUSES),
+    query("source").isString().optional().isIn(quantityProgressService.ENTRY_SOURCES),
+    dateField(query("from").isString().optional()),
+    dateField(query("to").isString().optional()),
     validate,
   ],
   asyncHandler(async (req, res) => {

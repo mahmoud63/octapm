@@ -21,7 +21,7 @@ router.get(
   "/",
   requirePermission("document_control", "read"),
   [
-    query("recordType").isIn(PIN_TYPES),
+    query("recordType").isString().isIn(PIN_TYPES),
     query("recordId").isString().trim().notEmpty(),
     validate,
   ],

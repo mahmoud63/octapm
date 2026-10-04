@@ -30,11 +30,16 @@ const packageValidators = ({ requireTitle = false } = {}) => [
   requireTitle ? body("title").isString().trim().notEmpty().isLength({ max: 200 }) : body("title").optional().isString().trim().isLength({ min: 1, max: 200 }),
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
   body("instructions").optional({ nullable: true }).isString().trim().isLength({ max: 8000 }),
-  body("dueAt").optional({ nullable: true }).isISO8601(),
-  body("questionsDueAt").optional({ nullable: true }).isISO8601(),
+  // A date is one string (CERT-2 shapes): isISO8601() alone checks an array element by element.
+  body("dueAt").optional({ nullable: true }).isString().isISO8601(),
+  body("questionsDueAt").optional({ nullable: true }).isString().isISO8601(),
   body("currency").optional().isString().trim().isLength({ min: 3, max: 3 }),
   body("commitmentType").optional().isIn(service.COMMITMENT_TYPES),
   body("boqSections").optional().isArray({ max: 100 }),
+  // Each section a section name ("" is the "(no section)" key /boq-sections
+  // hands out): ["x"], {"not":"x"}, 5 and null were turned into text and
+  // stored as sections — "x", "[object Object]", "5", "" (CERT-2 shapes).
+  body("boqSections.*").isString(),
   validate,
 ];
 
@@ -45,10 +50,10 @@ const lineValidators = ({ requireDescription = false } = {}) => [
   body("unit").optional({ nullable: true }).isString().trim().isLength({ max: 30 }),
   body("qty").optional().isFloat({ min: 0 }),
   body("estimateRate").optional({ nullable: true }).isFloat({ min: 0 }),
-  body("budgetLineId").optional({ nullable: true }).isUUID(),
-  body("costCodeId").optional({ nullable: true }).isUUID(),
-  body("activityId").optional({ nullable: true }).isUUID(),
-  body("boqItemId").optional({ nullable: true }).isUUID(),
+  body("budgetLineId").optional({ nullable: true }).isString().isUUID(),
+  body("costCodeId").optional({ nullable: true }).isString().isUUID(),
+  body("activityId").optional({ nullable: true }).isString().isUUID(),
+  body("boqItemId").optional({ nullable: true }).isString().isUUID(),
   validate,
 ];
 
@@ -57,7 +62,7 @@ router.get("/boq-sections", read, asyncHandler(async (req, res) => sendSuccess(r
 router.get(
   "/",
   read,
-  [query("status").optional().isIn(Object.values(service.STATUS)), validate],
+  [query("status").isString().optional().isIn(Object.values(service.STATUS)), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await service.listPackages({ ...scope(req), status: req.query.status || null }) })),
 );
 
@@ -77,7 +82,10 @@ router.delete(
 router.post(
   "/:packageId/lines/from-boq",
   write,
-  [packageParam, body("sections").optional().isArray({ max: 100 }), body("boqItemIds").optional().isArray({ max: 500 }), body("boqItemIds.*").optional().isUUID(), validate],
+  // Each section is a section name ("" is the "(no section)" key /boq-sections
+  // hands out): an array, an object, a number, a boolean or null in its place
+  // reached Prisma's `in` list and answered 500 (CERT-2 shapes).
+  [packageParam, body("sections").optional().isArray({ max: 100 }), body("sections.*").isString(), body("boqItemIds").optional().isArray({ max: 500 }), body("boqItemIds.*").optional().isString().isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.addLinesFromBoq({ ...scope(req), packageId: req.params.packageId, sections: req.body.sections || null, boqItemIds: req.body.boqItemIds || null, actor: actor(req) }))),
 );
 
@@ -90,7 +98,7 @@ router.delete("/:packageId/lines/:lineId", write, [packageParam, param("lineId")
 router.post(
   "/:packageId/invitations",
   write,
-  [packageParam, body("invitations").isArray({ min: 1, max: 50 }), body("invitations.*.vendorCompanyId").optional({ nullable: true }).isUUID(), body("invitations.*.companyName").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), body("invitations.*.contactName").optional({ nullable: true }).isString().trim().isLength({ max: 120 }), body("invitations.*.contactEmail").optional({ nullable: true }).isEmail(), body("prequalOverrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
+  [packageParam, body("invitations").isArray({ min: 1, max: 50 }), body("invitations.*.vendorCompanyId").optional({ nullable: true }).isString().isUUID(), body("invitations.*.companyName").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), body("invitations.*.contactName").optional({ nullable: true }).isString().trim().isLength({ max: 120 }), body("invitations.*.contactEmail").optional({ nullable: true }).isEmail(), body("prequalOverrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await service.inviteBidders({ ...scope(req), packageId: req.params.packageId, invitations: req.body.invitations, prequalOverrideReason: req.body.prequalOverrideReason, actor: actor(req) }) }, 201)),
 );
 
@@ -102,7 +110,7 @@ router.post("/:packageId/publish", publish, [packageParam, validate], asyncHandl
 
 router.post("/:packageId/close", publish, [packageParam, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.closePackage({ ...scope(req), packageId: req.params.packageId, actor: actor(req) }))));
 
-router.post("/:packageId/reopen", publish, [packageParam, body("dueAt").isISO8601(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.reopenPackage({ ...scope(req), packageId: req.params.packageId, dueAt: req.body.dueAt, actor: actor(req) }))));
+router.post("/:packageId/reopen", publish, [packageParam, body("dueAt").isString().isISO8601(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.reopenPackage({ ...scope(req), packageId: req.params.packageId, dueAt: req.body.dueAt, actor: actor(req) }))));
 
 router.post(
   "/:packageId/addenda",
@@ -134,14 +142,14 @@ router.get(
   }),
 );
 
-router.post("/:packageId/award", award, [packageParam, body("bidId").isUUID(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.softAward({ ...scope(req), packageId: req.params.packageId, bidId: req.body.bidId, actor: actor(req) }))));
+router.post("/:packageId/award", award, [packageParam, body("bidId").isString().isUUID(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.softAward({ ...scope(req), packageId: req.params.packageId, bidId: req.body.bidId, actor: actor(req) }))));
 
 router.post("/:packageId/award/revoke", award, [packageParam, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.revokeSoftAward({ ...scope(req), packageId: req.params.packageId, actor: actor(req) }))));
 
 router.post(
   "/:packageId/award/confirm",
   award,
-  [packageParam, body("bidId").optional({ nullable: true }).isUUID(), body("title").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), body("retentionRate").optional({ nullable: true }).isFloat({ min: 0, max: 100 }), body("startDate").optional({ nullable: true }).isISO8601(), body("endDate").optional({ nullable: true }).isISO8601(), body("prequalOverrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
+  [packageParam, body("bidId").optional({ nullable: true }).isString().isUUID(), body("title").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), body("retentionRate").optional({ nullable: true }).isFloat({ min: 0, max: 100 }), body("startDate").optional({ nullable: true }).isString().isISO8601(), body("endDate").optional({ nullable: true }).isString().isISO8601(), body("prequalOverrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.confirmAward({ ...scope(req), packageId: req.params.packageId, payload: req.body, actor: actor(req) }), 201)),
 );
 

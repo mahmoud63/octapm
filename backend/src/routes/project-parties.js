@@ -15,7 +15,7 @@ const partyPayloadValidators = ({ requireRole = true } = {}) => [
   requireRole
     ? body("role").isString().trim().notEmpty().isIn(companyPartyService.PARTY_ROLES)
     : body("role").optional().isString().trim().notEmpty().isIn(companyPartyService.PARTY_ROLES),
-  body("companyId").optional({ nullable: true }).isUUID(),
+  body("companyId").optional({ nullable: true }).isString().isUUID(),
   body("companyName").optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
   body("name").optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
   body("legalName").optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
@@ -38,8 +38,8 @@ router.get(
   "/",
   requirePermission("project_parties", "read"),
   [
-    query("role").optional().isIn(["all", ...companyPartyService.PARTY_ROLES]),
-    query("status").optional().isIn(["all", "active", "inactive"]),
+    query("role").isString().optional().isIn(["all", ...companyPartyService.PARTY_ROLES]),
+    query("status").isString().optional().isIn(["all", "active", "inactive"]),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -107,7 +107,7 @@ router.post(
   }),
   [
     param("partyId").isUUID(),
-    body("userId").isUUID(),
+    body("userId").isString().isUUID(),
     body("role").optional().isString().trim().isLength({ max: 80 }),
     validate,
   ],

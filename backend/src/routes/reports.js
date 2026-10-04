@@ -112,7 +112,7 @@ router.post(
 router.get(
   "/cost-loading",
   requirePermission("cost", "read"),
-  [query("status").optional().isIn(COST_LOADING_STATUSES), validate],
+  [query("status").isString().optional().isIn(COST_LOADING_STATUSES), validate],
   asyncHandler(async (req, res) => {
     const result = await evService.listCostLoadings({
       orgId: req.user.orgId,
@@ -127,8 +127,8 @@ router.post(
   "/cost-loading",
   requirePermission("cost", "create"),
   [
-    body("activityId").isUUID(),
-    body("reportingPeriodId").optional({ nullable: true }).isUUID(),
+    body("activityId").isString().isUUID(),
+    body("reportingPeriodId").optional({ nullable: true }).isString().isUUID(),
     body("plannedDate").isISO8601(),
     moneyBody("plannedValue", { required: true }),
     body("source").optional().isIn(COST_LOADING_SOURCES),
@@ -154,8 +154,8 @@ router.patch(
   requirePermission("cost", "update"),
   [
     param("id").isUUID(),
-    body("activityId").optional().isUUID(),
-    body("reportingPeriodId").optional({ nullable: true }).isUUID(),
+    body("activityId").optional().isString().isUUID(),
+    body("reportingPeriodId").optional({ nullable: true }).isString().isUUID(),
     body("plannedDate").optional().isISO8601(),
     moneyBody("plannedValue"),
     body("source").optional().isIn(COST_LOADING_SOURCES),
@@ -232,8 +232,8 @@ router.get(
   "/ev",
   requirePermission("cost", "read"),
   [
-    query("periodId").optional().isUUID(),
-    query("cutoffDate").optional().isISO8601(),
+    query("periodId").isString().optional().isUUID(),
+    query("cutoffDate").isString().optional().isISO8601(),
     validate,
   ],
   asyncHandler(async (req, res) => {

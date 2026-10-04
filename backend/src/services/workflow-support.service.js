@@ -349,10 +349,17 @@ const normalizeActivityLinks = (payload = {}) => {
 
   if (raw === undefined) {
     if (payload.activityId !== undefined) {
-      return payload.activityId
+      // A blank or whitespace-only activityId names no activity: it is dropped
+      // here (as the array branch below drops empty entries) so it is never
+      // carried to Prisma as { activityId: null } / id in [null] — a 500
+      // (CERT-2). assertPayloadActivity treats the same value as absent, so a
+      // record whose route lacks an activityId validator (e.g. transmittals)
+      // is consistent with every other workflow record type.
+      const activityId = trimOrNull(payload.activityId);
+      return activityId
         ? [
             {
-              activityId: trimOrNull(payload.activityId),
+              activityId,
               relationType: "primary",
               scheduleImpactDays: 0,
               notes: null,
@@ -544,13 +551,31 @@ const ensureActivities = async ({ tx, projectId, links }) => {
   }
 };
 
-// The body's activityId names one of this project's activities, checked
-// before anything is written (CERT-2): beside activity links it was ignored
-// unchecked, and alone it reached the row first, so an id that exists nowhere
-// answered 500 where another company's answered 400.
+// Every activity a workflow record will name — the body's activityId and each
+// activityIds[] / activityLinks[].activityId entry, read as
+// normalizeActivityLinks reads them — is one of this project's, checked before
+// anything is written (CERT-2). The record's row carries its primary activity
+// (the first link, or the body's activityId), so the row was written before
+// syncWorkflowReferences checked the links: another company's activity passed
+// the foreign key and was then refused 400 by the links' check, while one
+// that exists nowhere failed the foreign key first — a 500 (P2003), an
+// existence oracle across companies. Beside links the body's activityId was
+// not stored and not checked. A value that is not one string (an array, a
+// number, an object) names no activity and is refused exactly alike.
+const payloadActivityValues = (payload = {}) => {
+  const raw = payload.activityLinks !== undefined ? payload.activityLinks : payload.activityIds;
+  const linked = raw === undefined ? [] : toArray(raw).map((entry) => (typeof entry === "string" ? entry : entry?.activityId || entry?.id));
+  return [payload.activityId, ...linked].filter((value) => value !== undefined && value !== null && value !== "");
+};
+
 const assertPayloadActivity = async ({ tx = prisma, projectId, payload = {} }) => {
-  if (typeof payload.activityId !== "string" || !payload.activityId) return;
-  await ensureActivities({ tx, projectId, links: [{ activityId: payload.activityId }] });
+  const values = payloadActivityValues(payload);
+  if (values.some((value) => typeof value !== "string")) {
+    throw new HttpError(400, "WORKFLOW_ACTIVITY_NOT_FOUND", "One or more linked activities were not found in this project");
+  }
+  const ids = values.map((value) => value.trim()).filter(Boolean);
+  if (!ids.length) return;
+  await ensureActivities({ tx, projectId, links: ids.map((activityId) => ({ activityId })) });
 };
 
 // Records whose author is on the row: on a create whose caller passes no

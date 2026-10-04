@@ -180,6 +180,20 @@ describe("meeting service", () => {
     });
   });
 
+  it("refuses a meeting activity outside the project without echoing the id it was sent (CERT-2)", async () => {
+    const foreignActivity = "99999999-9999-4999-8999-999999999999";
+    // The project holds no such activity → MEETING_ACTIVITY_INVALID.
+    mockPrisma.activity.findMany.mockResolvedValue([]);
+    const refusal = await meetingService
+      .createMeeting({ orgId, projectId, payload: { title: "Coordination", activityId: foreignActivity }, userId: "creator-1", userRole: "planning_eng" })
+      .catch((error) => error);
+    expect(refusal).toMatchObject({ status: 400, code: "MEETING_ACTIVITY_INVALID" });
+    // The refusal does not carry the id (another company's activity), as RISK_ACTIVITY_INVALID.
+    expect(refusal.details).toBeUndefined();
+    expect(JSON.stringify(refusal)).not.toContain(foreignActivity);
+    expect(mockPrisma.meeting.create).not.toHaveBeenCalled();
+  });
+
   it("creates meeting minutes and links action items to persisted tasks", async () => {
     const createdMeeting = meetingRow();
     const createdAction = actionItemRow();

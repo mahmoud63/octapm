@@ -116,55 +116,239 @@ const hasEvidence = (evidence) => {
 };
 
 /**
- * The documents a submission's photo evidence names must be documents of the
- * submission's own project (CERT-2 isolation sweep). A key was stored as
- * given, so a submission — made directly, in a bulk batch or through a daily
- * report — could name another company's document; approving it copied the
- * reference onto the activity's official progress. A photo names its document
- * by `key`, and the product's own upload answer repeats the id as
- * `documentId` and `storageKey`; each is matched by the document's id or its
- * storage key, as a daily report's own photos are. A key naming another
- * company's document and one naming nothing get the same 400 — the refusal a
- * daily report's photos get — before anything is written.
+ * Photo evidence names documents of the submission's own project only, in the
+ * one shape the product's clients send (certification CERT-2).
+ *
+ * A key was stored as given, so a submission — made directly, in a bulk batch
+ * or through a daily report — could name another company's document, and
+ * approving it copied the reference onto the activity's official progress. A
+ * photo names its document by `key`, and the product's own upload answer
+ * repeats the id as `documentId` and `storageKey`; each is matched by the
+ * document's id or its storage key, as a daily report's own photos are. A key
+ * naming another company's document and one naming nothing get the same 400
+ * INVALID_SITE_PHOTO_REFERENCE — the refusal a daily report's photos get —
+ * before anything is written; so does a document field that is not one text.
+ *
+ * Only that check ran, and only on photos[] as a list of objects: a document
+ * named in any other shape — photos as an object, a list inside the list, a
+ * bare id as a photo, a `documents` list, a key beside photos[], an unknown
+ * photo field — was skipped and stored as given (the second CERT-2 shapes
+ * round). The accepted shape is what the clients send: the site-reporting form
+ * sends the upload's own answer as photos[] (file-storage.service
+ * serializeUploadedDocument), the progress tab a typed link
+ * (`{ photos: [{ url }] }`), a daily report and a site diary their photos
+ * (normalizePhotos), the UAT runner its attachment description
+ * (e2e/uat/run-uat-regression.mjs evidenceAttachment: fileName, fileUrl,
+ * mimeType, sizeBytes, description), the certification drivers notes beside
+ * them:
+ *
+ *   { photos: [ <photo> | "<link>" … ], <word>: <text | number | flag | null> … }
+ *
+ * where a photo is an object of EVIDENCE_PHOTO_FIELDS, each a text, number,
+ * flag or null. Anything else is invalid input (400 VALIDATION_ERROR) whoever's
+ * id it carries, before any lookup: photos that is not a list, a photo that is
+ * neither an object nor a link, a field a photo does not have, a value that is
+ * a list or an object, a document field or uploadedBy outside photos[], a name
+ * that is not a plain word, and an identifier standing alone where a link or a
+ * description belongs (an id goes only where it is checked). A link the
+ * product itself serves as a stored file (FILE_LINK) names a file of this
+ * project only — a document, a photo or a document revision, checked as a
+ * document field is. Any other link is the caller's text and is stored as
+ * given: an Autodesk Construction Cloud folder, a page of this product (an
+ * RFI, an activity). The third CERT-2 round had taken every link holding
+ * /projects/<id> on any host for the product's, and every other identifier in
+ * it for a document, so such evidence was refused (400
+ * INVALID_SITE_PHOTO_REFERENCE) — and the UAT runner's photo, whose
+ * `description` was not a photo field, too (400 VALIDATION_ERROR). A photo's
+ * `uploadedBy` is the uploader of the document it names, read from the
+ * document; a photo naming none carries no uploader. So no identifier the
+ * caller sends reaches evidenceJson unchecked where the product resolves it.
  */
 const EVIDENCE_DOCUMENT_FIELDS = ['key', 'documentId', 'storageKey'];
+const EVIDENCE_PHOTO_FIELDS = new Set([
+  ...EVIDENCE_DOCUMENT_FIELDS,
+  'url', 'fileUrl', 'downloadUrl',
+  'filename', 'fileName', 'originalName', 'name', 'type', 'mimeType',
+  'size', 'sizeBytes', 'storage', 'scanStatus', 'retentionExpiresAt',
+  'uploadedBy', 'uploadedAt', 'caption', 'takenAt', 'description',
+]);
+const EVIDENCE_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const IDENTIFIER = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const IDENTIFIER_ALONE = new RegExp(`^${IDENTIFIER}$`, 'i');
+/**
+ * A link the product serves as a stored file: its download routes —
+ * site-reporting.js, workflow-uploads.js (mounted at /workflow), boq.js,
+ * import.js and schedule.js `/uploads/:key`; attachments.js
+ * `/documents/:documentId`; photos.js `/:photoId/file` and `/thumbnail`;
+ * doc-control.js `/revisions/:revisionId/download` and `/preview` — and the
+ * doc-control/uploads link the upload answer gives (file-storage.service
+ * uploadDocumentControlFile). With or without the /api/v1 base (the mobile
+ * client keeps paths below it: photoFilePath), on whatever host it is written
+ * (a client may make it absolute). Captures: the project, an upload or
+ * document key, a photo id, a revision id.
+ */
+const FILE_KEY = '[A-Za-z0-9._~%-]+';
+const FILE_LINK = new RegExp(
+  `(?:/api/v1)?/projects/(${IDENTIFIER})/(?:` +
+    `(?:site-reporting|workflow|doc-control|boq|import|schedule)/uploads/(${FILE_KEY})` +
+    `|attachments/documents/(${FILE_KEY})` +
+    `|photos/(${IDENTIFIER})/(?:file|thumbnail)` +
+    `|doc-control/revisions/(${IDENTIFIER})/(?:download|preview)` +
+    ')',
+  'gi',
+);
+/** A key as the route reads it: decoded, without a sentence's closing dots. */
+const fileKey = (written) => {
+  const key = written.replace(/\.+$/, '');
+  try {
+    return decodeURIComponent(key);
+  } catch {
+    return key;
+  }
+};
+const EVIDENCE_REFERENCE_MESSAGE = 'Photo evidence must reference documents uploaded to this project';
 
-const evidenceDocumentKeys = (evidence) => {
-  const photos = Array.isArray(evidence)
-    ? evidence
-    : Array.isArray(evidence?.photos)
-      ? evidence.photos
-      : [];
-  return idsOf(
-    photos.flatMap((photo) =>
-      photo && typeof photo === 'object'
-        ? EVIDENCE_DOCUMENT_FIELDS.map((field) => photo[field])
-        : [],
-    ),
-  );
+const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const isScalar = (value) =>
+  value === null ||
+  typeof value === 'string' ||
+  typeof value === 'boolean' ||
+  (typeof value === 'number' && Number.isFinite(value));
+
+const evidenceShapeError = (field) =>
+  new HttpError(400, 'VALIDATION_ERROR', 'Validation failed', [
+    {
+      field,
+      message: 'Evidence is { photos: [an uploaded document of this project named by key, documentId or storageKey, or a link], notes and other descriptions as text }',
+      location: 'body',
+    },
+  ]);
+
+/**
+ * The accepted shape, checked before any lookup. Answers the files the
+ * evidence names — document keys (its document fields and the documents its
+ * file links name), photo ids and revision ids (its file links) — and whether
+ * a file link names another project.
+ */
+const readEvidenceShape = (evidence, projectId, base) => {
+  const at = (rest) => (base ? `${base}.${rest}` : rest);
+  const refuse = (field) => {
+    throw evidenceShapeError(field);
+  };
+  const keys = [];
+  const photoIds = [];
+  const revisionIds = [];
+  let otherProject = false;
+  const text = (value, field) => {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (IDENTIFIER_ALONE.test(trimmed)) refuse(field);
+    for (const [, project, uploadKey, documentKey, photoId, revisionId] of trimmed.matchAll(FILE_LINK)) {
+      if (project.toLowerCase() !== String(projectId).toLowerCase()) {
+        otherProject = true;
+        continue;
+      }
+      if (uploadKey || documentKey) keys.push(fileKey(uploadKey || documentKey));
+      if (photoId) photoIds.push(photoId);
+      if (revisionId) revisionIds.push(revisionId);
+    }
+  };
+
+  for (const [name, value] of Object.entries(evidence)) {
+    if (!EVIDENCE_NAME.test(name)) refuse(base || 'evidence');
+    if (name === 'photos') {
+      if (!Array.isArray(value)) refuse(at('photos'));
+      value.forEach((photo, index) => {
+        const field = at(`photos[${index}]`);
+        if (typeof photo === 'string') {
+          text(photo, field);
+          return;
+        }
+        if (!isPlainObject(photo)) refuse(field);
+        for (const [key, entry] of Object.entries(photo)) {
+          if (!EVIDENCE_PHOTO_FIELDS.has(key)) refuse(field);
+          if (EVIDENCE_DOCUMENT_FIELDS.includes(key)) {
+            if (entry === null) continue;
+            if (typeof entry !== 'string') throw new HttpError(400, 'INVALID_SITE_PHOTO_REFERENCE', EVIDENCE_REFERENCE_MESSAGE);
+            if (entry.trim()) keys.push(entry.trim());
+            continue;
+          }
+          if (!isScalar(entry)) refuse(`${field}.${key}`);
+          if (key !== 'uploadedBy') text(entry, `${field}.${key}`);
+        }
+      });
+      continue;
+    }
+    if (EVIDENCE_DOCUMENT_FIELDS.includes(name) || name === 'uploadedBy') refuse(at(name));
+    if (!isScalar(value)) refuse(at(name));
+    text(value, at(name));
+  }
+  return { keys: idsOf(keys), photoIds: idsOf(photoIds), revisionIds: idsOf(revisionIds), otherProject };
 };
 
-const assertEvidenceDocuments = async ({ orgId = null, projectId, evidence }, tx = prisma) => {
-  const keys = evidenceDocumentKeys(evidence);
-  if (!keys.length) return;
-  const documents = await tx.projectDocument.findMany({
-    where: {
-      projectId,
-      ...(orgId ? { orgId } : {}),
-      OR: [{ id: { in: keys } }, { storageKey: { in: keys } }],
-    },
-    select: { id: true, storageKey: true },
-  });
-  const known = new Set(documents.flatMap((document) => [document.id, document.storageKey]));
-  const missing = keys.filter((key) => !known.has(key));
-  if (missing.length) {
-    throw new HttpError(
-      400,
-      'INVALID_SITE_PHOTO_REFERENCE',
-      'Photo evidence must reference documents uploaded to this project',
-      { missing },
-    );
+/**
+ * The evidence as it is stored: the accepted shape (else 400
+ * VALIDATION_ERROR), naming documents of this project only (else 400
+ * INVALID_SITE_PHOTO_REFERENCE, another company's document and one that exists
+ * nowhere alike), each photo's uploader read from its document. `field` is
+ * where the evidence sits in the request (a daily report's own photos pass
+ * null). Exported for the daily report's photos.
+ */
+const prepareEvidence = async ({ orgId = null, projectId, evidence, field = 'evidence' }, tx = prisma) => {
+  if (evidence === null || evidence === undefined) return null;
+  if (!isPlainObject(evidence)) throw evidenceShapeError(field || 'photos');
+  const { keys, photoIds, revisionIds, otherProject } = readEvidenceShape(evidence, projectId, field);
+  if (otherProject) throw new HttpError(400, 'INVALID_SITE_PHOTO_REFERENCE', EVIDENCE_REFERENCE_MESSAGE);
+  const missing = [];
+  let documents = [];
+  if (keys.length) {
+    documents = await tx.projectDocument.findMany({
+      where: {
+        projectId,
+        ...(orgId ? { orgId } : {}),
+        OR: [{ id: { in: keys } }, { storageKey: { in: keys } }],
+      },
+      select: { id: true, storageKey: true, uploadedBy: true },
+    });
+    const known = new Set(documents.flatMap((document) => [document.id, document.storageKey]));
+    missing.push(...keys.filter((key) => !known.has(key)));
   }
+  // A photo link and a revision link name a photo and a revision of this
+  // project, as photos.js and doc-control.js resolve them.
+  if (photoIds.length) {
+    const rows = await tx.photo.findMany({
+      where: { id: { in: photoIds }, projectId, ...(orgId ? { orgId } : {}) },
+      select: { id: true },
+    });
+    const known = new Set(rows.map((row) => row.id));
+    missing.push(...photoIds.filter((id) => !known.has(id)));
+  }
+  if (revisionIds.length) {
+    const rows = await tx.documentRevision.findMany({
+      where: { id: { in: revisionIds }, projectId },
+      select: { id: true },
+    });
+    const known = new Set(rows.map((row) => row.id));
+    missing.push(...revisionIds.filter((id) => !known.has(id)));
+  }
+  if (missing.length) {
+    throw new HttpError(400, 'INVALID_SITE_PHOTO_REFERENCE', EVIDENCE_REFERENCE_MESSAGE, { missing });
+  }
+  const photos = Array.isArray(evidence.photos) ? evidence.photos : [];
+  if (!photos.some((photo) => isPlainObject(photo) && photo.uploadedBy !== undefined)) return evidence;
+  const byKey = new Map();
+  for (const document of documents) {
+    byKey.set(document.id, document);
+    if (document.storageKey) byKey.set(document.storageKey, document);
+  }
+  return {
+    ...evidence,
+    photos: photos.map((photo) => {
+      if (!isPlainObject(photo) || photo.uploadedBy === undefined) return photo;
+      const document = EVIDENCE_DOCUMENT_FIELDS.map((key) => (typeof photo[key] === 'string' ? byKey.get(photo[key].trim()) : null)).find(Boolean);
+      return { ...photo, uploadedBy: document?.uploadedBy ?? null };
+    }),
+  };
 };
 
 const getEvidenceAttachments = (evidence) => {
@@ -1101,8 +1285,7 @@ const buildSubmissionData = async ({
     );
   }
 
-  const evidence = normalizeEvidence(payload, fallbackPhotos);
-  await assertEvidenceDocuments({ orgId, projectId, evidence }, tx);
+  const evidence = await prepareEvidence({ orgId, projectId, evidence: normalizeEvidence(payload, fallbackPhotos) }, tx);
   if (
     status !== 'draft' &&
     methodConfig.evidenceRequired &&
@@ -1875,6 +2058,7 @@ module.exports = {
   calculateProgressPercent,
   normalizeMethod,
   hasEvidence,
+  prepareEvidence,
   serializeMethodConfig,
   serializeSubmission,
   serializeProgressSource,

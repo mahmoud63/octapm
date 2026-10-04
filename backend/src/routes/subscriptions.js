@@ -32,7 +32,7 @@ const assertRecordRead = (req, recordType) => {
 
 router.get(
   "/mine",
-  [query("limit").optional().isInt({ min: 1, max: 500 }).toInt(), validate],
+  [query("limit").isString().optional().isInt({ min: 1, max: 500 }).toInt(), validate],
   asyncHandler(async (req, res) => {
     const result = await commentService.listMySubscriptions({
       orgId: req.user.orgId,
@@ -47,7 +47,7 @@ router.get(
 router.get(
   "/",
   [
-    query("recordType").isIn(commentService.RECORD_TYPES),
+    query("recordType").isString().isIn(commentService.RECORD_TYPES),
     query("recordId").isString().trim().notEmpty(),
     validate,
   ],

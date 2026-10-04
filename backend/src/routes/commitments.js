@@ -41,10 +41,10 @@ const upload = multer({
 
 const lineValidators = (prefix) => [
   body(`${prefix}.*.description`).isString().trim().notEmpty(),
-  body(`${prefix}.*.costCodeId`).optional({ nullable: true }).isUUID(),
-  body(`${prefix}.*.budgetLineId`).optional({ nullable: true }).isUUID(),
-  body(`${prefix}.*.boqItemId`).optional({ nullable: true }).isUUID(),
-  body(`${prefix}.*.activityId`).optional({ nullable: true }).isUUID(),
+  body(`${prefix}.*.costCodeId`).optional({ nullable: true }).isString().isUUID(),
+  body(`${prefix}.*.budgetLineId`).optional({ nullable: true }).isString().isUUID(),
+  body(`${prefix}.*.boqItemId`).optional({ nullable: true }).isString().isUUID(),
+  body(`${prefix}.*.activityId`).optional({ nullable: true }).isString().isUUID(),
   body(`${prefix}.*.qty`).optional({ nullable: true }).isFloat({ min: 0 }),
   body(`${prefix}.*.rate`).optional({ nullable: true }).isFloat(),
   body(`${prefix}.*.amount`).optional({ nullable: true }).isFloat(),
@@ -54,8 +54,8 @@ const commitmentValidators = ({ requireTitle = false } = {}) => [
   requireTitle ? body("title").isString().trim().notEmpty().isLength({ max: 200 }) : body("title").optional().isString().trim().notEmpty().isLength({ max: 200 }),
   body("type").optional().isIn(commitmentService.TYPES),
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
-  body("vendorCompanyId").optional({ nullable: true }).isUUID(),
-  body("supplierId").optional({ nullable: true }).isUUID(),
+  body("vendorCompanyId").optional({ nullable: true }).isString().isUUID(),
+  body("supplierId").optional({ nullable: true }).isString().isUUID(),
   body("retentionRate").optional({ nullable: true }).isFloat({ min: 0, max: 100 }),
   body("paymentTerms").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
   body("currency").optional({ nullable: true }).isString().trim().isLength({ min: 3, max: 3 }),
@@ -71,27 +71,27 @@ const coValidators = ({ requireTitle = false } = {}) => [
   requireTitle ? body("title").isString().trim().notEmpty().isLength({ max: 200 }) : body("title").optional().isString().trim().notEmpty().isLength({ max: 200 }),
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
   body("value").optional({ nullable: true }).isFloat(),
-  body("primeChangeOrderId").optional({ nullable: true }).isUUID(),
+  body("primeChangeOrderId").optional({ nullable: true }).isString().isUUID(),
   body("lines").optional().isArray({ max: 500 }),
   body("lines.*.amount").isFloat(),
   // The schedule-of-values line this change moves. Without it the change
   // raises the commitment's revised value but not the line's billing ceiling.
-  body("lines.*.sovLineId").optional({ nullable: true }).isUUID(),
+  body("lines.*.sovLineId").optional({ nullable: true }).isString().isUUID(),
   body("lines.*.description").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
-  body("lines.*.costCodeId").optional({ nullable: true }).isUUID(),
-  body("lines.*.budgetLineId").optional({ nullable: true }).isUUID(),
-  body("lines.*.activityId").optional({ nullable: true }).isUUID(),
+  body("lines.*.costCodeId").optional({ nullable: true }).isString().isUUID(),
+  body("lines.*.budgetLineId").optional({ nullable: true }).isString().isUUID(),
+  body("lines.*.activityId").optional({ nullable: true }).isString().isUUID(),
 ];
 
 router.get(
   "/",
   requirePermission("commitment", "read"),
   [
-    query("type").optional().isIn(commitmentService.TYPES),
-    query("status").optional().isIn(commitmentService.STATUSES),
-    query("vendorCompanyId").optional({ values: "falsy" }).isUUID(),
+    query("type").isString().optional().isIn(commitmentService.TYPES),
+    query("status").isString().optional().isIn(commitmentService.STATUSES),
+    query("vendorCompanyId").isString().optional({ values: "falsy" }).isUUID(),
     query("search").optional().isString().trim().isLength({ max: 120 }),
-    query("includeVoid").optional().isBoolean().toBoolean(),
+    query("includeVoid").isString().optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) => sendSuccess(res, await commitmentService.listCommitments({ ...scope(req), query: req.query, viewer: viewer(req) }))),
@@ -107,7 +107,7 @@ router.post(
 router.post(
   "/change-orders/from-prime",
   requirePermission("commitment", "create"),
-  [body("primeChangeOrderId").isUUID(), body("items").isArray({ min: 1, max: 100 }), body("items.*.commitmentId").isUUID(), body("items.*.value").optional({ nullable: true }).isFloat(), validate],
+  [body("primeChangeOrderId").isString().isUUID(), body("items").isArray({ min: 1, max: 100 }), body("items.*.commitmentId").isString().isUUID(), body("items.*.value").optional({ nullable: true }).isFloat(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await commitmentService.spawnFromPrimeChangeOrder({ ...scope(req), payload: req.body, actor: actor(req) }), 201)),
 );
 
@@ -154,7 +154,7 @@ router.put(
 router.put(
   "/:commitmentId/insurance",
   requirePermission("commitment", "update"),
-  [param("commitmentId").isUUID(), body("insurance").isArray({ max: 20 }), body("insurance.*.type").optional().isIn(commitmentService.INSURANCE_TYPES), body("insurance.*.documentId").optional({ nullable: true }).isUUID(), body("insurance.*.expiresAt").optional({ nullable: true }).isISO8601(), validate],
+  [param("commitmentId").isUUID(), body("insurance").isArray({ max: 20 }), body("insurance.*.type").optional().isIn(commitmentService.INSURANCE_TYPES), body("insurance.*.documentId").optional({ nullable: true }).isString().isUUID(), body("insurance.*.expiresAt").optional({ nullable: true }).isISO8601(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await commitmentService.setInsurance({ ...scope(req), commitmentId: req.params.commitmentId, payload: req.body, actor: actor(req) }))),
 );
 
@@ -184,7 +184,7 @@ router.post(
   requirePermission("commitment", "approve", { transition: "commitment.execute" }),
   uploadLimiter,
   upload.single("file"),
-  [param("commitmentId").isUUID(), body("documentId").optional({ nullable: true }).isUUID(), body("override").optional().isBoolean().toBoolean(), body("overrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }), validate],
+  [param("commitmentId").isUUID(), body("documentId").optional({ nullable: true }).isString().isUUID(), body("override").optional().isBoolean().toBoolean(), body("overrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }), validate],
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -376,7 +376,7 @@ router.patch(
     param("commitmentId").isUUID(),
     param("key").isString().trim().isLength({ min: 1, max: 60 }),
     body("status").optional().isIn(closeoutService.STATUSES),
-    body("documentId").optional({ nullable: true }).isUUID(),
+    body("documentId").optional({ nullable: true }).isString().isUUID(),
     body("note").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
     body("waivedReason").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
     validate,

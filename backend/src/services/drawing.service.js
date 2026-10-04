@@ -3,6 +3,7 @@ const { HttpError } = require('../utils/http-error');
 const { nextRef } = require("../utils/reference-number");
 const {
   RECORD_TYPES,
+  assertPayloadActivity,
   workflowAssignmentData,
   attachWorkflowDetailsToRecords,
   primaryActivityIdFromPayload,
@@ -22,19 +23,6 @@ const ensureProject = async ({ orgId, projectId }) => {
 
   return project;
 };
-
-/**
- * An `activityId` sent beside `activityLinks` / `activityIds` was neither
- * stored (the links name the primary activity) nor checked (CERT-2). It names
- * one of this project's activities; another company's activity and one that
- * exists nowhere get the 400 the links' own check gives a missing activity.
- */
-const assertActivityIdInProject = ({ projectId, activityId }) =>
-  require('./tenant-references.service')
-    .assertProjectRows({ model: 'activity', projectId, ids: [activityId], code: 'WORKFLOW_ACTIVITY_NOT_FOUND', message: 'One or more linked activities were not found in this project' })
-    .catch((error) => {
-      throw error?.code === 'WORKFLOW_ACTIVITY_NOT_FOUND' ? new HttpError(400, error.code, error.message) : error;
-    });
 
 const listDrawings = async ({ orgId, projectId }) => {
   await ensureProject({ orgId, projectId });
@@ -61,7 +49,8 @@ const listDrawings = async ({ orgId, projectId }) => {
 
 const createDrawing = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
-  await assertActivityIdInProject({ projectId, activityId: payload.activityId });
+  // Every activity the drawing will name, before anything is written (CERT-2).
+  await assertPayloadActivity({ projectId, payload });
 
   const generatedRef = await nextRef(prisma, { table: 'DrawingRecord', scopeColumn: 'projectId', scopeId: projectId, prefix: 'DWG' });
   const activityId = primaryActivityIdFromPayload(payload);
@@ -142,7 +131,7 @@ const updateDrawing = async ({
   if (!existing) {
     throw new HttpError(404, 'DRAWING_NOT_FOUND', 'Drawing not found');
   }
-  await assertActivityIdInProject({ projectId, activityId: payload.activityId });
+  await assertPayloadActivity({ projectId, payload });
 
   const nextStatus = payload.status ?? existing.status;
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);

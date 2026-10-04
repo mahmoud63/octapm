@@ -70,17 +70,17 @@ const draftBody = (req) => {
 router.get(
   "/",
   [
-    query("status").optional().isIn([...service.STATUSES, "all"]),
+    query("status").isString().optional().isIn([...service.STATUSES, "all"]),
     query("kind").optional().isString().isLength({ max: 500 }),
     query("severity").optional().isString().isLength({ max: 60 }),
     query("subject").optional().isString().isLength({ max: 120 }),
     query("subjectType").optional().isString().isLength({ max: 60 }),
-    query("subjectId").optional().isUUID(),
-    query("wbsNodeId").optional().isUUID(),
-    query("locationId").optional().isUUID(),
-    query("costCodeId").optional().isUUID(),
-    query("cursor").optional().isUUID(),
-    query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
+    query("subjectId").isString().optional().isUUID(),
+    query("wbsNodeId").isString().optional().isUUID(),
+    query("locationId").isString().optional().isUUID(),
+    query("costCodeId").isString().optional().isUUID(),
+    query("cursor").isString().optional().isUUID(),
+    query("limit").isString().optional().isInt({ min: 1, max: 100 }).toInt(),
     validate,
   ],
   asyncHandler(async (req, res) => sendSuccess(res, await service.listExceptions({ ...scope(req), ...callerFor(req), query: req.query }))),
@@ -118,7 +118,7 @@ router.post(
 );
 router.post(
   "/:exceptionId/associate-change-event",
-  [exceptionIdParam, body("changeEventId").isUUID(), validate],
+  [exceptionIdParam, body("changeEventId").isString().isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.associateChangeEvent({ ...scope(req), ...callerFor(req), exceptionId: req.params.exceptionId, actor: actorFor(req), payload: req.body }))),
 );
 

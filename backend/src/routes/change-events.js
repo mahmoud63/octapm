@@ -51,7 +51,7 @@ const eventValidators = (partial = false) => [
   body("lines.*.notes").optional({ nullable: true }).isString().isLength({ max: 1000 }),
 ];
 
-router.get("/", requirePermission("change_event", "read"), [query("status").optional().isIn(Object.values(service.STATUS)), query("type").optional().isIn(service.TYPES), query("origin").optional().isIn(service.ORIGINS), query("q").optional().isString().isLength({ max: 200 }), validate], asyncHandler(async (req, res) => send(req, res, await service.listChangeEvents({ ...scope(req), query: req.query }))));
+router.get("/", requirePermission("change_event", "read"), [query("status").isString().optional().isIn(Object.values(service.STATUS)), query("type").isString().optional().isIn(service.TYPES), query("origin").isString().optional().isIn(service.ORIGINS), query("q").optional().isString().isLength({ max: 200 }), validate], asyncHandler(async (req, res) => send(req, res, await service.listChangeEvents({ ...scope(req), query: req.query }))));
 router.post("/", requirePermission("change_event", "create"), [...eventValidators(), validate], asyncHandler(async (req, res) => send(req, res, await service.createChangeEvent({ ...scope(req), payload: req.body, actor: actorFor(req) }), 201)));
 
 router.post("/rfqs/:rfqId/remind", requirePermission("change_event", "submit", { transition: "change_event.rfq_send" }), [param("rfqId").isUUID(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.remindRfq({ ...scope(req), rfqId: req.params.rfqId, actor: actorFor(req) }))));

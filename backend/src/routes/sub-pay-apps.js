@@ -17,7 +17,7 @@ const viewer = (req) => ({ id: req.user.id, role: getEffectiveRole(req), project
 
 const lineValidators = [
   body("lines").optional().isArray({ max: 500 }),
-  body("lines.*.sovLineId").isUUID(),
+  body("lines.*.sovLineId").isString().isUUID(),
   body("lines.*.thisPeriodAmount").optional({ nullable: true }).isFloat({ min: 0 }),
   body("lines.*.thisPeriodPct").optional({ nullable: true }).isFloat({ min: 0, max: 100 }),
   body("lines.*.materialsOnSite").optional({ nullable: true }).isFloat({ min: 0 }),
@@ -27,7 +27,7 @@ const lineValidators = [
 router.get(
   "/",
   requirePermission("sub_pay_app", "read"),
-  [query("commitmentId").optional({ values: "falsy" }).isUUID(), query("status").optional().isIn(service.STATUSES), query("includeVoid").optional().isBoolean().toBoolean(), validate],
+  [query("commitmentId").isString().optional({ values: "falsy" }).isUUID(), query("status").isString().optional().isIn(service.STATUSES), query("includeVoid").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.listPayApps({ ...scope(req), query: req.query, viewer: viewer(req) }))),
 );
 
@@ -35,7 +35,7 @@ router.post(
   "/",
   requirePermission("sub_pay_app", "create"),
   [
-    body("commitmentId").isUUID(),
+    body("commitmentId").isString().isUUID(),
     body("periodLabel").isString().trim().notEmpty().isLength({ max: 60 }),
     body("periodStart").optional({ nullable: true }).isISO8601(),
     body("periodEnd").optional({ nullable: true }).isISO8601(),
@@ -69,7 +69,7 @@ router.patch(
     body("otherDeductionsNote").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
     body("taxRate").optional({ nullable: true }).isFloat({ min: 0, max: 100 }),
     body("waiverRequired").optional().isBoolean().toBoolean(),
-    body("waiverDocumentId").optional({ nullable: true }).isUUID(),
+    body("waiverDocumentId").optional({ nullable: true }).isString().isUUID(),
     body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
     ...lineValidators,
     validate,

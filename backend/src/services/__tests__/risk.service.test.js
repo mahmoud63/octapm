@@ -244,6 +244,24 @@ describe("risk service activity impact and closeout workflow", () => {
     expect(mockPrisma.risk.update).not.toHaveBeenCalled();
   });
 
+  it("refuses links outside the project before a reference number is drawn, without handing the ids back (CERT-2)", async () => {
+    const foreignActivity = "33333333-3333-4333-8333-333333333333";
+    mockPrisma.activity.findMany.mockImplementation(({ where }) =>
+      Promise.resolve([activity, activityTwo].filter((row) => where.id.in.includes(row.id) && where.projectId === "project-1")),
+    );
+    const drawn = jest.spyOn(mockPrisma, "$queryRaw");
+    for (const links of [{ activityIds: [foreignActivity] }, { activityLinks: [{ activityId: activity.id }, { activityId: foreignActivity }] }]) {
+      const refusal = await riskService.createRisk({ orgId: "org-1", projectId: "project-1", payload: { description: "Late delivery", probability: "low", impact: "medium", ...links }, userId: "planner-1", userRole: "planning_eng" }).catch((error) => error);
+      expect(refusal).toMatchObject({ status: 400, code: "RISK_ACTIVITY_INVALID", message: "One or more linked activities are invalid for this project" });
+      expect(refusal.details).toBeUndefined();
+      expect(JSON.stringify(refusal)).not.toContain(foreignActivity);
+    }
+    expect(drawn).not.toHaveBeenCalled();
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.risk.create).not.toHaveBeenCalled();
+    drawn.mockRestore();
+  });
+
   it("submits and approves risk closeout with audit trail", async () => {
     const existing = riskRow();
     const submitted = riskRow({

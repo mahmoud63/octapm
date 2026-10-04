@@ -55,7 +55,7 @@ router.patch(
     body("contractType").optional().isIn(service.CONTRACT_TYPES),
     body("status").optional().isIn(service.CONTRACT_STATUSES),
     body("currency").optional().isString().trim().isLength({ min: 3, max: 3 }),
-    body("clientCompanyId").optional({ nullable: true }).isUUID(),
+    body("clientCompanyId").optional({ nullable: true }).isString().isUUID(),
     moneyBody("originalValue"),
     moneyBody("advanceAmount"),
     rate("retentionRate"),
@@ -65,8 +65,8 @@ router.patch(
     rate("materialsOnSiteRate"),
     rate("taxRate"),
     body("paymentTermsDays").optional().isInt({ min: 0, max: 365 }).toInt(),
-    body("startDate").optional({ nullable: true }).isISO8601(),
-    body("completionDate").optional({ nullable: true }).isISO8601(),
+    body("startDate").optional({ nullable: true }).isString().isISO8601(),
+    body("completionDate").optional({ nullable: true }).isString().isISO8601(),
     body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
     // Confirms the stored original value as it stands (the BOQ fallback, or
     // a value of unestablished source); the service also requires boq:read.
@@ -151,7 +151,7 @@ router.post(
   [
     moneyBody("amount", { required: true }),
     body("reference").optional({ nullable: true }).isString().trim().isLength({ max: 40 }),
-    body("occurredAt").optional({ nullable: true }).isISO8601(),
+    body("occurredAt").optional({ nullable: true }).isString().isISO8601(),
     body("note").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
     validate,
   ],

@@ -50,10 +50,10 @@ router.get(
   requirePermission("document_control", "read"),
   [
     query("discipline").optional().isString().trim().isLength({ max: 80 }),
-    query("locationId").optional({ values: "falsy" }).isUUID(),
+    query("locationId").isString().optional({ values: "falsy" }).isUUID(),
     query("search").optional().isString().trim().isLength({ max: 120 }),
-    query("status").optional().isIn(["current", "obsolete", "all"]),
-    query("setId").optional({ values: "falsy" }).isUUID(),
+    query("status").isString().optional().isIn(["current", "obsolete", "all"]),
+    query("setId").isString().optional({ values: "falsy" }).isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -121,7 +121,7 @@ router.patch(
     param("sheetId").isUUID(),
     body("title").optional().isString().trim().isLength({ min: 1, max: 200 }),
     body("discipline").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
-    body("locationId").optional({ nullable: true }).isUUID(),
+    body("locationId").optional({ nullable: true }).isString().isUUID(),
     body("status").optional().isIn(["current", "obsolete"]),
     body("obsoleteReason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
     body("scaleRatio").optional({ nullable: true }).isFloat({ gt: 0, max: 100000 }),

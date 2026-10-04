@@ -18,15 +18,17 @@ const viewer = (req) => ({ id: req.user.id, name: req.user.name, role: getEffect
 const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
 
 const instanceValidators = ({ create = false } = {}) => [
-  create ? body("templateId").isUUID() : body("templateId").not().exists(),
+  create ? body("templateId").isString().isUUID() : body("templateId").not().exists(),
   body("title").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
-  body("activityId").optional({ nullable: true }).isUUID(),
-  body("locationId").optional({ nullable: true }).isUUID(),
-  body("sheetId").optional({ nullable: true }).isUUID(),
-  body("assigneeUserId").optional({ nullable: true }).isUUID(),
-  body("assigneeCompanyId").optional({ nullable: true }).isUUID(),
-  body("inspectorUserId").optional({ nullable: true }).isUUID(),
-  body("approverUserId").optional({ nullable: true }).isUUID(),
+  // .isString() first: an array passes isUUID() element by element and
+  // reached Prisma as a 500 (CERT-2 shapes).
+  body("activityId").optional({ nullable: true }).isString().isUUID(),
+  body("locationId").optional({ nullable: true }).isString().isUUID(),
+  body("sheetId").optional({ nullable: true }).isString().isUUID(),
+  body("assigneeUserId").optional({ nullable: true }).isString().isUUID(),
+  body("assigneeCompanyId").optional({ nullable: true }).isString().isUUID(),
+  body("inspectorUserId").optional({ nullable: true }).isString().isUUID(),
+  body("approverUserId").optional({ nullable: true }).isString().isUUID(),
   body("scheduledFor").optional({ nullable: true }).isISO8601(),
   body("dueDate").optional({ nullable: true }).isISO8601(),
   body("recurrence").optional({ nullable: true }).isObject(),
@@ -39,22 +41,22 @@ const instanceValidators = ({ create = false } = {}) => [
 
 const listValidators = [
   query("status").optional().isString().trim().isLength({ max: 120 }),
-  query("type").optional().isIn(formService.TYPES),
-  query("templateId").optional({ values: "falsy" }).isUUID(),
-  query("activityId").optional({ values: "falsy" }).isUUID(),
-  query("locationId").optional({ values: "falsy" }).isUUID(),
-  query("sheetId").optional({ values: "falsy" }).isUUID(),
-  query("assigneeUserId").optional({ values: "falsy" }).isUUID(),
-  query("assigneeCompanyId").optional({ values: "falsy" }).isUUID(),
-  query("ballInCourtUserId")
+  query("type").isString().optional().isIn(formService.TYPES),
+  query("templateId").isString().optional({ values: "falsy" }).isUUID(),
+  query("activityId").isString().optional({ values: "falsy" }).isUUID(),
+  query("locationId").isString().optional({ values: "falsy" }).isUUID(),
+  query("sheetId").isString().optional({ values: "falsy" }).isUUID(),
+  query("assigneeUserId").isString().optional({ values: "falsy" }).isUUID(),
+  query("assigneeCompanyId").isString().optional({ values: "falsy" }).isUUID(),
+  query("ballInCourtUserId").isString()
     .optional({ values: "falsy" })
     .matches(/^(me|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i),
-  query("outcome").optional().isIn(formService.OUTCOMES),
-  query("overdue").optional().isBoolean().toBoolean(),
-  query("from").optional({ values: "falsy" }).isISO8601(),
-  query("to").optional({ values: "falsy" }).isISO8601(),
+  query("outcome").isString().optional().isIn(formService.OUTCOMES),
+  query("overdue").isString().optional().isBoolean().toBoolean(),
+  query("from").isString().optional({ values: "falsy" }).isISO8601(),
+  query("to").isString().optional({ values: "falsy" }).isISO8601(),
   query("search").optional().isString().trim().isLength({ max: 120 }),
-  query("limit").optional().isInt({ min: 1, max: 1000 }).toInt(),
+  query("limit").isString().optional().isInt({ min: 1, max: 1000 }).toInt(),
   validate,
 ];
 
@@ -93,7 +95,7 @@ router.post(
 router.get(
   "/hold-points",
   requirePermission("inspection", "read"),
-  [query("activityId").isUUID(), validate],
+  [query("activityId").isString().isUUID(), validate],
   asyncHandler(async (req, res) => {
     const holdPoints = await formService.openHoldPoints({ projectId: req.params.projectId, activityId: req.query.activityId });
     return sendSuccess(res, { activityId: req.query.activityId, open: holdPoints.length, holdPoints });
@@ -110,7 +112,7 @@ router.get(
 router.get(
   "/:instanceId/export.pdf",
   requirePermission("inspection", "export"),
-  [param("instanceId").isUUID(), query("includePhotos").optional().isBoolean().toBoolean(), validate],
+  [param("instanceId").isUUID(), query("includePhotos").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => {
     const result = await formService.exportInstancePdf({ ...scope(req), instanceId: req.params.instanceId, includePhotos: req.query.includePhotos === true, viewer: viewer(req) });
     res.setHeader("Content-Type", "application/pdf");
@@ -146,7 +148,7 @@ router.put(
   [
     param("instanceId").isUUID(),
     body("responses").isArray({ min: 1, max: 500 }),
-    body("responses.*.itemId").isUUID(),
+    body("responses.*.itemId").isString().isUUID(),
     body("responses.*.value").optional({ nullable: true }),
     body("responses.*.note").optional({ nullable: true }).isString().isLength({ max: 2000 }),
     validate,
@@ -193,7 +195,7 @@ router.post(
     body("image").isString().isLength({ min: 30, max: 600_000 }),
     body("signerName").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
     body("signerCompany").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
-    body("itemId").optional({ nullable: true }).isUUID(),
+    body("itemId").optional({ nullable: true }).isString().isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -227,10 +229,10 @@ router.post(
     body("priority").optional().isIn(["low", "normal", "high", "urgent"]),
     body("trade").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
     body("locationText").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
-    body("assigneeCompanyId").optional({ nullable: true }).isUUID(),
-    body("assigneeUserId").optional({ nullable: true }).isUUID(),
-    body("managerUserId").optional({ nullable: true }).isUUID(),
-    body("finalApproverUserId").optional({ nullable: true }).isUUID(),
+    body("assigneeCompanyId").optional({ nullable: true }).isString().isUUID(),
+    body("assigneeUserId").optional({ nullable: true }).isString().isUUID(),
+    body("managerUserId").optional({ nullable: true }).isString().isUUID(),
+    body("finalApproverUserId").optional({ nullable: true }).isString().isUUID(),
     body("dueDate").optional({ nullable: true }).isISO8601(),
     validate,
   ],

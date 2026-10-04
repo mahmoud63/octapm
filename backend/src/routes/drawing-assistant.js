@@ -28,7 +28,7 @@ router.post(
   [
     param("setId").isUUID(),
     body("pages").isArray({ min: 1, max: 12 }),
-    body("pages.*.revisionId").isUUID(),
+    body("pages.*.revisionId").isString().isUUID(),
     body("pages.*.image").isString().isLength({ min: 32, max: 3_000_000 }),
     body("apply").optional().isBoolean().toBoolean(),
     body("overwrite").optional().isBoolean().toBoolean(),
@@ -64,9 +64,9 @@ router.post(
   requirePermission("document_control", "read"),
   [
     param("sheetId").isUUID(),
-    body("a.revisionId").isUUID(),
+    body("a.revisionId").isString().isUUID(),
     body("a.image").isString().isLength({ min: 32, max: 3_000_000 }),
-    body("b.revisionId").isUUID(),
+    body("b.revisionId").isString().isUUID(),
     body("b.image").isString().isLength({ min: 32, max: 3_000_000 }),
     validate,
   ],

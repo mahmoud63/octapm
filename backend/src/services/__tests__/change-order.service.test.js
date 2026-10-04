@@ -586,3 +586,88 @@ describe("Phase 21D — integrity (release challenge, tenth pass)", () => {
     delete mockPrisma.$queryRaw;
   });
 });
+
+describe("CERT-2 — the activity a change order's own row names", () => {
+  // ChangeOrder.activityId is a foreign key. It was written before the links
+  // checked the project, so an id that exists nowhere failed on the
+  // constraint (500) where another company's activity was refused (400):
+  // the answer told which ids are some company's activities. The project's
+  // own activities are the only ones found here; any other id is refused
+  // the way the links refuse it, before the order row is written.
+  const OWN = "activity-own";
+  const REFUSED = { status: 400, code: "CHANGE_ORDER_ACTIVITY_NOT_FOUND", message: "One or more linked activities were not found in this project" };
+  const projectActivities = async ({ where }) =>
+    where.projectId === "project-1" ? (where.id?.in || []).filter((id) => id === OWN).map((id) => ({ id, totalFloat: 0, isCritical: false })) : [];
+  const WAYS = [
+    ["activityLinks[].activityId", (id) => ({ activityLinks: [{ activityId: id, scheduleImpactDays: 1 }] })],
+    ["activityId", (id) => ({ activityId: id })],
+    ["affectedActivityIds[]", (id) => ({ affectedActivityIds: [id] })],
+  ];
+  const draft = { ...existing, status: "draft", activityLinks: [], allocationLinks: [] };
+  // The suites above replace and then delete $queryRaw; the reference
+  // counter (create) and the order's lock (update) need it back.
+  const counter = referenceCounterMock();
+  let savedQueryRaw;
+
+  beforeEach(() => {
+    savedQueryRaw = Object.prototype.hasOwnProperty.call(mockPrisma, "$queryRaw") ? mockPrisma.$queryRaw : undefined;
+    jest.clearAllMocks();
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", orgId: "org-1", name: "Project" });
+    mockPrisma.activity.findMany.mockImplementation(projectActivities);
+    mockPrisma.$queryRaw = counter.$queryRaw;
+    mockPrisma.projectDocument.findMany.mockResolvedValue([]);
+    mockPrisma.projectDocument.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.commercialAttachmentRef.findMany.mockResolvedValue([]);
+    mockPrisma.commercialCorrespondenceLink.findMany.mockResolvedValue([]);
+    mockPrisma.auditEvent.findMany.mockResolvedValue([]);
+    mockPrisma.changeOrderActivityLink.findMany.mockResolvedValue([]);
+    mockPrisma.workflowStatusHistory.create.mockResolvedValue({});
+  });
+  afterEach(() => {
+    mockPrisma.activity.findMany.mockReset();
+    if (savedQueryRaw === undefined) delete mockPrisma.$queryRaw;
+    else mockPrisma.$queryRaw = savedQueryRaw;
+  });
+
+  it.each(WAYS)("create: %s naming an activity that is not the project's (another company's, or none at all) is refused before the order is written", async (_way, over) => {
+    for (const id of ["activity-of-another-company", "activity-that-exists-nowhere"]) {
+      await expect(
+        changeOrderService.createChangeOrder({ orgId: "org-1", projectId: "project-1", userId: "qs-1", payload: { description: "Extra work", value: 10, ...over(id) } }),
+      ).rejects.toMatchObject(REFUSED);
+      expect(mockPrisma.activity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { projectId: "project-1", id: { in: [id] } } }));
+    }
+    expect(mockPrisma.changeOrder.create).not.toHaveBeenCalled();
+  });
+
+  it.each(WAYS)("update: %s naming an activity that is not the project's is refused before the order row is written", async (_way, over) => {
+    for (const id of ["activity-of-another-company", "activity-that-exists-nowhere"]) {
+      mockPrisma.changeOrder.findFirst.mockResolvedValueOnce(draft).mockResolvedValueOnce(draft); // the copy, then the order as held
+      await expect(
+        changeOrderService.updateChangeOrder({ orgId: "org-1", projectId: "project-1", coId: "co-1", userId: "qs-1", userRole: "qs", payload: over(id) }),
+      ).rejects.toMatchObject(REFUSED);
+      expect(mockPrisma.activity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { projectId: "project-1", id: { in: [id] } } }));
+    }
+    expect(mockPrisma.changeOrder.update).not.toHaveBeenCalled();
+    expect(mockPrisma.changeOrderActivityLink.createMany).not.toHaveBeenCalled();
+  });
+
+  it.each(WAYS)("the project's own activity is still accepted through %s, on create and on update", async (_way, over) => {
+    mockPrisma.changeOrder.create.mockImplementation(async ({ data }) => ({ id: "co-new", ...data, activityLinks: [], allocationLinks: [] }));
+    await changeOrderService.createChangeOrder({ orgId: "org-1", projectId: "project-1", userId: "qs-1", payload: { description: "Extra work", value: 10, ...over(OWN) } });
+    expect(mockPrisma.changeOrder.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ activityId: OWN }) }));
+
+    mockPrisma.changeOrder.findFirst.mockResolvedValue(draft);
+    mockPrisma.changeOrder.update.mockImplementation(async ({ data }) => ({ ...draft, ...data }));
+    await changeOrderService.updateChangeOrder({ orgId: "org-1", projectId: "project-1", coId: "co-1", userId: "qs-1", userRole: "qs", payload: over(OWN) });
+    expect(mockPrisma.changeOrder.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "co-1" }, data: expect.objectContaining({ activityId: OWN }) }));
+    expect(mockPrisma.changeOrderActivityLink.createMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: [expect.objectContaining({ activityId: OWN })] }));
+  });
+
+  it("an order that names no activity is not looked up", async () => {
+    mockPrisma.changeOrder.findFirst.mockResolvedValue(draft);
+    mockPrisma.changeOrder.update.mockImplementation(async ({ data }) => ({ ...draft, ...data }));
+    await changeOrderService.updateChangeOrder({ orgId: "org-1", projectId: "project-1", coId: "co-1", userId: "qs-1", userRole: "qs", payload: { activityId: null, description: "Reworded" } });
+    expect(mockPrisma.changeOrder.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ activityId: null }) }));
+    expect(mockPrisma.activity.findMany).not.toHaveBeenCalled();
+  });
+});

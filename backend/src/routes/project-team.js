@@ -53,7 +53,7 @@ router.post(
   "/",
   requireCompanyAdmin,
   [
-    body("userId").isUUID(),
+    body("userId").isString().isUUID(),
     // Optional: what they do *here*. Defaults to their company role, because
     // that is right nearly always, but a planner brought on to run cost
     // control can be assigned as one without changing who they are elsewhere.
@@ -98,7 +98,7 @@ router.put(
   requireCompanyAdmin,
   [
     param("userId").isUUID(),
-    body("templateId").optional({ nullable: true }).isUUID(),
+    body("templateId").optional({ nullable: true }).isString().isUUID(),
     body("overrides").optional({ nullable: true }).isObject(),
     validate,
   ],
@@ -136,7 +136,7 @@ router.put(
   requireCompanyAdmin,
   [
     param("partyId").isUUID(),
-    body("templateId").optional({ nullable: true }).isUUID(),
+    body("templateId").optional({ nullable: true }).isString().isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {

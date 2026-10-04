@@ -48,7 +48,7 @@ const allocationFigureValidators = () => [
   body('basis').optional().isIn(allocationService.VALID_BASES),
   body('source').optional().isIn(['manual', 'import', 'ai', 'migration']),
   body('notes').optional({ nullable: true }).isString().trim(),
-  body('locationId').optional({ nullable: true }).isUUID(),
+  body('locationId').optional({ nullable: true }).isString().isUUID(),
   body('suggestedBy').optional({ nullable: true }).isIn(allocationService.SUGGESTION_SOURCES),
   body('confidence').optional({ nullable: true }).isFloat({ min: 0, max: 1 }).toFloat(),
 ];
@@ -59,12 +59,12 @@ router.get(
   '/',
   requirePermission('boq', 'read'),
   [
-    query('status')
+    query('status').isString()
       .optional()
       .isIn(['draft', 'submitted', 'approved', 'rejected']),
-    query('boqItemId').optional().isUUID(),
-    query('activityId').optional().isUUID(),
-    query('includeInactive').optional().isBoolean().toBoolean(),
+    query('boqItemId').isString().optional().isUUID(),
+    query('activityId').isString().optional().isUUID(),
+    query('includeInactive').isString().optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -87,8 +87,8 @@ router.get(
   '/coverage',
   requirePermission('boq', 'read'),
   [
-    query('groupBy').optional().isIn(allocationService.GROUP_BY_OPTIONS),
-    query('cutoffDate').optional().isISO8601(),
+    query('groupBy').isString().optional().isIn(allocationService.GROUP_BY_OPTIONS),
+    query('cutoffDate').isString().optional().isISO8601(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -107,8 +107,8 @@ router.get(
   '/suggestions',
   requirePermission('boq', 'read'),
   [
-    query('boqItemId').optional().isUUID(),
-    query('limit').optional().isInt({ min: 1, max: 20 }).toInt(),
+    query('boqItemId').isString().optional().isUUID(),
+    query('limit').isString().optional().isInt({ min: 1, max: 20 }).toInt(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -129,7 +129,7 @@ router.patch(
   [
     body('rule').isIn(allocationService.MAPPING_RULES),
     body('itemIds').optional().isArray({ max: 2000 }),
-    body('itemIds.*').isUUID(),
+    body('itemIds.*').isString().isUUID(),
     body('section').optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
     validate,
   ],
@@ -151,8 +151,8 @@ router.post(
   CAN_CREATE,
   [
     body('allocations').isArray({ min: 1, max: 500 }),
-    body('allocations.*.boqItemId').isUUID(),
-    body('allocations.*.activityId').isUUID(),
+    body('allocations.*.boqItemId').isString().isUUID(),
+    body('allocations.*.activityId').isString().isUUID(),
     body('allocations.*.quantity').optional().isFloat({ gt: 0 }).toFloat(),
     // Money is money on every path: the same two-decimal rule as the single
     // create, so a bulk row cannot carry a figure the service would round.
@@ -160,7 +160,7 @@ router.post(
     body('allocations.*.weight').optional().isFloat({ min: 0 }).toFloat(),
     body('allocations.*.basis').optional().isIn(allocationService.VALID_BASES),
     body('allocations.*.notes').optional({ nullable: true }).isString().trim(),
-    body('allocations.*.locationId').optional({ nullable: true }).isUUID(),
+    body('allocations.*.locationId').optional({ nullable: true }).isString().isUUID(),
     body('allocations.*.suggestedBy').optional({ nullable: true }).isIn(allocationService.SUGGESTION_SOURCES),
     body('allocations.*.confidence').optional({ nullable: true }).isFloat({ min: 0, max: 1 }).toFloat(),
     validate,
@@ -181,7 +181,7 @@ router.post(
 router.post(
   '/import',
   CAN_CREATE,
-  [query('dryRun').optional().isBoolean().toBoolean(), validate],
+  [query('dryRun').isString().optional().isBoolean().toBoolean(), validate],
   mappingUpload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file?.buffer) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
@@ -218,8 +218,8 @@ router.post(
   '/',
   CAN_CREATE,
   [
-    body('boqItemId').isUUID(),
-    body('activityId').isUUID(),
+    body('boqItemId').isString().isUUID(),
+    body('activityId').isString().isUUID(),
     ...allocationFigureValidators(),
     validate,
   ],
@@ -240,8 +240,8 @@ router.patch(
   CAN_UPDATE,
   [
     param('id').isUUID(),
-    body('boqItemId').optional().isUUID(),
-    body('activityId').optional().isUUID(),
+    body('boqItemId').optional().isString().isUUID(),
+    body('activityId').optional().isString().isUUID(),
     ...allocationFigureValidators(),
     validate,
   ],

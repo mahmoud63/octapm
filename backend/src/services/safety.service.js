@@ -2,6 +2,7 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const {
   RECORD_TYPES,
+  assertPayloadActivity,
   workflowAssignmentData,
   attachWorkflowDetailsToRecords,
   normalizeAttachmentRefs,
@@ -244,6 +245,11 @@ const createSafetyIncident = async ({
   userRole = null,
 }) => {
   await ensureProject({ orgId, projectId });
+  // Every activity the incident will name (activityId, activityIds,
+  // activityLinks), before anything is written: the row carries the primary
+  // activity, so an activity that exists nowhere failed its foreign key (500)
+  // where another company's was refused 400 by the links (CERT-2).
+  await assertPayloadActivity({ projectId, payload });
 
   const generatedRef = await nextRef(prisma, { table: 'SafetyIncident', scopeColumn: 'projectId', scopeId: projectId, prefix: 'SAF' });
   const activityId = primaryActivityIdFromPayload(payload);
@@ -357,6 +363,8 @@ const updateSafetyIncident = async ({
     existingStatus: existing.status,
     nextStatus,
   });
+  // As on create: checked before anything is written (CERT-2).
+  await assertPayloadActivity({ projectId, payload });
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
 
   const row = await prisma.$transaction(async (tx) => {

@@ -22,6 +22,7 @@ const mockSupport = {
   RECORD_TYPES: { SUBMITTAL: "submittal" },
   attachWorkflowDetailsToRecords: jest.fn(async ({ records }) => records),
   primaryActivityIdFromPayload: jest.fn((payload, existing = null) => (payload.activityId !== undefined ? payload.activityId : existing)),
+  assertPayloadActivity: jest.fn(async () => undefined),
   recordDocumentRevisions: jest.fn(async () => ({ revisionCount: 0 })),
   recordWorkflowHistory: jest.fn(async () => null),
   syncWorkflowReferences: jest.fn(async () => ({})),

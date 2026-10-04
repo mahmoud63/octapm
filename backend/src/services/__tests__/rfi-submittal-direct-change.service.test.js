@@ -77,7 +77,8 @@ describe("RFI decisions through create / update", () => {
       status: 400,
       code: "WORKFLOW_ACTIVITY_NOT_FOUND",
     });
-    expect(mockPrisma.activity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["foreign-activity"] }, projectId: "project-1" } }));
+    // Every activity the RFI names is checked in one query: the activityId and the links.
+    expect(mockPrisma.activity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["foreign-activity", "own-activity"] }, projectId: "project-1" } }));
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 

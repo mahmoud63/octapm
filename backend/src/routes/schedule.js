@@ -421,7 +421,7 @@ router.post(
     transition: 'revision.baseline',
   }),
   [
-    body('revisionId').optional({ nullable: true }).isUUID().withMessage(REVISION_ID_INVALID),
+    body('revisionId').optional({ nullable: true }).isString().isUUID().withMessage(REVISION_ID_INVALID),
     optionalComment('The baseline comment'),
     validateWithReasons,
   ],

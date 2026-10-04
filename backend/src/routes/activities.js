@@ -80,8 +80,8 @@ router.post(
       .trim()
       .isLength({ max: 64 }),
     body('wbsCode').optional().isString().trim(),
-    body('startDate').optional().isISO8601(),
-    body('endDate').optional().isISO8601(),
+    body('startDate').optional().isString().isISO8601(),
+    body('endDate').optional().isString().isISO8601(),
     body('earlyStart').optional().isInt({ min: 0 }).toInt(),
     body('earlyFinish').optional().isInt({ min: 0 }).toInt(),
     body('lateStart').optional().isInt({ min: 0 }).toInt(),
@@ -90,8 +90,10 @@ router.post(
     body('duration').optional().isInt({ min: 0 }).toInt(),
     body('predecessors').optional().isString().trim(),
     body('dependencies').optional().isArray(),
-    body('dependencies.*.predecessorId').optional().isUUID(),
-    body('dependencies.*.predecessorActivityId').optional().isUUID(),
+    // One string each (CERT-2 shapes): isUUID() alone took ["<id>"] element
+    // by element, and the service then read it as the activity it wraps.
+    body('dependencies.*.predecessorId').optional().isString().isUUID(),
+    body('dependencies.*.predecessorActivityId').optional().isString().isUUID(),
     body('dependencies.*.predecessorRef').optional().isString().trim(),
     body('dependencies.*.relationshipType').optional().isIn(VALID_RELATIONSHIPS),
     body('dependencies.*.lagDays').optional().isInt().toInt(),
@@ -102,7 +104,9 @@ router.post(
     body('engineerIds')
       .isArray({ min: 1 })
       .withMessage('At least one engineer required'),
-    body('engineerIds.*').isUUID(),
+    // .isString() first: isUUID() alone checks an array element by element,
+    // so [["<id>"]] passed and reached Prisma as a 500 (CERT-2 shapes).
+    body('engineerIds.*').isString().isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -122,7 +126,7 @@ router.post(
   }),
   [
     body('updates').isArray({ min: 1 }),
-    body('updates.*.activityId').isUUID(),
+    body('updates.*.activityId').isString().isUUID(),
     body('updates.*.pctComplete')
       .optional()
       .isFloat({ min: 0, max: 100 })
@@ -140,8 +144,10 @@ router.post(
     body('updates.*.evidence').optional().isObject(),
     body('updates.*.milestones').optional().isArray(),
     body('updates.*.entryIds').optional().isArray({ max: 500 }),
-    body('updates.*.entryIds.*').optional().isUUID(),
-    body('updates.*.bundleSubmittedThrough').optional().isISO8601({ strict: true }),
+    // Each quantity entry one string: [["<id>"]] passed isUUID() element by
+    // element (CERT-2 shapes).
+    body('updates.*.entryIds.*').optional().isString().isUUID(),
+    body('updates.*.bundleSubmittedThrough').optional().isString().isISO8601({ strict: true }),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -160,11 +166,11 @@ router.get(
   '/progress-submissions',
   requirePermission('progress', 'read'),
   [
-    query('status')
+    query('status').isString()
       .optional()
       .isIn(['draft', 'submitted', 'approved', 'rejected']),
-    query('from').optional().isISO8601({ strict: true }),
-    query('to').optional().isISO8601({ strict: true }),
+    query('from').isString().optional().isISO8601({ strict: true }),
+    query('to').isString().optional().isISO8601({ strict: true }),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -226,7 +232,7 @@ router.get(
 router.get(
   '/:id/quantities',
   requirePermission('schedule', 'read'),
-  [param('id').isUUID(), query('cutoffDate').optional().isISO8601(), validate],
+  [param('id').isUUID(), query('cutoffDate').isString().optional().isISO8601(), validate],
   asyncHandler(async (req, res) => {
     const { can, partyScoped } = controlsDetailService.detailReader(req);
     const view = await quantityViewsService.getActivityQuantities({
@@ -254,8 +260,8 @@ router.patch(
       .trim()
       .isLength({ max: 64 }),
     body('wbsCode').optional().isString().trim(),
-    body('startDate').optional().isISO8601(),
-    body('endDate').optional().isISO8601(),
+    body('startDate').optional().isString().isISO8601(),
+    body('endDate').optional().isString().isISO8601(),
     body('earlyStart').optional().isInt({ min: 0 }).toInt(),
     body('earlyFinish').optional().isInt({ min: 0 }).toInt(),
     body('lateStart').optional().isInt({ min: 0 }).toInt(),
@@ -264,8 +270,10 @@ router.patch(
     body('duration').optional().isInt({ min: 0 }).toInt(),
     body('predecessors').optional().isString().trim(),
     body('dependencies').optional().isArray(),
-    body('dependencies.*.predecessorId').optional().isUUID(),
-    body('dependencies.*.predecessorActivityId').optional().isUUID(),
+    // One string each (CERT-2 shapes): isUUID() alone took ["<id>"] element
+    // by element, and the service then read it as the activity it wraps.
+    body('dependencies.*.predecessorId').optional().isString().isUUID(),
+    body('dependencies.*.predecessorActivityId').optional().isString().isUUID(),
     body('dependencies.*.predecessorRef').optional().isString().trim(),
     body('dependencies.*.relationshipType').optional().isIn(VALID_RELATIONSHIPS),
     body('dependencies.*.lagDays').optional().isInt().toInt(),
@@ -274,7 +282,7 @@ router.patch(
     body('isMilestone').optional().isBoolean().toBoolean(),
     body('sortOrder').optional().isInt({ min: 0 }).toInt(),
     body('engineerIds').optional().isArray({ min: 1 }),
-    body('engineerIds.*').optional().isUUID(),
+    body('engineerIds.*').optional().isString().isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -358,7 +366,7 @@ router.get(
   requirePermission('progress', 'read'),
   [
     param('id').isUUID(),
-    query('status')
+    query('status').isString()
       .optional()
       .isIn(['draft', 'submitted', 'approved', 'rejected']),
     validate,
@@ -383,8 +391,8 @@ router.post(
     param('id').isUUID(),
     body('pctComplete').optional().isFloat({ min: 0, max: 100 }).toFloat(),
     moneyBody('actualCost'),
-    body('actualStart').optional().isISO8601(),
-    body('actualFinish').optional().isISO8601(),
+    body('actualStart').optional().isString().isISO8601(),
+    body('actualFinish').optional().isString().isISO8601(),
     body('progressMethod').optional().isIn(VALID_PROGRESS_METHODS),
     body('method').optional().isIn(VALID_PROGRESS_METHODS),
     body('status').optional().isIn(VALID_PROGRESS_STATUSES),
@@ -408,8 +416,9 @@ router.post(
     // named, and/or every submitted entry of the activity dated on or before
     // a day. Its figures are then derived (see progress.service).
     body('entryIds').optional().isArray({ max: 500 }),
-    body('entryIds.*').optional().isUUID(),
-    body('bundleSubmittedThrough').optional().isISO8601({ strict: true }),
+    // Each one string: [["<id>"]] passed isUUID() element by element (CERT-2 shapes).
+    body('entryIds.*').optional().isString().isUUID(),
+    body('bundleSubmittedThrough').optional().isString().isISO8601({ strict: true }),
     validate,
   ],
   asyncHandler(async (req, res) => {

@@ -2,6 +2,7 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { nextRef } = require("../utils/reference-number");
 const inventory = require("./inventory.service");
+const { assertQuantityBound, assertUnitCostBound, assertValueBound, movementDate } = require("../utils/stock-figures");
 const procurement = require("./procurement.service");
 const auditService = require("./audit.service");
 
@@ -36,6 +37,65 @@ const num = (value) => Number(value ?? 0);
 const trimOrNull = (value) => {
   const text = String(value ?? "").trim();
   return text ? text : null;
+};
+
+/**
+ * An identifier a delivery names — the order, its project, the warehouse, a
+ * line's item or bin, the daily report — as an identifier or as nothing.
+ *
+ * Only a string is an identifier. An array, a number or an object used to go
+ * straight into the lookup: an array or a number failed there with a 500, and
+ * a Prisma filter such as {"not":"x"} passed it — it matched any record of the
+ * organisation (a daily report of the project, which then failed at the write
+ * with a 500; any stocked item, which the delivery was then booked to) — and an
+ * order or a warehouse left out matched any (CERT-2). A value of any other
+ * shape is refused exactly as a record that does not exist, at the same point
+ * and with the same answer; the trimmed string is what is looked up and what
+ * is stored.
+ */
+const identifierOf = (value) => {
+  if (value === undefined || value === null) return { id: null, refused: false };
+  if (typeof value !== "string") return { id: null, refused: true };
+  return { id: value.trim() || null, refused: false };
+};
+const dailyReportReference = identifierOf;
+
+/** When the goods arrived: a date, or now. Anything that is not a date failed at the write with a 500. */
+const receivedAtOf = (value) => {
+  if (value === undefined || value === null || value === "") return new Date();
+  const at = value instanceof Date ? value : typeof value === "string" ? new Date(value) : null;
+  if (!at || Number.isNaN(at.getTime())) throw new HttpError(400, "RECEIPT_DATE_INVALID", "receivedAt must be a date and time");
+  return at;
+};
+
+/**
+ * The price a delivered line names: a number of zero or more, or null when it
+ * names none (the ordered price is used). "abc" became NaN on the stock
+ * ledger, which rounded to 0 and reset the item's average, last price and
+ * unit cost to nothing (CERT-2). Checked for every line before anything is
+ * read or created for the delivery.
+ */
+const unitCostOf = (value) => {
+  if (value === undefined || value === null) return null;
+  const parsed = typeof value === "number" || (typeof value === "string" && value.trim() !== "") ? Number(value) : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed < 0) throw new HttpError(400, "INV_NUMBER", "Unit cost must be zero or more");
+  // And no more than the item's price columns hold: 1e15 failed at the write with a 500 (CERT-2).
+  return assertUnitCostBound(parsed);
+};
+
+/**
+ * The stock positions of this organisation a delivery's answer counts: its
+ * own rows, in one of its own bins or none (the warehouse is its own). A
+ * balance this organisation holds in another company's bin — residue from
+ * before the bin guard — was counted into "how much have I got now" (CERT-2).
+ */
+const ownPositions = (orgId) => ({ orgId, OR: [{ locationId: null }, { location: { orgId } }] });
+
+/** The report must be the order's project's; anything else answers as one that exists nowhere. */
+const assertDailyReport = async (client, { projectId, reference }) => {
+  if (reference.refused || (reference.id && !(await client.dailyReport.findFirst({ where: { id: reference.id, projectId }, select: { id: true } })))) {
+    throw new HttpError(404, "DAILY_REPORT_NOT_FOUND", "Daily report not found");
+  }
 };
 
 // ─── finding the order ─────────────────────────────────────────────────────
@@ -160,10 +220,13 @@ const listOrders = async ({ orgId, projectId = null, projectIds = null, scope = 
  * storeman stop and set one up, this matches on the code and creates one if it
  * has to, then remembers the mapping on the line for next time.
  */
-const resolveInventoryItemUnchecked = async (tx, { orgId, user, line, requestedItemId }) => {
-  if (requestedItemId) {
+const resolveInventoryItemUnchecked = async (tx, { orgId, user, line, requestedItemId, unitCost = null }) => {
+  // Only a string names an item; {"not":"x"} matched any item of the organisation (CERT-2).
+  const requested = identifierOf(requestedItemId);
+  if (requested.refused) throw new HttpError(404, "ITEM_NOT_FOUND", "Item not found");
+  if (requested.id) {
     const item = await tx.inventoryItem.findFirst({
-      where: { id: requestedItemId, orgId },
+      where: { id: requested.id, orgId },
     });
     if (!item) throw new HttpError(404, "ITEM_NOT_FOUND", "Item not found");
     return item;
@@ -188,7 +251,11 @@ const resolveInventoryItemUnchecked = async (tx, { orgId, user, line, requestedI
       name: line.description,
       unit: line.unit,
       specification: line.spec ?? null,
-      unitCost: line.unitCost,
+      // At the price this delivery is booked at, which was checked against
+      // the item's price columns before anything was created: the ordered
+      // price alone (a Decimal(18,2)) overflowed them with a 500 even when the
+      // delivery named a price that fits (CERT-2).
+      unitCost: unitCost ?? line.unitCost,
       notes: "Created on first goods receipt",
       createdBy: user.id,
       updatedBy: user.id,
@@ -210,8 +277,8 @@ const resolveInventoryItemUnchecked = async (tx, { orgId, user, line, requestedI
  * (OCTA-PROC-RECEIPT-085).
  */
 /** The resolved item must be one the key may touch: a project item is that project's (Phase 21D, CX21-461). */
-const resolveInventoryItem = async (tx, { orgId, user, line, requestedItemId, allowedProjectIds = null }) => {
-  const item = await resolveInventoryItemUnchecked(tx, { orgId, user, line, requestedItemId });
+const resolveInventoryItem = async (tx, { orgId, user, line, requestedItemId, unitCost = null, allowedProjectIds = null }) => {
+  const item = await resolveInventoryItemUnchecked(tx, { orgId, user, line, requestedItemId, unitCost });
   if (item?.projectId && allowedProjectIds?.length && !allowedProjectIds.includes(item.projectId)) {
     throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
   }
@@ -231,6 +298,7 @@ const resolveItemsForReceipt = async ({ orgId, user, order, lines, allowedProjec
           user,
           line,
           requestedItemId: reported.inventoryItemId,
+          unitCost: unitCostOf(reported.unitCost) ?? num(line.unitCost),
           allowedProjectIds,
         }),
       );
@@ -301,6 +369,22 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
   if (!lines.length) {
     throw new HttpError(400, "RECEIPT_EMPTY", "Say what was delivered");
   }
+  const receivedAt = receivedAtOf(payload.receivedAt);
+  // Every line's price, quantities and expiry date, before anything is read
+  // or created (CERT-2): a first delivery's stocked item is settled outside
+  // the receipt's transaction, so a line refused later would leave it behind.
+  // An expiry date that is not a date failed at the write with a 500.
+  for (const row of lines) {
+    unitCostOf(row?.unitCost);
+    assertQuantityBound(Number(row?.acceptedQty) || 0, "Accepted quantity");
+    assertQuantityBound(Number(row?.rejectedQty) || 0, "Rejected quantity");
+    movementDate(row?.expiryDate, "expiryDate");
+  }
+  // The identifiers the delivery names, each a string or refused as one that
+  // exists nowhere (CERT-2).
+  const orderRef = identifierOf(payload.orderId);
+  const projectRef = identifierOf(payload.projectId);
+  const warehouseRef = identifierOf(payload.warehouseId);
 
   // Read the order once up front so the items can be settled before the
   // transaction that puts the stock away.
@@ -310,29 +394,52 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
   // against another project's order, putting the stock and the cost on the
   // wrong job (OCTA-PROC-RECEIPT-086).
   const orderScope = {
-    id: payload.orderId,
+    id: orderRef.id,
     project: { orgId },
-    ...(payload.projectId ? { projectId: payload.projectId } : {}),
+    ...(projectRef.id ? { projectId: projectRef.id } : {}),
   };
-  const advance = await prisma.procurementOrder.findFirst({
-    where: orderScope,
-    include: { lines: true },
-  });
+  // An order or a project that is not a string identifier — or no order at
+  // all, which used to match any — is found nowhere.
+  const orderNamed = Boolean(orderRef.id) && !orderRef.refused && !projectRef.refused;
+  const advance = orderNamed
+    ? await prisma.procurementOrder.findFirst({
+        where: orderScope,
+        include: { lines: true },
+      })
+    : null;
   // The key's project list is checked before anything is created for the
   // delivery: settling the items used to create the stocked item first and
   // refuse afterwards, leaving the item behind (Phase 21D, CX21-421).
   if (advance && allowedProjectIds?.length && !allowedProjectIds.includes(advance.projectId)) {
     throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
   }
+  // The daily report is the order's project's, checked before the items are
+  // settled: settling creates a first delivery's stocked item outside the
+  // receipt's transaction, so a report refused later left that item behind.
+  // The order's project does not change between here and the receipt.
+  const dailyReport = dailyReportReference(payload.dailyReportId);
+  if (advance) await assertDailyReport(prisma, { projectId: advance.projectId, reference: dailyReport });
+  // What each delivered line is worth at the price it is booked at — the one
+  // given, else the ordered one — fits the stock ledger, checked before a first
+  // delivery's item is settled (CERT-2).
+  for (const row of advance ? lines : []) {
+    const line = advance.lines.find((candidate) => candidate.id === row?.poLineId);
+    if (!line) continue;
+    const cost = unitCostOf(row.unitCost) ?? num(line.unitCost);
+    assertUnitCostBound(cost);
+    assertValueBound(Math.max(0, Number(row.acceptedQty) || 0), cost);
+  }
   const itemsByLine = advance
     ? await resolveItemsForReceipt({ orgId, user, order: advance, lines, allowedProjectIds })
     : new Map();
 
   return prisma.$transaction(async (tx) => {
-    const order = await tx.procurementOrder.findFirst({
-      where: orderScope,
-      include: { lines: true, project: true },
-    });
+    const order = orderNamed
+      ? await tx.procurementOrder.findFirst({
+          where: orderScope,
+          include: { lines: true, project: true },
+        })
+      : null;
     if (!order) throw new HttpError(404, "PO_NOT_FOUND", "Purchase order not found");
     // The order is held for the delivery. Its status was read a moment ago;
     // a cancellation landing between that read and the receipt's final
@@ -390,6 +497,21 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
       seenLineIds.add(row.poLineId);
     }
     const receivingLineIds = [...seenLineIds];
+    // Only this order's own lines are locked. The lock used to take every id
+    // the request named, so a delivery naming another company's purchase-order
+    // line held that company's row until the refusal further down (CERT-2). A
+    // line that is not on this order is refused here, exactly as the loop below
+    // refuses it, before any row is locked or anything is written.
+    const onOrder = new Set(order.lines.map((row) => row.id));
+    if (receivingLineIds.some((id) => !onOrder.has(id))) {
+      throw new HttpError(404, "PO_LINE_NOT_FOUND", "That line is not on this order");
+    }
+    // The daily report a delivery is booked against is the order's project's.
+    // Unchecked, another company's report id was stored on the receipt, and one
+    // that exists nowhere failed on the foreign key with a 500 (CERT-2). It was
+    // checked above, before anything was created, against the order as read
+    // then; it is checked again only if that read did not find this order.
+    if (!advance || advance.projectId !== order.projectId) await assertDailyReport(tx, { projectId: order.projectId, reference: dailyReport });
     if (receivingLineIds.length) {
       // The lock and the true figures in one query: rows come back as they are
       // at the moment they are locked, so there is no second read to go stale
@@ -406,9 +528,11 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
       ...[...itemsByLine.values()].map((item) => item?.id),
     ]);
 
-    const warehouse = await tx.warehouse.findFirst({
-      where: { id: payload.warehouseId, orgId },
-    });
+    const warehouse = warehouseRef.id && !warehouseRef.refused
+      ? await tx.warehouse.findFirst({
+          where: { id: warehouseRef.id, orgId },
+        })
+      : null;
     if (!warehouse) {
       throw new HttpError(404, "WAREHOUSE_NOT_FOUND", "Warehouse not found");
     }
@@ -416,6 +540,28 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
     // project, whichever project the order is on (Phase 21D, CX21-461).
     if (warehouse.projectId && allowedProjectIds?.length && !allowedProjectIds.includes(warehouse.projectId)) {
       throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+    }
+
+    // The bin each line is put away in must be one of this warehouse's own.
+    // Another company's location used to be stored on the stock movement and
+    // the balance — and the item's scan then served that company's bin name
+    // and code back — while a location that exists nowhere failed on the
+    // foreign key with a 500 (CERT-2). Both are refused as the stock-receive
+    // door refuses them, before anything is written: 404 LOCATION_NOT_FOUND.
+    // Only a string names a bin: [own bin] used to be read as the bin (CERT-2).
+    const binRefs = lines.map((row) => identifierOf(row.locationId));
+    if (binRefs.some((ref) => ref.refused)) {
+      throw new HttpError(404, "LOCATION_NOT_FOUND", "That location is not in this warehouse");
+    }
+    const binIds = [...new Set(binRefs.map((ref) => ref.id).filter(Boolean))];
+    if (binIds.length) {
+      const bins = await tx.warehouseLocation.findMany({
+        where: { id: { in: binIds }, warehouseId: warehouse.id, orgId },
+        select: { id: true },
+      });
+      if (bins.length !== binIds.length) {
+        throw new HttpError(404, "LOCATION_NOT_FOUND", "That location is not in this warehouse");
+      }
     }
 
     // A delivery note posted twice — the second scan, the retried tap on a
@@ -446,9 +592,9 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
         orderId: order.id,
         packageId: order.packageId,
         supplierId: order.supplierId,
-        dailyReportId: payload.dailyReportId || null,
+        dailyReportId: dailyReport.id,
         receiptNumber: receiptNumber || (await nextReceiptNumber(tx, order.projectId)),
-        receivedAt: payload.receivedAt ? new Date(payload.receivedAt) : new Date(),
+        receivedAt,
         receivedBy: trimOrNull(payload.receivedBy) || user.id,
         warehouseLocation: warehouse.name,
         deliveryNote: trimOrNull(payload.deliveryNote),
@@ -489,6 +635,7 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
           user,
           line,
           requestedItemId: reported.inventoryItemId,
+          unitCost: unitCostOf(reported.unitCost) ?? num(line.unitCost),
         }));
 
       const receiptLine = await tx.deliveryReceiptLine.create({
@@ -513,13 +660,10 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
             orgId,
             item,
             warehouseId: warehouse.id,
-            locationId: trimOrNull(reported.locationId),
+            locationId: identifierOf(reported.locationId).id,
             type: "receipt",
             quantity: acceptedQty,
-            unitCost:
-              reported.unitCost === undefined || reported.unitCost === null
-                ? num(line.unitCost)
-                : Number(reported.unitCost),
+            unitCost: unitCostOf(reported.unitCost) ?? num(line.unitCost),
             user,
             context: {
               projectId: order.projectId,
@@ -584,7 +728,7 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
         rejectedQty,
         receivedQty: num(updatedLine.receivedQty),
         remainingQty: round(Math.max(0, ordered - num(updatedLine.receivedQty))),
-        locationId: trimOrNull(reported.locationId),
+        locationId: identifierOf(reported.locationId).id,
         status: nextStatus,
       });
 
@@ -621,6 +765,8 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
       where: {
         warehouseId: warehouse.id,
         itemId: { in: [...new Set(outcomes.map((row) => row.itemId))] },
+        // The organisation's own positions only (CERT-2).
+        ...ownPositions(orgId),
       },
       select: { itemId: true, onHand: true },
     });

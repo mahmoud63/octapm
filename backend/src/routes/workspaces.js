@@ -80,7 +80,7 @@ const register = (router, { sendSession, getRequestContext }) => {
    */
   router.get(
     "/workspaces/resolve",
-    [query("projectId").isUUID(), validate],
+    [query("projectId").isString().isUUID(), validate],
     subjectOfToken,
     asyncHandler(async (req, res) => {
       const result = await workspaceLinkService.resolveProjectWorkspace({

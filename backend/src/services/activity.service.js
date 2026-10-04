@@ -11,6 +11,7 @@ const {
 } = require('./activity-dependency.service');
 const { toMoneyNumber } = require('../utils/money');
 const progressService = require('./progress.service');
+const { assertMembers } = require('./tenant-references.service');
 const { summarizeRiskActivityLinks } = require('./risk.service');
 
 const VALID_CATEGORIES = [
@@ -344,6 +345,35 @@ const collectDateWarnings = ({ project, startDate, endDate }) => {
   return warnings;
 };
 
+/**
+ * The engineers an activity is assigned to are people of this organisation by
+ * membership, with the standing they hold here (certification CERT-2, as the
+ * project team and mentions are): an active account with an active membership
+ * in this organisation. They were looked up by User.orgId, the person's home
+ * workspace, so a member of this company whose home is another company was
+ * refused here. Another company's person, a person who exists nowhere, a
+ * member this company has deactivated (or invited, not yet joined) and a value
+ * that is not an identifier all get the same 400 INVALID_ENGINEERS; a person
+ * named twice is refused as before.
+ */
+const assertEngineers = async ({ orgId, engineerIds }) => {
+  const invalid = () => new HttpError(400, 'INVALID_ENGINEERS', 'One or more engineer IDs are invalid');
+  let members;
+  try {
+    members = await assertMembers({ orgId, userIds: engineerIds, code: 'INVALID_ENGINEERS', message: 'One or more engineer IDs are invalid' });
+  } catch (error) {
+    if (error instanceof HttpError) throw invalid();
+    throw error;
+  }
+  // One assignment per person: a person named twice is refused, as before.
+  if (members.length !== engineerIds.length) throw invalid();
+  // …in good standing here: an active membership and an active account.
+  const notActive = await prisma.organizationMembership.count({
+    where: { orgId, userId: { in: members }, OR: [{ status: { not: 'active' } }, { user: { status: { not: 'active' } } }] },
+  });
+  if (notActive) throw invalid();
+};
+
 const listActivities = async ({ orgId, projectId }) => {
   const project = await ensureProject(orgId, projectId);
 
@@ -381,21 +411,7 @@ const createActivity = async ({ orgId, projectId, payload }) => {
     );
   }
 
-  const engineers = await prisma.user.findMany({
-    where: {
-      id: { in: engineerIds },
-      orgId,
-      status: 'active',
-    },
-  });
-
-  if (engineers.length !== engineerIds.length) {
-    throw new HttpError(
-      400,
-      'INVALID_ENGINEERS',
-      'One or more engineer IDs are invalid',
-    );
-  }
+  await assertEngineers({ orgId, engineerIds });
 
   if (payload.category && !VALID_CATEGORIES.includes(payload.category)) {
     throw new HttpError(
@@ -540,21 +556,7 @@ const updateActivity = async ({ orgId, projectId, activityId, payload }) => {
       );
     }
 
-    const engineers = await prisma.user.findMany({
-      where: {
-        id: { in: engineerIds },
-        orgId,
-        status: 'active',
-      },
-    });
-
-    if (engineers.length !== engineerIds.length) {
-      throw new HttpError(
-        400,
-        'INVALID_ENGINEERS',
-        'One or more engineer IDs are invalid',
-      );
-    }
+    await assertEngineers({ orgId, engineerIds });
   }
 
   const shouldRecalculateCpm = [

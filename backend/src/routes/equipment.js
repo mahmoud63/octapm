@@ -15,10 +15,10 @@ router.get(
   '/usage',
   requirePermission('cost', 'read'),
   [
-    query('activityId').optional().isUUID(),
-    query('equipmentId').optional().isUUID(),
-    query('from').optional().isISO8601(),
-    query('to').optional().isISO8601(),
+    query('activityId').isString().optional().isUUID(),
+    query('equipmentId').isString().optional().isUUID(),
+    query('from').isString().optional().isISO8601(),
+    query('to').isString().optional().isISO8601(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -49,7 +49,7 @@ router.post(
   '/',
   requireRoles('pm', 'planning_eng'),
   [
-    body('companyEquipmentId').optional({ nullable: true }).isUUID(),
+    body('companyEquipmentId').optional({ nullable: true }).isString().isUUID(),
     body('name')
       .if(body('companyEquipmentId').not().exists({ checkFalsy: true }))
       .isString()

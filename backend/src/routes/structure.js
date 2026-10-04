@@ -28,11 +28,11 @@ const wbsPayloadValidators = ({ requireCore = false } = {}) => [
   requireCore
     ? body("name").isString().trim().isLength({ min: 1, max: 160 })
     : body("name").optional().isString().trim().isLength({ min: 1, max: 160 }),
-  body("parentId").optional({ nullable: true }).isUUID(),
+  body("parentId").optional({ nullable: true }).isString().isUUID(),
   body("sortOrder").optional({ nullable: true }).isInt({ min: 0 }).toInt(),
   body("isPackage").optional().isBoolean().toBoolean(),
-  body("ownerPartyId").optional({ nullable: true }).isUUID(),
-  body("commitmentId").optional({ nullable: true }).isUUID(),
+  body("ownerPartyId").optional({ nullable: true }).isString().isUUID(),
+  body("commitmentId").optional({ nullable: true }).isString().isUUID(),
   body("externalId").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
   validate,
 ];
@@ -58,7 +58,7 @@ const wbsOutlineReader = (req, res, next) =>
 router.get(
   "/wbs",
   wbsOutlineReader,
-  [query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  [query("includeArchived").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => {
     const result = await wbsService.listWbsNodes({
       orgId: req.user.orgId,
@@ -141,7 +141,7 @@ router.post(
 router.get(
   "/units",
   requirePermission("boq", "read"),
-  [query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  [query("includeArchived").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => {
     const result = await uomService.listUnits({
       orgId: req.user.orgId,

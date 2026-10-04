@@ -71,12 +71,21 @@ const round = (value, dp = 4) => {
   return Math.round((Number(value) || 0) * factor) / factor;
 };
 
+// What a stock figure and a movement's date can be (CERT-2): the bounds, and
+// why they are what they are, live in utils/stock-figures.js.
+const {
+  assertQuantityBound,
+  assertUnitCostBound,
+  assertValueBound,
+  movementDate,
+} = require("../utils/stock-figures");
+
 const positive = (value, field) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new HttpError(400, "INV_QUANTITY", `${field} must be greater than zero`);
   }
-  return parsed;
+  return assertQuantityBound(parsed, field);
 };
 
 const trimOrNull = (value) => {
@@ -99,6 +108,123 @@ const oneOf = (value, allowed, field, fallback) => {
     throw new HttpError(400, "INV_ENUM", `${field} must be one of ${allowed.join(", ")}`);
   }
   return picked;
+};
+
+// ─── stored references, read back (CERT-2) ─────────────────────────────────
+//
+// A row this organisation owns can still name another company's record: a
+// receipt put away in another company's bin before the write guards existed
+// left a stock balance and movements of this organisation naming that bin,
+// and the item's scan then served the bin's id, name and code back. The
+// database's keys do not stop it (no relation here carries the organisation).
+// So every read below serves a related record only when it is this
+// organisation's own:
+//   - a stock position (a balance) is shown, counted and drawn on only when
+//     it is the organisation's own row, in its own warehouse, in one of its
+//     own bins or in none;
+//   - a movement or a transfer is the organisation's own history and is
+//     shown, with any reference that is not its own blanked, id and all.
+
+/** The relations a stock position's owner is read through. */
+const POSITION_OWNERS = {
+  warehouse: { select: { orgId: true } },
+  location: { select: { orgId: true } },
+};
+
+/** A preferred supplier is shown by name only when it is this organisation's. */
+const SUPPLIER_NAME = { select: { name: true, project: { select: { orgId: true } } } };
+
+const isOwnPosition = (orgId, balance, { item = false } = {}) =>
+  Boolean(balance) &&
+  balance.orgId === orgId &&
+  balance.warehouse?.orgId === orgId &&
+  (balance.locationId == null || balance.location?.orgId === orgId) &&
+  (!item || balance.item?.orgId === orgId);
+
+/** An item read with only the organisation's own stock positions and its own supplier. */
+const scopeItem = (orgId, row) => {
+  if (!row) return row;
+  const scoped = { ...row };
+  if (Array.isArray(row.balances)) scoped.balances = row.balances.filter((balance) => isOwnPosition(orgId, balance));
+  if (row.preferredSupplierId && row.preferredSupplier?.project?.orgId !== orgId) {
+    scoped.preferredSupplierId = null;
+    scoped.preferredSupplier = null;
+  }
+  return scoped;
+};
+
+/** A row with every named relation that is not this organisation's blanked, and the id that names it. */
+const ownReferences = (orgId, row, relations) => {
+  const scoped = { ...row };
+  for (const relation of relations) {
+    if (row[`${relation}Id`] != null && row[relation]?.orgId !== orgId) {
+      scoped[relation] = null;
+      scoped[`${relation}Id`] = null;
+    }
+  }
+  return scoped;
+};
+
+/** The positions a draw or a reservation may touch: the organisation's own, in none of another company's bins. */
+const drawablePositions = (orgId) => ({ orgId, OR: [{ locationId: null }, { location: { orgId } }] });
+
+/**
+ * Every stock position that is the organisation's own, in any warehouse: its
+ * own row, in its own warehouse, in one of its own bins or none — the read
+ * scope above, as a query. The item's average blends against these only: a
+ * balance this organisation holds in another company's bin (residue from
+ * before the bin guard) used to be counted into it (CERT-2).
+ */
+const ownPositions = (orgId) => ({ orgId, warehouse: { orgId }, OR: [{ locationId: null }, { location: { orgId } }] });
+
+// ─── identifiers a caller names (CERT-2 shapes) ────────────────────────────
+//
+// Only a string is an identifier. An array, a number or an object used to go
+// straight into a lookup: ["<id>"] failed there with a 500 — the
+// organisation's own id as much as another company's or one that exists
+// nowhere — and a Prisma filter such as {"not":"x"} matched any record. A
+// value of any other shape stands for a record that exists nowhere: it is
+// refused at the same point and with the same answer as an identifier nobody
+// holds, and it is never looked up and never stored.
+
+/** What an identifier of any other shape becomes. */
+const NOT_AN_ID = Symbol("not an identifier");
+
+/** A named identifier as one trimmed string, null when none is named, or NOT_AN_ID. */
+const identifierOf = (value) => {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") return NOT_AN_ID;
+  return value.trim() || null;
+};
+
+/** The record an identifier names, or null: NOT_AN_ID (and nothing) is found nowhere. */
+const lookUp = async (id, find) => (typeof id === "string" ? find(id) : null);
+
+/** Whether a named reference must be refused: of another shape, or not found by `find` (skipped when `find` is not available). */
+const refused = async (id, find, available = true) => {
+  if (id === NOT_AN_ID) return true;
+  if (!id || !available) return false;
+  return !(await find(id));
+};
+
+/**
+ * The references a caller may name on a movement it posts directly, and the
+ * provenance it may not.
+ *
+ * A transfer's or a count's provenance is the product's to write, never the
+ * caller's: the direct doors passed the whole request body on as the
+ * movement's context, so a receipt naming another company's transfer was
+ * stored with it, and one naming a transfer that exists nowhere failed on the
+ * foreign key with a 500 (CERT-2). Every reference the caller may name is one
+ * string, nothing, or NOT_AN_ID, and is checked by `postMovement`.
+ */
+const CALLER_REFERENCES = ["projectId", "activityId", "costCodeId", "boqItemId", "commitmentId", "locationRefId", "poLineId", "receiptLineId"];
+const PRODUCT_PROVENANCE = ["transferId", "countId", "reversesId"];
+const callerContext = (payload = {}) => {
+  const context = { ...payload };
+  for (const field of PRODUCT_PROVENANCE) delete context[field];
+  for (const field of CALLER_REFERENCES) context[field] = identifierOf(payload[field]);
+  return context;
 };
 
 // ─── item master ───────────────────────────────────────────────────────────
@@ -179,12 +305,12 @@ const listItems = async ({ orgId, projectId = null, projectIds = null, search = 
 
   const rows = await prisma.inventoryItem.findMany({
     where,
-    include: { balances: projectIds?.length ? balancesFor(projectIds) : true, preferredSupplier: { select: { name: true } } },
+    include: { balances: { ...(projectIds?.length ? balancesFor(projectIds) : {}), include: POSITION_OWNERS }, preferredSupplier: SUPPLIER_NAME },
     orderBy: [{ name: "asc" }],
     take: 500,
   });
 
-  const items = rows.map(withStock);
+  const items = rows.map((row) => withStock(scopeItem(orgId, row)));
   return { items: lowStock ? items.filter((item) => item.belowReorder) : items };
 };
 
@@ -206,21 +332,24 @@ const findByCode = async ({ orgId, code, allowedProjectIds = null }) => {
       balances: {
         ...balancesFor(allowedProjectIds),
         include: {
-          warehouse: { select: { id: true, code: true, name: true, kind: true } },
-          location: { select: { id: true, code: true, name: true, kind: true, path: true } },
+          warehouse: { select: { id: true, code: true, name: true, kind: true, orgId: true } },
+          location: { select: { id: true, code: true, name: true, kind: true, path: true, orgId: true } },
         },
       },
-      preferredSupplier: { select: { name: true } },
+      preferredSupplier: SUPPLIER_NAME,
     },
   });
   if (!row) {
     throw new HttpError(404, "ITEM_NOT_FOUND", `Nothing in inventory matches "${value}"`);
   }
+  // Only the organisation's own positions: a balance put away in another
+  // company's bin served that bin's id, name and code to the scan (CERT-2).
+  const own = scopeItem(orgId, row);
 
   return {
-    item: withStock(row),
+    item: withStock(own),
     // Where it physically is, so a scan answers "where is it" in one step.
-    stock: row.balances.map((balance) => ({
+    stock: own.balances.map((balance) => ({
       warehouseId: balance.warehouseId,
       warehouse: balance.warehouse?.name ?? null,
       warehouseCode: balance.warehouse?.code ?? null,
@@ -246,15 +375,15 @@ const getItem = async ({ orgId, itemId, allowedProjectIds = null }) => {
         // A key sees stock only in warehouses of its projects or the company's (CX21-462).
         ...balancesFor(allowedProjectIds),
         include: {
-          warehouse: { select: { id: true, code: true, name: true } },
-          location: { select: { id: true, code: true, name: true } },
+          warehouse: { select: { id: true, code: true, name: true, orgId: true } },
+          location: { select: { id: true, code: true, name: true, orgId: true } },
         },
       },
-      preferredSupplier: { select: { name: true } },
+      preferredSupplier: SUPPLIER_NAME,
     },
   });
   if (!row) throw new HttpError(404, "ITEM_NOT_FOUND", "Item not found");
-  return withStock(row);
+  return withStock(scopeItem(orgId, row));
 };
 
 const itemFields = (payload, existing = null) => {
@@ -278,6 +407,8 @@ const itemFields = (payload, existing = null) => {
       if (value !== null && (!Number.isFinite(value) || value < 0)) {
         throw new HttpError(400, "INV_NUMBER", `${field} must be zero or more`);
       }
+      // The item's price column is a Decimal(18,4) (CERT-2).
+      if (field === "unitCost" && value !== null) assertUnitCostBound(value);
       data[field] = value;
     }
   }
@@ -335,9 +466,9 @@ const createItem = async ({ orgId, user, payload }) => {
 
   const row = await prisma.inventoryItem.create({
     data: { orgId, ...data, createdBy: user.id, updatedBy: user.id },
-    include: { balances: true, preferredSupplier: { select: { name: true } } },
+    include: { balances: { include: POSITION_OWNERS }, preferredSupplier: SUPPLIER_NAME },
   });
-  return withStock(row);
+  return withStock(scopeItem(orgId, row));
 };
 
 const updateItem = async ({ orgId, user, itemId, payload }) => {
@@ -357,9 +488,9 @@ const updateItem = async ({ orgId, user, itemId, payload }) => {
   const row = await prisma.inventoryItem.update({
     where: { id: itemId },
     data: { ...data, updatedBy: user.id },
-    include: { balances: true, preferredSupplier: { select: { name: true } } },
+    include: { balances: { include: POSITION_OWNERS }, preferredSupplier: SUPPLIER_NAME },
   });
-  return withStock(row);
+  return withStock(scopeItem(orgId, row));
 };
 
 // ─── warehouses and their locations ────────────────────────────────────────
@@ -388,7 +519,7 @@ const listWarehouses = async ({ orgId, projectId = null, projectIds = null, stat
     },
     include: {
       manager: { select: { name: true } },
-      _count: { select: { locations: true } },
+      _count: { select: { locations: { where: { orgId } } } },
     },
     orderBy: [{ name: "asc" }],
   });
@@ -557,6 +688,11 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
   if (!Number.isFinite(signed) || signed === 0) {
     throw new HttpError(400, "INV_QUANTITY", "Quantity must not be zero");
   }
+  // No larger than the ledger holds, and its dates real dates — checked here,
+  // where every movement passes, before anything moves (CERT-2).
+  assertQuantityBound(signed);
+  const occurredAt = movementDate(context.occurredAt, "occurredAt");
+  const expiryDate = movementDate(context.expiryDate, "expiryDate");
 
   // The price a movement is costed at is read from the item row under the
   // item's lock, not from the object the caller loaded before the transaction
@@ -568,8 +704,20 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
   // a KEY SHARE on the item, which NO KEY UPDATE does not conflict with, so
   // two first receipts into different stores cannot deadlock (Phase 21D).
   const costed = Boolean(rule.costs && unitCost != null);
+  // A price that is not a number of zero or more is refused before anything
+  // moves: "abc" became NaN, which rounded to 0 and reset the item's average,
+  // its last price and its unit cost to nothing (CERT-2). A price is a number
+  // or a numeric string; "" and [5] are not.
+  const receiptCost = !costed ? null : typeof unitCost === "number" || (typeof unitCost === "string" && unitCost.trim() !== "") ? Number(unitCost) : Number.NaN;
+  if (costed && (!Number.isFinite(receiptCost) || receiptCost < 0)) {
+    throw new HttpError(400, "INV_NUMBER", "Unit cost must be zero or more");
+  }
+  if (costed) assertUnitCostBound(receiptCost);
   const [freshItem] = await tx.$queryRaw`SELECT "averageCost" FROM "InventoryItem" WHERE id = ${item.id} FOR NO KEY UPDATE`;
   const itemAverage = freshItem && freshItem.averageCost != null ? Number(freshItem.averageCost) : Number(item.averageCost ?? 0);
+  // What the movement is worth, at the price it is costed at, fits the
+  // ledger's value column — 1,000 at the largest price did not (CERT-2).
+  assertValueBound(signed, costed ? receiptCost : itemAverage);
 
   const balance =
     (await tx.stockBalance.findFirst({ where: { itemId: item.id, warehouseId, locationId } })) ??
@@ -620,7 +768,6 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
   // the average it finds.
   let costForMovement = itemAverage;
   if (costed) {
-    const receiptCost = Number(unitCost);
     // The average belongs to the item, so it blends against everything the
     // item has on hand — every warehouse and bin — not only the balance this
     // delivery lands in. A first delivery into an empty second store used to
@@ -636,7 +783,9 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
     // average when it is released, so it is the item's stock while it waits
     // (Phase 21D, CX21-501). Damaged stock is written off and does not come
     // back, so it is not counted.
-    const balances = await tx.stockBalance.findMany({ where: { itemId: item.id }, select: { onHand: true, inTransit: true, quarantined: true } });
+    // The item's own positions only: a balance of this organisation in
+    // another company's bin was counted into the blend (CERT-2).
+    const balances = await tx.stockBalance.findMany({ where: { itemId: item.id, ...ownPositions(orgId) }, select: { onHand: true, inTransit: true, quarantined: true } });
     const itemOnHand = balances.reduce((sum, row) => sum + Number(row.onHand ?? 0) + Number(row.inTransit ?? 0) + Number(row.quarantined ?? 0), 0);
     const totalQty = itemOnHand + signed;
     const blended =
@@ -681,7 +830,7 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
       "INV_PROJECT_MISMATCH",
       "The activity this is issued to belongs to a different project from the one named. Cost would land on the wrong project.",
     );
-    error.details = { namedProjectId: context.projectId, activityProjectId: activityProject, activityId: context.activityId };
+    error.details = { namedProjectId: context.projectId === NOT_AN_ID ? null : context.projectId, activityProjectId: activityProject, activityId: context.activityId };
     throw error;
   }
   const projectId = activityProject ?? context.projectId ?? null;
@@ -689,9 +838,9 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
   // the way an activity is (CX21-410): a project id from another tenant used
   // to be trusted, and this tenant's stock then charged that tenant's budget
   // line (Phase 21D, CX21-420).
-  if (projectId && !activityProject && tx.project?.findFirst) {
-    const owner = await tx.project.findFirst({ where: { id: projectId, orgId }, select: { id: true } });
-    if (!owner) throw new HttpError(404, "PROJECT_NOT_FOUND", "That project is not this organisation's");
+  // A project named in any shape but one string is found nowhere (CERT-2).
+  if (projectId && !activityProject && (await refused(projectId, (id) => tx.project.findFirst({ where: { id, orgId }, select: { id: true } }), Boolean(tx.project?.findFirst)))) {
+    throw new HttpError(404, "PROJECT_NOT_FOUND", "That project is not this organisation's");
   }
   // A key limited to some projects may not move stock on another, whether
   // the project is named or derived from the activity (CX21-421).
@@ -702,21 +851,31 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
   // project are: a cost code of another organisation, a BOQ item or a
   // commitment of another project were stored as given, and the cost code
   // reached the ledger (Phase 21D, CX21-535).
-  if (context.costCodeId && tx.costCode?.findFirst) {
-    const code = await tx.costCode.findFirst({ where: { id: context.costCodeId, orgId }, select: { id: true } });
-    if (!code) throw new HttpError(404, "COST_CODE_NOT_FOUND", "That cost code is not this organisation's");
+  if (await refused(context.costCodeId, (id) => tx.costCode.findFirst({ where: { id, orgId }, select: { id: true } }), Boolean(tx.costCode?.findFirst))) {
+    throw new HttpError(404, "COST_CODE_NOT_FOUND", "That cost code is not this organisation's");
   }
   // On a movement with a project the BOQ row or commitment is that
   // project's; on one without — a receipt into a company store carrying the
   // buyer's coding — it is this organisation's (the stricter rule refused the
   // receipt itself, CX21-545).
-  if (context.boqItemId && tx.boqItem?.findFirst) {
-    const boqRow = await tx.boqItem.findFirst({ where: { id: context.boqItemId, ...(projectId ? { projectId } : { project: { orgId } }) }, select: { id: true } });
-    if (!boqRow) throw new HttpError(404, "BOQ_ITEM_NOT_FOUND", projectId ? "That BOQ item is not on this project" : "That BOQ item is not this organisation's");
+  if (await refused(context.boqItemId, (id) => tx.boqItem.findFirst({ where: { id, ...(projectId ? { projectId } : { project: { orgId } }) }, select: { id: true } }), Boolean(tx.boqItem?.findFirst))) {
+    throw new HttpError(404, "BOQ_ITEM_NOT_FOUND", projectId ? "That BOQ item is not on this project" : "That BOQ item is not this organisation's");
   }
-  if (context.commitmentId && tx.commitment?.findFirst) {
-    const commitment = await tx.commitment.findFirst({ where: { id: context.commitmentId, ...(projectId ? { projectId } : { orgId }) }, select: { id: true } });
-    if (!commitment) throw new HttpError(404, "COMMITMENT_NOT_FOUND", projectId ? "That commitment is not on this project" : "That commitment is not this organisation's");
+  if (await refused(context.commitmentId, (id) => tx.commitment.findFirst({ where: { id, ...(projectId ? { projectId } : { orgId }) }, select: { id: true } }), Boolean(tx.commitment?.findFirst))) {
+    throw new HttpError(404, "COMMITMENT_NOT_FOUND", projectId ? "That commitment is not on this project" : "That commitment is not this organisation's");
+  }
+  // The work location, the purchase-order line and the delivery line a
+  // movement names were stored as given: another company's were kept on this
+  // organisation's ledger (CERT-2). Each is the movement's project's, or —
+  // on a movement without one — this organisation's.
+  if (await refused(context.locationRefId, (id) => tx.location.findFirst({ where: { id, ...(projectId ? { projectId } : { orgId }) }, select: { id: true } }), Boolean(tx.location?.findFirst))) {
+    throw new HttpError(404, "LOCATION_NOT_FOUND", projectId ? "That location is not on this project" : "That location is not this organisation's");
+  }
+  if (await refused(context.poLineId, (id) => tx.procurementPoLine.findFirst({ where: { id, ...(projectId ? { projectId } : { project: { orgId } }) }, select: { id: true } }), Boolean(tx.procurementPoLine?.findFirst))) {
+    throw new HttpError(404, "PO_LINE_NOT_FOUND", projectId ? "That purchase order line is not on this project" : "That purchase order line is not this organisation's");
+  }
+  if (await refused(context.receiptLineId, (id) => tx.deliveryReceiptLine.findFirst({ where: { id, ...(projectId ? { projectId } : { project: { orgId } }) }, select: { id: true } }), Boolean(tx.deliveryReceiptLine?.findFirst))) {
+    throw new HttpError(404, "RECEIPT_LINE_NOT_FOUND", projectId ? "That delivery line is not on this project" : "That delivery line is not this organisation's");
   }
 
   const movement = await tx.stockTransaction.create({
@@ -742,11 +901,11 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
       countId: context.countId ?? null,
       batchNo: trimOrNull(context.batchNo),
       serialNo: trimOrNull(context.serialNo),
-      expiryDate: context.expiryDate ? new Date(context.expiryDate) : null,
+      expiryDate,
       reference: trimOrNull(context.reference),
       notes: trimOrNull(context.notes),
       performedBy: user.id,
-      occurredAt: context.occurredAt ? new Date(context.occurredAt) : new Date(),
+      occurredAt: occurredAt ?? new Date(),
     },
   });
 
@@ -780,6 +939,8 @@ const CONSUMPTION_SIGN = Object.freeze({ issue: 1, return: -1 });
  * project posts no cost at all.
  */
 const projectOfActivity = async ({ tx, orgId, activityId }) => {
+  // An activity named in any shape but one string is found nowhere (CERT-2).
+  if (activityId === NOT_AN_ID) throw new HttpError(404, "ACTIVITY_NOT_FOUND", "That activity is not on a project of this organisation");
   if (!activityId || !tx.activity?.findFirst) return null;
   // Scoped to the organisation. An activity id from another tenant used to
   // resolve to that tenant's project, and this tenant's stock then posted
@@ -855,8 +1016,10 @@ const drawFromWarehouse = async (
   // did not exist when this read ran cannot appear meanwhile, because bins
   // are only created under the same item lock (Phase 21D, CX21-202).
   await lockItems(tx, [item.id]);
+  // Only the organisation's own positions: a balance in another company's bin
+  // would be drawn from and its bin named on the movement and in the answer.
   const balances = await tx.stockBalance.findMany({
-    where: { itemId: item.id, warehouseId },
+    where: { itemId: item.id, warehouseId, ...drawablePositions(orgId) },
     orderBy: [{ onHand: "desc" }],
   });
   // Available, not on hand: reserved stock belongs to somebody else.
@@ -901,11 +1064,17 @@ const drawFromWarehouse = async (
   return posted;
 };
 
+/**
+ * The item, the warehouse and the bin a movement names, each one string or
+ * found nowhere (CERT-2 shapes): ["<id>"] reached the lookup and failed with a
+ * 500, whoever's id it wrapped, and an item or warehouse left out matched any.
+ * The caller moves stock with the ids settled here, never the raw request's.
+ */
 const loadItemAndWarehouse = async (tx, { orgId, itemId, warehouseId, locationId, allowedProjectIds = null }) => {
-  const item = await tx.inventoryItem.findFirst({ where: { id: itemId, orgId } });
+  const item = await lookUp(identifierOf(itemId), (id) => tx.inventoryItem.findFirst({ where: { id, orgId } }));
   if (!item) throw new HttpError(404, "ITEM_NOT_FOUND", "Item not found");
 
-  const warehouse = await tx.warehouse.findFirst({ where: { id: warehouseId, orgId } });
+  const warehouse = await lookUp(identifierOf(warehouseId), (id) => tx.warehouse.findFirst({ where: { id, orgId } }));
   if (!warehouse) throw new HttpError(404, "WAREHOUSE_NOT_FOUND", "Warehouse not found");
 
   // A project's own item or warehouse is that project's stock: a key limited
@@ -917,15 +1086,16 @@ const loadItemAndWarehouse = async (tx, { orgId, itemId, warehouseId, locationId
     }
   }
 
-  if (locationId) {
-    const location = await tx.warehouseLocation.findFirst({
-      where: { id: locationId, warehouseId, orgId },
-    });
+  const bin = identifierOf(locationId);
+  if (bin !== null) {
+    const location = await lookUp(bin, (id) => tx.warehouseLocation.findFirst({
+      where: { id, warehouseId: warehouse.id, orgId },
+    }));
     if (!location) {
       throw new HttpError(404, "LOCATION_NOT_FOUND", "That location is not in this warehouse");
     }
   }
-  return { item, warehouse };
+  return { item, warehouse, locationId: bin };
 };
 
 const serializeTransaction = (row) => ({
@@ -960,6 +1130,13 @@ const receiveStock = async ({ orgId, user, payload }) => {
   if (unitCost != null && (!Number.isFinite(unitCost) || unitCost < 0)) {
     throw new HttpError(400, "INV_NUMBER", "Unit cost must be zero or more");
   }
+  // The figures and dates the ledger can hold, before anything is read (CERT-2).
+  if (unitCost != null) {
+    assertUnitCostBound(unitCost);
+    assertValueBound(quantity, unitCost);
+  }
+  movementDate(payload.occurredAt, "occurredAt");
+  movementDate(payload.expiryDate, "expiryDate");
   // Damaged on delivery is a part of what was delivered — more damaged than
   // received would write off stock already on the shelf; checked before
   // anything moves (Phase 21D, CX21-556).
@@ -967,8 +1144,11 @@ const receiveStock = async ({ orgId, user, payload }) => {
     throw new HttpError(400, "INV_DAMAGE_EXCEEDS_RECEIPT", "More was reported damaged than was received");
   }
 
+  // The caller's own words, never a transfer's or a count's provenance (CERT-2).
+  const context = callerContext(payload);
+
   return prisma.$transaction(async (tx) => {
-    const { item } = await loadItemAndWarehouse(tx, {
+    const { item, warehouse, locationId } = await loadItemAndWarehouse(tx, {
       orgId,
       itemId: payload.itemId,
       warehouseId: payload.warehouseId,
@@ -979,13 +1159,13 @@ const receiveStock = async ({ orgId, user, payload }) => {
     const row = await postMovement(tx, {
       orgId,
       item,
-      warehouseId: payload.warehouseId,
-      locationId: payload.locationId ?? null,
+      warehouseId: warehouse.id,
+      locationId,
       type: "receipt",
       quantity,
       unitCost,
       user,
-      context: payload,
+      context,
     });
 
     // Damaged goods are received and then written off in the same breath, so
@@ -995,12 +1175,12 @@ const receiveStock = async ({ orgId, user, payload }) => {
       await postMovement(tx, {
         orgId,
         item,
-        warehouseId: payload.warehouseId,
-        locationId: payload.locationId ?? null,
+        warehouseId: warehouse.id,
+        locationId,
         type: "damage",
         quantity: damaged,
         user,
-        context: { ...payload, notes: payload.damageNotes ?? "Damaged on delivery" },
+        context: { ...context, notes: payload.damageNotes ?? "Damaged on delivery" },
       });
     }
 
@@ -1017,7 +1197,11 @@ const receiveStock = async ({ orgId, user, payload }) => {
  */
 const issueStock = async ({ orgId, user, payload }) => {
   const quantity = positive(payload.quantity, "Quantity");
-  if (!payload.activityId && !payload.costCodeId) {
+  movementDate(payload.occurredAt, "occurredAt");
+  movementDate(payload.expiryDate, "expiryDate");
+  // The caller's own words, never a transfer's or a count's provenance (CERT-2).
+  const said = callerContext(payload);
+  if (!said.activityId && !said.costCodeId) {
     throw new HttpError(
       400,
       "INV_NO_COST_TARGET",
@@ -1032,7 +1216,7 @@ const issueStock = async ({ orgId, user, payload }) => {
   // cost silently absent (OCTA-INV-PROJECT-068).
 
   return prisma.$transaction(async (tx) => {
-    const { item } = await loadItemAndWarehouse(tx, {
+    const { item, warehouse, locationId } = await loadItemAndWarehouse(tx, {
       orgId,
       itemId: payload.itemId,
       warehouseId: payload.warehouseId,
@@ -1040,13 +1224,13 @@ const issueStock = async ({ orgId, user, payload }) => {
       allowedProjectIds: payload.allowedProjectIds ?? null,
     });
     // The project the issue lands on decides which inherited coding fits it (CX21-545).
-    const projectId = (await projectOfActivity({ tx, orgId, activityId: payload.activityId ?? null })) ?? payload.projectId ?? null;
-    const context = { ...payload, ...(await inheritedCoding(tx, { orgId, item, payload, projectId })) };
+    const projectId = (await projectOfActivity({ tx, orgId, activityId: said.activityId })) ?? said.projectId ?? null;
+    const context = { ...said, ...(await inheritedCoding(tx, { orgId, item, payload: said, projectId })) };
     const posted = await drawFromWarehouse(tx, {
       orgId,
       item,
-      warehouseId: payload.warehouseId,
-      locationId: payload.locationId ?? null,
+      warehouseId: warehouse.id,
+      locationId,
       quantity,
       type: "issue",
       user,
@@ -1102,7 +1286,8 @@ const inheritedCoding = async (tx, { orgId, item, payload, projectId = null }) =
     const fits = !tx.costCode?.findFirst || Boolean(await tx.costCode.findFirst({ where: { id: lastReceipt.costCodeId, orgId }, select: { id: true } }));
     if (fits) inherited.costCodeId = lastReceipt.costCodeId;
   }
-  if (!payload.boqItemId && lastReceipt.boqItemId && projectId) {
+  // A project of any other shape is refused when the movement posts; nothing is inherited for it.
+  if (!payload.boqItemId && lastReceipt.boqItemId && typeof projectId === "string") {
     const fits = !tx.boqItem?.findFirst || Boolean(await tx.boqItem.findFirst({ where: { id: lastReceipt.boqItemId, projectId }, select: { id: true } }));
     if (fits) inherited.boqItemId = lastReceipt.boqItemId;
   }
@@ -1126,15 +1311,18 @@ const adjustReservation = async ({ orgId, user, payload }) => {
   if (!Number.isFinite(quantity) || quantity === 0) {
     throw new HttpError(400, "INV_QUANTITY", "Quantity must not be zero");
   }
+  assertQuantityBound(quantity);
 
   return prisma.$transaction(async (tx) => {
-    const { item } = await loadItemAndWarehouse(tx, {
+    // The warehouse and bin as settled there: one string each (CERT-2).
+    const { item, warehouse, locationId } = await loadItemAndWarehouse(tx, {
       orgId,
       itemId: payload.itemId,
       warehouseId: payload.warehouseId,
       locationId: payload.locationId ?? null,
       allowedProjectIds: payload.allowedProjectIds ?? null,
     });
+    const warehouseId = warehouse.id;
 
     // Stock is held per bin, but nobody reserves "30 bags from bin B-A03" —
     // they reserve 30 bags from the store. Without a named location this
@@ -1147,12 +1335,13 @@ const adjustReservation = async ({ orgId, user, payload }) => {
     // (Phase 21D, CX21-105 / CX21-202). Holding the item — one row — rather
     // than the bins also cannot wait on a receipt in the opposite order.
     await lockItems(tx, [item.id]);
-    const balances = payload.locationId
+    // The organisation's own positions only, as an issue draws on them (CERT-2).
+    const balances = locationId
       ? await tx.stockBalance.findMany({
-          where: { itemId: item.id, warehouseId: payload.warehouseId, locationId: payload.locationId },
+          where: { itemId: item.id, warehouseId, locationId, ...drawablePositions(orgId) },
         })
       : await tx.stockBalance.findMany({
-          where: { itemId: item.id, warehouseId: payload.warehouseId },
+          where: { itemId: item.id, warehouseId, ...drawablePositions(orgId) },
           orderBy: [{ onHand: "desc" }],
         });
 
@@ -1160,7 +1349,7 @@ const adjustReservation = async ({ orgId, user, payload }) => {
       throw new HttpError(
         409,
         "INV_NO_STOCK_HERE",
-        `No ${item.name} is held ${payload.locationId ? "in that location" : "in this warehouse"}`
+        `No ${item.name} is held ${locationId ? "in that location" : "in this warehouse"}`
       );
     }
 
@@ -1204,17 +1393,17 @@ const adjustReservation = async ({ orgId, user, payload }) => {
     }
 
     const after = await tx.stockBalance.findMany({
-      where: payload.locationId
-        ? { itemId: item.id, warehouseId: payload.warehouseId, locationId: payload.locationId }
-        : { itemId: item.id, warehouseId: payload.warehouseId },
+      where: locationId
+        ? { itemId: item.id, warehouseId, locationId, ...drawablePositions(orgId) }
+        : { itemId: item.id, warehouseId, ...drawablePositions(orgId) },
     });
     const nextOnHand = round(after.reduce((sum, b) => sum + b.onHand, 0));
     const nextReserved = round(after.reduce((sum, b) => sum + (b.reserved ?? 0), 0));
 
     return {
       itemId: item.id,
-      warehouseId: payload.warehouseId,
-      locationId: payload.locationId ?? null,
+      warehouseId,
+      locationId,
       onHand: nextOnHand,
       reserved: nextReserved,
       available: round(nextOnHand - nextReserved),
@@ -1233,7 +1422,9 @@ const adjustStock = async ({ orgId, user, payload, type }) => {
     // An unexplained adjustment is the thing an auditor asks about first.
     throw new HttpError(400, "INV_ADJUST_REASON", "Say why the stock is being adjusted");
   }
-  if (type === "return" && !payload.activityId && !payload.projectId) {
+  // The caller's own words, never a transfer's or a count's provenance (CERT-2).
+  const said = callerContext(payload);
+  if (type === "return" && !said.activityId && !said.projectId) {
     // Stock coming back from site brings its cost back from where it was
     // charged, exactly as an issue charges it: a return naming neither an
     // activity nor a cost code left the cost on the activity that no longer
@@ -1247,9 +1438,13 @@ const adjustStock = async ({ orgId, user, payload, type }) => {
   if (!Number.isFinite(quantity) || quantity === 0) {
     throw new HttpError(400, "INV_QUANTITY", "Quantity must not be zero");
   }
+  // The figures and dates the ledger can hold, before anything is read (CERT-2).
+  assertQuantityBound(quantity);
+  movementDate(payload.occurredAt, "occurredAt");
+  movementDate(payload.expiryDate, "expiryDate");
 
   return prisma.$transaction(async (tx) => {
-    const { item } = await loadItemAndWarehouse(tx, {
+    const { item, warehouse, locationId } = await loadItemAndWarehouse(tx, {
       orgId,
       itemId: payload.itemId,
       warehouseId: payload.warehouseId,
@@ -1264,23 +1459,23 @@ const adjustStock = async ({ orgId, user, payload, type }) => {
       ? await drawFromWarehouse(tx, {
           orgId,
           item,
-          warehouseId: payload.warehouseId,
-          locationId: payload.locationId ?? null,
+          warehouseId: warehouse.id,
+          locationId,
           quantity,
           type,
           user,
-          context: payload,
+          context: said,
         })
       : [
           await postMovement(tx, {
             orgId,
             item,
-            warehouseId: payload.warehouseId,
-            locationId: payload.locationId ?? null,
+            warehouseId: warehouse.id,
+            locationId,
             type,
             quantity,
             user,
-            context: payload,
+            context: said,
           }),
         ];
     return { movements: posted.map(serializeTransaction) };
@@ -1298,14 +1493,17 @@ const listTransactions = async ({ orgId, itemId = null, warehouseId = null, proj
       ...(type ? { type } : {}),
     },
     include: {
-      item: { select: { sku: true, name: true, unit: true } },
-      warehouse: { select: { name: true } },
-      location: { select: { code: true } },
+      item: { select: { sku: true, name: true, unit: true, orgId: true } },
+      warehouse: { select: { name: true, orgId: true } },
+      location: { select: { code: true, orgId: true } },
     },
     orderBy: [{ occurredAt: "desc" }],
     take: Math.min(500, Math.max(1, Number(limit) || 100)),
   });
-  return { items: rows.map(serializeTransaction) };
+  // The organisation's own movements, with any item, warehouse or bin that is
+  // not its own blanked: a receipt put away in another company's bin served
+  // that bin's id and code in the ledger (CERT-2).
+  return { items: rows.map((row) => serializeTransaction(ownReferences(orgId, row, ["item", "warehouse", "location"]))) };
 };
 
 // ─── transfers between warehouses ──────────────────────────────────────────
@@ -1335,11 +1533,18 @@ const serializeTransfer = (row) => ({
   createdAt: row.createdAt?.toISOString() ?? null,
 });
 
-const transferInclude = {
-  fromWarehouse: { select: { name: true } },
-  toWarehouse: { select: { name: true } },
-  lines: { include: { item: { select: { sku: true, name: true, unit: true } } } },
-};
+/** A transfer as read back: its own lines, and every warehouse and item read with its owner (CERT-2). */
+const transferInclude = (orgId) => ({
+  fromWarehouse: { select: { name: true, orgId: true } },
+  toWarehouse: { select: { name: true, orgId: true } },
+  lines: { where: { orgId }, include: { item: { select: { sku: true, name: true, unit: true, orgId: true } } } },
+});
+
+/** A transfer with any warehouse or line item that is not this organisation's blanked (CERT-2). */
+const ownTransfer = (orgId, row) => ({
+  ...ownReferences(orgId, row, ["fromWarehouse", "toWarehouse"]),
+  lines: (row.lines ?? []).map((line) => ownReferences(orgId, line, ["item"])),
+});
 
 /** Prisma delegate -> table, for the shared counter. */
 const REF_TABLES = { stockTransfer: "StockTransfer" };
@@ -1379,20 +1584,26 @@ const assertStockAllowed = async (client, { orgId, allowedProjectIds, warehouses
 const createTransfer = async ({ orgId, user, payload }) => {
   const lines = Array.isArray(payload.lines) ? payload.lines : [];
   if (!lines.length) throw new HttpError(400, "TRANSFER_EMPTY", "Add at least one item to transfer");
-  if (payload.fromWarehouseId === payload.toWarehouseId) {
+  // Each warehouse and line item one string, or found nowhere: ["<id>"]
+  // reached the lookup and failed with a 500, and a line's ["<id>"] was read
+  // as the id itself (CERT-2 shapes).
+  const fromId = identifierOf(payload.fromWarehouseId);
+  const toId = identifierOf(payload.toWarehouseId);
+  if (fromId !== NOT_AN_ID && fromId === toId) {
     throw new HttpError(400, "TRANSFER_SAME_WAREHOUSE", "Choose two different warehouses");
   }
 
   const [from, to] = await Promise.all([
-    prisma.warehouse.findFirst({ where: { id: payload.fromWarehouseId, orgId } }),
-    prisma.warehouse.findFirst({ where: { id: payload.toWarehouseId, orgId } }),
+    lookUp(fromId, (id) => prisma.warehouse.findFirst({ where: { id, orgId } })),
+    lookUp(toId, (id) => prisma.warehouse.findFirst({ where: { id, orgId } })),
   ]);
   if (!from || !to) throw new HttpError(404, "WAREHOUSE_NOT_FOUND", "Warehouse not found");
   // Every item on the transfer must be this organisation's: an id of another
   // tenant's item used to be linked and its details echoed back (CX21-473).
-  const itemIds = [...new Set(lines.map((line) => requireText(line.itemId, "Item")))];
-  const known = await prisma.inventoryItem.findMany({ where: { id: { in: itemIds }, orgId }, select: { id: true } });
-  if (known.length !== itemIds.length) throw new HttpError(404, "ITEM_NOT_FOUND", "Item not found");
+  const lineItemIds = lines.map((line) => identifierOf(line?.itemId));
+  const itemIds = [...new Set(lineItemIds.filter((id) => id !== NOT_AN_ID).map((id) => requireText(id, "Item")))];
+  const known = itemIds.length ? await prisma.inventoryItem.findMany({ where: { id: { in: itemIds }, orgId }, select: { id: true } }) : [];
+  if (lineItemIds.includes(NOT_AN_ID) || known.length !== itemIds.length) throw new HttpError(404, "ITEM_NOT_FOUND", "Item not found");
   await assertStockAllowed(prisma, { orgId, allowedProjectIds: payload.allowedProjectIds ?? null, warehouses: [from, to], itemIds });
 
   const ref = trimOrNull(payload.ref) || (await nextRef("stockTransfer", orgId, "TRF"));
@@ -1407,9 +1618,9 @@ const createTransfer = async ({ orgId, user, payload }) => {
       createdBy: user.id,
       updatedBy: user.id,
       lines: {
-        create: lines.map((line) => ({
+        create: lines.map((line, index) => ({
           orgId,
-          itemId: requireText(line.itemId, "Item"),
+          itemId: lineItemIds[index],
           quantity: positive(line.quantity, "Quantity"),
           batchNo: trimOrNull(line.batchNo),
           serialNo: trimOrNull(line.serialNo),
@@ -1417,9 +1628,9 @@ const createTransfer = async ({ orgId, user, payload }) => {
         })),
       },
     },
-    include: transferInclude,
+    include: transferInclude(orgId),
   });
-  return serializeTransfer(row);
+  return serializeTransfer(ownTransfer(orgId, row));
 };
 
 /** Stock leaves the source and is in transit until someone receives it. */
@@ -1462,17 +1673,17 @@ const dispatchTransfer = async ({ orgId, user, transferId, allowedProjectIds = n
     const row = await tx.stockTransfer.update({
       where: { id: transfer.id },
       data: { status: "in_transit", dispatchedAt: new Date(), dispatchedBy: user.id, updatedBy: user.id },
-      include: transferInclude,
+      include: transferInclude(orgId),
     });
-    return serializeTransfer(row);
+    return serializeTransfer(ownTransfer(orgId, row));
   });
 };
 
 /** Stock lands. What arrived damaged is written off at the destination. */
 const receiveTransfer = async ({ orgId, user, transferId, payload = {}, allowedProjectIds = null }) => {
-  const received = new Map(
-    (Array.isArray(payload.lines) ? payload.lines : []).map((line) => [line.id, line])
-  );
+  // A reported line that is not an object reports nothing: [null] failed here with a 500 (CERT-2).
+  const reportedLines = (Array.isArray(payload.lines) ? payload.lines : []).filter((line) => line && typeof line === "object");
+  const received = new Map(reportedLines.map((line) => [line.id, line]));
 
   return prisma.$transaction(async (tx) => {
     // Locked before it is read: the second of two concurrent dispatches or
@@ -1490,6 +1701,15 @@ const receiveTransfer = async ({ orgId, user, transferId, payload = {}, allowedP
     }
     if (transfer.status !== "in_transit") {
       throw new HttpError(409, "TRANSFER_STATE", `A ${transfer.status} transfer cannot be received`);
+    }
+    // Every reported line is one of this transfer's own. A line naming
+    // anything else — another transfer's, another company's, one that exists
+    // nowhere, ["<own id>"] — was matched to nothing, so the line it meant was
+    // booked in full and the figures reported for it dropped (CERT-2). It is
+    // refused, before anything moves, as a line this transfer does not have.
+    const ownLines = new Set(transfer.lines.map((line) => line.id));
+    if (reportedLines.some((line) => typeof line.id !== "string" || !ownLines.has(line.id))) {
+      throw new HttpError(404, "TRANSFER_LINE_NOT_FOUND", "That line is not on this transfer");
     }
     await lockItems(tx, transfer.lines.map((line) => line.itemId));
 
@@ -1591,9 +1811,9 @@ const receiveTransfer = async ({ orgId, user, transferId, payload = {}, allowedP
     const row = await tx.stockTransfer.update({
       where: { id: transfer.id },
       data: { status: "received", receivedAt: new Date(), receivedBy: user.id, updatedBy: user.id },
-      include: transferInclude,
+      include: transferInclude(orgId),
     });
-    return serializeTransfer(row);
+    return serializeTransfer(ownTransfer(orgId, row));
   });
 };
 
@@ -1602,11 +1822,11 @@ const listTransfers = async ({ orgId, status = null, projectIds = null }) => {
   const scope = projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : null;
   const rows = await prisma.stockTransfer.findMany({
     where: { orgId, ...(status ? { status } : {}), ...(scope ? { fromWarehouse: scope, toWarehouse: scope, lines: { every: { item: scope } } } : {}) },
-    include: transferInclude,
+    include: transferInclude(orgId),
     orderBy: [{ createdAt: "desc" }],
     take: 200,
   });
-  return { items: rows.map(serializeTransfer) };
+  return { items: rows.map((row) => serializeTransfer(ownTransfer(orgId, row))) };
 };
 
 // ─── analytics ─────────────────────────────────────────────────────────────
@@ -1628,11 +1848,11 @@ const getSummary = async ({ orgId, projectId = null, projectIds = null }) => {
         status: "active",
         ...(itemScope || {}),
       },
-      include: { balances: projectIds?.length ? balancesFor(projectIds) : true },
+      include: { balances: { ...(projectIds?.length ? balancesFor(projectIds) : {}), include: POSITION_OWNERS } },
     }),
     prisma.warehouse.findMany({
       where: { orgId, status: "active", ...(projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : {}) },
-      include: { balances: { ...(itemScope ? { where: { item: itemScope } } : {}), include: { item: { select: { averageCost: true } } } } },
+      include: { balances: { ...(itemScope ? { where: { item: itemScope } } : {}), include: { item: { select: { averageCost: true, orgId: true } }, ...POSITION_OWNERS } } },
     }),
     prisma.stockTransaction.findMany({
       where: { orgId, ...(projectId ? { projectId } : projectIds?.length ? { projectId: { in: projectIds } } : {}) },
@@ -1642,7 +1862,9 @@ const getSummary = async ({ orgId, projectId = null, projectIds = null }) => {
     }),
   ]);
 
-  const enriched = items.map(withStock);
+  // Only the organisation's own positions count, of its own items (CERT-2).
+  const enriched = items.map((row) => withStock(scopeItem(orgId, row)));
+  const ownPositions = (warehouse) => warehouse.balances.filter((balance) => isOwnPosition(orgId, balance, { item: true }));
   const totalValue = round(enriched.reduce((sum, item) => sum + item.value, 0), 2);
   const moved = new Set(recent.map((row) => row.itemId));
 
@@ -1662,13 +1884,13 @@ const getSummary = async ({ orgId, projectId = null, projectIds = null }) => {
       name: warehouse.name,
       kind: warehouse.kind,
       value: round(
-        warehouse.balances.reduce(
+        ownPositions(warehouse).reduce(
           (sum, balance) => sum + balance.onHand * Number(balance.item?.averageCost ?? 0),
           0
         ),
         2
       ),
-      lines: warehouse.balances.filter((balance) => balance.onHand > 0).length,
+      lines: ownPositions(warehouse).filter((balance) => balance.onHand > 0).length,
     })),
     issuedValue: round(
       recent.filter((row) => row.type === "issue").reduce((sum, row) => sum + Number(row.value), 0),

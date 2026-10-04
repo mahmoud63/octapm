@@ -28,6 +28,8 @@ const mockPrisma = {
   dailyLogQuantity: table(),
   quantityProgressEntry: table(),
   boqItem: { findMany: jest.fn(async () => [{ id: "item-1", code: "1.1", ref: null, description: "Concrete in footings", unit: "m3", unitCode: "m3" }]) },
+  // CERT-2: who belongs to the organisation (by membership).
+  organizationMembership: { findMany: jest.fn(async () => []) },
 };
 // The quantity-progress service as the daily log calls it: the Decimal
 // helpers are real arithmetic; the row/entry helpers record their calls.
@@ -120,6 +122,60 @@ describe("daily log", () => {
     expect(mockPrisma.dailyLogManpower.create).toHaveBeenCalledTimes(1);
   });
 
+  // ── CERT-2: what a row may name ───────────────────────────────────────────
+
+  it("CERT-2: a row names a company of the organisation's own directory only; another organisation's is refused exactly as one that exists nowhere", async () => {
+    // The directory of org-1 holds co-1; the lookup is scoped to the caller's organisation.
+    mockPrisma.company.findFirst.mockImplementation(async ({ where }) => (where.id === "co-1" && where.orgId === "org-1" ? { id: "co-1", name: "ACME Concrete" } : null));
+    try {
+      const base = { manpower: { trade: "Steel fixer", workers: 4 }, equipment: { name: "Excavator" }, deliveries: { description: "Rebar" } };
+      for (const [section, payload] of Object.entries(base)) {
+        const answers = [];
+        for (const companyId of ["co-of-another-org", "co-that-exists-nowhere"]) {
+          const error = await service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section, payload: { ...payload, companyId }, actor: { id: "staff-1" }, viewer: staff }).catch((caught) => caught);
+          expect(error).toMatchObject({ status: 400, code: "DAILY_LOG_COMPANY_NOT_FOUND", message: "Company not found" });
+          answers.push(JSON.stringify({ status: error.status, code: error.code, message: error.message, details: error.details ?? null }));
+        }
+        expect(answers[0]).toBe(answers[1]);
+        expect(mockPrisma.company.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "co-of-another-org", orgId: "org-1" } }));
+      }
+      expect(mockPrisma.dailyLogManpower.create).not.toHaveBeenCalled();
+      expect(mockPrisma.dailyLogEquipment.create).not.toHaveBeenCalled();
+      expect(mockPrisma.dailyLogDelivery.create).not.toHaveBeenCalled();
+
+      // The organisation's own company is accepted and stored.
+      await service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "equipment", payload: { name: "Excavator", companyId: "co-1" }, actor: { id: "staff-1" }, viewer: staff });
+      expect(mockPrisma.dailyLogEquipment.create).toHaveBeenCalledWith({ data: expect.objectContaining({ companyId: "co-1", name: "Excavator" }) });
+
+      // The edit route: pointing a row at another organisation's company is refused and the row is not written…
+      mockPrisma.dailyLogManpower.findFirst.mockResolvedValueOnce(manpower());
+      await expect(service.updateEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "manpower", entryId: "mp-1", payload: { companyId: "co-of-another-org" }, actor: { id: "staff-1" }, viewer: staff })).rejects.toMatchObject({ status: 400, code: "DAILY_LOG_COMPANY_NOT_FOUND" });
+      expect(mockPrisma.dailyLogManpower.update).not.toHaveBeenCalled();
+      // …and an edit that leaves the row's company as it was is not looked up again.
+      mockPrisma.company.findFirst.mockClear();
+      mockPrisma.dailyLogManpower.findFirst.mockResolvedValueOnce(manpower());
+      await service.updateEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "manpower", entryId: "mp-1", payload: { workers: 5 }, actor: { id: "staff-1" }, viewer: staff });
+      expect(mockPrisma.dailyLogManpower.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ companyId: "co-1", workers: 5 }) }));
+      expect(mockPrisma.company.findFirst).not.toHaveBeenCalled();
+    } finally {
+      mockPrisma.company.findFirst.mockImplementation(async () => ({ name: "ACME Concrete" }));
+    }
+  });
+
+  it("CERT-2: an activity, location or party of another project is refused as not found on this project", async () => {
+    mockPrisma.activity.findFirst.mockResolvedValueOnce(null);
+    await expect(service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "notes", payload: { text: "pour", activityId: "act-elsewhere" }, actor: { id: "staff-1" }, viewer: staff })).rejects.toMatchObject({ status: 400, code: "DAILY_LOG_ACTIVITY_NOT_FOUND" });
+    expect(mockPrisma.activity.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: "act-elsewhere", projectId: "project-1" } }));
+    mockPrisma.location.findFirst.mockResolvedValueOnce(null);
+    await expect(service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "notes", payload: { text: "pour", locationId: "loc-elsewhere" }, actor: { id: "staff-1" }, viewer: staff })).rejects.toMatchObject({ status: 400, code: "DAILY_LOG_LOCATION_NOT_FOUND" });
+    expect(mockPrisma.location.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: "loc-elsewhere", projectId: "project-1" } }));
+    mockPrisma.projectParty.findFirst.mockResolvedValueOnce(null);
+    await expect(service.addEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "manpower", payload: { trade: "Welder", partyId: "party-elsewhere" }, actor: { id: "staff-1" }, viewer: staff })).rejects.toMatchObject({ status: 400, code: "DAILY_LOG_PARTY_NOT_FOUND" });
+    expect(mockPrisma.projectParty.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: "party-elsewhere", projectId: "project-1" } }));
+    expect(mockPrisma.dailyLogNote.create).not.toHaveBeenCalled();
+    expect(mockPrisma.dailyLogManpower.create).not.toHaveBeenCalled();
+  });
+
   it("party users cannot touch other companies' entries and cannot write once the day is submitted", async () => {
     mockPrisma.dailyLogManpower.findFirst.mockResolvedValueOnce(manpower({ partyId: "party-other", createdBy: "someone" }));
     await expect(service.updateEntry({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", section: "manpower", entryId: "mp-1", payload: { workers: 1 }, actor: { id: "sub-user" }, viewer: partyUser })).rejects.toMatchObject({ code: "DAILY_LOG_ENTRY_FORBIDDEN" });
@@ -204,6 +260,40 @@ describe("daily log", () => {
     expect(result.document).toEqual({ id: "doc-1", fileName: "daily-log-tower-2026-09-05.pdf" });
     mockPrisma.dailyLog.findUnique.mockResolvedValue(logRow());
     await expect(service.distribute({ orgId: "org-1", projectId: "project-1", date: "2026-09-05", actor: { id: "pm-1" } })).rejects.toMatchObject({ code: "DAILY_LOG_EMPTY" });
+  });
+
+  it("CERT-2: the people a day is distributed to by name are members of the organisation; another organisation's person is refused exactly as one who exists nowhere, before anything is filed, sent or stored", async () => {
+    mockPrisma.dailyLog.findUnique.mockResolvedValue(logRow({ manpower: [manpower()] }));
+    mockPrisma.organizationMembership.findMany.mockImplementation(async ({ where }) => (where.orgId === "org-1" ? ["pm-1", "site-1"].filter((id) => where.userId.in.includes(id)).map((userId) => ({ userId })) : []));
+    try {
+      const day = { orgId: "org-1", projectId: "project-1", date: "2026-09-05", actor: { id: "pm-1" } };
+      const answers = [];
+      for (const userId of ["user-of-another-org", "user-that-exists-nowhere"]) {
+        const error = await service.distribute({ ...day, to: { roles: [], userIds: ["site-1", userId], emails: [] } }).catch((caught) => caught);
+        expect(error).toMatchObject({ status: 404, code: "USER_NOT_FOUND" });
+        answers.push(JSON.stringify({ status: error.status, code: error.code, message: error.message, details: error.details ?? null }));
+      }
+      expect(answers[0]).toBe(answers[1]);
+      expect(mockPrisma.organizationMembership.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ orgId: "org-1", userId: { in: ["site-1", "user-of-another-org"] } }) }));
+      // A value that is not an identifier names no one, and is refused the same way.
+      await expect(service.distribute({ ...day, to: { roles: [], userIds: [["site-1"]], emails: [] } })).rejects.toMatchObject({ status: 404, code: "USER_NOT_FOUND" });
+      expect(mockUpload).not.toHaveBeenCalled();
+      expect(mockNotifications.createNotifications).not.toHaveBeenCalled();
+      expect(mockSendEmail).not.toHaveBeenCalled();
+      expect(mockPrisma.dailyLog.update).not.toHaveBeenCalled();
+
+      // Members are accepted, stored once each and told.
+      const result = await service.distribute({ ...day, to: { roles: [], userIds: ["site-1", "site-1"], emails: [] } });
+      expect(mockNotifications.createNotifications).toHaveBeenCalledWith(expect.objectContaining({ recipientUserIds: ["site-1"] }));
+      expect(mockPrisma.dailyLog.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ distributionJson: expect.objectContaining({ userIds: ["site-1"] }) }) }));
+      expect(result.distribution.userIds).toEqual(["site-1"]);
+      // The scheduled send names no one: nothing to look up.
+      mockPrisma.organizationMembership.findMany.mockClear();
+      await service.distribute({ ...day, actor: null, scheduled: true });
+      expect(mockPrisma.organizationMembership.findMany).not.toHaveBeenCalled();
+    } finally {
+      mockPrisma.organizationMembership.findMany.mockImplementation(async () => []);
+    }
   });
 
   it("queues the evening send once the project's local clock passes the send time", async () => {

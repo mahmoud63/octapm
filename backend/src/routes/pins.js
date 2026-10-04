@@ -52,7 +52,7 @@ router.post(
     body("recordType").isIn(PIN_TYPES),
     body("recordId").optional({ nullable: true }).isString().trim().notEmpty(),
     body("create").optional({ nullable: true }).isObject(),
-    body("sheetRevisionId").optional({ nullable: true }).isUUID(),
+    body("sheetRevisionId").optional({ nullable: true }).isString().isUUID(),
     body("label").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
     body("color").optional({ nullable: true }).isString().trim().isLength({ max: 9 }),
     validate,

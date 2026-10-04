@@ -329,7 +329,7 @@ router.get(
 router.get(
   "/me/permissions",
   authenticate,
-  [query("projectId").optional().isUUID(), validate],
+  [query("projectId").isString().optional().isUUID(), validate],
   asyncHandler(async (req, res) => {
     const permissionTemplateService = require("../services/permission-template.service");
     if (!req.query.projectId) {

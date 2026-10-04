@@ -45,7 +45,7 @@ router.get(
 
 router.get(
   "/api-clients",
-  [query("includeRevoked").optional().isBoolean().toBoolean(), validate],
+  [query("includeRevoked").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await apiClients.listApiClients({ orgId: req.user.orgId, includeRevoked: Boolean(req.query.includeRevoked) }) })),
 );
 
@@ -54,7 +54,7 @@ const apiClientValidators = ({ requireName = false } = {}) => [
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
   body("scopes").optional().isArray({ max: 200 }),
   body("projectIds").optional().isArray({ max: 500 }),
-  body("userId").optional({ nullable: true }).isUUID(),
+  body("userId").optional({ nullable: true }).isString().isUUID(),
   body("expiresAt").optional({ nullable: true }).isISO8601(),
   body("status").optional().isIn(["revoked"]),
   validate,
@@ -94,7 +94,7 @@ const webhookValidators = ({ requireAll = false } = {}) => [
   requireAll ? body("url").isString().trim().notEmpty().isLength({ max: 2000 }) : body("url").optional().isString().trim().isLength({ min: 1, max: 2000 }),
   requireAll ? body("eventTypes").isArray({ min: 1, max: 50 }) : body("eventTypes").optional().isArray({ min: 1, max: 50 }),
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
-  body("projectId").optional({ nullable: true }).isUUID(),
+  body("projectId").optional({ nullable: true }).isString().isUUID(),
   body("secret").optional({ nullable: true }).isString().trim().isLength({ min: 16, max: 200 }),
   body("status").optional().isIn(["active", "paused"]),
   validate,
@@ -138,7 +138,7 @@ router.post(
 
 router.get(
   "/webhooks/:id/deliveries",
-  [param("id").isUUID(), query("status").optional().isIn(["pending", "delivered", "failed", "dead"]), query("limit").optional().isInt({ min: 1, max: 200 }).toInt(), validate],
+  [param("id").isUUID(), query("status").isString().optional().isIn(["pending", "delivered", "failed", "dead"]), query("limit").isString().optional().isInt({ min: 1, max: 200 }).toInt(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await webhooks.listDeliveries({ orgId: req.user.orgId, subscriptionId: req.params.id, status: req.query.status || null, limit: req.query.limit || 50 }) })),
 );
 
@@ -180,13 +180,13 @@ router.get(
 
 router.get(
   "/accounting/mappings",
-  [query("provider").optional().isIn(accounting.PROVIDER_KEYS), validate],
+  [query("provider").isString().optional().isIn(accounting.PROVIDER_KEYS), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await accounting.listMappings({ orgId: req.user.orgId, provider: req.query.provider || null }) })),
 );
 
 router.put(
   "/accounting/mappings",
-  [body("provider").isIn(accounting.PROVIDER_KEYS), body("costCode").isString().trim().notEmpty().isLength({ max: 80 }), body("costCodeId").optional({ nullable: true }).isUUID(), body("externalAccountId").isString().trim().notEmpty().isLength({ max: 120 }), body("externalAccountName").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), validate],
+  [body("provider").isIn(accounting.PROVIDER_KEYS), body("costCode").isString().trim().notEmpty().isLength({ max: 80 }), body("costCodeId").optional({ nullable: true }).isString().isUUID(), body("externalAccountId").isString().trim().notEmpty().isLength({ max: 120 }), body("externalAccountName").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await accounting.upsertMapping({ orgId: req.user.orgId, actor: actor(req), payload: req.body }))),
 );
 
@@ -198,7 +198,7 @@ router.delete(
 
 router.get(
   "/accounting/syncs",
-  [query("status").optional().isIn(["pending", "synced", "paid", "failed"]), query("projectId").optional().isUUID(), query("limit").optional().isInt({ min: 1, max: 500 }).toInt(), validate],
+  [query("status").isString().optional().isIn(["pending", "synced", "paid", "failed"]), query("projectId").isString().optional().isUUID(), query("limit").isString().optional().isInt({ min: 1, max: 500 }).toInt(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await accounting.listSyncs({ orgId: req.user.orgId, projectId: req.query.projectId || null, status: req.query.status || null, limit: req.query.limit || 100 }) })),
 );
 
@@ -215,7 +215,7 @@ router.post(
 
 router.get(
   "/accounting/export",
-  [query("format").optional().isIn(["xlsx", "csv"]), query("provider").optional().isIn(accounting.PROVIDER_KEYS), query("projectId").optional().isUUID(), query("from").optional().isISO8601(), query("to").optional().isISO8601(), validate],
+  [query("format").isString().optional().isIn(["xlsx", "csv"]), query("provider").isString().optional().isIn(accounting.PROVIDER_KEYS), query("projectId").isString().optional().isUUID(), query("from").isString().optional().isISO8601(), query("to").isString().optional().isISO8601(), validate],
   asyncHandler(async (req, res) => {
     const file = await accounting.renderExport({ orgId: req.user.orgId, projectId: req.query.projectId || null, from: req.query.from || null, to: req.query.to || null, provider: req.query.provider || null, format: req.query.format || "xlsx" });
     res.setHeader("Content-Type", file.mimeType);

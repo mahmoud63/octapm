@@ -56,7 +56,7 @@ const itemValidators = () => [
 const idParams = [param("lookaheadId").isUUID()];
 const itemParams = [param("lookaheadId").isUUID(), param("itemId").isUUID()];
 
-router.get("/", requirePermission("lookahead", "read"), [query("status").optional().isIn(Object.values(service.STATUS)), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listLookaheads({ ...scope(req), query: req.query, viewer: actorFor(req) }))));
+router.get("/", requirePermission("lookahead", "read"), [query("status").isString().optional().isIn(Object.values(service.STATUS)), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listLookaheads({ ...scope(req), query: req.query, viewer: actorFor(req) }))));
 router.post("/", requirePermission("lookahead", "create"), [...headerValidators(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.createLookahead({ ...scope(req), payload: req.body, actor: actorFor(req) }), 201)));
 router.get("/constraints", requirePermission("lookahead", "read"), asyncHandler(async (req, res) => sendSuccess(res, await service.listConstraints({ ...scope(req), viewer: actorFor(req) }))));
 router.get("/:lookaheadId", requirePermission("lookahead", "read"), [...idParams, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.getLookahead({ ...scope(req), lookaheadId: req.params.lookaheadId, viewer: actorFor(req) }))));

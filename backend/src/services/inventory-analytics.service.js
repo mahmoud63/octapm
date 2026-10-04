@@ -38,6 +38,21 @@ const DAY = 24 * 60 * 60 * 1000;
 const daysBetween = (from, to) =>
   from && to ? Math.floor((to.getTime() - from.getTime()) / DAY) : null;
 
+/**
+ * Only the organisation's own stock positions are counted (CERT-2), as the
+ * inventory reads show them: its own balance row, in its own warehouse, in
+ * one of its own bins or none — and, read from a warehouse, of its own item.
+ * A balance of this organisation put away in another company's bin before the
+ * write guards existed is not a figure of anything this organisation holds.
+ */
+const POSITION_OWNERS = { warehouse: { select: { orgId: true } }, location: { select: { orgId: true } } };
+const isOwnPosition = (orgId, balance, { item = false } = {}) =>
+  Boolean(balance) &&
+  balance.orgId === orgId &&
+  balance.warehouse?.orgId === orgId &&
+  (balance.locationId == null || balance.location?.orgId === orgId) &&
+  (!item || balance.item?.orgId === orgId);
+
 const byValueDesc = (a, b) => b.value - a.value;
 
 const stockOf = (item) => {
@@ -249,11 +264,11 @@ const getAnalytics = async ({ orgId, projectId = null, projectIds = null }) => {
       },
       // the balances too: a company item's stock in another project's
       // warehouse is not this key's to count (CX21-471)
-      include: { balances: projectIds?.length ? { where: { warehouse: { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } } } : true },
+      include: { balances: { ...(projectIds?.length ? { where: { warehouse: { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } } } : {}), include: POSITION_OWNERS } },
     }),
     prisma.warehouse.findMany({
       where: { orgId, status: "active", ...(projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : {}) },
-      include: { balances: { ...(itemScope ? { where: { item: itemScope } } : {}), include: { item: { select: { averageCost: true } } } } },
+      include: { balances: { ...(itemScope ? { where: { item: itemScope } } : {}), include: { item: { select: { averageCost: true, orgId: true } }, ...POSITION_OWNERS } } },
     }),
     prisma.stockTransaction.groupBy({
       by: ["itemId"],
@@ -305,7 +320,7 @@ const getAnalytics = async ({ orgId, projectId = null, projectIds = null }) => {
     }),
   ]);
 
-  const items = itemRows.map(stockOf);
+  const items = itemRows.map((row) => stockOf({ ...row, balances: (row.balances ?? []).filter((balance) => isOwnPosition(orgId, balance)) }));
   const itemsBySku = new Map(items.map((item) => [item.sku, item]));
   const itemsByName = new Map(items.map((item) => [item.name.toLowerCase(), item]));
 
@@ -320,15 +335,17 @@ const getAnalytics = async ({ orgId, projectId = null, projectIds = null }) => {
   const activityIds = usageRows.map((row) => row.activityId).filter(Boolean);
   const usageProjectIds = [...new Set(usageRows.map((row) => row.projectId).filter(Boolean))];
   const [activities, usageProjects] = await Promise.all([
+    // Named only when they are this organisation's: a movement's stored
+    // activity is not proof of whose it is (CERT-2).
     activityIds.length
       ? prisma.activity.findMany({
-          where: { id: { in: activityIds } },
+          where: { id: { in: activityIds }, project: { orgId } },
           select: { id: true, activityCode: true, name: true },
         })
       : [],
     usageProjectIds.length
       ? prisma.project.findMany({
-          where: { id: { in: usageProjectIds } },
+          where: { id: { in: usageProjectIds }, orgId },
           select: { id: true, name: true },
         })
       : [],
@@ -341,6 +358,7 @@ const getAnalytics = async ({ orgId, projectId = null, projectIds = null }) => {
   const overstocked = overstock(items);
 
   const byWarehouse = warehouses
+    .map((warehouse) => ({ ...warehouse, balances: warehouse.balances.filter((balance) => isOwnPosition(orgId, balance, { item: true })) }))
     .map((warehouse) => ({
       id: warehouse.id,
       name: warehouse.name,
@@ -363,9 +381,9 @@ const getAnalytics = async ({ orgId, projectId = null, projectIds = null }) => {
     .map((row) => {
       const activity = activityById.get(row.activityId);
       return {
-        projectId: row.projectId,
+        projectId: projectById.has(row.projectId) ? row.projectId : null,
         project: projectById.get(row.projectId)?.name ?? null,
-        activityId: row.activityId,
+        activityId: activity ? row.activityId : null,
         activityRef: activity?.activityCode ?? null,
         activity: activity?.name ?? null,
         quantity: round(Math.abs(num(row._sum?.quantity))),

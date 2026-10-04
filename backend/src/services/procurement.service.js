@@ -11,7 +11,7 @@ const {
   calculateOrderByDate,
   computeProcurementRisk,
 } = require('./procurement-risk.service');
-const { toMoneyDecimal, toMoneyNumber } = require('../utils/money');
+const { MONEY_MAX, toMoneyDecimal, toMoneyNumber } = require('../utils/money');
 const { assertProjectRows, idsOf } = require('./tenant-references.service');
 
 const ACTIVITY_SELECT = {
@@ -42,10 +42,26 @@ const ORDER_INCLUDE = {
     orderBy: { lineNumber: 'asc' },
   },
   deliveryReceipts: {
-    include: { lines: true },
+    // The report each receipt and receipt line names is read with its
+    // project, so it is served only when it is the receipt's own (CERT-2).
+    include: { lines: { include: { dailyReport: { select: { projectId: true } } } }, dailyReport: { select: { projectId: true } } },
     orderBy: { receivedAt: 'desc' },
   },
 };
+
+/**
+ * A delivery receipt (or a receipt line) as served: its daily report only
+ * when that report is on the receipt's own project. A receipt stored naming
+ * another company's report — residue from before the write guard — served
+ * that report's id on the purchase-order list (CERT-2). The row keeps its
+ * shape: the report's id or null, and nothing more of it.
+ */
+const withOwnReport = (row) => {
+  const { dailyReport, ...served } = row;
+  if (served.dailyReportId && dailyReport?.projectId !== served.projectId) served.dailyReportId = null;
+  return served;
+};
+const ownReceipt = (receipt) => ({ ...withOwnReport(receipt), lines: (receipt.lines ?? []).map(withOwnReport) });
 
 const VALID_REQUIRED_TIMINGS = new Set(['activity_start', 'activity_finish']);
 const ALERT_STATUSES = new Set(['open', 'acknowledged', 'resolved']);
@@ -224,6 +240,13 @@ const assertLineCoding = async ({ tx = prisma, orgId, projectId, lines }) => {
   await assertProjectRows({ tx, model: 'budgetLine', projectId, ids: pick('budgetLineId'), code: 'BUDGET_LINE_NOT_FOUND', message: 'Budget line not found' });
   await assertProjectRows({ tx, model: 'materialMaster', projectId, ids: pick('materialMasterId'), code: 'MATERIAL_NOT_FOUND', message: 'Material not found' });
   // Cost codes belong to the organisation, not to a project.
+  // A cost code is named by one string. idsOf() skips any other shape, and the
+  // line was then written with String(value): ["<id>"] became "<id>" and
+  // another company's cost code was stored unchecked (CERT-2 shapes). Any
+  // other shape gets the 404 a cost code that exists nowhere gets.
+  if (pick('costCodeId').some((value) => value !== undefined && value !== null && value !== '' && typeof value !== 'string')) {
+    throw new HttpError(404, 'COST_CODE_NOT_FOUND', 'Cost code not found');
+  }
   const costCodeIds = idsOf(pick('costCodeId'));
   if (costCodeIds.length) {
     const found = orgId && tx.costCode?.findMany
@@ -464,6 +487,19 @@ const normalizeAlertData = ({
   expectedDeliveryDate: risk.expectedDeliveryDate || null,
 });
 
+/**
+ * Each of an alert's links is unique on its project: one alert per order
+ * line, per material requirement and per procurement package.
+ */
+const ALERT_KEYS = ['poLineId', 'activityMaterialId', 'packageId'];
+
+/** The project's alerts that already hold one of these links. */
+const alertsHolding = async (tx, projectId, data) => {
+  const held = ALERT_KEYS.filter((key) => data[key]).map((key) => ({ [key]: data[key] }));
+  if (!held.length || !tx.procurementLeadTimeAlert.findMany) return [];
+  return (await tx.procurementLeadTimeAlert.findMany({ where: { projectId, OR: held } })) || [];
+};
+
 const syncLeadTimeAlert = async ({
   tx = prisma,
   projectId,
@@ -508,12 +544,31 @@ const syncLeadTimeAlert = async ({
       material,
       packageRow,
     });
-    if (existing) {
+    // The alert is also one per procurement package. A second order, line or
+    // material on a package that already had an alert found nothing by its
+    // own key, created a second alert for the package, broke the unique key,
+    // and the buyer was answered 409 with Prisma's own text for the ordinary
+    // act of ordering on that package again (CERT-2). The alert already
+    // holding one of its links is the one brought up to date — pointing at
+    // what most recently changed the package's outlook, as the alert per
+    // material does — and a link that yet another alert holds stays there.
+    const holders = await alertsHolding(tx, projectId, data);
+    const target =
+      existing ||
+      holders.find((row) => data.packageId && row.packageId === data.packageId) ||
+      holders[0] ||
+      null;
+    for (const key of ALERT_KEYS) {
+      if (data[key] && holders.some((row) => row.id !== target?.id && row[key] === data[key])) {
+        delete data[key];
+      }
+    }
+    if (target) {
       return tx.procurementLeadTimeAlert.update({
-        where: { id: existing.id },
+        where: { id: target.id },
         data: {
           ...data,
-          status: existing.status === 'resolved' ? 'open' : existing.status,
+          status: target.status === 'resolved' ? 'open' : target.status,
           resolvedAt: null,
           resolvedBy: null,
         },
@@ -1045,6 +1100,17 @@ const createPurchaseOrder = async ({ orgId, projectId, actor, payload }) => {
     }
   });
 
+  // What the order is worth fits its value column, a Decimal(18,2): 1e15 of
+  // something at 100.00 failed at the write with a 500 (CERT-2). Refused
+  // before anything is written.
+  const orderValue = payload.lines.reduce(
+    (total, line) => total.plus(toMoneyDecimal(line.unitCost || 0).times(Number(line.orderedQty) || 0)),
+    toMoneyDecimal(0),
+  );
+  if (orderValue.greaterThan(MONEY_MAX)) {
+    throw new HttpError(400, 'PO_VALUE_TOO_LARGE', 'This order is worth more than an order can record');
+  }
+
   for (const line of payload.lines) {
     const activityId = line.activityId || payload.activityId;
     await ensureActivity({ projectId, activityId });
@@ -1207,6 +1273,7 @@ const listPurchaseOrders = async ({ orgId, projectId }) => {
   return orders.map((order) => ({
     ...order,
     lines: order.lines.map((line) => enrichPoLine(line, project)),
+    deliveryReceipts: (order.deliveryReceipts ?? []).map(ownReceipt),
   }));
 };
 

@@ -40,7 +40,7 @@ router.post(
     body("title").trim().notEmpty(),
     body("changeType").isIn(["addition", "deduction"]),
     moneyBody("amount", { required: true }),
-    body("effectiveDate").optional().isISO8601(),
+    body("effectiveDate").optional().isString().isISO8601(),
     body("status")
       .optional()
       .isIn(["draft", "submitted", "approved", "rejected"]),
@@ -67,7 +67,7 @@ router.patch(
     param("revisionId").isUUID(),
     body("changeType").optional().isIn(["addition", "deduction"]),
     moneyBody("amount"),
-    body("effectiveDate").optional().isISO8601(),
+    body("effectiveDate").optional().isString().isISO8601(),
     body("status")
       .optional()
       .isIn(["draft", "submitted", "approved", "rejected"]),

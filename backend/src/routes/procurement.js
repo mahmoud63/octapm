@@ -10,15 +10,21 @@ const procurementService = require('../services/procurement.service');
 const goodsReceiptService = require('../services/goods-receipt.service');
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const { QUANTITY_MAX, UNIT_COST_MAX } = require('../utils/stock-figures');
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 
+// A date is one string: isISO8601() alone checks an array element by
+// element, so [] and ["2026-10-01"] passed (CERT-2 shapes).
 const optionalDate = (field) =>
-  body(field).optional({ nullable: true }).isISO8601().toDate();
+  body(field).optional({ nullable: true }).isString().isISO8601().toDate();
 
-const optionalUuid = (field) =>
-  body(field).optional({ nullable: true }).isUUID();
+// An identifier that must be one string: isUUID() alone checks an array
+// element by element, so ["<id>"] passed and reached Prisma as a 500
+// (CERT-2 shapes).
+const optionalId = (field) =>
+  body(field).optional({ nullable: true }).isString().isUUID();
 
 router.get(
   '/',
@@ -50,7 +56,7 @@ router.post(
     transition: 'supplier.manage',
   }),
   [
-    body('companyId').optional({ nullable: true }).isUUID(),
+    body('companyId').optional({ nullable: true }).isString().isUUID(),
     body('name')
       .if(body('companyId').not().exists({ checkFalsy: true }))
       .isString()
@@ -102,8 +108,8 @@ router.post(
     body('packageNumber').isString().trim().notEmpty(),
     body('title').isString().trim().notEmpty(),
     body('description').optional({ nullable: true }).isString().trim(),
-    optionalUuid('supplierId'),
-    optionalUuid('activityId'),
+    optionalId('supplierId'),
+    optionalId('activityId'),
     body('status')
       .optional()
       .isIn(['planning', 'tendering', 'awarded', 'in_delivery', 'closed', 'cancelled']),
@@ -179,10 +185,10 @@ router.post(
     // reference of their own to use (OCTA-UX-PODUP-102).
     body('ref').optional({ values: 'falsy' }).isString().trim(),
     body('item').optional({ nullable: true }).isString().trim(),
-    optionalUuid('activityId'),
-    optionalUuid('packageId'),
-    optionalUuid('supplierId'),
-    optionalUuid('commitmentId'),
+    optionalId('activityId'),
+    optionalId('packageId'),
+    optionalId('supplierId'),
+    optionalId('commitmentId'),
     body('supplier').optional({ nullable: true }).isString().trim(),
     // A new order may only be planned or drafted here. Approved, issued and
     // acknowledged are decisions made on the register, which records who made
@@ -203,20 +209,25 @@ router.post(
     body('notes').optional({ nullable: true }).isString().trim(),
     body('lines').isArray({ min: 1 }),
     body('lines.*.lineNumber').optional().isInt({ min: 1 }).toInt(),
-    body('lines.*.activityId').isUUID(),
+    body('lines.*.activityId').isString().isUUID(),
     // Cost coding at the moment the order is raised (OCTA-FIN-POLINE-060).
-    body('lines.*.costCodeId').optional({ nullable: true }).isUUID(),
-    body('lines.*.budgetLineId').optional({ nullable: true }).isUUID(),
-    body('lines.*.boqItemId').optional({ nullable: true }).isUUID(),
-    optionalUuid('lines.*.activityMaterialId'),
-    optionalUuid('lines.*.materialMasterId'),
-    optionalUuid('lines.*.packageId'),
-    optionalUuid('lines.*.supplierId'),
+    // Each one string (CERT-2 shapes): isUUID() alone took ["<id>"] element by
+    // element; a package or a supplier sent so reached Prisma as a 500, the
+    // coding was refused only later, by the service.
+    optionalId('lines.*.costCodeId'),
+    optionalId('lines.*.budgetLineId'),
+    optionalId('lines.*.boqItemId'),
+    optionalId('lines.*.activityMaterialId'),
+    optionalId('lines.*.materialMasterId'),
+    optionalId('lines.*.packageId'),
+    optionalId('lines.*.supplierId'),
     body('lines.*.itemCode').optional({ nullable: true }).isString().trim(),
     body('lines.*.description').isString().trim().notEmpty(),
     body('lines.*.spec').optional({ nullable: true }).isString().trim(),
     body('lines.*.unit').isString().trim().notEmpty(),
-    body('lines.*.orderedQty').isFloat({ min: 0.001 }).toFloat(),
+    // A quantity the stock ledger can hold to four decimal places (CERT-2:
+    // 1e15 at 100.00 overflowed the order's value with a 500).
+    body('lines.*.orderedQty').isFloat({ min: 0.001, max: QUANTITY_MAX }).toFloat(),
     moneyBody('lines.*.unitCost'),
     body('lines.*.leadWeeks').optional().isInt({ min: 0 }).toInt(),
     body('lines.*.requiredTiming')
@@ -291,17 +302,30 @@ router.post(
     body('receiptNumber').isString().trim().notEmpty(),
     optionalDate('receivedAt'),
     body('receivedBy').optional({ nullable: true }).isString().trim(),
-    optionalUuid('warehouseId'),
+    // Every identifier one string (CERT-2 shapes): isUUID() alone let
+    // ["<id>"] through, element by element.
+    optionalId('warehouseId'),
     body('deliveryNote').optional({ nullable: true }).isString().trim(),
-    optionalUuid('dailyReportId'),
+    optionalId('dailyReportId'),
     body('issueToActivity').optional().isBoolean().toBoolean(),
     body('notes').optional({ nullable: true }).isString().trim(),
     body('lines').isArray({ min: 1 }),
-    body('lines.*.poLineId').isUUID(),
-    optionalUuid('lines.*.dailyReportId'),
-    body('lines.*.acceptedQty').isFloat({ min: 0.001 }).toFloat(),
-    body('lines.*.rejectedQty').optional().isFloat({ min: 0 }).toFloat(),
-    body('lines.*.issuedQty').optional().isFloat({ min: 0 }).toFloat(),
+    body('lines.*.poLineId').isString().isUUID(),
+    optionalId('lines.*.dailyReportId'),
+    // The bin and the stocked item a line is put away as had no check here.
+    optionalId('lines.*.locationId'),
+    optionalId('lines.*.inventoryItemId'),
+    // The price a line was delivered at: "abc" had no check here, became NaN
+    // on the stock ledger and reset the item's average, last price and unit
+    // cost to 0 (CERT-2). And no more than the item's price columns hold
+    // (Decimal(18,4)): 1e15 failed at the write with a 500.
+    body('lines.*.unitCost').optional({ nullable: true }).isFloat({ min: 0, max: UNIT_COST_MAX }),
+    body('lines.*.acceptedQty').isFloat({ min: 0.001, max: QUANTITY_MAX }).toFloat(),
+    body('lines.*.rejectedQty').optional().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
+    body('lines.*.issuedQty').optional().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
+    // A date the stock ledger can store: "x" had no check here and failed at
+    // the write with a 500 (CERT-2).
+    body('lines.*.expiryDate').optional({ nullable: true }).isString().isISO8601(),
     body('lines.*.notes').optional({ nullable: true }).isString().trim(),
     validate,
   ],
@@ -345,9 +369,11 @@ router.post(
     body('title').optional().isString().trim().isLength({ max: 200 }),
     body('description').optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
     body('instructions').optional({ nullable: true }).isString().trim().isLength({ max: 8000 }),
-    body('dueAt').optional({ nullable: true }).isISO8601(),
+    body('dueAt').optional({ nullable: true }).isString().isISO8601(),
     body('currency').optional().isString().trim().isLength({ min: 3, max: 3 }),
     body('boqSections').optional().isArray({ max: 100 }),
+    // Each a section name, as the bid package takes them (CERT-2 shapes).
+    body('boqSections.*').isString(),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -385,7 +411,7 @@ router.get(
   '/lead-time-alerts',
   requirePermission('procurement', 'read'),
   [
-    query('status')
+    query('status').isString()
       .optional()
       .isIn(['open', 'acknowledged', 'resolved']),
     validate,

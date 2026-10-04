@@ -31,8 +31,8 @@ router.get(
   "/directory",
   [
     query("search").optional().isString().trim().isLength({ max: 120 }),
-    query("status").optional().isIn(["active", "inactive"]),
-    query("vendorsOnly").optional().isBoolean().toBoolean(),
+    query("status").isString().optional().isIn(["active", "inactive"]),
+    query("vendorsOnly").isString().optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -69,7 +69,7 @@ router.get(
   [
     query("search").optional().isString().trim().isLength({ max: 120 }),
     query("trade").optional().isString().trim().isLength({ max: 80 }),
-    query("includeInactive").optional().isBoolean().toBoolean(),
+    query("includeInactive").isString().optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -134,7 +134,7 @@ router.patch(
 
 router.get(
   "/prequalification",
-  [query("withinDays").optional().isInt({ min: 1, max: 365 }).toInt(), validate],
+  [query("withinDays").isString().optional().isInt({ min: 1, max: 365 }).toInt(), validate],
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -251,7 +251,7 @@ const costCodeValidators = ({ requireAll = false } = {}) => [
   requireAll ? body("name").isString().trim().notEmpty().isLength({ max: 255 }) : body("name").optional().isString().trim().notEmpty().isLength({ max: 255 }),
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
   body("category").optional().isIn(companyWorkspaceService.COST_CODE_CATEGORIES),
-  body("parentId").optional({ nullable: true }).isUUID(),
+  body("parentId").optional({ nullable: true }).isString().isUUID(),
   body("sortOrder").optional().isInt({ min: 0 }).toInt(),
   body("status").optional().isIn(["active", "archived"]),
   validate,
@@ -261,8 +261,8 @@ router.get(
   "/cost-codes",
   [
     query("search").optional().isString().trim().isLength({ max: 120 }),
-    query("category").optional().isIn(companyWorkspaceService.COST_CODE_CATEGORIES),
-    query("includeArchived").optional().isBoolean().toBoolean(),
+    query("category").isString().optional().isIn(companyWorkspaceService.COST_CODE_CATEGORIES),
+    query("includeArchived").isString().optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -327,7 +327,7 @@ router.get(
   "/equipment",
   [
     query("search").optional().isString().trim().isLength({ max: 120 }),
-    query("includeArchived").optional().isBoolean().toBoolean(),
+    query("includeArchived").isString().optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -381,7 +381,7 @@ const templateValidators = ({ requireName = false } = {}) => [
 
 router.get(
   "/project-templates",
-  [query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  [query("includeArchived").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) =>
     sendSuccess(res, await projectTemplateService.listTemplates({ orgId: req.user.orgId, query: req.query })),
   ),
@@ -454,9 +454,9 @@ const formTemplateValidators = ({ requireName = false } = {}) => [
 router.get(
   "/form-templates",
   [
-    query("type").optional().isIn(formService.TYPES),
-    query("status").optional().isIn(["draft", "active", "archived"]),
-    query("includeArchived").optional().isBoolean().toBoolean(),
+    query("type").isString().optional().isIn(formService.TYPES),
+    query("status").isString().optional().isIn(["draft", "active", "archived"]),
+    query("includeArchived").isString().optional().isBoolean().toBoolean(),
     query("search").optional().isString().trim().isLength({ max: 120 }),
     validate,
   ],
@@ -501,7 +501,7 @@ router.delete(
 router.post(
   "/form-templates/:id/duplicate",
   requireCompanyAdmin,
-  [param("id").isUUID(), body("targetProjectId").optional({ nullable: true }).isUUID(), body("name").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), validate],
+  [param("id").isUUID(), body("targetProjectId").optional({ nullable: true }).isString().isUUID(), body("name").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), validate],
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -526,7 +526,7 @@ const submittalTemplateValidators = ({ requireName = false } = {}) => [
 
 router.get(
   "/submittal-workflow-templates",
-  [query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  [query("includeArchived").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.listTemplates({ orgId: req.user.orgId, projectId: null, query: { ...req.query, scope: "company" } }))),
 );
 
@@ -594,7 +594,7 @@ const companyTemplateViewer = (req) =>
 
 router.get(
   "/workflow-templates",
-  [query("tool").optional().isIn(workflowTools.TOOL_KEYS), query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  [query("tool").isString().optional().isIn(workflowTools.TOOL_KEYS), query("includeArchived").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await workflowEngine.listTemplates({ orgId: req.user.orgId, projectId: null, tool: req.query.tool || null, includeArchived: Boolean(req.query.includeArchived), scope: "company", viewer: companyTemplateViewer(req) }) })),
 );
 
@@ -673,7 +673,7 @@ router.get(
 
 router.get(
   "/custom-fields",
-  [query("recordType").optional().isIn(customFields.RECORD_TYPE_KEYS), query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  [query("recordType").isString().optional().isIn(customFields.RECORD_TYPE_KEYS), query("includeArchived").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await customFields.listDefinitions({ orgId: req.user.orgId, recordType: req.query.recordType || null, includeArchived: Boolean(req.query.includeArchived), scope: "company" }) })),
 );
 
@@ -709,7 +709,7 @@ const fieldsetValidators = ({ requireName = false } = {}) => [
 
 router.get(
   "/custom-fieldsets",
-  [query("recordType").optional().isIn(customFields.RECORD_TYPE_KEYS), query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  [query("recordType").isString().optional().isIn(customFields.RECORD_TYPE_KEYS), query("includeArchived").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await customFields.listFieldsets({ orgId: req.user.orgId, recordType: req.query.recordType || null, includeArchived: Boolean(req.query.includeArchived) }) })),
 );
 
@@ -738,7 +738,7 @@ const recordTypeValidators = ({ requireLabel = false } = {}) => [
   requireLabel ? body("label").isString().trim().notEmpty().isLength({ max: 120 }) : body("label").optional().isString().trim().isLength({ min: 1, max: 120 }),
   body("key").optional().isString().trim().isLength({ max: 60 }),
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
-  body("fieldsetId").optional({ nullable: true }).isUUID(),
+  body("fieldsetId").optional({ nullable: true }).isString().isUUID(),
   body("settings").optional({ nullable: true }).isObject(),
   body("position").optional().isInt({ min: 0, max: 10000 }).toInt(),
   body("status").optional().isIn(["active", "archived"]),
@@ -747,7 +747,7 @@ const recordTypeValidators = ({ requireLabel = false } = {}) => [
 
 router.get(
   "/record-types",
-  [query("tool").optional().isIn(customFields.TOOLS_WITH_RECORD_TYPES), query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  [query("tool").isString().optional().isIn(customFields.TOOLS_WITH_RECORD_TYPES), query("includeArchived").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await customFields.listRecordTypes({ orgId: req.user.orgId, tool: req.query.tool || null, includeArchived: Boolean(req.query.includeArchived) }), tools: customFields.TOOLS_WITH_RECORD_TYPES })),
 );
 

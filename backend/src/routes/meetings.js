@@ -14,7 +14,7 @@ router.use(authenticate);
 router.use(subscriptionGate);
 
 const optionalUuid = (field) =>
-  body(field).optional({ values: "falsy" }).isUUID();
+  body(field).optional({ values: "falsy" }).isString().isUUID();
 
 const optionalDate = (field) =>
   body(field).optional({ nullable: true }).isISO8601();
@@ -56,9 +56,9 @@ const meetingPayloadValidators = ({ requireTitle = false } = {}) => [
   optionalDate("endedAt"),
   optionalDate("nextMeetingAt"),
   body("attendees").optional().isArray({ max: 200 }),
-  body("attendees.*.activityId").optional({ values: "falsy" }).isUUID(),
-  body("attendees.*.userId").optional({ values: "falsy" }).isUUID(),
-  body("attendees.*.projectPartyId").optional({ values: "falsy" }).isUUID(),
+  body("attendees.*.activityId").optional({ values: "falsy" }).isString().isUUID(),
+  body("attendees.*.userId").optional({ values: "falsy" }).isString().isUUID(),
+  body("attendees.*.projectPartyId").optional({ values: "falsy" }).isString().isUUID(),
   body("attendees.*.name")
     .optional({ nullable: true })
     .isString()
@@ -77,8 +77,8 @@ const meetingPayloadValidators = ({ requireTitle = false } = {}) => [
   body("attendees.*.distributionRequired").optional().isBoolean(),
   body("attendees.*.attendedAt").optional({ nullable: true }).isISO8601(),
   body("agendaItems").optional().isArray({ max: 200 }),
-  body("agendaItems.*.activityId").optional({ values: "falsy" }).isUUID(),
-  body("agendaItems.*.presenterId").optional({ values: "falsy" }).isUUID(),
+  body("agendaItems.*.activityId").optional({ values: "falsy" }).isString().isUUID(),
+  body("agendaItems.*.presenterId").optional({ values: "falsy" }).isString().isUUID(),
   body("agendaItems.*.sortOrder").optional().isInt({ min: 0, max: 10000 }),
   body("agendaItems.*.title")
     .optional()
@@ -92,8 +92,8 @@ const meetingPayloadValidators = ({ requireTitle = false } = {}) => [
     .isLength({ max: 4000 }),
   body("agendaItems.*.status").optional().isIn(meetingService.AGENDA_STATUSES),
   body("decisions").optional().isArray({ max: 200 }),
-  body("decisions.*.activityId").optional({ values: "falsy" }).isUUID(),
-  body("decisions.*.decidedById").optional({ values: "falsy" }).isUUID(),
+  body("decisions.*.activityId").optional({ values: "falsy" }).isString().isUUID(),
+  body("decisions.*.decidedById").optional({ values: "falsy" }).isString().isUUID(),
   body("decisions.*.title")
     .optional()
     .isString()
@@ -111,9 +111,9 @@ const meetingPayloadValidators = ({ requireTitle = false } = {}) => [
     .isLength({ max: 4000 }),
   body("decisions.*.decidedAt").optional({ nullable: true }).isISO8601(),
   body("actionItems").optional().isArray({ max: 200 }),
-  body("actionItems.*.activityId").optional({ values: "falsy" }).isUUID(),
-  body("actionItems.*.taskId").optional({ values: "falsy" }).isUUID(),
-  body("actionItems.*.ownerId").optional({ values: "falsy" }).isUUID(),
+  body("actionItems.*.activityId").optional({ values: "falsy" }).isString().isUUID(),
+  body("actionItems.*.taskId").optional({ values: "falsy" }).isString().isUUID(),
+  body("actionItems.*.ownerId").optional({ values: "falsy" }).isString().isUUID(),
   body("actionItems.*.itemNumber")
     .optional({ nullable: true })
     .isString()
@@ -148,17 +148,17 @@ router.get(
   "/",
   requirePermission("meeting", "read"),
   [
-    query("cursor").optional({ values: "falsy" }).isUUID(),
-    query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
+    query("cursor").isString().optional({ values: "falsy" }).isUUID(),
+    query("limit").isString().optional().isInt({ min: 1, max: 100 }).toInt(),
     query("status").optional().isString().trim(),
     query("meetingType").optional().isString().trim(),
-    query("activityId").optional({ values: "falsy" }).isUUID(),
-    query("includeArchived").optional().isBoolean().toBoolean(),
+    query("activityId").isString().optional({ values: "falsy" }).isUUID(),
+    query("includeArchived").isString().optional().isBoolean().toBoolean(),
     query("search").optional().isString().trim(),
-    query("sortBy")
+    query("sortBy").isString()
       .optional()
       .isIn(["created", "updated", "scheduled", "status", "type"]),
-    query("sortDir").optional().isIn(["asc", "desc"]),
+    query("sortDir").isString().optional().isIn(["asc", "desc"]),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -238,13 +238,13 @@ router.post(
       .isLength({ max: 4000 }),
     body("includeAttendees").optional().isBoolean(),
     body("recipientUserIds").optional().isArray({ max: 200 }),
-    body("recipientUserIds.*").isUUID(),
+    body("recipientUserIds.*").isString().isUUID(),
     body("userIds").optional().isArray({ max: 200 }),
-    body("userIds.*").isUUID(),
+    body("userIds.*").isString().isUUID(),
     body("projectPartyIds").optional().isArray({ max: 200 }),
-    body("projectPartyIds.*").isUUID(),
+    body("projectPartyIds.*").isString().isUUID(),
     body("partyIds").optional().isArray({ max: 200 }),
-    body("partyIds.*").isUUID(),
+    body("partyIds.*").isString().isUUID(),
     body("recipients").optional().isArray({ max: 200 }),
     body("recipients.*.name")
       .optional({ nullable: true })
@@ -279,7 +279,7 @@ router.post(
   [
     param("id").isUUID(),
     body("body").isString().trim().notEmpty().isLength({ max: 4000 }),
-    body("activityId").optional({ values: "falsy" }).isUUID(),
+    body("activityId").optional({ values: "falsy" }).isString().isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {

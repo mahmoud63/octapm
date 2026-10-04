@@ -49,9 +49,9 @@ router.get(
   "/templates",
   requireCompanyAdmin,
   [
-    query("status").optional().isIn(Object.values(permissionTemplateService.TEMPLATE_STATUSES)),
-    query("kind").optional().isIn(permissionTemplateService.TEMPLATE_KINDS),
-    query("includeArchived").optional().isBoolean().toBoolean(),
+    query("status").isString().optional().isIn(Object.values(permissionTemplateService.TEMPLATE_STATUSES)),
+    query("kind").isString().optional().isIn(permissionTemplateService.TEMPLATE_KINDS),
+    query("includeArchived").isString().optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) => {

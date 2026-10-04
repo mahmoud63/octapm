@@ -177,7 +177,7 @@ router.patch(
   [
     param("setId").isUUID(),
     body("updates").isArray({ min: 1, max: 500 }),
-    body("updates.*.id").isUUID(),
+    body("updates.*.id").isString().isUUID(),
     body("updates.*.number").optional({ nullable: true }).isString().trim().isLength({ max: 40 }),
     body("updates.*.title").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
     body("updates.*.revision").optional({ nullable: true }).isString().trim().isLength({ max: 20 }),
@@ -203,7 +203,7 @@ router.post(
   [
     param("setId").isUUID(),
     body("revisionIds").optional().isArray({ max: 1500 }),
-    body("revisionIds.*").isUUID(),
+    body("revisionIds.*").isString().isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {

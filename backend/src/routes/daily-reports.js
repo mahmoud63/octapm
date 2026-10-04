@@ -26,20 +26,28 @@ const PROGRESS_METHODS = [
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 
+// Each filter is one value: a repeated one (?status=a&status=b) passed the
+// element-by-element checks and reached Prisma as a list — a 500 (CERT-2).
 const collectionFilters = [
-  query('activityId').optional().isUUID(),
-  query('status').optional().isIn(dailyReportService.REPORT_STATUSES),
-  query('date').optional().isISO8601(),
-  query('from').optional().isISO8601(),
-  query('to').optional().isISO8601(),
+  query('activityId').optional().isString().isUUID(),
+  query('status').optional().isString().isIn(dailyReportService.REPORT_STATUSES),
+  query('date').optional().isString().isISO8601(),
+  query('from').optional().isString().isISO8601(),
+  query('to').optional().isString().isISO8601(),
   validate,
 ];
+
+// A photo is an object or a link; a list in its place was dropped unseen.
+const isPhotoEntry = (photo) =>
+  typeof photo === 'string' || (photo !== null && typeof photo === 'object' && !Array.isArray(photo));
 
 const reportPayloadValidators = ({ partial = false } = {}) => {
   const optional = { nullable: true };
   return [
-    partial ? body('activityId').optional().isUUID() : body('activityId').isUUID(),
-    body('engineerId').optional().isUUID(),
+    partial ? body('activityId').optional().isString().isUUID() : body('activityId').isString().isUUID(),
+    // .isString() first: isUUID() alone checks an array element by element,
+    // so ["<id>"] passed and reached the database as a 500 (CERT-2 shapes).
+    body('engineerId').optional().isString().isUUID(),
     partial
       ? body('date').optional().isISO8601()
       : body('date').isISO8601(),
@@ -63,6 +71,9 @@ const reportPayloadValidators = ({ partial = false } = {}) => {
     body('materials.*.unit').optional().isString().trim(),
     body('equipment').optional(optional).isArray(),
     body('equipment.*.equipmentId').optional().isString().trim(),
+    // The approval reads a line's equipment from .id too: one text, checked
+    // against the project's equipment as equipmentId is (CERT-2).
+    body('equipment.*.id').optional().isString(),
     body('equipment.*.name').optional().isString().trim(),
     body('equipment.*.hours').optional().isFloat({ min: 0 }).toFloat(),
     body('issues').optional(optional).isArray(),
@@ -72,6 +83,7 @@ const reportPayloadValidators = ({ partial = false } = {}) => {
     body('issues.*.owner').optional().isString().trim(),
     body('issues.*.status').optional().isString().trim(),
     body('photos').optional(optional).isArray(),
+    body('photos.*').custom(isPhotoEntry),
     body('photos.*.url').optional().isString().trim(),
     body('photos.*.key').optional().isString().trim(),
     body('photos.*.filename').optional().isString().trim(),
@@ -82,6 +94,7 @@ const reportPayloadValidators = ({ partial = false } = {}) => {
     body('photos.*.caption').optional().isString().trim(),
     body('photos.*.takenAt').optional().isISO8601(),
     body('photos.*.uploadedAt').optional().isISO8601(),
+    body('photos.*.uploadedBy').optional({ nullable: true }).isString(),
     body('notes').optional(optional).isString().trim(),
     body('clientRequestId').optional(optional).isString().trim().isLength({ max: 100 }),
     body('clientCreatedAt').optional(optional).isISO8601(),

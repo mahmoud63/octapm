@@ -558,6 +558,30 @@ const assertApprovalProof = async ({
   );
 };
 
+/**
+ * The activity the order's own row names, looked up in the order's project
+ * before the row is written. `ChangeOrder.activityId` is a foreign key: an id
+ * that exists nowhere failed on the constraint (a 500 carrying the database's
+ * text outside production) while another company's activity was written,
+ * reached the links and was refused there (400) — so the answer told which
+ * ids are some company's activities (certification CERT-2). Both are refused
+ * now as the links refuse an activity that is not the project's.
+ */
+const assertOrderActivity = async ({ tx = prisma, projectId, activityId }) => {
+  if (!activityId) return;
+  const found = await tx.activity.findMany({
+    where: { projectId, id: { in: [activityId] } },
+    select: { id: true },
+  });
+  if (!found.some((row) => row.id === activityId)) {
+    throw new HttpError(
+      400,
+      "CHANGE_ORDER_ACTIVITY_NOT_FOUND",
+      "One or more linked activities were not found in this project",
+    );
+  }
+};
+
 const syncActivityLinks = async ({
   tx,
   projectId,
@@ -971,15 +995,18 @@ const createChangeOrder = async ({
   const status = CHANGE_ORDER_STATUSES.DRAFT;
   const primaryActivityId = firstActivityIdFromPayload(payload);
 
+  const orderActivityId =
+    primaryActivityId !== undefined
+      ? primaryActivityId
+      : payload.activityId || null;
+
   const created = await prisma.$transaction(async (tx) => {
     const allocation = await normalizeBudgetAllocations({ tx, projectId, payload, value: toMoneyNumber(payload.value) });
+    await assertOrderActivity({ tx, projectId, activityId: orderActivityId });
     const created = await tx.changeOrder.create({
       data: {
         projectId,
-        activityId:
-          primaryActivityId !== undefined
-            ? primaryActivityId
-            : payload.activityId || null,
+        activityId: orderActivityId,
         budgetLineId: allocation?.budgetLineId ?? null,
         budgetAllocationsJson: allocation?.budgetAllocationsJson ?? [],
         ref,
@@ -1290,6 +1317,7 @@ const updateChangeOrder = async ({
       );
     }
 
+    await assertOrderActivity({ tx, projectId, activityId: data.activityId });
     const updated = await tx.changeOrder.update({
       where: { id: coId },
       data,

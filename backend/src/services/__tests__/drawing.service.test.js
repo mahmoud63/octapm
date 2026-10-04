@@ -26,6 +26,7 @@ jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 jest.mock("../workflow-support.service", () => ({
   ...mockWorkflow,
   primaryActivityIdFromPayload: jest.requireActual("../workflow-support.service").primaryActivityIdFromPayload,
+  assertPayloadActivity: jest.requireActual("../workflow-support.service").assertPayloadActivity,
 }));
 
 const drawingService = require("../drawing.service");
@@ -46,7 +47,8 @@ describe("drawing activity references (CERT-2)", () => {
     await expect(
       drawingService.createDrawing({ orgId: "org-1", projectId: "project-1", payload: { drawingNumber: "S-101", title: "Foundation", activityId: FOREIGN, activityIds: [OWN_2] } }),
     ).rejects.toMatchObject({ status: 400, code: "WORKFLOW_ACTIVITY_NOT_FOUND" });
-    expect(mockPrisma.activity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: [FOREIGN] }, projectId: "project-1" } }));
+    // Every activity the drawing names is checked in one query (the activityId and the links).
+    expect(mockPrisma.activity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: [FOREIGN, OWN_2] }, projectId: "project-1" } }));
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     expect(mockPrisma.drawingRecord.create).not.toHaveBeenCalled();
   });
@@ -55,6 +57,16 @@ describe("drawing activity references (CERT-2)", () => {
     await expect(
       drawingService.updateDrawing({ orgId: "org-1", projectId: "project-1", drawingId: "drawing-1", payload: { title: "Foundation rev", activityId: FOREIGN, activityIds: [OWN_2] } }),
     ).rejects.toMatchObject({ status: 400, code: "WORKFLOW_ACTIVITY_NOT_FOUND" });
+    expect(mockPrisma.drawingRecord.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses a link to an activity outside the project before the row (which carries the first link) is written", async () => {
+    for (const payload of [{ activityIds: [FOREIGN] }, { activityLinks: [{ activityId: FOREIGN }] }, { activityLinks: [{ activityId: OWN }, { activityId: FOREIGN }] }]) {
+      await expect(drawingService.createDrawing({ orgId: "org-1", projectId: "project-1", payload: { drawingNumber: "S-105", title: "Walls", ...payload } })).rejects.toMatchObject({ status: 400, code: "WORKFLOW_ACTIVITY_NOT_FOUND" });
+      await expect(drawingService.updateDrawing({ orgId: "org-1", projectId: "project-1", drawingId: "drawing-1", payload })).rejects.toMatchObject({ status: 400, code: "WORKFLOW_ACTIVITY_NOT_FOUND" });
+    }
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.drawingRecord.create).not.toHaveBeenCalled();
     expect(mockPrisma.drawingRecord.update).not.toHaveBeenCalled();
   });
 

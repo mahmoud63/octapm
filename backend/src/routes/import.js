@@ -204,7 +204,7 @@ router.post(
   '/xlsx',
   requirePermission('schedule', 'create'),
   uploadLimiter,
-  [query('dryRun').optional().isBoolean().toBoolean(), validate],
+  [query('dryRun').isString().optional().isBoolean().toBoolean(), validate],
   upload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
@@ -270,7 +270,7 @@ router.post(
     transition: 'submission.submit',
   }),
   uploadLimiter,
-  [query('dryRun').optional().isBoolean().toBoolean(), validate],
+  [query('dryRun').isString().optional().isBoolean().toBoolean(), validate],
   upload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');

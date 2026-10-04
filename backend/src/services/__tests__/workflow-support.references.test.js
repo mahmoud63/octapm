@@ -40,6 +40,41 @@ describe("the body's primary activity (certification CERT-2)", () => {
     await expect(service.assertPayloadActivity({ tx, projectId: "project-1", payload: { activityId: null } })).resolves.toBeUndefined();
     expect(tx.activity.findMany).not.toHaveBeenCalled();
   });
+
+  // The row carries the first link, so a link outside the project reached the
+  // row's foreign key before the links' check: 400 for another company's
+  // activity, 500 for one that exists nowhere (CERT-2 existence oracle).
+  it("checks every activity the links name too, as normalizeActivityLinks reads them", async () => {
+    for (const payload of [{ activityIds: [OTHER] }, { activityLinks: [{ activityId: OTHER }] }, { activityLinks: [{ activityId: OWN }, { id: OTHER }] }, { activityIds: [OWN, OTHER] }, { activityId: OWN, activityLinks: [{ activityId: OTHER }] }]) {
+      await expect(service.assertPayloadActivity({ tx, projectId: "project-1", payload })).rejects.toMatchObject({ status: 400, code: "WORKFLOW_ACTIVITY_NOT_FOUND" });
+    }
+    expect(tx.activity.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: { projectId: "project-1", id: { in: [OWN, OTHER] } } }));
+    await expect(service.assertPayloadActivity({ tx, projectId: "project-1", payload: { activityIds: [OWN], activityLinks: [{ activityId: OWN, relationType: "primary" }, ""] } })).resolves.toBeUndefined();
+    // activityLinks wins over activityIds, which is then neither stored nor checked.
+    await expect(service.assertPayloadActivity({ tx, projectId: "project-1", payload: { activityLinks: [{ activityId: OWN }], activityIds: [OTHER] } })).resolves.toBeUndefined();
+  });
+
+  // A blank / whitespace-only activityId is a record whose route lacks an
+  // activityId validator (transmittals): it must be treated as absent, not
+  // carried to Prisma as { activityId: null } / id in [null] — a 500.
+  it("treats a blank or whitespace activityId as absent, consistently, and never queries for it", async () => {
+    for (const blank of ["", "   ", "\t", "\n"]) {
+      expect(service.normalizeActivityLinks({ activityId: blank })).toEqual([]);
+      tx.activity.findMany.mockClear();
+      await expect(service.assertPayloadActivity({ tx, projectId: "project-1", payload: { activityId: blank } })).resolves.toBeUndefined();
+      expect(tx.activity.findMany).not.toHaveBeenCalled();
+    }
+    // A real id still becomes one primary link and is checked.
+    expect(service.normalizeActivityLinks({ activityId: OWN })).toEqual([{ activityId: OWN, relationType: "primary", scheduleImpactDays: 0, notes: null }]);
+  });
+
+  it("refuses a value that is not one string exactly like a missing activity, without a query", async () => {
+    for (const payload of [{ activityId: [OWN] }, { activityId: { id: OWN } }, { activityId: 12345 }, { activityLinks: [{ activityId: [OWN] }] }, { activityLinks: [{ activityId: { not: "x" } }] }, { activityLinks: [{ activityId: 12345 }] }, { activityIds: [{ id: [OWN] }] }]) {
+      tx.activity.findMany.mockClear();
+      await expect(service.assertPayloadActivity({ tx, projectId: "project-1", payload })).rejects.toMatchObject({ status: 400, code: "WORKFLOW_ACTIVITY_NOT_FOUND", message: "One or more linked activities were not found in this project" });
+      expect(tx.activity.findMany).not.toHaveBeenCalled();
+    }
+  });
 });
 
 describe("ball in court", () => {

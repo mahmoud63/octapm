@@ -64,7 +64,7 @@ const projectContext = asyncHandler(async (req, res, next) => {
 });
 
 const optionalNullableUuid = (field) =>
-  body(field).optional({ values: "falsy" }).isUUID();
+  body(field).optional({ values: "falsy" }).isString().isUUID();
 
 const attachmentValidators = [
   body("attachments")
@@ -73,9 +73,9 @@ const attachmentValidators = [
     .withMessage("attachments must be an array or object"),
   body("attachments.*.projectDocumentId")
     .optional({ values: "falsy" })
-    .isUUID(),
-  body("attachments.*.documentId").optional({ values: "falsy" }).isUUID(),
-  body("attachments.*.id").optional({ values: "falsy" }).isUUID(),
+    .isString().isUUID(),
+  body("attachments.*.documentId").optional({ values: "falsy" }).isString().isUUID(),
+  body("attachments.*.id").optional({ values: "falsy" }).isString().isUUID(),
   body("attachments.*.fileName")
     .optional({ nullable: true })
     .isString()
@@ -123,20 +123,20 @@ router.get(
   projectContext,
   requirePermission("task", "read"),
   [
-    query("cursor").optional({ values: "falsy" }).isUUID(),
-    query("projectId").optional({ values: "falsy" }).isUUID(),
-    query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
+    query("cursor").isString().optional({ values: "falsy" }).isUUID(),
+    query("projectId").isString().optional({ values: "falsy" }).isUUID(),
+    query("limit").isString().optional().isInt({ min: 1, max: 100 }).toInt(),
     query("status").optional().isString().trim(),
     query("priority").optional().isString().trim(),
-    query("assignee").optional().isIn(["me"]),
-    query("assigneeId").optional({ values: "falsy" }).isUUID(),
-    query("overdue").optional().isBoolean().toBoolean(),
-    query("includeArchived").optional().isBoolean().toBoolean(),
+    query("assignee").isString().optional().isIn(["me"]),
+    query("assigneeId").isString().optional({ values: "falsy" }).isUUID(),
+    query("overdue").isString().optional().isBoolean().toBoolean(),
+    query("includeArchived").isString().optional().isBoolean().toBoolean(),
     query("search").optional().isString().trim(),
-    query("sortBy")
+    query("sortBy").isString()
       .optional()
       .isIn(["created", "updated", "due", "priority", "status"]),
-    query("sortDir").optional().isIn(["asc", "desc"]),
+    query("sortDir").isString().optional().isIn(["asc", "desc"]),
     validate,
   ],
   asyncHandler(async (req, res) => {

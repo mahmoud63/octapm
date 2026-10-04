@@ -40,7 +40,26 @@ const sendScoped = (req, res, result) => {
 const router = express.Router();
 router.use(authenticate);
 
-const optionalProject = query("projectId").optional({ nullable: true }).isUUID();
+// An identifier is one string. express-validator's isUUID() checks an array
+// element by element, so ["<id>"] passed — the organisation's own id as much
+// as another company's or one that exists nowhere — and reached Prisma as a
+// 500 (CERT-2 shapes). Every identifier field below is a string first; any
+// other shape is a 400 VALIDATION_ERROR naming the field, whoever's id it wraps.
+const idBody = (field) => body(field).isString().isUUID();
+const optionalIdBody = (field) => body(field).optional({ nullable: true }).isString().isUUID();
+const optionalIdQuery = (field) => query(field).optional({ nullable: true }).isString().isUUID();
+
+const optionalProject = optionalIdQuery("projectId");
+
+// A figure no larger than its column holds (CERT-2): a unit cost of 1e15
+// failed at the write with a 500, a quantity of 1e15 was stored. The bounds
+// and why they are what they are: utils/stock-figures.js.
+const { QUANTITY_MAX, UNIT_COST_MAX } = require("../utils/stock-figures");
+const quantityOf = (field) => body(field).isFloat({ min: -QUANTITY_MAX, max: QUANTITY_MAX });
+const unitCostOf = (field) => body(field).optional({ nullable: true }).isFloat({ min: 0, max: UNIT_COST_MAX });
+// A date is one string that is a date: "x", {"not":"x"} and [] reached the
+// stock ledger and failed at the write with a 500 (CERT-2).
+const optionalDateBody = (field) => body(field).optional({ nullable: true }).isString().isISO8601();
 
 // ─── item master ───────────────────────────────────────────────────────────
 
@@ -51,8 +70,9 @@ router.get(
     optionalProject,
     query("search").optional().isString().trim().isLength({ max: 120 }),
     query("category").optional().isString().trim().isLength({ max: 80 }),
-    query("status").optional().isIn(service.ITEM_STATUSES),
-    query("lowStock").optional().isBoolean().toBoolean(),
+    // One status: ?status=a&status=b is an array, which isIn() checks element by element (CERT-2 shapes).
+    query("status").optional().isString().isIn(service.ITEM_STATUSES),
+    query("lowStock").isString().optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -108,9 +128,9 @@ const itemBody = [
   body("specification").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
   body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
-  body("preferredSupplierId").optional({ nullable: true }).isUUID(),
-  body("projectId").optional({ nullable: true }).isUUID(),
-  body("unitCost").optional().isFloat({ min: 0 }),
+  optionalIdBody("preferredSupplierId"),
+  optionalIdBody("projectId"),
+  body("unitCost").optional().isFloat({ min: 0, max: UNIT_COST_MAX }),
   body("reorderLevel").optional().isFloat({ min: 0 }),
   body("minStock").optional().isFloat({ min: 0 }),
   body("maxStock").optional({ nullable: true }).isFloat({ min: 0 }),
@@ -186,8 +206,8 @@ router.post(
     body("code").isString().trim().isLength({ min: 1, max: 30 }),
     body("name").isString().trim().isLength({ min: 1, max: 200 }),
     body("kind").optional().isIn(service.WAREHOUSE_KINDS),
-    body("projectId").optional({ nullable: true }).isUUID(),
-    body("managerId").optional({ nullable: true }).isUUID(),
+    optionalIdBody("projectId"),
+    optionalIdBody("managerId"),
     body("address").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
     body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
     validate,
@@ -208,7 +228,7 @@ router.patch(
     param("warehouseId").isUUID(),
     body("name").optional().isString().trim().isLength({ min: 1, max: 200 }),
     body("kind").optional().isIn(service.WAREHOUSE_KINDS),
-    body("managerId").optional({ nullable: true }).isUUID(),
+    optionalIdBody("managerId"),
     body("address").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
     body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
     body("status").optional().isIn(["active", "archived"]),
@@ -252,7 +272,7 @@ router.post(
     body("code").isString().trim().isLength({ min: 1, max: 40 }),
     body("name").isString().trim().isLength({ min: 1, max: 200 }),
     body("kind").optional().isIn(service.LOCATION_KINDS),
-    body("parentId").optional({ nullable: true }).isUUID(),
+    optionalIdBody("parentId"),
     body("sortOrder").optional().isInt(),
     validate,
   ],
@@ -274,14 +294,19 @@ router.post(
 // ─── movements ─────────────────────────────────────────────────────────────
 
 const movementBody = [
-  body("itemId").isUUID(),
-  body("warehouseId").isUUID(),
-  body("locationId").optional({ nullable: true }).isUUID(),
-  body("quantity").isFloat(),
+  idBody("itemId"),
+  idBody("warehouseId"),
+  optionalIdBody("locationId"),
+  quantityOf("quantity"),
   body("batchNo").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
   body("serialNo").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
   body("reference").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
   body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
+  // When the stock moved (a device syncing later sends it; defaults to now)
+  // and when a batch expires. Read by every movement; only the issue checked
+  // them, and then not as one string.
+  optionalDateBody("occurredAt"),
+  optionalDateBody("expiryDate"),
 ];
 
 router.post(
@@ -289,11 +314,20 @@ router.post(
   requirePermission("inventory", "create", { transition: "stock.receive" }),
   [
     ...movementBody,
-    body("unitCost").optional({ nullable: true }).isFloat({ min: 0 }),
-    body("damagedQty").optional({ nullable: true }).isFloat({ min: 0 }),
-    body("poLineId").optional({ nullable: true }).isUUID(),
-    body("receiptLineId").optional({ nullable: true }).isUUID(),
-    body("expiryDate").optional({ nullable: true }).isISO8601(),
+    unitCostOf("unitCost"),
+    body("damagedQty").optional({ nullable: true }).isFloat({ min: 0, max: QUANTITY_MAX }),
+    optionalIdBody("poLineId"),
+    optionalIdBody("receiptLineId"),
+    // What a direct receipt may carry for the movement it posts: each one
+    // string, checked as this organisation's by the service (CERT-2). The
+    // projectId used to have no check here at all, so every shape of it —
+    // {"id":…}, 12345, true, {"not":"x"} — reached Prisma as a 500.
+    optionalIdBody("projectId"),
+    optionalIdBody("activityId"),
+    optionalIdBody("costCodeId"),
+    optionalIdBody("boqItemId"),
+    optionalIdBody("commitmentId"),
+    optionalIdBody("locationRefId"),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -312,15 +346,14 @@ router.post(
   requirePermission("inventory", "submit", { transition: "stock.issue" }),
   [
     ...movementBody,
-    body("projectId").optional({ nullable: true }).isUUID(),
-    body("activityId").optional({ nullable: true }).isUUID(),
-    body("costCodeId").optional({ nullable: true }).isUUID(),
-    body("boqItemId").optional({ nullable: true }).isUUID(),
-    body("locationRefId").optional({ nullable: true }).isUUID(),
-    body("commitmentId").optional({ nullable: true }).isUUID(),
-    // When the stock left (a device syncing later sends it); defaults to now.
+    optionalIdBody("projectId"),
+    optionalIdBody("activityId"),
+    optionalIdBody("costCodeId"),
+    optionalIdBody("boqItemId"),
+    optionalIdBody("locationRefId"),
+    optionalIdBody("commitmentId"),
+    // When the stock left (occurredAt, in movementBody); defaults to now.
     // The cost is dated on the project's reporting day of this instant.
-    body("occurredAt").optional({ nullable: true }).isISO8601(),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -341,10 +374,10 @@ router.post(
   "/stock/reserve",
   requirePermission("inventory", "submit", { transition: "stock.issue" }),
   [
-    body("itemId").isUUID(),
-    body("warehouseId").isUUID(),
-    body("locationId").optional({ nullable: true }).isUUID(),
-    body("quantity").isFloat().toFloat(),
+    idBody("itemId"),
+    idBody("warehouseId"),
+    optionalIdBody("locationId"),
+    quantityOf("quantity").toFloat(),
     body("reference").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
     body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
     validate,
@@ -370,9 +403,13 @@ for (const [path, type, transition] of [
     requirePermission("inventory", "update", { transition }),
     [
       ...movementBody,
-      body("projectId").optional({ nullable: true }).isUUID(),
-      body("activityId").optional({ nullable: true }).isUUID(),
-      body("costCodeId").optional({ nullable: true }).isUUID(),
+      optionalIdBody("projectId"),
+      optionalIdBody("activityId"),
+      optionalIdBody("costCodeId"),
+      // Read by the movement as an issue reads them (CERT-2).
+      optionalIdBody("boqItemId"),
+      optionalIdBody("commitmentId"),
+      optionalIdBody("locationRefId"),
       validate,
     ],
     asyncHandler(async (req, res) =>
@@ -399,12 +436,13 @@ router.get(
   "/stock/transactions",
   requirePermission("inventory", "read"),
   [
-    query("itemId").optional().isUUID(),
-    query("warehouseId").optional().isUUID(),
-    query("projectId").optional().isUUID(),
-    query("activityId").optional().isUUID(),
+    // ?itemId=a&itemId=b is an array: one string each, or a 400 (CERT-2 shapes).
+    optionalIdQuery("itemId"),
+    optionalIdQuery("warehouseId"),
+    optionalIdQuery("projectId"),
+    optionalIdQuery("activityId"),
     query("type").optional().isString().trim(),
-    query("limit").optional().isInt({ min: 1, max: 500 }).toInt(),
+    query("limit").isString().optional().isInt({ min: 1, max: 500 }).toInt(),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -425,7 +463,8 @@ router.get(
 router.get(
   "/transfers",
   requirePermission("inventory", "read"),
-  [query("status").optional().isIn(service.TRANSFER_STATUSES), validate],
+  // One status: ?status=draft&status=received reached Prisma as a 500 (CERT-2 shapes).
+  [query("status").optional().isString().isIn(service.TRANSFER_STATUSES), validate],
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -438,11 +477,11 @@ router.post(
   "/transfers",
   requirePermission("inventory", "create", { transition: "stock.transfer" }),
   [
-    body("fromWarehouseId").isUUID(),
-    body("toWarehouseId").isUUID(),
+    idBody("fromWarehouseId"),
+    idBody("toWarehouseId"),
     body("lines").isArray({ min: 1 }),
-    body("lines.*.itemId").isUUID(),
-    body("lines.*.quantity").isFloat({ gt: 0 }),
+    idBody("lines.*.itemId"),
+    body("lines.*.quantity").isFloat({ gt: 0, max: QUANTITY_MAX }),
     body("ref").optional({ nullable: true }).isString().trim().isLength({ max: 40 }),
     body("reason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
     validate,
@@ -479,9 +518,17 @@ router.post(
   [
     param("transferId").isUUID(),
     body("lines").optional().isArray(),
-    body("lines.*.id").optional().isUUID(),
-    body("lines.*.receivedQty").optional().isFloat({ min: 0 }),
-    body("lines.*.damagedQty").optional().isFloat({ min: 0 }),
+    // Each reported line is an object: [null] failed in the service with a 500,
+    // and ["x"] was ignored, so the whole transfer was booked in as sent (CERT-2).
+    body("lines.*").isObject(),
+    // Each reported line names one of the transfer's lines, as one string:
+    // ["<id>"] passed isUUID() element by element and was then matched to
+    // nothing, so the line was booked in full and the reported quantities
+    // dropped (CERT-2). A line that names no line reports nothing it can be
+    // booked against; the service refuses a line that is not the transfer's.
+    idBody("lines.*.id"),
+    body("lines.*.receivedQty").optional().isFloat({ min: 0, max: QUANTITY_MAX }),
+    body("lines.*.damagedQty").optional().isFloat({ min: 0, max: QUANTITY_MAX }),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -503,7 +550,7 @@ router.post(
 router.get(
   "/purchase-orders",
   requirePermission("inventory", "read"),
-  [optionalProject, query("scope").optional().isIn(goodsReceipt.ORDER_SCOPES), validate],
+  [optionalProject, query("scope").isString().optional().isIn(goodsReceipt.ORDER_SCOPES), validate],
   asyncHandler(async (req, res) =>
     sendSuccess(res, await scopedCall(req, req.query.projectId, () => goodsReceipt.listOrders({ projectIds: keyProjects(req),
         orgId: req.user.orgId,
@@ -532,21 +579,29 @@ router.post(
   "/goods-receipt",
   requirePermission("inventory", "create", { transition: "stock.receive" }),
   [
-    body("orderId").isUUID(),
-    body("warehouseId").isUUID(),
+    idBody("orderId"),
+    idBody("warehouseId"),
+    // The project, who received it and when had no check here (CERT-2). The
+    // daily report is left to the service on purpose: any value that is not
+    // one string is answered there exactly as a report that exists nowhere
+    // (404 DAILY_REPORT_NOT_FOUND), the answer a string id of another
+    // company's report gets. receivedAt likewise: the service refuses any
+    // value that is not a date (400 RECEIPT_DATE_INVALID).
+    optionalIdBody("projectId"),
+    body("receivedBy").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
     body("receiptNumber").optional({ nullable: true }).isString().trim().isLength({ max: 40 }),
     body("deliveryNote").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
     body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
     body("lines").isArray({ min: 1 }),
-    body("lines.*.poLineId").isUUID(),
-    body("lines.*.acceptedQty").optional().isFloat({ min: 0 }),
-    body("lines.*.rejectedQty").optional().isFloat({ min: 0 }),
-    body("lines.*.unitCost").optional({ nullable: true }).isFloat({ min: 0 }),
-    body("lines.*.locationId").optional({ nullable: true }).isUUID(),
-    body("lines.*.inventoryItemId").optional({ nullable: true }).isUUID(),
+    idBody("lines.*.poLineId"),
+    body("lines.*.acceptedQty").optional().isFloat({ min: 0, max: QUANTITY_MAX }),
+    body("lines.*.rejectedQty").optional().isFloat({ min: 0, max: QUANTITY_MAX }),
+    unitCostOf("lines.*.unitCost"),
+    optionalIdBody("lines.*.locationId"),
+    optionalIdBody("lines.*.inventoryItemId"),
     body("lines.*.batchNo").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
     body("lines.*.serialNo").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
-    body("lines.*.expiryDate").optional({ nullable: true }).isISO8601(),
+    optionalDateBody("lines.*.expiryDate"),
     validate,
   ],
   asyncHandler(async (req, res) =>

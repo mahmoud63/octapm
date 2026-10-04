@@ -4,6 +4,7 @@ const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const weatherFeed = require("./weather-feed.service");
 const { isPartyScopedAccess } = require("./company-party.service");
+const { assertMembers } = require("./tenant-references.service");
 const { createPdf } = require("../utils/pdf-writer");
 
 /**
@@ -873,7 +874,7 @@ const enrichPayload = async ({ tx, orgId, projectId, section, payload, party }) 
   return next;
 };
 
-const assertRefs = async ({ tx, orgId, projectId, section, data, actor = null }) => {
+const assertRefs = async ({ tx, orgId, projectId, section, data, actor = null, existing = null }) => {
   if (data.activityId) {
     const activity = await tx.activity.findFirst({ where: { id: data.activityId, projectId }, select: { id: true } });
     if (!activity) throw new HttpError(400, "DAILY_LOG_ACTIVITY_NOT_FOUND", "Activity not found on this project");
@@ -881,6 +882,16 @@ const assertRefs = async ({ tx, orgId, projectId, section, data, actor = null })
   if (data.locationId) {
     const location = await tx.location.findFirst({ where: { id: data.locationId, projectId }, select: { id: true } });
     if (!location) throw new HttpError(400, "DAILY_LOG_LOCATION_NOT_FOUND", "Location not found on this project");
+  }
+  // CERT-2: a manpower, equipment or delivery row names a company of the
+  // organisation's own directory (a project party's company is one of them),
+  // never another organisation's: its id is answered exactly as an id that
+  // exists nowhere. Looked up whenever the row is pointed at a company it did
+  // not name before; an edit that leaves the row's company as it was does not
+  // look it up again.
+  if (data.companyId && data.companyId !== existing?.companyId) {
+    const company = await tx.company.findFirst({ where: { id: data.companyId, orgId }, select: { id: true } });
+    if (!company) throw new HttpError(400, "DAILY_LOG_COMPANY_NOT_FOUND", "Company not found");
   }
   if (section === QUANTITIES) {
     // PC-6 §4: the row names an item the activity has an approved allocation
@@ -979,7 +990,7 @@ const updateEntry = async ({ orgId, projectId, date, section, entryId, payload =
     if (section === QUANTITIES && (data.activityId !== entry.activityId || data.boqItemId !== entry.boqItemId) && pendingEntry) {
       throw new HttpError(400, "QUANTITY_ENTRY_IMMUTABLE_FIELD", "A submitted quantity's activity and BOQ item are not changed; remove the row and record another", { field: data.activityId !== entry.activityId ? "activityId" : "boqItemId" });
     }
-    await assertRefs({ tx, orgId, projectId, section, data, actor });
+    await assertRefs({ tx, orgId, projectId, section, data, actor, existing: entry });
     const resubmit = party.scoped || entry.status === ENTRY_STATUS.REJECTED;
     const updated = await tx[config.model].update({
       where: { id: entry.id },
@@ -1356,6 +1367,12 @@ const distribute = async ({ orgId, projectId, date, actor = null, to = null, not
   const settings = mergeSettings(project.dailyLogSettingsJson);
   const existing = await prisma.dailyLog.findUnique({ where: { projectId_date: { projectId, date: day } } });
   if (!existing) throw new HttpError(404, "DAILY_LOG_NOT_FOUND", "Nothing has been logged for this day yet");
+  // The people the day is sent to by name are members of this organisation
+  // (by membership). Another company's person used to be stored on the day's
+  // distribution and served back with every answer of that day (CERT-2); it is
+  // now refused exactly as a person who exists nowhere, before the PDF is
+  // filed, anyone is told or anything is stored.
+  const userIds = Array.isArray(to?.userIds) ? await assertMembers({ orgId, userIds: to.userIds }) : [];
 
   // One stored document for the project, rendered as the most restricted
   // reader would see it: no BOQ item code, no per-item quantity.
@@ -1375,7 +1392,6 @@ const distribute = async ({ orgId, projectId, date, actor = null, to = null, not
   });
 
   const roles = Array.isArray(to?.roles) ? to.roles.filter((role) => DISTRIBUTION_ROLES.includes(role)) : settings.distributionRoles;
-  const userIds = Array.isArray(to?.userIds) ? to.userIds.filter(Boolean) : [];
   const emails = (Array.isArray(to?.emails) ? to.emails : settings.distributionEmails).map((email) => String(email).trim().toLowerCase()).filter((email) => EMAIL_RE.test(email));
   const key = rendered.log.date;
   const digest = renderText({ project, log: rendered.log });

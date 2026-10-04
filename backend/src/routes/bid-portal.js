@@ -57,7 +57,7 @@ router.post(
 
 router.put(
   "/:token/bid",
-  [tokenParam, body("lines").optional().isArray({ max: 500 }), body("lines.*.packageLineId").optional().isUUID(), body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("inclusions").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("exclusions").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("validityDays").optional({ nullable: true }).isInt({ min: 0, max: 3650 }), body("leadTimeDays").optional({ nullable: true }).isInt({ min: 0, max: 3650 }), validate],
+  [tokenParam, body("lines").optional().isArray({ max: 500 }), body("lines.*.packageLineId").optional().isString().isUUID(), body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("inclusions").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("exclusions").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("validityDays").optional({ nullable: true }).isInt({ min: 0, max: 3650 }), body("leadTimeDays").optional({ nullable: true }).isInt({ min: 0, max: 3650 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.portalSaveBid(req.params.token, req.body))),
 );
 

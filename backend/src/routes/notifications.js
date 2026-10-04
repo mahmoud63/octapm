@@ -139,13 +139,13 @@ router.put(
 router.get(
   "/",
   [
-    query("cursor").optional().isUUID(),
-    query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
-    query("status")
+    query("cursor").isString().optional().isUUID(),
+    query("limit").isString().optional().isInt({ min: 1, max: 100 }).toInt(),
+    query("status").isString()
       .optional()
       .isIn(["active", "all", "unread", "read", "archived"]),
-    query("category").optional().isIn(categories),
-    query("projectId").optional().isUUID(),
+    query("category").isString().optional().isIn(categories),
+    query("projectId").isString().optional().isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -186,7 +186,7 @@ router.post(
   "/scan-due",
   requireRoles("pm", "planning_eng"),
   [
-    body("projectId").optional({ nullable: true }).isUUID(),
+    body("projectId").optional({ nullable: true }).isString().isUUID(),
     body("horizonDays").optional().isInt({ min: 1, max: 30 }).toInt(),
     validate,
   ],

@@ -237,7 +237,15 @@ const packageData = (payload, { project, existing = null }) => {
     if (!COMMITMENT_TYPES.includes(type)) throw new HttpError(400, "BID_COMMITMENT_TYPE", `commitmentType must be one of ${COMMITMENT_TYPES.join(", ")}`);
     data.commitmentType = type;
   }
-  if (payload.boqSections !== undefined) data.boqSections = [...new Set((Array.isArray(payload.boqSections) ? payload.boqSections : []).map((item) => String(item ?? "").trim()))];
+  if (payload.boqSections !== undefined) {
+    // A list of section names. Any other shape was turned into text and stored
+    // as a section: ["x"] as "x", {"not":"x"} as "[object Object]", 5 as "5",
+    // null as "" (CERT-2 shapes).
+    if (!Array.isArray(payload.boqSections) || payload.boqSections.some((item) => typeof item !== "string")) {
+      throw new HttpError(400, "BID_SECTIONS_INVALID", "boqSections is a list of BOQ section names");
+    }
+    data.boqSections = [...new Set(payload.boqSections.map((item) => item.trim()))];
+  }
   return data;
 };
 
@@ -326,8 +334,17 @@ const codingForBoqItems = async ({ tx, projectId, boqItemIds }) => {
   return coding;
 };
 
+// The BOQ items of the chosen sections. "" is the key listBoqSections gives the
+// items without a section (null or ""): it was sent to Prisma as `in: [null]`,
+// which Prisma refuses, so choosing "(no section)" answered 500.
+const sectionWhere = (sections) => {
+  const named = [...new Set(sections.filter(Boolean))];
+  const clauses = [...(named.length ? [{ section: { in: named } }] : []), ...(sections.some((section) => !section) ? [{ section: null }, { section: "" }] : [])];
+  return clauses.length === 1 ? clauses[0] : { OR: clauses };
+};
+
 const linesFromBoq = async ({ tx, projectId, sections = null, boqItemIds = null, existingBoqIds = new Set(), startNumber = 1 }) => {
-  const where = { projectId, isActive: true, supersededAt: null, ...(boqItemIds?.length ? { id: { in: boqItemIds } } : {}), ...(sections?.length ? { section: { in: sections.map((section) => section || null) } } : {}) };
+  const where = { projectId, isActive: true, supersededAt: null, ...(boqItemIds?.length ? { id: { in: boqItemIds } } : {}), ...(sections?.length ? sectionWhere(sections) : {}) };
   const items = await tx.boqItem.findMany({ where, orderBy: [{ sortOrder: "asc" }, { code: "asc" }] });
   const wanted = items.filter((item) => !existingBoqIds.has(item.id));
   const coding = await codingForBoqItems({ tx, projectId, boqItemIds: wanted.map((item) => item.id) });
@@ -537,6 +554,12 @@ const inviteBidders = async ({ orgId, projectId, packageId, invitations = [], ac
   const list = Array.isArray(invitations) ? invitations : [];
   if (!list.length) throw new HttpError(400, "BID_INVITATIONS_REQUIRED", "Add at least one bidder");
   if (pkg.invitations.length + list.length > MAX_INVITATIONS) throw new HttpError(400, "BID_INVITATIONS_TOO_MANY", `At most ${MAX_INVITATIONS} bidders per package`);
+  // A directory vendor named on an invitation must be this organisation's,
+  // and is checked before the prequalification gate reads it. Unchecked,
+  // another company's vendor (like one that exists nowhere) was answered "not
+  // prequalified" with its id handed back in the details; now either is the
+  // 404 a missing vendor gets, before anything is written (CERT-2).
+  await refs.assertCompanies({ orgId, companyIds: list.map((entry) => entry?.vendorCompanyId), code: "VENDOR_NOT_FOUND", message: "Vendor company not found" });
   const unqualified = await prequalService.assertInvitable({
     orgId,
     companies: list.map((entry) => ({ companyId: trimOrNull(entry.vendorCompanyId), name: trimOrNull(entry.companyName) || "This vendor" })),

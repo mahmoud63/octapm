@@ -48,40 +48,44 @@ const itemValidators = (partial = false) => [
   body("sourceRecordId").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
   body("trade").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
   body("locationText").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
-  body("locationId").optional({ nullable: true }).isUUID(),
-  body("sheetId").optional({ nullable: true }).isUUID(),
-  body("activityId").optional({ nullable: true }).isUUID(),
-  body("assigneeCompanyId").optional({ nullable: true }).isUUID(),
-  body("assigneeUserId").optional({ nullable: true }).isUUID(),
-  body("managerUserId").optional({ nullable: true }).isUUID(),
-  body("finalApproverUserId").optional({ nullable: true }).isUUID(),
+  body("locationId").optional({ nullable: true }).isString().isUUID(),
+  body("sheetId").optional({ nullable: true }).isString().isUUID(),
+  body("activityId").optional({ nullable: true }).isString().isUUID(),
+  body("assigneeCompanyId").optional({ nullable: true }).isString().isUUID(),
+  body("assigneeUserId").optional({ nullable: true }).isString().isUUID(),
+  body("managerUserId").optional({ nullable: true }).isString().isUUID(),
+  body("finalApproverUserId").optional({ nullable: true }).isString().isUUID(),
   body("dueDate").optional({ nullable: true }).isISO8601(),
   body("status").optional().isIn(["draft", "open"]),
   body("activityIds").optional().isArray(),
-  body("activityIds.*").optional().isUUID(),
+  body("activityIds.*").optional().isString().isUUID(),
   body("activityLinks").optional().isArray(),
+  // Each link's activityId is an identifier, as on every other workflow route
+  // (transmittals, rfi, ncr …): .isString() first so an array or object is
+  // refused here, not coerced by normalizeActivityLinks (CERT-2).
+  body("activityLinks.*.activityId").optional().isString().isUUID(),
   body("attachmentRefs").optional().isArray(),
 ];
 
 const filterValidators = () => [
-  query("kind").optional().isIn([...punchService.KINDS, "all"]),
-  query("observationType").optional().isIn(punchService.OBSERVATION_TYPES),
+  query("kind").isString().optional().isIn([...punchService.KINDS, "all"]),
+  query("observationType").isString().optional().isIn(punchService.OBSERVATION_TYPES),
   query("status").optional().isString().trim().isLength({ max: 120 }),
-  query("assigneeCompanyId").optional({ values: "falsy" }).isUUID(),
-  query("assigneeUserId").optional({ values: "falsy" }).isUUID(),
-  query("managerUserId").optional({ values: "falsy" }).isUUID(),
-  query("finalApproverUserId").optional({ values: "falsy" }).isUUID(),
-  query("ballInCourtUserId")
+  query("assigneeCompanyId").isString().optional({ values: "falsy" }).isUUID(),
+  query("assigneeUserId").isString().optional({ values: "falsy" }).isUUID(),
+  query("managerUserId").isString().optional({ values: "falsy" }).isUUID(),
+  query("finalApproverUserId").isString().optional({ values: "falsy" }).isUUID(),
+  query("ballInCourtUserId").isString()
     .optional({ values: "falsy" })
     .matches(/^(me|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i)
     .withMessage("ballInCourtUserId must be a user id or `me`"),
-  query("locationId").optional({ values: "falsy" }).isUUID(),
-  query("sheetId").optional({ values: "falsy" }).isUUID(),
+  query("locationId").isString().optional({ values: "falsy" }).isUUID(),
+  query("sheetId").isString().optional({ values: "falsy" }).isUUID(),
   query("trade").optional().isString().trim().isLength({ max: 80 }),
-  query("priority").optional().isIn(punchService.PRIORITIES),
-  query("overdue").optional().isBoolean().toBoolean(),
+  query("priority").isString().optional().isIn(punchService.PRIORITIES),
+  query("overdue").isString().optional().isBoolean().toBoolean(),
   query("search").optional().isString().trim().isLength({ max: 120 }),
-  query("limit").optional().isInt({ min: 1, max: 1000 }).toInt(),
+  query("limit").isString().optional().isInt({ min: 1, max: 1000 }).toInt(),
 ];
 
 const filtersFrom = (req) => ({
@@ -122,8 +126,8 @@ router.get(
   requirePermission("punch", "export"),
   [
     ...filterValidators(),
-    query("groupBy").optional().isIn(["company", "location", "none"]),
-    query("includePhotos").optional().isBoolean().toBoolean(),
+    query("groupBy").isString().optional().isIn(["company", "location", "none"]),
+    query("includePhotos").isString().optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -183,7 +187,7 @@ router.post(
     body("defaults").optional().isObject(),
     // An item's references are identifiers, as on a single create; the service
     // checks that each names this project's or this company's record.
-    ...REFERENCE_FIELDS.flatMap((field) => [body(`items.*.${field}`).optional({ nullable: true }).isUUID(), body(`defaults.${field}`).optional({ nullable: true }).isUUID()]),
+    ...REFERENCE_FIELDS.flatMap((field) => [body(`items.*.${field}`).optional({ nullable: true }).isString().isUUID(), body(`defaults.${field}`).optional({ nullable: true }).isString().isUUID()]),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -203,11 +207,11 @@ router.post(
   requirePermission("punch", "submit", { transition: "punch.distribute" }),
   [
     body("itemIds").optional().isArray({ max: 1000 }),
-    body("itemIds.*").isUUID(),
+    body("itemIds.*").isString().isUUID(),
     body("companyIds").optional().isArray({ max: 50 }),
-    body("companyIds.*").isUUID(),
+    body("companyIds.*").isString().isUUID(),
     body("userIds").optional().isArray({ max: 200 }),
-    body("userIds.*").isUUID(),
+    body("userIds.*").isString().isUUID(),
     body("message").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
     body("kind").optional().isIn(punchService.KINDS),
     validate,

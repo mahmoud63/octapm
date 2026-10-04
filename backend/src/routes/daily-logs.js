@@ -32,13 +32,13 @@ const optionalNumber = (field, options = {}) => body(field).optional({ nullable:
 
 const entryValidators = [
   optionalText("clientRequestId", 100),
-  body("partyId").optional({ nullable: true }).isUUID(),
-  body("companyId").optional({ nullable: true }).isUUID(),
+  body("partyId").optional({ nullable: true }).isString().isUUID(),
+  body("companyId").optional({ nullable: true }).isString().isUUID(),
   optionalText("companyName", 200),
   optionalText("trade", 120),
   body("workers").optional({ nullable: true }).isInt({ min: 0, max: 100000 }),
   optionalNumber("hours", { min: 0, max: 24 }),
-  body("equipmentId").optional({ nullable: true }).isUUID(),
+  body("equipmentId").optional({ nullable: true }).isString().isUUID(),
   optionalText("name", 200),
   body("count").optional({ nullable: true }).isInt({ min: 1, max: 10000 }),
   optionalNumber("hoursOperated", { min: 0, max: 24 }),
@@ -58,15 +58,15 @@ const entryValidators = [
   optionalNumber("hoursLost", { min: 0, max: 24 }),
   body("kind").optional({ nullable: true }).isIn(service.NOTE_KINDS),
   optionalText("text", 4000),
-  body("activityId").optional({ nullable: true }).isUUID(),
-  body("locationId").optional({ nullable: true }).isUUID(),
+  body("activityId").optional({ nullable: true }).isString().isUUID(),
+  body("locationId").optional({ nullable: true }).isString().isUUID(),
   optionalText("notes", 2000),
   body("status").optional().isIn(["draft", "approved"]),
   // PC-6: the quantities section — the item (allocated to the activity), the
   // allocation it was picked from, and the unit (the item's or an alias;
   // `unit` above is accepted as a spelling of it).
-  body("boqItemId").optional({ nullable: true }).isUUID(),
-  body("allocationId").optional({ nullable: true }).isUUID(),
+  body("boqItemId").optional({ nullable: true }).isString().isUUID(),
+  body("allocationId").optional({ nullable: true }).isString().isUUID(),
   optionalText("unitCode", 32),
 ];
 
@@ -99,7 +99,7 @@ router.put(
 router.get(
   "/manpower-report",
   requirePermission("progress", "read"),
-  [query("from").optional().matches(DATE_RE), query("to").optional().matches(DATE_RE), query("groupBy").optional().isIn(["company", "trade", "company_trade", "activity"]), validate],
+  [query("from").isString().optional().matches(DATE_RE), query("to").isString().optional().matches(DATE_RE), query("groupBy").isString().optional().isIn(["company", "trade", "company_trade", "activity"]), validate],
   asyncHandler(async (req, res) =>
     sendSuccess(res, await service.manpowerReport({ ...scope(req), from: req.query.from || null, to: req.query.to || null, groupBy: req.query.groupBy || "company", viewer: viewer(req) })),
   ),
@@ -108,7 +108,7 @@ router.get(
 router.get(
   "/",
   requirePermission("progress", "read"),
-  [query("from").optional().matches(DATE_RE), query("to").optional().matches(DATE_RE), validate],
+  [query("from").isString().optional().matches(DATE_RE), query("to").isString().optional().matches(DATE_RE), validate],
   asyncHandler(async (req, res) => sendSuccess(res, withheldDailyLogList(await service.listLogs({ ...scope(req), from: req.query.from || null, to: req.query.to || null, viewer: viewer(req) }), boqFigureAccess(req)))),
 );
 
@@ -183,7 +183,7 @@ router.post(
     body("roles").optional().isArray({ max: 20 }),
     body("roles.*").optional().isIn(service.DISTRIBUTION_ROLES),
     body("userIds").optional().isArray({ max: 100 }),
-    body("userIds.*").optional().isUUID(),
+    body("userIds.*").optional().isString().isUUID(),
     body("emails").optional().isArray({ max: 50 }),
     body("emails.*").optional().isEmail(),
     optionalText("note", 2000),
@@ -236,7 +236,7 @@ router.post(
 router.post(
   "/:date/entries/delays/:entryId/weather-delay",
   requirePermission("progress", "update", { transition: "daily_log.update" }),
-  [dateParam, entryParam, optionalNumber("delayDays", { min: 0, max: 365 }), body("contractual").optional().isBoolean().toBoolean(), optionalText("description", 2000), body("activityIds").optional().isArray({ max: 200 }), body("activityIds.*").optional().isUUID(), validate],
+  [dateParam, entryParam, optionalNumber("delayDays", { min: 0, max: 365 }), body("contractual").optional().isBoolean().toBoolean(), optionalText("description", 2000), body("activityIds").optional().isArray({ max: 200 }), body("activityIds.*").optional().isString().isUUID(), validate],
   asyncHandler(async (req, res) =>
     send(req, res, await service.logWeatherDelay({ ...scope(req), date: req.params.date, entryId: req.params.entryId, payload: req.body, actor: actor(req), viewer: viewer(req) })),
   ),

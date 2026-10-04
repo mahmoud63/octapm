@@ -3,6 +3,7 @@ const { HttpError } = require('../utils/http-error');
 const auditService = require('./audit.service');
 const equipmentService = require('./equipment.service');
 const progressService = require('./progress.service');
+const { assertMembers } = require('./tenant-references.service');
 
 const REPORT_STATUSES = ['draft', 'submitted', 'approved', 'rejected'];
 const CREATE_STATUSES = ['draft', 'submitted'];
@@ -183,6 +184,104 @@ const ensureProjectPhotoKeys = async ({ tx, orgId, projectId, photos }) => {
   }
 };
 
+/**
+ * The report's photos as they are stored: the shape progress evidence takes
+ * (progress.service prepareEvidence — an object or a link each, no identifier
+ * where a link or a description belongs, links into the product naming this
+ * project's own documents) and each photo's uploader read from the document it
+ * names (certification CERT-2: the uploader, a person, was stored as given, so
+ * another company's person could be named on the report).
+ */
+const checkedPhotos = async ({ tx, orgId, projectId, photos }) =>
+  (await progressService.prepareEvidence({ orgId, projectId, evidence: { photos }, field: null }, tx))?.photos || [];
+
+/**
+ * The engineer a report names is a person of this organisation, by membership
+ * (certification CERT-2): another company's person used to be stored and
+ * served back, while one who exists nowhere answered 500 from the database's
+ * foreign key — which told the two apart. Both are now the 404 of a person who
+ * is not a member here; a person who belongs to several companies is a valid
+ * engineer in each. Checked when it is set or changed, so a report whose
+ * engineer has since left can still be edited for anything else.
+ */
+const assertEngineer = ({ tx, orgId, engineerId }) =>
+  assertMembers({ tx, orgId, userIds: [engineerId], code: 'USER_NOT_FOUND', message: 'The engineer is not a member of this organisation' });
+
+/**
+ * The ids a report's lines name in the given fields, or null when one of them
+ * is not one text (a list, an object, a number: it names nothing, and is
+ * refused like a missing one rather than dropped).
+ */
+const lineReferences = (lines, fields) => {
+  const ids = [];
+  for (const line of normalizeList(lines)) {
+    if (!line || typeof line !== 'object' || Array.isArray(line)) continue;
+    for (const field of fields) {
+      const value = line[field];
+      if (value === undefined || value === null) continue;
+      if (typeof value !== 'string') return null;
+      if (value.trim()) ids.push(value.trim());
+    }
+  }
+  return [...new Set(ids)];
+};
+
+const lineRefusal = ({ code, message, field, missing }) => {
+  const error = new HttpError(400, code, message);
+  error.details = { [field]: missing };
+  return error;
+};
+
+/**
+ * The equipment and materials a site record's lines name are this project's
+ * (certification CERT-2). equipment[].equipmentId — and .id, which the
+ * approval reads too (equipment.service normalizeDailyReportEquipmentLines) —
+ * and materials[].materialId were stored in equipmentJson and materialsJson as
+ * given and served back: another company's equipment or material was stored;
+ * a daily report's equipment was checked only when the report was approved,
+ * its materials never. Each now names equipment of this project, and a
+ * material of this project (an activity's material — the id the materials
+ * routes call materialId — or the project's material list), on create and
+ * whenever a request sends the lines. Another company's and one that exists
+ * nowhere get the same 400 the approval gives, before anything is written.
+ * The approval's own check stays. Shared with the site diary
+ * (site-diary.service).
+ */
+const assertLineReferences = async ({ tx, projectId, equipment = [], materials = [], record = 'Daily report' }) => {
+  const equipmentIds = lineReferences(equipment, ['equipmentId', 'id']);
+  const equipmentRefusal = (missing) => lineRefusal({
+    code: 'EQUIPMENT_USAGE_LINK_INVALID',
+    message: record === 'Daily report' ? 'Daily report equipment usage must reference project equipment' : `${record} equipment must reference project equipment`,
+    field: 'missingEquipmentIds',
+    missing,
+  });
+  if (equipmentIds === null) throw equipmentRefusal([]);
+  if (equipmentIds.length) {
+    const rows = await tx.equipment.findMany({ where: { projectId, id: { in: equipmentIds } }, select: { id: true } });
+    const known = new Set(rows.map((row) => row.id));
+    const missing = equipmentIds.filter((id) => !known.has(id));
+    if (missing.length) throw equipmentRefusal(missing);
+  }
+
+  const materialIds = lineReferences(materials, ['materialId']);
+  const materialRefusal = (missing) => lineRefusal({
+    code: 'MATERIAL_LINK_INVALID',
+    message: `${record} materials must reference materials of this project`,
+    field: 'missingMaterialIds',
+    missing,
+  });
+  if (materialIds === null) throw materialRefusal([]);
+  if (materialIds.length) {
+    const known = new Set();
+    for (const model of ['activityMaterial', 'materialMaster']) {
+      const rows = await tx[model].findMany({ where: { projectId, id: { in: materialIds } }, select: { id: true } });
+      for (const row of rows) known.add(row.id);
+    }
+    const missing = materialIds.filter((id) => !known.has(id));
+    if (missing.length) throw materialRefusal(missing);
+  }
+};
+
 const linkPhotoDocuments = async ({
   tx,
   orgId,
@@ -320,9 +419,12 @@ const serializeDailyReport = (row) =>
     : null;
 
 const buildReportData = ({ payload, projectId, userId, existing = null }) => {
-  const photos = normalizePhotos(
-    payload.photos !== undefined ? payload.photos : existing?.photosJson,
-  );
+  // Photos a request does not send stay as they are stored (CERT-2: they are
+  // checked when they are sent, not again on every edit).
+  const photos =
+    payload.photos !== undefined
+      ? normalizePhotos(payload.photos)
+      : existing?.photosJson || [];
 
   return {
     projectId,
@@ -522,13 +624,16 @@ const createDailyReport = async ({
       );
     }
 
+    if (payload.engineerId) await assertEngineer({ tx, orgId, engineerId: payload.engineerId });
     const data = buildReportData({ payload, projectId, userId });
+    await assertLineReferences({ tx, projectId, equipment: data.equipmentJson, materials: data.materialsJson });
     await ensureProjectPhotoKeys({
       tx,
       orgId,
       projectId,
       photos: data.photosJson,
     });
+    data.photosJson = await checkedPhotos({ tx, orgId, projectId, photos: data.photosJson });
 
     const now = new Date();
     const report = await tx.dailyReport.create({
@@ -614,16 +719,32 @@ const updateDailyReport = async ({
       );
     }
 
+    if (payload.engineerId && payload.engineerId !== existing.engineerId) {
+      await assertEngineer({ tx, orgId, engineerId: payload.engineerId });
+    }
     const data = buildReportData({ payload, projectId, userId, existing });
     if (data.activityId !== existing.activityId) {
       await ensureActivity({ projectId, activityId: data.activityId }, tx);
     }
-    await ensureProjectPhotoKeys({
+    // Only what the request sends is checked: the lines and the photos it
+    // leaves alone stay as they are, so a report whose stored photo has since
+    // changed (a site photo later cited by a change order, a link accepted
+    // before) can still be edited for anything else (CERT-2).
+    await assertLineReferences({
       tx,
-      orgId,
       projectId,
-      photos: data.photosJson,
+      equipment: payload.equipment !== undefined ? data.equipmentJson : [],
+      materials: payload.materials !== undefined ? data.materialsJson : [],
     });
+    if (payload.photos !== undefined) {
+      await ensureProjectPhotoKeys({
+        tx,
+        orgId,
+        projectId,
+        photos: data.photosJson,
+      });
+      data.photosJson = await checkedPhotos({ tx, orgId, projectId, photos: data.photosJson });
+    }
 
     const row = await tx.dailyReport.update({
       where: { id: reportId },
@@ -930,6 +1051,8 @@ const rejectDailyReport = async ({
 
 module.exports = {
   REPORT_STATUSES,
+  assertLineReferences,
+  checkedPhotos,
   listDailyReports,
   createDailyReport,
   getDailyReport,

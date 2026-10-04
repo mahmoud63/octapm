@@ -13,10 +13,15 @@ const SHIFT_VALUES = ['day', 'night', 'swing'];
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 
+// A photo is an object or a link, as a daily report's is (CERT-2); a list in
+// its place was dropped unseen.
+const isPhotoEntry = (photo) =>
+  typeof photo === 'string' || (photo !== null && typeof photo === 'object' && !Array.isArray(photo));
+
 const diaryPayloadValidators = ({ partial = false } = {}) => {
   const optional = { nullable: true };
   return [
-    body('engineerId').optional().isUUID(),
+    body('engineerId').optional().isString().isUUID(),
     partial
       ? body('date').optional().isISO8601()
       : body('date').isISO8601(),
@@ -52,9 +57,11 @@ const diaryPayloadValidators = ({ partial = false } = {}) => {
     body('materials.*.unit').optional().isString().trim(),
     body('equipment').optional(optional).isArray(),
     body('equipment.*.equipmentId').optional().isString().trim(),
+    body('equipment.*.id').optional().isString(),
     body('equipment.*.name').optional().isString().trim(),
     body('equipment.*.hours').optional().isFloat({ min: 0 }).toFloat(),
     body('photos').optional(optional).isArray(),
+    body('photos.*').custom(isPhotoEntry),
     body('photos.*.url').optional().isString().trim(),
     body('photos.*.key').optional().isString().trim(),
     body('photos.*.filename').optional().isString().trim(),
@@ -65,6 +72,8 @@ const diaryPayloadValidators = ({ partial = false } = {}) => {
     body('photos.*.caption').optional().isString().trim(),
     body('photos.*.takenAt').optional().isISO8601(),
     body('photos.*.uploadedAt').optional().isISO8601(),
+    // The uploader is read from the photo's document (site-diary.service).
+    body('photos.*.uploadedBy').optional({ nullable: true }).isString(),
     body('notes').optional(optional).isString().trim(),
     body('clientRequestId').optional(optional).isString().trim().isLength({ max: 100 }),
     body('clientCreatedAt').optional(optional).isISO8601(),
@@ -78,10 +87,10 @@ router.get(
   '/',
   requirePermission('progress', 'read'),
   [
-    query('status').optional().isIn(siteDiaryService.DIARY_STATUSES),
-    query('date').optional().isISO8601(),
-    query('from').optional().isISO8601(),
-    query('to').optional().isISO8601(),
+    query('status').isString().optional().isIn(siteDiaryService.DIARY_STATUSES),
+    query('date').isString().optional().isISO8601(),
+    query('from').isString().optional().isISO8601(),
+    query('to').isString().optional().isISO8601(),
     validate,
   ],
   asyncHandler(async (req, res) => {

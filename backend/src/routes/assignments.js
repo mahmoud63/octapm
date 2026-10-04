@@ -16,7 +16,7 @@ router.use(authenticate);
 
 router.get(
   "/mine",
-  [query("limit").optional().isInt({ min: 1, max: 500 }).toInt(), validate],
+  [query("limit").isString().optional().isInt({ min: 1, max: 500 }).toInt(), validate],
   asyncHandler(async (req, res) => {
     const result = await recordAssignmentService.listMyOpenItems({
       orgId: req.user.orgId,
@@ -46,10 +46,10 @@ router.post(
   requireCompanyAdmin,
   [
     body("recordType").isIn(recordAssignmentService.RECORD_TYPE_IDS),
-    body("recordId").isUUID(),
+    body("recordId").isString().isUUID(),
     body("field").isIn(recordAssignmentService.ASSIGNABLE_FIELDS),
-    body("userId").optional({ nullable: true }).isUUID(),
-    body("companyId").optional({ nullable: true }).isUUID(),
+    body("userId").optional({ nullable: true }).isString().isUUID(),
+    body("companyId").optional({ nullable: true }).isString().isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {

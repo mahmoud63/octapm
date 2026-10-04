@@ -48,14 +48,14 @@ router.get(
 router.post(
   "/index",
   requirePermission("document_control", "update"),
-  [body("documentIds").optional().isArray({ max: 50 }), body("documentIds.*").isUUID(), validate],
+  [body("documentIds").optional().isArray({ max: 50 }), body("documentIds.*").isString().isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.scanProject({ ...scope(req), documentIds: req.body.documentIds || null, userId: req.user.id, viewer: reader(req).viewer }))),
 );
 
 router.get(
   "/",
   requirePermission("document_control", "read"),
-  [query("q").optional().isString().isLength({ max: 200 }), query("division").optional().isString().isLength({ max: 4 }), query("documentId").optional().isUUID(), validate],
+  [query("q").optional().isString().isLength({ max: 200 }), query("division").optional().isString().isLength({ max: 4 }), query("documentId").isString().optional().isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.listSections({ ...scope(req), q: req.query.q || null, division: req.query.division || null, documentId: req.query.documentId || null, viewer: reader(req).viewer }))),
 );
 
@@ -75,7 +75,7 @@ router.post(
 router.get(
   "/:sectionId",
   requirePermission("document_control", "read"),
-  [param("sectionId").isUUID(), query("maxChars").optional().isInt({ min: 500, max: 200000 }).toInt(), validate],
+  [param("sectionId").isUUID(), query("maxChars").isString().optional().isInt({ min: 500, max: 200000 }).toInt(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.getSection({ ...scope(req), sectionId: req.params.sectionId, maxChars: req.query.maxChars || undefined, access: access(req), ...reader(req) }))),
 );
 
@@ -83,7 +83,7 @@ router.post(
   "/:sectionId/conflicts",
   requirePermission("assistant", "read"),
   requirePermission("document_control", "read"),
-  [param("sectionId").isUUID(), body("sheetIds").optional().isArray({ max: 12 }), body("sheetIds.*").isUUID(), validate],
+  [param("sectionId").isUUID(), body("sheetIds").optional().isArray({ max: 12 }), body("sheetIds.*").isString().isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.findConflicts({ ...scope(req), sectionId: req.params.sectionId, user: user(req), payload: req.body, access: access(req), ...reader(req) }))),
 );
 

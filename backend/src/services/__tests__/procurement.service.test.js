@@ -277,6 +277,21 @@ describe('procurement service material workflow controls', () => {
         expect.objectContaining({ data: expect.objectContaining({ [field]: own }) }),
       );
     });
+
+    // CERT-2 shapes: a cost code sent in another shape was skipped by the check
+    // and then stored as String(value) — ["<id>"] became another company's id.
+    test.each([
+      ['an array', (id) => [id]],
+      ['a nested array', (id) => [[id]]],
+      ['an object', (id) => ({ id })],
+      ['a number', () => 12345],
+    ])('costCodeId sent as %s is refused like a cost code that exists nowhere, own or foreign alike, before the order is written', async (_label, shape) => {
+      for (const id of ['cc-1', 'cc-x', '00000000-0000-4000-8000-000000000000']) {
+        await expect(order({ costCodeId: shape(id) })).rejects.toMatchObject({ status: 404, code: 'COST_CODE_NOT_FOUND' });
+      }
+      expect(mockPrisma.procurementOrder.create).not.toHaveBeenCalled();
+      expect(mockPrisma.procurementPoLine.create).not.toHaveBeenCalled();
+    });
   });
 
   test('refuses to create an order already declared approved or issued', async () => {
@@ -453,5 +468,112 @@ describe('procurement service material workflow controls', () => {
     });
 
     expect(mockPrisma.activityMaterialUsage.create).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * CERT-2 (bodies-4): the lead-time alert is one per procurement package too.
+ * A second order (or a material) on a package that already had an alert found
+ * nothing by its own key, created a second alert for the package, broke the
+ * unique (projectId, packageId) key, and the buyer was answered 409 with
+ * Prisma's own text. The alert holding the package is brought up to date.
+ */
+describe('a lead-time alert per package (CERT-2)', () => {
+  const day = (n) => new Date(Date.now() + n * 86_400_000);
+  // Promised five weeks after it is needed: at risk.
+  const atRiskLine = (over = {}) => ({
+    id: 'line-2', projectId: 'project-1', orderId: 'order-2', activityId: activity.id, activity, packageId: 'pkg-1',
+    activityMaterialId: null, requiredDate: day(5), promisedDate: day(40), leadWeeks: 0, bufferDays: 0,
+    status: 'ordered', orderedQty: 1, receivedQty: 0, issuedQty: 0, ...over,
+  });
+  beforeEach(() => {
+    mockPrisma.procurementLeadTimeAlert.findFirst.mockReset();
+    mockPrisma.procurementLeadTimeAlert.findMany.mockReset();
+    mockPrisma.procurementLeadTimeAlert.create.mockReset();
+    mockPrisma.procurementLeadTimeAlert.update.mockReset();
+    mockPrisma.procurementLeadTimeAlert.update.mockImplementation(async ({ where, data }) => ({ id: where.id, ...data }));
+    mockPrisma.procurementLeadTimeAlert.create.mockImplementation(async ({ data }) => ({ id: 'alert-new', ...data }));
+  });
+
+  test('a second line on a package whose alert another line holds updates that alert — no second alert', async () => {
+    mockPrisma.procurementLeadTimeAlert.findFirst.mockResolvedValue(null);
+    mockPrisma.procurementLeadTimeAlert.findMany.mockResolvedValue([{ id: 'alert-pkg', projectId: 'project-1', packageId: 'pkg-1', poLineId: 'line-1', activityMaterialId: null, status: 'acknowledged' }]);
+
+    await procurementService.syncLeadTimeAlert({ tx: mockPrisma, projectId: 'project-1', project, line: atRiskLine() });
+
+    expect(mockPrisma.procurementLeadTimeAlert.create).not.toHaveBeenCalled();
+    expect(mockPrisma.procurementLeadTimeAlert.update).toHaveBeenCalledWith({
+      where: { id: 'alert-pkg' },
+      data: expect.objectContaining({ packageId: 'pkg-1', poLineId: 'line-2', orderId: 'order-2', status: 'acknowledged' }),
+    });
+    expect(mockPrisma.procurementLeadTimeAlert.findMany).toHaveBeenCalledWith({
+      where: { projectId: 'project-1', OR: [{ poLineId: 'line-2' }, { packageId: 'pkg-1' }] },
+    });
+  });
+
+  test('a resolved package alert taken over by an at-risk line is opened again', async () => {
+    mockPrisma.procurementLeadTimeAlert.findFirst.mockResolvedValue(null);
+    mockPrisma.procurementLeadTimeAlert.findMany.mockResolvedValue([{ id: 'alert-pkg', projectId: 'project-1', packageId: 'pkg-1', poLineId: null, activityMaterialId: null, status: 'resolved' }]);
+    await procurementService.syncLeadTimeAlert({ tx: mockPrisma, projectId: 'project-1', project, line: atRiskLine() });
+    expect(mockPrisma.procurementLeadTimeAlert.update.mock.calls[0][0].data).toMatchObject({ status: 'open', resolvedAt: null, resolvedBy: null });
+  });
+
+  test('a link that yet another alert holds stays with it: the line\'s own alert is updated without the package', async () => {
+    mockPrisma.procurementLeadTimeAlert.findFirst.mockResolvedValue({ id: 'alert-own', projectId: 'project-1', packageId: null, poLineId: 'line-2', status: 'open' });
+    mockPrisma.procurementLeadTimeAlert.findMany.mockResolvedValue([
+      { id: 'alert-own', projectId: 'project-1', packageId: null, poLineId: 'line-2', status: 'open' },
+      { id: 'alert-pkg', projectId: 'project-1', packageId: 'pkg-1', poLineId: 'line-1', status: 'open' },
+    ]);
+    await procurementService.syncLeadTimeAlert({ tx: mockPrisma, projectId: 'project-1', project, line: atRiskLine() });
+    expect(mockPrisma.procurementLeadTimeAlert.create).not.toHaveBeenCalled();
+    const [{ where, data }] = mockPrisma.procurementLeadTimeAlert.update.mock.calls[0];
+    expect(where).toEqual({ id: 'alert-own' });
+    expect(data).not.toHaveProperty('packageId');
+    expect(data.poLineId).toBe('line-2');
+  });
+
+  test('a package nobody holds yet gets its alert created', async () => {
+    mockPrisma.procurementLeadTimeAlert.findFirst.mockResolvedValue(null);
+    mockPrisma.procurementLeadTimeAlert.findMany.mockResolvedValue([]);
+    await procurementService.syncLeadTimeAlert({ tx: mockPrisma, projectId: 'project-1', project, line: atRiskLine() });
+    expect(mockPrisma.procurementLeadTimeAlert.update).not.toHaveBeenCalled();
+    expect(mockPrisma.procurementLeadTimeAlert.create).toHaveBeenCalledWith({ data: expect.objectContaining({ packageId: 'pkg-1', poLineId: 'line-2', status: 'open' }) });
+  });
+
+  test('a material on a package whose alert a line holds takes that alert over', async () => {
+    mockPrisma.procurementLeadTimeAlert.findFirst.mockResolvedValue(null);
+    mockPrisma.procurementLeadTimeAlert.findMany.mockResolvedValue([{ id: 'alert-pkg', projectId: 'project-1', packageId: 'pkg-1', poLineId: 'line-1', activityMaterialId: null, status: 'open' }]);
+    const material = { id: 'mat-1', projectId: 'project-1', activityId: activity.id, activity, procurementPackageId: 'pkg-1', name: 'Cable', plannedQty: 3, qty: 3, requiredDate: day(5), leadWeeks: 12, bufferDays: 0, status: 'planned', poLines: [] };
+    await procurementService.syncLeadTimeAlert({ tx: mockPrisma, projectId: 'project-1', project, material });
+    expect(mockPrisma.procurementLeadTimeAlert.create).not.toHaveBeenCalled();
+    expect(mockPrisma.procurementLeadTimeAlert.update).toHaveBeenCalledWith({ where: { id: 'alert-pkg' }, data: expect.objectContaining({ activityMaterialId: 'mat-1', packageId: 'pkg-1', poLineId: null }) });
+  });
+});
+
+/**
+ * CERT-2 (bodies-4): what an order is worth fits its value column, a
+ * Decimal(18,2). 1e15 of something at 100.00 failed at the write with a 500.
+ */
+describe('an order\'s value fits its column (CERT-2)', () => {
+  const order = (lines) =>
+    procurementService.createPurchaseOrder({ orgId: 'org-1', projectId: 'project-1', actor: { id: 'proc-1', role: 'procurement' }, payload: { ref: 'PO-BIG', item: 'Big', lines } });
+  const line = (over) => ({ description: 'Line', unit: 'nr', activityId: 'activity-1', ...over });
+  beforeEach(() => {
+    for (const model of ['boqItem', 'budgetLine', 'materialMaster', 'costCode']) mockPrisma[model].findMany.mockResolvedValue([]);
+  });
+
+  test.each([
+    ['one line of 1e15 at 100.00', [line({ orderedQty: 1e15, unitCost: 100 })]],
+    ['two lines that only together pass 10^16', [line({ orderedQty: 6e13, unitCost: 100 }), line({ orderedQty: 6e13, unitCost: 100 })]],
+  ])('%s is a 400 PO_VALUE_TOO_LARGE before anything is written', async (_label, lines) => {
+    await expect(order(lines)).rejects.toMatchObject({ status: 400, code: 'PO_VALUE_TOO_LARGE' });
+    expect(mockPrisma.procurementOrder.create).not.toHaveBeenCalled();
+    expect(mockPrisma.procurementPoLine.create).not.toHaveBeenCalled();
+  });
+
+  test('an order worth just under 10^16 is not refused for its value', async () => {
+    const outcome = await order([line({ orderedQty: 99_999_999_999, unitCost: '99999.99' })]).catch((error) => error);
+    expect(outcome?.code).not.toBe('PO_VALUE_TOO_LARGE');
+    expect(mockPrisma.procurementOrder.create).toHaveBeenCalled();
   });
 });

@@ -46,13 +46,13 @@ router.get(
     query('entityType').optional().isString().trim().isLength({ max: 80 }),
     query('entityId').optional().isString().trim().isLength({ max: 120 }),
     query('action').optional().isString().trim().isLength({ max: 80 }),
-    query('source')
+    query('source').isString()
       .optional()
       .isIn(['all', 'audit', 'approval', 'status', 'comment'])
       .withMessage('source must be all, audit, approval, status, or comment'),
     query('cursor').optional().isString().trim().isLength({ max: 120 }),
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
-    query('order').optional().isIn(['asc', 'desc']),
+    query('limit').isString().optional().isInt({ min: 1, max: 100 }).toInt(),
+    query('order').isString().optional().isIn(['asc', 'desc']),
     validate,
   ],
   asyncHandler(async (req, res) => {

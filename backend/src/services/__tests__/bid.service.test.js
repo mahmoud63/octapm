@@ -352,6 +352,41 @@ describe("bid management", () => {
       const pkg = await service.createPackage({ ...scope, payload: { title: "Piling", boqSections: ["02 Substructure"] } });
       expect(pkg.lines.map((line) => line.boqItemId)).toEqual(["boq-1", "boq-2"]);
     });
+
+    it("lines from the BOQ by id: another company's item is dropped exactly as one that exists nowhere; the project's own is taken", async () => {
+      const pkg = await service.createPackage({ ...scope, payload: { title: "By id" } });
+      const theirs = await service.addLinesFromBoq({ ...scope, packageId: pkg.id, boqItemIds: ["boq-x"] });
+      const nobodys = await service.addLinesFromBoq({ ...scope, packageId: pkg.id, boqItemIds: ["00000000-0000-4000-8000-000000000000"] });
+      expect(theirs.lines).toEqual([]);
+      expect(nobodys.lines).toEqual([]);
+      expect(store.lines.some((line) => line.boqItemId === "boq-x")).toBe(false);
+      const ours = await service.addLinesFromBoq({ ...scope, packageId: pkg.id, boqItemIds: ["boq-3", "boq-x"] });
+      expect(ours.lines.map((line) => line.boqItemId)).toEqual(["boq-3"]);
+    });
+
+    /**
+     * CERT-2 (own-state pairs): an invitation naming another company's vendor
+     * reached the prequalification gate first, which answered 409 "not
+     * prequalified" with that company's id handed back in the details, and a
+     * list naming an own vendor first wrote that invitation before refusing.
+     */
+    it("an invitation's directory vendor: another company's is refused like one that exists nowhere, before the prequalification gate and before anything is written", async () => {
+      store.companies.push({ id: "co-1", orgId: ORG, name: "Own Piling", email: "bids@own.example", contactName: "Olu" }, { id: "co-x", orgId: "org-2", name: "Their Piling", email: "bids@their.example", contactName: "Theo" });
+      const pkg = await service.createPackage({ ...scope, payload: { title: "Vendors" } });
+      mockPrisma.bidInvitation.create.mockClear();
+      for (const vendorCompanyId of ["co-x", "00000000-0000-4000-8000-000000000000"]) {
+        const refused = await service.inviteBidders({ ...scope, packageId: pkg.id, invitations: [{ vendorCompanyId, contactEmail: "est@their.example" }] }).catch((error) => error);
+        expect(refused).toMatchObject({ status: 404, code: "VENDOR_NOT_FOUND" });
+        expect(JSON.stringify({ message: refused.message, details: refused.details ?? null })).not.toContain(vendorCompanyId);
+        await expect(service.inviteBidders({ ...scope, packageId: pkg.id, invitations: [{ vendorCompanyId, contactEmail: "est@their.example" }], prequalOverrideReason: "Assessment booked" })).rejects.toMatchObject({ status: 404, code: "VENDOR_NOT_FOUND" });
+      }
+      await expect(service.inviteBidders({ ...scope, packageId: pkg.id, invitations: [{ vendorCompanyId: "co-1", contactEmail: "a@own.example" }, { vendorCompanyId: "co-x", contactEmail: "b@their.example" }], prequalOverrideReason: "Assessment booked" })).rejects.toMatchObject({ status: 404, code: "VENDOR_NOT_FOUND" });
+      expect(mockPrisma.bidInvitation.create).not.toHaveBeenCalled();
+      expect(store.invitations).toEqual([]);
+
+      const invited = await service.inviteBidders({ ...scope, packageId: pkg.id, invitations: [{ vendorCompanyId: "co-1" }], prequalOverrideReason: "Assessment booked" });
+      expect(invited[0]).toMatchObject({ vendorCompanyId: "co-1", companyName: "Own Piling", contactEmail: "bids@own.example" });
+    });
   });
 
   /**
@@ -434,5 +469,54 @@ describe("bid management", () => {
         }),
       );
     });
+  });
+});
+
+// "" is the key /boq-sections gives the BOQ items without a section; it was
+// sent to Prisma as `section: { in: [null] }`, which Prisma refuses, so
+// choosing "(no section)" answered 500 (CERT-2 shapes, round 3).
+/**
+ * CERT-2 (bodies-4): a package's BOQ sections are section names. ["x"],
+ * {"not":"x"}, 5 and null were turned into text and stored as sections:
+ * "x", "[object Object]", "5", "".
+ */
+describe("a bid package's BOQ sections are names (CERT-2)", () => {
+  beforeEach(() => {
+    for (const rows of Object.values(store)) rows.length = 0;
+    jest.clearAllMocks();
+  });
+
+  it.each([[[["x"]]], [[{ not: "x" }]], [[5]], [[null]], [["02 Substructure", ["x"]]], ["02 Substructure"]])("boqSections %j is a 400 BID_SECTIONS_INVALID and nothing is stored", async (boqSections) => {
+    await expect(service.createPackage({ orgId: ORG, projectId: PROJECT, payload: { title: "Sections", boqSections }, actor })).rejects.toMatchObject({ status: 400, code: "BID_SECTIONS_INVALID" });
+    expect(store.packages).toHaveLength(0);
+  });
+
+  it("names, the no-section key among them, are stored as given (trimmed)", async () => {
+    const pkg = await service.createPackage({ orgId: ORG, projectId: PROJECT, payload: { title: "Sections", boqSections: [" 02 Substructure ", ""] }, actor });
+    expect(pkg.boqSections).toEqual(["02 Substructure", ""]);
+  });
+});
+
+describe("BOQ sections chosen for a bid package", () => {
+  beforeEach(() => {
+    for (const rows of Object.values(store)) rows.length = 0;
+    jest.clearAllMocks();
+  });
+  const sectionFilter = () => {
+    const { where } = mockPrisma.boqItem.findMany.mock.calls.at(-1)[0];
+    const { projectId, isActive, supersededAt, ...rest } = where;
+    expect({ projectId, isActive, supersededAt }).toEqual({ projectId: PROJECT, isActive: true, supersededAt: null });
+    return rest;
+  };
+
+  it("matches the items without a section for the no-section key, never with `in: [null]`", async () => {
+    const pkg = await service.createPackage({ orgId: ORG, projectId: PROJECT, payload: { title: "Sections", dueAt: future(10) }, actor });
+    await service.addLinesFromBoq({ orgId: ORG, projectId: PROJECT, packageId: pkg.id, sections: [""], actor });
+    expect(sectionFilter()).toEqual({ OR: [{ section: null }, { section: "" }] });
+    await service.addLinesFromBoq({ orgId: ORG, projectId: PROJECT, packageId: pkg.id, sections: ["", "03 Concrete", "03 Concrete"], actor });
+    expect(sectionFilter()).toEqual({ OR: [{ section: { in: ["03 Concrete"] } }, { section: null }, { section: "" }] });
+    await service.addLinesFromBoq({ orgId: ORG, projectId: PROJECT, packageId: pkg.id, sections: ["02 Substructure"], actor });
+    expect(sectionFilter()).toEqual({ section: { in: ["02 Substructure"] } });
+    expect(JSON.stringify(mockPrisma.boqItem.findMany.mock.calls)).not.toContain("[null]");
   });
 });

@@ -240,3 +240,73 @@ describe("Phase 21D — integrity (release challenge, third pass)", () => {
     expect(prisma.inventoryItem.findMany.mock.calls[0][0].include.balances.where).toEqual({ warehouse: { OR: [{ projectId: null }, { projectId: { in: ["p1"] } }] } });
   });
 });
+
+/**
+ * CERT-2: a row of this organisation that names another company's record —
+ * a balance put away in another company's bin, a movement naming another
+ * company's activity — is not a figure or a name of anything this
+ * organisation holds. Every relation is loaded as Prisma loads it: from its
+ * table, whichever organisation it belongs to.
+ */
+describe("CERT-2 — analytics count only the organisation's own positions and name only its own records", () => {
+  const ORG = "org-1";
+  const OTHER = "org-2";
+  const own = { orgId: ORG };
+  const theirs = { orgId: OTHER };
+  const position = (over) => ({ orgId: ORG, onHand: 0, reserved: 0, damaged: 0, quarantined: 0, inTransit: 0, locationId: null, warehouse: own, location: null, ...over });
+
+  it("values the shelf and each warehouse from the own positions only, and names an activity or a project only when it is the organisation's", async () => {
+    const { prisma } = require("../../config/db");
+    const empty = () => jest.fn(async () => []);
+    Object.assign(prisma, {
+      inventoryItem: {
+        findMany: jest.fn(async () => [
+          {
+            id: "item-1", sku: "CEM", name: "Cement", unit: "bag", category: "cement", averageCost: 10, reorderLevel: 0, minStock: 0, maxStock: null, leadTimeDays: 0,
+            balances: [
+              position({ onHand: 5 }),
+              position({ onHand: 3, locationId: "bin-own", location: own }),
+              position({ onHand: 10, locationId: "bin-theirs", location: theirs }),
+              position({ onHand: 100, warehouse: theirs }),
+              position({ onHand: 1000, orgId: OTHER }),
+            ],
+          },
+        ]),
+      },
+      warehouse: {
+        findMany: jest.fn(async () => [
+          {
+            id: "wh-1", name: "Site store", kind: "site",
+            balances: [
+              position({ onHand: 5, item: { averageCost: 10, orgId: ORG } }),
+              position({ onHand: 3, locationId: "bin-own", location: own, item: { averageCost: 10, orgId: ORG } }),
+              position({ onHand: 10, locationId: "bin-theirs", location: theirs, item: { averageCost: 10, orgId: ORG } }),
+              position({ onHand: 7, item: { averageCost: 1000, orgId: OTHER } }),
+              position({ onHand: 1000, orgId: OTHER, item: { averageCost: 10, orgId: ORG } }),
+            ],
+          },
+        ]),
+      },
+      stockTransaction: {
+        groupBy: jest.fn(async ({ by }) => (by.includes("activityId") ? [
+          { projectId: "p-own", activityId: "act-own", _sum: { quantity: -2, value: 20 } },
+          { projectId: "p-own", activityId: "act-theirs", _sum: { quantity: -1, value: 10 } },
+        ] : [])),
+        findMany: empty(),
+      },
+      procurementPoLine: { groupBy: empty() },
+      activityMaterial: { findMany: empty() },
+      activity: { findMany: jest.fn(async ({ where }) => [{ id: "act-own", activityCode: "A-1", name: "Own activity", orgId: ORG }, { id: "act-theirs", activityCode: "T-1", name: "Their activity CANARY-OTHER", orgId: OTHER }].filter((row) => where.id.in.includes(row.id) && (!where.project || where.project.orgId === row.orgId))) },
+      project: { findMany: jest.fn(async ({ where }) => [{ id: "p-own", name: "Own project", orgId: ORG }].filter((row) => where.id.in.includes(row.id) && (where.orgId === undefined || where.orgId === row.orgId))) },
+    });
+    const result = await service.getAnalytics({ orgId: ORG });
+    expect(result.headline.totalValue).toBe(80); // 8 own on hand at 10.00
+    expect(result.byWarehouse).toEqual([expect.objectContaining({ id: "wh-1", value: 80, lines: 2 })]);
+    const usage = Object.fromEntries(result.usageByActivity.map((row) => [row.value, row]));
+    expect(usage[20]).toMatchObject({ activityId: "act-own", activity: "Own activity", projectId: "p-own", project: "Own project" });
+    expect(usage[10]).toMatchObject({ activityId: null, activityRef: null, activity: null });
+    expect(JSON.stringify(result)).not.toMatch(/act-theirs|CANARY-OTHER/);
+    expect(prisma.activity.findMany.mock.calls[0][0].where).toMatchObject({ project: { orgId: ORG } });
+    expect(prisma.project.findMany.mock.calls[0][0].where).toMatchObject({ orgId: ORG });
+  });
+});

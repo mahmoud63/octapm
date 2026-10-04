@@ -21,7 +21,7 @@ const locationPayloadValidators = ({ requireName = false } = {}) => [
     .isString()
     .trim()
     .isLength({ max: 1000 }),
-  body("parentId").optional({ nullable: true }).isUUID(),
+  body("parentId").optional({ nullable: true }).isString().isUUID(),
   body("sortOrder").optional({ nullable: true }).isInt({ min: 0 }).toInt(),
   validate,
 ];
@@ -35,7 +35,7 @@ const reasonValidators = [
 router.get(
   "/",
   requirePermission("location", "read"),
-  [query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  [query("includeArchived").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => {
     const result = await locationService.listLocations({
       orgId: req.user.orgId,
@@ -66,9 +66,9 @@ router.post(
   "/reorder",
   requirePermission("location", "update"),
   [
-    body("parentId").optional({ nullable: true }).isUUID(),
+    body("parentId").optional({ nullable: true }).isString().isUUID(),
     body("orderedIds").isArray({ min: 1 }),
-    body("orderedIds.*").isUUID(),
+    body("orderedIds.*").isString().isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {

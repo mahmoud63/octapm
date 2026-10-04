@@ -22,12 +22,12 @@ router.get(
   "/",
   requirePermission("user_management", "read"),
   [
-    query("cursor").optional().isUUID(),
-    query("status").optional().isIn(["active", "inactive"]),
+    query("cursor").isString().optional().isUUID(),
+    query("status").isString().optional().isIn(["active", "inactive"]),
     query("role").optional().isString(),
     query("search").optional().isString().trim(),
-    query("sortBy").optional().isIn(["name", "email", "projects", "created"]),
-    query("sortDir").optional().isIn(["asc", "desc"]),
+    query("sortBy").isString().optional().isIn(["name", "email", "projects", "created"]),
+    query("sortDir").isString().optional().isIn(["asc", "desc"]),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -80,9 +80,9 @@ router.post(
   [
     body("email").isEmail().normalizeEmail(),
     body("role").isString().trim().notEmpty(),
-    body("projectId").optional({ values: "falsy" }).isUUID(),
-    body("companyId").optional({ values: "falsy" }).isUUID(),
-    body("projectPartyId").optional({ values: "falsy" }).isUUID(),
+    body("projectId").optional({ values: "falsy" }).isString().isUUID(),
+    body("companyId").optional({ values: "falsy" }).isString().isUUID(),
+    body("projectPartyId").optional({ values: "falsy" }).isString().isUUID(),
     body("projectPartyId").custom((value, { req }) => {
       if (!value || req.body.projectId) return true;
       throw new Error("projectId is required when projectPartyId is provided");

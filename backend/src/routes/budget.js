@@ -26,7 +26,7 @@ const moneyField = (name) => body(name).optional({ nullable: true }).isFloat({ m
 // stays with cost control (PUT below).
 router.get(
   "/cost-codes",
-  [query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  [query("includeArchived").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await budgetService.listProjectCostCodes({ ...scope(req), query: req.query }))),
 );
 
@@ -35,9 +35,9 @@ router.put(
   requirePermission("cost", "update"),
   [
     body("costCodeIds").optional().isArray({ max: 2000 }),
-    body("costCodeIds.*").isUUID(),
+    body("costCodeIds.*").isString().isUUID(),
     body("removeCostCodeIds").optional().isArray({ max: 2000 }),
-    body("removeCostCodeIds.*").isUUID(),
+    body("removeCostCodeIds.*").isString().isUUID(),
     body("importAll").optional().isBoolean().toBoolean(),
     validate,
   ],
@@ -48,9 +48,9 @@ router.get(
   "/lines",
   requirePermission("cost", "read"),
   [
-    query("includeArchived").optional().isBoolean().toBoolean(),
-    query("costType").optional().isIn(budgetService.COST_TYPES),
-    query("costCodeId").optional({ values: "falsy" }).isUUID(),
+    query("includeArchived").isString().optional().isBoolean().toBoolean(),
+    query("costType").isString().optional().isIn(budgetService.COST_TYPES),
+    query("costCodeId").isString().optional({ values: "falsy" }).isUUID(),
     query("search").optional().isString().trim().isLength({ max: 120 }),
     validate,
   ],
@@ -63,7 +63,7 @@ router.post(
   "/lines",
   requirePermission("cost", "create"),
   [
-    body("costCodeId").isUUID(),
+    body("costCodeId").isString().isUUID(),
     body("costType").optional().isIn(budgetService.COST_TYPES),
     body("description").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
     moneyField("originalBudget"),
@@ -92,7 +92,7 @@ router.post(
 router.post(
   "/transfers",
   requirePermission("cost", "approve"),
-  [body("fromLineId").isUUID(), body("toLineId").isUUID(), body("amount").isFloat({ gt: 0 }), body("note").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
+  [body("fromLineId").isString().isUUID(), body("toLineId").isString().isUUID(), body("amount").isFloat({ gt: 0 }), body("note").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await budgetService.transferBudget({ ...scope(req), payload: req.body, actor: actor(req) }))),
 );
 
@@ -113,7 +113,7 @@ router.get(
 router.post(
   "/snapshots",
   requirePermission("cost", "approve"),
-  [body("label").optional({ nullable: true }).isString().trim().isLength({ max: 160 }), body("reportingPeriodId").optional({ nullable: true }).isUUID(), validate],
+  [body("label").optional({ nullable: true }).isString().trim().isLength({ max: 160 }), body("reportingPeriodId").optional({ nullable: true }).isString().isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await budgetService.takeSnapshot({ ...scope(req), payload: req.body, actor: actor(req) }), 201)),
 );
 
@@ -127,7 +127,7 @@ router.get(
 router.put(
   "/change-orders/:changeOrderId/line",
   requirePermission("cost", "update"),
-  [param("changeOrderId").isUUID(), body("lineId").optional({ nullable: true }).isUUID(), validate],
+  [param("changeOrderId").isUUID(), body("lineId").optional({ nullable: true }).isString().isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await budgetService.setChangeOrderBudgetLine({ ...scope(req), changeOrderId: req.params.changeOrderId, lineId: req.body.lineId || null, actor: actor(req) }))),
 );
 
@@ -168,7 +168,7 @@ router.delete(
 router.put(
   "/lines/:lineId/allocations",
   requirePermission("cost", "update"),
-  [param("lineId").isUUID(), body("allocations").isArray({ max: 500 }), body("allocations.*.activityId").isUUID(), body("allocations.*.weight").isFloat({ min: 0, max: 100 }), validate],
+  [param("lineId").isUUID(), body("allocations").isArray({ max: 500 }), body("allocations.*.activityId").isString().isUUID(), body("allocations.*.weight").isFloat({ min: 0, max: 100 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await budgetService.setLineAllocations({ ...scope(req), lineId: req.params.lineId, payload: req.body, actor: actor(req) }))),
 );
 

@@ -31,9 +31,9 @@ router.get(
   "/",
   requirePermission("project_parties", "read"),
   [
-    query("cursor").optional().isUUID(),
-    query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
-    query("status").optional().isIn(["active", "inactive"]),
+    query("cursor").isString().optional().isUUID(),
+    query("limit").isString().optional().isInt({ min: 1, max: 100 }).toInt(),
+    query("status").isString().optional().isIn(["active", "inactive"]),
     query("search").optional().isString().trim().isLength({ max: 120 }),
     validate,
   ],

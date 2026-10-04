@@ -94,9 +94,9 @@ const assertCanManageJob = (req, job) => {
 router.get(
   "/",
   [
-    query("status").optional().isIn(Object.values(jobService.JOB_STATUSES)),
-    query("type").optional().isIn(Object.values(jobService.JOB_TYPES)),
-    query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
+    query("status").isString().optional().isIn(Object.values(jobService.JOB_STATUSES)),
+    query("type").isString().optional().isIn(Object.values(jobService.JOB_TYPES)),
+    query("limit").isString().optional().isInt({ min: 1, max: 100 }).toInt(),
     validate,
   ],
   asyncHandler(async (req, res) => {

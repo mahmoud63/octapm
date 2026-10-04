@@ -35,7 +35,7 @@ router.put(
     optionalInt("defectsLiabilityDays"),
     body("ldCapPct").optional({ nullable: true }).isFloat({ min: 0, max: 100 }),
     body("documentIds").optional().isArray({ max: 20 }),
-    body("documentIds.*").isUUID(),
+    body("documentIds.*").isString().isUUID(),
     body("clauses").optional().isArray({ max: 200 }),
     body("clauses.*.category").optional({ nullable: true }).isIn(service.CLAUSE_CATEGORIES),
     body("clauses.*.status").optional({ nullable: true }).isIn(["draft", "confirmed", "rejected"]),
@@ -49,7 +49,7 @@ router.post(
   "/extract",
   requirePermission("assistant", "read"),
   requirePermission("eot", "update"),
-  [body("documentIds").optional().isArray({ max: 10 }), body("documentIds.*").isUUID(), validate],
+  [body("documentIds").optional().isArray({ max: 10 }), body("documentIds.*").isString().isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.extractClauses({ ...scope(req), user: user(req), payload: req.body, viewer: viewer(req) }))),
 );
 
@@ -63,7 +63,7 @@ router.post(
   "/notices/draft",
   requirePermission("assistant", "read"),
   requirePermission("document_control", "create"),
-  [body("recordType").isIn(Object.values(service.RECORD_TYPES)), body("recordId").isUUID(), body("instructions").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }), validate],
+  [body("recordType").isIn(Object.values(service.RECORD_TYPES)), body("recordId").isString().isUUID(), body("instructions").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.draftNotice({ ...scope(req), user: user(req), payload: req.body }))),
 );
 
@@ -72,11 +72,11 @@ router.post(
   requirePermission("document_control", "create"),
   [
     body("recordType").isIn(Object.values(service.RECORD_TYPES)),
-    body("recordId").isUUID(),
+    body("recordId").isString().isUUID(),
     body("subject").isString().trim().isLength({ min: 1, max: 200 }),
     body("body").isString().trim().isLength({ min: 1, max: 12000 }),
-    body("activityId").optional({ nullable: true }).isUUID(),
-    body("date").optional({ nullable: true }).isISO8601(),
+    body("activityId").optional({ nullable: true }).isString().isUUID(),
+    body("date").optional({ nullable: true }).isString().isISO8601(),
     validate,
   ],
   asyncHandler(async (req, res) => sendSuccess(res, await service.createNotice({ ...scope(req), user: user(req), payload: req.body }), 201)),

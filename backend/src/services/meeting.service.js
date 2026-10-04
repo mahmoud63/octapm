@@ -420,11 +420,13 @@ const ensureActivitiesInProject = async ({
   const found = new Set(rows.map((row) => row.id));
   const missing = ids.filter((id) => !found.has(id));
   if (missing.length) {
+    // The refusal does not list the ids it was sent: it handed another
+    // company's activity id back in the answer (CERT-2), and the answer is the
+    // same whichever id is missing (as RISK_ACTIVITY_INVALID).
     throw new HttpError(
       400,
       "MEETING_ACTIVITY_INVALID",
       "One or more meeting activity links are invalid for this project",
-      { activityIds: missing },
     );
   }
 };

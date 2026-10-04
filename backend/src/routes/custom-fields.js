@@ -61,14 +61,14 @@ router.get(
 router.get(
   "/schema",
   requirePermission("custom_field", "read"),
-  [query("recordType").isIn(service.RECORD_TYPE_KEYS), query("recordTypeKey").optional().isString().trim(), validate],
+  [query("recordType").isString().isIn(service.RECORD_TYPE_KEYS), query("recordTypeKey").optional().isString().trim(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.schemaFor({ ...scope(req), recordType: req.query.recordType, recordTypeKey: req.query.recordTypeKey || null }))),
 );
 
 router.get(
   "/definitions",
   requirePermission("custom_field", "read"),
-  [query("recordType").optional().isIn(service.RECORD_TYPE_KEYS), query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  [query("recordType").isString().optional().isIn(service.RECORD_TYPE_KEYS), query("includeArchived").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await service.listDefinitions({ ...scope(req), recordType: req.query.recordType || null, includeArchived: Boolean(req.query.includeArchived), scope: "all" }) })),
 );
 
@@ -96,7 +96,7 @@ router.delete(
 router.get(
   "/fieldsets",
   requirePermission("custom_field", "read"),
-  [query("recordType").optional().isIn(service.RECORD_TYPE_KEYS), validate],
+  [query("recordType").isString().optional().isIn(service.RECORD_TYPE_KEYS), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await service.listFieldsets({ orgId: req.user.orgId, recordType: req.query.recordType || null }) })),
 );
 
@@ -109,13 +109,13 @@ router.get(
 router.put(
   "/assignments",
   manage,
-  [body("recordType").isIn(service.RECORD_TYPE_KEYS), body("fieldsetId").optional({ nullable: true }).isUUID(), validate],
+  [body("recordType").isIn(service.RECORD_TYPE_KEYS), body("fieldsetId").optional({ nullable: true }).isString().isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await service.setProjectFieldset({ ...scope(req), recordType: req.body.recordType, fieldsetId: req.body.fieldsetId || null, actor: actor(req) }) })),
 );
 
 router.get(
   "/values",
-  [query("recordType").isIn(service.RECORD_TYPE_KEYS), query("recordIds").isString().notEmpty(), validate],
+  [query("recordType").isString().isIn(service.RECORD_TYPE_KEYS), query("recordIds").isString().notEmpty(), validate],
   requireRecordAccess("read"),
   asyncHandler(async (req, res) => {
     const recordIds = String(req.query.recordIds).split(",").map((item) => item.trim()).filter(Boolean).slice(0, 500);

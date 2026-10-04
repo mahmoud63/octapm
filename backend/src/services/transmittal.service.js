@@ -3,6 +3,7 @@ const { HttpError } = require('../utils/http-error');
 const { nextRef } = require("../utils/reference-number");
 const {
   RECORD_TYPES,
+  assertPayloadActivity,
   workflowAssignmentData,
   attachWorkflowDetailsToRecords,
   recordDocumentRevisions,
@@ -46,6 +47,8 @@ const listTransmittals = async ({ orgId, projectId }) => {
 
 const createTransmittal = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
+  // Every activity the transmittal links, before anything is written (CERT-2).
+  await assertPayloadActivity({ projectId, payload });
 
   const generatedRef = await nextRef(prisma, { table: 'Transmittal', scopeColumn: 'projectId', scopeId: projectId, prefix: 'TRM' });
 
@@ -128,6 +131,7 @@ const updateTransmittal = async ({
   if (!existing) {
     throw new HttpError(404, 'TRANSMITTAL_NOT_FOUND', 'Transmittal not found');
   }
+  await assertPayloadActivity({ projectId, payload });
 
   const nextStatus = payload.status ?? existing.status;
 

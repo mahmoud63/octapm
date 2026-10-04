@@ -31,12 +31,12 @@ router.get(
   '/',
   requirePermission('cost', 'read'),
   [
-    query('cursor').optional().isUUID(),
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
-    query('activityId').optional().isUUID(),
+    query('cursor').isString().optional().isUUID(),
+    query('limit').isString().optional().isInt({ min: 1, max: 100 }).toInt(),
+    query('activityId').isString().optional().isUUID(),
     query('category').optional().isString().trim().isLength({ max: 120 }),
     query('search').optional().isString().trim().isLength({ max: 120 }),
-    query('sortBy')
+    query('sortBy').isString()
       .optional()
       .isIn([
         'activity',
@@ -50,7 +50,7 @@ router.get(
         'actual',
         'forecast',
       ]),
-    query('sortDir').optional().isIn(['asc', 'desc']),
+    query('sortDir').isString().optional().isIn(['asc', 'desc']),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -101,7 +101,7 @@ router.post(
     transition: 'burn_rate.create',
   }),
   [
-    body('date').optional().isISO8601(),
+    body('date').optional().isString().isISO8601(),
     moneyBody('amount', { required: true }),
     body('category').optional().isString().trim(),
     body('note').optional().isString().trim(),
@@ -136,7 +136,7 @@ router.post(
     moneyBody('budget'),
     moneyBody('committed'),
     moneyBody('actual'),
-    body('actualThroughDate').optional({ nullable: true }).isISO8601(),
+    body('actualThroughDate').optional({ nullable: true }).isString().isISO8601(),
     moneyBody('forecast'),
     forecastSourceIsTheServers,
     validate,
@@ -173,7 +173,7 @@ router.patch(
     moneyBody('budget'),
     moneyBody('committed'),
     moneyBody('actual'),
-    body('actualThroughDate').optional({ nullable: true }).isISO8601(),
+    body('actualThroughDate').optional({ nullable: true }).isString().isISO8601(),
     moneyBody('forecast'),
     forecastSourceIsTheServers,
     validate,
@@ -218,9 +218,9 @@ router.get(
   requirePermission('cost', 'read'),
   [
     param('projectId').isUUID(),
-    query('budgetLineId').optional().isUUID(),
-    query('activityId').optional().isUUID(),
-    query('limit').optional().isInt({ min: 1, max: 500 }).toInt(),
+    query('budgetLineId').isString().optional().isUUID(),
+    query('activityId').isString().optional().isUUID(),
+    query('limit').isString().optional().isInt({ min: 1, max: 500 }).toInt(),
     validate,
   ],
   asyncHandler(async (req, res) =>

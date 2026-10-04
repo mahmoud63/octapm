@@ -70,7 +70,7 @@ router.get(
 router.get(
   "/templates",
   requirePermission("workflow", "read"),
-  [query("tool").optional().isIn(tools.TOOL_KEYS), query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  [query("tool").isString().optional().isIn(tools.TOOL_KEYS), query("includeArchived").isString().optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await engine.listTemplates({ ...scope(req), tool: req.query.tool || null, includeArchived: Boolean(req.query.includeArchived), viewer: viewer(req) }) })),
 );
 
@@ -104,7 +104,7 @@ router.get(
 router.get(
   "/instances",
   requirePermission("workflow", "read"),
-  [query("tool").optional().isIn(tools.TOOL_KEYS), query("recordId").optional({ values: "falsy" }).isUUID(), query("status").optional().isIn(Object.values(engine.INSTANCE_STATUS)), query("limit").optional().isInt({ min: 1, max: 200 }).toInt(), validate],
+  [query("tool").isString().optional().isIn(tools.TOOL_KEYS), query("recordId").isString().optional({ values: "falsy" }).isUUID(), query("status").isString().optional().isIn(Object.values(engine.INSTANCE_STATUS)), query("limit").isString().optional().isInt({ min: 1, max: 200 }).toInt(), validate],
   asyncHandler(async (req, res) =>
     sendSuccess(res, { items: (await engine.listInstances({ ...scope(req), tool: req.query.tool || null, recordId: req.query.recordId || null, status: req.query.status || null, limit: req.query.limit || 50, viewerId: req.user.id, viewer: viewer(req) })).map(await instanceView(req)) }),
   ),
@@ -113,7 +113,7 @@ router.get(
 router.post(
   "/instances",
   requirePermission("workflow", "update", { transition: "workflow.manage" }),
-  [body("tool").isIn(tools.TOOL_KEYS), body("recordId").isUUID(), body("templateId").optional({ nullable: true }).isUUID(), validate],
+  [body("tool").isIn(tools.TOOL_KEYS), body("recordId").isString().isUUID(), body("templateId").optional({ nullable: true }).isString().isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await viewed(req, await engine.startInstance({ ...scope(req), tool: req.body.tool, recordId: req.body.recordId, templateId: req.body.templateId || null, actor: actor(req), trigger: "manual", viewer: viewer(req) })), 201)),
 );
 

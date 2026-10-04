@@ -90,12 +90,12 @@ const projectPayloadValidators = ({ requireName = false } = {}) => [
   optionalText("contractorName"),
   optionalEnum("contractType", CONTRACT_TYPES),
   optionalText("contractNumber"),
-  body("startDate").optional({ nullable: true }).isISO8601(),
-  body("endDate").optional({ nullable: true }).isISO8601(),
-  body("completionDate").optional({ nullable: true }).isISO8601(),
-  body("baselineDate").optional({ nullable: true }).isISO8601(),
-  body("dataDate").optional({ nullable: true }).isISO8601(),
-  body("revisedCompletionDate").optional({ nullable: true }).isISO8601(),
+  body("startDate").optional({ nullable: true }).isString().isISO8601(),
+  body("endDate").optional({ nullable: true }).isString().isISO8601(),
+  body("completionDate").optional({ nullable: true }).isString().isISO8601(),
+  body("baselineDate").optional({ nullable: true }).isString().isISO8601(),
+  body("dataDate").optional({ nullable: true }).isString().isISO8601(),
+  body("revisedCompletionDate").optional({ nullable: true }).isString().isISO8601(),
   body("duration").optional({ nullable: true }).isInt({ min: 0 }).toInt(),
   body("durationUnit").optional().isIn(["days", "weeks", "months"]),
   moneyBody("contractValue"),
@@ -125,7 +125,7 @@ const projectPayloadValidators = ({ requireName = false } = {}) => [
   body("parties.*.role")
     .optional()
     .isIn(["owner", "consultant", "contractor", "subcontractor"]),
-  body("parties.*.companyId").optional({ nullable: true }).isUUID(),
+  body("parties.*.companyId").optional({ nullable: true }).isString().isUUID(),
   body("parties.*.companyName")
     .optional({ nullable: true })
     .isString()
@@ -164,10 +164,10 @@ const projectPayloadValidators = ({ requireName = false } = {}) => [
 router.get(
   "/",
   [
-    query("cursor").optional().isUUID(),
-    query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
+    query("cursor").isString().optional().isUUID(),
+    query("limit").isString().optional().isInt({ min: 1, max: 100 }).toInt(),
     query("status").optional().isString(),
-    query("includeArchived").optional().isBoolean().toBoolean(),
+    query("includeArchived").isString().optional().isBoolean().toBoolean(),
     query("search").optional().isString().trim(),
     validate,
   ],

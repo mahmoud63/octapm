@@ -26,10 +26,10 @@ router.get(
   // commercial and financial roles.
   requirePermission("change_order", "read"),
   [
-    query("status")
+    query("status").isString()
       .optional()
       .isIn(["draft", "pending", "approved", "rejected", "archived"]),
-    query("includeArchived").optional().isBoolean().toBoolean(),
+    query("includeArchived").isString().optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -52,13 +52,13 @@ router.post(
   requireRoles("pm", "qs"),
   [
     body("description").isString().trim().notEmpty(),
-    body("activityId").optional({ nullable: true }).isUUID(),
-    body("budgetLineId").optional({ nullable: true }).isUUID(),
+    body("activityId").optional({ nullable: true }).isString().isUUID(),
+    body("budgetLineId").optional({ nullable: true }).isString().isUUID(),
     body("budgetAllocations").optional().isArray({ max: 50 }),
-    body("budgetAllocations.*.budgetLineId").isUUID(),
+    body("budgetAllocations.*.budgetLineId").isString().isUUID(),
     moneyBody("budgetAllocations.*.amount"),
     body("activityLinks").optional().isArray(),
-    body("activityLinks.*.activityId").optional().isUUID(),
+    body("activityLinks.*.activityId").optional().isString().isUUID(),
     body("activityLinks.*.relationType").optional().isString().trim(),
     body("activityLinks.*.scheduleImpactDays").optional().isInt().toInt(),
     body("activityLinks.*.approvedScheduleImpactDays")
@@ -69,16 +69,16 @@ router.post(
     moneyBody("activityLinks.*.approvedCostImpact"),
     body("activityLinks.*.baselineStart")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.baselineFinish")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactedStart")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactedFinish")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactBasis")
       .optional({ nullable: true })
       .isString()
@@ -88,12 +88,12 @@ router.post(
       .isString()
       .trim(),
     body("affectedActivityIds").optional().isArray(),
-    body("affectedActivityIds.*").optional().isUUID(),
+    body("affectedActivityIds.*").optional().isString().isUUID(),
     body("allocationLinks").optional().isArray(),
     body("allocationLinks.*.allocationId")
       .optional({ nullable: true })
-      .isUUID(),
-    body("allocationLinks.*.boqItemId").optional({ nullable: true }).isUUID(),
+      .isString().isUUID(),
+    body("allocationLinks.*.boqItemId").optional({ nullable: true }).isString().isUUID(),
     body("allocationLinks.*.quantity").optional().isFloat({ min: 0 }).toFloat(),
     moneyBody("allocationLinks.*.amount"),
     body("allocationLinks.*.notes")
@@ -101,16 +101,16 @@ router.post(
       .isString()
       .trim(),
     body("correspondenceIds").optional().isArray(),
-    body("correspondenceIds.*").optional().isUUID(),
+    body("correspondenceIds.*").optional().isString().isUUID(),
     body("correspondenceLinks").optional().isArray(),
-    body("correspondenceLinks.*.correspondenceId").optional().isUUID(),
+    body("correspondenceLinks.*.correspondenceId").optional().isString().isUUID(),
     body("correspondenceLinks.*.relationType").optional().isString().trim(),
     body("attachmentRefs").optional().isArray(),
-    body("attachmentRefs.*.documentId").optional({ nullable: true }).isUUID(),
+    body("attachmentRefs.*.documentId").optional({ nullable: true }).isString().isUUID(),
     body("supportingDocumentIds").optional().isArray(),
-    body("supportingDocumentIds.*").optional().isUUID(),
+    body("supportingDocumentIds.*").optional().isString().isUUID(),
     body("documentIds").optional().isArray(),
-    body("documentIds.*").optional().isUUID(),
+    body("documentIds.*").optional().isString().isUUID(),
     body("category").optional().isString().trim(),
     moneyBody("value"),
     body("status").optional().isIn(["draft"]),
@@ -129,7 +129,7 @@ router.post(
       .isLength({
         max: 4000,
       }),
-    body("submittedDate").optional().isISO8601(),
+    body("submittedDate").optional().isString().isISO8601(),
     body("raisedBy").optional().isString().trim(),
     body("rejectedReason").optional().isString().trim(),
     body("approvalComment")
@@ -159,13 +159,13 @@ router.patch(
   [
     param("id").isUUID(),
     body("description").optional().isString().trim().notEmpty(),
-    body("activityId").optional({ nullable: true }).isUUID(),
-    body("budgetLineId").optional({ nullable: true }).isUUID(),
+    body("activityId").optional({ nullable: true }).isString().isUUID(),
+    body("budgetLineId").optional({ nullable: true }).isString().isUUID(),
     body("budgetAllocations").optional().isArray({ max: 50 }),
-    body("budgetAllocations.*.budgetLineId").isUUID(),
+    body("budgetAllocations.*.budgetLineId").isString().isUUID(),
     moneyBody("budgetAllocations.*.amount"),
     body("activityLinks").optional().isArray(),
-    body("activityLinks.*.activityId").optional().isUUID(),
+    body("activityLinks.*.activityId").optional().isString().isUUID(),
     body("activityLinks.*.relationType").optional().isString().trim(),
     body("activityLinks.*.scheduleImpactDays").optional().isInt().toInt(),
     body("activityLinks.*.approvedScheduleImpactDays")
@@ -176,16 +176,16 @@ router.patch(
     moneyBody("activityLinks.*.approvedCostImpact"),
     body("activityLinks.*.baselineStart")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.baselineFinish")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactedStart")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactedFinish")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactBasis")
       .optional({ nullable: true })
       .isString()
@@ -195,12 +195,12 @@ router.patch(
       .isString()
       .trim(),
     body("affectedActivityIds").optional().isArray(),
-    body("affectedActivityIds.*").optional().isUUID(),
+    body("affectedActivityIds.*").optional().isString().isUUID(),
     body("allocationLinks").optional().isArray(),
     body("allocationLinks.*.allocationId")
       .optional({ nullable: true })
-      .isUUID(),
-    body("allocationLinks.*.boqItemId").optional({ nullable: true }).isUUID(),
+      .isString().isUUID(),
+    body("allocationLinks.*.boqItemId").optional({ nullable: true }).isString().isUUID(),
     body("allocationLinks.*.quantity").optional().isFloat({ min: 0 }).toFloat(),
     moneyBody("allocationLinks.*.amount"),
     body("allocationLinks.*.notes")
@@ -208,16 +208,16 @@ router.patch(
       .isString()
       .trim(),
     body("correspondenceIds").optional().isArray(),
-    body("correspondenceIds.*").optional().isUUID(),
+    body("correspondenceIds.*").optional().isString().isUUID(),
     body("correspondenceLinks").optional().isArray(),
-    body("correspondenceLinks.*.correspondenceId").optional().isUUID(),
+    body("correspondenceLinks.*.correspondenceId").optional().isString().isUUID(),
     body("correspondenceLinks.*.relationType").optional().isString().trim(),
     body("attachmentRefs").optional().isArray(),
-    body("attachmentRefs.*.documentId").optional({ nullable: true }).isUUID(),
+    body("attachmentRefs.*.documentId").optional({ nullable: true }).isString().isUUID(),
     body("supportingDocumentIds").optional().isArray(),
-    body("supportingDocumentIds.*").optional().isUUID(),
+    body("supportingDocumentIds.*").optional().isString().isUUID(),
     body("documentIds").optional().isArray(),
-    body("documentIds.*").optional().isUUID(),
+    body("documentIds.*").optional().isString().isUUID(),
     body("category").optional().isString().trim(),
     moneyBody("value"),
     body("status")
@@ -238,7 +238,7 @@ router.patch(
       .isLength({
         max: 4000,
       }),
-    body("submittedDate").optional().isISO8601(),
+    body("submittedDate").optional().isString().isISO8601(),
     body("raisedBy").optional().isString().trim(),
     body("rejectedReason").optional().isString().trim(),
     body("approvalComment")

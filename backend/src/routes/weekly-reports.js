@@ -152,8 +152,8 @@ router.post(
   '/',
   requireRoles('pm', 'planning_eng', 'site_engineer'),
   [
-    body('weekStartDate').isISO8601(),
-    body('weekEndDate').isISO8601(),
+    body('weekStartDate').isString().isISO8601(),
+    body('weekEndDate').isString().isISO8601(),
     body('plannedProgress').optional().isFloat({ min: 0, max: 100 }),
     body('actualProgress').optional().isFloat({ min: 0, max: 100 }),
     body('weatherDelayDays').optional().isInt({ min: 0 }),
@@ -162,9 +162,9 @@ router.post(
     // The activity lists are lists of activity ids (weekly-report.service
     // checks that each is an activity of this project).
     body('activitiesCompleted').optional({ nullable: true }).isArray(),
-    body('activitiesCompleted.*').isUUID(),
+    body('activitiesCompleted.*').isString().isUUID(),
     body('activitiesInProgress').optional({ nullable: true }).isArray(),
-    body('activitiesInProgress.*').isUUID(),
+    body('activitiesInProgress.*').isString().isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -218,17 +218,17 @@ router.patch(
   requireRoles('pm', 'planning_eng', 'site_engineer'),
   [
     param('id').isUUID(),
-    body('weekStartDate').optional().isISO8601(),
-    body('weekEndDate').optional().isISO8601(),
+    body('weekStartDate').optional().isString().isISO8601(),
+    body('weekEndDate').optional().isString().isISO8601(),
     body('plannedProgress').optional().isFloat({ min: 0, max: 100 }),
     body('actualProgress').optional().isFloat({ min: 0, max: 100 }),
     body('weatherDelayDays').optional().isInt({ min: 0 }),
     body('manpowerCount').optional().isInt({ min: 0 }),
     body('status').optional().isIn(['draft', 'submitted', 'approved']),
     body('activitiesCompleted').optional({ nullable: true }).isArray(),
-    body('activitiesCompleted.*').isUUID(),
+    body('activitiesCompleted.*').isString().isUUID(),
     body('activitiesInProgress').optional({ nullable: true }).isArray(),
-    body('activitiesInProgress.*').isUUID(),
+    body('activitiesInProgress.*').isString().isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => {

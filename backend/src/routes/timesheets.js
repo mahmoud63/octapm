@@ -13,7 +13,9 @@ router.use(authenticate);
 
 const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
 const actorFor = (req) => ({ id: req.user.id, name: req.user.name || null, role: getEffectiveRole(req), projectAccess: req.projectAccess || null });
-const dateQuery = (name) => query(name).optional().matches(/^\d{4}-\d{2}-\d{2}$/);
+// A filter is one value: isIn()/matches() check a repeated one (?status=a&status=b)
+// element by element, and the list reached Prisma — a 500 (CERT-2 shapes).
+const dateQuery = (name) => query(name).optional().isString().matches(/^\d{4}-\d{2}-\d{2}$/);
 const idOrNull = (field) => body(field).optional({ nullable: true }).isString();
 
 const workerValidators = (partial = false) => [
@@ -23,7 +25,8 @@ const workerValidators = (partial = false) => [
   body("employeeNumber").optional({ nullable: true }).isString().isLength({ max: 60 }),
   body("trade").optional({ nullable: true }).isString().isLength({ max: 80 }),
   body("classification").optional({ nullable: true }).isString().isLength({ max: 80 }),
-  body("hourlyRate").optional({ nullable: true }).isFloat({ min: 0 }),
+  // No more than the rate's columns hold (service.RATE_MAX): 1e20 failed at the write with a 500 (CERT-2).
+  body("hourlyRate").optional({ nullable: true }).isFloat({ min: 0, max: service.RATE_MAX }),
   body("overtimeMultiplier").optional().isFloat({ min: 1, max: 5 }),
   body("status").optional().isIn(["active", "inactive"]),
   body("notes").optional({ nullable: true }).isString().isLength({ max: 2000 }),
@@ -55,24 +58,24 @@ const entryValidators = () => [
 ];
 
 // Workers (company-level; listed under the project so party users are scoped)
-router.get("/workers", requirePermission("timesheet", "read"), [query("q").optional().isString().isLength({ max: 120 }), query("companyId").optional().isString(), query("status").optional().isIn(["active", "inactive"]), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listWorkers({ orgId: req.user.orgId, query: { ...req.query, projectId: req.params.projectId }, viewer: actorFor(req) }))));
+router.get("/workers", requirePermission("timesheet", "read"), [query("q").optional().isString().isLength({ max: 120 }), query("companyId").optional().isString(), query("status").optional().isString().isIn(["active", "inactive"]), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listWorkers({ orgId: req.user.orgId, query: { ...req.query, projectId: req.params.projectId }, viewer: actorFor(req) }))));
 router.post("/workers", requirePermission("timesheet", "create", { transition: "timesheet.worker_admin" }), [...workerValidators(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.createWorker({ orgId: req.user.orgId, payload: req.body, actor: actorFor(req), viewer: actorFor(req) }), 201)));
-router.post("/workers/import", requirePermission("timesheet", "create", { transition: "timesheet.worker_admin" }), [body("rows").isArray({ min: 1, max: 1000 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.importWorkers({ orgId: req.user.orgId, rows: req.body.rows, actor: actorFor(req), viewer: actorFor(req) }))));
+router.post("/workers/import", requirePermission("timesheet", "create", { transition: "timesheet.worker_admin" }), [body("rows").isArray({ min: 1, max: 1000 }), body("rows.*.userId").optional({ nullable: true }).isString(), body("rows.*.companyId").optional({ nullable: true }).isString(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.importWorkers({ orgId: req.user.orgId, rows: req.body.rows, actor: actorFor(req), viewer: actorFor(req) }))));
 router.patch("/workers/:workerId", requirePermission("timesheet", "update", { transition: "timesheet.worker_admin" }), [param("workerId").isUUID(), ...workerValidators(true), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.updateWorker({ orgId: req.user.orgId, workerId: req.params.workerId, payload: req.body, viewer: actorFor(req) }))));
 
 // Crews
-router.get("/crews", requirePermission("timesheet", "read"), [query("status").optional().isIn(["active", "inactive"]), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listCrews({ ...scope(req), query: req.query, viewer: actorFor(req) }))));
+router.get("/crews", requirePermission("timesheet", "read"), [query("status").optional().isString().isIn(["active", "inactive"]), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listCrews({ ...scope(req), query: req.query, viewer: actorFor(req) }))));
 router.post("/crews", requirePermission("timesheet", "create"), [...crewValidators(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.createCrew({ ...scope(req), payload: req.body, actor: actorFor(req), viewer: actorFor(req) }), 201)));
 router.patch("/crews/:crewId", requirePermission("timesheet", "update"), [param("crewId").isUUID(), ...crewValidators(true), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.updateCrew({ ...scope(req), crewId: req.params.crewId, payload: req.body, actor: actorFor(req), viewer: actorFor(req) }))));
 router.delete("/crews/:crewId", requirePermission("timesheet", "delete"), [param("crewId").isUUID(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.deleteCrew({ ...scope(req), crewId: req.params.crewId, actor: actorFor(req), viewer: actorFor(req) }))));
 
 // Views and exports (static paths before /:timesheetId)
-router.get("/week", requirePermission("timesheet", "read"), [query("weekStart").matches(/^\d{4}-\d{2}-\d{2}$/), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.weekSummary({ ...scope(req), weekStart: req.query.weekStart, viewer: actorFor(req) }))));
+router.get("/week", requirePermission("timesheet", "read"), [query("weekStart").isString().matches(/^\d{4}-\d{2}-\d{2}$/), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.weekSummary({ ...scope(req), weekStart: req.query.weekStart, viewer: actorFor(req) }))));
 router.get("/productivity", requirePermission("timesheet", "read"), [dateQuery("from"), dateQuery("to"), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.productivity({ ...scope(req), query: req.query, viewer: actorFor(req) }))));
 router.get(
   "/export.xlsx",
   requirePermission("timesheet", "export"),
-  [dateQuery("from"), dateQuery("to"), query("status").optional().isIn(Object.values(service.STATUS)), validate],
+  [dateQuery("from"), dateQuery("to"), query("status").optional().isString().isIn(Object.values(service.STATUS)), validate],
   asyncHandler(async (req, res) => {
     const result = await service.exportTimesheets({ ...scope(req), query: req.query, viewer: actorFor(req) });
     res.setHeader("Content-Type", result.mimeType);
@@ -81,9 +84,10 @@ router.get(
   }),
 );
 
-// Timesheets
-router.get("/", requirePermission("timesheet", "read"), [dateQuery("from"), dateQuery("to"), query("status").optional().isIn(Object.values(service.STATUS)), query("crewId").optional().isUUID(), query("companyId").optional().isString(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listTimesheets({ ...scope(req), query: req.query, viewer: actorFor(req) }))));
-router.post("/", requirePermission("timesheet", "create"), [body("date").matches(/^\d{4}-\d{2}-\d{2}$/), body("crewId").optional({ nullable: true }).isUUID(), body("companyId").optional({ nullable: true }).isString(), body("notes").optional({ nullable: true }).isString().isLength({ max: 2000 }), body("defaultHours").optional().isFloat({ min: 0, max: 24 }), body("clientRequestId").optional({ nullable: true }).isString().isLength({ max: 120 }), ...entryValidators(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.createTimesheet({ ...scope(req), payload: req.body, actor: actorFor(req), viewer: actorFor(req) }), 201)));
+// Timesheets (a crew is named by one id: .isString() before .isUUID(), which
+// checks an array element by element — crewId ["<id>"] reached Prisma as a 500, CERT-2)
+router.get("/", requirePermission("timesheet", "read"), [dateQuery("from"), dateQuery("to"), query("status").optional().isString().isIn(Object.values(service.STATUS)), query("crewId").optional().isString().isUUID(), query("companyId").optional().isString(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listTimesheets({ ...scope(req), query: req.query, viewer: actorFor(req) }))));
+router.post("/", requirePermission("timesheet", "create"), [body("date").matches(/^\d{4}-\d{2}-\d{2}$/), body("crewId").optional({ nullable: true }).isString().isUUID(), body("companyId").optional({ nullable: true }).isString(), body("notes").optional({ nullable: true }).isString().isLength({ max: 2000 }), body("defaultHours").optional().isFloat({ min: 0, max: 24 }), body("clientRequestId").optional({ nullable: true }).isString().isLength({ max: 120 }), ...entryValidators(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.createTimesheet({ ...scope(req), payload: req.body, actor: actorFor(req), viewer: actorFor(req) }), 201)));
 router.get("/:timesheetId", requirePermission("timesheet", "read"), [param("timesheetId").isUUID(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.getTimesheet({ ...scope(req), timesheetId: req.params.timesheetId, viewer: actorFor(req) }))));
 router.patch("/:timesheetId", requirePermission("timesheet", "update"), [param("timesheetId").isUUID(), body("date").optional().matches(/^\d{4}-\d{2}-\d{2}$/), body("notes").optional({ nullable: true }).isString().isLength({ max: 2000 }), ...entryValidators(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.updateTimesheet({ ...scope(req), timesheetId: req.params.timesheetId, payload: req.body, actor: actorFor(req), viewer: actorFor(req) }))));
 router.delete("/:timesheetId", requirePermission("timesheet", "delete"), [param("timesheetId").isUUID(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.deleteTimesheet({ ...scope(req), timesheetId: req.params.timesheetId, actor: actorFor(req), viewer: actorFor(req) }))));

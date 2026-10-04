@@ -7,6 +7,7 @@ const auditService = require("./audit.service");
 const costLedger = require("./cost-ledger.service");
 const notificationService = require("./notification.service");
 const { isPartyScopedAccess } = require("./company-party.service");
+const { assertMembers } = require("./tenant-references.service");
 
 /**
  * Timesheets and crews (OCTA-FLD-TIME-037).
@@ -29,6 +30,15 @@ const { isPartyScopedAccess } = require("./company-party.service");
 const STATUS = Object.freeze({ DRAFT: "draft", SUBMITTED: "submitted", APPROVED: "approved", REJECTED: "rejected" });
 const TIME_TYPES = Object.freeze(["regular", "overtime", "double"]);
 const MAX_HOURS_PER_DAY = 24;
+const MAX_OVERTIME_MULTIPLIER = 5;
+/**
+ * The largest hourly rate (CERT-2): a rate is stored on the worker as a
+ * Decimal(18,2), and an approved entry posts it as the labour's unit cost (a
+ * Decimal(18,4) on the cost ledger) beside the entry's amount, a Decimal(18,2)
+ * of up to a day's hours at the highest overtime multiplier. The largest whole
+ * rate all of them hold. 1e20 failed at the write with a 500.
+ */
+const RATE_MAX = Math.floor((1e16 - 1) / (MAX_HOURS_PER_DAY * MAX_OVERTIME_MULTIPLIER));
 
 const trimOrNull = (value) => {
   if (value === null || value === undefined) return null;
@@ -180,7 +190,12 @@ const normalizeWorker = (payload, existing = null) => {
   if (!name) throw new HttpError(400, "WORKER_NAME_REQUIRED", "The worker needs a name");
   const rate = pick("hourlyRate");
   const multiplier = toNumber(pick("overtimeMultiplier", 1.5), 1.5);
-  if (multiplier < 1 || multiplier > 5) throw new HttpError(400, "WORKER_MULTIPLIER_INVALID", "The overtime multiplier must be between 1 and 5");
+  if (multiplier < 1 || multiplier > MAX_OVERTIME_MULTIPLIER) throw new HttpError(400, "WORKER_MULTIPLIER_INVALID", "The overtime multiplier must be between 1 and 5");
+  // A rate given is a number the rate's columns hold — checked for an import
+  // row as for the form (CERT-2).
+  if (payload.hourlyRate !== undefined && rate !== null && rate !== "" && !(Number(rate) >= 0 && Number(rate) <= RATE_MAX)) {
+    throw new HttpError(400, "WORKER_RATE_INVALID", `The hourly rate must be a number from 0 to ${RATE_MAX.toLocaleString("en-US")}`);
+  }
   return {
     name: name.slice(0, 200),
     companyId: trimOrNull(pick("companyId")),
@@ -193,6 +208,28 @@ const normalizeWorker = (payload, existing = null) => {
     status: pick("status", "active") === "inactive" ? "inactive" : "active",
     notes: trimOrNull(pick("notes"))?.slice(0, 2000) || null,
   };
+};
+
+/**
+ * What a worker names belongs to this organisation (CERT-2): its company is
+ * one of the organisation's directory, and the platform user it is linked to
+ * is a person of the organisation by membership (a person who belongs to
+ * several companies is a valid reference in each of them). Another company's
+ * person used to be stored as given while one who exists nowhere answered 500
+ * from the database's foreign key, which told the two apart; an import, or an
+ * edit, stored another company's company too, and the worker list then served
+ * that company's name. Each is now answered as a reference that does not
+ * exist. Checked when it is set or changed, so a worker whose person has since
+ * left can still be edited for anything else.
+ */
+const assertWorkerRefs = async ({ orgId, data, existing = null }) => {
+  if (data.companyId && data.companyId !== existing?.companyId) {
+    const company = await prisma.company.findFirst({ where: { id: data.companyId, orgId }, select: { id: true } });
+    if (!company) throw new HttpError(400, "WORKER_COMPANY_INVALID", "Unknown company");
+  }
+  if (data.userId && data.userId !== existing?.userId) {
+    await assertMembers({ orgId, userIds: [data.userId], message: "The person is not a member of this organisation" });
+  }
 };
 
 const listWorkers = async ({ orgId, query = {}, viewer = null }) => {
@@ -216,10 +253,7 @@ const createWorker = async ({ orgId, payload = {}, actor = null, viewer = null }
     if (!party?.companyId) throw new HttpError(403, "FORBIDDEN", "Your party has no company to add workers to");
     data.companyId = party.companyId;
   }
-  if (data.companyId) {
-    const company = await prisma.company.findFirst({ where: { id: data.companyId, orgId }, select: { id: true } });
-    if (!company) throw new HttpError(400, "WORKER_COMPANY_INVALID", "Unknown company");
-  }
+  await assertWorkerRefs({ orgId, data });
   if (data.employeeNumber) {
     const clash = await prisma.worker.findFirst({ where: { orgId, employeeNumber: data.employeeNumber }, select: { id: true } });
     if (clash) throw new HttpError(409, "WORKER_NUMBER_EXISTS", `Employee number ${data.employeeNumber} is already used`);
@@ -234,6 +268,7 @@ const updateWorker = async ({ orgId, workerId, payload = {}, viewer = null }) =>
   if (scoped(viewer) && !companyIdsFor(viewer).includes(existing.companyId)) throw new HttpError(403, "FORBIDDEN", "You can only edit your company's workers");
   const data = normalizeWorker(payload, existing);
   if (scoped(viewer)) data.companyId = existing.companyId;
+  await assertWorkerRefs({ orgId, data, existing });
   if (data.employeeNumber && data.employeeNumber !== existing.employeeNumber) {
     const clash = await prisma.worker.findFirst({ where: { orgId, employeeNumber: data.employeeNumber, id: { not: workerId } }, select: { id: true } });
     if (clash) throw new HttpError(409, "WORKER_NUMBER_EXISTS", `Employee number ${data.employeeNumber} is already used`);
@@ -258,14 +293,20 @@ const importWorkers = async ({ orgId, rows = [], actor = null, viewer = null }) 
           results.skipped += 1;
           continue;
         }
+        await assertWorkerRefs({ orgId, data, existing });
         await prisma.worker.update({ where: { id: existing.id }, data: { ...data, companyId: existing.companyId || data.companyId } });
         results.updated += 1;
       } else {
+        await assertWorkerRefs({ orgId, data });
         await prisma.worker.create({ data: { ...data, orgId, createdBy: actor?.id || null } });
         results.created += 1;
       }
     } catch (error) {
-      results.errors.push({ row: index + 1, message: error.message });
+      // A row's refusal is told in the product's words; anything else (the
+      // database's own text names the constraint, the file and the line) is
+      // not passed on (CERT-2: it told an id that exists nowhere from one of
+      // another company).
+      results.errors.push({ row: index + 1, message: error instanceof HttpError ? error.message : "The row could not be imported" });
     }
   }
   return results;
@@ -284,7 +325,7 @@ const listCrews = async ({ orgId, projectId, query = {}, viewer = null }) => {
   return { items: rows.map(crewOut) };
 };
 
-const assertCrewRefs = async ({ orgId, projectId, data }) => {
+const assertCrewRefs = async ({ orgId, projectId, data, existing = null }) => {
   if (data.companyId) {
     const company = await prisma.company.findFirst({ where: { id: data.companyId, orgId }, select: { id: true } });
     if (!company) throw new HttpError(400, "CREW_COMPANY_INVALID", "Unknown company");
@@ -296,6 +337,22 @@ const assertCrewRefs = async ({ orgId, projectId, data }) => {
   if (data.defaultCostCodeId) {
     const code = await prisma.projectCostCode.findFirst({ where: { projectId, costCodeId: data.defaultCostCodeId }, select: { id: true } });
     if (!code) throw new HttpError(400, "CREW_COST_CODE_INVALID", "The default cost code is not on this project");
+  }
+  // The foreman is a person of this organisation, by membership: another
+  // company's person used to be stored as given, and one who exists nowhere
+  // too (CERT-2). Checked when it is set or changed, so a crew whose foreman
+  // has since left can still be edited for anything else.
+  if (data.foremanUserId && data.foremanUserId !== existing?.foremanUserId) {
+    await assertMembers({ orgId, userIds: [data.foremanUserId], message: "The foreman is not a member of this organisation" });
+  }
+  // The crew's party is a party of this project. Crew.partyId has no foreign
+  // key: another company's party, and an id that exists nowhere, used to be
+  // stored as given and copied onto every timesheet of the crew (CERT-2). Both
+  // are answered as a party that is not on this project. Checked when it is
+  // set or changed, like the foreman.
+  if (data.partyId && data.partyId !== existing?.partyId) {
+    const party = await prisma.projectParty.findFirst({ where: { id: data.partyId, projectId }, select: { id: true } });
+    if (!party) throw new HttpError(400, "CREW_PARTY_INVALID", "The party is not on this project");
   }
 };
 
@@ -347,6 +404,9 @@ const createCrew = async ({ orgId, projectId, payload = {}, actor = null, viewer
 };
 
 const loadCrew = async ({ orgId, projectId, crewId, viewer }) => {
+  // A crew is named by one id; any other value names no crew (CERT-2 shapes:
+  // ["<id>"] reached Prisma as a 500), whoever's id it wraps.
+  if (typeof crewId !== "string") throw new HttpError(404, "CREW_NOT_FOUND", "Crew not found");
   const row = await prisma.crew.findFirst({ where: { id: crewId, orgId, projectId }, include: crewInclude });
   if (!row) throw new HttpError(404, "CREW_NOT_FOUND", "Crew not found");
   assertVisible(row, viewer);
@@ -360,7 +420,7 @@ const updateCrew = async ({ orgId, projectId, crewId, payload = {}, actor = null
     data.companyId = existing.companyId;
     data.partyId = existing.partyId;
   }
-  await assertCrewRefs({ orgId, projectId, data });
+  await assertCrewRefs({ orgId, projectId, data, existing });
   if (Array.isArray(payload.workerIds)) await assertWorkersUsable({ orgId, workerIds: payload.workerIds, viewer });
   if (data.name.toLowerCase() !== existing.name.toLowerCase()) {
     const clash = await prisma.crew.findFirst({ where: { projectId, name: { equals: data.name, mode: "insensitive" }, id: { not: crewId } }, select: { id: true } });
@@ -482,8 +542,16 @@ const createTimesheet = async ({ orgId, projectId, payload = {}, actor = null, v
   let rows = Array.isArray(payload.entries) ? payload.entries : null;
   if (!rows && crew) rows = crew.members.map((member) => ({ workerId: member.workerId, activityId: crew.defaultActivityId, costCodeId: crew.defaultCostCodeId, timeType: "regular", hours: toNumber(payload.defaultHours, 8) }));
   const { entries } = await normalizeEntries({ orgId, projectId, rows: rows || [], viewer });
+  // The company a timesheet is booked to is one of the organisation's
+  // directory: Timesheet.companyId has no foreign key, and another company's
+  // id (or one that exists nowhere) used to be stored as given (CERT-2).
+  const requestedCompanyId = trimOrNull(payload.companyId);
+  if (requestedCompanyId) {
+    const company = await prisma.company.findFirst({ where: { id: requestedCompanyId, orgId }, select: { id: true } });
+    if (!company) throw new HttpError(400, "TIMESHEET_COMPANY_INVALID", "Unknown company");
+  }
   const party = scoped(viewer) ? partyFor(viewer) : null;
-  const companyId = party?.companyId || crew?.companyId || trimOrNull(payload.companyId) || null;
+  const companyId = party?.companyId || crew?.companyId || requestedCompanyId || null;
   const created = await prisma.$transaction(async (tx) => {
     const row = await tx.timesheet.create({ data: { orgId, projectId, date, crewId: crew?.id || null, partyId: party?.partyId || crew?.partyId || null, companyId, status: STATUS.DRAFT, notes: trimOrNull(payload.notes)?.slice(0, 2000) || null, ...totalsOf(entries), clientRequestId, createdBy: actor?.id || null } });
     if (entries.length) await tx.timeEntry.createMany({ data: entries.map((entry) => ({ ...entry, orgId, projectId, timesheetId: row.id })) });
@@ -798,4 +866,4 @@ const exportTimesheets = async ({ orgId, projectId, query = {}, viewer = null })
   return { buffer, fileName: `timesheets-${query.from || "all"}-${query.to || "all"}.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", rows: entries.rowCount - 1 };
 };
 
-module.exports = { STATUS, TIME_TYPES, toDateOnly, multiplierFor, normalizeWorker, listWorkers, createWorker, updateWorker, importWorkers, listCrews, createCrew, updateCrew, deleteCrew, listTimesheets, getTimesheet, createTimesheet, updateTimesheet, deleteTimesheet, submitTimesheet, approveTimesheet, rejectTimesheet, reopenTimesheet, weekSummary, productivity, exportTimesheets };
+module.exports = { STATUS, TIME_TYPES, RATE_MAX, toDateOnly, multiplierFor, normalizeWorker, listWorkers, createWorker, updateWorker, importWorkers, listCrews, createCrew, updateCrew, deleteCrew, listTimesheets, getTimesheet, createTimesheet, updateTimesheet, deleteTimesheet, submitTimesheet, approveTimesheet, rejectTimesheet, reopenTimesheet, weekSummary, productivity, exportTimesheets };

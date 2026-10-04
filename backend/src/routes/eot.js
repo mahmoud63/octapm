@@ -51,24 +51,24 @@ router.post(
     body("eotDaysGranted").optional().isFloat({ min: 0 }),
     moneyBody("ldRatePerDay"),
     body("affectedActivityIds").optional().isArray(),
-    body("affectedActivityIds.*").optional().isUUID(),
+    body("affectedActivityIds.*").optional().isString().isUUID(),
     body("activityLinks").optional().isArray(),
-    body("activityLinks.*.activityId").optional().isUUID(),
-    body("activityLinks.*.delayStart").optional({ nullable: true }).isISO8601(),
-    body("activityLinks.*.delayEnd").optional({ nullable: true }).isISO8601(),
+    body("activityLinks.*.activityId").optional().isString().isUUID(),
+    body("activityLinks.*.delayStart").optional({ nullable: true }).isString().isISO8601(),
+    body("activityLinks.*.delayEnd").optional({ nullable: true }).isString().isISO8601(),
     body("activityLinks.*.delayDays").optional().isFloat({ min: 0 }),
     body("activityLinks.*.baselineStart")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.baselineFinish")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactedStart")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactedFinish")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactBasis")
       .optional({ nullable: true })
       .isString()
@@ -104,49 +104,49 @@ router.post(
     body("eotDaysGranted").optional().isFloat({ min: 0 }),
     moneyBody("ldRatePerDay"),
     body("affectedActivityIds").optional().isArray(),
-    body("affectedActivityIds.*").optional().isUUID(),
+    body("affectedActivityIds.*").optional().isString().isUUID(),
     body("activityLinks").optional().isArray(),
-    body("activityLinks.*.activityId").optional().isUUID(),
-    body("activityLinks.*.delayStart").optional({ nullable: true }).isISO8601(),
-    body("activityLinks.*.delayEnd").optional({ nullable: true }).isISO8601(),
+    body("activityLinks.*.activityId").optional().isString().isUUID(),
+    body("activityLinks.*.delayStart").optional({ nullable: true }).isString().isISO8601(),
+    body("activityLinks.*.delayEnd").optional({ nullable: true }).isString().isISO8601(),
     body("activityLinks.*.delayDays").optional().isFloat({ min: 0 }),
     body("activityLinks.*.baselineStart")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.baselineFinish")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactedStart")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactedFinish")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactBasis")
       .optional({ nullable: true })
       .isString()
       .trim(),
     body("weatherDelayIds").optional().isArray(),
-    body("weatherDelayIds.*").optional().isUUID(),
+    body("weatherDelayIds.*").optional().isString().isUUID(),
     body("weatherDelayLinks").optional().isArray(),
-    body("weatherDelayLinks.*.weatherDelayId").optional().isUUID(),
+    body("weatherDelayLinks.*.weatherDelayId").optional().isString().isUUID(),
     body("weatherDelayLinks.*.delayStart")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("weatherDelayLinks.*.delayEnd")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("weatherDelayLinks.*.delayDays").optional().isFloat({ min: 0 }),
     body("correspondenceIds").optional().isArray(),
-    body("correspondenceIds.*").optional().isUUID(),
+    body("correspondenceIds.*").optional().isString().isUUID(),
     body("correspondenceLinks").optional().isArray(),
-    body("correspondenceLinks.*.correspondenceId").optional().isUUID(),
+    body("correspondenceLinks.*.correspondenceId").optional().isString().isUUID(),
     body("attachmentRefs").optional().isArray(),
-    body("attachmentRefs.*.documentId").optional({ nullable: true }).isUUID(),
+    body("attachmentRefs.*.documentId").optional({ nullable: true }).isString().isUUID(),
     body("supportingDocumentIds").optional().isArray(),
-    body("supportingDocumentIds.*").optional().isUUID(),
+    body("supportingDocumentIds.*").optional().isString().isUUID(),
     body("documentIds").optional().isArray(),
-    body("documentIds.*").optional().isUUID(),
+    body("documentIds.*").optional().isString().isUUID(),
     body("analysis").optional({ nullable: true }).isString().trim(),
     body("comment").optional({ nullable: true }).isString().trim(),
     body("statusComment").optional({ nullable: true }).isString().trim(),
@@ -262,49 +262,49 @@ router.patch(
     body("eotDaysGranted").optional().isFloat({ min: 0 }),
     moneyBody("ldRatePerDay"),
     body("affectedActivityIds").optional().isArray(),
-    body("affectedActivityIds.*").optional().isUUID(),
+    body("affectedActivityIds.*").optional().isString().isUUID(),
     body("activityLinks").optional().isArray(),
-    body("activityLinks.*.activityId").optional().isUUID(),
-    body("activityLinks.*.delayStart").optional({ nullable: true }).isISO8601(),
-    body("activityLinks.*.delayEnd").optional({ nullable: true }).isISO8601(),
+    body("activityLinks.*.activityId").optional().isString().isUUID(),
+    body("activityLinks.*.delayStart").optional({ nullable: true }).isString().isISO8601(),
+    body("activityLinks.*.delayEnd").optional({ nullable: true }).isString().isISO8601(),
     body("activityLinks.*.delayDays").optional().isFloat({ min: 0 }),
     body("activityLinks.*.baselineStart")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.baselineFinish")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactedStart")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactedFinish")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("activityLinks.*.impactBasis")
       .optional({ nullable: true })
       .isString()
       .trim(),
     body("weatherDelayIds").optional().isArray(),
-    body("weatherDelayIds.*").optional().isUUID(),
+    body("weatherDelayIds.*").optional().isString().isUUID(),
     body("weatherDelayLinks").optional().isArray(),
-    body("weatherDelayLinks.*.weatherDelayId").optional().isUUID(),
+    body("weatherDelayLinks.*.weatherDelayId").optional().isString().isUUID(),
     body("weatherDelayLinks.*.delayStart")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("weatherDelayLinks.*.delayEnd")
       .optional({ nullable: true })
-      .isISO8601(),
+      .isString().isISO8601(),
     body("weatherDelayLinks.*.delayDays").optional().isFloat({ min: 0 }),
     body("correspondenceIds").optional().isArray(),
-    body("correspondenceIds.*").optional().isUUID(),
+    body("correspondenceIds.*").optional().isString().isUUID(),
     body("correspondenceLinks").optional().isArray(),
-    body("correspondenceLinks.*.correspondenceId").optional().isUUID(),
+    body("correspondenceLinks.*.correspondenceId").optional().isString().isUUID(),
     body("attachmentRefs").optional().isArray(),
-    body("attachmentRefs.*.documentId").optional({ nullable: true }).isUUID(),
+    body("attachmentRefs.*.documentId").optional({ nullable: true }).isString().isUUID(),
     body("supportingDocumentIds").optional().isArray(),
-    body("supportingDocumentIds.*").optional().isUUID(),
+    body("supportingDocumentIds.*").optional().isString().isUUID(),
     body("documentIds").optional().isArray(),
-    body("documentIds.*").optional().isUUID(),
+    body("documentIds.*").optional().isString().isUUID(),
     body("analysis").optional({ nullable: true }).isString().trim(),
     body("claimLetter").optional({ nullable: true }).isString().trim(),
     body("comment").optional({ nullable: true }).isString().trim(),

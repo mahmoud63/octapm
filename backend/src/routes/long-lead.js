@@ -26,10 +26,10 @@ router.post(
   requireRoles('pm', 'planning_eng', 'procurement'),
   [
     body('item').isString().trim().notEmpty(),
-    body('activityId').optional({ nullable: true }).isUUID(),
+    body('activityId').optional({ nullable: true }).isString().isUUID(),
     // The procurement package this is being bought under. Set it and the
     // dates and statuses come from there instead of being typed twice.
-    body('procurementPackageId').optional({ nullable: true }).isUUID(),
+    body('procurementPackageId').optional({ nullable: true }).isString().isUUID(),
     body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
     body('requiredTiming')
       .optional()
@@ -67,10 +67,10 @@ router.patch(
   [
     param('id').isUUID(),
     body('item').optional().isString().trim().notEmpty(),
-    body('activityId').optional({ nullable: true }).isUUID(),
+    body('activityId').optional({ nullable: true }).isString().isUUID(),
     // The procurement package this is being bought under. Set it and the
     // dates and statuses come from there instead of being typed twice.
-    body('procurementPackageId').optional({ nullable: true }).isUUID(),
+    body('procurementPackageId').optional({ nullable: true }).isString().isUUID(),
     body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
     body('requiredTiming')
       .optional()

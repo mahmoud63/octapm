@@ -203,12 +203,14 @@ const assertActivitiesInProject = async ({
   const found = new Set(activities.map((activity) => activity.id));
   const missing = ids.filter((id) => !found.has(id));
 
+  // The refusal does not list the ids it was sent: it handed another
+  // company's activity id back in the answer (CERT-2), and the answer is the
+  // same whichever id is missing.
   if (missing.length) {
     throw new HttpError(
       400,
       "RISK_ACTIVITY_INVALID",
       "One or more linked activities are invalid for this project",
-      { activityIds: missing },
     );
   }
 };
@@ -635,6 +637,9 @@ const createRisk = async ({
 
   const activityLinks = normalizeActivityLinks(payload);
   await assertActivityIdInProject({ projectId, activityId: payload.activityId });
+  // The links too, before a reference number is drawn: a refused create
+  // advanced the risk register's counter (CERT-2).
+  if (activityLinks !== null) await assertActivitiesInProject({ projectId, activityLinks });
   const generatedRef = await nextRef(prisma, { table: 'Risk', scopeColumn: 'projectId', scopeId: projectId, prefix: 'RSK', pad: 2 });
   const ref = generatedRef;
 

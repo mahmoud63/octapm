@@ -119,7 +119,7 @@ router.get(
   "/register",
   requirePermission("document_control", "read"),
   [
-    query("recordType").optional().isIn(REGISTER_RECORD_TYPES),
+    query("recordType").isString().optional().isIn(REGISTER_RECORD_TYPES),
     query("folder").optional().isString().trim().isLength({ max: 80 }),
     query("category").optional().isString().trim().isLength({ max: 120 }),
     query("status").optional().isString().trim().isLength({ max: 80 }),
@@ -148,8 +148,8 @@ router.post(
     param("recordType").isIn(DOCUMENT_RECORD_TYPES),
     param("recordId").isUUID(),
     body("revision").trim().notEmpty().isLength({ max: 40 }),
-    body("projectDocumentId").optional().isUUID(),
-    body("documentId").optional().isUUID(),
+    body("projectDocumentId").optional().isString().isUUID(),
+    body("documentId").optional().isString().isUUID(),
     body("storageKey").optional().isString().trim().isLength({ max: 120 }),
     body("key").optional().isString().trim().isLength({ max: 120 }),
     body("title")

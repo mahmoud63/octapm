@@ -52,6 +52,7 @@ const mockWorkflow = {
   primaryActivityIdFromPayload: jest.fn((payload, fallback = null) =>
     payload.activityId === undefined ? fallback : payload.activityId,
   ),
+  assertPayloadActivity: jest.fn(async () => undefined),
   recordDocumentRevisions: jest.fn(),
   recordWorkflowHistory: jest.fn(),
   syncWorkflowReferences: jest.fn(),

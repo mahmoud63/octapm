@@ -36,8 +36,8 @@ router.get(
   requirePermission("document_control", "read"),
   [
     query("q").isString().trim().isLength({ min: 1, max: 200 }),
-    query("limit").optional().isInt({ min: 1, max: 50 }).toInt(),
-    query("semantic").optional().isBoolean().toBoolean(),
+    query("limit").isString().optional().isInt({ min: 1, max: 50 }).toInt(),
+    query("semantic").isString().optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -85,7 +85,7 @@ router.get(
   requirePermission("document_control", "read"),
   [
     param("documentId").isUUID(),
-    query("maxChars").optional().isInt({ min: 200, max: 200000 }).toInt(),
+    query("maxChars").isString().optional().isInt({ min: 200, max: 200000 }).toInt(),
     validate,
   ],
   asyncHandler(async (req, res) => {

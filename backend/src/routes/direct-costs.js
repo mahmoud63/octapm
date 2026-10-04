@@ -24,7 +24,7 @@ const validators = (partial = false) => [
   body("invoiceNumber").optional({ nullable: true }).isString().isLength({ max: 80 }),
   // The purchase order this invoice is against, so the order can say how much
   // of it has been billed and the three-way match has something to compare.
-  body("purchaseOrderId").optional({ nullable: true }).isUUID(),
+  body("purchaseOrderId").optional({ nullable: true }).isString().isUUID(),
   date("dueDate"),
   date("receivedDate"),
   body("tax").optional({ nullable: true }).isFloat({ min: 0 }),
@@ -35,6 +35,9 @@ const validators = (partial = false) => [
   body("lines.*.costCodeId").optional({ nullable: true }).isString(),
   body("lines.*.budgetLineId").optional({ nullable: true }).isString(),
   body("lines.*.activityId").optional({ nullable: true }).isString(),
+  // A purchase-order line is named by one string; any other shape reached
+  // Prisma as a 500 (CERT-2 shapes).
+  body("lines.*.poLineId").optional({ nullable: true }).isString(),
   body("lines.*.costType").optional({ nullable: true }).isIn(service.COST_TYPES),
   body("lines.*.quantity").optional().isFloat({ min: 0 }),
   body("lines.*.unit").optional({ nullable: true }).isString().isLength({ max: 20 }),
@@ -43,7 +46,7 @@ const validators = (partial = false) => [
   body("lines.*.notes").optional({ nullable: true }).isString().isLength({ max: 1000 }),
 ];
 
-router.get("/", requirePermission("cost", "read"), [query("status").optional().isIn(Object.values(service.STATUS)), query("type").optional().isIn(service.TYPES), query("vendorCompanyId").optional().isString(), query("from").optional().isISO8601(), query("to").optional().isISO8601(), query("q").optional().isString().isLength({ max: 200 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listDirectCosts({ ...scope(req), query: req.query }))));
+router.get("/", requirePermission("cost", "read"), [query("status").isString().optional().isIn(Object.values(service.STATUS)), query("type").isString().optional().isIn(service.TYPES), query("vendorCompanyId").optional().isString(), query("from").isString().optional().isISO8601(), query("to").isString().optional().isISO8601(), query("q").optional().isString().isLength({ max: 200 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.listDirectCosts({ ...scope(req), query: req.query }))));
 router.post("/", requirePermission("cost", "create"), [...validators(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.createDirectCost({ ...scope(req), payload: req.body, actor: actorFor(req) }), 201)));
 router.get("/:directCostId", requirePermission("cost", "read"), [param("directCostId").isUUID(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.getDirectCost({ ...scope(req), directCostId: req.params.directCostId }))));
 router.patch("/:directCostId", requirePermission("cost", "update"), [param("directCostId").isUUID(), ...validators(true), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.updateDirectCost({ ...scope(req), directCostId: req.params.directCostId, payload: req.body, actor: actorFor(req) }))));

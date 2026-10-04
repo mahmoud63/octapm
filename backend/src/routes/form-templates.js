@@ -28,7 +28,7 @@ const templateValidators = ({ requireName = false } = {}) => [
   body("sections").optional().isArray({ max: 100 }),
   body("sections.*.title").optional().isString(),
   body("sections.*.items").optional().isArray({ max: 500 }),
-  body("sourceTemplateId").optional({ nullable: true }).isUUID(),
+  body("sourceTemplateId").optional({ nullable: true }).isString().isUUID(),
   validate,
 ];
 
@@ -36,10 +36,10 @@ router.get(
   "/",
   requirePermission("inspection", "read"),
   [
-    query("scope").optional().isIn(["all", "project", "company"]),
-    query("type").optional().isIn(formService.TYPES),
-    query("status").optional().isIn(["draft", "active", "archived"]),
-    query("includeArchived").optional().isBoolean().toBoolean(),
+    query("scope").isString().optional().isIn(["all", "project", "company"]),
+    query("type").isString().optional().isIn(formService.TYPES),
+    query("status").isString().optional().isIn(["draft", "active", "archived"]),
+    query("includeArchived").isString().optional().isBoolean().toBoolean(),
     query("search").optional().isString().trim().isLength({ max: 120 }),
     validate,
   ],

@@ -253,6 +253,23 @@ describe('progress service', () => {
       expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
     });
 
+    // CERT-2 shapes: a document named in another shape was skipped by the check
+    // and the evidence stored as given, keeping another company's document id.
+    it.each([
+      ['an array', (id) => [id]],
+      ['a nested array', (id) => [[id]]],
+      ['an object', (id) => ({ id })],
+      ['a number', () => 12345],
+    ])('refuses a document named by %s — own, foreign or nowhere alike — before anything is written', async (_label, shape) => {
+      mockPrisma.projectDocument.findMany.mockResolvedValue([{ id: 'own-doc', storageKey: 'own-storage' }]);
+      for (const field of ['key', 'documentId', 'storageKey']) {
+        for (const id of ['own-doc', 'foreign-doc', 'nowhere-doc']) {
+          await expect(submit({ photos: [{ [field]: shape(id) }] })).rejects.toMatchObject({ status: 400, code: 'INVALID_SITE_PHOTO_REFERENCE' });
+        }
+      }
+      expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
+    });
+
     it('accepts the project\'s own documents, by id or by storage key, and stores the evidence as given', async () => {
       mockPrisma.projectDocument.findMany.mockResolvedValue([{ id: 'own-doc', storageKey: 'own-storage' }]);
       const evidence = { photos: [{ key: 'own-doc', documentId: 'own-doc', storageKey: 'own-doc', url: '/x' }, { key: 'own-storage' }] };

@@ -92,7 +92,7 @@ const assertRecordAccess = (req, recordType, actions) => {
 router.get(
   "/",
   [
-    query("recordType").isIn(attachmentService.RECORD_TYPES),
+    query("recordType").isString().isIn(attachmentService.RECORD_TYPES),
     query("recordId").optional().isString().trim().notEmpty(),
     validate,
   ],
@@ -119,7 +119,7 @@ router.get(
   "/search",
   [
     query("q").optional().isString().trim().isLength({ max: 120 }),
-    query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
+    query("limit").isString().optional().isInt({ min: 1, max: 100 }).toInt(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -144,7 +144,7 @@ router.post(
     body("recordId").isString().trim().notEmpty(),
     body("role").optional().isIn(attachmentService.ATTACHMENT_ROLES),
     body("caption").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
-    body("locationId").optional({ nullable: true }).isUUID(),
+    body("locationId").optional({ nullable: true }).isString().isUUID(),
     body("tags").optional(),
     body("documentIds").optional(),
     body("clientRequestId").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),

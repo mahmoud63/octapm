@@ -19,7 +19,7 @@ const definitionValidators = (partial = false) => [
   partial ? body("name").optional().isString().trim().isLength({ min: 1, max: 160 }) : body("name").isString().trim().isLength({ min: 1, max: 160 }),
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
   partial ? body("source").optional().isString() : body("source").isString(),
-  body("projectId").optional({ nullable: true }).isUUID(),
+  body("projectId").optional({ nullable: true }).isString().isUUID(),
   body("columns").optional().isArray({ max: 60 }),
   body("columns.*").optional().isString(),
   body("filters").optional().isArray({ max: 30 }),
@@ -35,7 +35,7 @@ const definitionValidators = (partial = false) => [
 
 const previewValidators = [
   body("source").isString(),
-  body("projectId").optional({ nullable: true }).isUUID(),
+  body("projectId").optional({ nullable: true }).isString().isUUID(),
   body("columns").optional().isArray({ max: 60 }),
   body("filters").optional().isArray({ max: 30 }),
   body("sort").optional({ nullable: true }).isObject(),
@@ -86,7 +86,7 @@ router.post(
   "/ask",
   requirePermission("assistant", "read"),
   requirePermission("report", "read"),
-  [body("question").isString().trim().isLength({ min: 3, max: 1000 }), body("projectId").optional({ nullable: true }).isUUID(), validate],
+  [body("question").isString().trim().isLength({ min: 3, max: 1000 }), body("projectId").optional({ nullable: true }).isString().isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await reportAssistant.ask({ orgId: orgId(req), user: user(req), apiClient: req.apiClient || null, question: req.body.question, projectId: req.body.projectId || null }))),
 );
 
@@ -109,14 +109,14 @@ router.get(
   "/runs/:runId/download",
   requirePermission("report", "read"),
   noApiKey,
-  [param("runId").isUUID(), query("format").optional().isIn(["pdf", "xlsx"]), validate],
+  [param("runId").isUUID(), query("format").isString().optional().isIn(["pdf", "xlsx"]), validate],
   asyncHandler(async (req, res) => sendFile(res, await service.getRunFile({ orgId: orgId(req), user: user(req), runId: req.params.runId, format: req.query.format || "pdf" }))),
 );
 
 router.get(
   "/",
   requirePermission("report", "read"),
-  [query("projectId").optional({ values: "falsy" }).isUUID(), query("source").optional().isString(), validate],
+  [query("projectId").isString().optional({ values: "falsy" }).isUUID(), query("source").optional().isString(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.listDefinitions({ orgId: orgId(req), user: user(req), projectId: req.query.projectId || null, source: req.query.source || null }))),
 );
 
@@ -177,7 +177,7 @@ router.get(
 router.get(
   "/:reportId/runs",
   requirePermission("report", "read"),
-  [param("reportId").isUUID(), query("limit").optional().isInt({ min: 1, max: 100 }).toInt(), validate],
+  [param("reportId").isUUID(), query("limit").isString().optional().isInt({ min: 1, max: 100 }).toInt(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await service.listRuns({ orgId: orgId(req), user: user(req), reportId: req.params.reportId, limit: req.query.limit || 20 }) })),
 );
 
