@@ -340,6 +340,7 @@ model User {
 
   apiClients   ApiClient[]
   memberships  OrganizationMembership[]
+  platformAccess PlatformUserAccess?
   assistantConversations AssistantConversation[]
   managedWarehouses Warehouse[] @relation("WarehouseManager")
   @@index([orgId])
@@ -963,6 +964,7 @@ model AuditEvent {
 
   @@index([orgId])
   @@index([projectId])
+  @@index([occurredAt]) // platform-admin record-activity windows across organisations
   @@index([orgId, projectId, occurredAt])
   @@index([projectId, entityType, entityId, occurredAt])
   @@index([entityType, entityId])
@@ -8847,4 +8849,96 @@ model RateLimitBucket {
   resetAt DateTime
 
   @@index([resetAt])
+}
+
+// ---------------------------------------------------------------------------
+// Platform administration (OctaPM staff, across every organisation).
+// Deliberately NOT an OrganizationMembership and NOT a role in the permission
+// catalogue: a company admin or owner never becomes a platform operator, and
+// the ordinary tenant-scoped services never read these tables. Granted and
+// revoked only by backend/scripts/platform/platform-access.js (no API).
+// docs/platform/OCTAPM_SUPERADMIN_DESIGN.md
+// ---------------------------------------------------------------------------
+model PlatformUserAccess {
+  id        String    @id @default(uuid())
+  userId    String    @unique
+  role      String    @default("platform_superadmin") // V1: platform_superadmin only (CHECK in the migration)
+  status    String    @default("active") // active | revoked (CHECK in the migration)
+  reason    String // why this person holds platform access (required at grant)
+  grantedBy String // the operator who ran the grant script
+  grantedAt DateTime  @default(now())
+  revokedAt DateTime?
+  revokedBy String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+// One row per platform-admin request (reads included). No FKs: the trail must
+// outlive the actor's account and the organisation it looked at.
+model PlatformAuditEvent {
+  id          String   @id @default(uuid())
+  actorUserId String
+  actorEmail  String
+  actorRole   String
+  action      String // e.g. platform.companies.list, platform.company.view
+  targetType  String? // organisation | user | project
+  targetId    String?
+  targetOrgId String?
+  method      String
+  path        String // redacted path, no query values
+  queryKeys   Json     @default("[]") // names only
+  statusCode  Int
+  requestId   String?
+  occurredAt  DateTime @default(now())
+
+  @@index([occurredAt])
+  @@index([actorUserId, occurredAt])
+  @@index([targetOrgId, occurredAt])
+  @@index([action, occurredAt])
+}
+
+// Product usage: WHAT happened, never the customer's content. No free text and
+// no metadata blob in V1 — every column is an identifier or a catalogue word
+// (backend/src/services/platform/product-event-catalog.js). No FKs: usage
+// history is kept when a project or user is removed.
+model ProductEvent {
+  id        String   @id @default(uuid())
+  orgId     String
+  projectId String?
+  userId    String?
+  eventName String // catalogue name, e.g. boq.opened, rfi.created
+  module    String // catalogue module, e.g. boq, rfi
+  action    String // opened | created | submitted | approved | closed | imported | generated
+  platform  String // web | mobile | api
+  source    String // client | server
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([orgId, createdAt])
+  @@index([module, createdAt])
+  @@index([eventName, createdAt])
+  @@index([userId, createdAt])
+}
+
+// API error responses as counts: code, status, route pattern and tenant only.
+// Never the message, body or stack (those stay in the redacted server log).
+model PlatformErrorEvent {
+  id           String   @id @default(uuid())
+  status       Int
+  code         String
+  method       String
+  routePattern String // ids replaced by :id
+  module       String?
+  orgId        String?
+  requestId    String?
+  occurredAt   DateTime @default(now())
+
+  @@index([occurredAt])
+  @@index([code, occurredAt])
+  @@index([orgId, occurredAt])
+  @@index([module, occurredAt])
 }
