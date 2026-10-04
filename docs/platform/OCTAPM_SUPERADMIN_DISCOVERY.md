@@ -32,7 +32,7 @@ Isolation used for this work:
 | Project | `orgId, name, status, archivedAt, createdAt`; commercial columns (`contractValue`, `ldRatePerDay`, …) | REUSE metadata only; commercial columns DO NOT USE |
 | ProjectAssignment | project membership counts | REUSE |
 | InvitationToken | `status, expiresAt, acceptedAt, revokedAt` | REUSE (pending counts; never `tokenHash`) |
-| RefreshSession | session rows; `tokenHash`, `ipAddress` | DO NOT USE in V1 (credential material, no reliable session semantics) |
+| RefreshSession | session rows per workspace; `tokenHash`, `ipAddress` | REUSE as an activity signal only (row `createdAt` per org/user, counted); `tokenHash` / `ipAddress` DO NOT USE; not a session-length model |
 | Subscription + `serializeSubscription` | canonical billing state (`plan, status, seats, trial*, currentPeriodEnd, cancelAtPeriodEnd, canceledAt`, Stripe ids). `getCurrentSubscription` *creates* a row when missing. | EXTEND (read rows + reuse `serializeSubscription`/`isExpired`; never call `ensureSubscription`); Stripe ids shown only as present/absent |
 | Invoice | `status paid/failed` | REUSE (payment-issue indicator) |
 | AuditEvent | org-scoped, customer-visible record trail (`entityType, action, actorId, occurredAt`), summaries carry content. No `occurredAt`-only index. | REUSE as the record-activity source (counts of `entityType`/`action` only, never summaries); EXTEND with an `occurredAt` index; DO NOT USE for platform-admin audit (requires `orgId`, customers read it) |
