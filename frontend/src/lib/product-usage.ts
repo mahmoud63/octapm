@@ -79,24 +79,54 @@ export const screenEventForPath = (pathname: string): ScreenEvent | null => {
   return module ? { name: `${module}.opened` } : null
 }
 
-const queue: ScreenEvent[] = []
+/**
+ * Who an event belongs to: the person and the workspace whose token was
+ * current when the screen opened. The server attributes a batch to the token
+ * that sends it, so an event queued under one workspace or person must never
+ * leave under another (pre-merge review CX-4).
+ */
+type Principal = { userId: string; orgId: string }
+type QueuedEvent = ScreenEvent & { principal: Principal }
+
+const currentPrincipal = (): Principal | null => {
+  const { user, accessToken } = useAuthStore.getState().auth
+  return user?.id && user.orgId && accessToken
+    ? { userId: user.id, orgId: user.orgId }
+    : null
+}
+const samePrincipal = (a: Principal | null, b: Principal) =>
+  Boolean(a && a.userId === b.userId && a.orgId === b.orgId)
+
+const queue: QueuedEvent[] = []
 const lastSent = new Map<string, number>()
 let timer: ReturnType<typeof setTimeout> | null = null
 
 const flush = () => {
   timer = null
+  const now = currentPrincipal()
+  // Events of another person or workspace are dropped, never re-attributed.
+  for (let i = queue.length - 1; i >= 0; i -= 1) {
+    if (!samePrincipal(now, queue[i].principal)) queue.splice(i, 1)
+  }
   if (!queue.length) return
-  const events = queue.splice(0, MAX_BATCH)
+  const events = queue
+    .splice(0, MAX_BATCH)
+    .map(({ name, projectId }) => (projectId ? { name, projectId } : { name }))
   apiClient.post('/telemetry/events', { events }).catch(() => undefined)
   if (queue.length) timer = setTimeout(flush, FLUSH_MS)
 }
 
-export const recordScreenOpen = (event: ScreenEvent, now = Date.now()) => {
-  const key = `${event.name}:${event.projectId ?? ''}`
+export const recordScreenOpen = (
+  event: ScreenEvent,
+  principal: Principal | null = currentPrincipal(),
+  now = Date.now()
+) => {
+  if (!principal) return false
+  const key = `${principal.userId}:${principal.orgId}:${event.name}:${event.projectId ?? ''}`
   const previous = lastSent.get(key)
   if (previous !== undefined && now - previous < DEDUPE_MS) return false
   lastSent.set(key, now)
-  queue.push(event)
+  queue.push({ ...event, principal })
   if (queue.length >= MAX_BATCH) flush()
   else if (!timer) timer = setTimeout(flush, FLUSH_MS)
   return true

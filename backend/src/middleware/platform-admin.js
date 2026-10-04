@@ -52,9 +52,15 @@ const requirePlatformAdmin = async (req, _res, next) => {
     }
     const result = await resolvePlatformPrincipal(payload.sub);
     if (!result.ok) {
-      if (result.reason !== "USER_INACTIVE") {
-        platformAudit.recordDenied({ userId: payload.sub, email: result.user?.email || payload.email, reason: result.reason, req });
-      }
+      // Every refusal of a verified token subject is audited, an inactive or
+      // deleted account included (pre-merge review CX-3).
+      platformAudit.recordDenied({
+        userId: payload.sub,
+        email: result.user?.email || payload.email,
+        reason: result.reason,
+        req,
+        statusCode: result.reason === "USER_INACTIVE" ? 401 : 403,
+      });
       throw DENIAL[result.reason]();
     }
     req.platformAdmin = result.principal;

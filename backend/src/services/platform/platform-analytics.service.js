@@ -15,7 +15,7 @@
  */
 const { Prisma } = require("@prisma/client");
 const { prisma } = require("../../config/db");
-const { activitySql, daysAgo, LIVE_ORG_FILTER, recordModuleSql, SYSTEM_RECORD_TYPES, WINDOWS } = require("./platform-read-models");
+const { activitySql, daysAgo, LIVE_ORG_FILTER, LIVE_ORG_IDS, recordModuleSql, SYSTEM_RECORD_TYPES, WINDOWS } = require("./platform-read-models");
 
 const resolveWindow = (value) => {
   const days = Number.parseInt(value, 10);
@@ -30,10 +30,12 @@ const getProductAnalytics = async ({ windowDays, now = new Date() } = {}) => {
   const prior = daysAgo(days * 2, now);
 
   const [
-    trackedTotal, recordModules, trackedModules, trackedEvents, activeCompanies, eligibleCompanies,
+    trackedInWindow, firstTracked, recordModules, trackedModules, trackedEvents, activeCompanies, eligibleCompanies,
     engagement, daily, signups, returning, lastActive, repeatModules,
   ] = await Promise.all([
-    prisma.$queryRaw`SELECT count(*)::int AS n, min("createdAt") AS first_at FROM "ProductEvent"`,
+    // Bounded by the window (index on createdAt) — never a count of the whole history (CX-7).
+    prisma.$queryRaw`SELECT count(*)::int AS n FROM "ProductEvent" WHERE "createdAt" >= ${since}`,
+    prisma.$queryRaw`SELECT "createdAt" AS first_at FROM "ProductEvent" ORDER BY "createdAt" ASC LIMIT 1`,
     prisma.$queryRaw`
       SELECT ${recordModuleSql()} AS module, count(*)::int AS events,
              count(DISTINCT "orgId")::int AS companies, count(DISTINCT "actorId")::int AS people
@@ -50,11 +52,9 @@ const getProductAnalytics = async ({ windowDays, now = new Date() } = {}) => {
       FROM "ProductEvent" WHERE "createdAt" >= ${since} AND ${LIVE_ORG_FILTER} GROUP BY 1, 2, 3 ORDER BY 4 DESC`,
     prisma.$queryRaw`
       SELECT count(DISTINCT a."orgId")::int AS n
-      FROM (${activitySql(since)}) a JOIN "Organisation" o ON o.id = a."orgId" AND o.status = 'active'`,
+      FROM (${activitySql(since)}) a`,
     prisma.$queryRaw`
-      SELECT count(*)::int AS n FROM "Organisation" o
-      WHERE o.status = 'active'
-        AND EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."orgId" = o.id AND m.status = 'active')`,
+      SELECT count(*)::int AS n FROM (${LIVE_ORG_IDS}) live`,
     prisma.$queryRaw`
       SELECT count(DISTINCT "userId") FILTER (WHERE at >= ${daysAgo(1, now)})::int AS dau,
              count(DISTINCT "userId") FILTER (WHERE at >= ${daysAgo(7, now)})::int AS wau,
@@ -119,15 +119,15 @@ const getProductAnalytics = async ({ windowDays, now = new Date() } = {}) => {
       activeCompanies: activeCount,
       eligibleCompanies: eligibleCount,
       definitions: {
-        activeCompanies: "Active companies with a recorded change, tracked event or session in the window.",
-        eligibleCompanies: "Active companies with at least one active member.",
+        activeCompanies: "Eligible companies with a recorded change, tracked event or session in the window.",
+        eligibleCompanies: "Active companies with at least one active member. Every module count is limited to these companies, so no share exceeds 100%.",
       },
     },
     tracking: {
-      trackedEventsAllTime: trackedTotal[0].n,
-      trackingSince: trackedTotal[0].first_at,
+      trackedEventsInWindow: trackedInWindow[0].n,
+      trackingSince: firstTracked[0]?.first_at ?? null,
       note:
-        trackedTotal[0].n === 0
+        !firstTracked.length
           ? "No tracked product events yet: screen opens, imports, exports and searches are recorded from the deployment of this release onward. Record activity below covers history."
           : null,
     },

@@ -128,7 +128,8 @@ const recordErrorEvent = ({ status, code, method, routePattern, module = null, o
       routePattern: String(routePattern || "(unmatched)").slice(0, 200),
       module: module ? String(module).slice(0, 32) : null,
       orgId: uuidOrNull(orgId),
-      requestId: typeof requestId === "string" ? requestId.slice(0, 64) : null,
+      // A client may choose its own request id; only a UUID is kept, never text.
+      requestId: uuidOrNull(requestId),
       occurredAt: new Date(),
     },
     "errorAccepted",

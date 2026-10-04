@@ -109,10 +109,20 @@ const recordModuleSql = (column = Prisma.sql`"entityType"`) =>
  * events, and session issue/refresh (RefreshSession, counted only — never its
  * token hash or address).
  */
+/**
+ * The companies cross-company analytics count: organisations that exist, are
+ * active and have at least one active member. AuditEvent / ProductEvent rows
+ * outlive their organisation (no foreign key, by design), and a company whose
+ * last member left cannot use the product; one definition serves every
+ * numerator and both denominators, so no share can exceed 100% (pre-merge
+ * review CX-5).
+ */
+const LIVE_ORG_IDS = Prisma.sql`SELECT o.id FROM "Organisation" o WHERE o.status = 'active'
+  AND EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."orgId" = o.id AND m.status = 'active')`;
+const LIVE_ORG_FILTER = Prisma.sql`"orgId" IN (${LIVE_ORG_IDS})`;
+
 const activitySql = (since, { liveOrgsOnly = true } = {}) => {
-  const live = liveOrgsOnly
-    ? Prisma.sql`AND "orgId" IN (SELECT id FROM "Organisation" WHERE status = 'active')`
-    : Prisma.empty;
+  const live = liveOrgsOnly ? Prisma.sql`AND ${LIVE_ORG_FILTER}` : Prisma.empty;
   return Prisma.sql`
   SELECT "orgId", "actorId" AS "userId", "occurredAt" AS at FROM "AuditEvent"
     WHERE "occurredAt" >= ${since} AND "entityType" NOT IN (${Prisma.join(SYSTEM_RECORD_TYPES)}) ${live}
@@ -121,14 +131,6 @@ const activitySql = (since, { liveOrgsOnly = true } = {}) => {
   UNION ALL
   SELECT "orgId", "userId", "createdAt" AS at FROM "RefreshSession" WHERE "createdAt" >= ${since} ${live}`;
 };
-
-/**
- * AuditEvent and ProductEvent rows outlive their organisation (no foreign
- * key, by design). Every cross-company count is limited to organisations that
- * exist and are active — the same population as the "active companies"
- * denominator, so a share can never exceed 100%.
- */
-const LIVE_ORG_FILTER = Prisma.sql`"orgId" IN (SELECT id FROM "Organisation" WHERE status = 'active')`;
 
 /**
  * The platform view of a subscription: canonical fields through the billing
@@ -165,6 +167,7 @@ module.exports = {
   ACTIVITY_LOOKBACK_DAYS,
   DAY_MS,
   LIVE_ORG_FILTER,
+  LIVE_ORG_IDS,
   RECORD_MODULES,
   SYSTEM_RECORD_TYPES,
   WINDOWS,

@@ -453,6 +453,13 @@ const getCompany = async (orgId, { now = new Date() } = {}) => {
   };
 };
 
+/**
+ * The total for a page: the window count on its rows, or — when a page past
+ * the end came back empty — the total of page 1 (pre-merge review CX-8).
+ */
+const totalOf = async (rows, paged, firstPage) =>
+  rows[0]?.total_count ?? (paged.offset ? (await firstPage()).page.total : 0);
+
 // ---------------------------------------------------------------------------
 // Users
 // ---------------------------------------------------------------------------
@@ -528,7 +535,7 @@ const listUsers = async (query = {}, { now = new Date() } = {}) => {
       pendingInvitations: pendingBy.get(r.email.toLowerCase()) || 0,
       platformOperator: Boolean(r.platform_operator),
     })),
-    page: pageInfo(paged, rows[0]?.total_count ?? 0),
+    page: pageInfo(paged, await totalOf(rows, paged, () => listUsers({ ...query, page: 1, pageSize: 1 }, { now }))),
     definitions: {
       role: "A person has a role per company membership; there is no platform-wide role. companies lists up to five memberships.",
     },
@@ -612,7 +619,7 @@ const listProjects = async (query = {}, { now = new Date() } = {}) => {
         healthFlags: health,
       };
     }),
-    page: pageInfo(paged, rows[0]?.total_count ?? 0),
+    page: pageInfo(paged, await totalOf(rows, paged, () => listProjects({ ...query, page: 1, pageSize: 1 }, { now }))),
   };
 };
 
@@ -674,7 +681,7 @@ const listSubscriptions = async (query = {}, { now = new Date() } = {}) => {
       cancelAtPeriodEnd: summary[0].cancel_at_period_end,
       unrecognizedPlan: summary[0].unrecognized_plan,
     },
-    page: pageInfo(paged, rows[0]?.total_count ?? 0),
+    page: pageInfo(paged, await totalOf(rows, paged, () => listSubscriptions({ ...query, page: 1, pageSize: 1 }, { now }))),
   };
 };
 

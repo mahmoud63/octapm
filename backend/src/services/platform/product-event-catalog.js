@@ -57,7 +57,7 @@ const SERVER_EVENT_RULES = Object.freeze([
   { method: "POST", pattern: /^\/reports\/export$/, eventName: "report.generated", module: "reports", action: "generated" },
   // Every document/spreadsheet export (`…/export.pdf`, `…/export.xlsx`, `/export/xlsx`,
   // `/export/schedule/:format`) except the accounting-integration feed, which is a sync.
-  { method: "GET", pattern: /^\/(?!integrations\/|projects\/:id\/accounting\/)(?:[a-z0-9._:-]+\/)*export(?:\.(?:pdf|xlsx|csv)|(?:\/[a-z0-9]+){1,2})$/,eventName: "report.generated", module: "reports", action: "generated" },
+  { method: "GET", pattern: /^\/(?!integrations\/|projects\/:id\/accounting\/)(?:[a-z0-9._:-]+\/)*export(?:\.(?:pdf|xlsx|csv)|(?:\/(?:[a-z0-9]+|:id)){1,2})$/, eventName: "report.generated", module: "reports", action: "generated" },
   { method: "GET", pattern: /^\/search$/, eventName: "search.executed", module: "search", action: "executed" },
 ]);
 
@@ -72,28 +72,43 @@ const CLIENT_EVENTS = Object.freeze(
   ),
 );
 
-const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const NUMBER = /^\d+$/;
-const WORD = /^[a-z][a-z0-9._-]{0,39}$/i;
+/**
+ * The route vocabulary: every literal segment of every documented /api/v1
+ * path (scripts/validate-openapi.js and the openapi test refuse an
+ * undocumented route, so this is the whole API). Built once, lazily.
+ */
+let routeWords = null;
+const ROUTE_WORDS = () => {
+  if (!routeWords) {
+    const { openApiSpec } = require("../../openapi/spec");
+    routeWords = new Set(
+      Object.keys(openApiSpec.paths)
+        .flatMap((p) => p.split("/"))
+        .filter((s) => s && !s.startsWith("{"))
+        .map((s) => s.toLowerCase()),
+    );
+  }
+  return routeWords;
+};
 
 /**
  * `/api/v1/projects/<uuid>/rfi/<uuid>/close?x=1` → `/projects/:id/rfi/:id/close`.
- * Any segment that is not a plain route word (an id, a date, a number, a token,
- * free text a client put in a URL) becomes `:id`, so no customer string can
- * reach a stored pattern.
+ * A segment is kept only when it is a literal word of the documented routes;
+ * everything else — ids, dates, tokens, and any word-shaped text a client puts
+ * in a URL (`/projects/confidential-client/rfi`) — becomes `:id`, so no
+ * customer string can reach a stored pattern (pre-merge review CX-2).
  */
 const normalisePath = (originalUrl) => {
   const pathOnly = String(originalUrl || "").split("?")[0].split("#")[0].replace(/^\/api\/v1/, "");
+  const words = ROUTE_WORDS();
   const segments = pathOnly.split("/").filter(Boolean).map((segment) => {
-    let decoded = segment;
+    let decoded;
     try {
-      decoded = decodeURIComponent(segment);
+      decoded = decodeURIComponent(segment).toLowerCase();
     } catch {
       return ":id";
     }
-    if (UUID.test(decoded) || DATE.test(decoded) || NUMBER.test(decoded) || !WORD.test(decoded)) return ":id";
-    return decoded.toLowerCase();
+    return words.has(decoded) ? decoded : ":id";
   });
   return `/${segments.join("/")}`.slice(0, 200);
 };

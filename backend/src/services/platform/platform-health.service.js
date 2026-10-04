@@ -130,6 +130,26 @@ const getSystemHealth = async ({ now = new Date() } = {}) => {
   };
 };
 
+/**
+ * Spike days: at least 10 errors and more than 3× the median day of the last
+ * `days` UTC calendar days, today included. Days with no error row count as
+ * zero — the database only returns days that had errors, and a median over
+ * those alone hid a single bad day among quiet ones (pre-merge review CX-6).
+ * `daily` rows are { day: Date|string (UTC date), n }.
+ */
+const detectSpikes = (daily, { days = 14, now = new Date() } = {}) => {
+  const key = (d) => new Date(d).toISOString().slice(0, 10);
+  const byDay = new Map(daily.map((d) => [key(d.day), Number(d.n) || 0]));
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const series = Array.from({ length: days }, (_, i) => {
+    const day = new Date(today - (days - 1 - i) * 86_400_000).toISOString().slice(0, 10);
+    return { day, n: byDay.get(day) || 0 };
+  });
+  const sorted = series.map((d) => d.n).sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+  return series.filter((d) => d.n >= 10 && d.n > 3 * Math.max(1, median)).map((d) => d.day);
+};
+
 const getErrorAnalytics = async ({ now = new Date() } = {}) => {
   const since1 = daysAgo(1, now);
   const since7 = daysAgo(7, now);
@@ -162,10 +182,7 @@ const getErrorAnalytics = async ({ now = new Date() } = {}) => {
              count(*) FILTER (WHERE status >= 500)::int AS server
       FROM "PlatformErrorEvent" WHERE "occurredAt" >= ${since14} GROUP BY 1 ORDER BY 1`,
   ]);
-  // A spike: a day with at least 10 errors and more than 3× the median day of the period.
-  const counts = daily.map((d) => d.n).sort((a, b) => a - b);
-  const median = counts.length ? counts[Math.floor(counts.length / 2)] : 0;
-  const spikes = daily.filter((d) => d.n >= 10 && d.n > 3 * Math.max(1, median)).map((d) => d.day);
+  const spikes = detectSpikes(daily, { days: 14, now });
   return {
     summary: {
       last24Hours: summary[0].all_24h,
@@ -186,4 +203,4 @@ const getErrorAnalytics = async ({ now = new Date() } = {}) => {
   };
 };
 
-module.exports = { getErrorAnalytics, getSystemHealth, SCHEDULER_LOCK_CLASS };
+module.exports = { detectSpikes, getErrorAnalytics, getSystemHealth, SCHEDULER_LOCK_CLASS };

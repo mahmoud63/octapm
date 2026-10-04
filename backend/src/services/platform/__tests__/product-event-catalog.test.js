@@ -14,7 +14,16 @@ describe("product-event catalogue", () => {
     expect(normalisePath(`/api/v1/projects/${ID}/daily-logs/2026-10-04/submit`)).toBe("/projects/:id/daily-logs/:id/submit");
     expect(normalisePath("/api/v1/reports/123/export.pdf")).toBe("/reports/:id/export.pdf");
     expect(normalisePath("/api/v1/search/Mr%20Smith's%20invoice")).toBe("/search/:id");
-    expect(normalisePath("/api/v1/x/%E0%A4%A")).toBe("/x/:id");
+    expect(normalisePath("/api/v1/x/%E0%A4%A")).toBe("/:id/:id");
+  });
+
+  test("normalisePath keeps only words of the documented routes (pre-merge review CX-2)", () => {
+    expect(normalisePath("/api/v1/projects/confidential-client/rfi")).toBe("/projects/:id/rfi");
+    expect(normalisePath("/api/v1/projects/abc/rfi/Acme-Tower-Phase2/close")).toBe("/projects/:id/rfi/:id/close");
+    expect(normalisePath("/api/v1/platform-admin/companies/secret-name")).toBe("/platform-admin/companies/:id");
+    // A parameter value that is itself a route word (`xer`, as in /import/xer) is kept: route vocabulary, never customer text.
+    expect(normalisePath("/api/v1/projects/abc/export/schedule/xer")).toBe("/projects/:id/export/schedule/xer");
+    expect(normalisePath("/api/v1/projects/abc/export/schedule/acme-format")).toBe("/projects/:id/export/schedule/:id");
   });
 
   test("moduleOfPath names the API area", () => {

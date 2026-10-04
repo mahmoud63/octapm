@@ -365,4 +365,75 @@ liveDescribe("Platform Superadmin V1", () => {
       for (const r of refusals) expect(r).toEqual({ routePattern: expect.stringMatching(/^\/platform-admin\//), module: "platform-admin" });
     });
   });
+
+  // Codex pre-merge review (2026-10-04): each case failed on 5034c03 before its fix.
+  describe("pre-merge review regressions", () => {
+    const SECRET = "confidential-client";
+
+    it("CX-1: platform audit rows keep no free text from the path, query names or a client request id", async () => {
+      const since = new Date();
+      const headers = { "x-request-id": "confidential-contract" };
+      await api.get(`/api/v1/platform-admin/companies/${SECRET}?private-note=1`, { ...bearer(mintAccessToken(pmA)), ...headers });
+      await api.get(`/api/v1/platform-admin/companies/${SECRET}?private-note=1&page=1`, { ...bearer(mintAccessToken(operator)), ...headers });
+      await new Promise((r) => setTimeout(r, 300));
+      const rows = await prisma.platformAuditEvent.findMany({ where: { occurredAt: { gte: since }, actorUserId: { in: [pmA.id, operator.id] } } });
+      expect(rows.length).toBe(2);
+      const text = JSON.stringify(rows);
+      expect(text).not.toContain("confidential");
+      expect(text).not.toContain("private-note");
+      for (const r of rows) {
+        expect(r.path).toBe("/api/v1/platform-admin/companies/:id");
+        expect(r.requestId).toBeNull(); // "confidential-contract" is not a UUID
+      }
+      expect(rows.find((r) => r.actorUserId === operator.id).queryKeys).toEqual(["page", "(unrecognised)"]);
+    });
+
+    it("CX-2: an error row keeps no word-shaped path text, matched route or not", async () => {
+      const requestId = crypto.randomUUID();
+      await api.get(`/api/v1/projects/${SECRET}/rfi`, { "x-request-id": requestId }); // 401 before any route matches
+      await api.get(`/api/v1/projects/${projectA.id}/rfi/${SECRET}`, { ...bearer(mintAccessToken(pmA)), "x-request-id": requestId });
+      await new Promise((r) => setTimeout(r, 3500));
+      const rows = await prisma.platformErrorEvent.findMany({ where: { requestId } });
+      await prisma.platformErrorEvent.deleteMany({ where: { requestId } });
+      expect(rows.length).toBe(2);
+      for (const r of rows) expect(r.routePattern).not.toContain("confidential");
+    });
+
+    it("CX-3: a deactivated account's refused requests are audited", async () => {
+      const since = new Date();
+      await prisma.user.update({ where: { id: operator.id }, data: { status: "inactive" } });
+      const res = await asOperator("/api/v1/platform-admin/overview");
+      await prisma.user.update({ where: { id: operator.id }, data: { status: "active" } });
+      expect(res.status).toBe(401);
+      await new Promise((r) => setTimeout(r, 300));
+      const rows = await prisma.platformAuditEvent.findMany({ where: { actorUserId: operator.id, occurredAt: { gte: since }, action: "platform.access_denied.user_inactive" } });
+      expect(rows.map((r) => r.statusCode)).toEqual([401]);
+    });
+
+    it("CX-5: the eligible-company share counts only eligible companies", async () => {
+      // An active company with RFI activity whose only membership is suspended: active, not eligible.
+      const lone = await createLiveOrg(prisma);
+      try {
+        await prisma.auditEvent.create({ data: { orgId: lone.org.id, entityType: "rfi", entityId: ORPHAN_ENTITY, action: "created", actorId: lone.user.id } });
+        await prisma.organizationMembership.update({ where: { id: lone.membership.id }, data: { status: "suspended" } });
+        const { data } = (await asOperator("/api/v1/platform-admin/analytics?windowDays=7")).body;
+        const rfi = data.modules.recordActivity.find((m) => m.module === "rfi");
+        const eligibleIds = (await prisma.organisation.findMany({ where: { status: "active", memberships: { some: { status: "active" } } }, select: { id: true } })).map((o) => o.id);
+        const eligibleWithRfi = new Set((await prisma.auditEvent.findMany({ where: { entityType: "rfi", occurredAt: { gte: new Date(Date.now() - 7 * 86_400_000) }, orgId: { in: eligibleIds } }, select: { orgId: true } })).map((r) => r.orgId)).size;
+        expect(Math.round(rfi.shareOfEligibleCompanies * data.denominators.eligibleCompanies)).toBe(eligibleWithRfi);
+        for (const m of data.modules.recordActivity) expect(m.shareOfEligibleCompanies ?? 0).toBeLessThanOrEqual(1);
+      } finally {
+        await prisma.auditEvent.deleteMany({ where: { orgId: lone.org.id } });
+        await dropLiveOrg(prisma, lone.org.id);
+      }
+    });
+
+    it("CX-8: a page past the end still reports the real total", async () => {
+      for (const list of ["users", "projects", "subscriptions"]) {
+        const first = (await asOperator(`/api/v1/platform-admin/${list}?pageSize=1`)).body.data.page;
+        const beyond = (await asOperator(`/api/v1/platform-admin/${list}?pageSize=1&page=${first.total + 5}`)).body.data;
+        expect([list, beyond.items.length, beyond.page.total]).toEqual([list, 0, first.total]);
+      }
+    });
+  });
 });

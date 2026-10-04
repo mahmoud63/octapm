@@ -275,7 +275,7 @@ export type Analytics = {
     definitions: Record<string, string>
   }
   tracking: {
-    trackedEventsAllTime: number
+    trackedEventsInWindow: number
     trackingSince: string | null
     note: string | null
   }

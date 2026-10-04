@@ -146,8 +146,8 @@ export function PlatformAnalyticsPage() {
               hint={`of ${fmtNumber(d.denominators.eligibleCompanies)} eligible`}
             />
             <KpiTile
-              label='Tracked events (all time)'
-              value={fmtNumber(d.tracking.trackedEventsAllTime)}
+              label={`Tracked events (${d.windowDays} d)`}
+              value={fmtNumber(d.tracking.trackedEventsInWindow)}
               hint={
                 d.tracking.trackingSince
                   ? `since ${fmtDate(d.tracking.trackingSince)}`
