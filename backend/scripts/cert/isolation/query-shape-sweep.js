@@ -46,6 +46,21 @@
  * The oracle pairs: for each (route, parameter) the ?x=foreign and ?x=nowhere
  * answers must be identical (status, code). A mismatch is a finding.
  *
+ * Coverage (robustness-5). The read sweep binds only routes with a path
+ * parameter, so 121 of the application's 350 GET routes were never sent here,
+ * nor any parameter a route reads from req.query without a validator (search's
+ * updatedAfter/updatedBefore aliases among them). Every GET route of the
+ * mounted application is now taken: the read sweep's owner path where there is
+ * one; else company 073's own captured GET of the route; else the template
+ * itself when it has no parameter; else a path bound to company 073's own
+ * records by discovery (bind-paths.js: its own collection asked for a record).
+ * OAuth/SSO callbacks are left out (they exchange a code with a provider). The
+ * parameters sent to a route are its validator fields, the generic set, every
+ * name its route file reads from req.query (req.query.x, req.query["x"],
+ * { x } = req.query) and — where the route hands req.query to a service —
+ * every name that service reads from it (query.x, rawQuery.x, filters.x), and
+ * every name the clients sent on the route in the captured corpus.
+ *
  * Results: <work>/results/isolation/<name>.json. The last line is
  *   query shape sweep: N requests, X 5xx, Y oracle pairs
  * where Y is the number of oracle pairs that DIFFER. Exit code 0 only when
@@ -57,7 +72,9 @@
 
 const path = require('path');
 const fs = require('fs');
+const readline = require('readline');
 const { as, pool } = require('../lib/api');
+const { createBinder } = require('./bind-paths');
 const guard = require('../lib/cert-env');
 const { buildMatcher } = require('../lib/routes');
 const { buildIndex } = require('./index-ids');
@@ -93,12 +110,69 @@ const verdictOf = (res) => {
   return 'ACCEPTED';
 };
 
-/** Query-parameter field names each GET route validates, by concrete template, read from the mounted router. */
+const ROUTES_DIR = path.join(__dirname, '..', '..', '..', 'src', 'routes');
+const SERVICES_DIR = path.join(__dirname, '..', '..', '..', 'src', 'services');
+// Property names that are a string's or an array's own, never a query parameter's.
+const NOT_PARAMS = new Set(['length', 'split', 'trim', 'toLowerCase', 'toUpperCase', 'map', 'filter', 'includes', 'startsWith', 'endsWith', 'replace', 'slice', 'join', 'some', 'every', 'find', 'forEach', 'reduce', 'push', 'toString', 'then', 'catch', 'match', 'test', 'indexOf', 'concat', 'keys', 'values', 'entries', 'sort', 'trimStart', 'trimEnd', 'localeCompare', 'normalize']);
+
+/** The names a source text reads from a request's query: req.query.x, req.query["x"], { x } = req.query. */
+const queryNamesIn = (text, objects = ['req\\.query']) => {
+  const names = new Set();
+  for (const object of objects) {
+    for (const m of text.matchAll(new RegExp(`\\b${object}\\??\\.([A-Za-z_][\\w]*)`, 'g'))) names.add(m[1]);
+    for (const m of text.matchAll(new RegExp(`\\b${object}\\[\\s*['"]([^'"]+)['"]\\s*\\]`, 'g'))) names.add(m[1]);
+    for (const m of text.matchAll(new RegExp(`\\{([^{}]*)\\}\\s*=\\s*${object}\\b`, 'g'))) {
+      for (const part of m[1].split(',')) {
+        const name = part.trim().split(/[:=\s]/)[0];
+        if (/^[A-Za-z_]\w*$/.test(name)) names.add(name);
+      }
+    }
+  }
+  return [...names].filter((n) => !NOT_PARAMS.has(n));
+};
+
+/** Per route file: the names it reads from req.query, and those its services read from a query it hands them. */
+const fileQueryNames = (() => {
+  const cache = new Map();
+  return (file) => {
+    if (!file) return [];
+    if (cache.has(file)) return cache.get(file);
+    const text = fs.readFileSync(path.join(ROUTES_DIR, file), 'utf8');
+    const names = new Set(queryNamesIn(text));
+    if (/:\s*req\.query\b(?!\.|\[)|\(\s*req\.query\s*[,)]|\.\.\.req\.query\b/.test(text)) {
+      for (const m of text.matchAll(/require\(\s*['"]\.\.\/services\/([\w.-]+?)(?:\.js)?['"]\s*\)/g)) {
+        const servicePath = path.join(SERVICES_DIR, `${m[1]}.js`);
+        if (!fs.existsSync(servicePath)) continue;
+        for (const n of queryNamesIn(fs.readFileSync(servicePath, 'utf8'), ['query', 'rawQuery', 'filters'])) names.add(n);
+      }
+    }
+    const list = [...names];
+    cache.set(file, list);
+    return list;
+  };
+})();
+
+/** Query-parameter field names each GET route validates, by concrete template, read from the mounted router; with every GET template and its route file. */
 const queryFieldsByTemplate = () => {
   // eslint-disable-next-line global-require
   const { createApp } = require('../../../src/app');
   const app = createApp();
+  // Which route file each mounted router is (by identity with the module's export).
+  const fileOf = new Map();
+  for (const file of fs.readdirSync(ROUTES_DIR).filter((f) => f.endsWith('.js'))) {
+    let mod;
+    try {
+      // eslint-disable-next-line global-require, import/no-dynamic-require
+      mod = require(path.join(ROUTES_DIR, file));
+    } catch {
+      continue;
+    }
+    const candidates = typeof mod === 'function' ? [mod] : Object.values(mod || {}).filter((v) => typeof v === 'function');
+    for (const candidate of candidates) if (candidate.stack && !fileOf.has(candidate)) fileOf.set(candidate, file);
+  }
   const out = new Map(); // "METHOD /template" -> Set(field)
+  out.getTemplates = new Map(); // "/template" -> route file
+
   const normalise = (value) => value.replace(/:([A-Za-z0-9_]+)/g, '{$1}').replace(/\/{2,}/g, '/').replace(/\/$/, '') || '/';
   const mountPath = (layer) => {
     let source = layer.regexp.source;
@@ -107,7 +181,7 @@ const queryFieldsByTemplate = () => {
     let k = 0;
     return source.replace(/\(\?:\/\(\[\^\/\]\+\?\)\)/g, () => `/{${layer.keys[k++]?.name || 'param'}}`).replace(/\(\[\^\/\]\+\?\)/g, () => `{${layer.keys[k++]?.name || 'param'}}`).replace(/\\\./g, '.').replace(/\^/g, '').replace(/\$/g, '').replace(/\?/g, '');
   };
-  const walk = (stack, prefix = '') => {
+  const walk = (stack, prefix = '', file = null) => {
     for (const layer of stack) {
       if (layer.route) {
         const fields = new Set();
@@ -115,6 +189,12 @@ const queryFieldsByTemplate = () => {
           const ctx = h.handle?.context;
           if (ctx && Array.isArray(ctx.fields) && Array.isArray(ctx.locations) && ctx.locations.includes('query')) {
             for (const f of ctx.fields) fields.add(String(f).replace(/\.\*$/, '').replace(/\[.*$/, ''));
+          }
+        }
+        if (layer.route.methods.get) {
+          for (const one of Array.isArray(layer.route.path) ? layer.route.path : [layer.route.path]) {
+            const full = normalise(`${prefix}${one}`);
+            if (full.startsWith('/api/v1')) out.getTemplates.set(full.replace('/api/v1', '') || '/', file);
           }
         }
         if (fields.size) {
@@ -131,7 +211,7 @@ const queryFieldsByTemplate = () => {
         }
         continue;
       }
-      if (layer.name === 'router' && layer.handle?.stack) walk(layer.handle.stack, normalise(`${prefix}${mountPath(layer)}`));
+      if (layer.name === 'router' && layer.handle?.stack) walk(layer.handle.stack, normalise(`${prefix}${mountPath(layer)}`), fileOf.get(layer.handle) || file);
     }
   };
   walk(app._router.stack);
@@ -179,7 +259,56 @@ const main = async () => {
       chosen.set(r.template, { route: r.route, template: r.template, company: r.victim });
     }
   }
-  console.log(`bound GET routes to probe: ${chosen.size} (preferred company ${PREFERRED}); victim ${VICTIM}; ${built.coverage ? Object.keys(built.index).length : 0} ids indexed`);
+  const fromReads = chosen.size;
+
+  // Every other GET route of the application (robustness-5): company PREFERRED's own captured GET,
+  // the template itself when it has no parameter, else a path discovered on PREFERRED's own records.
+  // The corpus also gives the query names the clients send on each route.
+  const binder = createBinder({ session: as(`pm@c${PREFERRED}.octapm-cert.test`) });
+  for (const r of owners) if (r.victim === PREFERRED) binder.learn(r.template, r.route);
+  const corpusNames = new Map(); // template -> Set(name)
+  const corpusRoute = new Map(); // template -> concrete path (PREFERRED's own)
+  const corpusDir = path.join(WORK, 'corpus');
+  for (const file of fs.readdirSync(corpusDir).filter((f) => f.endsWith('.jsonl'))) {
+    const rl = readline.createInterface({ input: fs.createReadStream(path.join(corpusDir, file)), crlfDelay: Infinity });
+    // eslint-disable-next-line no-restricted-syntax
+    for await (const line of rl) {
+      if (!line.includes('"method":"GET"')) continue;
+      let entry;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!(entry.status >= 200 && entry.status < 300) || typeof entry.route !== 'string') continue;
+      const hit = match('GET', entry.route);
+      if (!hit) continue;
+      const query = entry.route.includes('?') ? entry.route.slice(entry.route.indexOf('?') + 1) : '';
+      if (query) {
+        const names = corpusNames.get(hit.template) || corpusNames.set(hit.template, new Set()).get(hit.template);
+        for (const key of new URLSearchParams(query).keys()) names.add(key.replace(/\[.*$/, ''));
+      }
+      if (String(entry.actor || '').endsWith(`@c${PREFERRED}.octapm-cert.test`)) {
+        binder.learn(hit.template, entry.route);
+        if (!corpusRoute.has(hit.template)) corpusRoute.set(hit.template, entry.route.split('?')[0]);
+      }
+    }
+  }
+  const CALLBACK = /\/callback$/;
+  const unbound = [];
+  const sourceCount = { reads: fromReads, corpus: 0, template: 0, discovered: 0 };
+  for (const [template] of fieldsBy.getTemplates) {
+    if (chosen.has(template) || CALLBACK.test(template) || (ONLY && !ONLY.test(`GET ${template}`))) continue;
+    const source = corpusRoute.has(template) ? 'corpus' : template.includes('{') ? 'discovered' : 'template';
+    const route = corpusRoute.get(template) || (await binder.bind(template));
+    if (!route) {
+      unbound.push(template);
+      continue;
+    }
+    sourceCount[source] += 1;
+    chosen.set(template, { route, template, company: PREFERRED, source });
+  }
+  console.log(`bound GET routes to probe: ${chosen.size} (preferred company ${PREFERRED}; ${JSON.stringify(sourceCount)}); not bound: ${unbound.length}${unbound.length ? ` (${unbound.join(' | ')})` : ''}; victim ${VICTIM}; ${built.coverage ? Object.keys(built.index).length : 0} ids indexed`);
 
   const base = (route) => route.split('?')[0];
   const session = as(`pm@c${PREFERRED}.octapm-cert.test`);
@@ -206,9 +335,12 @@ const main = async () => {
 
   // One flat job per (route, parameter, shape), run `concurrency` at a time.
   const jobs = [];
+  let extraParams = 0;
   for (const { route, template } of chosen.values()) {
     const validated = [...(fieldsBy.get(`GET ${template}`) || [])];
-    const params = [...new Set([...validated, ...GENERIC])];
+    const read = [...fileQueryNames(fieldsBy.getTemplates.get(template)), ...(corpusNames.get(template) || [])];
+    const params = [...new Set([...validated, ...GENERIC, ...read])];
+    extraParams += params.length - new Set([...validated, ...GENERIC]).size;
     for (const name of params) {
       const foreign = foreignFor(name);
       for (const [shape, make] of SHAPES) {
@@ -216,7 +348,12 @@ const main = async () => {
       }
     }
   }
-  console.log(`requests to send: ${jobs.length}`);
+  console.log(`requests to send: ${jobs.length} (${extraParams} route parameter(s) read from req.query, a service or the corpus beyond the validator fields and the generic set)`);
+  if (process.argv.includes('--plan-only')) {
+    await db.end();
+    setTimeout(() => process.exit(0), 300);
+    return;
+  }
 
   let done = 0;
   const results = await pool(jobs, CONCURRENCY, async (job) => {
@@ -261,7 +398,7 @@ const main = async () => {
   const tally = (items, k) => items.reduce((acc, item) => ({ ...acc, [k(item)]: (acc[k(item)] || 0) + 1 }), {});
   const summary = {
     name: NAME, at: new Date().toISOString(), seconds: Math.round((Date.now() - started) / 1000),
-    reads: READS, routes: chosen.size, requests: results.length,
+    reads: READS, routes: chosen.size, getRoutesInApp: fieldsBy.getTemplates.size, routesBySource: sourceCount, unbound, requests: results.length,
     byVerdict: tally(results, (r) => r.verdict),
     serverErrors: serverErrors.length, leaks: leaks.length,
     oraclePairs: pairs.size, oraclePairsDiffering: differing.length,

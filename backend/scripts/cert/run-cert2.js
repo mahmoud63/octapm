@@ -59,6 +59,10 @@ const PROOFS = [
   'isolation/inventory-timesheets-state-proof.js', 'isolation/daily-logs-state-proof.js', 'isolation/quality-forms-safety-state-proof.js',
   'isolation/people-refs-2-state-proof.js', 'isolation/inventory-3-proof.js', 'isolation/people-evidence-3-proof.js',
   'isolation/oracles-shapes-3-proof.js', 'isolation/shape-ids-proof.js',
+  'isolation/evidence-4-proof.js', 'isolation/queries-4-proof.js', 'isolation/bodies-4-proof.js',
+  'isolation/evidence-lines-5-proof.js', 'isolation/robustness-5-proof.js', 'isolation/alerts-money-5-proof.js',
+  'isolation/evidence-6-proof.js', 'isolation/robustness-6-proof.js', 'isolation/alerts-6-proof.js',
+  'isolation/availability-7-proof.js', 'isolation/trivial-7-proof.js',
 ];
 
 const STEPS = [
@@ -92,6 +96,7 @@ const STEPS = [
   { name: 'realtime', args: [`${ISO}/realtime-proof.js`, '--pairs=5'] },
   { name: 'shape-sweep', inprocess: true, args: [`${ISO}/shape-sweep.js`, `--name=${TAG}-shapes`, `--inject=${TAG}-inject`] },
   { name: 'query-shape-sweep', inprocess: true, args: [`${ISO}/query-shape-sweep.js`, `--name=${TAG}-query-shapes`, `--reads=${TAG}-reads`] },
+  { name: 'date-sweep', inprocess: true, args: [`${ISO}/date-sweep.js`, `--name=${TAG}-dates`, `--reads=${TAG}-reads`] },
   // Every proof of the CERT-2 fixes, in process on the final code (the injection pairs no sweep can reach in an accepting state, among them).
   ...PROOFS.map((proof) => ({ name: `proof-${path.basename(proof, '.js')}`, inprocess: true, args: [`scripts/cert/${proof}`] })),
   { name: 'tally', args: [`${ISO}/cert2-tally.js`, `--tag=${TAG}`] },

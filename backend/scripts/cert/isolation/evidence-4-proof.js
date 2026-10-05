@@ -376,7 +376,10 @@ const main = async () => {
     const uatReportApproved = uatReport.body?.data?.id ? await pm('POST', `${AP}/daily-reports/${uatReport.body.data.id}/approve`, {}) : { status: 0 };
     check('ALLOWED UAT daily report: …and approved as the runner approves it', ok2xx(uatReportApproved) && uatReportApproved.body?.data?.status === 'approved', said(uatReportApproved));
     const uatSingle = await pm('POST', `${AP}/activities/${uatActivity}/progress`, { pctComplete: 85, progressMethod: 'percent', status: 'submitted', notes: `${STAMP} UAT single`, evidence: { photos: evidenceAttachment() } });
-    check('ALLOWED UAT photo shape on the single progress path is accepted and stored', ok2xx(uatSingle) && (await submissionsLike(`uat-evidence-${runId}`)).length === 2, said(uatSingle));
+    // Read by its own notes: since evidence-lines-5 the daily report above keeps the runner's photo, so its linked
+    // submission's evidence carries the runner's file name too, and a count by that name no longer picks this one out.
+    const uatSingleRows = await q('select "evidenceJson" as evidence from "ProgressSubmission" where "projectId" = $1 and notes = $2', [A.id, `${STAMP} UAT single`]);
+    check('ALLOWED UAT photo shape on the single progress path is accepted and stored as sent', ok2xx(uatSingle) && uatSingleRows.length === 1 && canonical(uatSingleRows[0].evidence) === canonical({ photos: evidenceAttachment() }), `${said(uatSingle)}; stored ${JSON.stringify(uatSingleRows.map((r) => r.evidence)).slice(0, 300)}`);
 
     // The web site-reporting form (site-reporting-dashboard.tsx): the upload's answer as photos, picked equipment.
     const webActivity = await freshActivity('WEB');

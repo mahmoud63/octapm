@@ -6,7 +6,13 @@
  * makes) may name only its own project's documents as photo evidence, and a
  * weekly report may list only its own project's activities.
  *
- *   CERT_INPROCESS=1 node scripts/cert/isolation/progress-reports-proof.js [attacker=024] [victim=025]
+ *   CERT_INPROCESS=1 node scripts/cert/isolation/progress-reports-proof.js [attacker=024] [victim=025] [--inject=cert2b-inject]
+ *
+ * The ids are the current population's: the attacker's project, activity and
+ * site photo and the victim's document and activity are read from the
+ * database. --inject=<name> reuses the pairs of an injection run
+ * (results/isolation/<name>.json) when it has them AND they still name this
+ * population's rows; otherwise the database's are used.
  *
  * The pairs (cert2-inject, all answered 2xx and stored the other company's id):
  *   POST /projects/{projectId}/activities/{id}/progress   evidence.photos[].key            = project_document
@@ -19,8 +25,8 @@
  *
  * The requests are built like the sweep's: the attacker company's project
  * manager writes to the attacker's own project, with the victim company's id
- * in the one field (the project, activity and foreign ids are the sweep's own
- * when results/isolation/cert2-inject.json has the pair). For each pair:
+ * in the one field (the project, activity and foreign ids are the injection
+ * run's own when --inject names one that has the pair). For each pair:
  *   - the victim's id is REFUSED, exactly as an id that exists nowhere is;
  *   - nothing is stored: no row of the attacker's company names the victim's
  *     ids afterwards that did not before, no row carries a refused request's
@@ -41,8 +47,12 @@ const { buildPopulation } = require('../lib/spec');
 const guard = require('../lib/cert-env');
 const fingerprint = require('./fingerprint');
 
-const ATTACKER = process.argv[2] || '024';
-const VICTIM = process.argv[3] || '025';
+const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const ATTACKER = positional[0] || '024';
+const VICTIM = positional[1] || '025';
+// --inject=<name>: reuse the pairs of results/isolation/<name>.json (an injection run on the
+// current population) when it has them; without it, every id is read from the database.
+const INJECT = process.argv.find((a) => a.startsWith('--inject='))?.slice(9) || null;
 const WORK = process.env.CERT_WORK_DIR || 'C:/Temp/octapm-cert';
 const STAMP = `PRP-${ATTACKER}-${crypto.randomBytes(3).toString('hex')}`.toUpperCase();
 const PNG_1X1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
@@ -70,12 +80,21 @@ const main = async () => {
   const victimOrg = await orgOf(VICTIM);
   if (!attackerOrg || !victimOrg) throw new Error('both companies must exist in the certification database');
 
-  // ── the sweep's request, or one built the same way ───────────────────────
+  // ── the ids: the current population's own, from the database ─────────────
+  // An injection result is reused only when asked for (--inject=<name>) and only
+  // where its ids still are what they were: the project and the activity the
+  // attacker company's, the document and the activity the victim's. A results
+  // file of an earlier population (cert2-inject.json was) names rows that no
+  // longer exist, and the proof failed at setup on the regenerated one.
   let sweep = [];
-  try {
-    sweep = JSON.parse(fs.readFileSync(path.join(WORK, 'results', 'isolation', 'cert2-inject.json'), 'utf8')).results
-      .filter((r) => r.attacker === ATTACKER && r.victim === VICTIM);
-  } catch { /* no sweep results: the ids are read from the database */ }
+  if (INJECT) {
+    try {
+      sweep = JSON.parse(fs.readFileSync(path.join(WORK, 'results', 'isolation', `${INJECT}.json`), 'utf8')).results
+        .filter((r) => r.attacker === ATTACKER && r.victim === VICTIM);
+    } catch (error) {
+      console.log(`--inject=${INJECT}: not read (${error.code || error.message}); the ids are read from the database`);
+    }
+  }
   const pairOf = (template, field) => sweep.find((r) => r.template === template && r.field === field && r.status < 300);
   const swept = {
     single: pairOf('/projects/{projectId}/activities/{id}/progress', 'evidence.photos[].key'),
@@ -84,17 +103,33 @@ const main = async () => {
     completed: pairOf('/projects/{projectId}/weekly-reports', 'activitiesCompleted[]'),
     inProgress: pairOf('/projects/{projectId}/weekly-reports', 'activitiesInProgress[]'),
   };
+  const orgOfDocument = async (id) => (id ? (await q(`select "orgId" from "ProjectDocument" where id = $1`, [id]))[0]?.orgId : null);
+  const orgOfActivity = async (id) => (id ? (await q(`select p."orgId" from "Activity" a join "Project" p on p.id = a."projectId" where a.id = $1`, [id]))[0]?.orgId : null);
+  if (swept.single) {
+    const [, , sweptProject, , sweptActivity] = swept.single.route.split('/');
+    const current = (await q(`select p."orgId" from "Activity" a join "Project" p on p.id = a."projectId" where a.id = $1 and p.id = $2`, [sweptActivity, sweptProject]))[0]?.orgId === attackerOrg
+      && (await orgOfDocument(swept.single.foreign)) === victimOrg;
+    if (!current) {
+      console.log(`--inject=${INJECT}: its progress pair names ids this population does not have (an earlier run's); the ids are read from the database`);
+      for (const name of Object.keys(swept)) swept[name] = null;
+    }
+  }
+  if (swept.completed && (await orgOfActivity(swept.completed.foreign)) !== victimOrg) swept.completed = null;
   for (const [name, row] of Object.entries(swept)) {
-    console.log(`sweep ${name}: ${row ? `${row.method} ${row.template} [${row.field}] -> ${row.status} ${row.verdict}` : '(not in the sweep results; built from the database)'}`);
+    console.log(`ids ${name}: ${row ? `the injection pair ${row.method} ${row.template} [${row.field}] -> ${row.status} ${row.verdict}` : 'read from the database'}`);
   }
 
   let projectId = swept.single?.route.split('/')[2] || null;
   let activityId = swept.single?.route.split('/')[4] || null;
   if (!projectId || !activityId) {
+    // A percent-method activity with no evidence requirement, in a project that has a clean site photo of its own.
     const row = (await q(`select a.id, a."projectId" from "Activity" a join "Project" p on p.id = a."projectId"
         join "ActivityProgressMethod" m on m."activityId" = a.id
-       where p."orgId" = $1 and m.method = 'percent' and not m."evidenceRequired" order by a."createdAt" limit 1`, [attackerOrg]))[0];
-    if (!row) throw new Error('the attacker company has no percent-method activity');
+       where p."orgId" = $1 and m.method = 'percent' and not m."evidenceRequired" and a."isActive"
+         and exists (select 1 from "ProjectDocument" d where d."projectId" = p.id and d."orgId" = p."orgId"
+                      and d."documentType" = 'site_photo' and d.status = 'available' and d."scanStatus" = 'clean')
+       order by a."createdAt" limit 1`, [attackerOrg]))[0];
+    if (!row) throw new Error('the attacker company has no percent-method activity in a project with a site photo');
     projectId = row.projectId;
     activityId = row.id;
   }

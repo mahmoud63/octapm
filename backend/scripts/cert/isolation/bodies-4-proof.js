@@ -723,7 +723,12 @@ const main = async () => {
     const second = await order(P, 'second');
     const secondLine = await lineOf(second);
     const afterSecond = await alertsOf(P);
-    check('ALLOWED: a second order on the same package is accepted (201) — it was a 409 CONFLICT with Prisma\'s text — and the package keeps exactly one alert, now on the second order\'s line', second.status === 201 && afterSecond.length === 1 && afterSecond[0].id === afterFirst[0]?.id && afterSecond[0].line === secondLine, `${said(second)}; ${JSON.stringify(afterSecond)}${PRISMA_TEXT.test(second.text || '') ? ' — PRISMA TEXT IN THE ANSWER' : ''}`);
+    // The second order's line is exactly as late as the first's (both needed in
+    // 5 days, promised in 40). Round 4 moved the alert to the line changed last;
+    // the package's alert now carries its WORST member, and on a tie the earlier
+    // one (procurement.service worstRisk, CERT-2 round 6), so it stays on the
+    // first order's line (trivial-7: this check encoded the superseded rule).
+    check('ALLOWED: a second order on the same package is accepted (201) — it was a 409 CONFLICT with Prisma\'s text — and the package keeps exactly one alert, still on the first order\'s line (the second is equally late: the worst member, the earlier on a tie)', second.status === 201 && Boolean(secondLine) && secondLine !== firstLine && afterSecond.length === 1 && afterSecond[0].id === afterFirst[0]?.id && afterSecond[0].line === firstLine, `${said(second)}; ${JSON.stringify(afterSecond)}${PRISMA_TEXT.test(second.text || '') ? ' — PRISMA TEXT IN THE ANSWER' : ''}`);
     const ack = afterSecond[0] ? await ask(procurement, 'PATCH', `${AP}/procurement/lead-time-alerts/${afterSecond[0].id}/acknowledge`, { note: `Proof ${STAMP}` }) : { status: 0 };
     const third = await order(P, 'third');
     const afterThird = await alertsOf(P);

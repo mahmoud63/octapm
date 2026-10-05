@@ -168,3 +168,30 @@ Recorded, not fixed (P2/P3, none cross-company):
 - **C2-N2 (P3)** Free-form evidence photo `url` and `uploadedBy` are kept as given (another project's API path, a non-member's id); nothing acts on them and downloads are scoped to the caller.
 - **C2-N3 (P2, functional, fail-closed)** People looked up by `User.orgId` (the person's home workspace) instead of membership, so a member of the company whose home workspace is another company is refused or not resolved — never let in. Found by the second CERT-2 run's realtime proof (a person of two companies could not be put on the second company's project team or mentioned there). **Fixed** (by membership, with the role and standing held in that company; `team-membership-proof.js` 11/11, 4/4 mutations caught): project team add (`permission-template.service` `addProjectMember`) and comment mentions (`comment.service` `resolveMentionUsers`). **Still open** (CERT-3, cross-company users): submittal and workflow `resolveAssignees` / step people (`submittal-workflow.service` :277, `workflow-engine.service` :368, :377), punch distribution recipients (`punch.service` :744), RFI people (`rfi-workflow.service` :39), project-template people (`project-template.service` :196), report recipients (`report-builder.service` :1026), conversation people (`conversation.service` :69/:81), activity engineers (`activity.service` :384/:543), `permission-template.service` :1327; auth/MFA/SSO lookups (`auth.service` :852, `mfa.service` :207, `sso.service` :355) to be reviewed for intent.
 - **C2-N4 (coverage)** Every `DocumentText` row of the certified population is pending (the extraction worker is off), so reads of ready document text were exercised only by the proofs; CERT-6.
+
+### CERT-2 fix rounds 1-7 (2026-10-03 / 04)
+
+The second CERT-2 run's sweeps were clean, but coverage triage showed 40 of 292
+injection route/field pairs had only ever been refused by the attacker's own
+record state or billing. Seven fix rounds followed, each reproduced first,
+proven live in process with mutations caught, and independently reviewed
+(workflows wf_9475ec24-3af, wf_815f0072-f13, wf_c8cd2d06-ada, wf_57338a16-889,
+wf_1e002b8d-041, wf_cc14b94d-6ff, wf_484fce32-199). Commits `94bef49`,
+`2e3dbe6`, `ac0d154`, then the round 5-7 commit.
+
+| ID | Sev | Finding | Status |
+|---|---|---|---|
+| C2-R1 | P1 | Cross-company references stored by writes the sweep could not reach in an accepting state: daily-log entry company, goods-receipt bin (then served with another company's canary by the item scan) and daily report, change-event RFQ vendor, timesheet crew foreman/party, worker person/company (create, update, import), timesheet company, daily-log distribution people, daily-report engineer/equipment/material lines, site-diary engineer/photos/lines, progress evidence in any shape or link form, direct stock movement context | Fixed |
+| C2-R2 | P2 | Existence oracles (another company's id 4xx, an id that exists nowhere 500): change-order activity, workflow-record activity links on every record type, worker person, crew party, daily report engineer, RFQ vendor | Fixed (checked before the write and before reference numbers) |
+| C2-R3 | P2 | Read side served stored foreign references: inventory scan/positions/costing, purchase-order receipts' daily report | Fixed (reads scoped to the company) |
+| C2-R4 | P2 | Any id field given as an array/object/number/operator reached Prisma (500, or coerced and stored); query parameters sent twice; dates the database cannot hold; figures given as arrays coerced to 0; NUL bytes, lone surrogates, deep JSON, multipart objects | Fixed: shape 1,752 requests, query 52,255, date 9,814 — 0 5xx; error handler maps caller input reaching the database to 400 and never echoes database text; code faults stay 500 |
+| C2-R5 | P2 | Membership vs home workspace: project team add, comment mentions, activity engineers refused a member of two companies | Fixed (`94bef49` and round 3); other `User.orgId` lookups in C2-N3 |
+| C2-R6 | P2 | Regressions introduced and corrected within the rounds: evidence links refused (external/in-app URLs, UAT photo fields), daily reports uneditable, lead-time alert following the last change then hiding a late line, quadratic link scan and alert recompute (5xx), equipment hours capped at one day | Fixed in rounds 4-7 |
+
+Deferred (recorded, not fixed under the CERT-2 scope freeze):
+
+- **D-FIN-1 (P2, CERT-5)** Money near Decimal(18,2)'s limit passes through floats: commitment line amounts (`commitment.service.js` ~:311), `moneyBody().toFloat()` on cost and procurement figures, direct-cost totals — values above ~2^53/100 lose cents; a legitimate total of exactly MONEY_MAX can be refused.
+- **D-FUN-1 (P2, CERT-3)** A purchase order cannot be closed once anything is received (`purchase-order.service.js` ALLOWED has no partial/received entries); deleting an activity cascades its PO lines without recomputing the order value.
+- **D-FUN-2 (P3, CERT-3)** Activity created without a duration is scheduled with duration 0 and later PATCHes are refused 400 INVALID_DATES.
+- **D-DQ-1 (P3, CERT-6)** 87 untyped fields (mostly JSON settings) accept an object or array; some text columns may store `[object Object]`; isIn chains accept lists on several routes.
+- **D-OPS-1 (P3, CERT-7)** Receipt and purchase-order `lines` arrays have no maximum size; goods receipts run in a 60 s window.
