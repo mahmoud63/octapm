@@ -1,5 +1,8 @@
 const express = require('express');
 const { body, param } = require('express-validator');
+const { scalarFigure, INT4_MAX } = require('../utils/figure-input');
+const { QUANTITY_MAX } = require('../utils/stock-figures');
+const { dateInput } = require('../utils/date-input');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
@@ -52,18 +55,18 @@ router.post(
       .isIn(UNITS)
       .withMessage(`Unit must be one of: ${UNITS.join(', ')}`),
     body('qty')
-      .isFloat({ min: 0.001 })
+      .custom(scalarFigure).bail().isFloat({ min: 0.001, max: QUANTITY_MAX })
       .toFloat()
       .withMessage('Quantity must be positive'),
-    body('plannedQty').optional().isFloat({ min: 0.001 }).toFloat(),
-    body('requiredDate').optional({ nullable: true }).isISO8601().toDate(),
+    body('plannedQty').optional().custom(scalarFigure).bail().isFloat({ min: 0.001, max: QUANTITY_MAX }).toFloat(),
+    body('requiredDate').optional({ nullable: true }).custom(dateInput).toDate(),
     body('requiredTiming')
       .optional()
       .isIn(['activity_start', 'activity_finish']),
-    body('needOffsetDays').optional().isInt({ min: 0 }).toInt(),
-    body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
-    body('bufferDays').optional().isInt({ min: 0 }).toInt(),
-    body('orderByDate').optional({ nullable: true }).isISO8601().toDate(),
+    body('needOffsetDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
+    body('leadWeeks').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
+    body('bufferDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
+    body('orderByDate').optional({ nullable: true }).custom(dateInput).toDate(),
     body('notes').optional({ nullable: true }).isString().trim(),
     validate,
   ],
@@ -93,16 +96,16 @@ router.patch(
     body('supplierContact').optional({ nullable: true }).isString().trim(),
     body('procurementPackageId').optional({ nullable: true }).isString().isUUID(),
     body('unit').optional().isIn(UNITS),
-    body('qty').optional().isFloat({ min: 0.001 }).toFloat(),
-    body('plannedQty').optional().isFloat({ min: 0.001 }).toFloat(),
-    body('requiredDate').optional({ nullable: true }).isISO8601().toDate(),
+    body('qty').optional().custom(scalarFigure).bail().isFloat({ min: 0.001, max: QUANTITY_MAX }).toFloat(),
+    body('plannedQty').optional().custom(scalarFigure).bail().isFloat({ min: 0.001, max: QUANTITY_MAX }).toFloat(),
+    body('requiredDate').optional({ nullable: true }).custom(dateInput).toDate(),
     body('requiredTiming')
       .optional()
       .isIn(['activity_start', 'activity_finish']),
-    body('needOffsetDays').optional().isInt({ min: 0 }).toInt(),
-    body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
-    body('bufferDays').optional().isInt({ min: 0 }).toInt(),
-    body('orderByDate').optional({ nullable: true }).isISO8601().toDate(),
+    body('needOffsetDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
+    body('leadWeeks').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
+    body('bufferDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
+    body('orderByDate').optional({ nullable: true }).custom(dateInput).toDate(),
     body('status')
       .optional()
       .isIn(['planned', 'ordered', 'partial', 'received', 'issued', 'consumed', 'cancelled']),
@@ -129,11 +132,11 @@ router.post(
   [
     param('materialId').isUUID(),
     body('usedQty')
-      .isFloat({ min: 0.001 })
+      .custom(scalarFigure).bail().isFloat({ min: 0.001, max: QUANTITY_MAX })
       .toFloat()
       .withMessage('Used quantity must be positive'),
-    body('wasteQty').optional().isFloat({ min: 0 }).toFloat(),
-    body('usageDate').optional({ nullable: true }).isISO8601().toDate(),
+    body('wasteQty').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
+    body('usageDate').optional({ nullable: true }).custom(dateInput).toDate(),
     body('poLineId').optional({ nullable: true }).isString().isUUID(),
     body('receiptLineId').optional({ nullable: true }).isString().isUUID(),
     body('dailyReportId').optional({ nullable: true }).isString().isUUID(),

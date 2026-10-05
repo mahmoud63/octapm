@@ -17,6 +17,7 @@ const {
 } = require('../parsers/msp-parser');
 const { parseScheduleXlsx } = require('../parsers/schedule-xlsx-parser');
 const { applyCpmToProject, dateToWorkingDay } = require('./cpm.service');
+const { SCHEDULE_DAYS_MAX } = require('../utils/schedule-days');
 
 // How many staged activities and dependencies a dry-run report carries back;
 // the counts are complete, the rows are a sample to review.
@@ -151,6 +152,46 @@ function isoOrNull(value) {
   return date ? date.toISOString() : null;
 }
 
+/**
+ * A schedule file's figures are a programme's (CERT-2, trivial-7): an
+ * activity's durations and total float and a relationship's lag are at most
+ * SCHEDULE_DAYS_MAX days either way, as the activity routes take them. Every
+ * format (XER, P6 XML, MSP XML, xlsx) staged them as given, and activation
+ * took them live: the critical-path pass then dated the programme from them —
+ * a duration of a million days held the activation's transaction for seconds
+ * per activity at the day-by-day conversion — and figures past the Int
+ * columns failed its write. A figure the file does not give as a number is
+ * no figure (it is staged as nothing, as before). The day offsets worked out
+ * from the file's dates are not bounded here: they come from dates (years 1
+ * to 9999) and the activation's critical-path pass works them out again.
+ * Refused whole, 400 SCHEDULE_FIGURE_OUT_OF_RANGE naming each activity and
+ * relationship, before anything is staged.
+ */
+function assertScheduleFigures(stagedActivities, dependencies) {
+  const beyond = (value) =>
+    value !== null && value !== undefined && Number.isFinite(Number(value)) && Math.abs(Number(value)) > SCHEDULE_DAYS_MAX;
+  const problems = [];
+  // One problem per activity and per relationship, naming each figure past the bound.
+  const valuesOf = (row, fields) => Object.fromEntries(fields.map((field) => [field, Number(row[field])]));
+  for (const activity of stagedActivities) {
+    const fields = ['duration', 'originalDuration', 'remainingDuration', 'totalFloat'].filter((field) => beyond(activity[field]));
+    if (fields.length) problems.push({ activity: activity.p6ActivityId || activity.draftKey, fields, values: valuesOf(activity, fields) });
+  }
+  for (const dependency of dependencies) {
+    if (beyond(dependency.lagDays)) {
+      problems.push({ predecessor: dependency.externalPredecessorRef, successor: dependency.externalSuccessorRef, fields: ['lagDays'], values: valuesOf(dependency, ['lagDays']) });
+    }
+  }
+  if (problems.length) {
+    throw new HttpError(
+      400,
+      'SCHEDULE_FIGURE_OUT_OF_RANGE',
+      `A schedule's durations, float and lags are at most ${SCHEDULE_DAYS_MAX} days; this file has ${problems.length} beyond that`,
+      { problems: problems.slice(0, 50), problemCount: problems.length, maxDays: SCHEDULE_DAYS_MAX },
+    );
+  }
+}
+
 function buildImportSnapshot({ project, activities, relationships, wbsNodes, source, calendars }) {
   const projectStart = project.startDate ? new Date(project.startDate) : null;
   const refToDraftKey = new Map();
@@ -242,6 +283,8 @@ function buildImportSnapshot({ project, activities, relationships, wbsNodes, sou
       },
     });
   }
+
+  assertScheduleFigures(stagedActivities, dependencies);
 
   return {
     source,

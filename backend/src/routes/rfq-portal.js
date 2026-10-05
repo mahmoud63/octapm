@@ -1,5 +1,7 @@
 const express = require("express");
 const { body, param } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { validate } = require("../middleware/validate");
@@ -18,7 +20,7 @@ router.get("/:token", [tokenParam, validate], asyncHandler(async (req, res) => s
 
 router.put(
   "/:token/quote",
-  [tokenParam, body("lines").optional().isArray({ max: 200 }), body("lines.*.lineId").isString(), body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("validUntil").optional({ nullable: true }).isISO8601(), body("leadTimeDays").optional({ nullable: true }).isInt({ min: 0, max: 3650 }), body("quotedBy").optional({ nullable: true }).isString().trim().isLength({ max: 120 }), validate],
+  [tokenParam, body("lines").optional().isArray({ max: 200 }), body("lines.*.lineId").isString(), body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("validUntil").optional({ nullable: true }).custom(dateInput), body("leadTimeDays").optional({ nullable: true }).custom(scalarFigure).bail().isInt({ min: 0, max: 3650 }), body("quotedBy").optional({ nullable: true }).isString().trim().isLength({ max: 120 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.portalSubmitQuote(req.params.token, req.body))),
 );
 

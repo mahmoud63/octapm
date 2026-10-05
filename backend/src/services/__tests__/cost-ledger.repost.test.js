@@ -132,3 +132,58 @@ describe("cost ledger — one projection row per activity", () => {
     expect(await stored("act-below")).toEqual([{ actual: 800, forecast: 10000, forecastSource: "default", budget: undefined }]);
   });
 });
+
+/**
+ * CERT-2 (alerts-money-5): what a posting leaves on the projections fits them.
+ * The activity's actual and the budget line's actual are Decimal(18,2):
+ * postings that each fit could together pass 10^16, and the increment failed
+ * at the write with a 500 — two workers at the highest rate on one day, a
+ * second issue of costly stock to the same activity. Refused with a 400
+ * before the entry is written.
+ */
+describe("cost ledger — the projections hold what is posted (CERT-2)", () => {
+  beforeEach(() => { ledger.reset(); mockPrisma.$queryRaw.mockImplementation(async () => []); mockPrisma.$executeRaw.mockClear(); });
+  const entries = () => mockPrisma.costLedgerEntry.findMany({ where: {} });
+
+  it("a posting that would take the activity's actual past 10^16 is a 400 COST_LEDGER_TOTAL_TOO_LARGE, and nothing is written", async () => {
+    ledger.seedCostRecord({ id: "cr-1", projectId: "p1", activityId: "act-1", actual: 6e15 });
+    await expect(service.post(posting({ activityId: "act-1", amount: 5e15 }))).rejects.toMatchObject({ status: 400, code: "COST_LEDGER_TOTAL_TOO_LARGE" });
+    expect(await entries()).toHaveLength(0);
+    expect(ledger.store.costRecords[0].actual).toBe(6e15);
+    // Checked under the pair's advisory lock, before the record is read.
+    const lock = mockPrisma.$executeRaw.mock.calls.findIndex(([strings, ...values]) => strings.join("?").includes("pg_advisory_xact_lock") && values.includes("cost-record:p1:act-1"));
+    expect(lock).toBeGreaterThanOrEqual(0);
+    // What fits is posted; a return that brings it down is too.
+    await expect(service.post(posting({ activityId: "act-1", amount: 3e15 }))).resolves.toMatchObject({ posted: true });
+    await expect(service.post(posting({ sourceLineId: "back", activityId: "act-1", amount: -4e15 }))).resolves.toMatchObject({ posted: true });
+    expect(ledger.store.costRecords[0].actual).toBe(5e15);
+  });
+
+  it("the budget line's actual likewise", async () => {
+    ledger.seedBudgetLine({ id: "bl-1", projectId: "p1", costCodeId: "cc-1", costType: "labour", actual: 9e15 });
+    await expect(service.post(posting({ budgetLineId: "bl-1", amount: 2e15 }))).rejects.toMatchObject({ status: 400, code: "COST_LEDGER_TOTAL_TOO_LARGE" });
+    expect(await entries()).toHaveLength(0);
+    expect(ledger.store.budgetLines[0].actual).toBe(9e15);
+  });
+
+  it("a single amount the ledger cannot hold is a 400 COST_LEDGER_AMOUNT_TOO_LARGE", async () => {
+    await expect(service.post(posting({ amount: 2e16 }))).rejects.toMatchObject({ status: 400, code: "COST_LEDGER_AMOUNT_TOO_LARGE" });
+    expect(await entries()).toHaveLength(0);
+  });
+
+  it("a reversal is held to the same bound: one that would take the actual past -10^16 is refused, and no mirror is written", async () => {
+    ledger.seedCostRecord({ id: "cr-1", projectId: "p1", activityId: "act-1", actual: 0 });
+    await service.post(posting({ activityId: "act-1", amount: 2e15 }));
+    // Since moved by something else to near the floor of the column.
+    ledger.store.costRecords[0].actual = -9e15;
+    await expect(service.reverse({ tx: mockPrisma, orgId: "org-1", projectId: "p1", sourceType: "timesheet", sourceId: "ts-1" })).rejects.toMatchObject({ status: 400, code: "COST_LEDGER_TOTAL_TOO_LARGE" });
+    expect(await entries()).toHaveLength(1);
+    expect(ledger.store.costRecords[0].actual).toBe(-9e15);
+  });
+
+  it("a posting already on the ledger is not refused for the sum it is already part of", async () => {
+    ledger.seedCostRecord({ id: "cr-1", projectId: "p1", activityId: "act-1", actual: 0 });
+    await service.post(posting({ activityId: "act-1", amount: 9e15 }));
+    await expect(service.post(posting({ activityId: "act-1", amount: 9e15 }))).resolves.toMatchObject({ posted: false, reason: "already_posted" });
+  });
+});

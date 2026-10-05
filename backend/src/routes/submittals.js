@@ -2,6 +2,8 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param, query } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { authenticate } = require("../middleware/auth");
 const { getEffectiveRole, hasPermission, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
@@ -44,9 +46,9 @@ const routeAdmin = (req) => ({
 const upgradeValidators = () => [
   body("packageId").optional({ nullable: true }).isString().isUUID(),
   body("workflowTemplateId").optional({ nullable: true }).isString().isUUID(),
-  body("leadTimeWeeks").optional({ nullable: true }).isInt({ min: 0, max: 104 }),
-  body("reviewDays").optional({ nullable: true }).isInt({ min: 0, max: 365 }),
-  body("requiredOnSite").optional({ nullable: true }).isString().isISO8601(),
+  body("leadTimeWeeks").optional({ nullable: true }).custom(scalarFigure).bail().isInt({ min: 0, max: 104 }),
+  body("reviewDays").optional({ nullable: true }).custom(scalarFigure).bail().isInt({ min: 0, max: 365 }),
+  body("requiredOnSite").optional({ nullable: true }).isString().custom(dateInput),
   body("managerUserId").optional({ nullable: true }).isString().isUUID(),
   body("distributionUserIds").optional().isArray({ max: 20 }),
   body("distributionUserIds.*").isString().isUUID(),
@@ -63,7 +65,7 @@ const templateValidators = ({ requireName = false } = {}) => [
   body("steps").optional().isArray({ max: 12 }),
   body("steps.*.name").optional().isString(),
   body("steps.*.mode").optional().isIn(["sequential", "parallel"]),
-  body("steps.*.days").optional().isInt({ min: 0, max: 365 }).toInt(),
+  body("steps.*.days").optional().custom(scalarFigure).bail().isInt({ min: 0, max: 365 }).toInt(),
   body("steps.*.assignees").optional().isArray({ max: 20 }),
 ];
 
@@ -104,8 +106,8 @@ router.get(
     query("ownerPartyId").isString().optional().isUUID(),
     query("partyId").isString().optional().isUUID(),
     query("search").optional().isString().trim().isLength({ max: 120 }),
-    query("dueAfter").isString().optional().isISO8601(),
-    query("dueBefore").isString().optional().isISO8601(),
+    query("dueAfter").isString().optional().custom(dateInput),
+    query("dueBefore").isString().optional().custom(dateInput),
     query("sortBy").isString()
       .optional()
       .isIn([
@@ -149,7 +151,7 @@ router.post(
     body("name").isString().trim().notEmpty().isLength({ max: 160 }),
     body("description").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
     body("activityId").optional({ nullable: true }).isString().isUUID(),
-    body("requiredOnSite").optional({ nullable: true }).isString().isISO8601(),
+    body("requiredOnSite").optional({ nullable: true }).isString().custom(dateInput),
     body("managerUserId").optional({ nullable: true }).isString().isUUID(),
     body("submittalIds").optional().isArray({ max: 200 }),
     body("submittalIds.*").isString().isUUID(),
@@ -173,7 +175,7 @@ router.patch(
     body("name").optional().isString().trim().notEmpty().isLength({ max: 160 }),
     body("description").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
     body("activityId").optional({ nullable: true }).isString().isUUID(),
-    body("requiredOnSite").optional({ nullable: true }).isString().isISO8601(),
+    body("requiredOnSite").optional({ nullable: true }).isString().custom(dateInput),
     body("managerUserId").optional({ nullable: true }).isString().isUUID(),
     validate,
   ],
@@ -240,7 +242,7 @@ router.post(
   "/",
   requirePermission("submittal", "create"),
   [
-    body("title").trim().notEmpty(),
+    body("title").isString().trim().notEmpty(),
     body("status")
       .optional()
       .isIn(["pending", "under_review", "approved", "resubmit", "rejected"]),
@@ -262,9 +264,12 @@ router.post(
     body("revisions").optional().isArray(),
     body("comment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("submittedOn").optional({ nullable: true }).isString().isISO8601(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
-    body("reviewedOn").optional({ nullable: true }).isString().isISO8601(),
+    body("submittedOn").optional({ nullable: true }).isString().custom(dateInput),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("reviewedOn").optional({ nullable: true }).isString().custom(dateInput),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("remarks").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -300,8 +305,8 @@ const submittalEvidenceValidators = [
   body("storageKey").optional().isString().trim(),
   body("remarks").optional({ nullable: true }).isString().trim(),
   body("comment").optional({ nullable: true }).isString().trim(),
-  body("submittedOn").optional({ nullable: true }).isString().isISO8601(),
-  body("reviewedOn").optional({ nullable: true }).isString().isISO8601(),
+  body("submittedOn").optional({ nullable: true }).isString().custom(dateInput),
+  body("reviewedOn").optional({ nullable: true }).isString().custom(dateInput),
 ];
 
 router.get(
@@ -369,9 +374,9 @@ router.post(
   }),
   [
     param("submittalId").isUUID(),
-    body("comment").trim().notEmpty(),
+    body("comment").isString().trim().notEmpty(),
     body("remarks").optional({ nullable: true }).isString().trim(),
-    body("reviewedOn").optional({ nullable: true }).isString().isISO8601(),
+    body("reviewedOn").optional({ nullable: true }).isString().custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -456,7 +461,7 @@ const rejectSubmittalRoute = asyncHandler(async (req, res) => {
 
 const rejectSubmittalValidators = [
   param("submittalId").isUUID(),
-  body("reason").trim().notEmpty(),
+  body("reason").isString().trim().notEmpty(),
   validate,
 ];
 
@@ -504,9 +509,12 @@ router.patch(
     body("revisions").optional().isArray(),
     body("comment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("submittedOn").optional({ nullable: true }).isString().isISO8601(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
-    body("reviewedOn").optional({ nullable: true }).isString().isISO8601(),
+    body("submittedOn").optional({ nullable: true }).isString().custom(dateInput),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("reviewedOn").optional({ nullable: true }).isString().custom(dateInput),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("remarks").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {

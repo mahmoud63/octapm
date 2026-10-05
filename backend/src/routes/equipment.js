@@ -1,5 +1,6 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
+const { dateInput } = require('../utils/date-input');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
@@ -17,8 +18,8 @@ router.get(
   [
     query('activityId').isString().optional().isUUID(),
     query('equipmentId').isString().optional().isUUID(),
-    query('from').isString().optional().isISO8601(),
-    query('to').isString().optional().isISO8601(),
+    query('from').isString().optional().custom(dateInput),
+    query('to').isString().optional().custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {

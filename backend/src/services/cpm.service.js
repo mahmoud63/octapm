@@ -11,6 +11,17 @@ const {
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+// The days a schedule date can be: years 1 to 9999 (UTC), what utils/date-input
+// accepts and the query engine converts. A conversion that lands outside them
+// is no date (null) — a later year failed the critical-path pass's own write,
+// and a day past what a Date holds is an invalid Date (CERT-2, trivial-7).
+const FIRST_STORABLE_DAY = Date.parse('0001-01-01T00:00:00.000Z');
+const LAST_STORABLE_DAY = Date.parse('9999-12-31T00:00:00.000Z');
+const isStorableDay = (date) => {
+  const time = date.getTime();
+  return time >= FIRST_STORABLE_DAY && time <= LAST_STORABLE_DAY;
+};
+
 const CALENDAR_DEFINITIONS = {
   five_day: {
     id: 'five_day',
@@ -98,10 +109,17 @@ function nearestWorkingDate(dateValue, options = {}, direction = 1) {
   let date = startOfUtcDay(dateValue);
   if (!date) return null;
   const step = direction < 0 ? -1 : 1;
-  while (!isWorkingDate(date, options)) {
+  // Every calendar works at least one day in any seven, so seven looks find
+  // it. The walk was unbounded, and a step past what a Date holds is an
+  // invalid Date — never a working day — so it never ended (CERT-2,
+  // trivial-7): such a step is no date (null).
+  const { workingDays } = resolveCalendar(options.calendarId, options.projectCalendar);
+  for (let look = 0; look < 7; look += 1) {
+    if (Number.isNaN(date.getTime())) return null;
+    if (workingDays.has(date.getUTCDay())) return date;
     date = shiftUtcDate(date, step);
   }
-  return date;
+  return null;
 }
 
 function workingDayToDate(projectStartDate, dayOffset, options = {}) {
@@ -120,14 +138,31 @@ function workingDayToDate(projectStartDate, dayOffset, options = {}) {
   const direction = offset < 0 ? -1 : 1;
   let date = nearestWorkingDate(projectStartDate, options, direction);
   if (!date) return null;
+
+  // Whole weeks at once (CERT-2, trivial-7). It walked one day at a time, on
+  // every activity read (six offsets each) and for four offsets of every
+  // activity in a PATCH's critical-path pass: 36,500 working days took about
+  // 20 ms, a million 0.5 s — one activity of a million days held a PATCH's
+  // transaction past its five seconds (500) — and past about 71 million the
+  // Date became invalid and the walk never ended. The seven days after a
+  // working day hold each weekday once, so exactly the calendar's working
+  // days in a week, and end on the same weekday, a working one: whole weeks
+  // land where the walk landed, and what is left (less than a week of working
+  // days) is walked. A date outside years 1 to 9999 is no date (null).
+  const { workingDays } = resolveCalendar(options.calendarId, options.projectCalendar);
   let remaining = Math.abs(offset);
+  const weeks = Math.floor(remaining / workingDays.size);
+  remaining -= weeks * workingDays.size;
+  date = shiftUtcDate(date, direction * weeks * 7);
+  if (!isStorableDay(date)) return null;
 
   while (remaining > 0) {
     date = shiftUtcDate(date, direction);
-    if (isWorkingDate(date, options)) remaining -= 1;
+    if (Number.isNaN(date.getTime())) return null;
+    if (workingDays.has(date.getUTCDay())) remaining -= 1;
   }
 
-  return date;
+  return isStorableDay(date) ? date : null;
 }
 
 function dateToWorkingDay(projectStartDate, dateValue, options = {}) {
@@ -141,16 +176,23 @@ function dateToWorkingDay(projectStartDate, dateValue, options = {}) {
 
   if (target.getTime() === start.getTime()) return 0;
 
+  // Whole weeks at once, as workingDayToDate counts them (CERT-2,
+  // trivial-7): it walked one day at a time between the two dates — up to
+  // 3.6 million days for a schedule file's dates, four per imported activity.
+  // Any seven days in a row hold each weekday once; the days after the whole
+  // weeks (fewer than seven) are walked.
   const direction = target > start ? 1 : -1;
-  let date = start;
-  let offset = 0;
-
-  while (date.getTime() !== target.getTime()) {
+  const { workingDays } = resolveCalendar(options.calendarId, options.projectCalendar);
+  const days = Math.round(Math.abs(target.getTime() - start.getTime()) / MS_PER_DAY);
+  const weeks = Math.floor(days / 7);
+  let count = weeks * workingDays.size;
+  let date = shiftUtcDate(start, direction * weeks * 7);
+  for (let step = weeks * 7; step < days; step += 1) {
     date = shiftUtcDate(date, direction);
-    if (isWorkingDate(date, options)) offset += direction;
+    if (workingDays.has(date.getUTCDay())) count += 1;
   }
 
-  return offset;
+  return direction * count;
 }
 
 function collectStructuredDependencies(activities, dependencies) {

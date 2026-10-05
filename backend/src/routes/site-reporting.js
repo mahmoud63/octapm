@@ -1,6 +1,8 @@
 const express = require('express');
 const crypto = require('crypto');
 const multer = require('multer');
+// The NUL / lone-surrogate guard again after multer: it parses the multipart body inside the route (CERT-2).
+const { rejectNullBytes } = require('../middleware/reject-null-bytes');
 const path = require('path');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
@@ -58,6 +60,7 @@ router.post(
   }),
   uploadLimiter,
   upload.array('files', 10),
+  rejectNullBytes,
   asyncHandler(async (req, res) => {
     try {
       const result = await fileStorageService.uploadSiteReportingFiles({

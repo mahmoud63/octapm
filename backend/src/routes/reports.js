@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -52,9 +53,9 @@ router.post(
   [
     body("code").optional().isString().trim().isLength({ max: 40 }),
     body("label").optional().isString().trim().isLength({ max: 120 }),
-    body("periodStart").isISO8601(),
-    body("periodEnd").isISO8601(),
-    body("cutoffDate").optional().isISO8601(),
+    body("periodStart").custom(dateInput),
+    body("periodEnd").custom(dateInput),
+    body("cutoffDate").optional().custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -129,7 +130,7 @@ router.post(
   [
     body("activityId").isString().isUUID(),
     body("reportingPeriodId").optional({ nullable: true }).isString().isUUID(),
-    body("plannedDate").isISO8601(),
+    body("plannedDate").custom(dateInput),
     moneyBody("plannedValue", { required: true }),
     body("source").optional().isIn(COST_LOADING_SOURCES),
     body("baselineVersion").optional().isString().trim().isLength({ max: 80 }),
@@ -156,7 +157,7 @@ router.patch(
     param("id").isUUID(),
     body("activityId").optional().isString().isUUID(),
     body("reportingPeriodId").optional({ nullable: true }).isString().isUUID(),
-    body("plannedDate").optional().isISO8601(),
+    body("plannedDate").optional().custom(dateInput),
     moneyBody("plannedValue"),
     body("source").optional().isIn(COST_LOADING_SOURCES),
     body("baselineVersion").optional().isString().trim().isLength({ max: 80 }),
@@ -233,7 +234,7 @@ router.get(
   requirePermission("cost", "read"),
   [
     query("periodId").isString().optional().isUUID(),
-    query("cutoffDate").isString().optional().isISO8601(),
+    query("cutoffDate").isString().optional().custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {

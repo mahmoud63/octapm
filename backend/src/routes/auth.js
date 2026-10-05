@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
@@ -145,7 +146,7 @@ router.post(
   [
     body("orgName").optional().isString().trim().notEmpty(),
     body("name").isString().trim().notEmpty(),
-    body("email").isEmail().normalizeEmail(),
+    body("email").isString().isEmail().normalizeEmail(),
     body("password").isString().isLength({ min: 8 }),
     body("phone").optional().isString().trim().notEmpty(),
     // The personal workspace's project defaults (ENT-6 §16), optional.
@@ -162,7 +163,7 @@ router.post(
   "/login",
   loginLimiter,
   [
-    body("email").isEmail().normalizeEmail(),
+    body("email").isString().isEmail().normalizeEmail(),
     body("password").isString().notEmpty(),
     validate,
   ],
@@ -189,7 +190,7 @@ require("./workspaces").register(router, {
 
 router.post(
   "/forgot-password",
-  [body("email").isEmail().normalizeEmail(), validate],
+  [body("email").isString().isEmail().normalizeEmail(), validate],
   asyncHandler(async (req, res) => {
     const result = await authService.requestPasswordReset(
       req.body,
@@ -368,6 +369,7 @@ router.patch(
     body("urls").optional().isArray({ max: 10 }),
     body("urls.*.value")
       .optional({ values: "falsy" })
+      .isString()
       .isURL({ require_protocol: true })
       .isLength({ max: 2048 }),
     validate,
@@ -388,7 +390,7 @@ router.patch(
   authenticate,
   [
     body("name").isString().trim().isLength({ min: 2, max: 30 }),
-    body("dob").optional({ nullable: true }).isISO8601().toDate(),
+    body("dob").optional({ nullable: true }).custom(dateInput).toDate(),
     body("language").isIn([...userSettingsService.LANGUAGES]),
     validate,
   ],

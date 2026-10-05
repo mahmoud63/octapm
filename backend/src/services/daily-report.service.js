@@ -98,6 +98,14 @@ const normalizeIssues = (value) =>
     })
     .filter((issue) => issue?.description);
 
+// A photo as the clients send it: the upload's answer (key, url, filename …),
+// a typed link, the drivers' { key, filename, caption } and the UAT runner's
+// { fileName, fileUrl, mimeType, sizeBytes, description }
+// (e2e/uat/run-uat-regression.mjs evidenceAttachment). A photo was kept only
+// by its url or key, so the runner's photo was accepted (201) and dropped
+// unseen (CERT-2 evidence-lines-5): its fileUrl (or downloadUrl) is now its
+// url, its fileName its filename, its sizeBytes its size and its description
+// is kept, and the photo is checked as every photo is (checkedPhotos).
 const normalizePhotos = (value) =>
   normalizeList(value)
     .map((photo) => {
@@ -105,16 +113,17 @@ const normalizePhotos = (value) =>
       if (!photo || typeof photo !== 'object') return null;
       return {
         key: photo.key || null,
-        url: photo.url || null,
-        filename: photo.filename || photo.name || null,
+        url: photo.url || photo.fileUrl || photo.downloadUrl || null,
+        filename: photo.filename || photo.name || photo.fileName || null,
         originalName: photo.originalName || null,
         mimeType: photo.mimeType || photo.type || null,
-        size: photo.size ?? null,
+        size: photo.size ?? photo.sizeBytes ?? null,
         storage: photo.storage || null,
         caption: trimOrNull(photo.caption),
         takenAt: photo.takenAt || null,
         uploadedBy: photo.uploadedBy || null,
         uploadedAt: photo.uploadedAt || null,
+        ...(photo.description !== undefined && photo.description !== null ? { description: photo.description } : {}),
       };
     })
     .filter((photo) => photo && (photo.url || photo.key));
@@ -192,8 +201,31 @@ const ensureProjectPhotoKeys = async ({ tx, orgId, projectId, photos }) => {
  * names (certification CERT-2: the uploader, a person, was stored as given, so
  * another company's person could be named on the report).
  */
-const checkedPhotos = async ({ tx, orgId, projectId, photos }) =>
-  (await progressService.prepareEvidence({ orgId, projectId, evidence: { photos }, field: null }, tx))?.photos || [];
+const checkedPhotos = async ({ tx, orgId, projectId, photos, read = null }) => {
+  const evidence = read && read.photos === photos ? read.scanned.evidence : { photos };
+  return (await progressService.prepareEvidence({ orgId, projectId, evidence, field: null, scanned: read?.scanned }, tx))?.photos || [];
+};
+
+/**
+ * The photos a request sends, normalised once and read (progress.service
+ * scanEvidence) before the transaction that looks up the files they name:
+ * read inside it, a long caption held the transaction open until it expired
+ * (CERT-2 evidence-6). The same list is stored and checked (checkedPhotos
+ * `read`), and a refusal is thrown where the photos are checked, so the
+ * request is answered as before. Null when the request sends no photos, or
+ * when they cannot be normalised here: they are then normalised and read
+ * where they were.
+ */
+const readPhotos = ({ projectId, payload }) => {
+  if (!payload || payload.photos === undefined) return null;
+  let photos;
+  try {
+    photos = normalizePhotos(payload.photos);
+  } catch {
+    return null;
+  }
+  return { photos, scanned: progressService.scanEvidence({ projectId, evidence: { photos }, field: null }) };
+};
 
 /**
  * The engineer a report names is a person of this organisation, by membership
@@ -207,20 +239,43 @@ const checkedPhotos = async ({ tx, orgId, projectId, photos }) =>
 const assertEngineer = ({ tx, orgId, engineerId }) =>
   assertMembers({ tx, orgId, userIds: [engineerId], code: 'USER_NOT_FOUND', message: 'The engineer is not a member of this organisation' });
 
+const lineShapeError = (field) =>
+  new HttpError(400, 'VALIDATION_ERROR', 'Validation failed', [
+    {
+      field,
+      message: 'A line is an object of texts, numbers and flags; an equipment line names its equipment by equipmentId (or id), a material line its material by materialId',
+      location: 'body',
+    },
+  ]);
+
 /**
- * The ids a report's lines name in the given fields, or null when one of them
- * is not one text (a list, an object, a number: it names nothing, and is
- * refused like a missing one rather than dropped).
+ * The ids a record's lines name, or null when the one a line names is not one
+ * text (a number, a flag: it names nothing, and is refused like a missing one
+ * rather than dropped). A line names the first of `fields` it fills — an
+ * equipment line its equipmentId, else its id, as the approval reads it
+ * (equipment.service normalizeDailyReportEquipmentLines: row.equipmentId ||
+ * row.id), so { equipmentId: <own>, id: 'row-1' } names the own equipment.
+ *
+ * A line that is not an object (a bare id: equipment: ['<id>']) and a value
+ * that is a list or an object (a nested { equipment: { id } }) were skipped
+ * unseen and stored as sent, another company's id with them (CERT-2
+ * evidence-lines-5): each is now invalid input (400 VALIDATION_ERROR) whoever's
+ * id it carries, before any lookup.
  */
-const lineReferences = (lines, fields) => {
+const lineReferences = (lines, name, fields) => {
   const ids = [];
-  for (const line of normalizeList(lines)) {
-    if (!line || typeof line !== 'object' || Array.isArray(line)) continue;
+  for (const [index, line] of normalizeList(lines).entries()) {
+    if (!line || typeof line !== 'object' || Array.isArray(line)) throw lineShapeError(`${name}[${index}]`);
+    const nested = Object.keys(line).find((key) => line[key] !== null && typeof line[key] === 'object');
+    if (nested !== undefined) throw lineShapeError(`${name}[${index}].${nested}`);
     for (const field of fields) {
       const value = line[field];
       if (value === undefined || value === null) continue;
       if (typeof value !== 'string') return null;
-      if (value.trim()) ids.push(value.trim());
+      if (value.trim()) {
+        ids.push(value.trim());
+        break;
+      }
     }
   }
   return [...new Set(ids)];
@@ -248,7 +303,7 @@ const lineRefusal = ({ code, message, field, missing }) => {
  * (site-diary.service).
  */
 const assertLineReferences = async ({ tx, projectId, equipment = [], materials = [], record = 'Daily report' }) => {
-  const equipmentIds = lineReferences(equipment, ['equipmentId', 'id']);
+  const equipmentIds = lineReferences(equipment, 'equipment', ['equipmentId', 'id']);
   const equipmentRefusal = (missing) => lineRefusal({
     code: 'EQUIPMENT_USAGE_LINK_INVALID',
     message: record === 'Daily report' ? 'Daily report equipment usage must reference project equipment' : `${record} equipment must reference project equipment`,
@@ -263,7 +318,7 @@ const assertLineReferences = async ({ tx, projectId, equipment = [], materials =
     if (missing.length) throw equipmentRefusal(missing);
   }
 
-  const materialIds = lineReferences(materials, ['materialId']);
+  const materialIds = lineReferences(materials, 'materials', ['materialId']);
   const materialRefusal = (missing) => lineRefusal({
     code: 'MATERIAL_LINK_INVALID',
     message: `${record} materials must reference materials of this project`,
@@ -418,13 +473,16 @@ const serializeDailyReport = (row) =>
       }
     : null;
 
-const buildReportData = ({ payload, projectId, userId, existing = null }) => {
+const buildReportData = ({ payload, projectId, userId, existing = null, normalizedPhotos = undefined }) => {
   // Photos a request does not send stay as they are stored (CERT-2: they are
-  // checked when they are sent, not again on every edit).
+  // checked when they are sent, not again on every edit). Normalised before
+  // the transaction, they are that list (readPhotos).
   const photos =
-    payload.photos !== undefined
-      ? normalizePhotos(payload.photos)
-      : existing?.photosJson || [];
+    normalizedPhotos !== undefined
+      ? normalizedPhotos
+      : payload.photos !== undefined
+        ? normalizePhotos(payload.photos)
+        : existing?.photosJson || [];
 
   return {
     projectId,
@@ -518,6 +576,8 @@ const createLinkedProgress = async ({
   report,
   progressPayload = null,
   status = 'submitted',
+  evidenceScan = null,
+  photosRead = null,
 }) => {
   const progressData =
     progressPayload && typeof progressPayload === 'object'
@@ -526,6 +586,17 @@ const createLinkedProgress = async ({
   if (toNumber(report.pctProgress) <= 0 && !Object.keys(progressData).length) {
     return null;
   }
+  // Read before the transaction (CERT-2 evidence-6): the progress's own
+  // evidence (evidenceScan); without one, the report's photos as stored —
+  // the photos the request sent, read then (photosRead), stored and read back
+  // in this transaction: the same files, so the same reading (the uploader
+  // the check sets is not read for links).
+  const reportPhotos = { photos: report.photosJson || [] };
+  const ownEvidence = (progressData.evidenceJson ?? null) !== null || Boolean(progressData.evidence);
+  const reading =
+    !ownEvidence && photosRead && !photosRead.scanned.error
+      ? { ...photosRead.scanned, source: reportPhotos, evidence: reportPhotos, field: 'evidence' }
+      : evidenceScan;
 
   return progressService.createProgressSubmission({
     orgId,
@@ -544,11 +615,12 @@ const createLinkedProgress = async ({
       source: 'daily_report',
       status,
       notes: progressData.notes || report.notes || undefined,
-      evidence: progressData.evidence || { photos: report.photosJson || [] },
+      evidence: progressData.evidence || reportPhotos,
     },
     dailyReportId: report.id,
     fallbackPhotos: report.photosJson || [],
     tx,
+    evidenceScan: reading,
   });
 };
 
@@ -600,8 +672,16 @@ const createDailyReport = async ({
   userId,
   userRole,
   payload,
-}) =>
-  prisma.$transaction(async (tx) => {
+}) => {
+  // The photos and the evidence of the progress the report records are read
+  // before the transaction (CERT-2 evidence-6; createLinkedProgress).
+  const photosRead = readPhotos({ projectId, payload });
+  const progressData = payload.progress && typeof payload.progress === 'object' ? payload.progress : {};
+  const progressRead = progressService.scanSubmissionEvidence({
+    projectId,
+    payload: { evidenceJson: progressData.evidenceJson, evidence: progressData.evidence || undefined },
+  });
+  return prisma.$transaction(async (tx) => {
     await ensureProject({ orgId, projectId }, tx);
 
     const clientRequestId = trimOrNull(payload.clientRequestId);
@@ -625,7 +705,7 @@ const createDailyReport = async ({
     }
 
     if (payload.engineerId) await assertEngineer({ tx, orgId, engineerId: payload.engineerId });
-    const data = buildReportData({ payload, projectId, userId });
+    const data = buildReportData({ payload, projectId, userId, normalizedPhotos: photosRead?.photos });
     await assertLineReferences({ tx, projectId, equipment: data.equipmentJson, materials: data.materialsJson });
     await ensureProjectPhotoKeys({
       tx,
@@ -633,7 +713,7 @@ const createDailyReport = async ({
       projectId,
       photos: data.photosJson,
     });
-    data.photosJson = await checkedPhotos({ tx, orgId, projectId, photos: data.photosJson });
+    data.photosJson = await checkedPhotos({ tx, orgId, projectId, photos: data.photosJson, read: photosRead });
 
     const now = new Date();
     const report = await tx.dailyReport.create({
@@ -666,6 +746,8 @@ const createDailyReport = async ({
       report,
       progressPayload: payload.progress || null,
       status: status === 'submitted' ? 'submitted' : 'draft',
+      evidenceScan: progressRead,
+      photosRead,
     }));
 
     await auditService.recordEvent({
@@ -695,6 +777,7 @@ const createDailyReport = async ({
       }),
     ), warnings);
   });
+};
 
 const getDailyReport = async ({ orgId, projectId, reportId }) => {
   await ensureProject({ orgId, projectId });
@@ -707,8 +790,10 @@ const updateDailyReport = async ({
   reportId,
   userId,
   payload,
-}) =>
-  prisma.$transaction(async (tx) => {
+}) => {
+  // The photos the request sends are read before the transaction (CERT-2 evidence-6).
+  const photosRead = readPhotos({ projectId, payload });
+  return prisma.$transaction(async (tx) => {
     await ensureProject({ orgId, projectId }, tx);
     const existing = await getReportOrThrow({ projectId, reportId }, tx);
     if (!EDITABLE_STATUSES.includes(existing.status)) {
@@ -722,7 +807,7 @@ const updateDailyReport = async ({
     if (payload.engineerId && payload.engineerId !== existing.engineerId) {
       await assertEngineer({ tx, orgId, engineerId: payload.engineerId });
     }
-    const data = buildReportData({ payload, projectId, userId, existing });
+    const data = buildReportData({ payload, projectId, userId, existing, normalizedPhotos: photosRead?.photos });
     if (data.activityId !== existing.activityId) {
       await ensureActivity({ projectId, activityId: data.activityId }, tx);
     }
@@ -743,7 +828,7 @@ const updateDailyReport = async ({
         projectId,
         photos: data.photosJson,
       });
-      data.photosJson = await checkedPhotos({ tx, orgId, projectId, photos: data.photosJson });
+      data.photosJson = await checkedPhotos({ tx, orgId, projectId, photos: data.photosJson, read: photosRead });
     }
 
     const row = await tx.dailyReport.update({
@@ -794,6 +879,7 @@ const updateDailyReport = async ({
 
     return serializeDailyReport(row);
   });
+};
 
 const submitDailyReport = async ({
   orgId,

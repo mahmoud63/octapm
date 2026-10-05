@@ -27,6 +27,7 @@ const path = require("path");
 const validatorLib = require("validator");
 const { QUANTITY_MAX, UNIT_COST_MAX } = require("../../utils/stock-figures");
 const { RATE_MAX } = require("../../services/timesheet.service");
+const { dateInput, dateOnlyInput } = require("../../utils/date-input");
 
 const routesDir = path.join(__dirname, "..");
 const files = fs.readdirSync(routesDir).filter((file) => file.endsWith(".js"));
@@ -81,7 +82,10 @@ const DATE_FILES = [
   "prime-contract.js", "procurement.js", "project-emails.js", "projects.js", "purchase-orders.js", "rfi.js", "safety.js",
   "submittals.js", "weather-delays.js", "weekly-reports.js",
 ];
+// A date chain checks with the date-input helper (robustness-5: isISO8601 let "20261001", "2026-W40" and
+// "2026-275" through to a 500) or, in files not yet moved to it, with validator's own date checks.
 const isDateCheck = (item) =>
+  [dateInput, dateOnlyInput].includes(item.validator) ||
   [validatorLib.isISO8601, validatorLib.isDate, validatorLib.isRFC3339].includes(item.validator) ||
   item.sanitizer === validatorLib.toDate ||
   (item.validator === validatorLib.matches && /\\d\{4\}/.test(String(item.options?.[0])));

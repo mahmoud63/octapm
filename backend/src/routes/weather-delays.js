@@ -2,6 +2,8 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
+const { scalarFigure, INT4_MAX } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { validate } = require("../middleware/validate");
 const { requirePermission } = require("../middleware/rbac");
 const {
@@ -30,17 +32,17 @@ router.post(
   "/",
   requirePermission("eot", "create"),
   [
-    body("description").trim().notEmpty(),
-    body("date").optional().isString().isISO8601(),
-    body("delayDays").isFloat({ min: 0 }),
+    body("description").isString().trim().notEmpty(),
+    body("date").optional().isString().custom(dateInput),
+    body("delayDays").custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
     body("contractual").optional().isBoolean(),
     body("affectedActivityIds").optional().isArray(),
     body("affectedActivityIds.*").optional().isString().isUUID(),
     body("activityLinks").optional().isArray(),
     body("activityLinks.*.activityId").optional().isString().isUUID(),
-    body("activityLinks.*.delayStart").optional({ nullable: true }).isString().isISO8601(),
-    body("activityLinks.*.delayEnd").optional({ nullable: true }).isString().isISO8601(),
-    body("activityLinks.*.delayDays").optional().isFloat({ min: 0 }),
+    body("activityLinks.*.delayStart").optional({ nullable: true }).isString().custom(dateInput),
+    body("activityLinks.*.delayEnd").optional({ nullable: true }).isString().custom(dateInput),
+    body("activityLinks.*.delayDays").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
     body("correspondenceIds").optional().isArray(),
     body("correspondenceIds.*").optional().isString().isUUID(),
     body("correspondenceLinks").optional().isArray(),
@@ -65,16 +67,16 @@ router.patch(
   requirePermission("eot", "update"),
   [
     param("weatherId").isUUID(),
-    body("date").optional().isString().isISO8601(),
-    body("delayDays").optional().isFloat({ min: 0 }),
+    body("date").optional().isString().custom(dateInput),
+    body("delayDays").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
     body("contractual").optional().isBoolean(),
     body("affectedActivityIds").optional().isArray(),
     body("affectedActivityIds.*").optional().isString().isUUID(),
     body("activityLinks").optional().isArray(),
     body("activityLinks.*.activityId").optional().isString().isUUID(),
-    body("activityLinks.*.delayStart").optional({ nullable: true }).isString().isISO8601(),
-    body("activityLinks.*.delayEnd").optional({ nullable: true }).isString().isISO8601(),
-    body("activityLinks.*.delayDays").optional().isFloat({ min: 0 }),
+    body("activityLinks.*.delayStart").optional({ nullable: true }).isString().custom(dateInput),
+    body("activityLinks.*.delayEnd").optional({ nullable: true }).isString().custom(dateInput),
+    body("activityLinks.*.delayDays").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
     body("correspondenceIds").optional().isArray(),
     body("correspondenceIds.*").optional().isString().isUUID(),
     body("correspondenceLinks").optional().isArray(),

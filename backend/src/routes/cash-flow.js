@@ -31,9 +31,12 @@ router.post(
   "/",
   requirePermission("cost", "create"),
   [
-    body("period").matches(/^\d{4}-\d{2}$/),
+    body("period").isString().matches(/^\d{4}-\d{2}$/),
     moneyBody("inflow"),
     moneyBody("outflow"),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("note").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {

@@ -1,5 +1,7 @@
 const express = require("express");
 const { body, param } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { getEffectiveRole, hasPermission, requirePermission } = require("../middleware/rbac");
@@ -39,11 +41,11 @@ router.post(
   [
     body("photoIds").optional().isArray({ max: 40 }),
     body("photoIds.*").isString().isUUID(),
-    body("from").optional({ nullable: true }).isString().isISO8601(),
-    body("to").optional({ nullable: true }).isString().isISO8601(),
+    body("from").optional({ nullable: true }).isString().custom(dateInput),
+    body("to").optional({ nullable: true }).isString().custom(dateInput),
     body("uncaptionedOnly").optional().isBoolean().toBoolean(),
     body("force").optional().isBoolean().toBoolean(),
-    body("limit").optional().isInt({ min: 1, max: 40 }).toInt(),
+    body("limit").optional().custom(scalarFigure).bail().isInt({ min: 1, max: 40 }).toInt(),
     validate,
   ],
   asyncHandler(async (req, res) => sendSuccess(res, await service.analyzeBatch({ ...scope(req), user: user(req), payload: req.body, viewer: viewer(req) }))),
@@ -91,7 +93,7 @@ router.post(
     body("trade").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
     body("locationId").optional({ nullable: true }).isString().isUUID(),
     body("assigneeCompanyId").optional({ nullable: true }).isString().isUUID(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => sendSuccess(res, await service.raiseObservation({ ...scope(req), photoId: req.params.photoId, payload: req.body, actor: actor(req), viewer: viewer(req) }), 201)),

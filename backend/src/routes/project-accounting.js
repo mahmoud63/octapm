@@ -1,5 +1,6 @@
 const express = require("express");
 const { param, query } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -45,7 +46,7 @@ router.post(
 router.get(
   "/export",
   requirePermission("sub_pay_app", "export"),
-  [query("format").isString().optional().isIn(["xlsx", "csv"]), query("provider").isString().optional().isIn(accounting.PROVIDER_KEYS), query("from").isString().optional().isISO8601(), query("to").isString().optional().isISO8601(), validate],
+  [query("format").isString().optional().isIn(["xlsx", "csv"]), query("provider").isString().optional().isIn(accounting.PROVIDER_KEYS), query("from").isString().optional().custom(dateInput), query("to").isString().optional().custom(dateInput), validate],
   asyncHandler(async (req, res) => {
     const file = await accounting.renderExport({ ...scope(req), from: req.query.from || null, to: req.query.to || null, provider: req.query.provider || null, format: req.query.format || "xlsx" });
     res.setHeader("Content-Type", file.mimeType);

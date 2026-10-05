@@ -2,6 +2,7 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { validate } = require("../middleware/validate");
 const { requirePermission } = require("../middleware/rbac");
 const {
@@ -33,8 +34,8 @@ router.post(
   "/",
   requirePermission("document_control", "create"),
   [
-    body("drawingNumber").trim().notEmpty(),
-    body("title").trim().notEmpty(),
+    body("drawingNumber").isString().trim().notEmpty(),
+    body("title").isString().trim().notEmpty(),
     body("status").optional().isIn(["active", "superseded", "cancelled"]),
     body("owner").optional().isString().trim(),
     body("reviewer").optional().isString().trim(),
@@ -50,9 +51,14 @@ router.post(
     body("revisions").optional().isArray(),
     body("comment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
-    body("reviewedOn").optional({ nullable: true }).isString().isISO8601(),
-    body("issueDate").optional({ nullable: true }).isString().isISO8601(),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("reviewedOn").optional({ nullable: true }).isString().custom(dateInput),
+    body("issueDate").optional({ nullable: true }).isString().custom(dateInput),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("discipline").optional({ nullable: true }).isString(),
+    body("purpose").optional({ nullable: true }).isString(),
+    body("fileUrl").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -88,9 +94,14 @@ router.patch(
     body("revisions").optional().isArray(),
     body("comment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
-    body("reviewedOn").optional({ nullable: true }).isString().isISO8601(),
-    body("issueDate").optional({ nullable: true }).isString().isISO8601(),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("reviewedOn").optional({ nullable: true }).isString().custom(dateInput),
+    body("issueDate").optional({ nullable: true }).isString().custom(dateInput),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("discipline").optional({ nullable: true }).isString(),
+    body("purpose").optional({ nullable: true }).isString(),
+    body("fileUrl").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {

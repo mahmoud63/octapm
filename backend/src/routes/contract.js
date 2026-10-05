@@ -1,5 +1,7 @@
 const express = require("express");
 const { body } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -14,7 +16,7 @@ router.use(authenticate);
 const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
 const user = (req) => ({ ...req.user, role: getEffectiveRole(req) });
 const viewer = (req) => ({ id: req.user.id, role: getEffectiveRole(req), isCompanyAdmin: Boolean(req.user.isCompanyAdmin), projectAccess: req.projectAccess || null });
-const optionalInt = (field, max = 3650) => body(field).optional({ nullable: true }).isInt({ min: 0, max });
+const optionalInt = (field, max = 3650) => body(field).optional({ nullable: true }).custom(scalarFigure).bail().isInt({ min: 0, max });
 
 router.get(
   "/",
@@ -33,7 +35,7 @@ router.put(
     optionalInt("responseDays"),
     optionalInt("paymentDays"),
     optionalInt("defectsLiabilityDays"),
-    body("ldCapPct").optional({ nullable: true }).isFloat({ min: 0, max: 100 }),
+    body("ldCapPct").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }),
     body("documentIds").optional().isArray({ max: 20 }),
     body("documentIds.*").isString().isUUID(),
     body("clauses").optional().isArray({ max: 200 }),
@@ -76,7 +78,7 @@ router.post(
     body("subject").isString().trim().isLength({ min: 1, max: 200 }),
     body("body").isString().trim().isLength({ min: 1, max: 12000 }),
     body("activityId").optional({ nullable: true }).isString().isUUID(),
-    body("date").optional({ nullable: true }).isString().isISO8601(),
+    body("date").optional({ nullable: true }).isString().custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => sendSuccess(res, await service.createNotice({ ...scope(req), user: user(req), payload: req.body }), 201)),

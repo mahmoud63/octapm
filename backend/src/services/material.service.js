@@ -322,7 +322,9 @@ const updateMaterial = async ({
         supplier: true,
         procurementPackage: true,
         materialMaster: true,
-        poLines: true,
+        // With each line's order status, which the material's risk reads (CERT-2),
+        // and its id and reference, as the web client's material type has an order.
+        poLines: { include: { order: { select: { id: true, ref: true, status: true } } } },
         usages: true,
         receiptLines: true,
         leadTimeAlerts: true,
@@ -342,7 +344,7 @@ const updateMaterial = async ({
 };
 
 const deleteMaterial = async ({ orgId, projectId, activityId, materialId }) => {
-  await verifyActivity(orgId, projectId, activityId);
+  const { project } = await verifyActivity(orgId, projectId, activityId);
 
   const material = await prisma.activityMaterial.findFirst({
     where: { id: materialId, activityId },
@@ -362,8 +364,28 @@ const deleteMaterial = async ({ orgId, projectId, activityId, materialId }) => {
     );
   }
 
-  await prisma.activityMaterial.delete({ where: { id: materialId } });
-  return { deleted: true };
+  // The material's own lead-time alert goes with it: it is about nothing
+  // now. A package's alert that only POINTS at it — the material was the
+  // package's worst risk — went with it too (the link cascades), and the
+  // package's other late lines were left with no alert at all. The link is
+  // released first, and the package's alert worked again without the
+  // material (CERT-2).
+  return prisma.$transaction(async (tx) => {
+    const pointing = tx.procurementLeadTimeAlert?.findMany
+      ? await tx.procurementLeadTimeAlert.findMany({
+          where: { projectId, activityMaterialId: materialId, packageId: { not: null } },
+          select: { id: true, packageId: true },
+        })
+      : [];
+    for (const alert of pointing) {
+      await tx.procurementLeadTimeAlert.update({ where: { id: alert.id }, data: { activityMaterialId: null } });
+    }
+    await tx.activityMaterial.delete({ where: { id: materialId } });
+    for (const packageId of new Set(pointing.map((alert) => alert.packageId))) {
+      await procurementService.syncLeadTimeAlert({ tx, projectId, project, packageRow: { id: packageId } });
+    }
+    return { deleted: true };
+  });
 };
 
 const recordMaterialUsage = async ({

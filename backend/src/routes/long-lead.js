@@ -1,5 +1,7 @@
 const express = require('express');
 const { body, param } = require('express-validator');
+const { scalarFigure, INT4_MAX } = require('../utils/figure-input');
+const { dateInput } = require('../utils/date-input');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
@@ -30,18 +32,18 @@ router.post(
     // The procurement package this is being bought under. Set it and the
     // dates and statuses come from there instead of being typed twice.
     body('procurementPackageId').optional({ nullable: true }).isString().isUUID(),
-    body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
+    body('leadWeeks').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     body('requiredTiming')
       .optional()
       .isIn(['activity_start', 'activity_finish']),
-    body('needOffsetDays').optional().isInt({ min: 0 }).toInt(),
-    body('bufferDays').optional().isInt({ min: 0 }).toInt(),
+    body('needOffsetDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
+    body('bufferDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     body('orderBy').optional().isString().trim(),
     body('expectedDeliveryDate')
       .optional({ nullable: true })
-      .isISO8601()
+      .custom(dateInput)
       .toDate(),
-    body('deliveredAt').optional({ nullable: true }).isISO8601().toDate(),
+    body('deliveredAt').optional({ nullable: true }).custom(dateInput).toDate(),
     body('warehouseStatus')
       .optional()
       .isIn(['not_received', 'partial', 'received', 'issued']),
@@ -71,18 +73,18 @@ router.patch(
     // The procurement package this is being bought under. Set it and the
     // dates and statuses come from there instead of being typed twice.
     body('procurementPackageId').optional({ nullable: true }).isString().isUUID(),
-    body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
+    body('leadWeeks').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     body('requiredTiming')
       .optional()
       .isIn(['activity_start', 'activity_finish']),
-    body('needOffsetDays').optional().isInt({ min: 0 }).toInt(),
-    body('bufferDays').optional().isInt({ min: 0 }).toInt(),
+    body('needOffsetDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
+    body('bufferDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     body('orderBy').optional().isString().trim(),
     body('expectedDeliveryDate')
       .optional({ nullable: true })
-      .isISO8601()
+      .custom(dateInput)
       .toDate(),
-    body('deliveredAt').optional({ nullable: true }).isISO8601().toDate(),
+    body('deliveredAt').optional({ nullable: true }).custom(dateInput).toDate(),
     body('warehouseStatus')
       .optional()
       .isIn(['not_received', 'partial', 'received', 'issued']),

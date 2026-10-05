@@ -2,6 +2,7 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { authenticate } = require("../middleware/auth");
 const { getEffectiveRole, requirePermission, requirePermissionOr } = require("../middleware/rbac");
 const { prisma } = require("../config/db");
@@ -30,7 +31,7 @@ const ncrCloseoutValidators = [
   body("owner").optional().isString().trim(),
   body("assigneeUserId").optional({ nullable: true }).isString().isUUID(),
   body("assigneeCompanyId").optional({ nullable: true }).isString().isUUID(),
-  body("dueDate").optional({ nullable: true }).isString().isISO8601(),
+  body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
   body("closureComment").optional().isString().trim(),
   body("comment").optional().isString().trim(),
   body("statusComment").optional().isString().trim(),
@@ -79,7 +80,11 @@ router.post(
     body("comment").optional().isString().trim(),
     body("closureComment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("description").optional({ nullable: true }).isString(),
+    body("disposition").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -179,7 +184,7 @@ const rejectNcrRoute = asyncHandler(async (req, res) => {
 
 const rejectNcrValidators = [
   param("ncrId").isUUID(),
-  body("reason").trim().notEmpty(),
+  body("reason").isString().trim().notEmpty(),
   validate,
 ];
 
@@ -219,8 +224,12 @@ router.patch(
     body("comment").optional().isString().trim(),
     body("closureComment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
-    body("closedDate").optional({ nullable: true }).isString().isISO8601(),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("closedDate").optional({ nullable: true }).isString().custom(dateInput),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("description").optional({ nullable: true }).isString(),
+    body("disposition").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -240,7 +249,7 @@ router.patch(
 router.post(
   "/:ncrId/reopen",
   requirePermission("ncr", "approve", { transition: "ncr.reopen" }),
-  [param("ncrId").isUUID(), body("reason").trim().notEmpty(), validate],
+  [param("ncrId").isUUID(), body("reason").isString().trim().notEmpty(), validate],
   asyncHandler(async (req, res) => {
     const row = await reopenNcr({
       orgId: req.user.orgId,

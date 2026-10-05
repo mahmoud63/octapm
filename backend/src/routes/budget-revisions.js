@@ -1,6 +1,7 @@
 const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { body, param } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { validate } = require("../middleware/validate");
 const { requirePermission, hasPermission } = require("../middleware/rbac");
 const { sendSuccess } = require("../utils/api-response");
@@ -37,13 +38,17 @@ router.post(
   "/",
   requirePermission("cost", "create"),
   [
-    body("title").trim().notEmpty(),
+    body("title").isString().trim().notEmpty(),
     body("changeType").isIn(["addition", "deduction"]),
     moneyBody("amount", { required: true }),
-    body("effectiveDate").optional().isString().isISO8601(),
+    body("effectiveDate").optional().isString().custom(dateInput),
     body("status")
       .optional()
       .isIn(["draft", "submitted", "approved", "rejected"]),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("linkedChangeOrder").optional({ nullable: true }).isString(),
+    body("notes").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -67,10 +72,14 @@ router.patch(
     param("revisionId").isUUID(),
     body("changeType").optional().isIn(["addition", "deduction"]),
     moneyBody("amount"),
-    body("effectiveDate").optional().isString().isISO8601(),
+    body("effectiveDate").optional().isString().custom(dateInput),
     body("status")
       .optional()
       .isIn(["draft", "submitted", "approved", "rejected"]),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("linkedChangeOrder").optional({ nullable: true }).isString(),
+    body("notes").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {

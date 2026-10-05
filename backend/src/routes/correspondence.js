@@ -2,6 +2,7 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { validate } = require("../middleware/validate");
 const { requirePermission } = require("../middleware/rbac");
 const {
@@ -36,7 +37,7 @@ router.post(
     body("direction").isIn(["incoming", "outgoing"]),
     body("type").isIn(["letter", "email", "memo", "notice"]),
     body("recordTypeKey").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
-    body("subject").trim().notEmpty(),
+    body("subject").isString().trim().notEmpty(),
     body("owner").optional().isString().trim(),
     body("reviewer").optional().isString().trim(),
     body("approver").optional().isString().trim(),
@@ -51,11 +52,14 @@ router.post(
     body("revisions").optional().isArray(),
     body("comment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("date").optional({ nullable: true }).isString().isISO8601(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
-    body("responseRequiredBy").optional({ nullable: true }).isString().isISO8601(),
-    body("responseDate").optional({ nullable: true }).isString().isISO8601(),
+    body("date").optional({ nullable: true }).isString().custom(dateInput),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("responseRequiredBy").optional({ nullable: true }).isString().custom(dateInput),
+    body("responseDate").optional({ nullable: true }).isString().custom(dateInput),
     body("status").optional().isIn(["open", "closed"]),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("body").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -93,11 +97,14 @@ router.patch(
     body("revisions").optional().isArray(),
     body("comment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("date").optional({ nullable: true }).isString().isISO8601(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
-    body("responseRequiredBy").optional({ nullable: true }).isString().isISO8601(),
-    body("responseDate").optional({ nullable: true }).isString().isISO8601(),
+    body("date").optional({ nullable: true }).isString().custom(dateInput),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("responseRequiredBy").optional({ nullable: true }).isString().custom(dateInput),
+    body("responseDate").optional({ nullable: true }).isString().custom(dateInput),
     body("status").optional().isIn(["open", "closed"]),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("body").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {

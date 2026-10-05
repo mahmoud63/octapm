@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
@@ -55,7 +56,7 @@ const apiClientValidators = ({ requireName = false } = {}) => [
   body("scopes").optional().isArray({ max: 200 }),
   body("projectIds").optional().isArray({ max: 500 }),
   body("userId").optional({ nullable: true }).isString().isUUID(),
-  body("expiresAt").optional({ nullable: true }).isISO8601(),
+  body("expiresAt").optional({ nullable: true }).custom(dateInput),
   body("status").optional().isIn(["revoked"]),
   validate,
 ];
@@ -215,7 +216,7 @@ router.post(
 
 router.get(
   "/accounting/export",
-  [query("format").isString().optional().isIn(["xlsx", "csv"]), query("provider").isString().optional().isIn(accounting.PROVIDER_KEYS), query("projectId").isString().optional().isUUID(), query("from").isString().optional().isISO8601(), query("to").isString().optional().isISO8601(), validate],
+  [query("format").isString().optional().isIn(["xlsx", "csv"]), query("provider").isString().optional().isIn(accounting.PROVIDER_KEYS), query("projectId").isString().optional().isUUID(), query("from").isString().optional().custom(dateInput), query("to").isString().optional().custom(dateInput), validate],
   asyncHandler(async (req, res) => {
     const file = await accounting.renderExport({ orgId: req.user.orgId, projectId: req.query.projectId || null, from: req.query.from || null, to: req.query.to || null, provider: req.query.provider || null, format: req.query.format || "xlsx" });
     res.setHeader("Content-Type", file.mimeType);

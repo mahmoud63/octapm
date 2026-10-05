@@ -1,5 +1,7 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, INT4_MAX, INT4_MIN, MONEY_FIGURE_MAX } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -31,7 +33,7 @@ const riskPayloadValidators = ({ requireDescription = false } = {}) => [
   body("phase").optional({ nullable: true }).isString().trim(),
   body("owner").optional({ nullable: true }).isString().trim(),
   ...assignmentReferenceValidators(),
-  body("dueDate").optional({ nullable: true }).isISO8601(),
+  body("dueDate").optional({ nullable: true }).custom(dateInput),
   body("escalationLevel").optional().isIn(["none", "watch", "escalated"]),
   body("escalationNotes").optional({ nullable: true }).isString().trim(),
   body("status").optional().isIn(["open", "monitoring"]),
@@ -42,8 +44,8 @@ const riskPayloadValidators = ({ requireDescription = false } = {}) => [
   body("activityLinks.*.activityId").optional().isString().isUUID(),
   body("activityLinks.*.id").optional().isString().isUUID(),
   body("activityLinks.*.relationType").optional().isString().trim(),
-  body("activityLinks.*.scheduleImpactDays").optional().isInt().toInt(),
-  body("activityLinks.*.costImpact").optional().isFloat({ min: 0 }).toFloat(),
+  body("activityLinks.*.scheduleImpactDays").optional().custom(scalarFigure).bail().isInt({ min: INT4_MIN, max: INT4_MAX }).toInt(),
+  body("activityLinks.*.costImpact").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }).toFloat(),
   body("activityLinks.*.notes").optional({ nullable: true }).isString().trim(),
   body("comment").optional({ nullable: true }).isString().trim(),
   body("statusComment").optional({ nullable: true }).isString().trim(),
@@ -52,7 +54,7 @@ const riskPayloadValidators = ({ requireDescription = false } = {}) => [
 
 const closeoutValidators = [
   param("id").isUUID(),
-  body("dueDate").optional({ nullable: true }).isISO8601(),
+  body("dueDate").optional({ nullable: true }).custom(dateInput),
   body("responsePlan").optional({ nullable: true }).isString().trim(),
   body("closeoutComment").optional({ nullable: true }).isString().trim(),
   body("comment").optional({ nullable: true }).isString().trim(),
@@ -154,7 +156,7 @@ router.post(
 router.post(
   "/:id/reject",
   requirePermission("risk", "approve", { transition: "risk.reject" }),
-  [param("id").isUUID(), body("reason").trim().notEmpty(), validate],
+  [param("id").isUUID(), body("reason").isString().trim().notEmpty(), validate],
   asyncHandler(async (req, res) => {
     const result = await riskService.rejectRiskCloseout({
       orgId: req.user.orgId,
@@ -171,7 +173,7 @@ router.post(
 router.post(
   "/:id/disapprove",
   requirePermission("risk", "approve", { transition: "risk.reject" }),
-  [param("id").isUUID(), body("reason").trim().notEmpty(), validate],
+  [param("id").isUUID(), body("reason").isString().trim().notEmpty(), validate],
   asyncHandler(async (req, res) => {
     const result = await riskService.rejectRiskCloseout({
       orgId: req.user.orgId,
@@ -188,7 +190,7 @@ router.post(
 router.post(
   "/:id/reopen",
   requirePermission("risk", "approve", { transition: "risk.reopen" }),
-  [param("id").isUUID(), body("reason").trim().notEmpty(), validate],
+  [param("id").isUUID(), body("reason").isString().trim().notEmpty(), validate],
   asyncHandler(async (req, res) => {
     const result = await riskService.reopenRisk({
       orgId: req.user.orgId,

@@ -1,7 +1,7 @@
 const { prisma } = require("../config/db");
 const { ballInCourt } = require("./ball-in-court.service");
 const { HttpError } = require("../utils/http-error");
-const { addMoney, subtractMoney, multiplyMoney, toMoneyNumber } = require("../utils/money");
+const { MONEY_MAX, addMoney, subtractMoney, multiplyMoney, toMoneyDecimal, toMoneyNumber } = require("../utils/money");
 const { createPdf } = require("../utils/pdf-writer");
 const { recordWorkspacePath } = require("../utils/record-links");
 const auditService = require("./audit.service");
@@ -464,9 +464,16 @@ const recomputeCommitted = async ({ tx = prisma, orgId, projectId }) => {
   });
   const budgetLines = await tx.budgetLine.findMany({ where: { projectId }, select: { id: true, costCodeId: true, costType: true, status: true } });
   const lineByKey = new Map(budgetLines.filter((line) => line.status === "active").map((line) => [`${line.costCodeId}:${line.costType}`, line.id]));
+  // What each budget line and each activity is committed to, added up as an
+  // exact decimal, checked against its Decimal(18,2) column and written as
+  // that same decimal (CERT-2, round 6). Commitments that each fit can
+  // together pass it: commitments of 9.7e15 and 6e15 on one activity failed
+  // the second execution only at the write (numeric field overflow), and
+  // 9.7e15 with 299,999,999,999,999 more — which fits — failed there too, as a
+  // float sum of 10^16.
   const byLine = new Map();
   const byActivity = new Map();
-  const post = (target, key, amount) => target.set(key, addMoney(target.get(key) || 0, amount));
+  const post = (target, key, amount) => target.set(key, (target.get(key) || toMoneyDecimal(0)).plus(amount));
   for (const commitment of commitments) {
     const costType = costTypeForCommitment(commitment.type);
     const entries = [
@@ -477,15 +484,24 @@ const recomputeCommitted = async ({ tx = prisma, orgId, projectId }) => {
       }),
     ];
     for (const entry of entries) {
-      const amount = toMoneyNumber(entry.amount);
-      if (!amount) continue;
+      const amount = toMoneyDecimal(entry.amount || 0);
+      if (amount.isZero()) continue;
       const lineId = entry.budgetLineId || (entry.costCodeId ? lineByKey.get(`${entry.costCodeId}:${costType}`) : null);
       if (lineId) post(byLine, lineId, amount);
       if (entry.activityId) post(byActivity, entry.activityId, amount);
     }
   }
+  const tooLarge = (totals) => [...totals.values()].some((value) => value.abs().greaterThan(MONEY_MAX));
+  if (tooLarge(byLine) || tooLarge(byActivity)) {
+    throw new HttpError(
+      400,
+      "COMMITTED_TOTAL_TOO_LARGE",
+      "The commitments on this project would come to more than a budget line or an activity can record",
+      { projection: tooLarge(byLine) ? "budget_line" : "activity" }
+    );
+  }
   for (const line of budgetLines) {
-    const value = round2(byLine.get(line.id) || 0);
+    const value = (byLine.get(line.id) || toMoneyDecimal(0)).toDecimalPlaces(2);
     await tx.budgetLine.update({ where: { id: line.id }, data: { committedFromCommitments: value } });
   }
   if (tx.costRecord?.findMany) {
@@ -500,17 +516,17 @@ const recomputeCommitted = async ({ tx = prisma, orgId, projectId }) => {
         if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${activityId}`}))`;
         // committed only: a recompute never writes the record's forecast or
         // forecastSource (owner decision R5-2).
-        await tx.costRecord.update({ where: { id: recordId }, data: { committed: round2(amount) } });
+        await tx.costRecord.update({ where: { id: recordId }, data: { committed: amount.toDecimalPlaces(2) } });
       } else if (tx.costRecord?.create) {
         // The pair is held before the row is created, and looked for again
         // under the lock (Phase 21D, CX21-464).
         if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${activityId}`}))`;
         const again = tx.costRecord.findFirst ? await tx.costRecord.findFirst({ where: { projectId, activityId }, select: { id: true } }) : null;
-        if (again) await tx.costRecord.update({ where: { id: again.id }, data: { committed: round2(amount) } });
+        if (again) await tx.costRecord.update({ where: { id: again.id }, data: { committed: amount.toDecimalPlaces(2) } });
         // Created with no forecast supplied: the initial default, marked
         // 'default' (R5-2) — the activity's approved allocation (actual 0), as
         // the cost API's creator reads it, not a budget of 0.
-        else await tx.costRecord.create({ data: { projectId, activityId, committed: round2(amount), ...(await defaultForecastOnCreate({ tx, projectId, activityId, actual: 0 })) } });
+        else await tx.costRecord.create({ data: { projectId, activityId, committed: amount.toDecimalPlaces(2), ...(await defaultForecastOnCreate({ tx, projectId, activityId, actual: 0 })) } });
       }
     }
     for (const row of records) {

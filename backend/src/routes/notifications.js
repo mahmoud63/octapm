@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -112,7 +113,7 @@ router.put(
     body("preferences.*.digestEnabled").optional().isBoolean().toBoolean(),
     body("preferences.*.dueSoonDays")
       .optional()
-      .isInt({ min: 1, max: 30 })
+      .custom(scalarFigure).bail().isInt({ min: 1, max: 30 })
       .toInt(),
     body("preferences.*.quietHoursStart")
       .optional({ nullable: true })
@@ -172,7 +173,7 @@ router.post(
 
 router.post(
   "/deliveries/retry",
-  [body("limit").optional().isInt({ min: 1, max: 100 }).toInt(), validate],
+  [body("limit").optional().custom(scalarFigure).bail().isInt({ min: 1, max: 100 }).toInt(), validate],
   asyncHandler(async (req, res) => {
     const data = await notificationService.processPendingEmailDeliveries({
       userId: req.user.id,
@@ -187,7 +188,7 @@ router.post(
   requireRoles("pm", "planning_eng"),
   [
     body("projectId").optional({ nullable: true }).isString().isUUID(),
-    body("horizonDays").optional().isInt({ min: 1, max: 30 }).toInt(),
+    body("horizonDays").optional().custom(scalarFigure).bail().isInt({ min: 1, max: 30 }).toInt(),
     validate,
   ],
   asyncHandler(async (req, res) => {

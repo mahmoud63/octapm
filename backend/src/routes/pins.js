@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
@@ -47,8 +48,8 @@ router.post(
   requirePermission("document_control", "read"),
   [
     param("sheetId").isUUID(),
-    body("x").isFloat({ min: 0, max: 1 }).toFloat(),
-    body("y").isFloat({ min: 0, max: 1 }).toFloat(),
+    body("x").custom(scalarFigure).bail().isFloat({ min: 0, max: 1 }).toFloat(),
+    body("y").custom(scalarFigure).bail().isFloat({ min: 0, max: 1 }).toFloat(),
     body("recordType").isIn(PIN_TYPES),
     body("recordId").optional({ nullable: true }).isString().trim().notEmpty(),
     body("create").optional({ nullable: true }).isObject(),

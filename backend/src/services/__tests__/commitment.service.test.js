@@ -147,13 +147,14 @@ describe("commitments", () => {
     expect(mockPrisma.commitment.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "executed", executedDocumentId: "doc-uploaded" }) }));
     expect(executed.status).toBe("executed");
     // subcontract lines land on the cost code's subcontract line; explicit budget lines win; CO without lines posts nowhere by line
-    expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith({ where: { id: "bl-1" }, data: { committedFromCommitments: 5000 } });
-    expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith({ where: { id: "bl-x" }, data: { committedFromCommitments: 7000 } });
-    expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith({ where: { id: "bl-mat" }, data: { committedFromCommitments: 0 } });
-    expect(mockPrisma.costRecord.update).toHaveBeenCalledWith({ where: { id: "cr-1" }, data: { committed: 5000 } });
+    // Written as exact decimals (CERT-2, round 6): the same figures.
+    expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith({ where: { id: "bl-1" }, data: { committedFromCommitments: { asymmetricMatch: (value) => value !== null && value !== undefined && Number(String(value)) === 5000, toAsymmetricMatcher: () => "the decimal 5000" } } });
+    expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith({ where: { id: "bl-x" }, data: { committedFromCommitments: { asymmetricMatch: (value) => value !== null && value !== undefined && Number(String(value)) === 7000, toAsymmetricMatcher: () => "the decimal 7000" } } });
+    expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith({ where: { id: "bl-mat" }, data: { committedFromCommitments: { asymmetricMatch: (value) => value !== null && value !== undefined && Number(String(value)) === 0, toAsymmetricMatcher: () => "the decimal 0" } } });
+    expect(mockPrisma.costRecord.update).toHaveBeenCalledWith({ where: { id: "cr-1" }, data: { committed: { asymmetricMatch: (value) => value !== null && value !== undefined && Number(String(value)) === 5000, toAsymmetricMatcher: () => "the decimal 5000" } } });
     // R5-2: created with no forecast supplied → the initial default, marked
     // default: the activity's approved allocation (9,000), not a budget of 0
-    expect(mockPrisma.costRecord.create).toHaveBeenCalledWith({ data: { projectId: "project-1", activityId: "act-2", committed: 7000, forecast: 9000, forecastSource: "default" } });
+    expect(mockPrisma.costRecord.create).toHaveBeenCalledWith({ data: { projectId: "project-1", activityId: "act-2", committed: { asymmetricMatch: (value) => value !== null && value !== undefined && Number(String(value)) === 7000, toAsymmetricMatcher: () => "the decimal 7000" }, forecast: 9000, forecastSource: "default" } });
     expect(mockNotifications.createNotifications).toHaveBeenCalledWith(expect.objectContaining({ event: "commitment.executed", recipientUserIds: expect.arrayContaining(["sub-user"]) }));
   });
 
@@ -175,7 +176,7 @@ describe("commitments", () => {
     mockPrisma.budgetLine.findMany.mockResolvedValue([{ id: "bl-1", costCodeId: "code-1", costType: "subcontract", status: "active" }]);
     mockPrisma.commitment.findFirst.mockResolvedValue(commitment({ status: "executed" })); // the parent as held (CX21-524)
     await service.transitionChangeOrder({ orgId: "org-1", projectId: "project-1", changeOrderId: "cco-1", to: "approved", actor: { id: "pm" } });
-    expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith({ where: { id: "bl-1" }, data: { committedFromCommitments: 2500 } });
+    expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith({ where: { id: "bl-1" }, data: { committedFromCommitments: { asymmetricMatch: (value) => value !== null && value !== undefined && Number(String(value)) === 2500, toAsymmetricMatcher: () => "the decimal 2500" } } });
     await expect(service.transitionChangeOrder({ orgId: "org-1", projectId: "project-1", changeOrderId: "cco-1", to: "rejected", actor: { id: "pm" } })).rejects.toMatchObject({ code: "COMMITMENT_CO_REASON_REQUIRED" });
   });
 
@@ -267,7 +268,49 @@ describe("Phase 21D — integrity (release challenge, tenth pass)", () => {
     const pair = mockPrisma.$executeRaw.mock.calls.findIndex(([strings, ...values]) => Array.isArray(strings) && strings.join("?").includes("pg_advisory_xact_lock") && values.includes("cost-record:project-1:act-1"));
     expect(pair).toBeGreaterThanOrEqual(0);
     expect(mockPrisma.$executeRaw.mock.invocationCallOrder[pair]).toBeLessThan(mockPrisma.costRecord.update.mock.invocationCallOrder[0]);
-    expect(mockPrisma.costRecord.update).toHaveBeenCalledWith({ where: { id: "cr-1" }, data: { committed: 5000 } });
+    expect(mockPrisma.costRecord.update).toHaveBeenCalledWith({ where: { id: "cr-1" }, data: { committed: { asymmetricMatch: (value) => value !== null && value !== undefined && Number(String(value)) === 5000, toAsymmetricMatcher: () => "the decimal 5000" } } });
+  });
+});
+
+/**
+ * CERT-2 (alerts-6): what each activity and budget line is committed to is
+ * added up, checked and written as one exact decimal. Two executed
+ * commitments of 6e15 on one activity failed the second execution with a 500
+ * at the write (numeric field overflow).
+ */
+describe("CERT-2 — committed totals fit their columns", () => {
+  it("commitments that together pass 10^16 on one activity or budget line are a 400 COMMITTED_TOTAL_TOO_LARGE before anything is written", async () => {
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    for (const [where, projection] of [[{ budgetLineId: null, costCodeId: null, activityId: "act-1" }, "activity"], [{ budgetLineId: "bl-1", costCodeId: null, activityId: null }, "budget_line"]]) {
+      mockPrisma.commitment.findMany.mockResolvedValue([
+        { id: "c-1", type: "subcontract", lines: [{ amount: "6000000000000000", ...where }], changeOrders: [] },
+        { id: "c-2", type: "subcontract", lines: [{ amount: "6000000000000000", ...where }], changeOrders: [] },
+      ]);
+      mockPrisma.budgetLine.findMany.mockResolvedValue([{ id: "bl-1", costCodeId: "code-1", costType: "subcontract", status: "active" }]);
+      mockPrisma.costRecord.findMany.mockResolvedValue([{ id: "cr-1", activityId: "act-1" }]);
+      mockPrisma.budgetLine.update.mockClear();
+      mockPrisma.costRecord.update.mockClear();
+      mockPrisma.costRecord.create.mockClear();
+      await expect(service.recomputeCommitted({ orgId: "org-1", projectId: "project-1" })).rejects.toMatchObject({ status: 400, code: "COMMITTED_TOTAL_TOO_LARGE", details: { projection } });
+      expect(mockPrisma.budgetLine.update).not.toHaveBeenCalled();
+      expect(mockPrisma.costRecord.update).not.toHaveBeenCalled();
+      expect(mockPrisma.costRecord.create).not.toHaveBeenCalled();
+    }
+  });
+
+  it("5e15 + 4,999,999,999,999,999 fits, and is written exactly — the float sum was 10^16", async () => {
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    mockPrisma.commitment.findMany.mockResolvedValue([
+      { id: "c-1", type: "subcontract", lines: [{ amount: "5000000000000000", budgetLineId: "bl-1", costCodeId: null, activityId: "act-1" }], changeOrders: [] },
+      { id: "c-2", type: "subcontract", lines: [{ amount: "4999999999999999", budgetLineId: "bl-1", costCodeId: null, activityId: "act-1" }], changeOrders: [] },
+    ]);
+    mockPrisma.budgetLine.findMany.mockResolvedValue([{ id: "bl-1", costCodeId: "code-1", costType: "subcontract", status: "active" }]);
+    mockPrisma.costRecord.findMany.mockResolvedValue([{ id: "cr-1", activityId: "act-1" }]);
+    mockPrisma.budgetLine.update.mockClear();
+    mockPrisma.costRecord.update.mockClear();
+    await service.recomputeCommitted({ orgId: "org-1", projectId: "project-1" });
+    expect(mockPrisma.budgetLine.update.mock.calls[0][0].data.committedFromCommitments.toFixed(2)).toBe("9999999999999999.00");
+    expect(mockPrisma.costRecord.update.mock.calls[0][0].data.committed.toFixed(2)).toBe("9999999999999999.00");
   });
 });
 

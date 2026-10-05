@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const { nextRef } = require('../utils/reference-number');
@@ -7,6 +8,7 @@ const {
   recordEvent,
 } = require('./audit.service');
 const {
+  SEVERITY_RANK,
   calculateNeedDate,
   calculateOrderByDate,
   computeProcurementRisk,
@@ -371,6 +373,26 @@ const buildLineRiskRow = (line) => {
   };
 };
 
+/** An order that will deliver nothing more. */
+const SETTLED_ORDER_STATUSES = new Set(['cancelled', 'closed']);
+const CANCELLED_STATUSES = new Set(['cancelled', 'canceled', 'void']);
+
+/** A line whose order was cancelled or closed: it will deliver nothing more, and is no one's risk. */
+const isOnSettledOrder = (line) => SETTLED_ORDER_STATUSES.has(lower(line?.order?.status));
+
+/**
+ * A line a material can still be waiting on: not cancelled or consumed, and
+ * not on a cancelled or closed order (CERT-2, round 6). The material read its
+ * promise from the first line not cancelled, whatever its order: a material
+ * ordered on an order since cancelled kept its package's alert open, critical
+ * "delivery after need" on the cancelled order's promised date. A line is
+ * judged by its order only when the order's status was read with it.
+ */
+const isOpenMaterialLine = (line) =>
+  !CANCELLED_STATUSES.has(lower(line.status)) &&
+  lower(line.status) !== 'consumed' &&
+  !isOnSettledOrder(line);
+
 const buildMaterialRiskRow = (material) => {
   const plannedQty = Number(material.plannedQty || material.qty || 0);
   const receivedQty = Number(material.receivedQty || 0);
@@ -384,9 +406,13 @@ const buildMaterialRiskRow = (material) => {
           ? 'partial'
           : 'not_received';
 
-  const firstOpenLine = material.poLines?.find(
-    (line) => !['cancelled', 'consumed'].includes(line.status),
-  );
+  const firstOpenLine = material.poLines?.find(isOpenMaterialLine);
+  // Ordered only on orders since cancelled or closed: it is not on order any
+  // more, and its order-by date speaks for it again.
+  const status =
+    !firstOpenLine && material.poLines?.length && lower(material.status) === 'ordered'
+      ? 'not_ordered'
+      : material.status;
 
   return {
     id: material.id,
@@ -400,7 +426,7 @@ const buildMaterialRiskRow = (material) => {
     requiredDate: material.requiredDate,
     promisedDate: firstOpenLine?.promisedDate || null,
     expectedDeliveryDate: firstOpenLine?.promisedDate || null,
-    status: material.status,
+    status,
     warehouseStatus,
   };
 };
@@ -462,44 +488,791 @@ const deriveScheduleNeedDates = ({
   };
 };
 
-const normalizeAlertData = ({
-  projectId,
-  risk,
-  line = null,
-  material = null,
-  packageRow = null,
-}) => ({
-  projectId,
-  activityId: line?.activityId || material?.activityId || packageRow?.activityId || null,
-  packageId:
-    line?.packageId ||
-    material?.procurementPackageId ||
-    packageRow?.id ||
-    null,
-  orderId: line?.orderId || null,
-  poLineId: line?.id || null,
-  activityMaterialId: material?.id || line?.activityMaterialId || null,
-  severity: risk.severity,
-  reason: risk.reason,
-  daysAtRisk: Math.round(risk.daysAtRisk || 0),
-  needDate: risk.needDate || null,
-  orderByDate: risk.orderByDate || null,
-  expectedDeliveryDate: risk.expectedDeliveryDate || null,
-});
+/**
+ * The lead-time alert (OCTA-PROC-LEADALERT-082; CERT-2 rounds 4 and 5).
+ *
+ * An alert is unique on its project by order line, by material requirement
+ * and by procurement package, so each alert speaks for one SCOPE, and every
+ * order line, material and package belongs to exactly one:
+ *
+ *   package   a procurement package, the materials planned on it, and the
+ *             order lines on it — or naming no package, ordered against one
+ *             of those materials. Its alert holds packageId.
+ *   material  a material requirement on no package, and the lines ordered
+ *             against it that name no package. Its alert holds
+ *             activityMaterialId and no packageId.
+ *   line      an order line that names neither. Its alert holds poLineId.
+ *
+ * The alert carries the WORST risk in its scope — recomputed from every
+ * member each time one of them changes — and points (poLineId, orderId,
+ * activityMaterialId, activityId) at the member carrying it. It is resolved
+ * only when nothing in the scope is at risk. Round 4 made a package's one
+ * alert follow whichever line or material changed it last: an on-time
+ * delivery on a second order resolved the package's alert while the first
+ * order's line was still five weeks late, and GET lead-time-alerts?status=open
+ * showed nothing.
+ *
+ * An acknowledged alert is opened again when the risk becomes worse than what
+ * was acknowledged: a higher severity, or more days at risk than time alone
+ * has added since. An acknowledgement of a three-day slip used to carry over,
+ * still acknowledged, to an eighty-day one.
+ *
+ * A package's own planning dates speak for it only while nothing is ordered
+ * on it: its status does not follow the orders placed against it, and a
+ * package left at "planning" would otherwise read "order-by date missed" for
+ * ever. A line on a cancelled or closed order will deliver nothing more, and
+ * a cancelled line or material is no one's risk: they are left out — of the
+ * scope, and of what a material in it is still waiting on.
+ *
+ * Every scope a write touches is worked again ONCE, after the write — not
+ * once per line (CERT-2, round 6): see syncLeadTimeAlerts.
+ */
+/**
+ * What a scope reads of a line: what its risk is worked from (buildLineRiskRow,
+ * computeProcurementRisk), what its alert points at (alertDataFor), and what
+ * places it in a scope — not every column of every line (CERT-2,
+ * availability-7: a scope of 240 lines read all thirty-odd columns of each).
+ */
+const ALERT_LINE_SELECT = {
+  id: true,
+  orderId: true,
+  packageId: true,
+  activityId: true,
+  activityMaterialId: true,
+  description: true,
+  status: true,
+  orderedQty: true,
+  receivedQty: true,
+  issuedQty: true,
+  leadWeeks: true,
+  requiredTiming: true,
+  needOffsetDays: true,
+  bufferDays: true,
+  requiredDate: true,
+  promisedDate: true,
+  createdAt: true,
+  activity: { select: ACTIVITY_SELECT },
+  order: { select: { ref: true, status: true } },
+};
+const ALERT_MATERIAL_INCLUDE = {
+  activity: { select: ACTIVITY_SELECT },
+  // With each line's order status (isOpenMaterialLine), newest first as the
+  // material register lists them.
+  poLines: {
+    include: { order: { select: { status: true } } },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+  },
+};
+const MEMBER_ORDER = [{ createdAt: 'asc' }, { id: 'asc' }];
+/**
+ * The lines of a scope that can still deliver, as the database filters them —
+ * the rule memberRisks applies again. A scope's cancelled and closed lines
+ * are not read each time it is worked: cancelling a 240-line order read all
+ * 240 back only to leave them out (CERT-2, round 6).
+ */
+const LIVE_LINE_WHERE = {
+  status: { notIn: [...CANCELLED_STATUSES] },
+  order: { status: { notIn: [...SETTLED_ORDER_STATUSES] } },
+};
+/** Reasons whose days at risk grow by themselves, a day each day. */
+const TIME_DRIVEN_REASONS = new Set(['delivery_overdue', 'order_by_missed']);
+const SCOPE_KEY = { package: 'packageId', material: 'activityMaterialId', line: 'poLineId' };
+const DAY_MS = 86_400_000;
+
+const findRows = async (tx, model, args) =>
+  (tx[model]?.findMany ? (await tx[model].findMany(args)) || [] : []);
+const scopeName = (scope) => `${scope.kind}:${scope.id}`;
+/** The link an alert is unique on as its scope's alert; its other links only point. */
+const ownKeyOf = (alert) =>
+  alert.packageId ? 'packageId' : alert.activityMaterialId ? 'activityMaterialId' : 'poLineId';
 
 /**
- * Each of an alert's links is unique on its project: one alert per order
- * line, per material requirement and per procurement package.
+ * The scopes the given alerts speak for, from the link each is unique on
+ * (scopeOfAlert, for many at once): a package's from its package; a
+ * material's from the material as it now stands; a line's from the line — its
+ * package, or the package of the material it was ordered against, or the
+ * material, or the line itself. Two reads for any number of alerts (the
+ * lines, then the materials); a line this same write has just written or
+ * read (`known`: the lines it works the alerts of) is taken as it has it, as
+ * its own scope was. null for an alert whose material or line is gone.
  */
-const ALERT_KEYS = ['poLineId', 'activityMaterialId', 'packageId'];
-
-/** The project's alerts that already hold one of these links. */
-const alertsHolding = async (tx, projectId, data) => {
-  const held = ALERT_KEYS.filter((key) => data[key]).map((key) => ({ [key]: data[key] }));
-  if (!held.length || !tx.procurementLeadTimeAlert.findMany) return [];
-  return (await tx.procurementLeadTimeAlert.findMany({ where: { projectId, OR: held } })) || [];
+const scopesOfAlerts = async (tx, projectId, alerts, known = new Map()) => {
+  const lineIds = [
+    ...new Set(alerts.filter((alert) => !alert.packageId && !alert.activityMaterialId && alert.poLineId).map((alert) => alert.poLineId)),
+  ];
+  const unknown = lineIds.filter((id) => !known.has(id));
+  const read = unknown.length
+    ? await findRows(tx, 'procurementPoLine', {
+        where: { projectId, id: { in: unknown } },
+        select: { id: true, packageId: true, activityMaterialId: true },
+      })
+    : [];
+  const lineById = new Map([
+    ...lineIds.filter((id) => known.has(id)).map((id) => [id, known.get(id)]),
+    ...read.map((line) => [line.id, line]),
+  ]);
+  const lines = [...lineById.values()];
+  const materialIds = [
+    ...new Set([
+      ...alerts.filter((alert) => !alert.packageId && alert.activityMaterialId).map((alert) => alert.activityMaterialId),
+      ...lines.filter((line) => !line.packageId && line.activityMaterialId).map((line) => line.activityMaterialId),
+    ]),
+  ];
+  const materials = materialIds.length
+    ? await findRows(tx, 'activityMaterial', {
+        where: { id: { in: materialIds }, projectId },
+        select: { id: true, procurementPackageId: true },
+      })
+    : [];
+  const materialById = new Map(materials.map((material) => [material.id, material]));
+  return alerts.map((alert) => {
+    if (alert.packageId) return { kind: 'package', id: alert.packageId };
+    if (alert.activityMaterialId) {
+      const material = materialById.get(alert.activityMaterialId);
+      if (!material) return null;
+      return material.procurementPackageId
+        ? { kind: 'package', id: material.procurementPackageId }
+        : { kind: 'material', id: material.id };
+    }
+    if (!alert.poLineId) return null;
+    const line = lineById.get(alert.poLineId);
+    if (!line) return null;
+    if (line.packageId) return { kind: 'package', id: line.packageId };
+    if (line.activityMaterialId) {
+      const owner = materialById.get(line.activityMaterialId);
+      return owner?.procurementPackageId
+        ? { kind: 'package', id: owner.procurementPackageId }
+        : { kind: 'material', id: line.activityMaterialId };
+    }
+    return { kind: 'line', id: line.id };
+  });
 };
 
+/** Rows grouped by a key, each group in the rows' order. */
+const groupBy = (rows, keyOf) => {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = keyOf(row);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  return groups;
+};
+
+/** A line the database left in a scope's read (LIVE_LINE_WHERE), judged the same way in memory. */
+const isLiveLine = (line) =>
+  !CANCELLED_STATUSES.has(line.status) && !SETTLED_ORDER_STATUSES.has(line.order?.status);
+
+/**
+ * Everything in the given scopes, read afresh: three reads for any number of
+ * scopes (CERT-2, availability-7) — the packages; the materials planned on
+ * them and each material scope's own; the lines that can still deliver on the
+ * packages or against those materials, and each line scope's own line. Gives
+ * each scope what it read for itself alone before, in the same order:
+ *
+ *   package   the package, its materials, and its lines that can still
+ *             deliver — on it, or naming no package and ordered against one
+ *             of its materials;
+ *   material  the material, and the lines that can still deliver ordered
+ *             against it naming no package (none when it is gone);
+ *   line      the line, while it can still deliver (round 6 read it whatever
+ *             its state, and left it out of the risk when it could not).
+ */
+const membersOfScopes = async (tx, projectId, scopes) => {
+  const scopeIds = (kind) => [...new Set(scopes.filter((scope) => scope.kind === kind).map((scope) => scope.id))];
+  const packageIds = scopeIds('package');
+  const materialScopeIds = scopeIds('material');
+  const lineScopeIds = scopeIds('line');
+  const onPackage = new Set(packageIds);
+
+  const packages = packageIds.length
+    ? await findRows(tx, 'procurementPackage', {
+        where: { id: { in: packageIds }, projectId },
+        include: { activity: { select: ACTIVITY_SELECT } },
+      })
+    : [];
+  const materialWhere = [
+    ...(packageIds.length ? [{ procurementPackageId: { in: packageIds } }] : []),
+    ...(materialScopeIds.length ? [{ id: { in: materialScopeIds } }] : []),
+  ];
+  const materials = materialWhere.length
+    ? await findRows(tx, 'activityMaterial', {
+        where: { projectId, OR: materialWhere },
+        include: ALERT_MATERIAL_INCLUDE,
+        orderBy: MEMBER_ORDER,
+      })
+    : [];
+  const planned = materials.filter((material) => onPackage.has(material.procurementPackageId));
+  const orderedAgainst = [...new Set([...planned.map((material) => material.id), ...materialScopeIds])];
+  const lineWhere = [
+    ...(packageIds.length ? [{ packageId: { in: packageIds }, ...LIVE_LINE_WHERE }] : []),
+    ...(orderedAgainst.length ? [{ packageId: null, activityMaterialId: { in: orderedAgainst }, ...LIVE_LINE_WHERE }] : []),
+    // A line scope's line too only while it can still deliver: one that cannot
+    // is no one's risk (memberRisks leaves it out), and its scope's alert is
+    // resolved on nothing — so cancelling an order of 240 lines reads none back.
+    ...(lineScopeIds.length ? [{ id: { in: lineScopeIds }, ...LIVE_LINE_WHERE }] : []),
+  ];
+  const lines = lineWhere.length
+    ? await findRows(tx, 'procurementPoLine', {
+        where: { projectId, OR: lineWhere },
+        select: ALERT_LINE_SELECT,
+        orderBy: MEMBER_ORDER,
+      })
+    : [];
+
+  const packageById = new Map(packages.map((row) => [row.id, row]));
+  const materialById = new Map(materials.map((row) => [row.id, row]));
+  const lineById = new Map(lines.map((row) => [row.id, row]));
+  const plannedOn = groupBy(planned, (material) => material.procurementPackageId);
+  const packageOfPlanned = new Map(planned.map((material) => [material.id, material.procurementPackageId]));
+  // One pass over the lines, in their order: a line is on at most one
+  // package's scope (its own package, or its material's when it names none),
+  // and, naming no package, in its material's own scope as well.
+  const linesOn = new Map();
+  const linesAgainst = new Map();
+  const push = (map, key, line) => {
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(line);
+  };
+  for (const line of lines) {
+    if (!isLiveLine(line)) continue;
+    if (line.packageId) {
+      if (onPackage.has(line.packageId)) push(linesOn, line.packageId, line);
+      continue;
+    }
+    if (!line.activityMaterialId) continue;
+    const packageId = packageOfPlanned.get(line.activityMaterialId);
+    if (packageId) push(linesOn, packageId, line);
+    push(linesAgainst, line.activityMaterialId, line);
+  }
+  return (scope) => {
+    if (scope.kind === 'package') {
+      return {
+        packageRow: packageById.get(scope.id) || null,
+        materials: plannedOn.get(scope.id) || [],
+        lines: linesOn.get(scope.id) || [],
+      };
+    }
+    if (scope.kind === 'material') {
+      const material = materialById.get(scope.id);
+      return {
+        packageRow: null,
+        materials: material ? [material] : [],
+        lines: material ? linesAgainst.get(scope.id) || [] : [],
+      };
+    }
+    const line = lineById.get(scope.id);
+    return { packageRow: null, materials: [], lines: line ? [line] : [] };
+  };
+};
+
+/** Each member that can still be late, with its risk. */
+const memberRisks = ({ packageRow, materials, lines }, project) => {
+  const liveLines = lines.filter(
+    (line) =>
+      !SETTLED_ORDER_STATUSES.has(lower(line.order?.status)) &&
+      !CANCELLED_STATUSES.has(lower(line.status)),
+  );
+  const risks = [
+    ...liveLines.map((line) => ({
+      line,
+      risk: computeProcurementRisk(buildLineRiskRow(line), { project }),
+    })),
+    ...materials
+      .filter((material) => !CANCELLED_STATUSES.has(lower(material.status)))
+      .map((material) => ({
+        material,
+        risk: computeProcurementRisk(buildMaterialRiskRow(material), { project }),
+      })),
+  ];
+  if (packageRow && !liveLines.length && !CANCELLED_STATUSES.has(lower(packageRow.status))) {
+    risks.push({ packageRow, risk: enrichPackage(packageRow, project).procurementRisk });
+  }
+  return risks;
+};
+
+const rankOf = (severity) => SEVERITY_RANK[severity] ?? 0;
+/** The worse of two: higher severity, then more days at risk; the earlier member on a tie. */
+const worstRisk = (risks) =>
+  risks.reduce((top, item) => {
+    if (!top) return item;
+    const delta = rankOf(item.risk.severity) - rankOf(top.risk.severity);
+    if (delta) return delta > 0 ? item : top;
+    return (item.risk.daysAtRisk || 0) > (top.risk.daysAtRisk || 0) ? item : top;
+  }, null);
+
+/** What the scope's alert says: the worst risk, pointing at the member carrying it. */
+const alertDataFor = (projectId, scope, top) => {
+  const { risk, line = null, material = null, packageRow = null } = top;
+  return {
+    projectId,
+    activityId: line?.activityId || material?.activityId || packageRow?.activityId || null,
+    packageId: scope.kind === 'package' ? scope.id : null,
+    orderId: line?.orderId || null,
+    poLineId: scope.kind === 'line' ? scope.id : line?.id || null,
+    activityMaterialId:
+      scope.kind === 'material' ? scope.id : material?.id || line?.activityMaterialId || null,
+    severity: risk.severity,
+    reason: risk.reason,
+    daysAtRisk: Math.round(risk.daysAtRisk || 0),
+    needDate: risk.needDate || null,
+    orderByDate: risk.orderByDate || null,
+    expectedDeliveryDate: risk.expectedDeliveryDate || null,
+  };
+};
+
+const utcDay = (value) => {
+  const date = new Date(value);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) / DAY_MS;
+};
+
+/**
+ * Whether the risk an alert now carries is worse than the one it carried:
+ * a higher severity, or, at the same severity, more days at risk — beyond the
+ * days that time alone has added to the same overdue line or missed order-by
+ * date since the alert was last brought up to date.
+ */
+const riskWorsened = (previous, next, today = new Date()) => {
+  const delta = rankOf(next.severity) - rankOf(previous.severity);
+  if (delta) return delta > 0;
+  const sameRisk =
+    previous.reason === next.reason &&
+    (previous.poLineId || null) === (next.poLineId || null) &&
+    (previous.activityMaterialId || null) === (next.activityMaterialId || null);
+  const elapsed =
+    sameRisk && TIME_DRIVEN_REASONS.has(next.reason) && previous.updatedAt
+      ? Math.max(0, utcDay(today) - utcDay(previous.updatedAt))
+      : 0;
+  return (next.daysAtRisk || 0) > (previous.daysAtRisk || 0) + elapsed;
+};
+
+/** The links an alert is unique on, each once per project. */
+const ALERT_LINKS = ['packageId', 'activityMaterialId', 'poLineId'];
+
+/**
+ * The project's alerts that one write's scopes can read or change, held in
+ * memory while the scopes are worked (CERT-2, availability-7). They are read
+ * before the first scope is worked, for every link a scope can look up; each
+ * scope then finds and changes the rows here exactly as it found and changed
+ * them in the table, one scope after another; and the rows that changed are
+ * written once, at the end (writeAlertBook). Round 6 asked the table about ten
+ * times for each scope, one scope at a time: an order of 220 lines, each on
+ * its own package, answered 500 after 6 s (the transaction expired) where the
+ * baseline answered 201 in 3.3 s, and cancelling 240 lines on no package took
+ * 1.8 s where the baseline took 0.1 s.
+ */
+const alertBook = () => {
+  const rows = new Map();
+  const initial = new Map();
+  const written = new Map();
+  const index = Object.fromEntries(ALERT_LINKS.map((key) => [key, new Map()]));
+  const place = (row, present) => {
+    for (const key of ALERT_LINKS) {
+      const value = row[key];
+      if (!value) continue;
+      if (!index[key].has(value)) index[key].set(value, new Set());
+      if (present) index[key].get(value).add(row.id);
+      else index[key].get(value).delete(row.id);
+    }
+  };
+  const wrote = (id, data) => {
+    if (!written.has(id)) written.set(id, new Set());
+    for (const key of Object.keys(data)) written.get(id).add(key);
+  };
+  return {
+    rows,
+    initial,
+    written,
+    /** Rows as the table holds them; a row already here keeps what this write made of it. */
+    add(found) {
+      for (const row of found) {
+        if (rows.has(row.id)) continue;
+        const copy = { ...row };
+        rows.set(row.id, copy);
+        initial.set(row.id, { ...row });
+        place(copy, true);
+      }
+    },
+    /** The rows that hold a link now, as findMany would answer them. */
+    holding(key, value) {
+      const ids = value ? index[key].get(value) : null;
+      return ids ? [...ids].map((id) => ({ ...rows.get(id) })) : [];
+    },
+    update(id, data, now) {
+      const row = rows.get(id);
+      place(row, false);
+      Object.assign(row, data, { updatedAt: now });
+      place(row, true);
+      wrote(id, data);
+      return { ...row };
+    },
+    create(data, now) {
+      const row = {
+        id: crypto.randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        acknowledgedAt: null,
+        acknowledgedBy: null,
+        resolvedAt: null,
+        resolvedBy: null,
+        ...data,
+      };
+      rows.set(row.id, row);
+      place(row, true);
+      wrote(row.id, data);
+      return { ...row };
+    },
+  };
+};
+
+/** The project's alerts holding any of these links, as the table holds them. One read. */
+const readAlerts = async (tx, projectId, { packageIds = [], materialIds = [], lineIds = [] }) => {
+  const links = [];
+  for (const [key, values] of [['packageId', packageIds], ['activityMaterialId', materialIds], ['poLineId', lineIds]]) {
+    const list = [...values];
+    if (list.length) links.push({ [key]: { in: list } });
+  }
+  return links.length ? findRows(tx, 'procurementLeadTimeAlert', { where: { projectId, OR: links } }) : [];
+};
+
+/**
+ * Brings one scope's alert up to date from every member of the scope, in the
+ * book: the reads and writes round 6 made of the table, in the same order.
+ *
+ *   - the scope's own alert;
+ *   - alerts of a narrower scope whose subject has since joined this one (a
+ *     material put on a package, a line ordered against a material): adopted
+ *     when the scope is at risk and has no alert of its own, otherwise closed
+ *     and their links released to the alert that now speaks for them;
+ *   - nothing at risk: the alert resolved;
+ *   - at risk: the scope's own link is its alert's (another alert that merely
+ *     points at the line or the material gives it up); a link the alert would
+ *     only point at, held by another alert, stays there â€” unless that alert is
+ *     resolved, or the line or material is a member of this scope, carrying
+ *     its risk; a link that is the other alert's own stays with it;
+ *   - the alert created, or updated â€” opened again when it was resolved, or
+ *     acknowledged on a risk that has since worsened.
+ */
+const syncScopeInBook = ({ book, projectId, project, scope, members, now }) => {
+  const top = worstRisk(memberRisks(members, project));
+  const atRisk = Boolean(top?.risk.isAtRisk);
+  const lineIds = members.lines.map((row) => row.id);
+
+  let alert =
+    (scope.kind === 'package'
+      ? book.holding('packageId', scope.id)[0]
+      : scope.kind === 'material'
+        ? book.holding('activityMaterialId', scope.id).find((row) => !row.packageId)
+        : book.holding('poLineId', scope.id).find((row) => !row.packageId && !row.activityMaterialId)) || null;
+
+  const narrower = new Map();
+  const narrowerLines = () => {
+    for (const id of lineIds) {
+      for (const row of book.holding('poLineId', id)) {
+        if (!row.packageId && !row.activityMaterialId) narrower.set(row.id, row);
+      }
+    }
+  };
+  if (scope.kind === 'material') narrowerLines();
+  if (scope.kind === 'package') {
+    for (const material of members.materials) {
+      for (const row of book.holding('activityMaterialId', material.id)) if (!row.packageId) narrower.set(row.id, row);
+    }
+    narrowerLines();
+  }
+  const orphans = [...narrower.values()];
+  if (!alert && atRisk && orphans.length) {
+    alert = [...orphans].sort(
+      (a, b) =>
+        Number(a.status === 'resolved') - Number(b.status === 'resolved') ||
+        new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0),
+    )[0];
+  }
+  for (const orphan of orphans) {
+    if (orphan.id === alert?.id) continue;
+    book.update(
+      orphan.id,
+      {
+        poLineId: null,
+        activityMaterialId: null,
+        ...(orphan.status === 'resolved' ? {} : { status: 'resolved', resolvedAt: now, resolvedBy: null }),
+      },
+      now,
+    );
+  }
+
+  if (!atRisk) {
+    if (!alert || alert.status === 'resolved') return alert || null;
+    return book.update(
+      alert.id,
+      {
+        status: 'resolved',
+        reason: top?.risk.reason || 'on_track',
+        severity: top?.risk.severity || 'none',
+        daysAtRisk: 0,
+        needDate: top?.risk.needDate || null,
+        orderByDate: top?.risk.orderByDate || null,
+        expectedDeliveryDate: top?.risk.expectedDeliveryDate || null,
+        resolvedAt: now,
+      },
+      now,
+    );
+  }
+
+  const data = alertDataFor(projectId, scope, top);
+  const other = (row) => !alert || row.id !== alert.id;
+  const scopeKey = SCOPE_KEY[scope.kind];
+  if (scopeKey !== 'packageId') {
+    for (const row of book.holding(scopeKey, scope.id).filter(other)) book.update(row.id, { [scopeKey]: null }, now);
+  }
+  const memberIds = {
+    poLineId: new Set(lineIds),
+    activityMaterialId: new Set(members.materials.map((row) => row.id)),
+  };
+  for (const key of ['poLineId', 'activityMaterialId']) {
+    if (key === scopeKey || !data[key]) continue;
+    const holder = book.holding(key, data[key]).find(other);
+    if (!holder) continue;
+    const takeBack =
+      ownKeyOf(holder) !== key && (holder.status === 'resolved' || memberIds[key].has(data[key]));
+    if (takeBack) book.update(holder.id, { [key]: null }, now);
+    else data[key] = null;
+  }
+
+  if (!alert) return book.create({ ...data, status: 'open' }, now);
+  const reopen =
+    alert.status === 'resolved' ||
+    (alert.status === 'acknowledged' && riskWorsened(alert, data, now));
+  return book.update(
+    alert.id,
+    {
+      ...data,
+      status: reopen ? 'open' : alert.status,
+      resolvedAt: null,
+      resolvedBy: null,
+      ...(reopen ? { acknowledgedAt: null, acknowledgedBy: null } : {}),
+    },
+    now,
+  );
+};
+
+const sameValue = (a, b) => {
+  if (a === b) return true;
+  if (a === null || a === undefined || b === null || b === undefined) {
+    return (a === null || a === undefined) && (b === null || b === undefined);
+  }
+  if (a instanceof Date || b instanceof Date) return new Date(a).getTime() === new Date(b).getTime();
+  return false;
+};
+/** One text per set of values, whatever order the fields were written in. */
+const payloadKey = (data) =>
+  JSON.stringify(Object.keys(data).sort().map((key) => [key, data[key] instanceof Date ? data[key].toISOString() : data[key] ?? null]));
+
+/**
+ * Writes what the scopes made of the book: each new alert, and each alert
+ * whose values changed, once â€” the changes that are the same values for
+ * several alerts (resolving every line of a cancelled order) in one statement.
+ * An alert the scopes brought up to date without changing a value is still
+ * marked brought up to date (updatedAt: how long an acknowledged risk has
+ * grown on its own is counted from it, riskWorsened), all such alerts in one
+ * statement.
+ *
+ * Each link is one alert's at most (the table's unique keys), and the book
+ * ends as the table would have after each scope's writes in turn: so every
+ * link given up is released first, and only then is a link taken by another
+ * alert, an existing one or a new one. An alert that gives up a link another
+ * takes while it takes a new one releases it in the first pass.
+ */
+const writeAlertBook = async (tx, book, now) => {
+  const model = tx.procurementLeadTimeAlert;
+  const creates = [];
+  const changes = [];
+  const unchanged = [];
+  for (const [id, fields] of book.written) {
+    const row = book.rows.get(id);
+    const before = book.initial.get(id);
+    const data = {};
+    for (const key of fields) data[key] = row[key];
+    if (!before) creates.push({ id, ...data });
+    else if ([...fields].some((key) => !sameValue(row[key], before[key]))) changes.push({ id, data, row, before });
+    else unchanged.push(id);
+  }
+  const takes = (change, key) => key in change.data && Boolean(change.row[key]) && !sameValue(change.row[key], change.before[key]);
+  const taken = Object.fromEntries(ALERT_LINKS.map((key) => [key, new Set()]));
+  for (const row of creates) for (const key of ALERT_LINKS) if (row[key]) taken[key].add(row[key]);
+  const first = [];
+  const then = [];
+  for (const change of changes) {
+    if (ALERT_LINKS.some((key) => takes(change, key))) {
+      then.push(change);
+      for (const key of ALERT_LINKS) if (takes(change, key)) taken[key].add(change.row[key]);
+    } else {
+      first.push(change);
+    }
+  }
+  const released = [];
+  for (const change of then) {
+    const release = {};
+    for (const key of ALERT_LINKS) {
+      if (change.before[key] && !sameValue(change.row[key], change.before[key]) && taken[key].has(change.before[key])) release[key] = null;
+    }
+    if (Object.keys(release).length) released.push({ id: change.id, data: release });
+  }
+
+  const groups = new Map();
+  for (const { id, data } of [...first, ...released]) {
+    const key = payloadKey(data);
+    if (!groups.has(key)) groups.set(key, { data, ids: [] });
+    groups.get(key).ids.push(id);
+  }
+  if (unchanged.length) groups.set('updatedAt', { data: { updatedAt: now }, ids: unchanged });
+  for (const { data, ids } of groups.values()) {
+    if (ids.length > 1 && model.updateMany) await model.updateMany({ where: { id: { in: ids } }, data });
+    else for (const id of ids) await model.update({ where: { id }, data });
+  }
+  for (const { id, data } of then) await model.update({ where: { id }, data });
+  if (creates.length > 1 && model.createMany) await model.createMany({ data: creates });
+  else for (const data of creates) await model.create({ data });
+};
+
+/** The scopes of many lines, materials and packages, each named once; one read for the lines' materials. */
+const scopesOf = async (tx, projectId, { lines = [], materials = [], packages = [] }) => {
+  const scopes = new Map();
+  const add = (scope) => {
+    if (!scopes.has(scopeName(scope))) scopes.set(scopeName(scope), scope);
+  };
+  for (const packageRow of packages) add({ kind: 'package', id: packageRow.id });
+  for (const material of materials) {
+    add(
+      material.procurementPackageId
+        ? { kind: 'package', id: material.procurementPackageId }
+        : { kind: 'material', id: material.id },
+    );
+  }
+  const ownerIds = [
+    ...new Set(lines.filter((line) => !line.packageId && line.activityMaterialId).map((line) => line.activityMaterialId)),
+  ];
+  const owners = ownerIds.length
+    ? await findRows(tx, 'activityMaterial', {
+        where: { id: { in: ownerIds }, projectId },
+        select: { id: true, procurementPackageId: true },
+      })
+    : [];
+  const packageOfMaterial = new Map(owners.map((row) => [row.id, row.procurementPackageId || null]));
+  for (const line of lines) {
+    if (line.packageId) add({ kind: 'package', id: line.packageId });
+    else if (line.activityMaterialId) {
+      const packageId = packageOfMaterial.get(line.activityMaterialId);
+      add(packageId ? { kind: 'package', id: packageId } : { kind: 'material', id: line.activityMaterialId });
+    } else add({ kind: 'line', id: line.id });
+  }
+  return [...scopes.values()];
+};
+
+/**
+ * Brings up to date the alert of every scope the given lines, materials and
+ * packages belong to — each scope ONCE (CERT-2, round 6) — reading the
+ * scopes' members and alerts together, not scope by scope (CERT-2,
+ * availability-7).
+ *
+ * Working a scope reads every member of it. Round 5 worked the scope again
+ * for every line written, inside the writer's five-second transaction: a
+ * 180-line order on one package read the package's lines 180 times and
+ * answered 500 (transaction expired), where the commit before created 240
+ * lines in 3.5 s, and cancelling 120 lines took 3.1 s where it had taken
+ * 0.1 s. A writer of many lines collects them and calls this once, after its
+ * loop, with the lines as written.
+ *
+ * Round 6 then read each scope's members and alerts one scope at a time, ten
+ * reads or so a scope: an order whose lines are each on their own package,
+ * or on none, is as many scopes as lines, and 220 of them answered 500 again.
+ * Every scope's members are now read in three reads, and every alert any
+ * scope can look up in one more (alertBook); the scopes are worked in memory,
+ * one after another as before, and the alerts that changed are written at the
+ * end (writeAlertBook) — a handful of statements for any number of scopes
+ * when the changes are alike (every line of a cancelled order resolved).
+ *
+ * Alerts of another scope that point at one of them are worked again too:
+ * what made it their worst may just have changed — a material taken off
+ * their package, a line delivered. They are read with the scopes' own alerts,
+ * before any scope takes its links back, and worked after the scopes of the
+ * subjects (their members and alerts read then, when there are any).
+ */
+const syncLeadTimeAlerts = async ({
+  tx = prisma,
+  projectId,
+  project,
+  lines = [],
+  materials = [],
+  packages = [],
+}) => {
+  if (!tx.procurementLeadTimeAlert?.findFirst) return [];
+  const subjects = {
+    lines: (lines || []).filter(Boolean),
+    materials: (materials || []).filter(Boolean),
+    packages: (packages || []).filter(Boolean),
+  };
+  const scopes = await scopesOf(tx, projectId, subjects);
+  if (!scopes.length) return [];
+
+  const lineIds = [...new Set(subjects.lines.map((line) => line.id))];
+  const materialIds = [
+    ...new Set(
+      [...subjects.materials.map((material) => material.id), ...subjects.lines.map((line) => line.activityMaterialId)].filter(Boolean),
+    ),
+  ];
+  const book = alertBook();
+  // Each scope's members, and every link the scopes can look an alert up by:
+  // their own, their members', what their members were ordered against.
+  const readScopes = async (list, also = {}) => {
+    const membersOf = await membersOfScopes(tx, projectId, list);
+    const members = list.map(membersOf);
+    const links = {
+      packageIds: list.filter((scope) => scope.kind === 'package').map((scope) => scope.id),
+      materialIds: new Set([...(also.materialIds || []), ...list.filter((scope) => scope.kind === 'material').map((scope) => scope.id)]),
+      lineIds: new Set([...(also.lineIds || []), ...list.filter((scope) => scope.kind === 'line').map((scope) => scope.id)]),
+    };
+    for (const { materials: planned, lines: delivering } of members) {
+      for (const material of planned) links.materialIds.add(material.id);
+      for (const line of delivering) {
+        links.lineIds.add(line.id);
+        if (line.activityMaterialId) links.materialIds.add(line.activityMaterialId);
+      }
+    }
+    const found = await readAlerts(tx, projectId, links);
+    book.add(found);
+    return { members, found };
+  };
+  // With the subjects' links too: the alerts that point at a subject, as they
+  // stand before any scope takes its links back.
+  const first = await readScopes(scopes, { lineIds, materialIds });
+  const subjectLines = new Set(lineIds);
+  const subjectMaterials = new Set(materialIds);
+  const pointing = first.found.filter(
+    (alert) => subjectLines.has(alert.poLineId) || subjectMaterials.has(alert.activityMaterialId),
+  );
+  const done = new Set(scopes.map(scopeName));
+  const others = [];
+  const known = new Map(subjects.lines.map((line) => [line.id, line]));
+  for (const otherScope of pointing.length ? await scopesOfAlerts(tx, projectId, pointing, known) : []) {
+    if (!otherScope || done.has(scopeName(otherScope))) continue;
+    done.add(scopeName(otherScope));
+    others.push(otherScope);
+  }
+  const worked = [...scopes, ...others];
+  const members = others.length ? [...first.members, ...(await readScopes(others)).members] : first.members;
+
+  const now = new Date();
+  const synced = [];
+  worked.forEach((scope, index) => {
+    const alert = syncScopeInBook({ book, projectId, project, scope, members: members[index], now });
+    if (index < scopes.length) synced.push(alert);
+  });
+  await writeAlertBook(tx, book, now);
+  return synced;
+};
+
+/** One line, material or package: its scope's alert, as syncLeadTimeAlerts brings it up to date. */
 const syncLeadTimeAlert = async ({
   tx = prisma,
   projectId,
@@ -508,95 +1281,106 @@ const syncLeadTimeAlert = async ({
   material = null,
   packageRow = null,
 }) => {
-  if (!tx.procurementLeadTimeAlert?.findFirst) return null;
-
-  const riskRow = line
-    ? buildLineRiskRow(line)
+  const subject = packageRow
+    ? { packages: [packageRow] }
     : material
-      ? buildMaterialRiskRow(material)
-      : buildPackageRiskRow(packageRow);
-  const risk = computeProcurementRisk(riskRow, { project });
-  // The row is unique on (projectId, poLineId) AND on
-  // (projectId, activityMaterialId), so a line that names a material has to be
-  // looked up by the material or the second order for it collides: the lookup
-  // by line finds nothing, the create then breaks the material constraint, and
-  // the buyer gets a raw 500 for the ordinary act of ordering the same material
-  // twice — a top-up, a split delivery, a second supplier
-  // (OCTA-PROC-LEADALERT-082). One alert per material, pointing at the line
-  // that most recently changed its outlook.
-  const where = {
+      ? { materials: [material] }
+      : line
+        ? { lines: [line] }
+        : null;
+  if (!subject) return null;
+  const [alert = null] = await syncLeadTimeAlerts({ tx, projectId, project, ...subject });
+  return alert;
+};
+
+/**
+ * Before order lines or materials are deleted — with the activity they are
+ * on: the database cascades both, and every alert linked to them with them
+ * (CERT-2, round 6). An alert that only POINTS at one of them gives the link
+ * up, so the alert of a package, or of a material, outlives the member that
+ * was its worst risk: deleting that member's activity deleted the package's
+ * whole alert while another line on it was five days late. The alert that is
+ * the line's or the material's own goes with it — it is about nothing now.
+ *
+ * Returns what to work again once they are gone (syncReleasedLeadTimeAlerts):
+ * the packages they were on, the materials the lines were ordered against,
+ * and the lines ordered against the materials.
+ */
+const releaseLeadTimeAlertLinks = async ({ tx = prisma, projectId, lineIds = [], materialIds = [] }) => {
+  const released = { lineIds: [...new Set(lineIds)], materialIds: [...new Set(materialIds)], packageIds: [], survivingMaterialIds: [], survivingLineIds: [] };
+  if (!tx.procurementLeadTimeAlert?.findMany || (!released.lineIds.length && !released.materialIds.length)) return released;
+  const goneLines = new Set(released.lineIds);
+  const goneMaterials = new Set(released.materialIds);
+  const lines = goneLines.size
+    ? await findRows(tx, 'procurementPoLine', {
+        where: { projectId, id: { in: released.lineIds } },
+        select: { id: true, packageId: true, activityMaterialId: true },
+      })
+    : [];
+  const materials = goneMaterials.size
+    ? await findRows(tx, 'activityMaterial', {
+        where: { projectId, id: { in: released.materialIds } },
+        select: { id: true, procurementPackageId: true },
+      })
+    : [];
+  const orderedAgainst = goneMaterials.size
+    ? await findRows(tx, 'procurementPoLine', {
+        where: { projectId, activityMaterialId: { in: released.materialIds } },
+        select: { id: true },
+      })
+    : [];
+  released.packageIds = [
+    ...new Set([...lines.map((line) => line.packageId), ...materials.map((material) => material.procurementPackageId)].filter(Boolean)),
+  ];
+  released.survivingMaterialIds = [
+    ...new Set(lines.map((line) => line.activityMaterialId).filter((id) => id && !goneMaterials.has(id))),
+  ];
+  released.survivingLineIds = orderedAgainst.map((line) => line.id).filter((id) => !goneLines.has(id));
+
+  const links = [];
+  if (goneLines.size) links.push({ poLineId: { in: released.lineIds } });
+  if (goneMaterials.size) links.push({ activityMaterialId: { in: released.materialIds } });
+  const pointing = await findRows(tx, 'procurementLeadTimeAlert', { where: { projectId, OR: links } });
+  for (const alert of pointing) {
+    const own = ownKeyOf(alert);
+    if ((own === 'poLineId' && goneLines.has(alert.poLineId)) || (own === 'activityMaterialId' && goneMaterials.has(alert.activityMaterialId))) {
+      continue;
+    }
+    const release = {};
+    if (goneLines.has(alert.poLineId)) release.poLineId = null;
+    if (goneMaterials.has(alert.activityMaterialId)) release.activityMaterialId = null;
+    await tx.procurementLeadTimeAlert.update({ where: { id: alert.id }, data: release });
+    if (alert.packageId) released.packageIds = [...new Set([...released.packageIds, alert.packageId])];
+    else if (alert.activityMaterialId && !goneMaterials.has(alert.activityMaterialId)) {
+      released.survivingMaterialIds = [...new Set([...released.survivingMaterialIds, alert.activityMaterialId])];
+    }
+  }
+  return released;
+};
+
+/** After the delete: every scope the deleted lines and materials were in, worked again once. */
+const syncReleasedLeadTimeAlerts = async ({ tx = prisma, projectId, project, released }) => {
+  if (!released) return [];
+  const materials = released.survivingMaterialIds.length
+    ? await findRows(tx, 'activityMaterial', {
+        where: { projectId, id: { in: released.survivingMaterialIds } },
+        select: { id: true, procurementPackageId: true },
+      })
+    : [];
+  const lines = released.survivingLineIds.length
+    ? await findRows(tx, 'procurementPoLine', {
+        where: { projectId, id: { in: released.survivingLineIds } },
+        select: { id: true, packageId: true, activityMaterialId: true },
+      })
+    : [];
+  return syncLeadTimeAlerts({
+    tx,
     projectId,
-    ...(line
-      ? line.activityMaterialId
-        ? { activityMaterialId: line.activityMaterialId }
-        : { poLineId: line.id }
-      : material
-        ? { activityMaterialId: material.id }
-        : { packageId: packageRow.id }),
-  };
-  const existing = await tx.procurementLeadTimeAlert.findFirst({ where });
-
-  if (risk.isAtRisk) {
-    const data = normalizeAlertData({
-      projectId,
-      risk,
-      line,
-      material,
-      packageRow,
-    });
-    // The alert is also one per procurement package. A second order, line or
-    // material on a package that already had an alert found nothing by its
-    // own key, created a second alert for the package, broke the unique key,
-    // and the buyer was answered 409 with Prisma's own text for the ordinary
-    // act of ordering on that package again (CERT-2). The alert already
-    // holding one of its links is the one brought up to date — pointing at
-    // what most recently changed the package's outlook, as the alert per
-    // material does — and a link that yet another alert holds stays there.
-    const holders = await alertsHolding(tx, projectId, data);
-    const target =
-      existing ||
-      holders.find((row) => data.packageId && row.packageId === data.packageId) ||
-      holders[0] ||
-      null;
-    for (const key of ALERT_KEYS) {
-      if (data[key] && holders.some((row) => row.id !== target?.id && row[key] === data[key])) {
-        delete data[key];
-      }
-    }
-    if (target) {
-      return tx.procurementLeadTimeAlert.update({
-        where: { id: target.id },
-        data: {
-          ...data,
-          status: target.status === 'resolved' ? 'open' : target.status,
-          resolvedAt: null,
-          resolvedBy: null,
-        },
-      });
-    }
-
-    return tx.procurementLeadTimeAlert.create({
-      data: { ...data, status: 'open' },
-    });
-  }
-
-  if (existing && existing.status !== 'resolved') {
-    return tx.procurementLeadTimeAlert.update({
-      where: { id: existing.id },
-      data: {
-        status: 'resolved',
-        reason: risk.reason,
-        severity: risk.severity,
-        daysAtRisk: 0,
-        needDate: risk.needDate || null,
-        orderByDate: risk.orderByDate || null,
-        expectedDeliveryDate: risk.expectedDeliveryDate || null,
-        resolvedAt: new Date(),
-      },
-    });
-  }
-
-  return existing || null;
+    project,
+    lines,
+    materials,
+    packages: released.packageIds.map((id) => ({ id })),
+  });
 };
 
 const enrichPoLine = (line, project) => ({
@@ -1074,6 +1858,18 @@ const raiseOrderFromAward = async ({ orgId, projectId, packageId, actor, payload
   });
 };
 
+/**
+ * An order is one transaction however many lines it carries: every line is
+ * checked, written and put on its material, and the alerts of every scope the
+ * lines are in are worked once at the end. Prisma's default five-second
+ * interactive window was outlived by an order of 500 lines at the baseline
+ * commit (500, P2028 transaction expired, on one package, on 500 packages and
+ * on none) and by 220 lines each on its own package in round 6 (CERT-2,
+ * availability-7). The window of the other batch writers (a delivery,
+ * activity bulk progress).
+ */
+const ORDER_TRANSACTION = Object.freeze({ maxWait: 10_000, timeout: 60_000 });
+
 const createPurchaseOrder = async ({ orgId, projectId, actor, payload }) => {
   const project = await ensureProject({ orgId, projectId });
   await ensureSupplier({ projectId, supplierId: payload.supplierId });
@@ -1222,14 +2018,11 @@ const createPurchaseOrder = async ({ orgId, projectId, actor, payload }) => {
           },
         });
       }
-
-      await syncLeadTimeAlert({
-        tx,
-        projectId,
-        project,
-        line: enrichedLine,
-      });
     }
+
+    // Every scope the order's lines are in, worked once, after every line is
+    // written (CERT-2, round 6).
+    await syncLeadTimeAlerts({ tx, projectId, project, lines: createdLines });
 
     const value = createdLines.reduce(
       (total, line) => total + lineValue(line),
@@ -1259,7 +2052,7 @@ const createPurchaseOrder = async ({ orgId, projectId, actor, payload }) => {
       value,
       lines: createdLines.map((line) => enrichPoLine(line, project)),
     };
-  });
+  }, ORDER_TRANSACTION);
 };
 
 const listPurchaseOrders = async ({ orgId, projectId }) => {
@@ -1720,6 +2513,7 @@ module.exports = {
   buildLineRiskRow,
   createPackage,
   createPurchaseOrder,
+  isOnSettledOrder,
   raiseOrderFromAward,
   createSupplier,
   enrichActivityMaterial,
@@ -1730,7 +2524,10 @@ module.exports = {
   listPurchaseOrders,
   listSuppliers,
   recordActivityMaterialUsage,
+  releaseLeadTimeAlertLinks,
   resolveLeadTimeAlert,
   syncLeadTimeAlert,
+  syncLeadTimeAlerts,
+  syncReleasedLeadTimeAlerts,
   updateLeadTimeAlert,
 };

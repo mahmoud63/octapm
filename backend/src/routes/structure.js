@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, INT4_MAX } = require("../utils/figure-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -29,7 +30,7 @@ const wbsPayloadValidators = ({ requireCore = false } = {}) => [
     ? body("name").isString().trim().isLength({ min: 1, max: 160 })
     : body("name").optional().isString().trim().isLength({ min: 1, max: 160 }),
   body("parentId").optional({ nullable: true }).isString().isUUID(),
-  body("sortOrder").optional({ nullable: true }).isInt({ min: 0 }).toInt(),
+  body("sortOrder").optional({ nullable: true }).custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
   body("isPackage").optional().isBoolean().toBoolean(),
   body("ownerPartyId").optional({ nullable: true }).isString().isUUID(),
   body("commitmentId").optional({ nullable: true }).isString().isUUID(),

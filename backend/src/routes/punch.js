@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
@@ -55,7 +56,7 @@ const itemValidators = (partial = false) => [
   body("assigneeUserId").optional({ nullable: true }).isString().isUUID(),
   body("managerUserId").optional({ nullable: true }).isString().isUUID(),
   body("finalApproverUserId").optional({ nullable: true }).isString().isUUID(),
-  body("dueDate").optional({ nullable: true }).isISO8601(),
+  body("dueDate").optional({ nullable: true }).custom(dateInput),
   body("status").optional().isIn(["draft", "open"]),
   body("activityIds").optional().isArray(),
   body("activityIds.*").optional().isString().isUUID(),
@@ -266,7 +267,9 @@ router.post(
   "/:itemId/transition",
   [
     param("itemId").isUUID(),
-    body("action").isIn(punchService.ACTIONS),
+    // One word (CERT-2, robustness-6): isIn() takes a list element by element, and
+    // ["start"] reached req.body.action.replace() below (a TypeError, 500).
+    body("action").isString().isIn(punchService.ACTIONS),
     body("reason").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
     validate,
   ],

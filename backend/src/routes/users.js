@@ -44,7 +44,7 @@ router.post(
   requirePermission("user_management", "create"),
   [
     body("name").isString().trim().notEmpty(),
-    body("email").isEmail().normalizeEmail(),
+    body("email").isString().isEmail().normalizeEmail(),
     // Optional here because an email that already belongs to an identity in
     // another workspace gets a membership, not a new account, and its
     // password is not this workspace's to set; the service still demands a
@@ -78,7 +78,7 @@ router.post(
     transition: "user.invite",
   }),
   [
-    body("email").isEmail().normalizeEmail(),
+    body("email").isString().isEmail().normalizeEmail(),
     body("role").isString().trim().notEmpty(),
     body("projectId").optional({ values: "falsy" }).isString().isUUID(),
     body("companyId").optional({ values: "falsy" }).isString().isUUID(),
@@ -122,7 +122,7 @@ router.patch(
   [
     param("id").isUUID(),
     body("name").optional().isString().trim().notEmpty(),
-    body("email").optional().isEmail().normalizeEmail(),
+    body("email").optional().isString().isEmail().normalizeEmail(),
     body("phone").optional().isString().trim(),
     body("role").optional().isString(),
     body("isCompanyAdmin").optional().isBoolean().toBoolean(),

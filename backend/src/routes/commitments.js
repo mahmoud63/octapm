@@ -2,7 +2,12 @@ const express = require("express");
 const crypto = require("crypto");
 const path = require("path");
 const multer = require("multer");
+// The NUL / lone-surrogate guard again after multer: it parses the multipart body inside the route (CERT-2).
+const { rejectNullBytes } = require("../middleware/reject-null-bytes");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, MONEY_FIGURE_MAX } = require("../utils/figure-input");
+const { QUANTITY_MAX } = require("../utils/stock-figures");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
@@ -45,9 +50,9 @@ const lineValidators = (prefix) => [
   body(`${prefix}.*.budgetLineId`).optional({ nullable: true }).isString().isUUID(),
   body(`${prefix}.*.boqItemId`).optional({ nullable: true }).isString().isUUID(),
   body(`${prefix}.*.activityId`).optional({ nullable: true }).isString().isUUID(),
-  body(`${prefix}.*.qty`).optional({ nullable: true }).isFloat({ min: 0 }),
-  body(`${prefix}.*.rate`).optional({ nullable: true }).isFloat(),
-  body(`${prefix}.*.amount`).optional({ nullable: true }).isFloat(),
+  body(`${prefix}.*.qty`).optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
+  body(`${prefix}.*.rate`).optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: -MONEY_FIGURE_MAX, max: MONEY_FIGURE_MAX }),
+  body(`${prefix}.*.amount`).optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: -MONEY_FIGURE_MAX, max: MONEY_FIGURE_MAX }),
 ];
 
 const commitmentValidators = ({ requireTitle = false } = {}) => [
@@ -56,11 +61,11 @@ const commitmentValidators = ({ requireTitle = false } = {}) => [
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
   body("vendorCompanyId").optional({ nullable: true }).isString().isUUID(),
   body("supplierId").optional({ nullable: true }).isString().isUUID(),
-  body("retentionRate").optional({ nullable: true }).isFloat({ min: 0, max: 100 }),
+  body("retentionRate").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }),
   body("paymentTerms").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
   body("currency").optional({ nullable: true }).isString().trim().isLength({ min: 3, max: 3 }),
-  body("startDate").optional({ nullable: true }).isISO8601(),
-  body("endDate").optional({ nullable: true }).isISO8601(),
+  body("startDate").optional({ nullable: true }).custom(dateInput),
+  body("endDate").optional({ nullable: true }).custom(dateInput),
   body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
   body("insurance").optional().isArray({ max: 20 }),
   body("lines").optional().isArray({ max: 500 }),
@@ -70,10 +75,10 @@ const commitmentValidators = ({ requireTitle = false } = {}) => [
 const coValidators = ({ requireTitle = false } = {}) => [
   requireTitle ? body("title").isString().trim().notEmpty().isLength({ max: 200 }) : body("title").optional().isString().trim().notEmpty().isLength({ max: 200 }),
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
-  body("value").optional({ nullable: true }).isFloat(),
+  body("value").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: -MONEY_FIGURE_MAX, max: MONEY_FIGURE_MAX }),
   body("primeChangeOrderId").optional({ nullable: true }).isString().isUUID(),
   body("lines").optional().isArray({ max: 500 }),
-  body("lines.*.amount").isFloat(),
+  body("lines.*.amount").custom(scalarFigure).bail().isFloat({ min: -MONEY_FIGURE_MAX, max: MONEY_FIGURE_MAX }),
   // The schedule-of-values line this change moves. Without it the change
   // raises the commitment's revised value but not the line's billing ceiling.
   body("lines.*.sovLineId").optional({ nullable: true }).isString().isUUID(),
@@ -107,7 +112,7 @@ router.post(
 router.post(
   "/change-orders/from-prime",
   requirePermission("commitment", "create"),
-  [body("primeChangeOrderId").isString().isUUID(), body("items").isArray({ min: 1, max: 100 }), body("items.*.commitmentId").isString().isUUID(), body("items.*.value").optional({ nullable: true }).isFloat(), validate],
+  [body("primeChangeOrderId").isString().isUUID(), body("items").isArray({ min: 1, max: 100 }), body("items.*.commitmentId").isString().isUUID(), body("items.*.value").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: -MONEY_FIGURE_MAX, max: MONEY_FIGURE_MAX }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await commitmentService.spawnFromPrimeChangeOrder({ ...scope(req), payload: req.body, actor: actor(req) }), 201)),
 );
 
@@ -154,7 +159,7 @@ router.put(
 router.put(
   "/:commitmentId/insurance",
   requirePermission("commitment", "update"),
-  [param("commitmentId").isUUID(), body("insurance").isArray({ max: 20 }), body("insurance.*.type").optional().isIn(commitmentService.INSURANCE_TYPES), body("insurance.*.documentId").optional({ nullable: true }).isString().isUUID(), body("insurance.*.expiresAt").optional({ nullable: true }).isISO8601(), validate],
+  [param("commitmentId").isUUID(), body("insurance").isArray({ max: 20 }), body("insurance.*.type").optional().isIn(commitmentService.INSURANCE_TYPES), body("insurance.*.documentId").optional({ nullable: true }).isString().isUUID(), body("insurance.*.expiresAt").optional({ nullable: true }).custom(dateInput), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await commitmentService.setInsurance({ ...scope(req), commitmentId: req.params.commitmentId, payload: req.body, actor: actor(req) }))),
 );
 
@@ -184,6 +189,7 @@ router.post(
   requirePermission("commitment", "approve", { transition: "commitment.execute" }),
   uploadLimiter,
   upload.single("file"),
+  rejectNullBytes,
   [param("commitmentId").isUUID(), body("documentId").optional({ nullable: true }).isString().isUUID(), body("override").optional().isBoolean().toBoolean(), body("overrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }), validate],
   asyncHandler(async (req, res) =>
     sendSuccess(
@@ -473,7 +479,7 @@ router.patch(
   [
     param("commitmentId").isUUID(),
     param("key").isString().trim().isLength({ min: 1, max: 60 }),
-    body("score").optional({ nullable: true }).isInt({ min: 0, max: 5 }).toInt(),
+    body("score").optional({ nullable: true }).custom(scalarFigure).bail().isInt({ min: 0, max: 5 }).toInt(),
     body("overrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
     body("note").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
     validate,

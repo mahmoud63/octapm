@@ -10,6 +10,7 @@ const {
   buildLineRiskRow,
   buildMaterialRiskRow,
   buildPackageRiskRow,
+  isOnSettledOrder,
 } = require("./procurement.service");
 const { getProjectAccessWhere } = require("./project-authorization.service");
 const { withheldCertificateTotals } = require("../utils/boq-figures");
@@ -768,7 +769,10 @@ async function getWorkspaceDashboard({
     prisma.activityMaterial.findMany({
       where: { projectId: inModule("procurement") },
       include: {
+        // Each line with its order's status: a line on a cancelled or closed
+        // order is no promise the material can still wait on (CERT-2).
         poLines: {
+          include: { order: { select: { status: true } } },
           orderBy: { createdAt: "desc" },
           take: 5,
         },
@@ -986,7 +990,9 @@ async function getWorkspaceDashboard({
     projectId: row.projectId,
     source: "procurement_package",
   }));
-  const procurementLineRows = procurementLines.map((row) => ({
+  // A line on a cancelled or closed order will deliver nothing more: it is
+  // no one's risk, as the lead-time alert has it (CERT-2).
+  const procurementLineRows = procurementLines.filter((row) => !isOnSettledOrder(row)).map((row) => ({
     ...buildLineRiskRow(row),
     projectId: row.projectId,
     source: "po_line",

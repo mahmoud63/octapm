@@ -1,6 +1,8 @@
 const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { body, param } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
+const { QUANTITY_MAX } = require("../utils/stock-figures");
 const { validate } = require("../middleware/validate");
 const { requirePermission, hasPermission } = require("../middleware/rbac");
 const { sendSuccess } = require("../utils/api-response");
@@ -94,19 +96,19 @@ router.patch(
     body("companyId").optional({ nullable: true }).isString().isUUID(),
     moneyBody("workDone"),
     moneyBody("materialsOnSite"),
-    body("retentionRate").optional().isFloat({ min: 0, max: 100 }),
+    body("retentionRate").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }),
     moneyBody("backCharges"),
     body("activityLinks").optional().isArray(),
     body("activityLinks.*.activityId").optional().isString().isUUID(),
     body("activityLinks.*.relationType").optional().isString().trim(),
-    body("activityLinks.*.quantity").optional().isFloat({ min: 0 }),
+    body("activityLinks.*.quantity").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
     moneyBody("activityLinks.*.amount"),
     body("allocationLinks").optional().isArray(),
     body("allocationLinks.*.allocationId")
       .optional({ nullable: true })
       .isString().isUUID(),
     body("allocationLinks.*.boqItemId").optional({ nullable: true }).isString().isUUID(),
-    body("allocationLinks.*.quantity").optional().isFloat({ min: 0 }),
+    body("allocationLinks.*.quantity").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
     moneyBody("allocationLinks.*.workDoneAmount"),
     moneyBody("allocationLinks.*.materialsOnSiteAmount"),
     body("correspondenceIds").optional().isArray(),

@@ -1,6 +1,6 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
-const { addMoney, toMoneyNumber } = require("../utils/money");
+const { MONEY_MAX, addMoney, toMoneyDecimal, toMoneyNumber } = require("../utils/money");
 const { localDateOf, resolveReportingTimeZone } = require("../utils/reporting-cutoff");
 const { defaultForecastOnCreate } = require("./cost-record-default.service");
 
@@ -133,6 +133,43 @@ const resolveBudgetLine = async ({ tx, projectId, budgetLineId, costCodeId, cost
     where: { projectId, costCodeId, costType, status: "active" },
     select: { id: true, costCodeId: true, costType: true },
   });
+};
+
+/**
+ * What a posting leaves on the projections fits them (CERT-2).
+ *
+ * The entry's amount, the budget line's actual and the activity's actual are
+ * each a Decimal(18,2): less than 10^16. Postings that each fit can together
+ * pass it — two workers on one day at the highest rate with overtime, a
+ * second issue of costly stock to the same activity — and the projection's
+ * increment then failed at the write with a 500 (numeric field overflow),
+ * rolling back everything before it. Every path that posts comes through
+ * here: timesheet approval, stock issue and return (a goods receipt issued
+ * straight to its activity included), direct costs, subcontractor pay
+ * applications, equipment. Checked before the entry is written: the
+ * activity's actual as held under the advisory lock its projection takes.
+ */
+const fitsMoney = (value) => toMoneyDecimal(value).abs().lessThanOrEqualTo(MONEY_MAX);
+
+const assertPostingFits = async ({ tx = prisma, projectId, activityId = null, budgetLineId = null, amount }) => {
+  if (!fitsMoney(amount)) {
+    throw new HttpError(400, "COST_LEDGER_AMOUNT_TOO_LARGE", "This cost is larger than the cost ledger can record");
+  }
+  if (budgetLineId && tx.budgetLine?.findFirst) {
+    const line = await tx.budgetLine.findFirst({ where: { id: budgetLineId }, select: { actual: true } });
+    if (line && !fitsMoney(toMoneyDecimal(line.actual).plus(toMoneyDecimal(amount)))) {
+      throw new HttpError(400, "COST_LEDGER_TOTAL_TOO_LARGE", "This cost would take the budget line's actual cost past what it can record", { projection: "budget_line" });
+    }
+  }
+  if (activityId) {
+    if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${activityId}`}))`;
+    const record = tx.costRecord?.findFirst
+      ? await tx.costRecord.findFirst({ where: { projectId, activityId }, select: { actual: true } })
+      : null;
+    if (!fitsMoney(toMoneyDecimal(record?.actual || 0).plus(toMoneyDecimal(amount)))) {
+      throw new HttpError(400, "COST_LEDGER_TOTAL_TOO_LARGE", "This cost would take the activity's actual cost past what it can record", { projection: "activity" });
+    }
+  }
 };
 
 /**
@@ -292,6 +329,8 @@ const post = async ({
     existing = await tx.costLedgerEntry.findFirst({ where: { orgId, sourceKey }, select: { id: true } });
   }
 
+  await assertPostingFits({ tx, projectId, activityId, budgetLineId: line?.id || null, amount: value });
+
   let entry;
   try {
     entry = await tx.costLedgerEntry.create({
@@ -377,6 +416,7 @@ const reverse = async ({
       reversalOfId: original.id,
       note,
     };
+    await assertPostingFits({ tx, projectId, activityId: mirror.activityId, budgetLineId: mirror.budgetLineId, amount: mirror.amount });
     try {
       const entry = await tx.costLedgerEntry.create({ data: mirror });
       await applyToProjections({ tx, entry });
@@ -415,6 +455,7 @@ module.exports = {
   SOURCE_TYPES,
   TRANSACTIONAL_SOURCES,
   applyToProjections,
+  assertPostingFits,
   certifiedAgainstCommitment,
   post,
   postedTotalFor,

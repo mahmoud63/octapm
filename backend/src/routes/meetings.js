@@ -7,6 +7,8 @@ const { validate } = require("../middleware/validate");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const meetingService = require("../services/meeting.service");
+const { dateInput } = require("../utils/date-input");
+const { scalarFigure } = require("../utils/figure-input");
 
 const router = express.Router({ mergeParams: true });
 
@@ -16,8 +18,15 @@ router.use(subscriptionGate);
 const optionalUuid = (field) =>
   body(field).optional({ values: "falsy" }).isString().isUUID();
 
+// A date is one text a Date reads (utils/date-input; CERT-2
+// evidence-lines-5): isISO8601 alone checked a list element by element and a
+// number by its digits, so ["2026-10-01"] and 20261001 were stored (201), and
+// it passes the compact, week and ordinal forms ('20261001', '2026-W40',
+// '2026-275') new Date() cannot read. Each is now a 400 VALIDATION_ERROR
+// naming the field.
+
 const optionalDate = (field) =>
-  body(field).optional({ nullable: true }).isISO8601();
+  body(field).optional({ nullable: true }).isString().custom(dateInput);
 
 const meetingPayloadValidators = ({ requireTitle = false } = {}) => [
   requireTitle
@@ -64,7 +73,9 @@ const meetingPayloadValidators = ({ requireTitle = false } = {}) => [
     .isString()
     .trim()
     .isLength({ max: 255 }),
-  body("attendees.*.email").optional({ values: "falsy" }).isEmail(),
+  // One address (CERT-2 evidence-6): isEmail checks a list element by element, and
+  // ["a@x", "b@x"] was stored as "a@x,b@x".
+  body("attendees.*.email").optional({ values: "falsy" }).isString().isEmail(),
   body("attendees.*.companyName")
     .optional({ nullable: true })
     .isString()
@@ -75,11 +86,12 @@ const meetingPayloadValidators = ({ requireTitle = false } = {}) => [
     .optional()
     .isIn(meetingService.ATTENDANCE_STATUSES),
   body("attendees.*.distributionRequired").optional().isBoolean(),
-  body("attendees.*.attendedAt").optional({ nullable: true }).isISO8601(),
+  optionalDate("attendees.*.attendedAt"),
   body("agendaItems").optional().isArray({ max: 200 }),
   body("agendaItems.*.activityId").optional({ values: "falsy" }).isString().isUUID(),
   body("agendaItems.*.presenterId").optional({ values: "falsy" }).isString().isUUID(),
-  body("agendaItems.*.sortOrder").optional().isInt({ min: 0, max: 10000 }),
+  // One value (utils/figure-input; CERT-2 evidence-6): [1] and [] passed isInt and were stored (201).
+  body("agendaItems.*.sortOrder").optional().custom(scalarFigure).bail().isInt({ min: 0, max: 10000 }),
   body("agendaItems.*.title")
     .optional()
     .isString()
@@ -109,7 +121,7 @@ const meetingPayloadValidators = ({ requireTitle = false } = {}) => [
     .isString()
     .trim()
     .isLength({ max: 4000 }),
-  body("decisions.*.decidedAt").optional({ nullable: true }).isISO8601(),
+  optionalDate("decisions.*.decidedAt"),
   body("actionItems").optional().isArray({ max: 200 }),
   body("actionItems.*.activityId").optional({ values: "falsy" }).isString().isUUID(),
   body("actionItems.*.taskId").optional({ values: "falsy" }).isString().isUUID(),
@@ -134,8 +146,8 @@ const meetingPayloadValidators = ({ requireTitle = false } = {}) => [
     .isString()
     .trim()
     .isLength({ max: 255 }),
-  body("actionItems.*.ownerEmail").optional({ values: "falsy" }).isEmail(),
-  body("actionItems.*.dueDate").optional().isISO8601(),
+  body("actionItems.*.ownerEmail").optional({ values: "falsy" }).isString().isEmail(),
+  body("actionItems.*.dueDate").optional().isString().custom(dateInput),
   body("actionItems.*.priority")
     .optional()
     .isIn(meetingService.ACTION_PRIORITIES),
@@ -251,7 +263,7 @@ router.post(
       .isString()
       .trim()
       .isLength({ max: 255 }),
-    body("recipients.*.email").optional({ values: "falsy" }).isEmail(),
+    body("recipients.*.email").optional({ values: "falsy" }).isString().isEmail(),
     body("recipients.*.companyName")
       .optional({ nullable: true })
       .isString()

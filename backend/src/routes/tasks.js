@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -105,7 +106,7 @@ const taskPayloadValidators = ({ requireTitle = false } = {}) => [
   body("label").optional().isIn(taskService.TASK_LABELS),
   body("priority").optional().isIn(taskService.TASK_PRIORITIES),
   body("status").optional().isIn(taskService.TASK_STATUSES),
-  body("dueDate").optional({ nullable: true }).isISO8601(),
+  body("dueDate").optional({ nullable: true }).custom(dateInput),
   optionalNullableUuid("projectId"),
   optionalNullableUuid("activityId"),
   optionalNullableUuid("assigneeId"),

@@ -1,5 +1,7 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
+const { QUANTITY_MAX } = require("../utils/stock-figures");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -28,7 +30,7 @@ const dateParam = param("date").matches(DATE_RE).withMessage("date must be YYYY-
 const sectionParam = param("section").isIn(service.SECTION_KEYS);
 const entryParam = param("entryId").isUUID();
 const optionalText = (field, max = 2000) => body(field).optional({ nullable: true }).isString().trim().isLength({ max });
-const optionalNumber = (field, options = {}) => body(field).optional({ nullable: true }).isFloat(options);
+const optionalNumber = (field, options = {}) => body(field).optional({ nullable: true }).custom(scalarFigure).bail().isFloat(options);
 
 const entryValidators = [
   optionalText("clientRequestId", 100),
@@ -36,16 +38,16 @@ const entryValidators = [
   body("companyId").optional({ nullable: true }).isString().isUUID(),
   optionalText("companyName", 200),
   optionalText("trade", 120),
-  body("workers").optional({ nullable: true }).isInt({ min: 0, max: 100000 }),
+  body("workers").optional({ nullable: true }).custom(scalarFigure).bail().isInt({ min: 0, max: 100000 }),
   optionalNumber("hours", { min: 0, max: 24 }),
   body("equipmentId").optional({ nullable: true }).isString().isUUID(),
   optionalText("name", 200),
-  body("count").optional({ nullable: true }).isInt({ min: 1, max: 10000 }),
+  body("count").optional({ nullable: true }).custom(scalarFigure).bail().isInt({ min: 1, max: 10000 }),
   optionalNumber("hoursOperated", { min: 0, max: 24 }),
   optionalNumber("hoursIdle", { min: 0, max: 24 }),
   optionalText("supplierName", 200),
   optionalText("description", 2000),
-  optionalNumber("quantity", { min: 0 }),
+  optionalNumber("quantity", { min: 0, max: QUANTITY_MAX }),
   optionalText("unit", 40),
   optionalText("poRef", 80),
   optionalText("receivedBy", 120),
@@ -185,7 +187,7 @@ router.post(
     body("userIds").optional().isArray({ max: 100 }),
     body("userIds.*").optional().isString().isUUID(),
     body("emails").optional().isArray({ max: 50 }),
-    body("emails.*").optional().isEmail(),
+    body("emails.*").optional().isString().isEmail(),
     optionalText("note", 2000),
     validate,
   ],

@@ -1,5 +1,7 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, MONEY_FIGURE_MAX } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -18,9 +20,9 @@ const viewer = (req) => ({ id: req.user.id, role: getEffectiveRole(req), project
 const lineValidators = [
   body("lines").optional().isArray({ max: 500 }),
   body("lines.*.sovLineId").isString().isUUID(),
-  body("lines.*.thisPeriodAmount").optional({ nullable: true }).isFloat({ min: 0 }),
-  body("lines.*.thisPeriodPct").optional({ nullable: true }).isFloat({ min: 0, max: 100 }),
-  body("lines.*.materialsOnSite").optional({ nullable: true }).isFloat({ min: 0 }),
+  body("lines.*.thisPeriodAmount").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }),
+  body("lines.*.thisPeriodPct").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }),
+  body("lines.*.materialsOnSite").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }),
   body("lines.*.notes").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
 ];
 
@@ -37,9 +39,9 @@ router.post(
   [
     body("commitmentId").isString().isUUID(),
     body("periodLabel").isString().trim().notEmpty().isLength({ max: 60 }),
-    body("periodStart").optional({ nullable: true }).isISO8601(),
-    body("periodEnd").optional({ nullable: true }).isISO8601(),
-    body("retentionRate").optional({ nullable: true }).isFloat({ min: 0, max: 100 }),
+    body("periodStart").optional({ nullable: true }).custom(dateInput),
+    body("periodEnd").optional({ nullable: true }).custom(dateInput),
+    body("retentionRate").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }),
     body("waiverRequired").optional().isBoolean().toBoolean(),
     body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
     validate,
@@ -60,14 +62,14 @@ router.patch(
   [
     param("payAppId").isUUID(),
     body("periodLabel").optional().isString().trim().notEmpty().isLength({ max: 60 }),
-    body("periodStart").optional({ nullable: true }).isISO8601(),
-    body("periodEnd").optional({ nullable: true }).isISO8601(),
-    body("retentionRate").optional({ nullable: true }).isFloat({ min: 0, max: 100 }),
-    body("backCharges").optional({ nullable: true }).isFloat({ min: 0 }),
+    body("periodStart").optional({ nullable: true }).custom(dateInput),
+    body("periodEnd").optional({ nullable: true }).custom(dateInput),
+    body("retentionRate").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }),
+    body("backCharges").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }),
     body("backChargesNote").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
-    body("otherDeductions").optional({ nullable: true }).isFloat({ min: 0 }),
+    body("otherDeductions").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }),
     body("otherDeductionsNote").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
-    body("taxRate").optional({ nullable: true }).isFloat({ min: 0, max: 100 }),
+    body("taxRate").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }),
     body("waiverRequired").optional().isBoolean().toBoolean(),
     body("waiverDocumentId").optional({ nullable: true }).isString().isUUID(),
     body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
@@ -131,8 +133,8 @@ router.post(
   requirePermission("sub_pay_app", "certify", { transition: "sub_pay_app.pay" }),
   [
     param("payAppId").isUUID(),
-    body("amount").isFloat({ gt: 0 }),
-    body("paidAt").optional({ nullable: true }).isISO8601(),
+    body("amount").custom(scalarFigure).bail().isFloat({ gt: 0, max: MONEY_FIGURE_MAX }),
+    body("paidAt").optional({ nullable: true }).custom(dateInput),
     body("method").optional({ nullable: true }).isString().trim().isLength({ max: 60 }),
     body("reference").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
     body("note").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),

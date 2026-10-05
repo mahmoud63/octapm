@@ -13,7 +13,8 @@ const mockPrisma = {
   procurementSupplier: { findFirst: jest.fn() },
   directCost: { aggregate: jest.fn() },
   location: { findFirst: jest.fn() },
-  $transaction: (fn) => fn(mockPrisma),
+  project: { findFirst: jest.fn(async () => ({ id: "project-1", startDate: null })) },
+  $transaction: jest.fn((fn) => fn(mockPrisma)),
   $queryRaw: jest.fn(async () => []), // row locks (Phase 21D): nothing to lock in a fake
 };
 
@@ -27,6 +28,7 @@ jest.mock("../approval-workflow.service", () => ({
   RECORD_TYPES: { PROCUREMENT_ORDER: "procurement_order" },
   recordTransition: jest.fn(async () => null),
 }));
+jest.mock("../procurement.service", () => ({ syncLeadTimeAlert: jest.fn(async () => null), syncLeadTimeAlerts: jest.fn(async () => []) }));
 
 const service = require("../purchase-order.service");
 
@@ -215,9 +217,10 @@ describe("the money on an order", () => {
     ]);
 
     const result = await service.recomputeTotals(mockPrisma, "order-1");
-    expect(result.subtotal).toBe(110000);
-    expect(result.taxAmount).toBe(5500);
-    expect(result.value).toBe(115500);
+    // Written as exact decimals (round 6).
+    expect(Number(result.subtotal)).toBe(110000);
+    expect(Number(result.taxAmount)).toBe(5500);
+    expect(Number(result.value)).toBe(115500);
   });
 
   it("reads what has been billed, ignoring voided invoices", async () => {
@@ -225,7 +228,7 @@ describe("the money on an order", () => {
     mockPrisma.directCost.aggregate.mockResolvedValue({ _sum: { total: 40000 } });
 
     const result = await service.recomputeInvoiced(mockPrisma, "order-1");
-    expect(result.invoicedAmount).toBe(40000);
+    expect(Number(result.invoicedAmount)).toBe(40000);
     expect(result.invoiceStatus).toBe("partially_invoiced");
     expect(mockPrisma.directCost.aggregate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -247,7 +250,7 @@ describe("the money on an order", () => {
     mockPrisma.directCost.aggregate.mockResolvedValue({ _sum: { total: null } });
 
     const result = await service.recomputeInvoiced(mockPrisma, "order-1");
-    expect(result.invoicedAmount).toBe(0);
+    expect(Number(result.invoicedAmount)).toBe(0);
     expect(result.invoiceStatus).toBe("not_invoiced");
   });
 });
@@ -274,5 +277,108 @@ describe("Phase 21D — integrity (release challenge, second pass)", () => {
     mockPrisma.$queryRaw.mockImplementation(async (strings) => (Array.isArray(strings) && strings.join("?").includes('FROM "ProcurementOrder"') ? [{ status: "issued" }] : []));
     await expect(service.rejectOrder({ orgId: "org-1", projectId: "project-1", orderId: "order-1", actor: { id: "pm" }, reason: "wrong supplier" })).rejects.toMatchObject({ code: "PO_STATE_CHANGED" });
     expect(mockPrisma.procurementOrder.update).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * CERT-2 (alerts-money-5): an order is worth no more than its value column
+ * holds, a Decimal(18,2), after an edit as at creation. A tax rate of 100 on
+ * an order worth 9e15 failed at the write with a 500 (numeric field
+ * overflow); and invoices that each fit could together pass what the order's
+ * invoiced amount holds.
+ */
+describe("CERT-2 — what an order is worth fits its columns when it is edited", () => {
+  const big = () => order({ lines: [{ id: "line-1", lineNumber: 1, orderedQty: 90_000_000_000, receivedQty: 0, unitCost: 100000, description: "Bulk" }], subtotal: 9e15, value: 9e15 });
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.$queryRaw.mockImplementation(async () => []);
+    mockPrisma.procurementOrder.update.mockImplementation(async ({ data }) => data);
+  });
+
+  it("a tax rate that takes the order past 10^16 is a 400 PO_VALUE_TOO_LARGE before anything is written", async () => {
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue(big());
+    await expect(service.updateOrder({ orgId: "org-1", projectId: "project-1", orderId: "order-1", actor: { id: "proc" }, payload: { taxRate: 100 } })).rejects.toMatchObject({ status: 400, code: "PO_VALUE_TOO_LARGE" });
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.procurementOrder.update).not.toHaveBeenCalled();
+  });
+
+  it("a tax rate the order's value can hold is accepted and stored", async () => {
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue(big());
+    mockPrisma.procurementOrder.findUnique.mockResolvedValue({ id: "order-1", taxRate: 10 });
+    mockPrisma.procurementPoLine.findMany.mockResolvedValue([{ orderedQty: 90_000_000_000, unitCost: 100000 }]);
+    await service.updateOrder({ orgId: "org-1", projectId: "project-1", orderId: "order-1", actor: { id: "proc" }, payload: { taxRate: 10 } });
+    expect(mockPrisma.procurementOrder.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ taxRate: 10 }) }));
+    const totals = mockPrisma.procurementOrder.update.mock.calls.map(([args]) => args.data).find((data) => "subtotal" in data);
+    expect([totals.subtotal, totals.taxAmount, totals.value].map(String)).toEqual(["9000000000000000", "900000000000000", "9900000000000000"]);
+  });
+
+  it("recomputing the totals refuses, before its write, figures the value column cannot hold", async () => {
+    mockPrisma.procurementOrder.findUnique.mockResolvedValue({ id: "order-1", taxRate: 100 });
+    mockPrisma.procurementPoLine.findMany.mockResolvedValue([{ orderedQty: 90_000_000_000, unitCost: 100000 }]);
+    await expect(service.recomputeTotals(mockPrisma, "order-1")).rejects.toMatchObject({ status: 400, code: "PO_VALUE_TOO_LARGE" });
+    expect(mockPrisma.procurementOrder.update).not.toHaveBeenCalled();
+  });
+
+  it("round 6: the totals are worked, checked and written as exact decimals — 5e15 + 4,999,999,999,999,999 fits, and is what is stored", async () => {
+    mockPrisma.procurementOrder.findUnique.mockResolvedValue({ id: "order-1", taxRate: 0 });
+    mockPrisma.procurementPoLine.findMany.mockResolvedValue([{ orderedQty: 1, unitCost: "5000000000000000" }, { orderedQty: "1", unitCost: "4999999999999999" }]);
+    const result = await service.recomputeTotals(mockPrisma, "order-1");
+    expect([result.subtotal, result.taxAmount, result.value].map((value) => value.toFixed(2))).toEqual(["9999999999999999.00", "0.00", "9999999999999999.00"]);
+    // In floating point the same lines came to 10^16 and were refused.
+    expect(5e15 + 4999999999999999).toBe(1e16);
+    // A half cent of tax rounds up, as it is stored.
+    expect(service.totalsOf([{ orderedQty: "0.5", unitCost: "0.01" }], 0).subtotal.toFixed(2)).toBe("0.01");
+  });
+
+  it("round 6: what is invoiced is checked and written as the same exact decimal", async () => {
+    mockPrisma.procurementOrder.findUnique.mockResolvedValue({ id: "order-1", value: "9999999999999999.99" });
+    mockPrisma.directCost.aggregate.mockResolvedValue({ _sum: { total: "9999999999999999.99" } });
+    const result = await service.recomputeInvoiced(mockPrisma, "order-1");
+    expect(result.invoicedAmount.toFixed(2)).toBe("9999999999999999.99");
+    expect(result.invoiceStatus).toBe("fully_invoiced");
+  });
+
+  it("invoices that together pass what the order's invoiced amount holds are a 400 PO_INVOICED_TOO_LARGE, not written", async () => {
+    mockPrisma.procurementOrder.findUnique.mockResolvedValue({ id: "order-1", value: 9e15 });
+    mockPrisma.directCost.aggregate.mockResolvedValue({ _sum: { total: "18000000000000000.00" } });
+    await expect(service.recomputeInvoiced(mockPrisma, "order-1")).rejects.toMatchObject({ status: 400, code: "PO_INVOICED_TOO_LARGE" });
+    expect(mockPrisma.procurementOrder.update).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * CERT-2 (alerts-money-5): a cancelled or closed order delivers nothing more,
+ * so the lead-time alerts its lines weigh on are worked again without them.
+ */
+describe("CERT-2 — cancelling or closing an order works its lines' lead-time alerts again", () => {
+  const procurement = require("../procurement.service");
+  const lines = [
+    { id: "line-1", lineNumber: 1, orderedQty: 10, receivedQty: 0, unitCost: 5, packageId: "pkg-1" },
+    { id: "line-2", lineNumber: 2, orderedQty: 10, receivedQty: 10, unitCost: 5, packageId: null },
+  ];
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.$queryRaw.mockImplementation(async () => [{ status: "issued" }]);
+    mockPrisma.procurementOrder.update.mockResolvedValue({});
+  });
+  afterEach(() => mockPrisma.$queryRaw.mockImplementation(async () => []));
+
+  it("cancel: the scopes of all the order's lines are worked once, inside the transaction, after the order is cancelled (round 6: not once per line)", async () => {
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue(order({ status: "issued", lines }));
+    await service.cancelOrder({ orgId: "org-1", projectId: "project-1", orderId: "order-1", actor: { id: "pm" }, reason: "Supplier failed" });
+    expect(procurement.syncLeadTimeAlerts).toHaveBeenCalledTimes(1);
+    expect(procurement.syncLeadTimeAlert).not.toHaveBeenCalled();
+    expect(procurement.syncLeadTimeAlerts).toHaveBeenCalledWith(expect.objectContaining({ tx: mockPrisma, projectId: "project-1", lines: [expect.objectContaining({ id: "line-1", packageId: "pkg-1" }), expect.objectContaining({ id: "line-2" })] }));
+    expect(mockPrisma.procurementOrder.update.mock.invocationCallOrder[0]).toBeLessThan(procurement.syncLeadTimeAlerts.mock.invocationCallOrder[0]);
+  });
+
+  it("close: likewise; issue and acknowledge leave the alerts alone", async () => {
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue(order({ status: "issued", lines: lines.map((line) => ({ ...line, receivedQty: 10 })) }));
+    await service.closeOrder({ orgId: "org-1", projectId: "project-1", orderId: "order-1", actor: { id: "pm" } });
+    expect(procurement.syncLeadTimeAlerts).toHaveBeenCalledTimes(1);
+    procurement.syncLeadTimeAlerts.mockClear();
+    await service.acknowledgeOrder({ orgId: "org-1", projectId: "project-1", orderId: "order-1", actor: { id: "pm" } });
+    expect(procurement.syncLeadTimeAlerts).not.toHaveBeenCalled();
+    expect(procurement.syncLeadTimeAlert).not.toHaveBeenCalled();
   });
 });

@@ -13,6 +13,15 @@ const mockPrisma = {
 };
 
 jest.mock('../../config/db', () => ({ prisma: mockPrisma }));
+// CERT-2 (alerts-6): the ledger posts what it is given; the audit is not under test.
+jest.mock('../cost-ledger.service', () => ({
+  post: jest.fn(async ({ amount }) => ({ posted: true, entry: { amount } })),
+}));
+jest.mock('../audit.service', () => ({
+  ENTITY_TYPES: { COST_RECORD: 'cost_record', ACTIVITY_EQUIPMENT_USAGE: 'activity_equipment_usage' },
+  ACTIONS: { CREATED: 'created', UPDATED: 'updated' },
+  recordEvent: jest.fn(async () => null),
+}));
 
 const equipmentService = require('../equipment.service');
 
@@ -135,5 +144,44 @@ describe('equipment service utilization', () => {
       hours: 4,
       costAmount: 400,
     });
+  });
+});
+
+/**
+ * CERT-2 (alerts-6): an approved daily report's equipment moves the activity's
+ * equipment category by exactly what the ledger posted, as an exact decimal,
+ * and only while it fits its Decimal(18,2) column. It was added up in floating
+ * point and written unchecked, with every other category written back through
+ * a float: an equipment category at 9.9e15 and 2e14 of equipment failed the
+ * approval with a 500.
+ */
+describe("an activity's equipment cost fits its column (CERT-2, round 6)", () => {
+  const tx = {
+    activityEquipmentUsage: {
+      findMany: jest.fn(async () => []),
+      create: jest.fn(async ({ data }) => ({ id: `usage-${data.sourceLineIndex}`, ...data })),
+    },
+    equipment: { findMany: jest.fn(async () => [{ id: 'eq-1', name: 'Crane', rateType: 'hourly', rate: 100000000000000 }]) },
+    costRecord: { findFirst: jest.fn(), update: jest.fn(async ({ data }) => ({ id: 'cr-1', ...data })), create: jest.fn() },
+  };
+  const report = { id: 'report-1', activityId: 'activity-1', date: new Date('2026-09-01T00:00:00.000Z'), equipmentJson: [{ equipmentId: 'eq-1', hours: 2 }] };
+  const post = () => equipmentService.postDailyReportEquipmentUsage({ tx, orgId: 'org-1', projectId: 'project-1', report, actorId: 'pm-1' });
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('a posting that would take the equipment category past 10^16 is a 400 COST_LEDGER_TOTAL_TOO_LARGE, and the record is not written', async () => {
+    tx.costRecord.findFirst.mockResolvedValue({ id: 'cr-1', equipment: '9900000000000000.00', actualThroughDate: null });
+    await expect(post()).rejects.toMatchObject({ status: 400, code: 'COST_LEDGER_TOTAL_TOO_LARGE', details: { projection: 'activity_equipment' } });
+    expect(tx.costRecord.update).not.toHaveBeenCalled();
+    expect(tx.costRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('one that fits moves the category by exactly what was posted, as an exact decimal, and writes no other category', async () => {
+    tx.costRecord.findFirst.mockResolvedValue({ id: 'cr-1', equipment: '9799999999999999.99', labour: '9999999999999999.99', actualThroughDate: null });
+    await post();
+    const { data } = tx.costRecord.update.mock.calls[0][0];
+    expect(data.equipment.toFixed(2)).toBe('9999999999999999.99');
+    expect(Object.keys(data).sort()).toEqual(['actualThroughDate', 'equipment']);
   });
 });

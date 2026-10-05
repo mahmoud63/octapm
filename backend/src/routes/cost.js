@@ -1,5 +1,6 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
+const { dateInput } = require('../utils/date-input');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
@@ -101,7 +102,7 @@ router.post(
     transition: 'burn_rate.create',
   }),
   [
-    body('date').optional().isString().isISO8601(),
+    body('date').optional().isString().custom(dateInput),
     moneyBody('amount', { required: true }),
     body('category').optional().isString().trim(),
     body('note').optional().isString().trim(),
@@ -136,7 +137,7 @@ router.post(
     moneyBody('budget'),
     moneyBody('committed'),
     moneyBody('actual'),
-    body('actualThroughDate').optional({ nullable: true }).isString().isISO8601(),
+    body('actualThroughDate').optional({ nullable: true }).isString().custom(dateInput),
     moneyBody('forecast'),
     forecastSourceIsTheServers,
     validate,
@@ -173,7 +174,7 @@ router.patch(
     moneyBody('budget'),
     moneyBody('committed'),
     moneyBody('actual'),
-    body('actualThroughDate').optional({ nullable: true }).isString().isISO8601(),
+    body('actualThroughDate').optional({ nullable: true }).isString().custom(dateInput),
     moneyBody('forecast'),
     forecastSourceIsTheServers,
     validate,

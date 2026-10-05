@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { validate } = require("../middleware/validate");
@@ -29,12 +30,12 @@ const instanceValidators = ({ create = false } = {}) => [
   body("assigneeCompanyId").optional({ nullable: true }).isString().isUUID(),
   body("inspectorUserId").optional({ nullable: true }).isString().isUUID(),
   body("approverUserId").optional({ nullable: true }).isString().isUUID(),
-  body("scheduledFor").optional({ nullable: true }).isISO8601(),
-  body("dueDate").optional({ nullable: true }).isISO8601(),
+  body("scheduledFor").optional({ nullable: true }).custom(dateInput),
+  body("dueDate").optional({ nullable: true }).custom(dateInput),
   body("recurrence").optional({ nullable: true }).isObject(),
   body("startNow").optional().isBoolean().toBoolean(),
   body("clientRequestId").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
-  body("clientCreatedAt").optional({ nullable: true }).isISO8601(),
+  body("clientCreatedAt").optional({ nullable: true }).custom(dateInput),
   body("deviceId").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
   validate,
 ];
@@ -53,8 +54,8 @@ const listValidators = [
     .matches(/^(me|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i),
   query("outcome").isString().optional().isIn(formService.OUTCOMES),
   query("overdue").isString().optional().isBoolean().toBoolean(),
-  query("from").isString().optional({ values: "falsy" }).isISO8601(),
-  query("to").isString().optional({ values: "falsy" }).isISO8601(),
+  query("from").isString().optional({ values: "falsy" }).custom(dateInput),
+  query("to").isString().optional({ values: "falsy" }).custom(dateInput),
   query("search").optional().isString().trim().isLength({ max: 120 }),
   query("limit").isString().optional().isInt({ min: 1, max: 1000 }).toInt(),
   validate,
@@ -233,7 +234,7 @@ router.post(
     body("assigneeUserId").optional({ nullable: true }).isString().isUUID(),
     body("managerUserId").optional({ nullable: true }).isString().isUUID(),
     body("finalApproverUserId").optional({ nullable: true }).isString().isUUID(),
-    body("dueDate").optional({ nullable: true }).isISO8601(),
+    body("dueDate").optional({ nullable: true }).custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) =>

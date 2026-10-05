@@ -554,7 +554,8 @@ describe('daily report service', () => {
       expect.objectContaining({
         where: { id: 'cost-1' },
         data: expect.objectContaining({
-          equipment: 500,
+          // An exact decimal (CERT-2, round 6): 100 already on the record + the 400 posted.
+          equipment: { asymmetricMatch: (value) => value !== null && value !== undefined && Number(String(value)) === 500, toAsymmetricMatcher: () => "the decimal 500" },
           // actual is no longer written here: the ledger posts it (Phase 21D, CX21-418)
           actualThroughDate: reportDate,
         }),
@@ -608,7 +609,7 @@ describe('daily report service', () => {
     expect(mockPrisma.costRecord.create.mock.calls[0][0].data).toMatchObject({
       projectId: 'project-1',
       activityId: 'activity-1',
-      equipment: 400,
+      equipment: { asymmetricMatch: (value) => value !== null && value !== undefined && Number(String(value)) === 400, toAsymmetricMatcher: () => "the decimal 400" },
       budget: 0,
       actual: 0,
       forecast: 2500,

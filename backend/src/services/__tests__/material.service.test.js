@@ -8,7 +8,8 @@ const mockTx = {
   procurementSupplier: { findFirst: jest.fn(), create: jest.fn() },
   procurementPackage: { findFirst: jest.fn() },
   materialMaster: { findFirst: jest.fn() },
-  activityMaterial: { create: jest.fn(), update: jest.fn() },
+  activityMaterial: { create: jest.fn(), update: jest.fn(), delete: jest.fn(async () => ({})) },
+  procurementLeadTimeAlert: { findMany: jest.fn(async () => []), update: jest.fn(async ({ data }) => data) },
 };
 const mockPrisma = {
   project: { findFirst: jest.fn() },
@@ -60,5 +61,39 @@ describe("activity material: the master entry is the project's own", () => {
     const row = await add(undefined);
     expect(mockTx.materialMaster.findFirst).not.toHaveBeenCalled();
     expect(row.id).toBe("m1");
+  });
+});
+
+/**
+ * CERT-2 (alerts-money-5): deleting a planned material must not take its
+ * package's lead-time alert with it. The alert's link to the material
+ * cascades on delete, so a package alert whose worst risk was the material was
+ * deleted outright while the package's other lines were still late.
+ */
+describe("deleting a material: its package's lead-time alert is kept and worked again", () => {
+  const procurement = require("../procurement.service");
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "p1", orgId: "org-1" });
+    mockPrisma.activity.findFirst.mockResolvedValue({ id: "a1", projectId: "p1" });
+    mockPrisma.activityMaterial.findFirst.mockResolvedValue({ id: "m1", activityId: "a1", procurementPackageId: "pkg-1", poLines: [], usages: [] });
+    mockTx.procurementLeadTimeAlert.findMany.mockResolvedValue([]);
+  });
+
+  it("releases the package alert's link to the material before the delete, then syncs that package", async () => {
+    mockTx.procurementLeadTimeAlert.findMany.mockResolvedValue([{ id: "alert-pkg", packageId: "pkg-1" }]);
+    await expect(materialService.deleteMaterial({ orgId: "org-1", projectId: "p1", activityId: "a1", materialId: "m1" })).resolves.toEqual({ deleted: true });
+    expect(mockTx.procurementLeadTimeAlert.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { projectId: "p1", activityMaterialId: "m1", packageId: { not: null } } }));
+    expect(mockTx.procurementLeadTimeAlert.update).toHaveBeenCalledWith({ where: { id: "alert-pkg" }, data: { activityMaterialId: null } });
+    expect(mockTx.procurementLeadTimeAlert.update.mock.invocationCallOrder[0]).toBeLessThan(mockTx.activityMaterial.delete.mock.invocationCallOrder[0]);
+    expect(procurement.syncLeadTimeAlert).toHaveBeenCalledWith(expect.objectContaining({ tx: mockTx, projectId: "p1", packageRow: { id: "pkg-1" } }));
+    expect(mockTx.activityMaterial.delete.mock.invocationCallOrder[0]).toBeLessThan(procurement.syncLeadTimeAlert.mock.invocationCallOrder[0]);
+  });
+
+  it("a material no package alert points at is simply deleted", async () => {
+    await materialService.deleteMaterial({ orgId: "org-1", projectId: "p1", activityId: "a1", materialId: "m1" });
+    expect(mockTx.activityMaterial.delete).toHaveBeenCalledWith({ where: { id: "m1" } });
+    expect(mockTx.procurementLeadTimeAlert.update).not.toHaveBeenCalled();
+    expect(procurement.syncLeadTimeAlert).not.toHaveBeenCalled();
   });
 });

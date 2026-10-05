@@ -1,5 +1,8 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, MONEY_FIGURE_MAX } = require("../utils/figure-input");
+const { QUANTITY_MAX } = require("../utils/stock-figures");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -31,8 +34,8 @@ const packageValidators = ({ requireTitle = false } = {}) => [
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
   body("instructions").optional({ nullable: true }).isString().trim().isLength({ max: 8000 }),
   // A date is one string (CERT-2 shapes): isISO8601() alone checks an array element by element.
-  body("dueAt").optional({ nullable: true }).isString().isISO8601(),
-  body("questionsDueAt").optional({ nullable: true }).isString().isISO8601(),
+  body("dueAt").optional({ nullable: true }).isString().custom(dateInput),
+  body("questionsDueAt").optional({ nullable: true }).isString().custom(dateInput),
   body("currency").optional().isString().trim().isLength({ min: 3, max: 3 }),
   body("commitmentType").optional().isIn(service.COMMITMENT_TYPES),
   body("boqSections").optional().isArray({ max: 100 }),
@@ -48,8 +51,8 @@ const lineValidators = ({ requireDescription = false } = {}) => [
   body("section").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
   body("code").optional({ nullable: true }).isString().trim().isLength({ max: 60 }),
   body("unit").optional({ nullable: true }).isString().trim().isLength({ max: 30 }),
-  body("qty").optional().isFloat({ min: 0 }),
-  body("estimateRate").optional({ nullable: true }).isFloat({ min: 0 }),
+  body("qty").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
+  body("estimateRate").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }),
   body("budgetLineId").optional({ nullable: true }).isString().isUUID(),
   body("costCodeId").optional({ nullable: true }).isString().isUUID(),
   body("activityId").optional({ nullable: true }).isString().isUUID(),
@@ -98,7 +101,7 @@ router.delete("/:packageId/lines/:lineId", write, [packageParam, param("lineId")
 router.post(
   "/:packageId/invitations",
   write,
-  [packageParam, body("invitations").isArray({ min: 1, max: 50 }), body("invitations.*.vendorCompanyId").optional({ nullable: true }).isString().isUUID(), body("invitations.*.companyName").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), body("invitations.*.contactName").optional({ nullable: true }).isString().trim().isLength({ max: 120 }), body("invitations.*.contactEmail").optional({ nullable: true }).isEmail(), body("prequalOverrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
+  [packageParam, body("invitations").isArray({ min: 1, max: 50 }), body("invitations.*.vendorCompanyId").optional({ nullable: true }).isString().isUUID(), body("invitations.*.companyName").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), body("invitations.*.contactName").optional({ nullable: true }).isString().trim().isLength({ max: 120 }), body("invitations.*.contactEmail").optional({ nullable: true }).isString().isEmail(), body("prequalOverrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, { items: await service.inviteBidders({ ...scope(req), packageId: req.params.packageId, invitations: req.body.invitations, prequalOverrideReason: req.body.prequalOverrideReason, actor: actor(req) }) }, 201)),
 );
 
@@ -110,7 +113,7 @@ router.post("/:packageId/publish", publish, [packageParam, validate], asyncHandl
 
 router.post("/:packageId/close", publish, [packageParam, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.closePackage({ ...scope(req), packageId: req.params.packageId, actor: actor(req) }))));
 
-router.post("/:packageId/reopen", publish, [packageParam, body("dueAt").isString().isISO8601(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.reopenPackage({ ...scope(req), packageId: req.params.packageId, dueAt: req.body.dueAt, actor: actor(req) }))));
+router.post("/:packageId/reopen", publish, [packageParam, body("dueAt").isString().custom(dateInput), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.reopenPackage({ ...scope(req), packageId: req.params.packageId, dueAt: req.body.dueAt, actor: actor(req) }))));
 
 router.post(
   "/:packageId/addenda",
@@ -149,7 +152,7 @@ router.post("/:packageId/award/revoke", award, [packageParam, validate], asyncHa
 router.post(
   "/:packageId/award/confirm",
   award,
-  [packageParam, body("bidId").optional({ nullable: true }).isString().isUUID(), body("title").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), body("retentionRate").optional({ nullable: true }).isFloat({ min: 0, max: 100 }), body("startDate").optional({ nullable: true }).isString().isISO8601(), body("endDate").optional({ nullable: true }).isString().isISO8601(), body("prequalOverrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
+  [packageParam, body("bidId").optional({ nullable: true }).isString().isUUID(), body("title").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), body("retentionRate").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }), body("startDate").optional({ nullable: true }).isString().custom(dateInput), body("endDate").optional({ nullable: true }).isString().custom(dateInput), body("prequalOverrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.confirmAward({ ...scope(req), packageId: req.params.packageId, payload: req.body, actor: actor(req) }), 201)),
 );
 

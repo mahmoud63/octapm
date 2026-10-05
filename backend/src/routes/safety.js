@@ -2,6 +2,8 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, INT4_MAX } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { authenticate } = require("../middleware/auth");
 const { getEffectiveRole, requirePermission, requirePermissionOr } = require("../middleware/rbac");
 const { prisma } = require("../config/db");
@@ -30,7 +32,7 @@ const safetyCloseoutValidators = [
   body("owner").optional().isString().trim(),
   body("assigneeUserId").optional({ nullable: true }).isString().isUUID(),
   body("assigneeCompanyId").optional({ nullable: true }).isString().isUUID(),
-  body("dueDate").optional({ nullable: true }).isString().isISO8601(),
+  body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
   body("closureComment").optional().isString().trim(),
   body("comment").optional().isString().trim(),
   body("statusComment").optional().isString().trim(),
@@ -70,7 +72,7 @@ router.post(
   requirePermission("safety", "create"),
   [
     body("incidentType").isIn(["near_miss", "first_aid", "lti", "fatality"]),
-    body("title").trim().notEmpty(),
+    body("title").isString().trim().notEmpty(),
     body("owner").optional().isString().trim(),
     body("reviewer").optional().isString().trim(),
     body("approver").optional().isString().trim(),
@@ -86,11 +88,15 @@ router.post(
     body("comment").optional().isString().trim(),
     body("closureComment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("date").optional({ nullable: true }).isString().isISO8601(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
-    body("closedDate").optional({ nullable: true }).isString().isISO8601(),
-    body("lostDays").optional().isInt({ min: 0 }),
+    body("date").optional({ nullable: true }).isString().custom(dateInput),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("closedDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("lostDays").optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }),
     body("status").optional().isIn(["open", "investigating"]),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("severity").optional({ nullable: true }).isString(),
+    body("investigation").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -189,7 +195,7 @@ const rejectSafetyRoute = asyncHandler(async (req, res) => {
 
 const rejectSafetyValidators = [
   param("incidentId").isUUID(),
-  body("reason").trim().notEmpty(),
+  body("reason").isString().trim().notEmpty(),
   validate,
 ];
 
@@ -229,11 +235,16 @@ router.patch(
     body("comment").optional().isString().trim(),
     body("closureComment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("date").optional({ nullable: true }).isString().isISO8601(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
-    body("closedDate").optional({ nullable: true }).isString().isISO8601(),
-    body("lostDays").optional().isInt({ min: 0 }),
+    body("date").optional({ nullable: true }).isString().custom(dateInput),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("closedDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("lostDays").optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }),
     body("status").optional().isIn(["open", "investigating"]),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("severity").optional({ nullable: true }).isString(),
+    body("responsible").optional({ nullable: true }).isString(),
+    body("investigation").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -253,7 +264,7 @@ router.patch(
 router.post(
   "/:incidentId/reopen",
   requirePermission("safety", "approve", { transition: "safety.reopen" }),
-  [param("incidentId").isUUID(), body("reason").trim().notEmpty(), validate],
+  [param("incidentId").isUUID(), body("reason").isString().trim().notEmpty(), validate],
   asyncHandler(async (req, res) => {
     const row = await reopenSafetyIncident({
       orgId: req.user.orgId,

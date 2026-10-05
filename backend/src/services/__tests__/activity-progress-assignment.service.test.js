@@ -11,6 +11,8 @@ const mockPrisma = {
 const mockProgressService = {
   assertProgressSubmitAllowed: jest.fn(),
   createProgressSubmission: jest.fn(),
+  // A batch reads each update's evidence before its transaction (CERT-2 evidence-6).
+  scanSubmissionEvidence: jest.fn(() => null),
   serializeMethodConfig: jest.fn((row) => row || null),
   serializeSubmission: jest.fn((row) => row || null),
   serializeProgressSource: jest.fn((row) => (row ? { source: row.source } : null)),

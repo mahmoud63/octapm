@@ -246,7 +246,14 @@ router.get(
       prisma.activityMaterial.findMany({
         where: { projectId: req.params.projectId },
         include: {
+          // Each line with its order's status, as procurement.service reads a
+          // material's lines (ALERT_MATERIAL_INCLUDE): a line on a cancelled or
+          // closed order is no promise the material can still wait on
+          // (buildMaterialRiskRow isOpenMaterialLine). Read without it, a
+          // material ordered on an order since cancelled kept that order's
+          // promised date here (CERT-2, trivial-7).
           poLines: {
+            include: { order: { select: { status: true } } },
             orderBy: { createdAt: "desc" },
             take: 5,
           },

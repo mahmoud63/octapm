@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -30,8 +31,8 @@ router.get(
   "/",
   requirePermission("document_control", "read"),
   [
-    query("from").isString().optional().isISO8601(),
-    query("to").isString().optional().isISO8601(),
+    query("from").isString().optional().custom(dateInput),
+    query("to").isString().optional().custom(dateInput),
     query("locationId").isString().optional().isUUID(),
     query("tag").optional().isString().trim(),
     query("recordType").isString().optional().isIn(attachmentService.RECORD_TYPES),
@@ -60,7 +61,7 @@ router.patch(
     body("caption").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
     body("tags").optional(),
     body("locationId").optional({ nullable: true }).isString().isUUID(),
-    body("takenAt").optional({ nullable: true }).isISO8601(),
+    body("takenAt").optional({ nullable: true }).custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {

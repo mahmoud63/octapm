@@ -1,5 +1,7 @@
 const express = require('express');
 const { body, param } = require('express-validator');
+const { scalarFigure, INT4_MAX } = require('../utils/figure-input');
+const { dateInput } = require('../utils/date-input');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { HttpError } = require('../utils/http-error');
@@ -152,12 +154,12 @@ router.post(
   '/',
   requireRoles('pm', 'planning_eng', 'site_engineer'),
   [
-    body('weekStartDate').isString().isISO8601(),
-    body('weekEndDate').isString().isISO8601(),
-    body('plannedProgress').optional().isFloat({ min: 0, max: 100 }),
-    body('actualProgress').optional().isFloat({ min: 0, max: 100 }),
-    body('weatherDelayDays').optional().isInt({ min: 0 }),
-    body('manpowerCount').optional().isInt({ min: 0 }),
+    body('weekStartDate').isString().custom(dateInput),
+    body('weekEndDate').isString().custom(dateInput),
+    body('plannedProgress').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }),
+    body('actualProgress').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }),
+    body('weatherDelayDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }),
+    body('manpowerCount').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }),
     body('status').optional().isIn(['draft', 'submitted', 'approved']),
     // The activity lists are lists of activity ids (weekly-report.service
     // checks that each is an activity of this project).
@@ -165,6 +167,9 @@ router.post(
     body('activitiesCompleted.*').isString().isUUID(),
     body('activitiesInProgress').optional({ nullable: true }).isArray(),
     body('activitiesInProgress.*').isString().isUUID(),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body('remarks').optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -218,17 +223,20 @@ router.patch(
   requireRoles('pm', 'planning_eng', 'site_engineer'),
   [
     param('id').isUUID(),
-    body('weekStartDate').optional().isString().isISO8601(),
-    body('weekEndDate').optional().isString().isISO8601(),
-    body('plannedProgress').optional().isFloat({ min: 0, max: 100 }),
-    body('actualProgress').optional().isFloat({ min: 0, max: 100 }),
-    body('weatherDelayDays').optional().isInt({ min: 0 }),
-    body('manpowerCount').optional().isInt({ min: 0 }),
+    body('weekStartDate').optional().isString().custom(dateInput),
+    body('weekEndDate').optional().isString().custom(dateInput),
+    body('plannedProgress').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }),
+    body('actualProgress').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }),
+    body('weatherDelayDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }),
+    body('manpowerCount').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }),
     body('status').optional().isIn(['draft', 'submitted', 'approved']),
     body('activitiesCompleted').optional({ nullable: true }).isArray(),
     body('activitiesCompleted.*').isString().isUUID(),
     body('activitiesInProgress').optional({ nullable: true }).isArray(),
     body('activitiesInProgress.*').isString().isUUID(),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body('remarks').optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {

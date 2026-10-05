@@ -1,7 +1,7 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const auditService = require('./audit.service');
-const { addMoney, multiplyMoney, toMoneyNumber } = require('../utils/money');
+const { MONEY_MAX, addMoney, multiplyMoney, toMoneyDecimal, toMoneyNumber } = require('../utils/money');
 const { defaultForecastOnCreate } = require('./cost-record-default.service');
 
 const RATE_TYPES = ['hourly', 'daily'];
@@ -261,11 +261,12 @@ const postEquipmentCostImpact = async ({
   actorId,
   actorRole,
 }) => {
+  // Added up as an exact decimal (CERT-2, round 6).
   const equipmentCost = usageRows.reduce(
-    (total, usage) => addMoney(total, usage.costAmount),
-    0,
+    (total, usage) => total.plus(toMoneyDecimal(usage.costAmount || 0)),
+    toMoneyDecimal(0),
   );
-  if (equipmentCost <= 0) return null;
+  if (!equipmentCost.greaterThan(0)) return null;
 
   // Through the cost ledger (OCTA-FIN-LEDGER-059): one entry per report, so
   // approving a report twice posts once, the activity's actual is incremented
@@ -277,7 +278,9 @@ const postEquipmentCostImpact = async ({
     projectId,
     sourceType: 'equipment',
     sourceId: report.id,
-    amount: equipmentCost,
+    // The ledger checks and posts the amount as it takes it; the category
+    // below moves by exactly what it posted.
+    amount: toMoneyNumber(equipmentCost),
     costType: 'equipment',
     activityId: report.activityId,
     incurredOn: normalizeUsageDate(report.date),
@@ -297,31 +300,45 @@ const postEquipmentCostImpact = async ({
     existing?.actualThroughDate || null,
     normalizeUsageDate(report.date),
   );
-  const nextEquipment = posting.posted
-    ? addMoney(existing?.equipment || 0, equipmentCost)
-    : toMoneyNumber(existing?.equipment || 0);
+  // The category moves by exactly what the ledger posted, as an exact
+  // decimal, and must fit its Decimal(18,2) column (CERT-2, round 6). It was
+  // added up in floating point and written unchecked — the ledger checks the
+  // activity's actual, not its equipment category, which the cost register
+  // can set on its own: an equipment category at 9.9e15 and a day's
+  // equipment of 2e14 failed the daily report's approval at the write
+  // (numeric field overflow), and 9.8e15 with 199,999,999,999,999 more — which
+  // fits — failed there too, as a float sum of 10^16. The
+  // other categories are left as they are, no longer written back through a
+  // float (which loses cents past 2^53 / 100, and reads 9,999,999,999,999,999.99
+  // as 10^16).
+  const postedAmount = posting.posted ? toMoneyDecimal(posting.entry?.amount ?? equipmentCost) : toMoneyDecimal(0);
+  const nextEquipment = toMoneyDecimal(existing?.equipment || 0).plus(postedAmount);
+  if (nextEquipment.abs().greaterThan(MONEY_MAX)) {
+    throw new HttpError(
+      400,
+      'COST_LEDGER_TOTAL_TOO_LARGE',
+      "This equipment cost would take the activity's equipment cost past what it can record",
+      { projection: 'activity_equipment' },
+    );
+  }
 
-  const data = {
-    projectId,
-    activityId: report.activityId,
-    labour: toMoneyNumber(existing?.labour || 0),
-    material: toMoneyNumber(existing?.material || 0),
-    equipment: nextEquipment,
-    subcontract: toMoneyNumber(existing?.subcontract || 0),
-    indirect: toMoneyNumber(existing?.indirect || 0),
-    overhead: toMoneyNumber(existing?.overhead || 0),
-    contingency: toMoneyNumber(existing?.contingency || 0),
-    budget: toMoneyNumber(existing?.budget || 0),
-    committed: toMoneyNumber(existing?.committed || 0),
-    actualThroughDate,
-  };
+  const data = { equipment: nextEquipment, actualThroughDate };
 
   // Created here only if the ledger made none: no forecast supplied, so the
   // initial default, marked 'default' (R5-2) — from the activity's approved
   // allocation, as every creator reads it.
   const record = existing
     ? await tx.costRecord.update({ where: { id: existing.id }, data })
-    : await tx.costRecord.create({ data: { ...data, actual: 0, ...(await defaultForecastOnCreate({ tx, projectId, activityId: report.activityId, actual: 0 })) } });
+    : await tx.costRecord.create({
+        data: {
+          projectId,
+          activityId: report.activityId,
+          ...Object.fromEntries(['labour', 'material', 'subcontract', 'indirect', 'overhead', 'contingency', 'budget', 'committed'].map((key) => [key, 0])),
+          ...data,
+          actual: 0,
+          ...(await defaultForecastOnCreate({ tx, projectId, activityId: report.activityId, actual: 0 })),
+        },
+      });
 
   await auditService.recordEvent({
     tx,
@@ -340,7 +357,7 @@ const postEquipmentCostImpact = async ({
       transition: 'daily_report.equipment_cost_post',
       activityId: report.activityId,
       dailyReportId: report.id,
-      equipmentCost,
+      equipmentCost: toMoneyNumber(equipmentCost),
       equipmentUsageCount: usageRows.length,
       actualThroughDate: toIso(actualThroughDate),
     },

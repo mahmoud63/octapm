@@ -1,6 +1,9 @@
 const express = require("express");
 const multer = require("multer");
+// The NUL / lone-surrogate guard again after multer: it parses the multipart body inside the route (CERT-2).
+const { rejectNullBytes } = require("../middleware/reject-null-bytes");
 const { body, param } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
@@ -48,6 +51,7 @@ router.post(
   requirePermission("assistant", "read"),
   requirePermission("progress", "submit", { transition: "daily_log.submit" }),
   upload.single("audio"),
+  rejectNullBytes,
   [body("language").optional({ nullable: true }).isString().trim().isLength({ min: 2, max: 8 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.transcribe({ file: req.file, language: req.body?.language || null }))),
 );
@@ -84,7 +88,7 @@ router.post(
     body("delays").optional().isArray({ max: 10 }),
     body("delays.*.type").optional({ nullable: true }).isIn(dailyLog.DELAY_TYPES),
     body("delays.*.description").isString().trim().isLength({ min: 1, max: 2000 }),
-    body("delays.*.hoursLost").optional({ nullable: true }).isFloat({ min: 0, max: 24 }),
+    body("delays.*.hoursLost").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: 24 }),
     body("delays.*.activityId").optional({ nullable: true }).isString().isUUID(),
     body("delays.*.locationId").optional({ nullable: true }).isString().isUUID(),
     body("photoCaptions").optional().isArray({ max: 40 }),

@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -53,7 +54,7 @@ const templateValidators = ({ requireName = false } = {}) => [
   body("tool").optional().isIn(tools.TOOL_KEYS),
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
   body("isDefault").optional().isBoolean().toBoolean(),
-  body("priority").optional().isInt({ min: -100, max: 100 }).toInt(),
+  body("priority").optional().custom(scalarFigure).bail().isInt({ min: -100, max: 100 }).toInt(),
   body("status").optional().isIn(["active", "archived"]),
   body("rules").optional().isArray({ max: 20 }),
   body("steps").optional().isArray({ max: 20 }),

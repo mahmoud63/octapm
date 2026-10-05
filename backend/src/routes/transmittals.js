@@ -2,6 +2,7 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { validate } = require("../middleware/validate");
 const { requirePermission } = require("../middleware/rbac");
 const {
@@ -33,9 +34,14 @@ router.post(
   "/",
   requirePermission("document_control", "create"),
   [
-    body("subject").trim().notEmpty(),
-    body("sender").trim().notEmpty(),
-    body("recipient").trim().notEmpty(),
+    body("subject").isString().trim().notEmpty(),
+    body("sender").isString().trim().notEmpty(),
+    body("recipient").isString().trim().notEmpty(),
+    // The reference and the notes are text too (CERT-2, robustness-6): an
+    // array as the ref reached the write after the register's next number had
+    // been drawn, and notes as an object failed in the service's trim() (500).
+    body("ref").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
+    body("notes").optional({ nullable: true }).isString(),
     body("method").optional().isIn(["email", "courier", "hand"]),
     body("status").optional().isIn(["pending_ack", "acknowledged"]),
     body("owner").optional().isString().trim(),
@@ -52,9 +58,9 @@ router.post(
     body("revisions").optional().isArray(),
     body("comment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("dueDate").optional({ nullable: true }).isISO8601(),
-    body("transmittedOn").optional({ nullable: true }).isISO8601(),
-    body("acknowledgedOn").optional({ nullable: true }).isISO8601(),
+    body("dueDate").optional({ nullable: true }).custom(dateInput),
+    body("transmittedOn").optional({ nullable: true }).custom(dateInput),
+    body("acknowledgedOn").optional({ nullable: true }).custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -75,6 +81,13 @@ router.patch(
   requirePermission("document_control", "update"),
   [
     param("transmittalId").isUUID(),
+    // What the service writes as text, checked as text (CERT-2, robustness-6):
+    // an object as the subject was read by Prisma as an update operation
+    // ("Unknown argument"), notes as an object failed in trim() (500).
+    body("subject").optional().isString(),
+    body("sender").optional().isString(),
+    body("recipient").optional().isString(),
+    body("notes").optional({ nullable: true }).isString(),
     body("method").optional().isIn(["email", "courier", "hand"]),
     body("status").optional().isIn(["pending_ack", "acknowledged"]),
     body("owner").optional().isString().trim(),
@@ -91,9 +104,9 @@ router.patch(
     body("revisions").optional().isArray(),
     body("comment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("dueDate").optional({ nullable: true }).isISO8601(),
-    body("transmittedOn").optional({ nullable: true }).isISO8601(),
-    body("acknowledgedOn").optional({ nullable: true }).isISO8601(),
+    body("dueDate").optional({ nullable: true }).custom(dateInput),
+    body("transmittedOn").optional({ nullable: true }).custom(dateInput),
+    body("acknowledgedOn").optional({ nullable: true }).custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {

@@ -1,8 +1,11 @@
 const express = require('express');
 const crypto = require('crypto');
 const multer = require('multer');
+// The NUL / lone-surrogate guard again after multer: it parses the multipart body inside the route (CERT-2).
+const { rejectNullBytes } = require('../middleware/reject-null-bytes');
 const path = require('path');
 const { body, param, query } = require('express-validator');
+const { dateInput } = require('../utils/date-input');
 const { validate, validateWithReasons } = require('../middleware/validate');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
@@ -150,6 +153,7 @@ router.post(
   uploadLimiter,
   aiGenerationLimiterUnlessDryRun,
   upload.single('file'),
+  rejectNullBytes,
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
     const { projectId } = req.params;
@@ -317,7 +321,7 @@ router.get(
   requirePermission('boq', 'read'),
   [
     param('itemId').isUUID().withMessage('The BOQ item id is not valid'),
-    query('cutoffDate').isString().optional().isISO8601().withMessage('cutoffDate must be an ISO 8601 date'),
+    query('cutoffDate').isString().optional().custom(dateInput).withMessage('cutoffDate must be an ISO 8601 date'),
     validate,
   ],
   asyncHandler(async (req, res) => {

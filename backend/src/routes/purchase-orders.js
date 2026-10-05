@@ -1,5 +1,7 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -73,9 +75,9 @@ router.patch(
     body("deliveryAddress").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
     body("deliveryTerms").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
     body("paymentTerms").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
-    body("taxRate").optional().isFloat({ min: 0, max: 100 }).toFloat(),
-    body("requiredBy").optional({ nullable: true }).isString().isISO8601(),
-    body("promisedDate").optional({ nullable: true }).isString().isISO8601(),
+    body("taxRate").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }).toFloat(),
+    body("requiredBy").optional({ nullable: true }).isString().custom(dateInput),
+    body("promisedDate").optional({ nullable: true }).isString().custom(dateInput),
     body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
     validate,
   ],

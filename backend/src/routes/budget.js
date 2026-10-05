@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, INT4_MAX, MONEY_FIGURE_MAX } = require("../utils/figure-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -19,7 +20,7 @@ router.use(authenticate);
 
 const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
 const actor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffectiveRole(req) });
-const moneyField = (name) => body(name).optional({ nullable: true }).isFloat({ min: -1e12, max: 1e12 });
+const moneyField = (name) => body(name).optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: -1e12, max: 1e12 });
 
 // The project's cost codes are reference data: change events, timesheets and direct costs
 // pick from them, so any member of the project reads them (Phase 22B). Changing the set
@@ -70,7 +71,7 @@ router.post(
     moneyField("committed"),
     moneyField("actual"),
     moneyField("forecast"),
-    body("sortOrder").optional().isInt({ min: 0 }).toInt(),
+    body("sortOrder").optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     validate,
   ],
   asyncHandler(async (req, res) => sendSuccess(res, await budgetService.createBudgetLine({ ...scope(req), payload: req.body, actor: actor(req) }), 201)),
@@ -83,7 +84,7 @@ router.post(
     body("rows").isArray({ min: 1, max: 2000 }),
     body("rows.*.code").isString().trim().notEmpty(),
     body("rows.*.costType").optional().isIn(budgetService.COST_TYPES),
-    body("rows.*.originalBudget").optional({ nullable: true }).isFloat(),
+    body("rows.*.originalBudget").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: -MONEY_FIGURE_MAX, max: MONEY_FIGURE_MAX }),
     validate,
   ],
   asyncHandler(async (req, res) => sendSuccess(res, await budgetService.importBudgetLines({ ...scope(req), rows: req.body.rows, actor: actor(req) }), 201)),
@@ -92,7 +93,7 @@ router.post(
 router.post(
   "/transfers",
   requirePermission("cost", "approve"),
-  [body("fromLineId").isString().isUUID(), body("toLineId").isString().isUUID(), body("amount").isFloat({ gt: 0 }), body("note").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
+  [body("fromLineId").isString().isUUID(), body("toLineId").isString().isUUID(), body("amount").custom(scalarFigure).bail().isFloat({ gt: 0, max: MONEY_FIGURE_MAX }), body("note").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await budgetService.transferBudget({ ...scope(req), payload: req.body, actor: actor(req) }))),
 );
 
@@ -151,7 +152,7 @@ router.patch(
     moneyField("committed"),
     moneyField("actual"),
     moneyField("forecast"),
-    body("sortOrder").optional().isInt({ min: 0 }).toInt(),
+    body("sortOrder").optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     body("status").optional().isIn(["active", "archived"]),
     validate,
   ],
@@ -168,7 +169,7 @@ router.delete(
 router.put(
   "/lines/:lineId/allocations",
   requirePermission("cost", "update"),
-  [param("lineId").isUUID(), body("allocations").isArray({ max: 500 }), body("allocations.*.activityId").isString().isUUID(), body("allocations.*.weight").isFloat({ min: 0, max: 100 }), validate],
+  [param("lineId").isUUID(), body("allocations").isArray({ max: 500 }), body("allocations.*.activityId").isString().isUUID(), body("allocations.*.weight").custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await budgetService.setLineAllocations({ ...scope(req), lineId: req.params.lineId, payload: req.body, actor: actor(req) }))),
 );
 
@@ -182,7 +183,7 @@ router.get(
 router.post(
   "/lines/:lineId/revisions",
   requirePermission("cost", "approve"),
-  [param("lineId").isUUID(), body("amount").isFloat(), body("note").isString().trim().notEmpty().isLength({ max: 500 }), validate],
+  [param("lineId").isUUID(), body("amount").custom(scalarFigure).bail().isFloat({ min: -MONEY_FIGURE_MAX, max: MONEY_FIGURE_MAX }), body("note").isString().trim().notEmpty().isLength({ max: 500 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await budgetService.addRevision({ ...scope(req), lineId: req.params.lineId, payload: req.body, actor: actor(req) }), 201)),
 );
 

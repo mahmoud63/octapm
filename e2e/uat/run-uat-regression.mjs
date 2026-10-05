@@ -980,7 +980,7 @@ async function runMeetingMinutesFlow({ pm, project, activity, runId }) {
           userId: pm.user?.id,
           name: "UAT Project Manager",
           role: "chair",
-          attendanceStatus: "present",
+          attendanceStatus: "attended",
           distributionRequired: true,
           activityId: activity.id,
         },
@@ -989,7 +989,7 @@ async function runMeetingMinutesFlow({ pm, project, activity, runId }) {
           email: `consultant.${suffix}@pmcopilots.test`,
           companyName: "UAT Consultant",
           role: "consultant",
-          attendanceStatus: "present",
+          attendanceStatus: "attended",
           distributionRequired: true,
           activityId: activity.id,
         },
@@ -998,7 +998,10 @@ async function runMeetingMinutesFlow({ pm, project, activity, runId }) {
         {
           title: "Concrete pour access",
           notes: "Review gate sequence and pump location.",
-          status: "closed",
+          // The meeting API's words (meeting.service ATTENDANCE_STATUSES,
+          // AGENDA_STATUSES), as the web meetings page sends them: 'present' and
+          // 'closed' were never taken, and the meeting was refused (CERT-2 evidence-6).
+          status: "covered",
           activityId: activity.id,
         },
       ],

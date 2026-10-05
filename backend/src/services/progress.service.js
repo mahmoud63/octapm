@@ -96,12 +96,13 @@ const normalizeMethod = (method) => {
   return normalized;
 };
 
-const normalizeEvidence = (payload = {}, fallbackPhotos = null) => {
-  const evidence =
-    payload.evidenceJson ??
-    payload.evidence ??
-    (fallbackPhotos ? { photos: fallbackPhotos } : null);
+/** The evidence a submission names, as it was sent: its evidenceJson, else its evidence, else the fallback photos. */
+const evidenceSource = (payload = {}, fallbackPhotos = null) =>
+  payload.evidenceJson ??
+  payload.evidence ??
+  (fallbackPhotos ? { photos: fallbackPhotos } : null);
 
+const evidenceOf = (evidence) => {
   if (!evidence) return null;
   if (Array.isArray(evidence)) return { photos: evidence };
   if (typeof evidence === 'object') return evidence;
@@ -180,33 +181,219 @@ const IDENTIFIER_ALONE = new RegExp(`^${IDENTIFIER}$`, 'i');
  * site-reporting.js, workflow-uploads.js (mounted at /workflow), boq.js,
  * import.js and schedule.js `/uploads/:key`; attachments.js
  * `/documents/:documentId`; photos.js `/:photoId/file` and `/thumbnail`;
- * doc-control.js `/revisions/:revisionId/download` and `/preview` — and the
- * doc-control/uploads link the upload answer gives (file-storage.service
+ * doc-control.js `/revisions/:revisionId/download` and `/preview`; the
+ * bidder portal's `/public/bids/:token/documents/:documentId` (bid-portal.js:
+ * a document of the bid package's project, named without the project) — and
+ * the doc-control/uploads link the upload answer gives (file-storage.service
  * uploadDocumentControlFile). With or without the /api/v1 base (the mobile
  * client keeps paths below it: photoFilePath), on whatever host it is written
- * (a client may make it absolute). Captures: the project, an upload or
- * document key, a photo id, a revision id.
+ * (a client may make it absolute). Captures, each as written: the project, an
+ * upload or document key, a photo id, a revision id, a bidder portal
+ * document.
+ *
+ * Express matches the literal segments as sent, without case, and decodes
+ * each parameter (decodeURIComponent) before the route reads it: a project, a
+ * photo or a revision written with escapes ('/projects/%63e2c…/') reaches the
+ * route as the plain id. So every capture is a run of URL characters, escapes
+ * included, decoded (fileKey) before it is compared or looked up; matched
+ * only in its plain form, an escaped project named no file here (CERT-2
+ * evidence-lines-5).
  */
-const FILE_KEY = '[A-Za-z0-9._~%-]+';
+const FILE_SEGMENT = '[A-Za-z0-9._~%-]+';
 const FILE_LINK = new RegExp(
-  `(?:/api/v1)?/projects/(${IDENTIFIER})/(?:` +
-    `(?:site-reporting|workflow|doc-control|boq|import|schedule)/uploads/(${FILE_KEY})` +
-    `|attachments/documents/(${FILE_KEY})` +
-    `|photos/(${IDENTIFIER})/(?:file|thumbnail)` +
-    `|doc-control/revisions/(${IDENTIFIER})/(?:download|preview)` +
-    ')',
+  `(?:/api/v1)?/projects/(${FILE_SEGMENT})/(?:` +
+    `(?:site-reporting|workflow|doc-control|boq|import|schedule)/uploads/(${FILE_SEGMENT})` +
+    `|attachments/documents/(${FILE_SEGMENT})` +
+    `|photos/(${FILE_SEGMENT})/(?:file|thumbnail)` +
+    `|doc-control/revisions/(${FILE_SEGMENT})/(?:download|preview)` +
+    ')' +
+    `|(?:/api/v1)?/public/bids/[^/?#\\s]+/documents/(${FILE_SEGMENT})`,
   'gi',
 );
-/** A key as the route reads it: decoded, without a sentence's closing dots. */
+/**
+ * A capture as the route reads it: decoded, without a sentence's closing
+ * dots. The dots are counted from the end: /\.+$/ tried every run of dots to
+ * its end, so a key of 100,000 dots and a letter took 3.5 s, inside the
+ * request's transaction (CERT-2 evidence-6).
+ */
 const fileKey = (written) => {
-  const key = written.replace(/\.+$/, '');
+  let end = written.length;
+  while (end > 0 && written.charCodeAt(end - 1) === 46) end -= 1;
+  const key = written.slice(0, end);
   try {
     return decodeURIComponent(key);
   } catch {
     return key;
   }
 };
+/**
+ * A document's id and its storage key are UUIDs (file-storage.service
+ * uploadProjectDocument). A key with any other character names no document
+ * and is missing without a lookup: a decoded '%00' is a NUL, which Postgres
+ * refuses in a text value, and the lookup answered 500 (22021) on every path
+ * evidence takes (CERT-2 evidence-lines-5).
+ */
+const DOCUMENT_KEY = /^[A-Za-z0-9._~-]+$/;
+/**
+ * Each link a text holds, read as written and as a client resolves it.
+ * Browsers, fetch and axios read a link with the WHATWG URL parser, which
+ * drops tab and newline anywhere in it, reads a backslash as a slash and
+ * resolves dot segments ('.', '..', '%2e'):
+ * '/projects/<id>/site-reporting/./uploads/<key>', the same link written with
+ * backslashes and 'site-re<TAB>porting' each fetch the stored file, and
+ * matched only as written they named none, so another company's file was
+ * stored as a link (CERT-2 evidence-lines-5).
+ *
+ * A field the clients use as a link — a photo's url, fileUrl or downloadUrl,
+ * a photo that is a link — is one link, its tabs and line breaks dropped as
+ * the parser drops them. Free text is a link per whitespace-separated token:
+ * it is not joined across its line breaks, so a link that ends a line is the
+ * link up to it, and a note's own link followed by a line of text stays the
+ * own link.
+ *
+ * A link the parser resolves to a file link is that link: it is judged by its
+ * path, query and fragment as resolved, and of its text as written only by
+ * the identifiers it names in a file link (a project, a document, a photo, a
+ * revision), so no identifier the caller writes there goes unchecked. A key
+ * as written that is no identifier is not the link's: the fifth round judged
+ * every key the text held, and the caller's own file written
+ * '…/uploads/x/../<own>' was refused for the key 'x', a link field with a tab
+ * or a line break inside the own key for the part before it (CERT-2
+ * evidence-6). A link that resolves to no file link is judged as written.
+ *
+ * A link that does not hold, as written, where a file link's route begins —
+ * 'projects' followed by a slash or a backslash, or 'bids' between two
+ * (FILE_ROUTE_AT) —, one of the route's names (FILE_ROUTE_NAME: 'site-reporting',
+ * 'workflow', 'doc-control', 'boq', 'import', 'schedule', 'attachments',
+ * 'photos', 'public') and one of 'uploads', 'documents', 'photos',
+ * 'revisions' names no stored file as written or resolved: every FILE_LINK
+ * holds them, and the parser makes none of them — the segments of the path it
+ * resolves are the segments written, split at a slash or a backslash (it
+ * drops dot segments, tab and newline, and escapes a character; it never
+ * unescapes one, and makes no letter), and Express matches the literal
+ * segments as sent ('%70rojects' is served nothing). It is not read. Free
+ * text is searched for where a route begins and only the tokens around it
+ * are looked at. The sixth round read every token holding 'projects' or
+ * 'bids' and a leaf word: 8.5 MB of distinct 'projects<i>uploads' tokens held
+ * the event loop 2.2 s, where HEAD's one pass over the text took 8 ms (CERT-2
+ * availability-7).
+ *
+ * A link the parser takes as written (plainForm) — no dot, no '%2e', no
+ * backslash, no character it escapes, no scheme and no host — resolves to
+ * itself under '/': it is judged as that path, query and fragment, matched
+ * once, and no URL is built for it. Only a link that needs normalising is
+ * parsed. Each distinct link of an evidence value is read once (CERT-2
+ * availability-7).
+ *
+ * A link in free text is read without the quotes, brackets and closing
+ * punctuation a writer puts around it ('see "<link>".', '<<link>>',
+ * '“<link>”'), as a reader follows it: the parser escapes a closing '"', '>'
+ * or '”' into the link's last segment, and since the fifth round the own
+ * file quoted in a note was refused for the key '<own>"' (HEAD took it).
+ * The fifth round parsed every token of a text and compared each path with
+ * every other (forms.includes): 50,000 short tokens in a note held the
+ * request and its transaction for seconds, and the transaction expired (500
+ * P2028) (CERT-2 evidence-6). The reading is now linear in the text, and it
+ * is made before the transaction (scanEvidence).
+ */
+const LINK_FIELDS = new Set(['url', 'fileUrl', 'downloadUrl']);
+const FILE_ROUTE_AT = /projects[\/\\]|[\/\\]bids[\/\\]/i;
+const FILE_ROUTE_NAME = /site-reporting|workflow|doc-control|boq|import|schedule|attachments|photos|public/i;
+const FILE_LEAF_WORD = /uploads|documents|photos|revisions/i;
+const LINK_BASE = 'http://link.invalid/';
+const fileLinksIn = (form) => [...form.matchAll(FILE_LINK)];
+/** Whether a form holds a file link at all: one test, nothing collected. */
+const HAS_FILE_LINK = new RegExp(FILE_LINK.source, 'i');
+/** JavaScript's \s, by code unit: what splits free text into tokens (split(/\s+/)). */
+const isSpace = (code) =>
+  code === 32 || (code >= 9 && code <= 13) || code === 0xa0 || code === 0x1680 || (code >= 0x2000 && code <= 0x200a) ||
+  code === 0x2028 || code === 0x2029 || code === 0x202f || code === 0x205f || code === 0x3000 || code === 0xfeff;
+const mayNameFile = (link) => FILE_ROUTE_AT.test(link) && FILE_LEAF_WORD.test(link) && FILE_ROUTE_NAME.test(link);
+// What a writer puts around a link in text: quotes, brackets, closing punctuation (none is a character of a key).
+const LINK_OPENERS = /^["'<([{\u201c\u2018\u00ab\u2039\u300c\u300e]+/;
+const LINK_CLOSERS = /["'>)\]}\u201d\u2019\u00bb\u203a\u300d\u300f.,;:!?]+$/;
+const unwrap = (token) => {
+  let end = token.length;
+  while (end > 0 && LINK_CLOSERS.test(token[end - 1])) end -= 1;
+  return token.slice(0, end).replace(LINK_OPENERS, '');
+};
+/**
+ * The links of a text that may name a stored file: a link field whole, its
+ * tabs and line breaks dropped; in free text, each whitespace-separated token
+ * that holds where a route begins (FILE_ROUTE_AT), found from there (the text
+ * before it is stepped over once). Given one at a time, as they are found:
+ * the reading stops at the first refusal (a file past MAX_EVIDENCE_FILES)
+ * without reading the rest of the text. A token written twice is given twice;
+ * the reader reads each once.
+ */
+function* linksOf(text, isLink) {
+  if (isLink) {
+    const link = text.replace(/[\t\n\r]/g, '');
+    if (mayNameFile(link)) yield link;
+    return;
+  }
+  const word = new RegExp(FILE_ROUTE_AT.source, 'gi');
+  const space = /\s/g;
+  let end = 0;
+  for (let found = word.exec(text); found; found = word.exec(text)) {
+    let start = found.index;
+    while (start > end && !isSpace(text.charCodeAt(start - 1))) start -= 1;
+    space.lastIndex = word.lastIndex;
+    const after = space.exec(text);
+    end = after ? after.index : text.length;
+    const link = unwrap(text.slice(start, end));
+    if (FILE_LEAF_WORD.test(link) && FILE_ROUTE_NAME.test(link)) yield link;
+    word.lastIndex = end;
+  }
+}
+/**
+ * A link the parser takes as it is written: only characters it leaves alone
+ * in a path, a query and a fragment (no dot — a dot segment —, no '%2e', no
+ * backslash; no space, control, quote, angle bracket, brace, caret, backtick
+ * or character outside ASCII, each of which it escapes), no scheme and not
+ * '//' first (a host). Resolved against LINK_BASE it is itself under '/': a
+ * relative link is given the slash, and its path, query and fragment are the
+ * parts as written. No file link spans a '?' or a '#', so the one form
+ * matches as the three parts do; as written it matches nothing more. Answers
+ * that form, or null for a link that needs normalising (formsOf). new URL()
+ * for each of 400,000 distinct tokens held the event loop seconds (CERT-2
+ * availability-7).
+ */
+const PLAIN_LINK = /^[A-Za-z0-9\-_~!$&()*+,;=:@\/?#%[\]|]*$/;
+const LINK_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+const DOT_ESCAPE = /%2e/i;
+const plainForm = (link) => {
+  if (!PLAIN_LINK.test(link) || DOT_ESCAPE.test(link) || LINK_SCHEME.test(link) || link.startsWith('//')) return null;
+  return link.startsWith('/') ? link : `/${link}`;
+};
+/** One link's forms: as the parser resolves it (its path, query and fragment), and as written (also with its backslashes read as slashes). */
+const formsOf = (link) => {
+  const slashes = link.replace(/\\/g, '/');
+  let resolved = [];
+  try {
+    const { pathname, search, hash } = new URL(slashes, LINK_BASE);
+    resolved = [pathname, search, hash].filter(Boolean);
+  } catch {
+    // Not a link a client can resolve: it is judged as written.
+  }
+  return { resolved, written: slashes === link ? [link] : [link, slashes] };
+};
 const EVIDENCE_REFERENCE_MESSAGE = 'Photo evidence must reference documents uploaded to this project';
+/**
+ * How many files one evidence value may name — documents, photos and
+ * revisions, each counted once. They are looked up together, a document by
+ * its id or its storage key (two bind variables a key), and Postgres takes at
+ * most 32,767 in one statement: 16,384 distinct keys answered 500 ("too many
+ * bind variables"), and 280,000 bidder-portal keys a RangeError before the
+ * lookup (CERT-2 availability-7). No client names more than a few dozen. The
+ * reading stops at the first file past the cap: 400 VALIDATION_ERROR naming
+ * the evidence, whoever's files they are.
+ */
+const MAX_EVIDENCE_FILES = 1000;
+const tooManyFiles = (field) =>
+  new HttpError(400, 'VALIDATION_ERROR', 'Validation failed', [
+    { field, message: `Evidence names more than ${MAX_EVIDENCE_FILES} files`, location: 'body' },
+  ]);
 
 const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const isScalar = (value) =>
@@ -239,18 +426,80 @@ const readEvidenceShape = (evidence, projectId, base) => {
   const photoIds = [];
   const revisionIds = [];
   let otherProject = false;
-  const text = (value, field) => {
+  // Each file named once in its list; past MAX_EVIDENCE_FILES in all, refused.
+  const named = new Map([[keys, new Set()], [photoIds, new Set()], [revisionIds, new Set()]]);
+  let count = 0;
+  const nameFile = (list, value) => {
+    const seen = named.get(list);
+    if (seen.has(value)) return;
+    seen.add(value);
+    list.push(value);
+    count += 1;
+    if (count > MAX_EVIDENCE_FILES) throw tooManyFiles(base || 'photos');
+  };
+  // identifiersOnly: a key that is no identifier is not counted (the text as written of a link that resolves to a file link).
+  const seenLinks = new Set();
+  const judge = (matches, identifiersOnly) => {
+    for (const [link, projectWritten, uploadKey, documentKey, photoWritten, revisionWritten, bidDocument] of matches) {
+      // The same file link, written again, names the same files: judged once.
+      const seen = `${identifiersOnly ? 'w' : 'r'}${link}`;
+      if (seenLinks.has(seen)) continue;
+      seenLinks.add(seen);
+      if (projectWritten !== undefined) {
+        // A project that does not decode to an id names none: its routes serve nothing.
+        const project = fileKey(projectWritten);
+        if (!IDENTIFIER_ALONE.test(project)) continue;
+        if (project.toLowerCase() !== String(projectId).toLowerCase()) {
+          otherProject = true;
+          continue;
+        }
+      }
+      const documentWritten = uploadKey || documentKey || bidDocument;
+      if (documentWritten) {
+        const key = fileKey(documentWritten);
+        if (!identifiersOnly || IDENTIFIER_ALONE.test(key)) nameFile(keys, key);
+      }
+      // The photo and revision routes take an id only (isUUID): anything else is served nothing.
+      for (const [written, list] of [[photoWritten, photoIds], [revisionWritten, revisionIds]]) {
+        const id = written ? fileKey(written) : null;
+        if (id && IDENTIFIER_ALONE.test(id)) nameFile(list, id);
+      }
+    }
+  };
+  // Each form is judged once: many spellings of one link (a long note of them) resolve to the same path.
+  const judged = new Map();
+  const judgeForm = (form, identifiersOnly) => {
+    const seen = `${identifiersOnly ? 'w' : 'r'}${form}`;
+    if (judged.has(seen)) return judged.get(seen);
+    const matches = fileLinksIn(form);
+    judge(matches, identifiersOnly);
+    judged.set(seen, matches.length > 0);
+    return matches.length > 0;
+  };
+  // Each distinct link that names a file, or is parsed, is read once wherever it is written: it names the same files.
+  const read = new Set();
+  const readOnce = (link) => {
+    if (read.has(link)) return false;
+    read.add(link);
+    return true;
+  };
+  const text = (value, field, isLink = false) => {
     if (typeof value !== 'string') return;
     const trimmed = value.trim();
     if (IDENTIFIER_ALONE.test(trimmed)) refuse(field);
-    for (const [, project, uploadKey, documentKey, photoId, revisionId] of trimmed.matchAll(FILE_LINK)) {
-      if (project.toLowerCase() !== String(projectId).toLowerCase()) {
-        otherProject = true;
+    for (const link of linksOf(trimmed, isLink)) {
+      // A link the parser takes as written: judged as it resolves, no URL
+      // built — one test for a link that names no file.
+      const plain = plainForm(link);
+      if (plain !== null) {
+        if (HAS_FILE_LINK.test(plain) && readOnce(link)) judge(fileLinksIn(plain), false);
         continue;
       }
-      if (uploadKey || documentKey) keys.push(fileKey(uploadKey || documentKey));
-      if (photoId) photoIds.push(photoId);
-      if (revisionId) revisionIds.push(revisionId);
+      if (!readOnce(link)) continue;
+      const { resolved, written } = formsOf(link);
+      let resolves = false;
+      for (const form of resolved) if (judgeForm(form, false)) resolves = true;
+      for (const form of written) judgeForm(form, resolves);
     }
   };
 
@@ -261,7 +510,7 @@ const readEvidenceShape = (evidence, projectId, base) => {
       value.forEach((photo, index) => {
         const field = at(`photos[${index}]`);
         if (typeof photo === 'string') {
-          text(photo, field);
+          text(photo, field, true);
           return;
         }
         if (!isPlainObject(photo)) refuse(field);
@@ -270,11 +519,11 @@ const readEvidenceShape = (evidence, projectId, base) => {
           if (EVIDENCE_DOCUMENT_FIELDS.includes(key)) {
             if (entry === null) continue;
             if (typeof entry !== 'string') throw new HttpError(400, 'INVALID_SITE_PHOTO_REFERENCE', EVIDENCE_REFERENCE_MESSAGE);
-            if (entry.trim()) keys.push(entry.trim());
+            if (entry.trim()) nameFile(keys, entry.trim());
             continue;
           }
           if (!isScalar(entry)) refuse(`${field}.${key}`);
-          if (key !== 'uploadedBy') text(entry, `${field}.${key}`);
+          if (key !== 'uploadedBy') text(entry, `${field}.${key}`, LINK_FIELDS.has(key));
         }
       });
       continue;
@@ -287,29 +536,77 @@ const readEvidenceShape = (evidence, projectId, base) => {
 };
 
 /**
+ * The reading of one evidence value (readEvidenceShape): its shape and the
+ * files it names, or the refusal it gets. It reads the request alone — no
+ * database — in time linear in the text, so it is made before the transaction
+ * that looks the files up: read inside it, a long note held the transaction
+ * open until it expired (CERT-2 evidence-6). prepareEvidence takes the reading
+ * made for the same evidence, project and field and throws its refusal where
+ * it read the evidence before, so every request is answered as it was.
+ */
+const scanEvidence = ({ projectId, evidence, field = 'evidence' }) => {
+  const reading = { evidence, projectId, field, shape: null, error: null };
+  if (!isPlainObject(evidence)) return reading;
+  try {
+    reading.shape = readEvidenceShape(evidence, projectId, field);
+  } catch (error) {
+    reading.error = error;
+  }
+  return reading;
+};
+
+/**
+ * A submission's evidence, read ahead (scanEvidence), with what it was read
+ * from (`source`: the submission's evidenceJson, evidence or fallback photos —
+ * the same object, or the same text). A caller that opens the transaction
+ * itself — a bulk batch, a daily report — reads each submission's evidence
+ * before it and hands the reading to createProgressSubmission, which reads
+ * the evidence itself when it is handed none for that source.
+ */
+const scanSubmissionEvidence = ({ projectId, payload, fallbackPhotos = null }) => {
+  let source;
+  try {
+    source = evidenceSource(payload, fallbackPhotos);
+  } catch (error) {
+    return { source: undefined, evidence: null, projectId, field: 'evidence', shape: null, error };
+  }
+  return { source, ...scanEvidence({ projectId, evidence: evidenceOf(source) }) };
+};
+
+/**
  * The evidence as it is stored: the accepted shape (else 400
  * VALIDATION_ERROR), naming documents of this project only (else 400
  * INVALID_SITE_PHOTO_REFERENCE, another company's document and one that exists
  * nowhere alike), each photo's uploader read from its document. `field` is
  * where the evidence sits in the request (a daily report's own photos pass
- * null). Exported for the daily report's photos.
+ * null); `scanned` its reading made before the transaction (scanEvidence).
+ * Exported for the daily report's photos.
  */
-const prepareEvidence = async ({ orgId = null, projectId, evidence, field = 'evidence' }, tx = prisma) => {
+const prepareEvidence = async ({ orgId = null, projectId, evidence, field = 'evidence', scanned = null }, tx = prisma) => {
   if (evidence === null || evidence === undefined) return null;
   if (!isPlainObject(evidence)) throw evidenceShapeError(field || 'photos');
-  const { keys, photoIds, revisionIds, otherProject } = readEvidenceShape(evidence, projectId, field);
+  const reading =
+    scanned && scanned.evidence === evidence && scanned.projectId === projectId && scanned.field === field
+      ? scanned
+      : scanEvidence({ projectId, evidence, field });
+  if (reading.error) throw reading.error;
+  const { keys, photoIds, revisionIds, otherProject } = reading.shape;
   if (otherProject) throw new HttpError(400, 'INVALID_SITE_PHOTO_REFERENCE', EVIDENCE_REFERENCE_MESSAGE);
   const missing = [];
   let documents = [];
   if (keys.length) {
-    documents = await tx.projectDocument.findMany({
-      where: {
-        projectId,
-        ...(orgId ? { orgId } : {}),
-        OR: [{ id: { in: keys } }, { storageKey: { in: keys } }],
-      },
-      select: { id: true, storageKey: true, uploadedBy: true },
-    });
+    // A key outside the id / storage-key characters is missing, never looked up (DOCUMENT_KEY).
+    const lookup = keys.filter((key) => DOCUMENT_KEY.test(key));
+    if (lookup.length) {
+      documents = await tx.projectDocument.findMany({
+        where: {
+          projectId,
+          ...(orgId ? { orgId } : {}),
+          OR: [{ id: { in: lookup } }, { storageKey: { in: lookup } }],
+        },
+        select: { id: true, storageKey: true, uploadedBy: true },
+      });
+    }
     const known = new Set(documents.flatMap((document) => [document.id, document.storageKey]));
     missing.push(...keys.filter((key) => !known.has(key)));
   }
@@ -1271,6 +1568,7 @@ const buildSubmissionData = async ({
   payload,
   dailyReportId = null,
   fallbackPhotos = null,
+  evidenceScan = null,
   tx = prisma,
 }) => {
   const configRow = await getMethodConfigRow({ projectId, activityId }, tx);
@@ -1285,7 +1583,9 @@ const buildSubmissionData = async ({
     );
   }
 
-  const evidence = await prepareEvidence({ orgId, projectId, evidence: normalizeEvidence(payload, fallbackPhotos) }, tx);
+  const evidenceRead = evidenceScan || scanSubmissionEvidence({ projectId, payload, fallbackPhotos });
+  if (evidenceRead.error && evidenceRead.evidence === null) throw evidenceRead.error;
+  const evidence = await prepareEvidence({ orgId, projectId, evidence: evidenceRead.evidence, scanned: evidenceRead }, tx);
   if (
     status !== 'draft' &&
     methodConfig.evidenceRequired &&
@@ -1554,7 +1854,17 @@ const createProgressSubmission = async ({
   dailyReportId = null,
   fallbackPhotos = null,
   tx = null,
+  evidenceScan = null,
 }) => {
+  // The evidence is read before the transaction (scanEvidence): by the caller
+  // that opened it (bulk progress, a daily report), else here.
+  let evidenceRead = null;
+  try {
+    if (evidenceScan && evidenceScan.projectId === projectId && evidenceScan.source === evidenceSource(payload, fallbackPhotos)) evidenceRead = evidenceScan;
+  } catch {
+    // The payload is read again below, and refused where it was.
+  }
+  evidenceRead = evidenceRead || scanSubmissionEvidence({ projectId, payload, fallbackPhotos });
   const runner = async (client) => {
     await ensureProject({ orgId, projectId }, client);
     await ensureActivity({ projectId, activityId }, client);
@@ -1573,6 +1883,7 @@ const createProgressSubmission = async ({
       payload,
       dailyReportId,
       fallbackPhotos,
+      evidenceScan: evidenceRead,
       tx: client,
     });
     const row = await client.progressSubmission.create({ data });
@@ -2059,6 +2370,9 @@ module.exports = {
   normalizeMethod,
   hasEvidence,
   prepareEvidence,
+  scanEvidence,
+  scanSubmissionEvidence,
+  MAX_EVIDENCE_FILES,
   serializeMethodConfig,
   serializeSubmission,
   serializeProgressSource,

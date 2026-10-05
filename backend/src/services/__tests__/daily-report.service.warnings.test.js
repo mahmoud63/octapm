@@ -30,6 +30,9 @@ jest.mock('../equipment.service', () => ({
 jest.mock('../progress.service', () => ({
   // The report's photos go through the evidence check (CERT-2); none here.
   prepareEvidence: jest.fn(async ({ evidence }) => evidence),
+  // …read before the transaction (CERT-2 evidence-6).
+  scanEvidence: jest.fn(({ projectId, evidence, field }) => ({ evidence, projectId, field, shape: null, error: null })),
+  scanSubmissionEvidence: jest.fn(() => null),
   createProgressSubmission: jest.fn(),
   approveProgressSubmissionWithClient: jest.fn(),
   serializeSubmission: (row) => ({ id: row.id, status: row.status, method: row.method, pctComplete: row.pctComplete }),

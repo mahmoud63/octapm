@@ -2,6 +2,8 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, MONEY_FIGURE_MAX } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { authenticate } = require("../middleware/auth");
 const { HttpError } = require("../utils/http-error");
 const { getEffectiveRole, hasPermission, requirePermission } = require("../middleware/rbac");
@@ -64,7 +66,7 @@ const upgradeValidators = () => [
   body("specSection").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
   body("locationId").optional({ nullable: true }).isString().isUUID(),
   body("costImpact").optional().isBoolean().toBoolean(),
-  body("costImpactAmount").optional({ nullable: true }).isFloat({ min: 0 }),
+  body("costImpactAmount").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }),
   body("scheduleImpactFlag").optional().isBoolean().toBoolean(),
   body("question").optional({ nullable: true }).isString().trim().isLength({ max: 20000 }),
   body("discipline").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
@@ -103,8 +105,8 @@ router.get(
     query("locationId").isString().optional({ values: "falsy" }).isUUID(),
     query("overdue").isString().optional().isBoolean().toBoolean(),
     query("search").optional().isString().trim().isLength({ max: 120 }),
-    query("dueAfter").isString().optional().isISO8601(),
-    query("dueBefore").isString().optional().isISO8601(),
+    query("dueAfter").isString().optional().custom(dateInput),
+    query("dueBefore").isString().optional().custom(dateInput),
     query("sortBy").isString()
       .optional()
       .isIn([
@@ -138,7 +140,7 @@ router.post(
   "/",
   requirePermission("rfi", "create"),
   [
-    body("subject").trim().notEmpty(),
+    body("subject").isString().trim().notEmpty(),
     body("priority").optional().isIn(["low", "normal", "high", "urgent"]),
     body("status").optional().isIn(["draft", "open", "answered", "closed"]),
     ...upgradeValidators(),
@@ -159,10 +161,15 @@ router.post(
     body("revisions").optional().isArray(),
     body("comment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("raisedDate").optional({ nullable: true }).isString().isISO8601(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
-    body("responseRequiredBy").optional({ nullable: true }).isString().isISO8601(),
-    body("answeredDate").optional({ nullable: true }).isString().isISO8601(),
+    body("raisedDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("responseRequiredBy").optional({ nullable: true }).isString().custom(dateInput),
+    body("answeredDate").optional({ nullable: true }).isString().custom(dateInput),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("response").optional({ nullable: true }).isString(),
+    body("raisedBy").optional({ nullable: true }).isString(),
+    body("answeredBy").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -307,7 +314,7 @@ router.post(
     param("rfiId").isUUID(),
     body("description").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
     body("category").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
-    body("value").optional({ nullable: true }).isFloat({ min: 0 }),
+    body("value").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -346,9 +353,9 @@ router.post(
   requirePermission("rfi", "submit", { transition: "rfi.answer" }),
   [
     param("rfiId").isUUID(),
-    body("response").trim().notEmpty(),
+    body("response").isString().trim().notEmpty(),
     body("answeredBy").optional({ nullable: true }).isString().trim(),
-    body("answeredDate").optional({ nullable: true }).isString().isISO8601(),
+    body("answeredDate").optional({ nullable: true }).isString().custom(dateInput),
     body("ownerPartyId").optional({ nullable: true }).isString().isUUID(),
     body("reviewerPartyId").optional({ nullable: true }).isString().isUUID(),
     body("approverPartyId").optional({ nullable: true }).isString().isUUID(),
@@ -408,7 +415,7 @@ router.post(
 router.post(
   "/:rfiId/close",
   requirePermission("rfi", "approve", { transition: "rfi.close" }),
-  [param("rfiId").isUUID(), body("comment").trim().notEmpty(), validate],
+  [param("rfiId").isUUID(), body("comment").isString().trim().notEmpty(), validate],
   asyncHandler(async (req, res) => {
     const row = await closeRfi({
       orgId: req.user.orgId,
@@ -427,7 +434,7 @@ router.post(
 router.post(
   "/:rfiId/reopen",
   requirePermission("rfi", "approve", { transition: "rfi.reopen" }),
-  [param("rfiId").isUUID(), body("reason").trim().notEmpty(), validate],
+  [param("rfiId").isUUID(), body("reason").isString().trim().notEmpty(), validate],
   asyncHandler(async (req, res) => {
     const row = await reopenRfi({
       orgId: req.user.orgId,
@@ -459,7 +466,7 @@ const rejectRfiRoute = asyncHandler(async (req, res) => {
 
 const rejectRfiValidators = [
   param("rfiId").isUUID(),
-  body("reason").trim().notEmpty(),
+  body("reason").isString().trim().notEmpty(),
   validate,
 ];
 
@@ -502,10 +509,15 @@ router.patch(
     body("revisions").optional().isArray(),
     body("comment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("raisedDate").optional({ nullable: true }).isString().isISO8601(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
-    body("responseRequiredBy").optional({ nullable: true }).isString().isISO8601(),
-    body("answeredDate").optional({ nullable: true }).isString().isISO8601(),
+    body("raisedDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("responseRequiredBy").optional({ nullable: true }).isString().custom(dateInput),
+    body("answeredDate").optional({ nullable: true }).isString().custom(dateInput),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("response").optional({ nullable: true }).isString(),
+    body("raisedBy").optional({ nullable: true }).isString(),
+    body("answeredBy").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {

@@ -1,5 +1,6 @@
 const express = require('express');
 const { body } = require('express-validator');
+const { scalarFigure } = require('../utils/figure-input');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
@@ -37,7 +38,7 @@ router.put(
   [
     body('services').isArray({ max: 20 }).withMessage('services must be a list of at most 20 entries'),
     body('services.*.label').isString().trim().isLength({ min: 1, max: 80 }),
-    body('services.*.percentage').isFloat({ min: 0, max: 1000 }).toFloat(),
+    body('services.*.percentage').custom(scalarFigure).bail().isFloat({ min: 0, max: 1000 }).toFloat(),
     body('services').custom((services) => {
       const labels = services.map((service) => String(service?.label ?? '').trim().toLowerCase());
       if (new Set(labels).size !== labels.length) throw new Error('labels must be unique');

@@ -647,7 +647,7 @@ const activityInUse = (activity, keptBy, kept) =>
   );
 
 const deleteActivity = async ({ orgId, projectId, activityId }) => {
-  await ensureProject(orgId, projectId);
+  const project = await ensureProject(orgId, projectId);
   const activity = await ensureActivity(projectId, activityId);
 
   const counts = await Promise.all(
@@ -670,7 +670,28 @@ const deleteActivity = async ({ orgId, projectId, activityId }) => {
   }
 
   try {
-    await prisma.activity.delete({ where: { id: activityId } });
+    // The activity's order lines and planned materials go with it (the
+    // database cascades both), and every lead-time alert linked to them with
+    // them: the alert of the package a deleted line was the worst risk of
+    // went too, while another line on the package was five days late
+    // (CERT-2, round 6). The links that only point at them are released
+    // first, and every scope they were in is worked again once they are gone.
+    await prisma.$transaction(async (tx) => {
+      // Required here: procurement.service is not otherwise needed by this module.
+      const procurement = require('./procurement.service');
+      const [lines, materials] = await Promise.all([
+        tx.procurementPoLine.findMany({ where: { projectId, activityId }, select: { id: true } }),
+        tx.activityMaterial.findMany({ where: { projectId, activityId }, select: { id: true } }),
+      ]);
+      const released = await procurement.releaseLeadTimeAlertLinks({
+        tx,
+        projectId,
+        lineIds: lines.map((row) => row.id),
+        materialIds: materials.map((row) => row.id),
+      });
+      await tx.activity.delete({ where: { id: activityId } });
+      await procurement.syncReleasedLeadTimeAlerts({ tx, projectId, project, released });
+    });
   } catch (error) {
     // A record this list does not know keeps it: still a refusal, naming the
     // constraint, never a 500.
@@ -761,6 +782,10 @@ const bulkUpdateProgress = async ({
     userRole,
   });
 
+  // Each update's evidence is read before the batch's transaction
+  // (progress.service scanEvidence): the transaction looks its files up only
+  // (CERT-2 evidence-6).
+  const evidenceReads = list.map((update) => progressService.scanSubmissionEvidence({ projectId, payload: update }));
   const submissions = await prisma.$transaction(async (tx) => {
     const written = [];
     for (const [index, update] of list.entries()) {
@@ -774,6 +799,7 @@ const bulkUpdateProgress = async ({
             userRole,
             payload: update,
             tx,
+            evidenceScan: evidenceReads[index],
           }),
         );
       } catch (error) {

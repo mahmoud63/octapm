@@ -2,7 +2,10 @@ const crypto = require("crypto");
 const path = require("path");
 const express = require("express");
 const multer = require("multer");
+// The NUL / lone-surrogate guard again after multer: it parses the multipart body inside the route (CERT-2).
+const { rejectNullBytes } = require("../middleware/reject-null-bytes");
 const { body, param } = require("express-validator");
+const { scalarFigure, isScalarFigure, SCALAR_FIGURE_MESSAGE, MONEY_FIGURE_MAX } = require("../utils/figure-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { validate } = require("../middleware/validate");
@@ -17,6 +20,22 @@ const service = require("../services/bid.service");
 const router = express.Router();
 
 const tokenParam = param("token").isString().trim().isLength({ min: 20, max: 200 });
+
+/**
+ * A bidder's rate is one figure (CERT-2, robustness-6): a number, or the text
+ * the portal's rate box holds, which may separate thousands with commas
+ * ("1,250.00" — the service reads it with the commas removed). It had no
+ * check at all: [1,1] was read as String([1,1]) = "1,1" = 11 and priced the
+ * line at 11. Empty (null, "") is a line not priced yet. The rate must fit
+ * the bid line's Decimal(18,2).
+ */
+const bidRate = (value) => {
+  if (value === null || value === undefined || value === "") return true;
+  if (!isScalarFigure(value)) throw new Error(SCALAR_FIGURE_MESSAGE);
+  const rate = Number(String(value).replace(/,/g, ""));
+  if (!Number.isFinite(rate) || rate < 0 || rate > MONEY_FIGURE_MAX) throw new Error("must be a rate of 0 or more");
+  return true;
+};
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -57,7 +76,7 @@ router.post(
 
 router.put(
   "/:token/bid",
-  [tokenParam, body("lines").optional().isArray({ max: 500 }), body("lines.*.packageLineId").optional().isString().isUUID(), body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("inclusions").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("exclusions").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("validityDays").optional({ nullable: true }).isInt({ min: 0, max: 3650 }), body("leadTimeDays").optional({ nullable: true }).isInt({ min: 0, max: 3650 }), validate],
+  [tokenParam, body("lines").optional().isArray({ max: 500 }), body("lines.*.packageLineId").optional().isString().isUUID(), body("lines.*.rate").optional({ nullable: true }).custom(bidRate), body("lines.*.note").optional({ nullable: true }).isString(), body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("inclusions").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("exclusions").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }), body("validityDays").optional({ nullable: true }).custom(scalarFigure).bail().isInt({ min: 0, max: 3650 }), body("leadTimeDays").optional({ nullable: true }).custom(scalarFigure).bail().isInt({ min: 0, max: 3650 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.portalSaveBid(req.params.token, req.body))),
 );
 
@@ -71,6 +90,7 @@ router.post(
   "/:token/upload",
   [tokenParam, validate],
   upload.single("file"),
+  rejectNullBytes,
   asyncHandler(async (req, res) => {
     try {
       return sendSuccess(res, await service.portalUpload(req.params.token, { file: req.file }), 201);

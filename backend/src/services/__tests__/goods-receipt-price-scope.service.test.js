@@ -55,7 +55,7 @@ const mockAudit = { recordEvent: jest.fn(async () => ({})), ENTITY_TYPES: { DELI
 
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 jest.mock("../inventory.service", () => mockInventory);
-jest.mock("../procurement.service", () => ({ syncLeadTimeAlert: jest.fn() }));
+jest.mock("../procurement.service", () => ({ syncLeadTimeAlert: jest.fn(), syncLeadTimeAlerts: jest.fn(async () => []) }));
 jest.mock("../audit.service", () => mockAudit);
 
 const service = require("../goods-receipt.service");

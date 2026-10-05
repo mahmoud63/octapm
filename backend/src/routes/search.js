@@ -1,5 +1,6 @@
 const express = require("express");
 const { query } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -22,10 +23,15 @@ router.get(
     query("projectId").isString().optional({ values: "falsy" }).isUUID(),
     query("status").optional().isString().trim().isLength({ max: 255 }),
     query("statuses").optional().isString().trim().isLength({ max: 255 }),
-    query("dateFrom").isString().optional({ values: "falsy" }).isISO8601(),
-    query("dateTo").isString().optional({ values: "falsy" }).isISO8601(),
-    query("from").isString().optional({ values: "falsy" }).isISO8601(),
-    query("to").isString().optional({ values: "falsy" }).isISO8601(),
+    query("dateFrom").isString().optional({ values: "falsy" }).custom(dateInput),
+    query("dateTo").isString().optional({ values: "falsy" }).custom(dateInput),
+    query("from").isString().optional({ values: "falsy" }).custom(dateInput),
+    query("to").isString().optional({ values: "falsy" }).custom(dateInput),
+    // The service also reads these aliases of the range (search.service.js
+    // parseDateRange); unchecked, "notadate", a value sent twice or ?x[k]=v
+    // became an Invalid Date in the query and a 500 (CERT-2).
+    query("updatedAfter").isString().optional({ values: "falsy" }).custom(dateInput),
+    query("updatedBefore").isString().optional({ values: "falsy" }).custom(dateInput),
     query("includeArchived").isString().optional().isBoolean().toBoolean(),
     query("limit").isString().optional().isInt({ min: 1, max: 50 }).toInt(),
     validate,

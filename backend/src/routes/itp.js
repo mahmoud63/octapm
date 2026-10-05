@@ -2,6 +2,7 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { validate } = require("../middleware/validate");
 const { requirePermission } = require("../middleware/rbac");
 const {
@@ -33,7 +34,7 @@ router.post(
   "/",
   requirePermission("inspection", "create"),
   [
-    body("title").trim().notEmpty(),
+    body("title").isString().trim().notEmpty(),
     body("pointType").optional().isIn(["hold", "witness", "review"]),
     body("status").optional().isIn(["pending", "passed", "failed", "waived"]),
     body("owner").optional().isString().trim(),
@@ -49,8 +50,12 @@ router.post(
     body("attachmentRefs").optional().isArray(),
     body("comment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
-    body("inspectionDate").optional({ nullable: true }).isString().isISO8601(),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("inspectionDate").optional({ nullable: true }).isString().custom(dateInput),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("inspector").optional({ nullable: true }).isString(),
+    body("notes").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -86,8 +91,12 @@ router.patch(
     body("attachmentRefs").optional().isArray(),
     body("comment").optional().isString().trim(),
     body("statusComment").optional().isString().trim(),
-    body("dueDate").optional({ nullable: true }).isString().isISO8601(),
-    body("inspectionDate").optional({ nullable: true }).isString().isISO8601(),
+    body("dueDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("inspectionDate").optional({ nullable: true }).isString().custom(dateInput),
+    // Text the service trims (CERT-2, robustness-6): an object, an array, a number or a
+    // boolean here failed in its trim() with a TypeError (500), or reached Prisma.
+    body("inspector").optional({ nullable: true }).isString(),
+    body("notes").optional({ nullable: true }).isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {

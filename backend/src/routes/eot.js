@@ -1,6 +1,8 @@
 const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { body, param } = require("express-validator");
+const { scalarFigure, INT4_MAX } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { authenticate } = require("../middleware/auth");
 const {
   getEffectiveRole,
@@ -45,30 +47,30 @@ router.post(
   "/calculate",
   requireRoles("pm", "planning_eng", "qs"),
   [
-    body("eventName").trim().notEmpty(),
+    body("eventName").isString().trim().notEmpty(),
     body("eventType").optional({ nullable: true }).isString().trim(),
-    body("delayDays").isFloat({ min: 0 }),
-    body("eotDaysGranted").optional().isFloat({ min: 0 }),
+    body("delayDays").custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
+    body("eotDaysGranted").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
     moneyBody("ldRatePerDay"),
     body("affectedActivityIds").optional().isArray(),
     body("affectedActivityIds.*").optional().isString().isUUID(),
     body("activityLinks").optional().isArray(),
     body("activityLinks.*.activityId").optional().isString().isUUID(),
-    body("activityLinks.*.delayStart").optional({ nullable: true }).isString().isISO8601(),
-    body("activityLinks.*.delayEnd").optional({ nullable: true }).isString().isISO8601(),
-    body("activityLinks.*.delayDays").optional().isFloat({ min: 0 }),
+    body("activityLinks.*.delayStart").optional({ nullable: true }).isString().custom(dateInput),
+    body("activityLinks.*.delayEnd").optional({ nullable: true }).isString().custom(dateInput),
+    body("activityLinks.*.delayDays").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
     body("activityLinks.*.baselineStart")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.baselineFinish")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactedStart")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactedFinish")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactBasis")
       .optional({ nullable: true })
       .isString()
@@ -98,30 +100,30 @@ router.post(
   "/",
   requireRoles("pm", "planning_eng", "qs"),
   [
-    body("eventName").trim().notEmpty(),
+    body("eventName").isString().trim().notEmpty(),
     body("eventType").optional({ nullable: true }).isString().trim(),
-    body("delayDays").isFloat({ min: 0 }),
-    body("eotDaysGranted").optional().isFloat({ min: 0 }),
+    body("delayDays").custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
+    body("eotDaysGranted").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
     moneyBody("ldRatePerDay"),
     body("affectedActivityIds").optional().isArray(),
     body("affectedActivityIds.*").optional().isString().isUUID(),
     body("activityLinks").optional().isArray(),
     body("activityLinks.*.activityId").optional().isString().isUUID(),
-    body("activityLinks.*.delayStart").optional({ nullable: true }).isString().isISO8601(),
-    body("activityLinks.*.delayEnd").optional({ nullable: true }).isString().isISO8601(),
-    body("activityLinks.*.delayDays").optional().isFloat({ min: 0 }),
+    body("activityLinks.*.delayStart").optional({ nullable: true }).isString().custom(dateInput),
+    body("activityLinks.*.delayEnd").optional({ nullable: true }).isString().custom(dateInput),
+    body("activityLinks.*.delayDays").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
     body("activityLinks.*.baselineStart")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.baselineFinish")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactedStart")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactedFinish")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactBasis")
       .optional({ nullable: true })
       .isString()
@@ -132,11 +134,11 @@ router.post(
     body("weatherDelayLinks.*.weatherDelayId").optional().isString().isUUID(),
     body("weatherDelayLinks.*.delayStart")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("weatherDelayLinks.*.delayEnd")
       .optional({ nullable: true })
-      .isString().isISO8601(),
-    body("weatherDelayLinks.*.delayDays").optional().isFloat({ min: 0 }),
+      .isString().custom(dateInput),
+    body("weatherDelayLinks.*.delayDays").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
     body("correspondenceIds").optional().isArray(),
     body("correspondenceIds.*").optional().isString().isUUID(),
     body("correspondenceLinks").optional().isArray(),
@@ -230,7 +232,7 @@ const rejectEotRoute = asyncHandler(async (req, res) => {
 
 const rejectEotValidators = [
   param("claimId").isUUID(),
-  body("reason").trim().notEmpty().isLength({ max: 2000 }),
+  body("reason").isString().trim().notEmpty().isLength({ max: 2000 }),
   validate,
 ];
 
@@ -253,33 +255,33 @@ router.patch(
   requireRoles("pm", "planning_eng", "qs"),
   [
     param("claimId").isUUID(),
-    body("eventName").optional().trim().notEmpty(),
+    body("eventName").optional().isString().trim().notEmpty(),
     body("eventType").optional({ nullable: true }).isString().trim(),
-    body("delayDays").optional().isFloat({ min: 0 }),
+    body("delayDays").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
     body("status")
       .optional()
       .isIn(["draft"]),
-    body("eotDaysGranted").optional().isFloat({ min: 0 }),
+    body("eotDaysGranted").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
     moneyBody("ldRatePerDay"),
     body("affectedActivityIds").optional().isArray(),
     body("affectedActivityIds.*").optional().isString().isUUID(),
     body("activityLinks").optional().isArray(),
     body("activityLinks.*.activityId").optional().isString().isUUID(),
-    body("activityLinks.*.delayStart").optional({ nullable: true }).isString().isISO8601(),
-    body("activityLinks.*.delayEnd").optional({ nullable: true }).isString().isISO8601(),
-    body("activityLinks.*.delayDays").optional().isFloat({ min: 0 }),
+    body("activityLinks.*.delayStart").optional({ nullable: true }).isString().custom(dateInput),
+    body("activityLinks.*.delayEnd").optional({ nullable: true }).isString().custom(dateInput),
+    body("activityLinks.*.delayDays").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
     body("activityLinks.*.baselineStart")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.baselineFinish")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactedStart")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactedFinish")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactBasis")
       .optional({ nullable: true })
       .isString()
@@ -290,11 +292,11 @@ router.patch(
     body("weatherDelayLinks.*.weatherDelayId").optional().isString().isUUID(),
     body("weatherDelayLinks.*.delayStart")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("weatherDelayLinks.*.delayEnd")
       .optional({ nullable: true })
-      .isString().isISO8601(),
-    body("weatherDelayLinks.*.delayDays").optional().isFloat({ min: 0 }),
+      .isString().custom(dateInput),
+    body("weatherDelayLinks.*.delayDays").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: INT4_MAX }),
     body("correspondenceIds").optional().isArray(),
     body("correspondenceIds.*").optional().isString().isUUID(),
     body("correspondenceLinks").optional().isArray(),

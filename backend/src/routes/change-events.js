@@ -1,5 +1,8 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, MONEY_FIGURE_MAX } = require("../utils/figure-input");
+const { QUANTITY_MAX } = require("../utils/stock-figures");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -33,8 +36,8 @@ const eventValidators = (partial = false) => [
   idOrNull("sourceRecordId"),
   idOrNull("activityId"),
   idOrNull("locationId"),
-  body("romAmount").optional({ nullable: true }).isFloat({ min: 0 }),
-  body("scheduleImpactDays").optional().isInt({ min: 0, max: 3650 }),
+  body("romAmount").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }),
+  body("scheduleImpactDays").optional().custom(scalarFigure).bail().isInt({ min: 0, max: 3650 }),
   body("ownerChange").optional().isBoolean().toBoolean(),
   body("notes").optional({ nullable: true }).isString().isLength({ max: 4000 }),
   body("lines").optional().isArray({ max: 200 }),
@@ -44,10 +47,10 @@ const eventValidators = (partial = false) => [
   body("lines.*.budgetLineId").optional({ nullable: true }).isString(),
   body("lines.*.activityId").optional({ nullable: true }).isString(),
   body("lines.*.commitmentId").optional({ nullable: true }).isString(),
-  body("lines.*.quantity").optional().isFloat({ min: 0 }),
+  body("lines.*.quantity").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
   body("lines.*.unit").optional({ nullable: true }).isString().isLength({ max: 20 }),
-  body("lines.*.unitCost").optional({ nullable: true }).isFloat({ min: 0 }),
-  body("lines.*.romAmount").optional({ nullable: true }).isFloat({ min: 0 }),
+  body("lines.*.unitCost").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }),
+  body("lines.*.romAmount").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }),
   body("lines.*.notes").optional({ nullable: true }).isString().isLength({ max: 1000 }),
 ];
 
@@ -65,10 +68,10 @@ router.delete("/:changeEventId", requirePermission("change_event", "delete"), [p
 router.post(
   "/:changeEventId/rfqs",
   requirePermission("change_event", "submit", { transition: "change_event.rfq_send" }),
-  [param("changeEventId").isUUID(), body("recipients").isArray({ min: 1, max: 50 }), body("recipients.*.commitmentId").optional({ nullable: true }).isString(), body("recipients.*.vendorCompanyId").optional({ nullable: true }).isString(), body("recipients.*.companyName").optional({ nullable: true }).isString().isLength({ max: 200 }), body("recipients.*.contactName").optional({ nullable: true }).isString().isLength({ max: 120 }), body("recipients.*.contactEmail").optional({ nullable: true }).isString().isLength({ max: 200 }), body("dueDate").optional({ nullable: true }).isISO8601(), body("instructions").optional({ nullable: true }).isString().isLength({ max: 4000 }), body("lineIds").optional().isArray({ max: 200 }), validate],
+  [param("changeEventId").isUUID(), body("recipients").isArray({ min: 1, max: 50 }), body("recipients.*.commitmentId").optional({ nullable: true }).isString(), body("recipients.*.vendorCompanyId").optional({ nullable: true }).isString(), body("recipients.*.companyName").optional({ nullable: true }).isString().isLength({ max: 200 }), body("recipients.*.contactName").optional({ nullable: true }).isString().isLength({ max: 120 }), body("recipients.*.contactEmail").optional({ nullable: true }).isString().isLength({ max: 200 }), body("dueDate").optional({ nullable: true }).custom(dateInput), body("instructions").optional({ nullable: true }).isString().isLength({ max: 4000 }), body("lineIds").optional().isArray({ max: 200 }), validate],
   asyncHandler(async (req, res) => send(req, res, await service.sendRfqs({ ...scope(req), changeEventId: req.params.changeEventId, payload: req.body, actor: actorFor(req), access: boqFigureAccess(req) }), 201)),
 );
-router.post("/:changeEventId/convert", requirePermission("change_event", "approve", { transition: "change_event.convert" }), [param("changeEventId").isUUID(), body("value").optional({ nullable: true }).isFloat({ min: 0 }), body("description").optional({ nullable: true }).isString().isLength({ max: 2000 }), body("includeCommitmentChangeOrders").optional().isBoolean().toBoolean(), validate], asyncHandler(async (req, res) => send(req, res, await service.convertToChangeOrder({ ...scope(req), changeEventId: req.params.changeEventId, payload: req.body, actor: actorFor(req), access: boqFigureAccess(req) }), 201)));
+router.post("/:changeEventId/convert", requirePermission("change_event", "approve", { transition: "change_event.convert" }), [param("changeEventId").isUUID(), body("value").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }), body("description").optional({ nullable: true }).isString().isLength({ max: 2000 }), body("includeCommitmentChangeOrders").optional().isBoolean().toBoolean(), validate], asyncHandler(async (req, res) => send(req, res, await service.convertToChangeOrder({ ...scope(req), changeEventId: req.params.changeEventId, payload: req.body, actor: actorFor(req), access: boqFigureAccess(req) }), 201)));
 router.post("/:changeEventId/close", requirePermission("change_event", "approve", { transition: "change_event.close" }), [param("changeEventId").isUUID(), body("reason").optional({ nullable: true }).isString().isLength({ max: 500 }), validate], asyncHandler(async (req, res) => send(req, res, await service.closeChangeEvent({ ...scope(req), changeEventId: req.params.changeEventId, payload: req.body, actor: actorFor(req) }))));
 router.post("/:changeEventId/void", requirePermission("change_event", "approve", { transition: "change_event.void" }), [param("changeEventId").isUUID(), body("reason").isString().trim().isLength({ min: 1, max: 1000 }), validate], asyncHandler(async (req, res) => send(req, res, await service.voidChangeEvent({ ...scope(req), changeEventId: req.params.changeEventId, payload: req.body, actor: actorFor(req) }))));
 

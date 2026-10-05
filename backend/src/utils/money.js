@@ -2,6 +2,7 @@ const { Prisma } = require('@prisma/client');
 const { Decimal: PrismaRuntimeDecimal } = require('@prisma/client/runtime/library');
 const { body } = require('express-validator');
 const { HttpError } = require('./http-error');
+const { scalarFigure } = require('./figure-input');
 
 const MONEY_SCALE = 2;
 const MONEY_PRECISION = 18;
@@ -148,7 +149,12 @@ const moneyBody = (
 ) => {
   const chain = body(field);
   const guarded = required ? chain : chain.optional({ nullable });
+  // One value (CERT-2): String([5]) is "5", so a one-element array passed
+  // the money check below and reached the service as an array. A refused
+  // value stops the chain (bail): toFloat() would convert it.
   return guarded
+    .custom(scalarFigure)
+    .bail()
     .custom((value) => assertMoneyInput(field, value, { required, min }))
     .toFloat();
 };

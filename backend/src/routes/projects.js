@@ -1,5 +1,7 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, INT4_MAX } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -62,6 +64,14 @@ const emptyStringToNull = (value) => {
   return trimmed || null;
 };
 
+// A sanitizer runs whatever the checks before it found: express-validator
+// stops a chain only at bail(). The currency's toUpperCase() ran on a number,
+// a list, an object or a flag and answered 500 'value.toUpperCase is not a
+// function' (CERT-2, trivial-7), and a choice (optionalEnum) was sanitized
+// before any check — ['epc'] was read as 'epc' and stored. Each now checks it
+// is one text first and stops there (400 VALIDATION_ERROR naming the field).
+// optionalText needs no stop: its trim() turns any value into a text before
+// emptyStringToNull reads it, and its isString() refuses the request.
 const optionalText = (field) =>
   body(field)
     .optional({ nullable: true })
@@ -73,6 +83,8 @@ const optionalText = (field) =>
 const optionalEnum = (field, values) =>
   body(field)
     .optional({ nullable: true })
+    .isString()
+    .bail()
     .customSanitizer(emptyStringToNull)
     .custom((value) => {
       if (value === null || values.includes(value)) return true;
@@ -90,29 +102,30 @@ const projectPayloadValidators = ({ requireName = false } = {}) => [
   optionalText("contractorName"),
   optionalEnum("contractType", CONTRACT_TYPES),
   optionalText("contractNumber"),
-  body("startDate").optional({ nullable: true }).isString().isISO8601(),
-  body("endDate").optional({ nullable: true }).isString().isISO8601(),
-  body("completionDate").optional({ nullable: true }).isString().isISO8601(),
-  body("baselineDate").optional({ nullable: true }).isString().isISO8601(),
-  body("dataDate").optional({ nullable: true }).isString().isISO8601(),
-  body("revisedCompletionDate").optional({ nullable: true }).isString().isISO8601(),
-  body("duration").optional({ nullable: true }).isInt({ min: 0 }).toInt(),
+  body("startDate").optional({ nullable: true }).isString().custom(dateInput),
+  body("endDate").optional({ nullable: true }).isString().custom(dateInput),
+  body("completionDate").optional({ nullable: true }).isString().custom(dateInput),
+  body("baselineDate").optional({ nullable: true }).isString().custom(dateInput),
+  body("dataDate").optional({ nullable: true }).isString().custom(dateInput),
+  body("revisedCompletionDate").optional({ nullable: true }).isString().custom(dateInput),
+  body("duration").optional({ nullable: true }).custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
   body("durationUnit").optional().isIn(["days", "weeks", "months"]),
   moneyBody("contractValue"),
   body("defaultRetentionRate")
     .optional({ nullable: true })
-    .isFloat({ min: 0, max: 100 })
+    .custom(scalarFigure).bail().isFloat({ min: 0, max: 100 })
     .toFloat(),
   moneyBody("ldRatePerDay"),
-  body("weatherAllowanceDays").optional().isInt({ min: 0 }).toInt(),
+  body("weatherAllowanceDays").optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
   optionalEnum("projectCalendar", PROJECT_CALENDARS),
   body("reportingCutoffDay")
     .optional({ nullable: true })
-    .isInt({ min: 1, max: 31 })
+    .custom(scalarFigure).bail().isInt({ min: 1, max: 31 })
     .toInt(),
   body("currency")
     .optional()
     .isString()
+    .bail()
     .isLength({ min: 3, max: 3 })
     .customSanitizer((value) => value.toUpperCase()),
   body("status")
@@ -138,7 +151,7 @@ const projectPayloadValidators = ({ requireName = false } = {}) => [
     .isLength({ max: 255 }),
   body("parties.*.contactEmail")
     .optional({ nullable: true })
-    .isEmail()
+    .isString().isEmail()
     .normalizeEmail(),
   body("parties.*.contactPhone")
     .optional({ nullable: true })

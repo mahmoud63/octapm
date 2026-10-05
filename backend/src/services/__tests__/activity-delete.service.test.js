@@ -1,6 +1,11 @@
 const mockPrisma = {
   project: { findFirst: jest.fn() },
   activity: { findFirst: jest.fn(), delete: jest.fn() },
+  // CERT-2 (alerts-6): the activity's order lines and materials, read before
+  // the delete so the lead-time alerts that point at them outlive them.
+  procurementPoLine: { findMany: jest.fn() },
+  activityMaterial: { findMany: jest.fn() },
+  $transaction: jest.fn(async (fn) => fn(mockPrisma)),
   costRecord: { count: jest.fn() },
   activityProgress: { count: jest.fn() },
   dailyReport: { count: jest.fn() },
@@ -20,6 +25,10 @@ jest.mock('../cpm.service', () => ({
 jest.mock('../activity-dependency.service', () => ({
   replaceActivityDependencies: jest.fn(),
   serializeDependencyDto: jest.fn(),
+}));
+jest.mock('../procurement.service', () => ({
+  releaseLeadTimeAlertLinks: jest.fn(async ({ lineIds, materialIds }) => ({ lineIds, materialIds, packageIds: ['pkg-1'], survivingMaterialIds: [], survivingLineIds: [] })),
+  syncReleasedLeadTimeAlerts: jest.fn(async () => []),
 }));
 jest.mock('../progress.service', () => ({
   assertProgressSubmitAllowed: jest.fn(),
@@ -55,6 +64,23 @@ describe('deleteActivity', () => {
     mockPrisma.quantityProgressEntry.count.mockResolvedValue(0);
     mockPrisma.dailyLogQuantity.count.mockResolvedValue(0);
     mockPrisma.activity.delete.mockResolvedValue(activity);
+    mockPrisma.procurementPoLine.findMany.mockResolvedValue([]);
+    mockPrisma.activityMaterial.findMany.mockResolvedValue([]);
+  });
+
+  it('CERT-2 (alerts-6): the lead-time alerts pointing at its order lines and materials give the links up before the delete, and their scopes are worked again after it, in one transaction', async () => {
+    const procurement = require('../procurement.service');
+    mockPrisma.procurementPoLine.findMany.mockResolvedValue([{ id: 'line-1' }, { id: 'line-2' }]);
+    mockPrisma.activityMaterial.findMany.mockResolvedValue([{ id: 'material-1' }]);
+    await expect(call()).resolves.toEqual({ deleted: true });
+    expect(mockPrisma.procurementPoLine.findMany).toHaveBeenCalledWith({ where: { projectId: 'project-1', activityId: 'activity-1' }, select: { id: true } });
+    expect(procurement.releaseLeadTimeAlertLinks).toHaveBeenCalledWith(expect.objectContaining({ tx: mockPrisma, projectId: 'project-1', lineIds: ['line-1', 'line-2'], materialIds: ['material-1'] }));
+    const released = await procurement.releaseLeadTimeAlertLinks.mock.results[0].value;
+    expect(procurement.syncReleasedLeadTimeAlerts).toHaveBeenCalledWith(expect.objectContaining({ tx: mockPrisma, projectId: 'project-1', released }));
+    const order = (fn) => fn.mock.invocationCallOrder[0];
+    expect(order(procurement.releaseLeadTimeAlertLinks)).toBeLessThan(order(mockPrisma.activity.delete));
+    expect(order(mockPrisma.activity.delete)).toBeLessThan(order(procurement.syncReleasedLeadTimeAlerts));
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
   it('deletes an activity that no record keeps', async () => {

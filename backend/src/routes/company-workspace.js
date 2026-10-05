@@ -1,5 +1,7 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, INT4_MAX } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -49,14 +51,14 @@ const vendorValidators = ({ requireName = false } = {}) => [
   body("tradeName").optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
   body("registrationNumber").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
   body("taxNumber").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
-  body("email").optional({ nullable: true }).isEmail().normalizeEmail(),
+  body("email").optional({ nullable: true }).isString().isEmail().normalizeEmail(),
   body("phone").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
   body("website").optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
   body("address").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
   body("contactName").optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
   body("trades").optional(),
   body("vendorProfile").optional({ nullable: true }).isObject(),
-  body("leadTimeReliability").optional({ nullable: true }).isFloat({ min: 0, max: 100 }).toFloat(),
+  body("leadTimeReliability").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }).toFloat(),
   body("paymentTerms").optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
   body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
   body("status").optional().isIn(["active", "inactive"]),
@@ -179,10 +181,10 @@ router.patch(
   [
     param("id").isUUID(),
     param("key").isString().trim().isLength({ min: 1, max: 60 }),
-    body("score").optional({ nullable: true }).isInt({ min: 0, max: 5 }).toInt(),
+    body("score").optional({ nullable: true }).custom(scalarFigure).bail().isInt({ min: 0, max: 5 }).toInt(),
     body("note").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
     body("reference").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
-    body("expiresAt").optional({ nullable: true }).isISO8601(),
+    body("expiresAt").optional({ nullable: true }).custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -205,7 +207,7 @@ router.post(
   [
     param("id").isUUID(),
     body("status").isIn(prequalService.DECIDED),
-    body("validUntil").optional({ nullable: true }).isISO8601(),
+    body("validUntil").optional({ nullable: true }).custom(dateInput),
     body("conditions").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
     body("decisionNote").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
     moneyBody("singleAwardLimit", { nullable: true }),
@@ -252,7 +254,7 @@ const costCodeValidators = ({ requireAll = false } = {}) => [
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
   body("category").optional().isIn(companyWorkspaceService.COST_CODE_CATEGORIES),
   body("parentId").optional({ nullable: true }).isString().isUUID(),
-  body("sortOrder").optional().isInt({ min: 0 }).toInt(),
+  body("sortOrder").optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
   body("status").optional().isIn(["active", "archived"]),
   validate,
 ];
@@ -519,7 +521,7 @@ const submittalTemplateValidators = ({ requireName = false } = {}) => [
   body("status").optional().isIn(["active", "archived"]),
   body("steps").optional().isArray({ max: 12 }),
   body("steps.*.mode").optional().isIn(["sequential", "parallel"]),
-  body("steps.*.days").optional().isInt({ min: 0, max: 365 }).toInt(),
+  body("steps.*.days").optional().custom(scalarFigure).bail().isInt({ min: 0, max: 365 }).toInt(),
   body("steps.*.assignees").optional().isArray({ max: 20 }),
   validate,
 ];
@@ -569,7 +571,7 @@ const workflowTemplateValidators = ({ requireName = false } = {}) => [
   body("tool").optional().isIn(workflowTools.TOOL_KEYS),
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
   body("isDefault").optional().isBoolean().toBoolean(),
-  body("priority").optional().isInt({ min: -100, max: 100 }).toInt(),
+  body("priority").optional().custom(scalarFigure).bail().isInt({ min: -100, max: 100 }).toInt(),
   body("status").optional().isIn(["active", "archived"]),
   body("rules").optional().isArray({ max: 20 }),
   body("steps").optional().isArray({ max: 20 }),
@@ -661,7 +663,7 @@ const customFieldValidators = ({ requireLabel = false } = {}) => [
   body("hidden").optional().isBoolean().toBoolean(),
   body("validation").optional({ nullable: true }).isObject(),
   body("condition").optional({ nullable: true }),
-  body("position").optional().isInt({ min: 0, max: 10000 }).toInt(),
+  body("position").optional().custom(scalarFigure).bail().isInt({ min: 0, max: 10000 }).toInt(),
   body("status").optional().isIn(["active", "archived"]),
   validate,
 ];
@@ -740,7 +742,7 @@ const recordTypeValidators = ({ requireLabel = false } = {}) => [
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
   body("fieldsetId").optional({ nullable: true }).isString().isUUID(),
   body("settings").optional({ nullable: true }).isObject(),
-  body("position").optional().isInt({ min: 0, max: 10000 }).toInt(),
+  body("position").optional().custom(scalarFigure).bail().isInt({ min: 0, max: 10000 }).toInt(),
   body("status").optional().isIn(["active", "archived"]),
   validate,
 ];

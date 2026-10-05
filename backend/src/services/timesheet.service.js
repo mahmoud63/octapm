@@ -8,6 +8,7 @@ const costLedger = require("./cost-ledger.service");
 const notificationService = require("./notification.service");
 const { isPartyScopedAccess } = require("./company-party.service");
 const { assertMembers } = require("./tenant-references.service");
+const { MONEY_MAX, toMoneyDecimal } = require("../utils/money");
 
 /**
  * Timesheets and crews (OCTA-FLD-TIME-037).
@@ -490,16 +491,23 @@ const normalizeEntries = async ({ orgId, projectId, rows, viewer }) => {
   return { entries, workerById };
 };
 
+/**
+ * What a timesheet's entries come to. The cost is added up as an exact
+ * decimal, and that decimal is what is checked and what is stored (CERT-2,
+ * round 6): added up in floating point, entries of 5,000,000,000,000,000 and
+ * 4,999,999,999,999,999 came to 10^16 — the check, in decimals, let the
+ * timesheet through and the write of the float overflowed its column.
+ */
 const totalsOf = (entries) => {
   let regular = 0;
   let overtime = 0;
-  let cost = 0;
+  let cost = toMoneyDecimal(0);
   for (const entry of entries) {
     if (entry.timeType === "regular") regular += toNumber(entry.hours);
     else overtime += toNumber(entry.hours);
-    cost += toNumber(entry.amount);
+    cost = cost.plus(toMoneyDecimal(entry.amount || 0));
   }
-  return { regularHours: round2(regular), overtimeHours: round2(overtime), totalCost: round2(cost) };
+  return { regularHours: round2(regular), overtimeHours: round2(overtime), totalCost: cost };
 };
 
 const listTimesheets = async ({ orgId, projectId, query = {}, viewer = null }) => {
@@ -635,13 +643,26 @@ const submitTimesheet = async ({ orgId, projectId, timesheetId, actor = null, vi
 const approveTimesheet = async ({ orgId, projectId, timesheetId, actor = null, viewer = null }) => {
   const existing = await loadTimesheet({ orgId, projectId, timesheetId, viewer });
   if (existing.status !== STATUS.SUBMITTED) throw new HttpError(409, "TIMESHEET_NOT_SUBMITTED", "Only submitted timesheets can be approved");
+  // What each entry costs, and what they come to. The timesheet's total is a
+  // Decimal(18,2) like each entry's amount, and entries that each fit can
+  // together pass it: two workers on one day at the highest rate with
+  // overtime were a 500 at the write (CERT-2). Refused before anything is
+  // posted; what the activities and budget lines can take is the ledger's
+  // check (cost-ledger assertPostingFits).
+  const priced = existing.entries.map((entry) => {
+    const rate = entry.rate !== null && entry.rate !== undefined ? toNumber(entry.rate) : toNumber(entry.worker?.hourlyRate, 0);
+    return { entry, rate, amount: round2(toNumber(entry.hours) * rate * multiplierFor(entry.timeType, entry.worker)) };
+  });
+  // The totals checked here are the totals written below (round 6).
+  const totals = totalsOf(priced.map(({ entry, rate, amount }) => ({ ...entry, rate, amount })));
+  if (totals.totalCost.greaterThan(MONEY_MAX)) {
+    throw new HttpError(400, "TIMESHEET_TOTAL_TOO_LARGE", "This timesheet's labour cost comes to more than a timesheet can record");
+  }
   const now = new Date();
   const row = await prisma.$transaction(async (tx) => {
     await lockTimesheetExpecting(tx, timesheetId, [STATUS.SUBMITTED], "TIMESHEET_NOT_SUBMITTED", () => "Only submitted timesheets can be approved");
     const posted = [];
-    for (const entry of existing.entries) {
-      const rate = entry.rate !== null && entry.rate !== undefined ? toNumber(entry.rate) : toNumber(entry.worker?.hourlyRate, 0);
-      const amount = round2(toNumber(entry.hours) * rate * multiplierFor(entry.timeType, entry.worker));
+    for (const { entry, rate, amount } of priced) {
       // Through the cost ledger (OCTA-FIN-LEDGER-059), so labour is traceable
       // back to the timesheet entry that produced it and reconciles like every
       // other source.
@@ -667,7 +688,6 @@ const approveTimesheet = async ({ orgId, projectId, timesheetId, actor = null, v
       await tx.timeEntry.update({ where: { id: entry.id }, data: { rate, amount, postedAmount: result.posted ? amount : toNumber(entry.postedAmount), budgetLineId } });
       posted.push({ ...entry, rate, amount });
     }
-    const totals = totalsOf(posted);
     await tx.timesheet.update({ where: { id: timesheetId }, data: { status: STATUS.APPROVED, approvedBy: actor?.id || null, approvedAt: now, postedAt: now, ...totals } });
     return loadTimesheet({ orgId, projectId, timesheetId, viewer, tx });
   });

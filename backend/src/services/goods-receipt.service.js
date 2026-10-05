@@ -364,6 +364,17 @@ const nextReceiptNumber = async (tx, projectId) =>
 
 const RECEIVABLE_STATUSES = new Set(["issued", "acknowledged", "partial", "received"]);
 
+/**
+ * A delivery is one transaction however many lines it carries: every line
+ * moves stock, writes a receipt line and advances its order line. Prisma's
+ * default five-second interactive window was outlived by a delivery of 240
+ * lines at the baseline commit, and of 120 under ordinary load once the
+ * lead-time alerts no longer cost anything per line (CERT-2, round 6: 5.7 s,
+ * 500 P2028 transaction expired) — and the storeman was told the system
+ * broke. The window of the other batch writers (activity bulk progress).
+ */
+const RECEIPT_TRANSACTION = Object.freeze({ maxWait: 10_000, timeout: 60_000 });
+
 const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = null }) => {
   const lines = Array.isArray(payload.lines) ? payload.lines : [];
   if (!lines.length) {
@@ -607,6 +618,8 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
     const posted = [];
     // One entry per line received, for the result the screen shows back.
     const outcomes = [];
+    // The lines as received, for their lead-time alerts once every line is in.
+    const delivered = [];
     for (const reported of lines) {
       const line = order.lines.find((candidate) => candidate.id === reported.poLineId);
       if (!line) {
@@ -732,15 +745,20 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
         status: nextStatus,
       });
 
-      // And the lead-time alert, which is about whether this material arrives
-      // in time for the activity — a question a delivery obviously changes.
-      await procurement.syncLeadTimeAlert({
-        tx,
-        projectId: order.projectId,
-        project: order.project,
-        line: { ...line, ...updatedLine },
-      });
+      delivered.push({ ...line, ...updatedLine });
     }
+
+    // And the lead-time alerts, which are about whether this material arrives
+    // in time for the activity — a question a delivery obviously changes.
+    // Every scope the delivered lines are in, worked once after the last line,
+    // not once per line (CERT-2, round 6: 120 lines received answered 500,
+    // the transaction expired).
+    await procurement.syncLeadTimeAlerts({
+      tx,
+      projectId: order.projectId,
+      project: order.project,
+      lines: delivered,
+    });
 
     // The order's own progress, from its lines rather than a separate counter.
     const refreshed = await tx.procurementPoLine.findMany({ where: { orderId: order.id } });
@@ -813,7 +831,7 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
         onHand: round(num(onHandByItem.get(row.itemId))),
       })),
     };
-  });
+  }, RECEIPT_TRANSACTION);
 };
 
 // ─── three-way match ───────────────────────────────────────────────────────

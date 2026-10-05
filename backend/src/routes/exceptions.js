@@ -1,5 +1,8 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, MONEY_FIGURE_MAX } = require("../utils/figure-input");
+const { QUANTITY_MAX } = require("../utils/stock-figures");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -46,19 +49,19 @@ const draftValidators = [
   body("notes").optional({ nullable: true }).isString().isLength({ max: 4000 }),
   body("activityId").optional({ nullable: true }).isString(),
   body("locationId").optional({ nullable: true }).isString(),
-  body("scheduleImpactDays").optional().isInt({ min: 0, max: 3650 }),
+  body("scheduleImpactDays").optional().custom(scalarFigure).bail().isInt({ min: 0, max: 3650 }),
   body("ownerChange").optional().isBoolean().toBoolean(),
-  body("romAmount").optional({ nullable: true }).isFloat({ min: 0 }),
+  body("romAmount").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }),
   body("lines").optional().isArray({ max: 200 }),
   body("lines.*.description").isString().trim().isLength({ min: 1, max: 500 }),
   body("lines.*.costCodeId").optional({ nullable: true }).isString(),
   body("lines.*.budgetLineId").optional({ nullable: true }).isString(),
   body("lines.*.activityId").optional({ nullable: true }).isString(),
   body("lines.*.commitmentId").optional({ nullable: true }).isString(),
-  body("lines.*.quantity").optional().isFloat({ min: 0 }),
+  body("lines.*.quantity").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
   body("lines.*.unit").optional({ nullable: true }).isString().isLength({ max: 20 }),
-  body("lines.*.unitCost").optional({ nullable: true }).isFloat({ min: 0 }),
-  body("lines.*.romAmount").optional({ nullable: true }).isFloat({ min: 0 }),
+  body("lines.*.unitCost").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }),
+  body("lines.*.romAmount").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: MONEY_FIGURE_MAX }),
   body("lines.*.notes").optional({ nullable: true }).isString().isLength({ max: 1000 }),
 ];
 const draftBody = (req) => {
@@ -98,7 +101,7 @@ router.post(
 );
 router.post(
   "/:exceptionId/snooze",
-  [exceptionIdParam, body("until").isISO8601(), body("reason").isString().trim().isLength({ min: 1, max: 500 }), validate],
+  [exceptionIdParam, body("until").custom(dateInput), body("reason").isString().trim().isLength({ min: 1, max: 500 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.snoozeException({ ...scope(req), ...callerFor(req), exceptionId: req.params.exceptionId, actor: actorFor(req), payload: req.body }))),
 );
 router.post(

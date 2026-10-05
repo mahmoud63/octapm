@@ -1,5 +1,9 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
+const { scalarFigure, INT4_MAX } = require('../utils/figure-input');
+const { SCHEDULE_DAYS_MAX } = require('../utils/schedule-days');
+const { QUANTITY_MAX } = require('../utils/stock-figures');
+const { dateInput } = require('../utils/date-input');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
@@ -7,6 +11,7 @@ const { getEffectiveRole, requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const { moneyBody } = require('../utils/money');
 const activityService = require('../services/activity.service');
+const { parsePredecessors } = require('../services/activity-dependency.service');
 // An activity's approved BOQ allocation (quantity, value, weight) is for
 // those who may read the BOQ, its budget for those who may read the BOQ or
 // the cost module (§12); every answer that carries an activity goes through
@@ -52,6 +57,22 @@ const VALID_PROGRESS_METHODS = [
 const VALID_PROGRESS_SOURCES = ['manual', 'import', 'mobile', 'daily_report'];
 const VALID_PROGRESS_STATUSES = ['draft', 'submitted'];
 
+// An activity's duration, day offsets and float, and a dependency's lag, are
+// at most SCHEDULE_DAYS_MAX days (a hundred years; utils/schedule-days). They
+// were taken up to INT4_MAX, and the dates worked out from them on every read
+// and in every PATCH walked one day at a time: a duration of 1,000,000 held
+// the PATCH's transaction past its five seconds (500), and past about 71
+// million days the walk never ended (CERT-2, trivial-7).
+const scheduleDays = (field, { min = 0 } = {}) =>
+  body(field).optional().custom(scalarFigure).bail().isInt({ min, max: SCHEDULE_DAYS_MAX }).toInt();
+// The lags the predecessors text names ("A1 FS+2, A2 SS-1"), bounded as
+// dependencies[].lagDays are: "A1 FS+999999999" was taken as given.
+const predecessorLagsFit = (text) => {
+  const tooLong = parsePredecessors(text).find((link) => Math.abs(link.lagDays) > SCHEDULE_DAYS_MAX);
+  if (tooLong) throw new Error(`a lag is at most ${SCHEDULE_DAYS_MAX} days either way (${tooLong.raw})`);
+  return true;
+};
+
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 
@@ -80,15 +101,15 @@ router.post(
       .trim()
       .isLength({ max: 64 }),
     body('wbsCode').optional().isString().trim(),
-    body('startDate').optional().isString().isISO8601(),
-    body('endDate').optional().isString().isISO8601(),
-    body('earlyStart').optional().isInt({ min: 0 }).toInt(),
-    body('earlyFinish').optional().isInt({ min: 0 }).toInt(),
-    body('lateStart').optional().isInt({ min: 0 }).toInt(),
-    body('lateFinish').optional().isInt({ min: 0 }).toInt(),
-    body('totalFloat').optional().isInt({ min: 0 }).toInt(),
-    body('duration').optional().isInt({ min: 0 }).toInt(),
-    body('predecessors').optional().isString().trim(),
+    body('startDate').optional().isString().custom(dateInput),
+    body('endDate').optional().isString().custom(dateInput),
+    scheduleDays('earlyStart'),
+    scheduleDays('earlyFinish'),
+    scheduleDays('lateStart'),
+    scheduleDays('lateFinish'),
+    scheduleDays('totalFloat'),
+    scheduleDays('duration'),
+    body('predecessors').optional().isString().bail().trim().custom(predecessorLagsFit),
     body('dependencies').optional().isArray(),
     // One string each (CERT-2 shapes): isUUID() alone took ["<id>"] element
     // by element, and the service then read it as the activity it wraps.
@@ -96,11 +117,11 @@ router.post(
     body('dependencies.*.predecessorActivityId').optional().isString().isUUID(),
     body('dependencies.*.predecessorRef').optional().isString().trim(),
     body('dependencies.*.relationshipType').optional().isIn(VALID_RELATIONSHIPS),
-    body('dependencies.*.lagDays').optional().isInt().toInt(),
+    scheduleDays('dependencies.*.lagDays', { min: -SCHEDULE_DAYS_MAX }),
     body('isCritical').optional().isBoolean().toBoolean(),
     moneyBody('budget'),
     body('isMilestone').optional().isBoolean().toBoolean(),
-    body('sortOrder').optional().isInt({ min: 0 }).toInt(),
+    body('sortOrder').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     body('engineerIds')
       .isArray({ min: 1 })
       .withMessage('At least one engineer required'),
@@ -129,15 +150,15 @@ router.post(
     body('updates.*.activityId').isString().isUUID(),
     body('updates.*.pctComplete')
       .optional()
-      .isFloat({ min: 0, max: 100 })
+      .custom(scalarFigure).bail().isFloat({ min: 0, max: 100 })
       .toFloat(),
     moneyBody('updates.*.actualCost'),
     body('updates.*.progressMethod').optional().isIn(VALID_PROGRESS_METHODS),
     body('updates.*.method').optional().isIn(VALID_PROGRESS_METHODS),
     body('updates.*.status').optional().isIn(VALID_PROGRESS_STATUSES),
     body('updates.*.source').optional().isIn(VALID_PROGRESS_SOURCES),
-    body('updates.*.quantityComplete').optional().isFloat({ min: 0 }).toFloat(),
-    body('updates.*.quantityPlanned').optional().isFloat({ min: 0 }).toFloat(),
+    body('updates.*.quantityComplete').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
+    body('updates.*.quantityPlanned').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
     body('updates.*.quantityUnit').optional().isString().trim(),
     body('updates.*.inspectionStatus').optional().isString().trim(),
     body('updates.*.notes').optional().isString().trim(),
@@ -147,7 +168,7 @@ router.post(
     // Each quantity entry one string: [["<id>"]] passed isUUID() element by
     // element (CERT-2 shapes).
     body('updates.*.entryIds.*').optional().isString().isUUID(),
-    body('updates.*.bundleSubmittedThrough').optional().isString().isISO8601({ strict: true }),
+    body('updates.*.bundleSubmittedThrough').optional().isString().custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -169,8 +190,8 @@ router.get(
     query('status').isString()
       .optional()
       .isIn(['draft', 'submitted', 'approved', 'rejected']),
-    query('from').isString().optional().isISO8601({ strict: true }),
-    query('to').isString().optional().isISO8601({ strict: true }),
+    query('from').isString().optional().custom(dateInput),
+    query('to').isString().optional().custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -232,7 +253,7 @@ router.get(
 router.get(
   '/:id/quantities',
   requirePermission('schedule', 'read'),
-  [param('id').isUUID(), query('cutoffDate').isString().optional().isISO8601(), validate],
+  [param('id').isUUID(), query('cutoffDate').isString().optional().custom(dateInput), validate],
   asyncHandler(async (req, res) => {
     const { can, partyScoped } = controlsDetailService.detailReader(req);
     const view = await quantityViewsService.getActivityQuantities({
@@ -260,15 +281,15 @@ router.patch(
       .trim()
       .isLength({ max: 64 }),
     body('wbsCode').optional().isString().trim(),
-    body('startDate').optional().isString().isISO8601(),
-    body('endDate').optional().isString().isISO8601(),
-    body('earlyStart').optional().isInt({ min: 0 }).toInt(),
-    body('earlyFinish').optional().isInt({ min: 0 }).toInt(),
-    body('lateStart').optional().isInt({ min: 0 }).toInt(),
-    body('lateFinish').optional().isInt({ min: 0 }).toInt(),
-    body('totalFloat').optional().isInt({ min: 0 }).toInt(),
-    body('duration').optional().isInt({ min: 0 }).toInt(),
-    body('predecessors').optional().isString().trim(),
+    body('startDate').optional().isString().custom(dateInput),
+    body('endDate').optional().isString().custom(dateInput),
+    scheduleDays('earlyStart'),
+    scheduleDays('earlyFinish'),
+    scheduleDays('lateStart'),
+    scheduleDays('lateFinish'),
+    scheduleDays('totalFloat'),
+    scheduleDays('duration'),
+    body('predecessors').optional().isString().bail().trim().custom(predecessorLagsFit),
     body('dependencies').optional().isArray(),
     // One string each (CERT-2 shapes): isUUID() alone took ["<id>"] element
     // by element, and the service then read it as the activity it wraps.
@@ -276,11 +297,11 @@ router.patch(
     body('dependencies.*.predecessorActivityId').optional().isString().isUUID(),
     body('dependencies.*.predecessorRef').optional().isString().trim(),
     body('dependencies.*.relationshipType').optional().isIn(VALID_RELATIONSHIPS),
-    body('dependencies.*.lagDays').optional().isInt().toInt(),
+    scheduleDays('dependencies.*.lagDays', { min: -SCHEDULE_DAYS_MAX }),
     body('isCritical').optional().isBoolean().toBoolean(),
     moneyBody('budget'),
     body('isMilestone').optional().isBoolean().toBoolean(),
-    body('sortOrder').optional().isInt({ min: 0 }).toInt(),
+    body('sortOrder').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     body('engineerIds').optional().isArray({ min: 1 }),
     body('engineerIds.*').optional().isString().isUUID(),
     validate,
@@ -337,12 +358,12 @@ router.put(
   [
     param('id').isUUID(),
     body('method').isIn(VALID_PROGRESS_METHODS),
-    body('plannedQuantity').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
+    body('plannedQuantity').optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
     body('quantityUnit').optional({ nullable: true }).isString().trim(),
     body('milestoneWeights').optional({ nullable: true }).isArray(),
     body('milestoneWeights.*.id').optional().isString().trim(),
     body('milestoneWeights.*.name').optional().isString().trim(),
-    body('milestoneWeights.*.weight').optional().isFloat({ min: 0 }).toFloat(),
+    body('milestoneWeights.*.weight').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
     body('inspectionRequired').optional().isBoolean().toBoolean(),
     body('evidenceRequired').optional().isBoolean().toBoolean(),
     body('notes').optional({ nullable: true }).isString().trim(),
@@ -389,24 +410,24 @@ router.post(
   }),
   [
     param('id').isUUID(),
-    body('pctComplete').optional().isFloat({ min: 0, max: 100 }).toFloat(),
+    body('pctComplete').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }).toFloat(),
     moneyBody('actualCost'),
-    body('actualStart').optional().isString().isISO8601(),
-    body('actualFinish').optional().isString().isISO8601(),
+    body('actualStart').optional().isString().custom(dateInput),
+    body('actualFinish').optional().isString().custom(dateInput),
     body('progressMethod').optional().isIn(VALID_PROGRESS_METHODS),
     body('method').optional().isIn(VALID_PROGRESS_METHODS),
     body('status').optional().isIn(VALID_PROGRESS_STATUSES),
     body('source').optional().isIn(VALID_PROGRESS_SOURCES),
-    body('quantityComplete').optional().isFloat({ min: 0 }).toFloat(),
-    body('quantityPlanned').optional().isFloat({ min: 0 }).toFloat(),
+    body('quantityComplete').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
+    body('quantityPlanned').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
     body('quantityUnit').optional().isString().trim(),
     body('milestones').optional().isArray(),
     body('milestones.*.id').optional().isString().trim(),
     body('milestones.*.name').optional().isString().trim(),
-    body('milestones.*.weight').optional().isFloat({ min: 0 }).toFloat(),
+    body('milestones.*.weight').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
     body('milestones.*.pctComplete')
       .optional()
-      .isFloat({ min: 0, max: 100 })
+      .custom(scalarFigure).bail().isFloat({ min: 0, max: 100 })
       .toFloat(),
     body('milestones.*.complete').optional().isBoolean().toBoolean(),
     body('inspectionStatus').optional().isString().trim(),
@@ -418,7 +439,7 @@ router.post(
     body('entryIds').optional().isArray({ max: 500 }),
     // Each one string: [["<id>"]] passed isUUID() element by element (CERT-2 shapes).
     body('entryIds.*').optional().isString().isUUID(),
-    body('bundleSubmittedThrough').optional().isString().isISO8601({ strict: true }),
+    body('bundleSubmittedThrough').optional().isString().custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {

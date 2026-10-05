@@ -446,6 +446,64 @@ describe("CERT-2 — a worker's hourly rate fits its columns", () => {
   });
 });
 
+/**
+ * CERT-2 (alerts-money-5): what a timesheet posts fits what holds it. A day's
+ * entry at the highest rate fits its own column, but two of them do not fit
+ * the timesheet's total, and one does not fit on top of what an activity has
+ * already spent: each was a 500 at the write (numeric field overflow),
+ * rolled back. Now a 400 before anything is posted.
+ */
+describe("CERT-2 — a timesheet's labour cost fits the timesheet and the activity", () => {
+  beforeEach(() => {
+    seed();
+    mockLedger.reset();
+    jest.clearAllMocks();
+    store.workers.push(
+      { id: "w-top-1", orgId: "org-1", companyId: "co-1", name: "Top One", hourlyRate: service.RATE_MAX, overtimeMultiplier: 5, status: "active", createdAt: new Date(), updatedAt: new Date() },
+      { id: "w-top-2", orgId: "org-1", companyId: "co-1", name: "Top Two", hourlyRate: service.RATE_MAX, overtimeMultiplier: 5, status: "active", createdAt: new Date(), updatedAt: new Date() },
+    );
+  });
+  const submitted = async (date, entries) => {
+    const sheet = await service.createTimesheet({ ...scope, payload: { date, entries }, actor: pm, viewer: pm });
+    await service.submitTimesheet({ ...scope, timesheetId: sheet.id, actor: pm, viewer: pm });
+    return sheet;
+  };
+  const state = () => JSON.stringify({ records: store.costRecords, lines: store.budgetLines, ledger: mockLedger.store.entries.length });
+
+  it("two workers at the highest rate on overtime for a day: each entry fits, the timesheet's total does not — a 400 TIMESHEET_TOTAL_TOO_LARGE and nothing posted", async () => {
+    const sheet = await submitted("2026-09-07", [{ workerId: "w-top-1", activityId: "act-2", hours: 24, timeType: "overtime" }, { workerId: "w-top-2", activityId: "act-2", hours: 24, timeType: "overtime" }]);
+    const before = state();
+    await expect(service.approveTimesheet({ ...scope, timesheetId: sheet.id, actor: pm, viewer: pm })).rejects.toMatchObject({ status: 400, code: "TIMESHEET_TOTAL_TOO_LARGE" });
+    expect(state()).toBe(before);
+    const stored = store.timesheets.find((row) => row.id === sheet.id);
+    expect([stored.status, Number(stored.totalCost)]).toEqual(["submitted", 0]);
+  });
+
+  it("round 6: entries of 5,000,000,000,000,000 and 4,999,999,999,999,999 fit, and the total stored is exactly their sum (the float sum, 10^16, overflowed the column)", async () => {
+    store.workers.push(
+      { id: "w-five", orgId: "org-1", companyId: "co-1", name: "Five", hourlyRate: 50000000000000, overtimeMultiplier: 5, status: "active", createdAt: new Date(), updatedAt: new Date() },
+      { id: "w-nine", orgId: "org-1", companyId: "co-1", name: "Nine", hourlyRate: 49999999999999.99, overtimeMultiplier: 5, status: "active", createdAt: new Date(), updatedAt: new Date() },
+    );
+    const sheet = await submitted("2026-09-09", [{ workerId: "w-five", activityId: "act-1", hours: 20, timeType: "overtime" }, { workerId: "w-nine", activityId: "act-2", hours: 20, timeType: "overtime" }]);
+    const approved = await service.approveTimesheet({ ...scope, timesheetId: sheet.id, actor: pm, viewer: pm });
+    expect(approved.status).toBe("approved");
+    const stored = store.timesheets.find((row) => row.id === sheet.id);
+    expect(stored.totalCost.toFixed(2)).toBe("9999999999999999.00");
+    expect(5e15 + 4999999999999999).toBe(1e16);
+  });
+
+  it("one that fits the timesheet but not on top of what the activity has spent is the ledger's 400 COST_LEDGER_TOTAL_TOO_LARGE; one that fits is posted, and reopening it frees the room", async () => {
+    const first = await submitted("2026-09-07", [{ workerId: "w-top-1", activityId: "act-1", hours: 12, timeType: "overtime" }]);
+    await expect(service.approveTimesheet({ ...scope, timesheetId: first.id, actor: pm, viewer: pm })).resolves.toMatchObject({ status: "approved" });
+    const second = await submitted("2026-09-08", [{ workerId: "w-top-2", activityId: "act-1", hours: 12, timeType: "overtime" }]);
+    const before = state();
+    await expect(service.approveTimesheet({ ...scope, timesheetId: second.id, actor: pm, viewer: pm })).rejects.toMatchObject({ status: 400, code: "COST_LEDGER_TOTAL_TOO_LARGE" });
+    expect(state()).toBe(before);
+    await service.reopenTimesheet({ ...scope, timesheetId: first.id, payload: { reason: "wrong day" }, actor: pm, viewer: pm });
+    await expect(service.approveTimesheet({ ...scope, timesheetId: second.id, actor: pm, viewer: pm })).resolves.toMatchObject({ status: "approved" });
+  });
+});
+
 describe("CERT-2 — a worker's person and company belong to the organisation", () => {
   beforeEach(() => {
     seed();

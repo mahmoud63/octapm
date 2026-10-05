@@ -41,7 +41,7 @@ jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 jest.mock("../inventory.service", () => mockInventory);
 // The lead-time alert is procurement's own calculation; that it is asked for is
 // what matters here, and it has its own tests.
-jest.mock("../procurement.service", () => ({ syncLeadTimeAlert: jest.fn() }));
+jest.mock("../procurement.service", () => ({ syncLeadTimeAlert: jest.fn(), syncLeadTimeAlerts: jest.fn(async () => []) }));
 // the delivery is published to the project as it is posted (Phase 22B)
 const mockAudit = { recordEvent: jest.fn(async () => ({})), ENTITY_TYPES: { DELIVERY_RECEIPT: "delivery_receipt" }, ACTIONS: { CREATED: "created" } };
 jest.mock("../audit.service", () => mockAudit);
@@ -268,11 +268,39 @@ describe("goods receipt", () => {
         data: expect.objectContaining({ receivedQty: { increment: 400 }, status: "partial" }),
       })
     );
-    expect(procurement.syncLeadTimeAlert).toHaveBeenCalled();
+    // Every scope the delivered lines are in, worked once after the last line (CERT-2, round 6).
+    expect(procurement.syncLeadTimeAlerts).toHaveBeenCalledTimes(1);
+    expect(procurement.syncLeadTimeAlerts).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-1", lines: [expect.objectContaining({ id: "line-1", activityMaterialId: "material-7" })] }));
+    expect(procurement.syncLeadTimeAlert).not.toHaveBeenCalled();
     // the delivery reaches everyone watching the project (Phase 22B)
     expect(mockAudit.recordEvent).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: "project-1", entityType: "delivery_receipt", action: "created", newStatus: "partial" })
     );
+  });
+
+  it("CERT-2 (alerts-6): a delivery runs in the batch writers' window, not Prisma's five seconds (240 lines outlived it)", async () => {
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue({
+      id: "order-1",
+      ref: "PO-0001",
+      status: "issued",
+      projectId: "project-1",
+      packageId: null,
+      supplierId: null,
+      project: { id: "project-1" },
+      lines: [poLine({ activityMaterialId: "material-7" })],
+    });
+    const original = mockPrisma.$transaction;
+    const windows = [];
+    mockPrisma.$transaction = (fn, options) => {
+      windows.push(options ?? null);
+      return original(fn);
+    };
+    try {
+      await service.receiveAgainstOrder({ orgId: ORG, user: USER, payload: { orderId: "order-1", warehouseId: "wh-1", lines: [{ poLineId: "line-1", acceptedQty: 400 }] } });
+    } finally {
+      mockPrisma.$transaction = original;
+    }
+    expect(windows).toContainEqual({ maxWait: 10_000, timeout: 60_000 });
   });
 
   it("leaves the material alone when the line was not ordered against one", async () => {

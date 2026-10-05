@@ -1,8 +1,11 @@
 const express = require("express");
 const crypto = require("crypto");
 const multer = require("multer");
+// The NUL / lone-surrogate guard again after multer: it parses the multipart body inside the route (CERT-2).
+const { rejectNullBytes } = require("../middleware/reject-null-bytes");
 const path = require("path");
 const { body, param, query } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
@@ -124,7 +127,7 @@ router.patch(
     body("locationId").optional({ nullable: true }).isString().isUUID(),
     body("status").optional().isIn(["current", "obsolete"]),
     body("obsoleteReason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
-    body("scaleRatio").optional({ nullable: true }).isFloat({ gt: 0, max: 100000 }),
+    body("scaleRatio").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ gt: 0, max: 100000 }),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -185,10 +188,11 @@ router.post(
   [param("sheetId").isUUID(), validate],
   uploadLimiter,
   upload.single("file"),
+  rejectNullBytes,
   [
     body("revision").isString().trim().isLength({ min: 1, max: 20 }),
     body("title").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
-    body("pageNumber").optional().isInt({ min: 1, max: 1500 }).toInt(),
+    body("pageNumber").optional().custom(scalarFigure).bail().isInt({ min: 1, max: 1500 }).toInt(),
     body("publish").optional().isBoolean().toBoolean(),
     validate,
   ],

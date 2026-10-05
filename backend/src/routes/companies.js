@@ -20,7 +20,7 @@ const companyValidators = [
   body("registrationNumber").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
   body("taxNumber").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
   body("type").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
-  body("email").optional({ nullable: true }).isEmail().normalizeEmail(),
+  body("email").optional({ nullable: true }).isString().isEmail().normalizeEmail(),
   body("phone").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
   body("website").optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
   body("address").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),

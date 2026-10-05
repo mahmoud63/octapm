@@ -1,5 +1,8 @@
 const express = require("express");
 const { body, param } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
+const { QUANTITY_MAX } = require("../utils/stock-figures");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -87,11 +90,11 @@ router.patch(
   [
     param("period").isString(),
     param("id").isUUID(),
-    body("qty").optional().isFloat({ min: 0 }).toFloat(),
+    body("qty").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
     moneyBody("rate"),
-    body("retentionRate").optional().isFloat({ min: 0 }).toFloat(),
+    body("retentionRate").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }).toFloat(),
     body("status").optional().isIn(["draft", "submitted", "certified", "paid"]),
-    body("certDate").optional({ nullable: true }).isISO8601(),
+    body("certDate").optional({ nullable: true }).custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -201,8 +204,8 @@ router.post(
   [
     param("period").isString(),
     body("invoiceNumber").optional().isString().trim().isLength({ max: 100 }),
-    body("invoiceDate").optional({ nullable: true }).isISO8601(),
-    body("dueDate").optional({ nullable: true }).isISO8601(),
+    body("invoiceDate").optional({ nullable: true }).custom(dateInput),
+    body("dueDate").optional({ nullable: true }).custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -231,7 +234,7 @@ router.post(
       .isString()
       .trim()
       .isLength({ max: 120 }),
-    body("paymentDate").optional({ nullable: true }).isISO8601(),
+    body("paymentDate").optional({ nullable: true }).custom(dateInput),
     body("paymentMethod")
       .optional({ nullable: true })
       .isString()
@@ -270,7 +273,7 @@ router.post(
       .isString()
       .trim()
       .isLength({ max: 120 }),
-    body("releaseDate").optional({ nullable: true }).isISO8601(),
+    body("releaseDate").optional({ nullable: true }).custom(dateInput),
     body("reason").optional({ nullable: true }).isString().trim().isLength({
       max: 2000,
     }),

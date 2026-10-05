@@ -1,5 +1,7 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, INT4_MAX, INT4_MIN } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -55,11 +57,11 @@ const optionalProject = optionalIdQuery("projectId");
 // failed at the write with a 500, a quantity of 1e15 was stored. The bounds
 // and why they are what they are: utils/stock-figures.js.
 const { QUANTITY_MAX, UNIT_COST_MAX } = require("../utils/stock-figures");
-const quantityOf = (field) => body(field).isFloat({ min: -QUANTITY_MAX, max: QUANTITY_MAX });
-const unitCostOf = (field) => body(field).optional({ nullable: true }).isFloat({ min: 0, max: UNIT_COST_MAX });
+const quantityOf = (field) => body(field).custom(scalarFigure).bail().isFloat({ min: -QUANTITY_MAX, max: QUANTITY_MAX });
+const unitCostOf = (field) => body(field).optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: UNIT_COST_MAX });
 // A date is one string that is a date: "x", {"not":"x"} and [] reached the
 // stock ledger and failed at the write with a 500 (CERT-2).
-const optionalDateBody = (field) => body(field).optional({ nullable: true }).isString().isISO8601();
+const optionalDateBody = (field) => body(field).optional({ nullable: true }).isString().custom(dateInput);
 
 // ─── item master ───────────────────────────────────────────────────────────
 
@@ -130,11 +132,11 @@ const itemBody = [
   body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
   optionalIdBody("preferredSupplierId"),
   optionalIdBody("projectId"),
-  body("unitCost").optional().isFloat({ min: 0, max: UNIT_COST_MAX }),
-  body("reorderLevel").optional().isFloat({ min: 0 }),
-  body("minStock").optional().isFloat({ min: 0 }),
-  body("maxStock").optional({ nullable: true }).isFloat({ min: 0 }),
-  body("leadTimeDays").optional().isInt({ min: 0 }),
+  body("unitCost").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: UNIT_COST_MAX }),
+  body("reorderLevel").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
+  body("minStock").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
+  body("maxStock").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
+  body("leadTimeDays").optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }),
   body("isSerialised").optional().isBoolean(),
   body("isBatched").optional().isBoolean(),
   body("status").optional().isIn(service.ITEM_STATUSES),
@@ -273,7 +275,7 @@ router.post(
     body("name").isString().trim().isLength({ min: 1, max: 200 }),
     body("kind").optional().isIn(service.LOCATION_KINDS),
     optionalIdBody("parentId"),
-    body("sortOrder").optional().isInt(),
+    body("sortOrder").optional().custom(scalarFigure).bail().isInt({ min: INT4_MIN, max: INT4_MAX }),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -315,7 +317,7 @@ router.post(
   [
     ...movementBody,
     unitCostOf("unitCost"),
-    body("damagedQty").optional({ nullable: true }).isFloat({ min: 0, max: QUANTITY_MAX }),
+    body("damagedQty").optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
     optionalIdBody("poLineId"),
     optionalIdBody("receiptLineId"),
     // What a direct receipt may carry for the movement it posts: each one
@@ -481,7 +483,7 @@ router.post(
     idBody("toWarehouseId"),
     body("lines").isArray({ min: 1 }),
     idBody("lines.*.itemId"),
-    body("lines.*.quantity").isFloat({ gt: 0, max: QUANTITY_MAX }),
+    body("lines.*.quantity").custom(scalarFigure).bail().isFloat({ gt: 0, max: QUANTITY_MAX }),
     body("ref").optional({ nullable: true }).isString().trim().isLength({ max: 40 }),
     body("reason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
     validate,
@@ -527,8 +529,8 @@ router.post(
     // dropped (CERT-2). A line that names no line reports nothing it can be
     // booked against; the service refuses a line that is not the transfer's.
     idBody("lines.*.id"),
-    body("lines.*.receivedQty").optional().isFloat({ min: 0, max: QUANTITY_MAX }),
-    body("lines.*.damagedQty").optional().isFloat({ min: 0, max: QUANTITY_MAX }),
+    body("lines.*.receivedQty").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
+    body("lines.*.damagedQty").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -594,8 +596,8 @@ router.post(
     body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
     body("lines").isArray({ min: 1 }),
     idBody("lines.*.poLineId"),
-    body("lines.*.acceptedQty").optional().isFloat({ min: 0, max: QUANTITY_MAX }),
-    body("lines.*.rejectedQty").optional().isFloat({ min: 0, max: QUANTITY_MAX }),
+    body("lines.*.acceptedQty").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
+    body("lines.*.rejectedQty").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }),
     unitCostOf("lines.*.unitCost"),
     optionalIdBody("lines.*.locationId"),
     optionalIdBody("lines.*.inventoryItemId"),

@@ -1,7 +1,8 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { ballInCourt } = require("./ball-in-court.service");
-const { addMoney, toMoneyNumber } = require("../utils/money");
+const { Prisma } = require("@prisma/client");
+const { MONEY_MAX, addMoney, toMoneyDecimal, toMoneyNumber } = require("../utils/money");
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
 
@@ -357,6 +358,46 @@ const listOrders = async ({ orgId, projectId, status = null, supplierId = null, 
 
 // ─── the money on an order ─────────────────────────────────────────────────
 
+/** A quantity or a rate as an exact decimal; anything that is not a finite number is nought. */
+const exact = (value) => {
+  if (value === null || value === undefined || value === "") return new Prisma.Decimal(0);
+  if (typeof value === "object" && typeof value.toFixed === "function") return new Prisma.Decimal(value.toString());
+  if (!Number.isFinite(Number(value))) return new Prisma.Decimal(0);
+  try {
+    return new Prisma.Decimal(typeof value === "number" ? value : String(value).trim());
+  } catch {
+    return new Prisma.Decimal(Number(value));
+  }
+};
+
+/**
+ * What an order's lines come to at a tax rate: the figures stored on it —
+ * worked, checked and written as exact decimals (CERT-2, round 6). Added up
+ * in floating point, two lines of 5,000,000,000,000,000 and
+ * 4,999,999,999,999,999 came to 10^16 (the nearest double), past the value
+ * column: an order the create check (in decimals) had let through was then
+ * refused by its own total. The check and the write are the same value.
+ */
+const totalsOf = (lines, taxRate) => {
+  const subtotal = lines
+    .reduce((total, line) => total.plus(toMoneyDecimal(line.unitCost || 0).times(exact(line.orderedQty))), new Prisma.Decimal(0))
+    .toDecimalPlaces(2);
+  const taxAmount = subtotal.times(exact(taxRate)).dividedBy(100).toDecimalPlaces(2);
+  return { subtotal, taxAmount, value: subtotal.plus(taxAmount) };
+};
+
+/**
+ * An order is worth no more than its value column holds, a Decimal(18,2) —
+ * the rule an order is created under (PO_VALUE_TOO_LARGE). A tax rate of 100
+ * on an order worth 9e15 failed at the write with a 500 (CERT-2).
+ */
+const assertOrderValueFits = (totals) => {
+  if (toMoneyDecimal(totals.value).greaterThan(MONEY_MAX)) {
+    throw new HttpError(400, "PO_VALUE_TOO_LARGE", "This order would be worth more than an order can record");
+  }
+  return totals;
+};
+
 /**
  * Re-adds the order from its lines and its tax rate.
  *
@@ -375,14 +416,10 @@ const recomputeTotals = async (tx, orderId) => {
     where: { orderId },
     select: { orderedQty: true, unitCost: true },
   });
-  const subtotal = round2(
-    lines.reduce((total, line) => total + (Number(line.orderedQty) || 0) * num(line.unitCost), 0)
-  );
-  const taxAmount = round2(subtotal * ((Number(order.taxRate) || 0) / 100));
 
   return tx.procurementOrder.update({
     where: { id: orderId },
-    data: { subtotal, taxAmount, value: addMoney(subtotal, taxAmount) },
+    data: assertOrderValueFits(totalsOf(lines, order.taxRate)),
   });
 };
 
@@ -403,13 +440,22 @@ const recomputeInvoiced = async (tx, orderId) => {
     where: { purchaseOrderId: orderId, status: { not: "void" } },
     _sum: { total: true },
   });
-  const invoicedAmount = num(billed._sum?.total);
-  const value = num(order.value);
+  // What is invoiced against an order is stored in a Decimal(18,2) as well:
+  // invoices that each fit can together pass it, and that was a 500 at the
+  // write (CERT-2). Refused inside the invoice's own transaction.
+  // The value checked is the value written, as an exact decimal (round 6):
+  // the sum as a double was 10^16 for 9,999,999,999,999,999.
+  const invoicedAmount = toMoneyDecimal(billed._sum?.total || 0);
+  if (invoicedAmount.greaterThan(MONEY_MAX)) {
+    throw new HttpError(400, "PO_INVOICED_TOO_LARGE", "The invoices against this order would come to more than an order can record");
+  }
+  const value = toMoneyDecimal(order.value || 0);
 
   let invoiceStatus = INVOICE_STATUS.NONE;
-  if (invoicedAmount > MONEY_EPSILON) {
-    invoiceStatus =
-      invoicedAmount >= value - MONEY_EPSILON ? INVOICE_STATUS.FULL : INVOICE_STATUS.PARTIAL;
+  if (invoicedAmount.greaterThan(MONEY_EPSILON)) {
+    invoiceStatus = invoicedAmount.greaterThanOrEqualTo(value.minus(MONEY_EPSILON))
+      ? INVOICE_STATUS.FULL
+      : INVOICE_STATUS.PARTIAL;
   }
 
   return tx.procurementOrder.update({
@@ -520,6 +566,18 @@ const transition = async ({ orgId, projectId, orderId, to, actor, reason = null,
     }
 
     await tx.procurementOrder.update({ where: { id: orderId }, data: patch });
+    // A cancelled or closed order delivers nothing more: the lead-time alerts
+    // its lines weigh on are worked again without them (CERT-2).
+    if (to === STATUS.CANCELLED || to === STATUS.CLOSED) {
+      // Required here: procurement.service requires this module.
+      const procurement = require("./procurement.service");
+      const project = tx.project?.findFirst
+        ? await tx.project.findFirst({ where: { id: projectId }, select: { id: true, startDate: true } })
+        : null;
+      // Every scope the order's lines are in, worked once — not once per line
+      // (round 6: 120 lines took 3.1 s to cancel, 0.1 s before).
+      await procurement.syncLeadTimeAlerts({ tx, projectId, project, lines: existing.lines });
+    }
     await record({
       tx,
       orgId,
@@ -649,6 +707,9 @@ const updateOrder = async ({ orgId, projectId, orderId, actor, payload = {} }) =
       throw new HttpError(400, "PO_TAX_INVALID", "Tax must be between 0 and 100 percent");
     }
     data.taxRate = rate;
+    // The value follows the tax rate: refused before anything is written when
+    // it would pass what an order can record (CERT-2).
+    assertOrderValueFits(totalsOf(existing.lines, rate));
   }
 
   return prisma.$transaction(async (tx) => {
@@ -684,6 +745,7 @@ module.exports = {
   STATUSES,
   acknowledgeOrder,
   approveOrder,
+  assertOrderValueFits,
   assertTransition,
   cancelOrder,
   closeOrder,
@@ -696,5 +758,6 @@ module.exports = {
   rejectOrder,
   serializeOrder,
   submitOrder,
+  totalsOf,
   updateOrder,
 };

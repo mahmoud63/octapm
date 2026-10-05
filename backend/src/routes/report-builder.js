@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, INT4_MAX } = require("../utils/figure-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -41,16 +42,16 @@ const previewValidators = [
   body("sort").optional({ nullable: true }).isObject(),
   body("groupBy").optional({ nullable: true }).isString(),
   body("aggregates").optional().isArray({ max: 10 }),
-  body("limit").optional().isInt({ min: 1, max: 1000 }).toInt(),
-  body("offset").optional().isInt({ min: 0 }).toInt(),
+  body("limit").optional().custom(scalarFigure).bail().isInt({ min: 1, max: 1000 }).toInt(),
+  body("offset").optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
 ];
 
 const scheduleValidators = [
   body("frequency").optional().isIn(service.FREQUENCIES),
-  body("dayOfWeek").optional().isInt({ min: 0, max: 6 }).toInt(),
-  body("dayOfMonth").optional().isInt({ min: 1, max: 31 }).toInt(),
-  body("hour").optional().isInt({ min: 0, max: 23 }).toInt(),
-  body("minute").optional().isInt({ min: 0, max: 59 }).toInt(),
+  body("dayOfWeek").optional().custom(scalarFigure).bail().isInt({ min: 0, max: 6 }).toInt(),
+  body("dayOfMonth").optional().custom(scalarFigure).bail().isInt({ min: 1, max: 31 }).toInt(),
+  body("hour").optional().custom(scalarFigure).bail().isInt({ min: 0, max: 23 }).toInt(),
+  body("minute").optional().custom(scalarFigure).bail().isInt({ min: 0, max: 59 }).toInt(),
   body("timezone").optional().isString().trim().isLength({ max: 64 }),
   body("format").optional().isIn(service.FORMATS),
   body("recipients").optional().isObject(),
@@ -156,7 +157,7 @@ router.delete(
 router.post(
   "/:reportId/run",
   requirePermission("report", "read"),
-  [param("reportId").isUUID(), body("limit").optional().isInt({ min: 1, max: 1000 }).toInt(), body("offset").optional().isInt({ min: 0 }).toInt(), validate],
+  [param("reportId").isUUID(), body("limit").optional().custom(scalarFigure).bail().isInt({ min: 1, max: 1000 }).toInt(), body("offset").optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.runDefinition({ orgId: orgId(req), user: user(req), apiClient: req.apiClient || null, reportId: req.params.reportId, limit: req.body.limit || service.PREVIEW_LIMIT, offset: req.body.offset || 0 }))),
 );
 

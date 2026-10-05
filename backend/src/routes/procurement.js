@@ -1,5 +1,7 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
+const { scalarFigure, INT4_MAX } = require('../utils/figure-input');
+const { dateInput } = require('../utils/date-input');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
@@ -18,7 +20,7 @@ router.use(authenticate);
 // A date is one string: isISO8601() alone checks an array element by
 // element, so [] and ["2026-10-01"] passed (CERT-2 shapes).
 const optionalDate = (field) =>
-  body(field).optional({ nullable: true }).isString().isISO8601().toDate();
+  body(field).optional({ nullable: true }).isString().custom(dateInput).toDate();
 
 // An identifier that must be one string: isUUID() alone checks an array
 // element by element, so ["<id>"] passed and reached Prisma as a 500
@@ -65,14 +67,14 @@ router.post(
     body('name').optional({ nullable: true }).isString().trim(),
     body('code').optional({ nullable: true }).isString().trim(),
     body('contactName').optional({ nullable: true }).isString().trim(),
-    body('email').optional({ nullable: true }).isEmail().normalizeEmail(),
+    body('email').optional({ nullable: true }).isString().isEmail().normalizeEmail(),
     body('phone').optional({ nullable: true }).isString().trim(),
     body('address').optional({ nullable: true }).isString().trim(),
     body('tradeCategories').optional().isArray(),
     body('status')
       .optional()
       .isIn(['approved', 'pending', 'on_hold', 'blocked']),
-    body('leadTimeReliability').optional().isFloat({ min: 0, max: 100 }).toFloat(),
+    body('leadTimeReliability').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }).toFloat(),
     body('notes').optional({ nullable: true }).isString().trim(),
     validate,
   ],
@@ -119,9 +121,9 @@ router.post(
     body('requiredTiming')
       .optional()
       .isIn(['activity_start', 'activity_finish']),
-    body('needOffsetDays').optional().isInt({ min: 0 }).toInt(),
-    body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
-    body('bufferDays').optional().isInt({ min: 0 }).toInt(),
+    body('needOffsetDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
+    body('leadWeeks').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
+    body('bufferDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     body('notes').optional({ nullable: true }).isString().trim(),
     validate,
   ],
@@ -160,7 +162,7 @@ router.post(
   [
     param('packageId').isUUID(),
     body('ref').optional({ values: 'falsy' }).isString().trim(),
-    body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
+    body('leadWeeks').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     optionalDate('requiredBy'),
     body('notes').optional({ nullable: true }).isString().trim(),
     validate,
@@ -194,12 +196,12 @@ router.post(
     // acknowledged are decisions made on the register, which records who made
     // them (OCTA-PROC-APPROVAL-067).
     body('status').optional().isIn(['planned', 'draft']),
-    body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
+    body('leadWeeks').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     body('requiredTiming')
       .optional()
       .isIn(['activity_start', 'activity_finish']),
-    body('needOffsetDays').optional().isInt({ min: 0 }).toInt(),
-    body('bufferDays').optional().isInt({ min: 0 }).toInt(),
+    body('needOffsetDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
+    body('bufferDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     body('currency').optional().isString().trim().isLength({ min: 3, max: 3 }),
     optionalDate('orderDate'),
     optionalDate('requiredBy'),
@@ -208,7 +210,7 @@ router.post(
     body('buyer').optional({ nullable: true }).isString().trim(),
     body('notes').optional({ nullable: true }).isString().trim(),
     body('lines').isArray({ min: 1 }),
-    body('lines.*.lineNumber').optional().isInt({ min: 1 }).toInt(),
+    body('lines.*.lineNumber').optional().custom(scalarFigure).bail().isInt({ min: 1, max: INT4_MAX }).toInt(),
     body('lines.*.activityId').isString().isUUID(),
     // Cost coding at the moment the order is raised (OCTA-FIN-POLINE-060).
     // Each one string (CERT-2 shapes): isUUID() alone took ["<id>"] element by
@@ -227,14 +229,14 @@ router.post(
     body('lines.*.unit').isString().trim().notEmpty(),
     // A quantity the stock ledger can hold to four decimal places (CERT-2:
     // 1e15 at 100.00 overflowed the order's value with a 500).
-    body('lines.*.orderedQty').isFloat({ min: 0.001, max: QUANTITY_MAX }).toFloat(),
+    body('lines.*.orderedQty').custom(scalarFigure).bail().isFloat({ min: 0.001, max: QUANTITY_MAX }).toFloat(),
     moneyBody('lines.*.unitCost'),
-    body('lines.*.leadWeeks').optional().isInt({ min: 0 }).toInt(),
+    body('lines.*.leadWeeks').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     body('lines.*.requiredTiming')
       .optional()
       .isIn(['activity_start', 'activity_finish']),
-    body('lines.*.needOffsetDays').optional().isInt({ min: 0 }).toInt(),
-    body('lines.*.bufferDays').optional().isInt({ min: 0 }).toInt(),
+    body('lines.*.needOffsetDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
+    body('lines.*.bufferDays').optional().custom(scalarFigure).bail().isInt({ min: 0, max: INT4_MAX }).toInt(),
     optionalDate('lines.*.requiredDate'),
     optionalDate('lines.*.promisedDate'),
     body('lines.*.notes').optional({ nullable: true }).isString().trim(),
@@ -319,13 +321,13 @@ router.post(
     // on the stock ledger and reset the item's average, last price and unit
     // cost to 0 (CERT-2). And no more than the item's price columns hold
     // (Decimal(18,4)): 1e15 failed at the write with a 500.
-    body('lines.*.unitCost').optional({ nullable: true }).isFloat({ min: 0, max: UNIT_COST_MAX }),
-    body('lines.*.acceptedQty').isFloat({ min: 0.001, max: QUANTITY_MAX }).toFloat(),
-    body('lines.*.rejectedQty').optional().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
-    body('lines.*.issuedQty').optional().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
+    body('lines.*.unitCost').optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: UNIT_COST_MAX }),
+    body('lines.*.acceptedQty').custom(scalarFigure).bail().isFloat({ min: 0.001, max: QUANTITY_MAX }).toFloat(),
+    body('lines.*.rejectedQty').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
+    body('lines.*.issuedQty').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
     // A date the stock ledger can store: "x" had no check here and failed at
     // the write with a 500 (CERT-2).
-    body('lines.*.expiryDate').optional({ nullable: true }).isString().isISO8601(),
+    body('lines.*.expiryDate').optional({ nullable: true }).isString().custom(dateInput),
     body('lines.*.notes').optional({ nullable: true }).isString().trim(),
     validate,
   ],
@@ -369,7 +371,7 @@ router.post(
     body('title').optional().isString().trim().isLength({ max: 200 }),
     body('description').optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
     body('instructions').optional({ nullable: true }).isString().trim().isLength({ max: 8000 }),
-    body('dueAt').optional({ nullable: true }).isString().isISO8601(),
+    body('dueAt').optional({ nullable: true }).isString().custom(dateInput),
     body('currency').optional().isString().trim().isLength({ min: 3, max: 3 }),
     body('boqSections').optional().isArray({ max: 100 }),
     // Each a section name, as the bid package takes them (CERT-2 shapes).

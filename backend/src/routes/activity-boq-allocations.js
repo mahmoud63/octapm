@@ -1,6 +1,11 @@
 const express = require('express');
 const multer = require('multer');
+// The NUL / lone-surrogate guard again after multer: it parses the multipart body inside the route (CERT-2).
+const { rejectNullBytes } = require('../middleware/reject-null-bytes');
 const { body, param, query } = require('express-validator');
+const { scalarFigure } = require('../utils/figure-input');
+const { QUANTITY_MAX } = require('../utils/stock-figures');
+const { dateInput } = require('../utils/date-input');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { HttpError } = require('../utils/http-error');
@@ -42,15 +47,15 @@ const mappingUpload = multer({
 });
 
 const allocationFigureValidators = () => [
-  body('quantity').optional().isFloat({ gt: 0 }).toFloat(),
+  body('quantity').optional().custom(scalarFigure).bail().isFloat({ gt: 0, max: QUANTITY_MAX }).toFloat(),
   moneyBody('amount', { min: 0.01 }),
-  body('weight').optional().isFloat({ min: 0 }).toFloat(),
+  body('weight').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
   body('basis').optional().isIn(allocationService.VALID_BASES),
   body('source').optional().isIn(['manual', 'import', 'ai', 'migration']),
   body('notes').optional({ nullable: true }).isString().trim(),
   body('locationId').optional({ nullable: true }).isString().isUUID(),
   body('suggestedBy').optional({ nullable: true }).isIn(allocationService.SUGGESTION_SOURCES),
-  body('confidence').optional({ nullable: true }).isFloat({ min: 0, max: 1 }).toFloat(),
+  body('confidence').optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: 1 }).toFloat(),
 ];
 
 router.use(authenticate);
@@ -88,7 +93,7 @@ router.get(
   requirePermission('boq', 'read'),
   [
     query('groupBy').isString().optional().isIn(allocationService.GROUP_BY_OPTIONS),
-    query('cutoffDate').isString().optional().isISO8601(),
+    query('cutoffDate').isString().optional().custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -153,16 +158,16 @@ router.post(
     body('allocations').isArray({ min: 1, max: 500 }),
     body('allocations.*.boqItemId').isString().isUUID(),
     body('allocations.*.activityId').isString().isUUID(),
-    body('allocations.*.quantity').optional().isFloat({ gt: 0 }).toFloat(),
+    body('allocations.*.quantity').optional().custom(scalarFigure).bail().isFloat({ gt: 0, max: QUANTITY_MAX }).toFloat(),
     // Money is money on every path: the same two-decimal rule as the single
     // create, so a bulk row cannot carry a figure the service would round.
     moneyBody('allocations.*.amount', { min: 0.01 }),
-    body('allocations.*.weight').optional().isFloat({ min: 0 }).toFloat(),
+    body('allocations.*.weight').optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
     body('allocations.*.basis').optional().isIn(allocationService.VALID_BASES),
     body('allocations.*.notes').optional({ nullable: true }).isString().trim(),
     body('allocations.*.locationId').optional({ nullable: true }).isString().isUUID(),
     body('allocations.*.suggestedBy').optional({ nullable: true }).isIn(allocationService.SUGGESTION_SOURCES),
-    body('allocations.*.confidence').optional({ nullable: true }).isFloat({ min: 0, max: 1 }).toFloat(),
+    body('allocations.*.confidence').optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: 1 }).toFloat(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -183,6 +188,7 @@ router.post(
   CAN_CREATE,
   [query('dryRun').isString().optional().isBoolean().toBoolean(), validate],
   mappingUpload.single('file'),
+  rejectNullBytes,
   asyncHandler(async (req, res) => {
     if (!req.file?.buffer) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
     const args = {

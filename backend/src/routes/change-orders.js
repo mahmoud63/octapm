@@ -1,5 +1,8 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure, INT4_MAX, INT4_MIN } = require("../utils/figure-input");
+const { QUANTITY_MAX } = require("../utils/stock-figures");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -60,25 +63,25 @@ router.post(
     body("activityLinks").optional().isArray(),
     body("activityLinks.*.activityId").optional().isString().isUUID(),
     body("activityLinks.*.relationType").optional().isString().trim(),
-    body("activityLinks.*.scheduleImpactDays").optional().isInt().toInt(),
+    body("activityLinks.*.scheduleImpactDays").optional().custom(scalarFigure).bail().isInt({ min: INT4_MIN, max: INT4_MAX }).toInt(),
     body("activityLinks.*.approvedScheduleImpactDays")
       .optional()
-      .isInt()
+      .custom(scalarFigure).bail().isInt({ min: INT4_MIN, max: INT4_MAX })
       .toInt(),
     moneyBody("activityLinks.*.costImpact"),
     moneyBody("activityLinks.*.approvedCostImpact"),
     body("activityLinks.*.baselineStart")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.baselineFinish")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactedStart")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactedFinish")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactBasis")
       .optional({ nullable: true })
       .isString()
@@ -94,7 +97,7 @@ router.post(
       .optional({ nullable: true })
       .isString().isUUID(),
     body("allocationLinks.*.boqItemId").optional({ nullable: true }).isString().isUUID(),
-    body("allocationLinks.*.quantity").optional().isFloat({ min: 0 }).toFloat(),
+    body("allocationLinks.*.quantity").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
     moneyBody("allocationLinks.*.amount"),
     body("allocationLinks.*.notes")
       .optional({ nullable: true })
@@ -114,7 +117,7 @@ router.post(
     body("category").optional().isString().trim(),
     moneyBody("value"),
     body("status").optional().isIn(["draft"]),
-    body("scheduleImpact").optional().isInt().toInt(),
+    body("scheduleImpact").optional().custom(scalarFigure).bail().isInt({ min: INT4_MIN, max: INT4_MAX }).toInt(),
     body("scheduleImpactSummary")
       .optional({ nullable: true })
       .isString()
@@ -129,7 +132,7 @@ router.post(
       .isLength({
         max: 4000,
       }),
-    body("submittedDate").optional().isString().isISO8601(),
+    body("submittedDate").optional().isString().custom(dateInput),
     body("raisedBy").optional().isString().trim(),
     body("rejectedReason").optional().isString().trim(),
     body("approvalComment")
@@ -167,25 +170,25 @@ router.patch(
     body("activityLinks").optional().isArray(),
     body("activityLinks.*.activityId").optional().isString().isUUID(),
     body("activityLinks.*.relationType").optional().isString().trim(),
-    body("activityLinks.*.scheduleImpactDays").optional().isInt().toInt(),
+    body("activityLinks.*.scheduleImpactDays").optional().custom(scalarFigure).bail().isInt({ min: INT4_MIN, max: INT4_MAX }).toInt(),
     body("activityLinks.*.approvedScheduleImpactDays")
       .optional()
-      .isInt()
+      .custom(scalarFigure).bail().isInt({ min: INT4_MIN, max: INT4_MAX })
       .toInt(),
     moneyBody("activityLinks.*.costImpact"),
     moneyBody("activityLinks.*.approvedCostImpact"),
     body("activityLinks.*.baselineStart")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.baselineFinish")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactedStart")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactedFinish")
       .optional({ nullable: true })
-      .isString().isISO8601(),
+      .isString().custom(dateInput),
     body("activityLinks.*.impactBasis")
       .optional({ nullable: true })
       .isString()
@@ -201,7 +204,7 @@ router.patch(
       .optional({ nullable: true })
       .isString().isUUID(),
     body("allocationLinks.*.boqItemId").optional({ nullable: true }).isString().isUUID(),
-    body("allocationLinks.*.quantity").optional().isFloat({ min: 0 }).toFloat(),
+    body("allocationLinks.*.quantity").optional().custom(scalarFigure).bail().isFloat({ min: 0, max: QUANTITY_MAX }).toFloat(),
     moneyBody("allocationLinks.*.amount"),
     body("allocationLinks.*.notes")
       .optional({ nullable: true })
@@ -223,7 +226,7 @@ router.patch(
     body("status")
       .optional()
       .isIn(["draft", "pending", "approved", "rejected"]),
-    body("scheduleImpact").optional().isInt().toInt(),
+    body("scheduleImpact").optional().custom(scalarFigure).bail().isInt({ min: INT4_MIN, max: INT4_MAX }).toInt(),
     body("scheduleImpactSummary")
       .optional({ nullable: true })
       .isString()
@@ -238,7 +241,7 @@ router.patch(
       .isLength({
         max: 4000,
       }),
-    body("submittedDate").optional().isString().isISO8601(),
+    body("submittedDate").optional().isString().custom(dateInput),
     body("raisedBy").optional().isString().trim(),
     body("rejectedReason").optional().isString().trim(),
     body("approvalComment")
@@ -327,7 +330,7 @@ const rejectChangeOrderRoute = asyncHandler(async (req, res) => {
 
 const rejectChangeOrderValidators = [
   param("id").isUUID(),
-  body("reason").trim().notEmpty().isLength({ max: 2000 }),
+  body("reason").isString().trim().notEmpty().isLength({ max: 2000 }),
   validate,
 ];
 

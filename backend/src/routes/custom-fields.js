@@ -1,5 +1,6 @@
 const express = require("express");
 const { body, param, query } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
@@ -47,7 +48,7 @@ const definitionValidators = ({ requireLabel = false } = {}) => [
   body("hidden").optional().isBoolean().toBoolean(),
   body("validation").optional({ nullable: true }).isObject(),
   body("condition").optional({ nullable: true }),
-  body("position").optional().isInt({ min: 0, max: 10000 }).toInt(),
+  body("position").optional().custom(scalarFigure).bail().isInt({ min: 0, max: 10000 }).toInt(),
   body("status").optional().isIn(["active", "archived"]),
   validate,
 ];

@@ -103,6 +103,10 @@ const createApp = () => {
     require("./routes/stripe-webhook"),
   );
   // Inbound email carries base64 attachments: its own, larger JSON limit (OCTA-COMM-CONV-042).
+  // It is mounted before the NUL guard below, but runs the same check itself
+  // (requestHasDisallowed) once the provider is verified: an unauthenticated
+  // caller gets 401 first, a verified payload with a NUL or a lone surrogate
+  // 400 — never the 500 a provider would retry (CERT-2).
   app.use(
     "/api/v1/public/inbound-email",
     express.json({ limit: "40mb" }),
@@ -110,8 +114,10 @@ const createApp = () => {
     require("./routes/inbound-email-webhook"),
   );
   app.use(express.json({ limit: "10mb" }));
-  // A NUL (U+0000) in any field reaches Postgres and answers 500 (22P05); no
-  // client sends one, so the whole request is refused here (CERT-2).
+  // A NUL (U+0000) in any field reaches Postgres and answers 500 (22P05); a
+  // lone UTF-16 surrogate fails in the query engine (InvalidArg). No client
+  // sends either, so the whole request is refused here (CERT-2). A multipart
+  // body is parsed inside its route, which runs the guard again after multer.
   app.use(rejectNullBytes);
 
   app.use("/api/health", createHealthRouter({ release }));

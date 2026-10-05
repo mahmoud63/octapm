@@ -472,81 +472,345 @@ describe('procurement service material workflow controls', () => {
 });
 
 /**
- * CERT-2 (bodies-4): the lead-time alert is one per procurement package too.
- * A second order (or a material) on a package that already had an alert found
- * nothing by its own key, created a second alert for the package, broke the
- * unique (projectId, packageId) key, and the buyer was answered 409 with
- * Prisma's own text. The alert holding the package is brought up to date.
+ * CERT-2 (bodies-4, alerts-money-5): the lead-time alert is one per
+ * procurement package (and per material, and per order line), so it speaks
+ * for everything in its scope: the WORST risk among every line and material,
+ * recomputed from all of them on each change, resolved only when none is at
+ * risk, and opened again when an acknowledged risk worsens. Round 4 made the
+ * package's alert follow whichever line changed last: an on-time delivery on
+ * a second order resolved it while the first order's line was five weeks
+ * late, and an acknowledgement of a small slip carried over to a far larger
+ * one. A stateful store, with the table's three unique keys enforced.
  */
-describe('a lead-time alert per package (CERT-2)', () => {
+describe('a lead-time alert per scope carries the worst open risk (CERT-2)', () => {
   const day = (n) => new Date(Date.now() + n * 86_400_000);
-  // Promised five weeks after it is needed: at risk.
-  const atRiskLine = (over = {}) => ({
-    id: 'line-2', projectId: 'project-1', orderId: 'order-2', activityId: activity.id, activity, packageId: 'pkg-1',
-    activityMaterialId: null, requiredDate: day(5), promisedDate: day(40), leadWeeks: 0, bufferDays: 0,
-    status: 'ordered', orderedQty: 1, receivedQty: 0, issuedQty: 0, ...over,
+  const matches = (row, where = {}) =>
+    Object.entries(where).every(([key, cond]) => {
+      if (key === 'OR') return cond.some((each) => matches(row, each));
+      if (cond === null) return row[key] === null || row[key] === undefined;
+      if (cond && typeof cond === 'object' && !(cond instanceof Date)) {
+        if ('in' in cond) return cond.in.includes(row[key]);
+        if ('notIn' in cond) return !cond.notIn.includes(row[key]);
+        if ('not' in cond) return row[key] !== cond.not;
+        // A relation filter (a line's order): the related row matches.
+        return Boolean(row[key]) && typeof row[key] === 'object' && matches(row[key], cond);
+      }
+      return row[key] === cond;
+    });
+  let store;
+  let seq;
+  const table = (name, { unique = [] } = {}) => ({
+    findFirst: jest.fn(async ({ where }) => {
+      const row = store[name].find((each) => matches(each, where));
+      return row ? { ...row } : null;
+    }),
+    findMany: jest.fn(async ({ where } = {}) => store[name].filter((each) => matches(each, where)).map((row) => ({ ...row }))),
+    create: jest.fn(async ({ data }) => {
+      const row = { id: `${name}-${(seq += 1)}`, createdAt: new Date(), updatedAt: new Date(), acknowledgedAt: null, acknowledgedBy: null, resolvedAt: null, resolvedBy: null, ...data };
+      for (const key of unique) {
+        if (row[key] && store[name].some((each) => each.projectId === row.projectId && each[key] === row[key])) {
+          throw Object.assign(new Error(`Unique constraint failed on the fields: (\`projectId\`,\`${key}\`)`), { code: 'P2002' });
+        }
+      }
+      store[name].push(row);
+      return { ...row };
+    }),
+    update: jest.fn(async ({ where, data }) => {
+      const row = store[name].find((each) => each.id === where.id);
+      const next = { ...row, ...data, updatedAt: new Date() };
+      for (const key of unique) {
+        if (next[key] && store[name].some((each) => each.id !== row.id && each.projectId === next.projectId && each[key] === next[key])) {
+          throw Object.assign(new Error(`Unique constraint failed on the fields: (\`projectId\`,\`${key}\`)`), { code: 'P2002' });
+        }
+      }
+      Object.assign(row, next);
+      return { ...row };
+    }),
+    // One statement for many rows, each held to the unique keys as the table holds it (availability-7).
+    updateMany: jest.fn(async ({ where, data }) => {
+      const rows = store[name].filter((each) => matches(each, where));
+      for (const row of rows) {
+        const next = { ...row, ...data, updatedAt: data.updatedAt || new Date() };
+        for (const key of unique) {
+          if (next[key] && store[name].some((each) => each.id !== row.id && each.projectId === next.projectId && each[key] === next[key])) {
+            throw Object.assign(new Error(`Unique constraint failed on the fields: (\`projectId\`,\`${key}\`)`), { code: 'P2002' });
+          }
+        }
+        Object.assign(row, next);
+      }
+      return { count: rows.length };
+    }),
+    createMany: jest.fn(async ({ data }) => {
+      for (const each of data) {
+        const row = { id: `${name}-${(seq += 1)}`, createdAt: new Date(), updatedAt: new Date(), acknowledgedAt: null, acknowledgedBy: null, resolvedAt: null, resolvedBy: null, ...each };
+        for (const key of unique) {
+          if (row[key] && store[name].some((other) => other.projectId === row.projectId && other[key] === row[key])) {
+            throw Object.assign(new Error(`Unique constraint failed on the fields: (\`projectId\`,\`${key}\`)`), { code: 'P2002' });
+          }
+        }
+        store[name].push(row);
+      }
+      return { count: data.length };
+    }),
   });
+  const tx = {
+    procurementLeadTimeAlert: table('alerts', { unique: ['poLineId', 'activityMaterialId', 'packageId'] }),
+    procurementPoLine: table('lines'),
+    activityMaterial: table('materials'),
+    procurementPackage: table('packages'),
+  };
+  const lineOn = (id, over = {}) => {
+    const row = {
+      id, projectId: 'project-1', orderId: `order-of-${id}`, order: { ref: `PO-${id}`, status: 'issued' }, activityId: activity.id, activity,
+      packageId: 'pkg-1', activityMaterialId: null, requiredDate: day(5), promisedDate: day(40), leadWeeks: 0, bufferDays: 0,
+      status: 'ordered', orderedQty: 1, receivedQty: 0, issuedQty: 0, createdAt: new Date(), ...over,
+    };
+    store.lines.push(row);
+    return row;
+  };
+  const change = (row, over) => Object.assign(row, over);
+  const sync = (subject) => procurementService.syncLeadTimeAlert({ tx, projectId: 'project-1', project, ...subject });
+  const open = () => store.alerts.filter((row) => row.status !== 'resolved');
   beforeEach(() => {
-    mockPrisma.procurementLeadTimeAlert.findFirst.mockReset();
-    mockPrisma.procurementLeadTimeAlert.findMany.mockReset();
-    mockPrisma.procurementLeadTimeAlert.create.mockReset();
-    mockPrisma.procurementLeadTimeAlert.update.mockReset();
-    mockPrisma.procurementLeadTimeAlert.update.mockImplementation(async ({ where, data }) => ({ id: where.id, ...data }));
-    mockPrisma.procurementLeadTimeAlert.create.mockImplementation(async ({ data }) => ({ id: 'alert-new', ...data }));
+    seq = 0;
+    store = { alerts: [], lines: [], materials: [], packages: [{ id: 'pkg-1', projectId: 'project-1', status: 'planning', activityId: activity.id, activity, requiredOnSiteDate: day(30), leadWeeks: 0, bufferDays: 0 }] };
   });
 
-  test('a second line on a package whose alert another line holds updates that alert — no second alert', async () => {
-    mockPrisma.procurementLeadTimeAlert.findFirst.mockResolvedValue(null);
-    mockPrisma.procurementLeadTimeAlert.findMany.mockResolvedValue([{ id: 'alert-pkg', projectId: 'project-1', packageId: 'pkg-1', poLineId: 'line-1', activityMaterialId: null, status: 'acknowledged' }]);
+  test('two orders on one package: the alert carries the worse line, and stays open after the other order is delivered', async () => {
+    const late = lineOn('line-1', { promisedDate: day(40) });
+    const lesser = lineOn('line-2', { promisedDate: day(10) });
+    await sync({ line: late });
+    await sync({ line: lesser });
+    expect(store.alerts).toHaveLength(1);
+    expect(store.alerts[0]).toMatchObject({ packageId: 'pkg-1', poLineId: 'line-1', orderId: 'order-of-line-1', status: 'open', reason: 'delivery_after_need', daysAtRisk: 35 });
 
-    await procurementService.syncLeadTimeAlert({ tx: mockPrisma, projectId: 'project-1', project, line: atRiskLine() });
-
-    expect(mockPrisma.procurementLeadTimeAlert.create).not.toHaveBeenCalled();
-    expect(mockPrisma.procurementLeadTimeAlert.update).toHaveBeenCalledWith({
-      where: { id: 'alert-pkg' },
-      data: expect.objectContaining({ packageId: 'pkg-1', poLineId: 'line-2', orderId: 'order-2', status: 'acknowledged' }),
-    });
-    expect(mockPrisma.procurementLeadTimeAlert.findMany).toHaveBeenCalledWith({
-      where: { projectId: 'project-1', OR: [{ poLineId: 'line-2' }, { packageId: 'pkg-1' }] },
-    });
+    // The second order's line is delivered in full.
+    change(lesser, { receivedQty: 1, status: 'received' });
+    const after = await sync({ line: lesser });
+    expect(store.alerts).toHaveLength(1);
+    expect(after).toMatchObject({ status: 'open', severity: 'critical', poLineId: 'line-1', daysAtRisk: 35 });
+    expect(open()).toHaveLength(1);
   });
 
-  test('a resolved package alert taken over by an at-risk line is opened again', async () => {
-    mockPrisma.procurementLeadTimeAlert.findFirst.mockResolvedValue(null);
-    mockPrisma.procurementLeadTimeAlert.findMany.mockResolvedValue([{ id: 'alert-pkg', projectId: 'project-1', packageId: 'pkg-1', poLineId: null, activityMaterialId: null, status: 'resolved' }]);
-    await procurementService.syncLeadTimeAlert({ tx: mockPrisma, projectId: 'project-1', project, line: atRiskLine() });
-    expect(mockPrisma.procurementLeadTimeAlert.update.mock.calls[0][0].data).toMatchObject({ status: 'open', resolvedAt: null, resolvedBy: null });
+  test('resolved only when nothing on the package is at risk, and opened again when something is', async () => {
+    const one = lineOn('line-1');
+    const two = lineOn('line-2', { promisedDate: day(10) });
+    await sync({ line: one });
+    change(one, { receivedQty: 1, status: 'received' });
+    expect(await sync({ line: one })).toMatchObject({ status: 'open', poLineId: 'line-2', daysAtRisk: 5 });
+    change(two, { receivedQty: 1, status: 'received' });
+    expect(await sync({ line: two })).toMatchObject({ status: 'resolved', severity: 'none', daysAtRisk: 0 });
+    const three = lineOn('line-3', { promisedDate: day(20) });
+    expect(await sync({ line: three })).toMatchObject({ id: store.alerts[0].id, status: 'open', poLineId: 'line-3', resolvedAt: null });
+    expect(store.alerts).toHaveLength(1);
   });
 
-  test('a link that yet another alert holds stays with it: the line\'s own alert is updated without the package', async () => {
-    mockPrisma.procurementLeadTimeAlert.findFirst.mockResolvedValue({ id: 'alert-own', projectId: 'project-1', packageId: null, poLineId: 'line-2', status: 'open' });
-    mockPrisma.procurementLeadTimeAlert.findMany.mockResolvedValue([
-      { id: 'alert-own', projectId: 'project-1', packageId: null, poLineId: 'line-2', status: 'open' },
-      { id: 'alert-pkg', projectId: 'project-1', packageId: 'pkg-1', poLineId: 'line-1', status: 'open' },
-    ]);
-    await procurementService.syncLeadTimeAlert({ tx: mockPrisma, projectId: 'project-1', project, line: atRiskLine() });
-    expect(mockPrisma.procurementLeadTimeAlert.create).not.toHaveBeenCalled();
-    const [{ where, data }] = mockPrisma.procurementLeadTimeAlert.update.mock.calls[0];
-    expect(where).toEqual({ id: 'alert-own' });
-    expect(data).not.toHaveProperty('packageId');
-    expect(data.poLineId).toBe('line-2');
+  test('an acknowledged alert is opened again when the risk worsens — not when it stays as acknowledged or eases', async () => {
+    const small = lineOn('line-1', { promisedDate: day(8) });
+    await sync({ line: small });
+    change(store.alerts[0], { status: 'acknowledged', acknowledgedAt: new Date(), acknowledgedBy: 'pm-1' });
+    // Synced again with nothing changed: still acknowledged.
+    expect(await sync({ line: small })).toMatchObject({ status: 'acknowledged', daysAtRisk: 3 });
+    // A second order, eighty days late, on the same package: a worse risk than was acknowledged.
+    const big = lineOn('line-2', { promisedDate: day(85) });
+    expect(await sync({ line: big })).toMatchObject({ status: 'open', poLineId: 'line-2', daysAtRisk: 80, acknowledgedAt: null, acknowledgedBy: null });
+    // Acknowledged again, then the supplier improves the promise: easing keeps the acknowledgement.
+    change(store.alerts[0], { status: 'acknowledged', acknowledgedAt: new Date(), acknowledgedBy: 'pm-1' });
+    change(big, { promisedDate: day(45) });
+    expect(await sync({ line: big })).toMatchObject({ status: 'acknowledged', daysAtRisk: 40, acknowledgedBy: 'pm-1' });
+    expect(store.alerts).toHaveLength(1);
   });
 
-  test('a package nobody holds yet gets its alert created', async () => {
-    mockPrisma.procurementLeadTimeAlert.findFirst.mockResolvedValue(null);
-    mockPrisma.procurementLeadTimeAlert.findMany.mockResolvedValue([]);
-    await procurementService.syncLeadTimeAlert({ tx: mockPrisma, projectId: 'project-1', project, line: atRiskLine() });
-    expect(mockPrisma.procurementLeadTimeAlert.update).not.toHaveBeenCalled();
-    expect(mockPrisma.procurementLeadTimeAlert.create).toHaveBeenCalledWith({ data: expect.objectContaining({ packageId: 'pkg-1', poLineId: 'line-2', status: 'open' }) });
+  test('a higher severity reopens an acknowledgement; days that time alone added to the same overdue line do not', async () => {
+    const calm = { ...activity, isCritical: false };
+    const overdue = lineOn('line-1', { activity: calm, requiredDate: day(60), promisedDate: day(-3) });
+    await sync({ line: overdue });
+    expect(store.alerts[0]).toMatchObject({ reason: 'delivery_overdue', severity: 'high', daysAtRisk: 3 });
+    // Acknowledged two days ago at one day overdue: the two days since are time, not news.
+    change(store.alerts[0], { status: 'acknowledged', daysAtRisk: 1, updatedAt: day(-2) });
+    expect(await sync({ line: overdue })).toMatchObject({ status: 'acknowledged', daysAtRisk: 3 });
+    // Acknowledged today at nought: three days is more than time explains.
+    change(store.alerts[0], { status: 'acknowledged', daysAtRisk: 0, updatedAt: new Date() });
+    expect(await sync({ line: overdue })).toMatchObject({ status: 'open' });
+    // From high to critical (more than a week overdue) reopens whatever the days.
+    change(store.alerts[0], { status: 'acknowledged', updatedAt: day(-30) });
+    change(overdue, { promisedDate: day(-9) });
+    expect(await sync({ line: overdue })).toMatchObject({ status: 'open', severity: 'critical' });
   });
 
-  test('a material on a package whose alert a line holds takes that alert over', async () => {
-    mockPrisma.procurementLeadTimeAlert.findFirst.mockResolvedValue(null);
-    mockPrisma.procurementLeadTimeAlert.findMany.mockResolvedValue([{ id: 'alert-pkg', projectId: 'project-1', packageId: 'pkg-1', poLineId: 'line-1', activityMaterialId: null, status: 'open' }]);
-    const material = { id: 'mat-1', projectId: 'project-1', activityId: activity.id, activity, procurementPackageId: 'pkg-1', name: 'Cable', plannedQty: 3, qty: 3, requiredDate: day(5), leadWeeks: 12, bufferDays: 0, status: 'planned', poLines: [] };
-    await procurementService.syncLeadTimeAlert({ tx: mockPrisma, projectId: 'project-1', project, material });
-    expect(mockPrisma.procurementLeadTimeAlert.create).not.toHaveBeenCalled();
-    expect(mockPrisma.procurementLeadTimeAlert.update).toHaveBeenCalledWith({ where: { id: 'alert-pkg' }, data: expect.objectContaining({ activityMaterialId: 'mat-1', packageId: 'pkg-1', poLineId: null }) });
+  test('materials on the package count: a material not yet ordered past its order-by date keeps the alert open once every line is in', async () => {
+    const line = lineOn('line-1', { promisedDate: day(10) });
+    store.materials.push({ id: 'mat-1', projectId: 'project-1', activityId: activity.id, activity, procurementPackageId: 'pkg-1', name: 'Cable', plannedQty: 3, qty: 3, requiredDate: day(5), leadWeeks: 12, bufferDays: 0, status: 'planned', poLines: [], createdAt: new Date() });
+    await sync({ material: store.materials[0] });
+    change(line, { receivedQty: 1, status: 'received' });
+    const after = await sync({ line });
+    expect(after).toMatchObject({ status: 'open', packageId: 'pkg-1', activityMaterialId: 'mat-1', poLineId: null, reason: 'order_by_missed' });
+    expect(store.alerts).toHaveLength(1);
+  });
+
+  test('a cancelled order\'s line, a cancelled material and a cancelled line hold nothing open', async () => {
+    const late = lineOn('line-1');
+    await sync({ line: late });
+    change(late, { order: { ref: 'PO-line-1', status: 'cancelled' } });
+    expect(await sync({ line: late })).toMatchObject({ status: 'resolved' });
+    store.materials.push({ id: 'mat-1', projectId: 'project-1', activityId: activity.id, activity, procurementPackageId: 'pkg-1', name: 'Cable', plannedQty: 3, requiredDate: day(5), leadWeeks: 12, bufferDays: 0, status: 'cancelled', poLines: [], createdAt: new Date() });
+    const voided = lineOn('line-2', { status: 'cancelled' });
+    expect(await sync({ line: voided })).toMatchObject({ status: 'resolved' });
+  });
+
+  test('the package\'s own planning dates speak for it only until something is ordered on it', async () => {
+    change(store.packages[0], { requiredOnSiteDate: day(5), leadWeeks: 12, latestOrderDate: day(-79) });
+    const own = await sync({ packageRow: store.packages[0] });
+    expect(own).toMatchObject({ packageId: 'pkg-1', poLineId: null, reason: 'order_by_missed', status: 'open' });
+    // Ordered, and promised in time: the package still reads "planning", but its lines speak now.
+    lineOn('line-1', { requiredDate: day(30), promisedDate: day(20) });
+    expect(await sync({ line: store.lines[0] })).toMatchObject({ status: 'resolved' });
+  });
+
+  test('a material\'s own alert is taken into its package\'s when it joins one — no second alert, no unique key broken', async () => {
+    store.materials.push({ id: 'mat-1', projectId: 'project-1', activityId: activity.id, activity, procurementPackageId: null, name: 'Cable', plannedQty: 3, requiredDate: day(5), leadWeeks: 12, bufferDays: 0, status: 'planned', poLines: [], createdAt: new Date() });
+    const own = await sync({ material: store.materials[0] });
+    expect(own).toMatchObject({ activityMaterialId: 'mat-1', packageId: null, status: 'open' });
+    change(store.alerts[0], { status: 'acknowledged', acknowledgedBy: 'pm-1' });
+    // Ordered on the package: the material now belongs to it.
+    change(store.materials[0], { procurementPackageId: 'pkg-1', status: 'ordered' });
+    const line = lineOn('line-1', { activityMaterialId: 'mat-1', promisedDate: day(10) });
+    const taken = await sync({ line });
+    expect(store.alerts).toHaveLength(1);
+    expect(taken).toMatchObject({ id: own.id, packageId: 'pkg-1' });
+    // A package that already had its alert closes the material's instead of colliding with it.
+    store.packages.push({ id: 'pkg-2', projectId: 'project-1', status: 'planning', activityId: activity.id, activity, requiredOnSiteDate: day(30), leadWeeks: 0, bufferDays: 0 });
+    store.materials.push({ id: 'mat-2', projectId: 'project-1', activityId: activity.id, activity, procurementPackageId: null, name: 'Duct', plannedQty: 3, requiredDate: day(5), leadWeeks: 12, bufferDays: 0, status: 'planned', poLines: [], createdAt: new Date() });
+    await sync({ material: store.materials[1] });
+    const other = lineOn('line-2', { packageId: 'pkg-2', promisedDate: day(40) });
+    await sync({ line: other });
+    change(store.materials[1], { procurementPackageId: 'pkg-2', status: 'ordered' });
+    const merged = await sync({ material: store.materials[1] });
+    expect(merged).toMatchObject({ packageId: 'pkg-2', status: 'open' });
+    const materialAlert = store.alerts.find((row) => row.id !== merged.id && row.id !== own.id);
+    expect(materialAlert).toMatchObject({ status: 'resolved', activityMaterialId: null, packageId: null });
+    expect(open()).toHaveLength(2);
+  });
+
+  test('a material taken off a package: the package\'s alert that pointed at it is worked again without it', async () => {
+    store.materials.push({ id: 'mat-1', projectId: 'project-1', activityId: activity.id, activity, procurementPackageId: 'pkg-1', name: 'Cable', plannedQty: 3, requiredDate: day(5), leadWeeks: 12, bufferDays: 0, status: 'planned', poLines: [], createdAt: new Date() });
+    lineOn('line-1', { requiredDate: day(30), promisedDate: day(20) });
+    const pkgAlert = await sync({ material: store.materials[0] });
+    expect(pkgAlert).toMatchObject({ packageId: 'pkg-1', activityMaterialId: 'mat-1', status: 'open' });
+    change(store.materials[0], { procurementPackageId: null });
+    const own = await sync({ material: store.materials[0] });
+    expect(own).toMatchObject({ activityMaterialId: 'mat-1', packageId: null, status: 'open' });
+    expect(store.alerts.find((row) => row.id === pkgAlert.id)).toMatchObject({ status: 'resolved', activityMaterialId: null });
+  });
+
+  // ── round 6 ──────────────────────────────────────────────────────────────
+
+  test('round 6: many lines on one package — the package\'s lines are read once, and its one alert is on the worst', async () => {
+    const lines = Array.from({ length: 60 }, (_, k) => lineOn(`line-${k + 1}`, { promisedDate: day(5 + (k % 40)) }));
+    tx.procurementPoLine.findMany.mockClear();
+    await procurementService.syncLeadTimeAlerts({ tx, projectId: 'project-1', project, lines });
+    const scopeReads = tx.procurementPoLine.findMany.mock.calls.filter(([args]) => args?.where?.OR);
+    expect(scopeReads).toHaveLength(1);
+    expect(store.alerts).toHaveLength(1);
+    expect(store.alerts[0]).toMatchObject({ packageId: 'pkg-1', poLineId: 'line-40', daysAtRisk: 39, status: 'open' });
+  });
+
+  test('round 6: a scope\'s cancelled and closed lines are not read when it is worked', async () => {
+    lineOn('line-1', { order: { ref: 'PO-1', status: 'cancelled' } });
+    lineOn('line-2', { order: { ref: 'PO-2', status: 'closed' } });
+    lineOn('line-3', { status: 'cancelled' });
+    const live = lineOn('line-4', { promisedDate: day(12) });
+    tx.procurementPoLine.findMany.mockClear();
+    await sync({ line: live });
+    const [read] = tx.procurementPoLine.findMany.mock.results.filter((_, i) => tx.procurementPoLine.findMany.mock.calls[i][0]?.where?.OR);
+    expect((await read.value).map((row) => row.id)).toEqual(['line-4']);
+    expect(store.alerts[0]).toMatchObject({ poLineId: 'line-4', daysAtRisk: 7, status: 'open' });
+  });
+
+  test('round 6: a material ordered on an order since cancelled or closed is not kept at risk by that order\'s promise', async () => {
+    const calm = { ...activity, isCritical: false };
+    for (const settled of ['cancelled', 'closed']) {
+      store.alerts = [];
+      store.lines = [];
+      const line = lineOn(`line-${settled}`, { activity: calm, activityMaterialId: 'mat-1', requiredDate: day(30), promisedDate: day(40) });
+      store.materials = [{ id: 'mat-1', projectId: 'project-1', activityId: activity.id, activity: calm, procurementPackageId: 'pkg-1', name: 'Cable', plannedQty: 1, requiredDate: day(30), leadWeeks: 0, bufferDays: 0, status: 'ordered', poLines: [line], createdAt: new Date() }];
+      expect(await sync({ line })).toMatchObject({ status: 'open', reason: 'delivery_after_need', daysAtRisk: 10 });
+      // The order will deliver nothing more: neither its line nor the material's view of it is a risk.
+      change(line, { order: { ref: 'PO-x', status: settled } });
+      expect(await sync({ line })).toMatchObject({ status: 'resolved', severity: 'none' });
+    }
+    // The scope reads each material's lines with their order's status — without it the rule above has nothing to go on.
+    expect(tx.activityMaterial.findMany).toHaveBeenCalledWith(expect.objectContaining({ include: expect.objectContaining({ poLines: expect.objectContaining({ include: { order: { select: { status: true } } } }) }) }));
+    // The material's own view: no promise from a settled order; ordered on nothing live, it is not on order.
+    const row = procurementService.buildMaterialRiskRow(store.materials[0]);
+    expect(row).toMatchObject({ promisedDate: null, expectedDeliveryDate: null, status: 'not_ordered' });
+    // A line whose order was not read with it is judged by its own status, as before.
+    expect(procurementService.buildMaterialRiskRow({ ...store.materials[0], poLines: [{ status: 'ordered', promisedDate: day(40) }] })).toMatchObject({ status: 'ordered' });
+  });
+
+  test('round 6: an open alert keeps its subject — a resolved alert gives up the link it was resolved on', async () => {
+    store.packages.push({ id: 'pkg-2', projectId: 'project-1', status: 'planning', activityId: activity.id, activity, requiredOnSiteDate: day(200), leadWeeks: 0, bufferDays: 0 });
+    const material = { id: 'mat-1', projectId: 'project-1', activityId: activity.id, activity, procurementPackageId: 'pkg-1', name: 'Cable', plannedQty: 3, requiredDate: day(5), leadWeeks: 12, bufferDays: 0, status: 'planned', poLines: [], createdAt: new Date() };
+    store.materials.push(material);
+    const first = await sync({ material });
+    expect(first).toMatchObject({ packageId: 'pkg-1', activityMaterialId: 'mat-1', status: 'open' });
+    // Needed much later: nothing on pkg-1 is at risk, and its alert is resolved — on the material.
+    change(material, { requiredDate: day(300) });
+    expect(await sync({ material })).toMatchObject({ id: first.id, status: 'resolved', activityMaterialId: 'mat-1' });
+    // Moved to pkg-2 and needed soon again: pkg-2's open alert is on the material, and pkg-1's resolved one let it go.
+    change(material, { procurementPackageId: 'pkg-2', requiredDate: day(5) });
+    const second = await sync({ material });
+    expect(second).toMatchObject({ packageId: 'pkg-2', activityMaterialId: 'mat-1', status: 'open', reason: 'order_by_missed' });
+    expect(store.alerts.find((row) => row.id === first.id)).toMatchObject({ status: 'resolved', activityMaterialId: null, packageId: 'pkg-1' });
+  });
+
+  test('round 6: a member of the scope is its alert\'s subject even when another open alert points at it', async () => {
+    store.packages.push({ id: 'pkg-2', projectId: 'project-1', status: 'planning', activityId: activity.id, activity, requiredOnSiteDate: day(200), leadWeeks: 0, bufferDays: 0 });
+    // A material planned on pkg-2, ordered on a line that names pkg-1: pkg-1's alert points at the line, and at the material it was ordered against.
+    const line = lineOn('line-1', { activityMaterialId: 'mat-1', promisedDate: day(40) });
+    const material = { id: 'mat-1', projectId: 'project-1', activityId: activity.id, activity, procurementPackageId: 'pkg-1', name: 'Cable', plannedQty: 1, requiredDate: day(5), leadWeeks: 0, bufferDays: 0, status: 'ordered', poLines: [line], createdAt: new Date() };
+    store.materials.push(material);
+    const onLine = await sync({ line });
+    expect(onLine).toMatchObject({ packageId: 'pkg-1', poLineId: 'line-1', activityMaterialId: 'mat-1', status: 'open' });
+    // The material is moved to pkg-2, where it is the worst risk (35 days, its line's promise).
+    change(material, { procurementPackageId: 'pkg-2' });
+    const moved = await sync({ material });
+    expect(moved).toMatchObject({ packageId: 'pkg-2', activityMaterialId: 'mat-1', status: 'open', reason: 'delivery_after_need' });
+    expect(store.alerts.find((row) => row.id === onLine.id)).toMatchObject({ packageId: 'pkg-1', poLineId: 'line-1', activityMaterialId: null, status: 'open' });
+  });
+
+  test('round 6: deleting the activity of a package\'s worst line keeps the package\'s alert, worked again on the line still late', async () => {
+    const worst = lineOn('line-1', { promisedDate: day(40) });
+    lineOn('line-2', { activityId: 'activity-2', promisedDate: day(10) });
+    await procurementService.syncLeadTimeAlerts({ tx, projectId: 'project-1', project, lines: store.lines });
+    expect(store.alerts[0]).toMatchObject({ poLineId: 'line-1', daysAtRisk: 35 });
+    const released = await procurementService.releaseLeadTimeAlertLinks({ tx, projectId: 'project-1', lineIds: [worst.id], materialIds: [] });
+    expect(store.alerts[0]).toMatchObject({ poLineId: null, packageId: 'pkg-1' });
+    // The cascade: the line is gone.
+    store.lines = store.lines.filter((row) => row.id !== worst.id);
+    await procurementService.syncReleasedLeadTimeAlerts({ tx, projectId: 'project-1', project, released });
+    expect(store.alerts).toHaveLength(1);
+    expect(store.alerts[0]).toMatchObject({ packageId: 'pkg-1', poLineId: 'line-2', daysAtRisk: 5, status: 'open' });
+  });
+
+  test('round 6: deleting a line a material\'s alert points at keeps the material\'s alert; a line\'s own alert goes with it', async () => {
+    const material = { id: 'mat-1', projectId: 'project-1', activityId: 'activity-2', activity, procurementPackageId: null, name: 'Cable', plannedQty: 1, requiredDate: day(5), leadWeeks: 1, bufferDays: 0, status: 'planned', poLines: [], createdAt: new Date() };
+    store.materials.push(material);
+    const ordered = lineOn('line-1', { packageId: null, activityMaterialId: 'mat-1', promisedDate: day(60) });
+    const loose = lineOn('line-2', { packageId: null, promisedDate: day(20) });
+    await procurementService.syncLeadTimeAlerts({ tx, projectId: 'project-1', project, lines: [ordered, loose] });
+    expect(store.alerts).toHaveLength(2);
+    const materialAlert = store.alerts.find((row) => row.activityMaterialId === 'mat-1');
+    expect(materialAlert).toMatchObject({ poLineId: 'line-1', packageId: null });
+    const released = await procurementService.releaseLeadTimeAlertLinks({ tx, projectId: 'project-1', lineIds: ['line-1', 'line-2'], materialIds: [] });
+    // The line's own alert is left to the cascade; the material's gives the line up.
+    expect(store.alerts.find((row) => row.id === materialAlert.id)).toMatchObject({ poLineId: null, activityMaterialId: 'mat-1' });
+    expect(store.alerts.find((row) => row.id !== materialAlert.id)).toMatchObject({ poLineId: 'line-2' });
+    store.lines = [];
+    store.alerts = store.alerts.filter((row) => row.poLineId !== 'line-2');
+    await procurementService.syncReleasedLeadTimeAlerts({ tx, projectId: 'project-1', project, released });
+    expect(store.alerts).toHaveLength(1);
+    expect(store.alerts[0]).toMatchObject({ id: materialAlert.id, activityMaterialId: 'mat-1', reason: 'order_by_missed', status: 'open' });
   });
 });
 
@@ -575,5 +839,31 @@ describe('an order\'s value fits its column (CERT-2)', () => {
     const outcome = await order([line({ orderedQty: 99_999_999_999, unitCost: '99999.99' })]).catch((error) => error);
     expect(outcome?.code).not.toBe('PO_VALUE_TOO_LARGE');
     expect(mockPrisma.procurementOrder.create).toHaveBeenCalled();
+  });
+});
+
+/**
+ * CERT-2 (alerts-6): an order's lines are written first, and the alert of
+ * every scope they are in is worked ONCE afterwards — not once per line, which
+ * read the package's every line again for each line and ran a 180-line order
+ * past its transaction's five seconds (a 500).
+ */
+describe('an order works each lead-time alert scope once (CERT-2, round 6)', () => {
+  const line = (n) => ({ description: `Line ${n}`, unit: 'nr', activityId: 'activity-1', orderedQty: 1, unitCost: 10, promisedDate: '2026-12-01' });
+  beforeEach(() => {
+    for (const model of ['boqItem', 'budgetLine', 'materialMaster', 'costCode']) mockPrisma[model].findMany.mockResolvedValue([]);
+    mockPrisma.procurementPackage.findFirst.mockResolvedValue({ id: 'pkg-1', projectId: 'project-1', status: 'planning' });
+    mockPrisma.procurementOrder.create.mockResolvedValue({ id: 'order-1', projectId: 'project-1', packageId: 'pkg-1', ref: 'PO-ONE', item: 'One', status: 'planned', leadWeeks: 0, bufferDays: 14, needOffsetDays: 0, requiredTiming: 'activity_start' });
+    mockPrisma.procurementPoLine.create.mockImplementation(async ({ data }) => ({ id: `line-${data.lineNumber}`, ...data }));
+    mockPrisma.procurementPoLine.findMany.mockResolvedValue([]);
+  });
+
+  test('a three-line order on one package reads the package\'s lines once, after every line is written', async () => {
+    // The order's totals are re-added by purchase-order.service afterwards; this fake stops there.
+    await procurementService.createPurchaseOrder({ orgId: 'org-1', projectId: 'project-1', actor: { id: 'proc-1' }, payload: { ref: 'PO-ONE', item: 'One', packageId: 'pkg-1', lines: [line(1), line(2), line(3)] } }).catch(() => null);
+    expect(mockPrisma.procurementPoLine.create).toHaveBeenCalledTimes(3);
+    const reads = mockPrisma.procurementPoLine.findMany.mock.calls.map(([args], i) => ({ args, order: mockPrisma.procurementPoLine.findMany.mock.invocationCallOrder[i] })).filter(({ args }) => args?.where?.OR);
+    expect(reads).toHaveLength(1);
+    expect(reads[0].order).toBeGreaterThan(Math.max(...mockPrisma.procurementPoLine.create.mock.invocationCallOrder));
   });
 });

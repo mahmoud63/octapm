@@ -1,5 +1,7 @@
 const express = require("express");
 const { body, query } = require("express-validator");
+const { scalarFigure } = require("../utils/figure-input");
+const { dateInput } = require("../utils/date-input");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -32,7 +34,7 @@ const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 
 const rate = (name) =>
-  body(name).optional({ nullable: true }).isFloat({ min: 0, max: 100 }).toFloat();
+  body(name).optional({ nullable: true }).custom(scalarFigure).bail().isFloat({ min: 0, max: 100 }).toFloat();
 
 router.get(
   "/",
@@ -64,9 +66,9 @@ router.patch(
     rate("advanceRecoveryRate"),
     rate("materialsOnSiteRate"),
     rate("taxRate"),
-    body("paymentTermsDays").optional().isInt({ min: 0, max: 365 }).toInt(),
-    body("startDate").optional({ nullable: true }).isString().isISO8601(),
-    body("completionDate").optional({ nullable: true }).isString().isISO8601(),
+    body("paymentTermsDays").optional().custom(scalarFigure).bail().isInt({ min: 0, max: 365 }).toInt(),
+    body("startDate").optional({ nullable: true }).isString().custom(dateInput),
+    body("completionDate").optional({ nullable: true }).isString().custom(dateInput),
     body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
     // Confirms the stored original value as it stands (the BOQ fallback, or
     // a value of unestablished source); the service also requires boq:read.
@@ -151,7 +153,7 @@ router.post(
   [
     moneyBody("amount", { required: true }),
     body("reference").optional({ nullable: true }).isString().trim().isLength({ max: 40 }),
-    body("occurredAt").optional({ nullable: true }).isString().isISO8601(),
+    body("occurredAt").optional({ nullable: true }).isString().custom(dateInput),
     body("note").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
     validate,
   ],

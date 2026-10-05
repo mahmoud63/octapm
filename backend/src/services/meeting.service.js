@@ -465,11 +465,14 @@ const ensureUsersInProject = async ({
   const map = new Map(rows.map((row) => [row.id, row]));
   const missing = ids.filter((id) => !map.has(id));
   if (missing.length) {
+    // The refusals of a meeting's people, parties, tasks and distribution
+    // recipients do not list the ids they were sent: they handed another
+    // company's ids back in the answer (CERT-2 evidence-lines-5), and the
+    // answer is the same whichever id is missing (as MEETING_ACTIVITY_INVALID).
     throw new HttpError(
       400,
       "MEETING_USER_INVALID",
       "One or more meeting users are not active project members",
-      { userIds: missing },
     );
   }
   return map;
@@ -494,7 +497,6 @@ const ensureProjectPartiesInProject = async ({
       400,
       "MEETING_PARTY_INVALID",
       "One or more meeting project parties are invalid for this project",
-      { projectPartyIds: missing },
     );
   }
   return map;
@@ -520,7 +522,6 @@ const ensureTasksInProject = async ({
       400,
       "MEETING_TASK_INVALID",
       "One or more linked tasks are invalid for this project",
-      { taskIds: missing },
     );
   }
 };
@@ -1428,7 +1429,6 @@ const resolveDistributionTargets = async ({
       400,
       "MEETING_DISTRIBUTION_PARTY_INVALID",
       "One or more distribution project parties are invalid",
-      { projectPartyIds: missingPartyIds },
     );
   }
 
@@ -1461,7 +1461,6 @@ const resolveDistributionTargets = async ({
       400,
       "MEETING_DISTRIBUTION_USER_INVALID",
       "One or more distribution recipients are not active project members",
-      { userIds: missingUserIds },
     );
   }
 

@@ -2,6 +2,8 @@ const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs/promises');
 const multer = require('multer');
+// The NUL / lone-surrogate guard again after multer: it parses the multipart body inside the route (CERT-2).
+const { rejectNullBytes } = require('../middleware/reject-null-bytes');
 const path = require('path');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
@@ -61,6 +63,7 @@ router.post(
   requirePermission('schedule', 'create'),
   uploadLimiter,
   upload.single('file'),
+  rejectNullBytes,
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
 
@@ -108,6 +111,7 @@ router.post(
   requirePermission('schedule', 'create'),
   uploadLimiter,
   upload.single('file'),
+  rejectNullBytes,
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
 
@@ -155,6 +159,7 @@ router.post(
   requirePermission('schedule', 'create'),
   uploadLimiter,
   upload.single('file'),
+  rejectNullBytes,
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
 
@@ -206,6 +211,7 @@ router.post(
   uploadLimiter,
   [query('dryRun').isString().optional().isBoolean().toBoolean(), validate],
   upload.single('file'),
+  rejectNullBytes,
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
 
@@ -272,6 +278,7 @@ router.post(
   uploadLimiter,
   [query('dryRun').isString().optional().isBoolean().toBoolean(), validate],
   upload.single('file'),
+  rejectNullBytes,
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
 

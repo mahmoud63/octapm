@@ -1,6 +1,7 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const auditService = require('./audit.service');
+const progressService = require('./progress.service');
 const { assertMembers } = require('./tenant-references.service');
 const { assertLineReferences, checkedPhotos } = require('./daily-report.service');
 
@@ -85,6 +86,14 @@ const normalizeIssues = (value) =>
     })
     .filter((issue) => issue?.description);
 
+// A photo as the clients send it: the upload's answer (key, url, filename …),
+// a typed link, the drivers' { key, filename, caption } and the UAT runner's
+// { fileName, fileUrl, mimeType, sizeBytes, description }
+// (e2e/uat/run-uat-regression.mjs evidenceAttachment). A photo was kept only
+// by its url or key, so the runner's photo was accepted (201) and dropped
+// unseen (CERT-2 evidence-lines-5): its fileUrl (or downloadUrl) is now its
+// url, its fileName its filename, its sizeBytes its size and its description
+// is kept, and the photo is checked as every photo is (checkedPhotos).
 const normalizePhotos = (value) =>
   normalizeList(value)
     .map((photo) => {
@@ -92,16 +101,17 @@ const normalizePhotos = (value) =>
       if (!photo || typeof photo !== 'object') return null;
       return {
         key: photo.key || null,
-        url: photo.url || null,
-        filename: photo.filename || photo.name || null,
+        url: photo.url || photo.fileUrl || photo.downloadUrl || null,
+        filename: photo.filename || photo.name || photo.fileName || null,
         originalName: photo.originalName || null,
         mimeType: photo.mimeType || photo.type || null,
-        size: photo.size ?? null,
+        size: photo.size ?? photo.sizeBytes ?? null,
         storage: photo.storage || null,
         caption: trimOrNull(photo.caption),
         takenAt: photo.takenAt || null,
         uploadedBy: photo.uploadedBy || null,
         uploadedAt: photo.uploadedAt || null,
+        ...(photo.description !== undefined && photo.description !== null ? { description: photo.description } : {}),
       };
     })
     .filter((photo) => photo && (photo.url || photo.key));
@@ -278,7 +288,23 @@ const serializeSiteDiary = (row) =>
       }
     : null;
 
-const buildDiaryData = ({ payload, projectId, userId, existing = null }) => ({
+/**
+ * The photos a request sends, normalised once and read (progress.service
+ * scanEvidence) before the transaction that looks up the files they name, as
+ * a daily report's are (daily-report.service readPhotos; CERT-2 evidence-6).
+ */
+const readPhotos = ({ projectId, payload }) => {
+  if (!payload || payload.photos === undefined) return null;
+  let photos;
+  try {
+    photos = normalizePhotos(payload.photos);
+  } catch {
+    return null;
+  }
+  return { photos, scanned: progressService.scanEvidence({ projectId, evidence: { photos }, field: null }) };
+};
+
+const buildDiaryData = ({ payload, projectId, userId, existing = null, normalizedPhotos = undefined }) => ({
   projectId,
   engineerId: payload.engineerId || existing?.engineerId || userId || null,
   date:
@@ -328,9 +354,11 @@ const buildDiaryData = ({ payload, projectId, userId, existing = null }) => ({
       ? normalizeList(payload.equipment)
       : existing?.equipmentJson || [],
   photosJson:
-    payload.photos !== undefined
-      ? normalizePhotos(payload.photos)
-      : existing?.photosJson || [],
+    normalizedPhotos !== undefined
+      ? normalizedPhotos
+      : payload.photos !== undefined
+        ? normalizePhotos(payload.photos)
+        : existing?.photosJson || [],
   notes:
     payload.notes !== undefined ? trimOrNull(payload.notes) : existing?.notes,
   clientRequestId:
@@ -385,8 +413,10 @@ const listSiteDiaries = async ({
   return rows.map(serializeSiteDiary);
 };
 
-const createSiteDiary = async ({ orgId, projectId, userId, payload }) =>
-  prisma.$transaction(async (tx) => {
+const createSiteDiary = async ({ orgId, projectId, userId, payload }) => {
+  // The photos are read before the transaction (CERT-2 evidence-6).
+  const photosRead = readPhotos({ projectId, payload });
+  return prisma.$transaction(async (tx) => {
     await ensureProject({ orgId, projectId }, tx);
 
     const clientRequestId = trimOrNull(payload.clientRequestId);
@@ -407,7 +437,7 @@ const createSiteDiary = async ({ orgId, projectId, userId, payload }) =>
     }
 
     if (payload.engineerId) await assertEngineer({ tx, orgId, engineerId: payload.engineerId });
-    const data = buildDiaryData({ payload, projectId, userId });
+    const data = buildDiaryData({ payload, projectId, userId, normalizedPhotos: photosRead?.photos });
     await assertLineReferences({ tx, projectId, equipment: data.equipmentJson, materials: data.materialsJson, record: 'Site diary' });
     await ensureProjectPhotoKeys({
       tx,
@@ -415,7 +445,7 @@ const createSiteDiary = async ({ orgId, projectId, userId, payload }) =>
       projectId,
       photos: data.photosJson,
     });
-    data.photosJson = await checkedPhotos({ tx, orgId, projectId, photos: data.photosJson });
+    data.photosJson = await checkedPhotos({ tx, orgId, projectId, photos: data.photosJson, read: photosRead });
 
     const now = new Date();
     const row = await tx.siteDiary.create({
@@ -460,6 +490,7 @@ const createSiteDiary = async ({ orgId, projectId, userId, payload }) =>
 
     return serializeSiteDiary(row);
   });
+};
 
 const getSiteDiary = async ({ orgId, projectId, diaryId }) => {
   await ensureProject({ orgId, projectId });
@@ -472,8 +503,10 @@ const updateSiteDiary = async ({
   diaryId,
   userId,
   payload,
-}) =>
-  prisma.$transaction(async (tx) => {
+}) => {
+  // The photos the request sends are read before the transaction (CERT-2 evidence-6).
+  const photosRead = readPhotos({ projectId, payload });
+  return prisma.$transaction(async (tx) => {
     await ensureProject({ orgId, projectId }, tx);
     const existing = await getDiaryOrThrow({ projectId, diaryId }, tx);
     if (!EDITABLE_STATUSES.includes(existing.status)) {
@@ -487,7 +520,7 @@ const updateSiteDiary = async ({
     if (payload.engineerId && payload.engineerId !== existing.engineerId) {
       await assertEngineer({ tx, orgId, engineerId: payload.engineerId });
     }
-    const data = buildDiaryData({ payload, projectId, userId, existing });
+    const data = buildDiaryData({ payload, projectId, userId, existing, normalizedPhotos: photosRead?.photos });
     await assertLineReferences({
       tx,
       projectId,
@@ -502,7 +535,7 @@ const updateSiteDiary = async ({
         projectId,
         photos: data.photosJson,
       });
-      data.photosJson = await checkedPhotos({ tx, orgId, projectId, photos: data.photosJson });
+      data.photosJson = await checkedPhotos({ tx, orgId, projectId, photos: data.photosJson, read: photosRead });
     }
 
     const row = await tx.siteDiary.update({
@@ -552,6 +585,7 @@ const updateSiteDiary = async ({
 
     return serializeSiteDiary(row);
   });
+};
 
 const submitSiteDiary = async ({ orgId, projectId, diaryId, userId }) =>
   prisma.$transaction(async (tx) => {

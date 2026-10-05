@@ -1,12 +1,15 @@
 const express = require("express");
 const crypto = require("crypto");
 const multer = require("multer");
+// The NUL / lone-surrogate guard again after multer: it parses the multipart body inside the route (CERT-2).
+const { rejectNullBytes } = require("../middleware/reject-null-bytes");
 const path = require("path");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
 const { uploadLimiter } = require("../middleware/rate-limit");
 const { body, param, query } = require("express-validator");
+const { dateInput } = require("../utils/date-input");
 const { authenticate } = require("../middleware/auth");
 const { getEffectiveRole, hasPermission, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
@@ -147,7 +150,7 @@ router.post(
   [
     param("recordType").isIn(DOCUMENT_RECORD_TYPES),
     param("recordId").isUUID(),
-    body("revision").trim().notEmpty().isLength({ max: 40 }),
+    body("revision").isString().trim().notEmpty().isLength({ max: 40 }),
     body("projectDocumentId").optional().isString().isUUID(),
     body("documentId").optional().isString().isUUID(),
     body("storageKey").optional().isString().trim().isLength({ max: 120 }),
@@ -187,14 +190,14 @@ router.post(
       .isString()
       .trim()
       .isLength({ max: 80 }),
-    body("reviewDueAt").optional({ nullable: true }).isISO8601(),
+    body("reviewDueAt").optional({ nullable: true }).custom(dateInput),
     body("status").optional().isIn(["uploaded", "submitted", "approved"]),
     body("issuedBy")
       .optional({ nullable: true })
       .isString()
       .trim()
       .isLength({ max: 120 }),
-    body("issuedAt").optional({ nullable: true }).isISO8601(),
+    body("issuedAt").optional({ nullable: true }).custom(dateInput),
     body("notes")
       .optional({ nullable: true })
       .isString()
@@ -226,6 +229,7 @@ router.post(
   [param("recordType").isIn(DOCUMENT_RECORD_TYPES), param("recordId").isUUID(), validate],
   uploadLimiter,
   upload.single("file"),
+  rejectNullBytes,
   asyncHandler(async (req, res) => {
     try {
       if (!req.file) {
@@ -309,7 +313,7 @@ router.post(
       .isString()
       .trim()
       .isLength({ max: 2000 }),
-    body("reviewDueAt").optional({ nullable: true }).isISO8601(),
+    body("reviewDueAt").optional({ nullable: true }).custom(dateInput),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -364,7 +368,7 @@ router.post(
   }),
   [
     param("revisionId").isUUID(),
-    body("reason").trim().notEmpty().isLength({ max: 2000 }),
+    body("reason").isString().trim().notEmpty().isLength({ max: 2000 }),
     validate,
   ],
   asyncHandler(async (req, res) => {
