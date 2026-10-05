@@ -1,9 +1,9 @@
 # OctaPM certification — tenant isolation report
 
 **Status: CERT-2 complete (2026-10-05).** Every acceptance count of the final
-run is 0. One cross-company P1 stays open outside the run's scope, waiting on
-an owner decision (L38, below). The document text-content gap is carried to
-CERT-6.
+run is 0. L38, the one cross-company P1 the sweeps could not reach, is closed
+on the owner's decision (below): P0 = 0, P1 tenant-isolation = 0. The document
+text-content gap is carried to CERT-6.
 
 ## The final run
 
@@ -60,20 +60,49 @@ run's foreign-reference findings (C2-BID … C2-EXPORT: eight P1 cross-company
 writes, three P3), and fix rounds 1-7 (C2-R1 … C2-R6), which drove the 40
 injection pairs the sweeps could reach only in a refusing state.
 
+## L38 — closed on the owner's decision (2026-10-05)
+
+`POST /users` with the e-mail of a person homed in another company attached
+them as an active member without their consent and answered with their profile.
+The sweeps attack with ids, not e-mail addresses, so the run did not exercise it.
+Owner decision: such an e-mail joins only through an invitation the identity
+accepts with its own authenticated session, and nothing about it is disclosed
+before. Implemented, reviewed independently three times (plan, diff, fixes —
+Codex; every finding adjudicated), and proven:
+
+| Check | Result |
+|---|---|
+| `l38-invitation-proof.js`: the owner's cases A–M on `POST /users` and `POST /users/invitations`, and every review case (former members and home identities whose membership ended, races, foreign and same-company SSO sessions, changed party offers, a reopened account, malformed names, custom fields) | 54/54 on the fixed code; the old code failed 15 of its first 35 checks |
+| Mutations re-introducing each defect | 14/14 caught |
+| L38 lead | no longer reproduces; it and the proof now run in every CERT-2 run |
+| Membership, people-reference and custom-field regression proofs (14) | all pass (team membership 11/11, shared identity 10/10, people templates 54/54, people refs 96/96, people evidence 230/230, evidence 208/208, punch/RFI/tasks 167/167, quality forms 138/138, daily logs 98/98, inventory references 19/19, workflow activity 72/72, audit/custom fields/assistant, L39 and L45 leads) |
+| Tenant sentinel on the final code (reference census, read sweep and injection from ten companies, full replay of 501 routes, realtime + workspace switching) | 247,530 attacks over 666 routes: leaks 0, answered 0, writes accepted 0, 5xx 0, replay data changed 0, new cross-company references 0; replay verdicts identical to the final run's; realtime 117/117 |
+
+**Found by the review and fixed with it — a cross-company read (C2-CF, P1):** a
+custom field of type person or company took any id, and a report then printed
+the other company's person (name, e-mail) or company by name. Values are now
+checked against the company's people and directory, refused exactly as an id
+that exists nowhere, and report names are resolved in the company only.
+
+**Reference census.** The sentinel's census counted 38 cross-company references
+at its start and end: the proof's own fixture rows (a stored foreign value, to
+show a report does not resolve it) and the audit trail of one mutation run that
+deliberately re-introduced the custom-field defect — all on the proof's own
+records in company 024. They were deleted and the census re-taken; the proof now
+removes its fixture rows itself.
+
+Recorded, not tenant isolation: D-SEC-1 (a workspace's "MFA required" is not
+enforced anywhere — CERT-7), D-ID-1 (`POST /users` answers 201 for a new e-mail
+and 202 for an existing one, which tells an admin an account exists for it —
+owner decision), D-ID-2, D-ID-3, D-SSO-1 (register).
+
 ## Open or carried
 
-- **L38 (P1, cross-company, owner decision).** `POST /users` with the e-mail of
-  a person homed in another company attaches them as an active member without
-  their consent and answers with their profile (`user.service.js` existing-
-  identity branch, the membership design's §5). The sweeps attack with ids, not
-  e-mail addresses, so this run does not exercise it. Fixing it changes the
-  designed membership flow (an invitation the person accepts, and a neutral
-  answer), so it waits for the owner.
 - **Document text content (CERT-6).** Every `DocumentText` row of the
   population is pending — the extraction worker was not running — so reads of
   extracted text were exercised only by the document proofs, not the sweeps.
 - **Not tenant, deferred:** see the register's deferred list (D-FIN-1, D-FUN-1/2,
-  D-VAL-1, D-DQ-1, D-OPS-1, D-PERF-1).
+  D-VAL-1, D-DQ-1, D-OPS-1, D-PERF-1, D-SEC-1, D-ID-1..3, D-SSO-1).
 
 **Backend suite.** 290/296 suites passed. 6 suites were not executable because
 the expected development PostgreSQL on :55432 was unavailable. The full suite is

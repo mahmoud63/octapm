@@ -39,7 +39,7 @@ are fixed; smaller findings are recorded for later.
 |---|---|---|
 | CERT-0 | Baseline verified | Complete (2026-10-02) |
 | CERT-1 | Hundred-company data generated | Complete (2026-10-03) |
-| CERT-2 | Tenant isolation complete | Complete (2026-10-05): every acceptance count 0 ([report](OCTAPM_TENANT_ISOLATION_REPORT.md)); L38 open for an owner decision |
+| CERT-2 | Tenant isolation complete | Complete (2026-10-05): every acceptance count 0; L38 closed on the owner's decision; P0 = 0, P1 tenant-isolation = 0 ([report](OCTAPM_TENANT_ISOLATION_REPORT.md)) |
 | CERT-3 | Construction workflows complete | In progress |
 | CERT-4 | Billing complete | Not started |
 | CERT-5 | Financial certification complete | Not started |
