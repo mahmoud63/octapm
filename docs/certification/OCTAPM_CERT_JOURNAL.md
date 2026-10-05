@@ -358,3 +358,13 @@ Clean generation on HEAD (sequence in the evening entry): restart the API on HEA
 **Fixed here**: project team add and comment mentions by membership (`94bef49`, a person of two companies could not be placed or mentioned in the second); the tenant-reference helpers refuse non-identifiers instead of dropping them (`2e3dbe6`; the root of several reviewer findings).
 
 **Next exact action**: when round 3 reports — review, full backend suite, every proof in process, commit; regenerate the population from empty on the final code (`regen-cert2.ps1 -Tag cert2c`, with the shape sweep, the victim-state injection and the gap proofs added to the run); report "CERT-2 TENANT ISOLATION COMPLETE" if every count is 0.
+
+## 2026-10-05 — CERT-2 scope frozen (owner: "NO ROUND 8"); low-usage mode; final run on the frozen code
+
+**State**: HEAD after `b18a86f` (fix rounds 5-7 committed `bfa9242`), pushed. Round 7 (wf_9e12a67f-00b) completed its fixes but both its attempts were stopped by the account limit before review; the tree was checked against each group's final snapshot — no mutation or partial edit left (one empty helper removed). Backend suite: 290 of 296 suites pass; the 6 others are DB-backed suites that need the shared development database on :55432, which is down (each failure is the unreachable database; they passed at the round-6 checkpoint). Cert cluster and API were down after a machine restart; cluster restarted 02:34 CDT.
+
+**Owner rules now in force**: CERT-2 is tenant isolation only; non-tenant findings are recorded and deferred (register: D-FIN-1, D-FUN-1/2, D-DQ-1, D-OPS-1); no reviewer waves; scripts do the testing; reports are deltas. Until Oct 8 21:00: one orchestrator, Codex for bounded work where available, no agent waves.
+
+**Final run**: `C:\Temp\octapm-cert\regen-cert2.ps1 -Tag cert2c` — regeneration from empty (CERT-1's deterministic population; a disposable baseline, not a restart), a server-side snapshot of the certified population (`scripts/cert/snapshot-db.js take cert2c`, so later baselines are a copy back), then `run-cert2.js` with every check: reads (after owner warm-up) + attribution, files, replay, injection, reference census, victim-state injection, coverage, realtime + workspace switching, shape/query/date sweeps, every CERT-2 proof in process, tally.
+
+**Next exact action**: when `logs\regen-cert2c\status.txt` says DONE, read `results\isolation\cert2c-tally.json` and the step exits in `cert2c-summary.json`; triage only failures; report "CERT-2 TENANT ISOLATION COMPLETE" in the owner's format.
