@@ -38,9 +38,9 @@ are fixed; smaller findings are recorded for later.
 | | Checkpoint | Status |
 |---|---|---|
 | CERT-0 | Baseline verified | Complete (2026-10-02) |
-| CERT-1 | Hundred-company data generated | In progress |
-| CERT-2 | Tenant isolation complete | Not started |
-| CERT-3 | Construction workflows complete | Not started |
+| CERT-1 | Hundred-company data generated | Complete (2026-10-03) |
+| CERT-2 | Tenant isolation complete | Complete (2026-10-05): every acceptance count 0 ([report](OCTAPM_TENANT_ISOLATION_REPORT.md)); L38 open for an owner decision |
+| CERT-3 | Construction workflows complete | In progress |
 | CERT-4 | Billing complete | Not started |
 | CERT-5 | Financial certification complete | Not started |
 | CERT-6 | Web, mobile, files, jobs complete | Not started |

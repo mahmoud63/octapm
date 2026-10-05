@@ -12,7 +12,7 @@ change it) · Deferred (scheduled after launch) · Not a defect.
 
 ## Launch blockers now
 
-Open P0 and P1 rows of the register (6). Since the last update: the CERT-2 foreign-reference findings (eight P1 cross-company writes and three P3) are fixed and proven; see the CERT-2 section at the end. Before that: the fifteen within-company party-visibility leads are fixed (two rounds with an independent review between; see the review-rounds section, which also lists the owner decisions R5, R22 and RFI drafts, and the P2/P3 left open). Every cross-company P0 and P1 is fixed except L38, which needs the owner.
+Open P0 and P1 rows of the register (6). CERT-2 closed on 2026-10-05 with every acceptance count 0; L38 is the one cross-company row left and needs the owner. Before that: the CERT-2 foreign-reference findings (eight P1 cross-company writes and three P3) are fixed and proven; see the CERT-2 section at the end. Before that: the fifteen within-company party-visibility leads are fixed (two rounds with an independent review between; see the review-rounds section, which also lists the owner decisions R5, R22 and RFI drafts, and the P2/P3 left open). Every cross-company P0 and P1 is fixed except L38, which needs the owner.
 
 - **L11 (P1)** — jobs-webhooks: A webhook subscribed to "*" or "job.progress" feeds on its own delivery jobs: WebhookDelivery and BackgroundJob grow without end from a single event
 - **L34 (P1)** — finance: Official AC to a cutoff is all-or-nothing per activity: one later-dated posting removes the activity's whole cost from AC, CPI and EAC, and a period l
@@ -195,3 +195,9 @@ Deferred (recorded, not fixed under the CERT-2 scope freeze):
 - **D-FUN-2 (P3, CERT-3)** Activity created without a duration is scheduled with duration 0 and later PATCHes are refused 400 INVALID_DATES.
 - **D-DQ-1 (P3, CERT-6)** 87 untyped fields (mostly JSON settings) accept an object or array; some text columns may store `[object Object]`; isIn chains accept lists on several routes.
 - **D-OPS-1 (P3, CERT-7)** Receipt and purchase-order `lines` arrays have no maximum size; goods receipts run in a 60 s window.
+- **D-VAL-1 (P3, CERT-3)** Found by the final run's shape sweep: `POST /transmittals` and `POST /ncr/{id}/submit` accept an `attachmentRefs[].storageKey` given as an object, number or boolean (201/200) and drop it. Nothing stored names another company (new references 0, victim tables 0); the shape should be refused 400 as on the other reference fields.
+- **D-PERF-1 (P3, CERT-7)** `availability-7-proof.js` asks the baseline tree to be slower than the fixed one by 2× and 400 ms on the sparse multipart upload; on the final run it was 361 ms against 22 ms (the fix itself passed: 22 ms, well under a second). A margin of the proof's own comparison under load, not a regression.
+
+### CERT-2 closed (2026-10-05)
+
+The final run `cert2c` (regenerated population, `4856924`) left every acceptance count at 0: cross-company reads, writes, stored foreign references, foreign-record response leaks, file leaks, realtime leaks, workspace-switch leaks, victim-state changes, tenant-related 5xx. Figures in [OCTAPM_TENANT_ISOLATION_REPORT.md](OCTAPM_TENANT_ISOLATION_REPORT.md). Four proofs failed only at setup on the regenerated population (they read ids and residue rows of the earlier one); corrected and passing. **L38 stays open** — the one cross-company P1, outside what the sweeps exercise (they attack by id, not by e-mail address), waiting on the owner's decision on the membership flow.

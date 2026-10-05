@@ -368,3 +368,28 @@ Clean generation on HEAD (sequence in the evening entry): restart the API on HEA
 **Final run**: `C:\Temp\octapm-cert\regen-cert2.ps1 -Tag cert2c` — regeneration from empty (CERT-1's deterministic population; a disposable baseline, not a restart), a server-side snapshot of the certified population (`scripts/cert/snapshot-db.js take cert2c`, so later baselines are a copy back), then `run-cert2.js` with every check: reads (after owner warm-up) + attribution, files, replay, injection, reference census, victim-state injection, coverage, realtime + workspace switching, shape/query/date sweeps, every CERT-2 proof in process, tally.
 
 **Next exact action**: when `logs\regen-cert2c\status.txt` says DONE, read `results\isolation\cert2c-tally.json` and the step exits in `cert2c-summary.json`; triage only failures; report "CERT-2 TENANT ISOLATION COMPLETE" in the owner's format.
+
+## 2026-10-05 — CERT-2 TENANT ISOLATION COMPLETE
+
+| | |
+|---|---|
+| Branch / HEAD | `cert/full-saas-certification`; run on `4856924`, closed with the proof-setup correction committed after it |
+| Checkpoint | **CERT-2 complete.** CERT-3 next (QUALITY-FIRST mode from here) |
+| Certification database | `octapm_cert` = the `cert2c` population after the run's attacks; clean copy kept as `octapm_cert_snap_cert2c` |
+| Services | Cert Postgres :55433 and cert API :5190 (PID 31384) up |
+
+**Run** (`regen-cert2.ps1 -Tag cert2c`, 02:34-09:36 CDT): layer 1 identical; 704 projects; 3,895 driver runs, 0 failed; 14 lifecycles × 496 checks, 0 failed; snapshot taken; `run-cert2.js` 236 min, 0 API restarts.
+
+**Tally first** (`cert2c-tally.json`): 365,950 attacks over 668 routes — leaks 0, answered 0, writes accepted 0, server errors 0; replay and file data changed 0; census start/after-injection/end 0, new 0. Victim-state halves: 0 victim (company, table) pairs changed. Realtime + workspace switching 117/117. Shapes 1,746 / query 52,255 / dates 9,854: 0 5xx, 0 new references, 0 oracle pairs differing. Attribution: read window 1,206 rows and the warm-up's rows all in the requester's own company, 0 naming an outsider. The two fingerprint comparisons exit 2 by design (they list changed rows for attribution).
+
+**Triage of the five proof steps that did not exit 0** (no product fix needed):
+
+1. `punch-rfi-tasks` and `quality-forms-safety-state` failed at setup: they took foreign ids from an earlier run's injection file (`cert2-inject.json`, `cert2b-inject.json`), whose rows the regeneration replaced. Now they use such a file only while its project is still the attacker's own, else read the ids from the database: 167/167 and 138/138 on the cert2c population.
+2. `inventory-timesheets-state` and `inventory-3` failed only their setup check for the brief's residue rows (pinned ids of the first population's pre-fix reproduction; a clean population has none — census 0). Now required only where the pinned bin exists: 140/140 and 279/279.
+3. `availability-7` 37/38: the fix passes (22 ms); the proof's own baseline comparison missed its 400 ms margin (361 ms). Not tenant: D-PERF-1, CERT-7.
+
+Also recorded, not tenant: D-VAL-1 (transmittal / NCR submit accept non-string `storageKey` shapes and drop them; CERT-3).
+
+**Open**: L38 (P1, cross-company: `POST /users` attaches another company's person without consent and returns their profile) — designed behaviour (membership doc §5), owner decision since 2026-10-02, outside what the sweeps exercise. Document text content: CERT-6. Backend suite: 290/296 suites passed; 6 suites were not executable because the expected development PostgreSQL on :55432 was unavailable — not green until those six pass in their intended environment before release certification.
+
+**Next exact action**: CERT-3 (construction workflows) under QUALITY-FIRST mode: plan from `C:\Temp\octapm-cert\scratch\cert3-gaps.md` on representative deep companies, keeping the 100-company evidence; Codex adversarial plan review before high-risk changes.

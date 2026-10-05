@@ -208,7 +208,11 @@ const main = async () => {
   // Residue: rows of the attacker's company that name the victim's records, left as they are.
   const residueReceipts = await q(`select r.id::text as id, r."dailyReportId"::text as report from "DeliveryReceipt" r join "Project" p on p.id = r."projectId" join "DailyReport" d on d.id = r."dailyReportId" join "Project" dp on dp.id = d."projectId" where p."orgId" = $1 and dp."orgId" = $2 order by r.id`, [attackerOrg, victimOrg]);
   const residueBalances = await q(`select b.id::text as id, b."itemId"::text as item, b."warehouseId"::text as wh, b."locationId"::text as loc from "StockBalance" b join "WarehouseLocation" l on l.id = b."locationId" where b."orgId" = $1 and l."orgId" = $2 order by b.id`, [attackerOrg, victimOrg]);
-  if (BRIEF_RESIDUE) {
+  // The brief's rows are those of the population the reproduction ran on: a
+  // regenerated population has neither them nor the bin and report they name.
+  const briefResidue = BRIEF_RESIDUE && (await ownerOf('locationId', BRIEF_RESIDUE.bin)) ? BRIEF_RESIDUE : null;
+  if (BRIEF_RESIDUE && !briefResidue) console.log(`      the brief's residue (bin ${BRIEF_RESIDUE.bin}, report ${BRIEF_RESIDUE.report}) belongs to an earlier population: this one has no such bin`);
+  if (briefResidue) {
     check(`setup: the residue receipts of company ${ATTACKER} naming company ${VICTIM}'s daily report ${BRIEF_RESIDUE.report} are present (${BRIEF_RESIDUE.receipts.length})`,
       BRIEF_RESIDUE.receipts.every((id) => residueReceipts.some((row) => row.id === id && row.report === BRIEF_RESIDUE.report)) && (await ownerOf('dailyReportId', BRIEF_RESIDUE.report)) === victimOrg,
       JSON.stringify(residueReceipts));

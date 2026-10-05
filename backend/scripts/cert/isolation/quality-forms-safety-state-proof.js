@@ -104,7 +104,15 @@ const main = async () => {
       if (sweep.length) break;
     } catch { /* not there: the ids are read from the database */ }
   }
-  const pairOf = (method, template, field) => sweep.find((r) => r.method === method && r.template === `/projects/{projectId}${template}` && r.field === field) || null;
+  // A results file of an earlier population names rows that no longer exist
+  // (the population is regenerated): it is used only while its project is still
+  // the attacker company's own.
+  const sweepProject = sweep.find((r) => r.route)?.route.split('/')[2] || null;
+  if (sweepProject && !(await one(`select id from "Project" where id = $1 and "orgId" = $2`, [sweepProject, attackerOrg]))) {
+    console.log(`the sweep results name project ${sweepProject}, which is not company ${ATTACKER}'s in this population: the ids are read from the database`);
+    sweep = [];
+  }
+  const pairOf =(method, template, field) => sweep.find((r) => r.method === method && r.template === `/projects/{projectId}${template}` && r.field === field) || null;
   const swept = {
     responses: pairOf('PUT', '/forms/{instanceId}/responses', 'responses[].itemId'),
     assigneeCompanyId: pairOf('POST', '/forms/{instanceId}/items/{itemId}/deficiency', 'assigneeCompanyId'),

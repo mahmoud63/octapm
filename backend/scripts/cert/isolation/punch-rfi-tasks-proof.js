@@ -102,6 +102,14 @@ const main = async () => {
     sweep = JSON.parse(fs.readFileSync(path.join(WORK, 'results', 'isolation', 'cert2-inject.json'), 'utf8')).results
       .filter((r) => r.attacker === ATTACKER && r.victim === VICTIM && r.method === 'POST');
   } catch { /* no sweep results: the ids are read from the database */ }
+  // A results file of an earlier population names rows that no longer exist
+  // (the population is regenerated): it is used only while its project is still
+  // the attacker company's own.
+  const sweepProject = sweep.find((r) => r.route)?.route.split('/')[2] || null;
+  if (sweepProject && !(await q(`select 1 from "Project" where id = $1 and "orgId" = $2`, [sweepProject, attackerOrg])).length) {
+    console.log(`the sweep results name project ${sweepProject}, which is not company ${ATTACKER}'s in this population: the ids are read from the database`);
+    sweep = [];
+  }
   const pairOf = (template, field) => sweep.find((r) => r.template === `/projects/{projectId}${template}` && r.field === field) || null;
   const swept = {
     assigneeUserId: pairOf('/punch', 'assigneeUserId'),

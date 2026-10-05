@@ -204,7 +204,11 @@ const main = async () => {
   const residueMovements = await q(`select t.id::text as id, t."itemId"::text as item, t."locationId"::text as loc from "StockTransaction" t join "WarehouseLocation" l on l.id = t."locationId" where t."orgId" = $1 and l."orgId" = $2 order by t.id`, [attackerOrg, victimOrg]);
   const residueBins = [...new Set([...residueBalances, ...residueMovements].map((row) => row.loc))];
   const residueItems = [...new Set([...residueBalances, ...residueMovements].map((row) => row.item))];
-  if (BRIEF_RESIDUE) {
+  // The brief's rows are those of the population the reproduction ran on: a
+  // regenerated population has neither them nor the bin they name.
+  const briefResidue = BRIEF_RESIDUE && (await locOwner(BRIEF_RESIDUE.bin)) ? BRIEF_RESIDUE : null;
+  if (BRIEF_RESIDUE && !briefResidue) console.log(`      the brief's residue (bin ${BRIEF_RESIDUE.bin}) belongs to an earlier population: this one has no such bin`);
+  if (briefResidue) {
     const balanceIds = residueBalances.map((row) => row.id);
     const movementIds = residueMovements.map((row) => row.id);
     check(`setup: the residue rows of company ${ATTACKER} naming company ${VICTIM}'s bin ${BRIEF_RESIDUE.bin} are present (StockBalance ${BRIEF_RESIDUE.balances.length}, StockTransaction ${BRIEF_RESIDUE.transactions.length})`,
