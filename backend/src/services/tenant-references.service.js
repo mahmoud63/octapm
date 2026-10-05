@@ -40,14 +40,18 @@ const assertIdentifiers = (values, code, message) => {
   if (listOf(values).some((value) => value !== null && value !== undefined && typeof value !== "string")) refuse(code, message);
 };
 
-/** People who are members of the organisation (any membership that has not ended). */
+/**
+ * People who are members of the organisation: active or suspended there. An
+ * invitation not yet accepted is not membership (owner decision L38), and a
+ * membership that has ended is not either.
+ */
 const assertMembers = async ({ tx = prisma, orgId, userIds, code = "USER_NOT_FOUND", message = "One or more people are not members of this organisation" }) => {
   assertIdentifiers(userIds, code, message);
   const wanted = idsOf(userIds);
   if (!wanted.length) return [];
   if (!orgId) refuse(code, message);
   const rows = await tx.organizationMembership.findMany({
-    where: { orgId, userId: { in: wanted }, status: { not: "left" } },
+    where: { orgId, userId: { in: wanted }, status: { in: ["active", "suspended"] } },
     select: { userId: true },
   });
   if (new Set(rows.map((row) => row.userId)).size !== wanted.length) refuse(code, message);

@@ -86,7 +86,8 @@ describe('daily report people (CERT-2)', () => {
     }
     expect(new Set(answers).size).toBe(1);
     expect(mockPrisma.organizationMembership.findMany).toHaveBeenCalledWith({
-      where: { orgId: 'org-1', userId: { in: [FOREIGN] }, status: { not: 'left' } },
+      // Active or suspended here: an invitation not yet accepted is not membership (L38).
+      where: { orgId: 'org-1', userId: { in: [FOREIGN] }, status: { in: ['active', 'suspended'] } },
       select: { userId: true },
     });
     expect(mockPrisma.dailyReport.create).not.toHaveBeenCalled();

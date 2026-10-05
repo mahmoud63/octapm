@@ -37,6 +37,14 @@ const MEMBERSHIP_STATUSES = Object.freeze({
   LEFT: "left",
 });
 
+/**
+ * The standings that make a person part of a workspace: active, or suspended
+ * by it. Not `left`, and not `invited` — an invitation is an offer the person
+ * has not accepted, so until they accept with their own session they are not
+ * listed, assigned, mentioned or reactivated there (owner decision L38).
+ */
+const PRESENT_STATUSES = Object.freeze([MEMBERSHIP_STATUSES.ACTIVE, MEMBERSHIP_STATUSES.SUSPENDED]);
+
 /** Catalogue roles a member-kind membership may carry (shared/permissions.json). */
 const CATALOGUE_ROLES = Object.freeze([...ALL_ROLES]);
 
@@ -348,18 +356,22 @@ const findMembership = async ({ tx = prisma, orgId, userId }) => {
 };
 
 /**
- * A user who belongs to a workspace: by membership, or by the User.orgId
- * column for rows that predate memberships. `where` narrows further; the
- * shape of the query is the one user.service always ran when the client
- * knows no memberships (test doubles), so those callers are unchanged.
+ * A user who belongs to a workspace: by a present membership (PRESENT_STATUSES),
+ * or by the User.orgId column for a row that predates memberships — one with
+ * no membership in this workspace at all. A home identity whose membership
+ * here has ended, or is only an invitation, is not part of the workspace:
+ * the column does not speak over the membership (certification L38 review).
+ * `where` narrows further; the shape of the query is the one user.service
+ * always ran when the client knows no memberships (test doubles), so those
+ * callers are unchanged.
  */
 const userInOrgWhere = ({ tx = prisma, orgId, where = {} }) =>
   hasMembershipModel(tx) && isMembershipReadEnabled()
     ? {
         ...where,
         OR: [
-          { orgId },
-          { memberships: { some: { orgId, status: { not: MEMBERSHIP_STATUSES.LEFT } } } },
+          { orgId, memberships: { none: { orgId } } },
+          { memberships: { some: { orgId, status: { in: [...PRESENT_STATUSES] } } } },
         ],
       }
     : { ...where, orgId };
@@ -504,6 +516,63 @@ const ensureMembership = async ({
     include: PRINCIPAL_INCLUDE,
   });
   return { membership, created: false, reactivated: !wasActive && status === MEMBERSHIP_STATUSES.ACTIVE };
+};
+
+/**
+ * Invitation acceptance (owner decision L38): writes exactly the membership
+ * the invitation offered — its role and kind, no administration, no ownership
+ * — and nothing the person held before. A membership that is active stays as
+ * it is (a project or party invitation to a current member assigns, it does
+ * not re-grade); an active guest offered a member seat is upgraded. Any other
+ * row (left, suspended, invited) is rewritten to the offer: a former
+ * administrator invited as a site engineer comes back as a site engineer.
+ * A member seat is decided by the personal-workspace rule, as every seat is.
+ *
+ * Returns `{ membership, created, reactivated, kept }`, or null when the
+ * membership write is switched off or the client does not know the model.
+ */
+const acceptOffer = async ({
+  tx = prisma,
+  orgId,
+  userId,
+  role,
+  kind = MEMBERSHIP_KINDS.MEMBER,
+  invitedById = null,
+  invitationId = null,
+  joinedAt = new Date(),
+}) => {
+  if (!isMembershipWriteEnabled() || !hasMembershipModel(tx)) return null;
+  const offeredRole = assertRoleForKind({ role, kind });
+  const existing = await tx.organizationMembership.findFirst({ where: { orgId, userId } });
+  const active = existing?.status === MEMBERSHIP_STATUSES.ACTIVE;
+  if (active && (existing.kind === MEMBERSHIP_KINDS.MEMBER || kind === MEMBERSHIP_KINDS.GUEST)) {
+    const membership = await tx.organizationMembership.findFirst({ where: { id: existing.id }, include: PRINCIPAL_INCLUDE });
+    return { membership, created: false, reactivated: false, kept: true };
+  }
+  const takesSeat = kind === MEMBERSHIP_KINDS.MEMBER && (!existing || existing.kind === MEMBERSHIP_KINDS.GUEST || !active);
+  if (takesSeat) await assertWorkspaceAcceptsMember({ tx, orgId, userId, kind });
+  const offer = {
+    role: offeredRole,
+    kind,
+    isAdmin: false,
+    isOwner: false,
+    status: MEMBERSHIP_STATUSES.ACTIVE,
+    invitationId,
+    joinedAt,
+  };
+  if (!existing) {
+    const membership = await tx.organizationMembership.create({
+      data: { orgId, userId, ...offer, invitedById },
+      include: PRINCIPAL_INCLUDE,
+    });
+    return { membership, created: true, reactivated: false, kept: false };
+  }
+  const membership = await tx.organizationMembership.update({
+    where: { id: existing.id },
+    data: { ...offer, leftAt: null, ...(invitedById ? { invitedById } : {}) },
+    include: PRINCIPAL_INCLUDE,
+  });
+  return { membership, created: false, reactivated: !active, kept: false };
 };
 
 /**
@@ -707,6 +776,8 @@ const findBillingRecipient = async ({ tx = prisma, orgId }) => {
 
 module.exports = {
   CATALOGUE_ROLES,
+  PRESENT_STATUSES,
+  acceptOffer,
   assertWorkspaceAcceptsMember,
   findBillingRecipient,
   GUEST_ROLE,

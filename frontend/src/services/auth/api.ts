@@ -1,7 +1,8 @@
-import { apiClient } from '@/services/api/client'
+import { apiClient, authlessClient } from '@/services/api/client'
 import type {
   ApiSuccess,
   AcceptInvitationPayload,
+  AcceptInvitationResult,
   AuthSession,
   AuthUser,
   ForgotPasswordPayload,
@@ -197,12 +198,25 @@ export const getInvitationPreview = async (
   return unwrapData(response)
 }
 
+/**
+ * Accepts an invitation. An account that already exists accepts with a
+ * session of its own (`bearer`: the access or identity token its sign-in
+ * just returned), never with its password; a new account sets its password
+ * here.
+ */
 export const acceptInvitation = async (
-  payload: AcceptInvitationPayload
-): Promise<AuthSession> => {
-  const response = await apiClient.post<ApiSuccess<AuthSession>>(
-    '/auth/invitations/accept',
-    payload
-  )
+  payload: AcceptInvitationPayload,
+  options: { bearer?: string } = {}
+): Promise<AcceptInvitationResult> => {
+  const response = options.bearer
+    ? await authlessClient.post<ApiSuccess<AcceptInvitationResult>>(
+        '/auth/invitations/accept',
+        payload,
+        { headers: { Authorization: `Bearer ${options.bearer}` } }
+      )
+    : await apiClient.post<ApiSuccess<AcceptInvitationResult>>(
+        '/auth/invitations/accept',
+        payload
+      )
   return unwrapData(response)
 }

@@ -63,6 +63,15 @@ liveDescribe("workspace links: notification paths and the legacy-link resolver",
   const login = (email) => api.post("/api/v1/auth/login", { email, password: PASSWORD }, MOBILE);
   const enter = (token, orgId) => api.post(`/api/v1/auth/workspaces/${orgId}/session`, {}, bearer(token));
   const resolve = (token, id) => api.get(`/api/v1/auth/workspaces/resolve?projectId=${id}`, bearer(token));
+  /** The accept link the local log transport printed for the newest invitation email. */
+  const acceptLinkFor = (email) => {
+    const output = api.proc.output();
+    const start = output.lastIndexOf(`[email:local] -> ${email} |`);
+    if (start === -1) throw new Error(`no invitation email for ${email} in the API output`);
+    const match = /https?:\/\/\S+\/accept-invite\?token=([A-Za-z0-9_-]+)/.exec(output.slice(start));
+    if (!match) throw new Error(`no accept link for ${email} in the API output`);
+    return match[1];
+  };
 
   beforeAll(async () => {
     api = await startApi({ EMAIL_PROVIDER: "log" });
@@ -74,9 +83,15 @@ liveDescribe("workspace links: notification paths and the legacy-link resolver",
     const created = await api.post("/api/v1/users", { name: "Persona", email: persona.email, password: PASSWORD, role: "qs" }, bearer(orgs.a.token));
     expect(created.status).toBe(201);
     persona.id = created.body.data.id;
+    // B cannot attach the existing identity (owner decision L38): it is
+    // invited, and joins by accepting with a session of its own.
     const direct = await api.post("/api/v1/users", { name: "Persona", email: persona.email, password: "Ignored-Passw0rd!", role: "pm" }, bearer(orgs.b.token));
-    expect(direct.status).toBe(201);
-    expect(direct.body.data).toMatchObject({ id: persona.id, existingIdentity: true });
+    expect(direct.status).toBe(202);
+    expect(direct.body.data).toMatchObject({ invited: true, email: persona.email, role: "pm", status: "pending" });
+    const own = await login(persona.email);
+    expect(own.status).toBe(200);
+    const accepted = await api.post("/api/v1/auth/invitations/accept", { token: acceptLinkFor(persona.email) }, bearer(own.body.data.tokens.accessToken));
+    expect(accepted.status).toBe(200);
 
     const project = await api.post(
       "/api/v1/projects",

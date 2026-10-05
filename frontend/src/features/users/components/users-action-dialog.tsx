@@ -127,14 +127,20 @@ export function UsersActionDialog({
     }
 
     try {
-      await createUserMutation.mutateAsync({
+      const created = await createUserMutation.mutateAsync({
         name: values.name,
         email: values.email,
         phone: values.phone,
         role: values.role,
         password: values.password,
       })
-      toast.success('Person added.')
+      // An e-mail that already has an account is invited, never added
+      // directly: the person joins when they accept with their own sign-in.
+      toast.success(
+        created?.invited
+          ? `Invitation sent to ${values.email}. They join when they accept it.`
+          : 'Person added.'
+      )
       form.reset({
         name: '',
         email: '',

@@ -67,7 +67,11 @@ mockPrisma.customFieldValue = table(store.values, "val", { include: (row) => ({ 
 mockPrisma.rfi = table(store.rfis, "rfi");
 mockPrisma.changeOrder = table(store.changeOrders, "co");
 mockPrisma.task = table(store.tasks, "task");
-mockPrisma.user = { findMany: jest.fn(async ({ where }) => where.id.in.map((id) => ({ id, name: `User ${id}`, email: null }))) };
+// The organisation's people: USER belongs to org-1; anyone else does not (a person
+// field names this company's people only — certification L38 review, M8). A query
+// scoped to an organisation (userInOrgWhere) sees only that organisation's people.
+const ORG_PEOPLE = { "org-1": ["33333333-3333-4333-8333-333333333333"] };
+mockPrisma.user = { findMany: jest.fn(async ({ where }) => where.id.in.filter((id) => !where.orgId || (ORG_PEOPLE[where.orgId] || []).includes(id)).map((id) => ({ id, name: `User ${id}`, email: null }))) };
 mockPrisma.company = { findMany: jest.fn(async ({ where }) => where.id.in.map((id) => ({ id, name: `Company ${id}` }))) };
 const mockAudit = {
   ENTITY_TYPES: { CUSTOM_FIELD: "custom_field", CUSTOM_FIELDSET: "custom_fieldset", RECORD_TYPE: "record_type" },
@@ -184,6 +188,11 @@ describe("custom fields", () => {
     await service.createDefinition({ orgId: ORG, recordType: "change_order", payload: { label: "Funding source", type: "select", options: ["owner", "contingency"] }, actor });
     await service.createDefinition({ orgId: ORG, recordType: "change_order", payload: { label: "Approver", type: "user" }, actor });
     await service.createDefinition({ orgId: ORG, recordType: "change_order", payload: { label: "Old", type: "text" }, actor }).then((field) => service.archiveDefinition({ orgId: ORG, definitionId: field.id, actor }));
+    // A person who is not a member here is refused like one who exists nowhere; nothing is stored.
+    await expect(
+      service.setValues({ orgId: ORG, projectId: PROJECT, recordType: "change_order", recordId: RECORD, values: { funding_source: "contingency", approver: "99999999-9999-4999-8999-999999999999" }, actor }),
+    ).rejects.toMatchObject({ code: "CUSTOM_FIELD_INVALID", details: { problems: [{ key: "approver", message: "Approver needs a person of this organisation" }] } });
+    expect(store.values).toHaveLength(0);
     await service.setValues({ orgId: ORG, projectId: PROJECT, recordType: "change_order", recordId: RECORD, values: { funding_source: "contingency", approver: USER }, actor });
 
     const columns = await service.reportColumns({ orgId: ORG, recordType: "change_order" });

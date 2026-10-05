@@ -45,10 +45,10 @@ router.post(
   [
     body("name").isString().trim().notEmpty(),
     body("email").isString().isEmail().normalizeEmail(),
-    // Optional here because an email that already belongs to an identity in
-    // another workspace gets a membership, not a new account, and its
-    // password is not this workspace's to set; the service still demands a
-    // password for a new identity.
+    // Optional here because an email that already belongs to an identity is
+    // sent an invitation, not given an account, and its password is not this
+    // workspace's to set; the service still demands a password for a new
+    // identity.
     body("password")
       .optional({ values: "falsy" })
       .isString()
@@ -68,7 +68,9 @@ router.post(
       payload: req.body,
       context: getRequestContext(req),
     });
-    return sendSuccess(res, result, 201);
+    // 202: the e-mail already names an identity, which was invited (it joins
+    // when it accepts); 201: a new account was made.
+    return sendSuccess(res, result, result.invited ? 202 : 201);
   }),
 );
 

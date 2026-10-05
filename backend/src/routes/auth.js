@@ -237,7 +237,10 @@ router.post(
   "/invitations/accept",
   [
     body("token").isString().isLength({ min: 20 }),
-    body("name").isString().trim().notEmpty(),
+    // Needed for a new account only (the service asks for it there); an
+    // existing identity accepts as itself and keeps its name. Absent is fine;
+    // present, it is a non-empty string (false or 0 is refused, not skipped).
+    body("name").optional({ values: "null" }).isString().trim().notEmpty(),
     body("password")
       .optional({ values: "falsy" })
       .isString()
@@ -249,14 +252,18 @@ router.post(
     body("phone").optional().isString().trim(),
     validate,
   ],
-  // A bearer, when the invitee is signed in, proves the existing identity
-  // the invitation names (membership doc §5); the password does otherwise.
+  // A bearer of the invitee's own session is the only proof of an existing
+  // identity (membership doc §5; owner decision L38); a new identity sets its
+  // password with the link.
   require("./workspaces").optionalTokenSubject,
   asyncHandler(async (req, res) => {
     const result = await authService.acceptInvitation(
-      { ...req.body, identityUserId: req.tokenSubject?.userId || null },
+      { ...req.body, identityUserId: req.tokenSubject?.userId || null, identitySsoOrgId: req.tokenSubject?.ssoOrgId || null },
       getRequestContext(req),
     );
+    // Accepted, but the workspace sends the person through its own sign-in
+    // (single sign-on, or a reopened account): no session is issued here.
+    if (result.signInRequired) return sendSuccess(res, result);
     return sendSession(req, res, result);
   }),
 );

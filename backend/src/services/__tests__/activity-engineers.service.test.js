@@ -78,7 +78,8 @@ describe('activity engineers by membership (CERT-2)', () => {
     // The home workspace (User.orgId) is never what decides.
     expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
     expect(mockPrisma.organizationMembership.findMany).toHaveBeenCalledWith({
-      where: { orgId: 'org-1', userId: { in: [BOTH] }, status: { not: 'left' } },
+      // Active or suspended here: an invitation not yet accepted is not membership (L38).
+      where: { orgId: 'org-1', userId: { in: [BOTH] }, status: { in: ['active', 'suspended'] } },
       select: { userId: true },
     });
     expect(mockPrisma.organizationMembership.count).toHaveBeenCalledWith({

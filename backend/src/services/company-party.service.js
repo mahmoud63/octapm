@@ -458,6 +458,11 @@ const removeProjectParty = async ({ orgId, projectId, partyId }) => {
   }
 
   const updated = await prisma.$transaction(async (tx) => {
+    // The party row first, then its members: the order invitation acceptance
+    // takes them in (assertPartyOffer), so the two never wait on each other.
+    if (typeof tx.$queryRaw === "function") {
+      await tx.$queryRaw`SELECT "id" FROM "ProjectParty" WHERE "id" = ${partyId} FOR UPDATE`;
+    }
     await tx.projectPartyMember.updateMany({
       where: { projectPartyId: partyId, status: "active" },
       data: { status: "inactive" },
@@ -576,6 +581,11 @@ const addProjectPartyMemberWithTx = async ({
   // hold a membership here afterwards — a guest one when they had none, and
   // whatever they had otherwise (a member is never downgraded).
   const membershipService = require("./membership.service");
+  // Inside a transaction the party row is locked first, in the order invitation
+  // acceptance and party removal take it, so none of them wait on each other.
+  if (tx !== prisma && typeof tx.$queryRaw === "function") {
+    await tx.$queryRaw`SELECT "id" FROM "ProjectParty" WHERE "id" = ${partyId} FOR UPDATE`;
+  }
   const [party, user] = await Promise.all([
     assertProjectParty({ tx, orgId, projectId, partyId }),
     membershipService.findUserInOrg({ tx, orgId, userId }),
@@ -687,6 +697,30 @@ const removeProjectPartyMember = async ({ orgId, projectId, partyId, userId }) =
 const getProjectPartyForInvitation = async ({ orgId, projectId, partyId }) =>
   assertProjectParty({ orgId, projectId, partyId });
 
+/**
+ * The party a party invitation offered is still the one acceptance would
+ * join: active, on the invitation's project, and of the company the
+ * invitation named. A party moved to another company since (or closed)
+ * would otherwise take the person somewhere they were never offered
+ * (certification L38, review A7): refused, and a new invitation is needed.
+ */
+const assertPartyOffer = async ({ tx = prisma, invitation }) => {
+  if (!invitation?.projectPartyId) return;
+  // Inside the acceptance transaction the party row is locked first, so a
+  // party edit cannot move it to another company between this check and the
+  // assignment that follows (it waits for the acceptance to commit).
+  if (tx !== prisma && typeof tx.$queryRaw === "function") {
+    await tx.$queryRaw`SELECT "id" FROM "ProjectParty" WHERE "id" = ${invitation.projectPartyId} FOR UPDATE`;
+  }
+  const party = await tx.projectParty.findFirst({
+    where: { id: invitation.projectPartyId, projectId: invitation.projectId || undefined, project: { orgId: invitation.orgId }, status: "active" },
+    select: { companyId: true },
+  });
+  if (!invitation.projectId || !party || (invitation.companyId && party.companyId !== invitation.companyId)) {
+    throw new HttpError(409, "INVITATION_OFFER_CHANGED", "This invitation no longer matches its project party; ask for a new invitation");
+  }
+};
+
 const acceptProjectPartyInvitation = async ({ tx, invitation, user }) => {
   if (!invitation.projectPartyId && !invitation.companyId) return null;
 
@@ -695,6 +729,7 @@ const acceptProjectPartyInvitation = async ({ tx, invitation, user }) => {
   const orgId = invitation.orgId;
 
   if (projectPartyId && projectId) {
+    await assertPartyOffer({ tx, invitation });
     return addProjectPartyMemberWithTx({
       tx,
       orgId,
@@ -823,6 +858,7 @@ module.exports = {
   applyPartyWorkflowVisibility,
   assertPartyWorkflowAccess,
   acceptProjectPartyInvitation,
+  assertPartyOffer,
   createCompany,
   ensureCompany,
   getProjectPartyForInvitation,

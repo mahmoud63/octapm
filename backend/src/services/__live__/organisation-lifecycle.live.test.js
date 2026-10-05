@@ -476,7 +476,9 @@ liveDescribe("workspaces: personal at sign-up, a company beside it, conversion",
       bearer(personal.token),
     );
     expect(partyInvite.status).toBe(201);
-    const accepted = await api.post("/api/v1/auth/invitations/accept", { token: acceptLinkFor(guest.email), name: guest.name, password: PASSWORD }, MOBILE);
+    // An existing identity accepts with its own session (owner decision L38).
+    const guestLogin = await login(guest.email);
+    const accepted = await api.post("/api/v1/auth/invitations/accept", { token: acceptLinkFor(guest.email) }, bearer(guestLogin.body.data.tokens?.accessToken || guestLogin.body.data.identityToken));
     expect(accepted.status).toBe(200);
     const guestRow = await prisma.organizationMembership.findFirst({ where: { orgId: personal.orgId, userId: guest.id } });
     expect(guestRow).toMatchObject({ kind: "guest", role: "external_party", status: "active" });
@@ -868,9 +870,17 @@ liveDescribe("workspaces: personal at sign-up, a company beside it, conversion",
   });
 
   it("after conversion a second member is seated where it was refused before", async () => {
+    // The existing identity is invited, not seated (owner decision L38); it is
+    // seated when it accepts with a session of its own.
     const existing = await api.post("/api/v1/users", { name: colleague.name, email: colleague.email, role: "qs" }, bearer(personal.token));
-    expect(existing.status).toBe(201);
-    expect(existing.body.data).toMatchObject({ id: colleague.id, existingIdentity: true });
+    expect(existing.status).toBe(202);
+    expect(existing.body.data).toMatchObject({ invited: true, email: colleague.email, role: "qs", status: "pending" });
+    expect(existing.body.data).not.toHaveProperty("existingIdentity");
+    expect((await prisma.organizationMembership.findFirst({ where: { orgId: personal.orgId, userId: colleague.id } }))?.status).not.toBe("active");
+    const own = await login(colleague.email);
+    const ownToken = own.body.data.tokens?.accessToken || own.body.data.identityToken;
+    const seated = await api.post("/api/v1/auth/invitations/accept", { token: acceptLinkFor(colleague.email) }, bearer(ownToken));
+    expect(seated.status).toBe(200);
 
     const invited = await api.post("/api/v1/users/invitations", { email: `live-third-${tag}@octapm-live.test`, role: "site_engineer" }, bearer(personal.token));
     expect(invited.status).toBe(201);

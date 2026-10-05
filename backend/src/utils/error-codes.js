@@ -72,7 +72,17 @@ const ERROR_CODE_CATALOG = Object.freeze({
   INVITATION_SIGN_IN_REQUIRED: {
     status: 401,
     category: "auth",
-    message: "Sign in as the invited account, or enter its password, to accept this invitation",
+    message: "Sign in as the invited account to accept this invitation",
+  },
+  INVITATION_OFFER_CHANGED: {
+    status: 409,
+    category: "auth",
+    message: "This invitation no longer matches its project party; ask for a new invitation",
+  },
+  MEMBERSHIP_PENDING_ACCEPTANCE: {
+    status: 409,
+    category: "auth",
+    message: "This person joins when they accept their invitation",
   },
   TOKEN_EXPIRED: {
     status: 401,

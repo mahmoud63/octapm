@@ -192,15 +192,33 @@ export interface InvitationPreview {
   } | null
   expiresAt: string
   existingUser: boolean
+  /** The e-mail already has an account: its owner signs in and accepts with that session. */
+  requiresSignIn?: boolean
+  /** A new account (or one its own workspace is reopening) chooses a password. */
   requiresPassword: boolean
 }
 
 export interface AcceptInvitationPayload {
   token: string
-  name: string
+  name?: string
   password?: string
   phone?: string
 }
+
+/** Accepted, but the workspace has the person sign in its own way (single sign-on, a reopened account). */
+export interface InvitationAcceptedSignIn {
+  accepted: true
+  signInRequired: true
+  orgId: string
+  reason?: { code: string; message: string }
+}
+
+export type AcceptInvitationResult = AuthSession | InvitationAcceptedSignIn
+
+export const isSignInRequired = (
+  result: AcceptInvitationResult
+): result is InvitationAcceptedSignIn =>
+  (result as InvitationAcceptedSignIn).signInRequired === true
 
 export interface ApiSuccess<T> {
   success: true

@@ -1,6 +1,7 @@
 const mockTx = {
   invitationToken: {
     create: jest.fn(),
+    findMany: jest.fn(),
     updateMany: jest.fn(),
   },
   authAuditEvent: {
@@ -62,6 +63,8 @@ describe("user invitations", () => {
       name: "Tower A",
     });
     mockPrisma.user.findUnique.mockResolvedValue(null);
+    mockTx.invitationToken.findMany.mockResolvedValue([]);
+    mockTx.invitationToken.updateMany.mockResolvedValue({ count: 0 });
     mockTx.invitationToken.create.mockImplementation(async ({ data }) => ({
       id: "invite-1",
       status: "pending",
@@ -169,5 +172,52 @@ describe("user invitations", () => {
       expect.objectContaining({ data: expect.objectContaining({ action: "invitation_created", userId: "other-user", metadataJson: expect.objectContaining({ existingUser: true }) }) }),
     );
     expect(mockSendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  // Owner decision L38: the answer is the invitation's alone, the same keys
+  // whether or not the e-mail has an account; the project's history (read by
+  // the inviting workspace) does not say which it was.
+  it("answers the same for an e-mail with and without an account, and the project history does not tell", async () => {
+    const invite = () => userService.inviteUser({ orgId: "org-1", actor: { id: "pm-1", role: "pm" }, payload: { email: "someone@example.com", role: "qs", projectId: "project-1" } });
+    const missing = await invite();
+    mockPrisma.user.findUnique.mockResolvedValue({ id: "other-user", orgId: "other-org", email: "someone@example.com", status: "active", name: "Real Name", phone: "+1 555 0100" });
+    const existing = await invite();
+    expect(Object.keys(existing).sort()).toEqual(Object.keys(missing).sort());
+    expect(JSON.stringify(existing)).not.toMatch(/Real Name|555 0100|other-org|other-user|existing/);
+    for (const call of mockTx.auditEvent.create.mock.calls) {
+      expect(JSON.stringify(call[0].data)).not.toContain("existingUser");
+    }
+  });
+
+  it("one pending invitation per e-mail: a new one revokes the previous and audits the revocation", async () => {
+    mockTx.invitationToken.findMany.mockResolvedValue([{ id: "old-invite" }]);
+    await userService.inviteUser({ orgId: "org-1", actor: { id: "pm-1", role: "pm" }, payload: { email: "someone@example.com", role: "qs" } });
+    expect(mockTx.invitationToken.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: { in: ["old-invite"] }, status: "pending" }), data: expect.objectContaining({ status: "revoked" }) }),
+    );
+    expect(mockTx.authAuditEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ action: "invitation_revoked", entityId: "old-invite", metadataJson: expect.objectContaining({ reason: "superseded" }) }) }),
+    );
+  });
+
+  it("POST /users with an existing identity's e-mail sends an invitation instead of attaching it, and tells nothing of the identity", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({ id: "other-user", orgId: "other-org", email: "someone@example.com", status: "inactive", name: "Real Name", phone: "+1 555 0100", lastLogin: new Date() });
+    // A client that knows memberships, with no membership of this person here.
+    mockPrisma.organizationMembership = { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn(), update: jest.fn() };
+    let result;
+    try {
+      result = await userService.createUser({ orgId: "org-1", actor: { id: "pm-1", role: "pm" }, payload: { email: "someone@example.com", name: "Typed Name", role: "qs", password: "Ignored1pass" } });
+    } finally {
+      const membershipModel = mockPrisma.organizationMembership;
+      delete mockPrisma.organizationMembership;
+      expect(membershipModel.create).not.toHaveBeenCalled();
+      expect(membershipModel.update).not.toHaveBeenCalled();
+    }
+    expect(result).toMatchObject({ invited: true, email: "someone@example.com", role: "qs", status: "pending" });
+    for (const key of ["name", "phone", "lastLogin", "existingIdentity", "orgId"]) expect(result).not.toHaveProperty(key);
+    expect(mockTx.invitationToken.create).toHaveBeenCalledTimes(1);
+    expect(mockTx.authAuditEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ action: "invitation_created", metadataJson: expect.objectContaining({ via: "users.create" }) }) }),
+    );
   });
 });

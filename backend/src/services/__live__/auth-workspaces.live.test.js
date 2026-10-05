@@ -7,9 +7,11 @@
  * Three throwaway organisations are registered through the product's own
  * sign-up: A, B and C. The persona is created in A as a QS (POST /users), is
  * invited into B as a PM and accepts (POST /users/invitations → the accept
- * link the log transport prints → POST /auth/invitations/accept), and is
- * added directly to C (POST /users with an email that already exists). A
- * fourth person, created in C, joins A only as a party member (guest).
+ * link the log transport prints → POST /auth/invitations/accept), and C's
+ * POST /users with its email sends an invitation too — an existing identity
+ * is never attached directly (owner decision L38) — which it accepts with its
+ * own session. A fourth person, created in C, joins A only as a party member
+ * (guest).
  *
  * What must hold:
  *   - sign-up and a one-workspace login answer exactly today's shape, and the
@@ -139,7 +141,7 @@ liveDescribe("workspaces: one identity, several organisations", () => {
     expect(session.membershipId).toBe(claims.mid);
   });
 
-  it("an identity joins a second workspace by invitation and a third by direct add", async () => {
+  it("an identity joins a second and a third workspace only by accepting invitations with its own session", async () => {
     // The persona is born in A as a QS.
     const created = await api.post("/api/v1/users", { name: "Persona", email: persona.email, password: PASSWORD, role: "qs" }, bearer(orgs.a.token));
     expect(created.status).toBe(201);
@@ -147,22 +149,26 @@ liveDescribe("workspaces: one identity, several organisations", () => {
     expect(created.body.data.existingIdentity).toBeUndefined();
     persona.id = created.body.data.id;
 
-    // B invites the same email as a PM; the preview welcomes the existing
-    // identity, and the acceptance needs proof of it (membership doc §5):
-    // the emailed link alone is refused, so is a wrong password; the
-    // identity's own session — or its password — binds the session to B.
+    // B invites the same email as a PM; the preview asks the existing
+    // identity to sign in, and the acceptance needs a session of its own
+    // (membership doc §5; owner decision L38): the emailed link alone is
+    // refused, so is a wrong password — and so is the right one, which is
+    // not a session (it would skip the second factor and the sign-in throttle).
     const invited = await api.post("/api/v1/users/invitations", { email: persona.email, role: "pm" }, bearer(orgs.b.token));
     expect(invited.status).toBe(201);
     const token = acceptLinkFor(persona.email);
     const preview = await api.get(`/api/v1/auth/invitations/${token}`);
     expect(preview.status).toBe(200);
-    expect(preview.body.data).toMatchObject({ existingUser: true, requiresPassword: true, role: "pm" });
+    expect(preview.body.data).toMatchObject({ existingUser: true, requiresSignIn: true, requiresPassword: false, role: "pm" });
     const linkAlone = await api.post("/api/v1/auth/invitations/accept", { token, name: "Persona" }, MOBILE);
     expect(linkAlone.status).toBe(401);
     expect(linkAlone.body.error.code).toBe("INVITATION_SIGN_IN_REQUIRED");
     const wrongPassword = await api.post("/api/v1/auth/invitations/accept", { token, name: "Persona", password: "Not-The-Passw0rd" }, MOBILE);
     expect(wrongPassword.status).toBe(401);
     expect(wrongPassword.body.error.code).toBe("INVITATION_SIGN_IN_REQUIRED");
+    const rightPassword = await api.post("/api/v1/auth/invitations/accept", { token, name: "Persona", password: PASSWORD }, MOBILE);
+    expect(rightPassword.status).toBe(401);
+    expect(rightPassword.body.error.code).toBe("INVITATION_SIGN_IN_REQUIRED");
     const someoneElse = await api.post("/api/v1/auth/invitations/accept", { token, name: "Persona" }, bearer(orgs.c.token));
     expect(someoneElse.status).toBe(401);
     expect(someoneElse.body.error.code).toBe("INVITATION_SIGN_IN_REQUIRED");
@@ -181,14 +187,22 @@ liveDescribe("workspaces: one identity, several organisations", () => {
     const row = await prisma.user.findUnique({ where: { id: persona.id } });
     expect(row).toMatchObject({ orgId: orgs.a.orgId, role: "qs" });
 
-    // A second invitation to B for someone already active there is refused;
-    // C adds the identity directly and says so.
+    // A second invitation to B for someone already active there is refused.
+    // C's POST /users with the email does not attach the identity: it sends an
+    // invitation (202) and says nothing of the person — no name, phone, last
+    // sign-in or home — until the identity accepts with its own session.
     const again = await api.post("/api/v1/users/invitations", { email: persona.email, role: "pm" }, bearer(orgs.b.token));
     expect(again.status).toBe(409);
     expect(again.body.error.code).toBe("ALREADY_MEMBER");
     const direct = await api.post("/api/v1/users", { name: "Someone Else", email: persona.email, password: "Ignored-Passw0rd!", role: "site_engineer" }, bearer(orgs.c.token));
-    expect(direct.status).toBe(201);
-    expect(direct.body.data).toMatchObject({ id: persona.id, existingIdentity: true, role: "site_engineer", name: "Persona" });
+    expect(direct.status).toBe(202);
+    expect(direct.body.data).toMatchObject({ invited: true, email: persona.email, role: "site_engineer", status: "pending" });
+    for (const key of ["name", "phone", "lastLogin", "existingIdentity", "orgId"]) expect(direct.body.data).not.toHaveProperty(key);
+    expect(await prisma.organizationMembership.findFirst({ where: { orgId: orgs.c.orgId, userId: persona.id } })).toBeNull();
+    const twoWorkspaces = await login(persona.email);
+    expect(twoWorkspaces.body.data.chooseWorkspace).toBe(true);
+    const intoC = await api.post("/api/v1/auth/invitations/accept", { token: acceptLinkFor(persona.email) }, bearer(twoWorkspaces.body.data.identityToken));
+    expect(intoC.status).toBe(200);
     const twice = await api.post("/api/v1/users", { name: "Persona", email: persona.email, role: "qs" }, bearer(orgs.c.token));
     expect(twice.status).toBe(409);
     expect(twice.body.error.code).toBe("EMAIL_EXISTS");
@@ -386,8 +400,9 @@ liveDescribe("workspaces: one identity, several organisations", () => {
       bearer(orgs.a.token),
     );
     expect(invited.status).toBe(201);
-    // The guest proves the identity with its password (no session of its own here).
-    const accepted = await api.post("/api/v1/auth/invitations/accept", { token: acceptLinkFor(guest.email), name: "Guest", password: PASSWORD }, MOBILE);
+    // The guest signs in to its own workspace and accepts with that session.
+    const own = await login(guest.email);
+    const accepted = await api.post("/api/v1/auth/invitations/accept", { token: acceptLinkFor(guest.email) }, bearer(own.body.data.tokens.accessToken));
     expect(accepted.status).toBe(200);
     expect(accepted.body.data.user).toMatchObject({ id: guest.id, orgId: orgs.a.orgId, role: "external_party" });
     const claims = decode(accepted.body.data.tokens.accessToken);
@@ -412,7 +427,8 @@ liveDescribe("workspaces: one identity, several organisations", () => {
     const roleChangesBefore = await prisma.authAuditEvent.count({ where: { orgId: orgs.b.orgId, userId: persona.id, action: "membership.role_changed" } });
     const invited = await api.post("/api/v1/users/invitations", { email: persona.email, role: "qs", projectId: orgs.b.projectId }, bearer(orgs.b.token));
     expect(invited.status).toBe(201);
-    const accepted = await api.post("/api/v1/auth/invitations/accept", { token: acceptLinkFor(persona.email), name: "Persona", password: PASSWORD }, MOBILE);
+    const own = await login(persona.email);
+    const accepted = await api.post("/api/v1/auth/invitations/accept", { token: acceptLinkFor(persona.email) }, bearer(own.body.data.identityToken));
     expect(accepted.status).toBe(200);
     expect(accepted.body.data.user).toMatchObject({ id: persona.id, orgId: orgs.b.orgId, role: "pm", isCompanyAdmin: true });
     expect(decode(accepted.body.data.tokens.accessToken)).toMatchObject({ orgId: orgs.b.orgId, role: "pm", adm: true });
@@ -429,8 +445,10 @@ liveDescribe("workspaces: one identity, several organisations", () => {
     const born = await api.post("/api/v1/users", { name: "Closed", email, password: PASSWORD, role: "site_engineer" }, bearer(orgs.a.token));
     expect(born.status).toBe(201);
     const id = born.body.data.id;
-    // C adds the identity directly; B invites it and holds the link.
-    expect((await api.post("/api/v1/users", { name: "Closed", email, role: "site_engineer" }, bearer(orgs.c.token))).status).toBe(201);
+    // C invites the identity and it accepts with its own session; B invites it and holds the link.
+    expect((await api.post("/api/v1/users", { name: "Closed", email, role: "site_engineer" }, bearer(orgs.c.token))).status).toBe(202);
+    const homeOnly = await login(email);
+    expect((await api.post("/api/v1/auth/invitations/accept", { token: acceptLinkFor(email) }, bearer(homeOnly.body.data.tokens.accessToken))).status).toBe(200);
     expect((await api.post("/api/v1/users/invitations", { email, role: "qs" }, bearer(orgs.b.token))).status).toBe(201);
     const token = acceptLinkFor(email);
 
@@ -458,11 +476,12 @@ liveDescribe("workspaces: one identity, several organisations", () => {
     expect(refused.body.error.code).toBe("USER_INACTIVE");
 
     // Home reopens the identity; C then reopens its own membership; and B's
-    // invitation, with the password as proof, now gives the third workspace.
+    // invitation, accepted with the identity's own session, now gives the third workspace.
     expect((await api.request("PATCH", `/api/v1/users/${id}/activate`, { headers: bearer(orgs.a.token) })).status).toBe(200);
     expect(await prisma.user.findUnique({ where: { id }, select: { status: true } })).toEqual({ status: "active" });
     expect((await api.request("PATCH", `/api/v1/users/${id}/activate`, { headers: bearer(orgs.c.token) })).status).toBe(200);
-    const accepted = await api.post("/api/v1/auth/invitations/accept", { token, name: "Closed", password: PASSWORD }, MOBILE);
+    const reopened = await login(email);
+    const accepted = await api.post("/api/v1/auth/invitations/accept", { token }, bearer(reopened.body.data.identityToken));
     expect(accepted.status).toBe(200);
     expect(accepted.body.data.user).toMatchObject({ id, orgId: orgs.b.orgId, role: "qs", status: "active" });
     const choice = await login(email);

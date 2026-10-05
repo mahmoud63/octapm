@@ -9,6 +9,7 @@ const mockTx = {
     updateMany: jest.fn(),
   },
   invitationToken: {
+    findMany: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
   },
@@ -33,6 +34,9 @@ const mockPrisma = {
     findUnique: jest.fn(),
   },
   invitationToken: {
+    findUnique: jest.fn(),
+  },
+  organisation: {
     findUnique: jest.fn(),
   },
   authAuditEvent: {
@@ -110,6 +114,12 @@ describe("auth password reset and invitation tokens", () => {
     }));
     mockTx.refreshSession.create.mockImplementation(async ({ data }) => data);
     mockSendEmail.mockResolvedValue({ delivered: true });
+    // Acceptance claims the link with a conditional update (one row), lists
+    // the e-mail's other pending links, and then issues the workspace session
+    // as any is issued (the workspace's policy read from the organisation).
+    mockTx.invitationToken.updateMany.mockResolvedValue({ count: 1 });
+    mockTx.invitationToken.findMany.mockResolvedValue([]);
+    mockPrisma.organisation.findUnique.mockResolvedValue({ id: "org-1", name: "Octa Builders", slug: "octa", kind: "company", status: "active", ssoEnabled: false, ssoRequired: false, ssoDomainsJson: [], mfaRequired: false });
   });
 
   it("stores only a hashed password reset token and sends a reset email", async () => {
@@ -265,16 +275,17 @@ describe("auth password reset and invitation tokens", () => {
   });
 
   it("accepts an invitation by creating a user and assigning the project role", async () => {
-    mockPrisma.invitationToken.findUnique.mockResolvedValue(pendingInvitation);
-    mockPrisma.user.findUnique.mockResolvedValue(null);
-    mockTx.user.create.mockResolvedValue({
+    const created = {
       ...activeUser,
       id: "new-user-1",
       email: pendingInvitation.email,
       role: pendingInvitation.role,
-    });
+    };
+    mockPrisma.invitationToken.findUnique.mockResolvedValue(pendingInvitation);
+    // No identity for the e-mail at acceptance; the new one when the session is issued.
+    mockPrisma.user.findUnique.mockResolvedValueOnce(null).mockResolvedValue(created);
+    mockTx.user.create.mockResolvedValue(created);
     mockTx.invitationToken.update.mockResolvedValue({});
-    mockTx.invitationToken.updateMany.mockResolvedValue({ count: 0 });
     mockTx.projectAssignment.upsert.mockResolvedValue({});
 
     const result = await authService.acceptInvitation(
@@ -311,16 +322,30 @@ describe("auth password reset and invitation tokens", () => {
       },
       update: { role: pendingInvitation.role, orgId: "org-1" },
     });
+    // Claimed only while still pending, unrevoked and unexpired; then stamped with who accepted.
+    expect(mockTx.invitationToken.updateMany).toHaveBeenCalledWith({
+      where: { id: pendingInvitation.id, status: "pending", acceptedAt: null, revokedAt: null, expiresAt: { gt: expect.any(Date) } },
+      data: { status: "accepted", acceptedAt: expect.any(Date) },
+    });
     expect(mockTx.invitationToken.update).toHaveBeenCalledWith({
       where: { id: pendingInvitation.id },
-      data: expect.objectContaining({
-        status: "accepted",
-        acceptedById: "new-user-1",
-      }),
+      data: expect.objectContaining({ acceptedById: "new-user-1" }),
     });
   });
 
-  it("needs proof of an existing identity: the link alone is refused; a bearer for it or its password accepts, and the password is never rewritten", async () => {
+  it("writes nothing when the link was revoked, used or expired after it was read (the claim finds no pending row)", async () => {
+    mockPrisma.invitationToken.findUnique.mockResolvedValue(pendingInvitation);
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+    mockTx.invitationToken.updateMany.mockResolvedValue({ count: 0 });
+    await expect(
+      authService.acceptInvitation({ token: "invite-token", name: "New User", password: "Password1" }),
+    ).rejects.toMatchObject({ code: "INVITATION_TOKEN_INVALID" });
+    expect(mockTx.user.create).not.toHaveBeenCalled();
+    expect(mockTx.projectAssignment.upsert).not.toHaveBeenCalled();
+    expect(mockTx.invitationToken.update).not.toHaveBeenCalled();
+  });
+
+  it("needs the existing identity's own session: the link alone, a password (even the right one) and another identity's session are refused; nothing on the identity is written", async () => {
     const bcrypt = require("bcryptjs");
     const existing = {
       ...activeUser,
@@ -332,25 +357,36 @@ describe("auth password reset and invitation tokens", () => {
     mockPrisma.invitationToken.findUnique.mockResolvedValue(pendingInvitation);
     mockPrisma.user.findUnique.mockResolvedValue(existing);
     mockTx.invitationToken.update.mockResolvedValue({});
-    mockTx.invitationToken.updateMany.mockResolvedValue({ count: 0 });
     mockTx.projectAssignment.upsert.mockResolvedValue({});
 
     const accept = (payload) => authService.acceptInvitation({ token: "invite-token", name: "Existing", ...payload });
     await expect(accept({})).rejects.toMatchObject({ code: "INVITATION_SIGN_IN_REQUIRED" });
     await expect(accept({ password: "Wrong-Passw0rd" })).rejects.toMatchObject({ code: "INVITATION_SIGN_IN_REQUIRED" });
-    await expect(accept({ identityUserId: "somebody-else" })).rejects.toMatchObject({ code: "INVITATION_SIGN_IN_REQUIRED" });
+    await expect(accept({ password: "Password1" })).rejects.toMatchObject({ code: "INVITATION_SIGN_IN_REQUIRED" });
+    await expect(accept({ identityUserId: "somebody-else", password: "Password1" })).rejects.toMatchObject({ code: "INVITATION_SIGN_IN_REQUIRED" });
+    // A session another company's single sign-on issued vouches for that company only (L10).
+    await expect(accept({ identityUserId: "existing-1", identitySsoOrgId: "other-org" })).rejects.toMatchObject({ code: "SSO_SESSION_BOUND" });
+    expect(mockTx.invitationToken.updateMany).not.toHaveBeenCalled();
     expect(mockTx.invitationToken.update).not.toHaveBeenCalled();
     expect(mockPrisma.authAuditEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ action: "invitation_accept_rejected", metadataJson: { reason: "INVITATION_SIGN_IN_REQUIRED" } }) }),
     );
 
-    const byPassword = await accept({ password: "Password1" });
-    expect(byPassword.user).toMatchObject({ id: "existing-1", orgId: "org-1" });
-    const bySession = await accept({ identityUserId: "existing-1" });
+    // The workspace session after acceptance is issued for the membership acceptance wrote.
+    mockPrisma.organizationMembership = {
+      findFirst: jest.fn().mockResolvedValue({ id: "m-1", orgId: "org-1", userId: "existing-1", status: "active", role: "site_engineer", kind: "member", isAdmin: false, isOwner: false }),
+      findMany: jest.fn().mockResolvedValue([]),
+    };
+    let bySession;
+    try {
+      bySession = await accept({ identityUserId: "existing-1" });
+    } finally {
+      delete mockPrisma.organizationMembership;
+    }
     expect(bySession.user).toMatchObject({ id: "existing-1", orgId: "org-1" });
     // Not the identity's home: nothing on the User row is written, the password least of all.
     expect(mockTx.user.update).not.toHaveBeenCalled();
-    expect(mockTx.invitationToken.update).toHaveBeenCalledTimes(2);
+    expect(mockTx.invitationToken.update).toHaveBeenCalledTimes(1);
   });
 
   it("does not reopen an identity its home workspace closed: another workspace's invitation is refused, home's reopens it with a new password", async () => {
@@ -366,11 +402,14 @@ describe("auth password reset and invitation tokens", () => {
     mockPrisma.user.findUnique.mockResolvedValue({ ...closed, orgId: "org-1" });
     mockTx.user.update.mockImplementation(async ({ data }) => ({ ...closed, orgId: "org-1", ...data }));
     mockTx.invitationToken.update.mockResolvedValue({});
-    mockTx.invitationToken.updateMany.mockResolvedValue({ count: 0 });
     mockTx.projectAssignment.upsert.mockResolvedValue({});
     await expect(authService.acceptInvitation({ token: "invite-token", name: "Closed" })).rejects.toMatchObject({ code: "INVITATION_PASSWORD_REQUIRED" });
+    // Home reopens it with a new password; the link itself mints no session
+    // (the account signs in afterwards, with its second factor if it has one).
     const reopened = await authService.acceptInvitation({ token: "invite-token", name: "Closed", password: "Password1" });
-    expect(reopened.user).toMatchObject({ id: "closed-1", status: "active" });
+    expect(reopened).toMatchObject({ accepted: true, signInRequired: true, orgId: "org-1" });
+    expect(reopened.tokens).toBeUndefined();
+    expect(mockTx.refreshSession.create).not.toHaveBeenCalled();
     expect(mockTx.user.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "active", passwordHash: expect.any(String) }) }),
     );

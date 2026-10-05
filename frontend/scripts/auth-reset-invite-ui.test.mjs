@@ -54,4 +54,15 @@ assert.ok(
   'accept-invite route must accept invitations and establish a normal session'
 )
 
+// Owner decision L38: an e-mail that already has an account accepts with its
+// own session — the form signs it in (password, then the second factor) and
+// accepts with that bearer; the password is never sent as proof.
+assert.ok(
+  acceptInviteForm.includes('invitation.requiresSignIn') &&
+    acceptInviteForm.includes('verifyMfa(') &&
+    acceptInviteForm.includes('acceptInvitation({ token }, bearer') &&
+    authApi.includes('Authorization: `Bearer ${options.bearer}`'),
+  'accept-invite must sign an existing account in and accept with its own session'
+)
+
 console.log('Auth reset and invitation UI assertions passed')

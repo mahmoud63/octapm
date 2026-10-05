@@ -1,6 +1,7 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const auditService = require("./audit.service");
+const membershipService = require("./membership.service");
 
 /**
  * Custom fields, fieldsets and record types (OCTA-PLAT-FIELDS-025).
@@ -707,6 +708,39 @@ const getValues = async ({ orgId, projectId, recordType, recordId, recordTypeKey
   return { ...schema, values: valueRowsToMap(rows, byFieldId) };
 };
 
+/**
+ * A person or company a value names is this company's own: one of its people
+ * (a present membership, or a legacy row homed here) or a company of its directory. Another company's id
+ * is refused exactly as an id that exists nowhere; a value already stored
+ * and not changed is left alone. Before this check a field took any id and a
+ * report then printed the other company's person or company by name
+ * (certification L38 review, M8).
+ */
+const assertNamedReferences = async ({ client, orgId, byKey, existing, normalized }) => {
+  const named = [];
+  for (const [key, value] of Object.entries(normalized)) {
+    const field = byKey.get(key);
+    if (!field || (field.type !== "user" && field.type !== "company") || value === null || value === undefined) continue;
+    if (JSON.stringify(existing[key] ?? null) === JSON.stringify(value)) continue;
+    named.push({ field, value });
+  }
+  if (!named.length) return;
+  const userIds = named.filter((item) => item.field.type === "user").map((item) => item.value);
+  const companyIds = named.filter((item) => item.field.type === "company").map((item) => item.value);
+  // The workspace's people as every list of them is read (membershipService.userInOrgWhere):
+  // a present membership, or a legacy row homed here with no membership at all.
+  const members = userIds.length
+    ? new Set((await client.user.findMany({ where: membershipService.userInOrgWhere({ tx: client, orgId, where: { id: { in: userIds } } }), select: { id: true } })).map((row) => row.id))
+    : new Set();
+  const companies = companyIds.length
+    ? new Set((await client.company.findMany({ where: { orgId, id: { in: companyIds } }, select: { id: true } })).map((row) => row.id))
+    : new Set();
+  const problems = named
+    .filter(({ field, value }) => (field.type === "user" ? !members.has(value) : !companies.has(value)))
+    .map(({ field }) => ({ key: field.key, message: `${field.label} needs a ${field.type === "user" ? "person" : "company"} of this organisation` }));
+  if (problems.length) throw new HttpError(400, "CUSTOM_FIELD_INVALID", problems.map((problem) => problem.message).join("; "), { problems });
+};
+
 /** Writes a values map for one record of the project (upsert; null removes), audited on the record itself. */
 const setValues = async ({ orgId, projectId, recordType, recordId, values = {}, actor = null, recordTypeKey = null, context = {}, partial = false, tx = null, viewer = null }) => {
   const client = tx || prisma;
@@ -722,6 +756,7 @@ const setValues = async ({ orgId, projectId, recordType, recordId, values = {}, 
   const existing = valueRowsToMap(existingRows, byFieldId);
   const merged = partial ? { ...existing, ...(isPlainObject(values) ? values : {}) } : { ...Object.fromEntries(schema.fields.map((field) => [field.key, null])), ...(isPlainObject(values) ? values : {}) };
   const normalized = validateValues({ schema, values: merged, context, partial });
+  await assertNamedReferences({ client, orgId, byKey, existing, normalized });
   const changed = [];
   for (const [key, value] of Object.entries(normalized)) {
     const field = byKey.get(key);
@@ -788,12 +823,19 @@ const attachValues = async ({ orgId, recordType, rows }) => {
       if (field.type === "company") companyIds.add(value);
     }
   }
+  // Names come from this company only: its people, past ones included (a
+  // record that named an approver who has since left still shows their name,
+  // as other history does). A value that names anyone else — one stored
+  // before values were checked — is shown as the bare id.
   if (userIds.size && prisma.user?.findMany) {
-    const users = await prisma.user.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, name: true, email: true } });
+    const ownPeople = membershipService.hasMembershipModel(prisma)
+      ? { id: { in: [...userIds] }, OR: [{ orgId }, { memberships: { some: { orgId } } }] }
+      : { id: { in: [...userIds] }, orgId };
+    const users = await prisma.user.findMany({ where: ownPeople, select: { id: true, name: true, email: true } });
     for (const user of users) names.set(`user:${user.id}`, user.name || user.email || user.id);
   }
   if (companyIds.size && prisma.company?.findMany) {
-    const companies = await prisma.company.findMany({ where: { id: { in: [...companyIds] } }, select: { id: true, name: true } });
+    const companies = await prisma.company.findMany({ where: { orgId, id: { in: [...companyIds] } }, select: { id: true, name: true } });
     for (const company of companies) names.set(`company:${company.id}`, company.name || company.id);
   }
   for (const row of rows) {

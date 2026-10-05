@@ -446,7 +446,8 @@ const assertOwnReferences = async (client, orgId, { projectId = null, preferredS
     if (!supplier) throw new HttpError(404, "SUPPLIER_NOT_FOUND", "That supplier is not this organisation's");
   }
   if (managerId) {
-    const member = await client.organizationMembership.findFirst({ where: { orgId, userId: managerId, status: { not: "left" } }, select: { id: true } });
+    // Active or suspended here; an invitation not yet accepted is not membership (L38).
+    const member = await client.organizationMembership.findFirst({ where: { orgId, userId: managerId, status: { in: ["active", "suspended"] } }, select: { id: true } });
     if (!member) throw new HttpError(404, "USER_NOT_FOUND", "That person is not a member of this organisation");
   }
 };

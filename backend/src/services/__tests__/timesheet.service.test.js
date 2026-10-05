@@ -132,7 +132,7 @@ const mockPrisma = {
   activity: { findMany: jest.fn(async ({ where }) => ACTIVITIES.filter((activity) => activity.projectId === where.projectId && (!where.id?.in || where.id.in.includes(activity.id))).map((activity) => ({ id: activity.id }))), findFirst: jest.fn(async ({ where }) => ACTIVITIES.find((activity) => activity.id === where.id && activity.projectId === where.projectId) || null) },
   projectCostCode: { findMany: jest.fn(async ({ where }) => (where.costCodeId?.in || []).filter((id) => id === "cc-1").map((id) => ({ costCodeId: id }))), findFirst: jest.fn(async ({ where }) => (where.costCodeId === "cc-1" ? { id: "pcc-1" } : null)) },
   location: { findMany: jest.fn(async () => []) },
-  organizationMembership: { findMany: jest.fn(async ({ where }) => MEMBERSHIPS.filter((row) => row.orgId === where.orgId && where.userId.in.includes(row.userId) && row.status !== where.status?.not).map((row) => ({ userId: row.userId }))) },
+  organizationMembership: { findMany: jest.fn(async ({ where }) => MEMBERSHIPS.filter((row) => row.orgId === where.orgId && where.userId.in.includes(row.userId) && (where.status?.in ? where.status.in.includes(row.status) : row.status !== where.status?.not)).map((row) => ({ userId: row.userId }))) },
   activityProgress: { findMany: jest.fn(async ({ where }) => ACTIVITIES.filter((activity) => where.activityId.in.includes(activity.id)).map((activity) => ({ activityId: activity.id, pctComplete: activity.physComplete, updatedAt: new Date() }))) },
   worker: table("workers", { hydrate: hydrateWorker }),
   crew: table("crews", { hydrate: hydrateCrew }),

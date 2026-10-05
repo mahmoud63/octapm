@@ -620,11 +620,15 @@ const issueWorkspaceSession = async ({ userId, orgId, ssoOrgId = null }, context
   if (!org || org.status !== "active") {
     throw new HttpError(404, "WORKSPACE_NOT_FOUND", "You are not a member of this workspace");
   }
-  assertWorkspacePolicy({
-    org,
-    email: user.email,
-    isCompanyAdmin: membership ? membership.isAdmin || membership.isOwner : Boolean(user.isCompanyAdmin),
-  });
+  // A session this workspace's own single sign-on issued is what its SSO-only
+  // policy asks for; any other session is held to the policy.
+  if (ssoOrgId !== orgId) {
+    assertWorkspacePolicy({
+      org,
+      email: user.email,
+      isCompanyAdmin: membership ? membership.isAdmin || membership.isOwner : Boolean(user.isCompanyAdmin),
+    });
+  }
 
   const memberships = await membershipService.listWorkspacesForUser(userId);
   return prisma.$transaction(async (tx) => {
@@ -1110,13 +1114,15 @@ const getInvitationPreview = async ({ token }) => {
 
   // An identity that already exists elsewhere is invited like any other
   // (membership doc §5): acceptance gives it a second membership — once the
-  // invitee has proved they are that identity, by password or by a session
-  // of their own, so `requiresPassword` is true for every existing identity
-  // (a client without a session asks for the password it already knows).
+  // invitee has signed in as that identity and accepts with that session
+  // (owner decision L38), so `requiresSignIn` is true for it. A new identity,
+  // or one its own workspace is reopening, chooses a password instead. Only
+  // the holder of the link — the invitee — can read this.
   const existingUser = await prisma.user.findUnique({
     where: { email: invitation.email },
     select: { id: true, orgId: true, status: true },
   });
+  const signsIn = Boolean(existingUser) && existingUser.status === "active";
 
   return {
     email: invitation.email,
@@ -1133,8 +1139,8 @@ const getInvitationPreview = async ({ token }) => {
       : null,
     expiresAt: invitation.expiresAt,
     existingUser: Boolean(existingUser),
-    // A new identity chooses one; an existing identity proves itself with it.
-    requiresPassword: true,
+    requiresSignIn: signsIn,
+    requiresPassword: !signsIn,
   };
 };
 
@@ -1144,22 +1150,41 @@ const getInvitationPreview = async ({ token }) => {
  * turn a leaked or forwarded invitation into a session for the victim, and
  * from there into every workspace they belong to. The proof is a session of
  * their own — an access or identity token for the same `sub`, passed by the
- * route as `identityUserId` — or the account password, which is compared and
- * never rewritten. A brand-new identity still sets its password with the
- * token alone, as it always has.
+ * route as `identityUserId` — and nothing else (owner decision L38: the
+ * person accepts "using their own authenticated identity/session"). The
+ * password alone is not that: it skipped the second factor, the sign-in
+ * throttle and the company's single sign-on. A session a company's single
+ * sign-on issued vouches for that company only (certification L10). A
+ * brand-new identity still sets its password with the token alone.
  */
-const assertInvitationIdentityProof = async ({ existingUser, identityUserId, password }) => {
-  if (identityUserId && identityUserId === existingUser.id) return;
-  if (password && (await bcrypt.compare(password, existingUser.passwordHash))) return;
-  throw new HttpError(
-    401,
-    "INVITATION_SIGN_IN_REQUIRED",
-    "Sign in as the invited account, or enter its password, to accept this invitation",
-  );
+const assertInvitationIdentityProof = ({ existingUser, identityUserId, identitySsoOrgId, invitation }) => {
+  if (!identityUserId || identityUserId !== existingUser.id) {
+    throw new HttpError(
+      401,
+      "INVITATION_SIGN_IN_REQUIRED",
+      "Sign in as the invited account to accept this invitation",
+    );
+  }
+  if (identitySsoOrgId && identitySsoOrgId !== invitation.orgId) {
+    throw new HttpError(
+      403,
+      "SSO_SESSION_BOUND",
+      "This session came from your company's single sign-on and opens that company only. Sign in with your own password to accept this invitation.",
+    );
+  }
+};
+
+/** Why a link cannot be used, for the audit line (the caller is told only that it is invalid). */
+const invitationRefusalReason = (invitation, now) => {
+  if (!invitation) return "unknown";
+  if (invitation.acceptedAt || invitation.status === "accepted") return "accepted";
+  if (invitation.revokedAt || invitation.status === "revoked") return "revoked";
+  if (invitation.expiresAt <= now) return "expired";
+  return "not_pending";
 };
 
 const acceptInvitation = async (
-  { token, name, password, phone, identityUserId = null },
+  { token, name, password, phone, identityUserId = null, identitySsoOrgId = null },
   context = {},
 ) => {
   const tokenHash = hashAccountToken(token);
@@ -1193,7 +1218,7 @@ const acceptInvitation = async (
       email: invitation?.email || null,
       ipAddress: context.ipAddress,
       userAgent: context.userAgent,
-      metadata: { reason: error.code || "invalid_token" },
+      metadata: { reason: invitationRefusalReason(invitation, now) },
     });
     throw error;
   }
@@ -1214,8 +1239,10 @@ const acceptInvitation = async (
       throw new HttpError(403, "USER_INACTIVE", "This account was closed by its own workspace");
     }
     if (existingUser && !reactivatesIdentity) {
-      await assertInvitationIdentityProof({ existingUser, identityUserId, password });
+      assertInvitationIdentityProof({ existingUser, identityUserId, identitySsoOrgId, invitation });
     }
+    // The party offered must still be the party acceptance would join.
+    await companyPartyService.assertPartyOffer({ invitation });
   } catch (error) {
     await recordAuthAuditEvent({
       orgId: invitation.orgId,
@@ -1235,6 +1262,12 @@ const acceptInvitation = async (
   // Only a new identity, or one being reopened by its home, sets a password
   // here; an active identity's password was its proof and is left alone.
   const setsPassword = !existingUser || reactivatesIdentity;
+  if (name !== undefined && name !== null && typeof name !== "string") {
+    throw new HttpError(400, "VALIDATION_ERROR", "The name must be text");
+  }
+  if (!existingUser && !name?.trim()) {
+    throw new HttpError(400, "VALIDATION_ERROR", "A name is required to create your account");
+  }
   if (setsPassword && !password) {
     throw new HttpError(
       400,
@@ -1256,17 +1289,45 @@ const acceptInvitation = async (
   const currentMembership = existingUser
     ? await membershipService.findMembership({ tx: prisma, orgId: invitation.orgId, userId: existingUser.id })
     : null;
+  // A person homed here with no membership row at all (seeded before the
+  // backfill) is a current member too: their row is written from the User
+  // columns and kept, not re-graded by a project or party invitation.
+  const legacyMember =
+    Boolean(existingUser) && homeOrg && !reactivatesIdentity && !currentMembership &&
+    membershipService.hasMembershipModel(prisma) && membershipService.isMembershipWriteEnabled();
   const keepsRole =
-    Boolean(currentMembership) &&
-    currentMembership.status === membershipService.MEMBERSHIP_STATUSES.ACTIVE &&
-    currentMembership.kind === membershipService.MEMBERSHIP_KINDS.MEMBER;
+    legacyMember ||
+    (Boolean(currentMembership) &&
+      currentMembership.status === membershipService.MEMBERSHIP_STATUSES.ACTIVE &&
+      currentMembership.kind === membershipService.MEMBERSHIP_KINDS.MEMBER);
 
-  return prisma.$transaction(async (tx) => {
+  const accepted = await prisma.$transaction(async (tx) => {
+    // Acceptance and a new invitation of the same e-mail to the same workspace
+    // are made one at a time (inviteUser takes the same lock), so neither
+    // judges the other's half-written state.
+    if (typeof tx.$executeRaw === "function") {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${invitation.orgId}), hashtext(${invitation.email}))`;
+    }
+    // The link is claimed first, and only while it is still pending: one
+    // revoked, accepted or expired since it was read above — by a newer
+    // invitation, a second submission, the clock — writes nothing.
+    // Expiry is judged at the claim, not at the start of the request.
+    const claimed = await tx.invitationToken.updateMany({
+      where: { id: invitation.id, status: "pending", acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
+      data: { status: "accepted", acceptedAt: now },
+    });
+    if (claimed.count !== 1) throw createInvalidInvitationTokenError();
+
     let user;
     if (existingUser) {
       const data = {};
       if (homeOrg) {
-        if (!keepsRole) data.role = invitation.role;
+        // The home User columns mirror the membership written below: the
+        // offered role, and never administration (an invitation confers none).
+        if (!keepsRole) {
+          data.role = invitation.role;
+          data.isCompanyAdmin = false;
+        }
         if (reactivatesIdentity) data.status = "active";
         if (name?.trim()) data.name = name.trim();
         if (phone !== undefined) data.phone = phone || null;
@@ -1293,9 +1354,12 @@ const acceptInvitation = async (
       });
     }
 
-    const ensured = keepsRole
-      ? { membership: currentMembership, created: false, reactivated: false }
-      : await membershipService.ensureMembership({
+    // Exactly the membership offered: its role and kind, no administration or
+    // ownership, whatever the person held here before (membershipService.acceptOffer).
+    // A legacy member's own row is written from the User columns and kept.
+    const ensured = legacyMember
+      ? { membership: await membershipService.ensureMembershipForUser({ tx, user, orgId: invitation.orgId }), created: true, reactivated: false, kept: true }
+      : await membershipService.acceptOffer({
           tx,
           orgId: invitation.orgId,
           userId: user.id,
@@ -1305,6 +1369,20 @@ const acceptInvitation = async (
           invitationId: invitation.id,
           joinedAt: now,
         });
+    // A membership coming back from suspension or departure brings nothing it
+    // held before: its old party places, company memberships and project
+    // assignments here go, and only the offered ones are written below.
+    if (ensured?.reactivated) {
+      await tx.projectPartyMember.updateMany({
+        where: { userId: user.id, status: "active", projectParty: { project: { orgId: invitation.orgId } } },
+        data: { status: "inactive" },
+      });
+      await tx.companyMembership.updateMany({
+        where: { userId: user.id, orgId: invitation.orgId, status: "active" },
+        data: { status: "inactive" },
+      });
+      await tx.projectAssignment.deleteMany({ where: { userId: user.id, orgId: invitation.orgId } });
+    }
     if (ensured) {
       await membershipService.recordMembershipEvent({
         tx,
@@ -1317,9 +1395,9 @@ const acceptInvitation = async (
           invitationId: invitation.id,
           created: ensured.created,
           reactivated: ensured.reactivated,
-          roleKept: keepsRole,
+          roleKept: ensured.kept,
           kind: ensured.membership.kind,
-          provedBy: existingUser && !reactivatesIdentity ? (identityUserId ? "session" : "password") : null,
+          provedBy: existingUser && !reactivatesIdentity ? "session" : null,
         },
       });
     }
@@ -1354,14 +1432,12 @@ const acceptInvitation = async (
     await tx.invitationToken.update({
       where: { id: invitation.id },
       data: {
-        status: "accepted",
-        acceptedAt: now,
         acceptedById: user.id,
         ...(ensured ? { membershipId: ensured.membership.id } : {}),
       },
     });
 
-    await tx.invitationToken.updateMany({
+    const siblings = await tx.invitationToken.findMany({
       where: {
         orgId: invitation.orgId,
         email: invitation.email,
@@ -1370,11 +1446,33 @@ const acceptInvitation = async (
         acceptedAt: null,
         revokedAt: null,
       },
-      data: {
-        status: "revoked",
-        revokedAt: now,
-      },
+      select: { id: true },
     });
+    if (siblings.length) {
+      await tx.invitationToken.updateMany({
+        where: { id: { in: siblings.map((row) => row.id) }, status: "pending" },
+        data: { status: "revoked", revokedAt: now },
+      });
+      // Audited as revoked only what this update revoked.
+      const revoked = await tx.invitationToken.findMany({
+        where: { id: { in: siblings.map((row) => row.id) }, status: "revoked", revokedAt: now },
+        select: { id: true },
+      });
+      for (const row of revoked) {
+        await recordAuthAuditEvent({
+          tx,
+          orgId: invitation.orgId,
+          userId: user.id,
+          entityType: "invitation",
+          entityId: row.id,
+          action: "invitation_revoked",
+          email: invitation.email,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+          metadata: { reason: "accepted_other", acceptedInvitationId: invitation.id },
+        });
+      }
+    }
 
     await recordAuthAuditEvent({
       tx,
@@ -1393,11 +1491,32 @@ const acceptInvitation = async (
         projectId: invitation.projectId,
         companyId: invitation.companyId,
         projectPartyId: invitation.projectPartyId,
+        provedBy: existingUser && !reactivatesIdentity ? "session" : null,
       },
     });
 
-    return createAuthSessionPayload(tx, user, context, { orgId: invitation.orgId });
+    return user;
   });
+
+  // The acceptance stands; the session for the workspace just joined is issued
+  // as every workspace session is (issueWorkspaceSession): the workspace's
+  // single-sign-on policy and second-factor enrolment apply, and a session a
+  // company's single sign-on issued stays bound to it. A reopened account, or
+  // one the workspace's policy sends to its single sign-on, signs in instead.
+  const signIn = (reason) => ({ accepted: true, signInRequired: true, orgId: invitation.orgId, reason });
+  if (reactivatesIdentity) {
+    return signIn({ code: "SIGN_IN_REQUIRED", message: "Your account is open again: sign in with your new password" });
+  }
+  try {
+    // The SSO binding is carried only from the accepting identity's own session;
+    // a bearer of anyone else (a colleague's session in the same browser, on a
+    // brand-new account's acceptance) lends it nothing.
+    const ownSso = identityUserId && identityUserId === accepted.id ? identitySsoOrgId : null;
+    return await issueWorkspaceSession({ userId: accepted.id, orgId: invitation.orgId, ssoOrgId: ownSso }, context);
+  } catch (error) {
+    if (error instanceof HttpError && error.status < 500) return signIn({ code: error.code, message: error.message });
+    throw error;
+  }
 };
 
 // ─── First administrator ────────────────────────────────────────────────────

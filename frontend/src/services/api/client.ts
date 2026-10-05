@@ -24,7 +24,8 @@ type PendingRequest = {
 const pendingRequests: PendingRequest[] = []
 let isRefreshing = false
 
-const authlessClient = axios.create({
+/** No stored-session header: for a request that carries its own bearer (a workspace re-entry, an invitation acceptance). */
+export const authlessClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 15000,
   withCredentials: true,
