@@ -13,6 +13,7 @@
  * No persona and no multi-company persona (user.a/b/c) is modified.
  */
 const { as, raw, API } = require('../lib/api');
+const { joinByInvitation } = require('../lib/invitations');
 
 const PASSWORD = process.env.CERT_PASSWORD; // read, never printed
 const ADMIN_CHOSEN_PW = 'Seized0nce1'; // the password the home admin sets; a throwaway's only
@@ -35,8 +36,10 @@ const show = (label, res) => {
   const u = await pm24.POST('/users', { name: 'U Shared Identity', email: uEmail, password: PASSWORD, role: 'site_engineer' });
   console.log('[setup] U created, home 024, id =', u.id);
 
-  // 2. U is also made a member of 025 (role qs there).
-  await pm25.POST('/users', { name: 'ignored', email: uEmail, role: 'qs' });
+  // 2. U is also made a member of 025 (role qs there): 025 invites, U accepts
+  //    with its own session (the only way since L38).
+  const joined = await joinByInvitation({ inviter: pm25, email: uEmail, role: 'qs', via: 'users', name: 'U Shared Identity' });
+  if (joined.accepted?.status !== 200) throw new Error(`setup: U did not join 025 (${joined.invited?.status} / ${joined.accepted?.status})`);
   const loginBefore = await raw('POST', '/auth/login', { json: { email: uEmail, password: PASSWORD } });
   const membershipsBefore = (loginBefore.body?.data?.memberships || []).map((m) => `${m.orgId}:${m.role}`);
   console.log('[setup] U memberships:', JSON.stringify(membershipsBefore));

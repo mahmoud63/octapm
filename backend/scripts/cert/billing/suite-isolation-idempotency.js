@@ -66,6 +66,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const { api, check, db, fake, fakeBase, finding, finish, onboard, ownerDecision, ownIds, preflight, reportOwnerDecisions, webhook } = require('./lib');
+const { joinByInvitation } = require('../lib/invitations');
 
 const SUITE = 'billing isolation and idempotency';
 const RUN = crypto.randomBytes(3).toString('hex');
@@ -392,10 +393,12 @@ const onePersonTwoCompanies = async (shared) => {
   await beginTrial(Y, amex('Y'));
   const person = X.email; // the owner of X, about to become a project manager of Y as well
 
-  const added = await Y.pm.send('POST', '/users', { name: 'Member Of Two Companies', email: person, role: 'pm' });
-  check('the administrator of Y adds the owner of X to Y: an existing person gets a membership, not a new account', [201, true], [added.status, added.body?.data?.existingIdentity]);
+  // An existing person is invited, never attached (L38): they join Y by accepting with their own session.
+  const joined = await joinByInvitation({ inviter: Y.pm, email: person, role: 'pm', via: 'users', name: 'Member Of Two Companies', homeOrgId: X.orgId });
+  check('the administrator of Y invites the owner of X: an existing person is sent an invitation (202) and joins by accepting it (200)', [202, 200], [joined.invited?.status, joined.accepted?.status]);
+  const personId = (await api.signIn(person, X.orgId)).user?.id;
   // Made an administrator of Y as well, so that what follows does not depend on who holds billing authority (section 4).
-  must('making the person an administrator of Y', await Y.pm.send('PATCH', `/users/${added.body?.data?.id}`, { isCompanyAdmin: true }), 200);
+  must('making the person an administrator of Y', await Y.pm.send('PATCH', `/users/${personId}`, { isCompanyAdmin: true }), 200);
   api.forget(person);
 
   const x0 = await row(X);
@@ -445,7 +448,7 @@ const onePersonTwoCompanies = async (shared) => {
   check('the person cannot obtain a session for a company they do not belong to', [404, false], [stranger.status, Boolean(stranger.body?.data?.tokens)]);
 
   // Y removes the person. The token minted for Y must stop at once; the one for X must not.
-  const removed = await Y.pm.send('PATCH', `/users/${added.body?.data?.id}/deactivate`, {});
+  const removed = await Y.pm.send('PATCH', `/users/${personId}/deactivate`, {});
   must('deactivating the person in Y', removed, 200);
   const deadRead = await api.raw('GET', '/billing/subscription', { token: tokenY });
   const deadCancel = await api.raw('POST', '/billing/cancel', { token: tokenY, json: {} });

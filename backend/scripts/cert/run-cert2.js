@@ -63,6 +63,7 @@ const PROOFS = [
   'isolation/evidence-lines-5-proof.js', 'isolation/robustness-5-proof.js', 'isolation/alerts-money-5-proof.js',
   'isolation/evidence-6-proof.js', 'isolation/robustness-6-proof.js', 'isolation/alerts-6-proof.js',
   'isolation/availability-7-proof.js', 'isolation/trivial-7-proof.js',
+  'leads/l38-cross-company-user-add.js', 'isolation/l38-invitation-proof.js',
 ];
 
 const STEPS = [

@@ -29,6 +29,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const { io: connectSocket } = require('socket.io-client');
 const api = require('../lib/api');
+const invitations = require('../lib/invitations');
 const { buildPopulation } = require('../lib/spec');
 
 if (process.env.CERT_INPROCESS === '1') throw new Error('realtime-proof needs the certification API: unset CERT_INPROCESS');
@@ -92,14 +93,14 @@ const main = async () => {
     const aOrg = (await api.signIn(`pm@${A.domain}`)).orgId;
     const vOrg = (await api.signIn(`pm@${V.domain}`)).orgId;
 
-    // A person of both companies, on V's project team.
+    // A person of both companies, on V's project team. They join V the one way
+    // the product allows (L38): V invites the e-mail, they accept with their own session.
     const email = `rt.shared.${STAMP.toLowerCase()}.${i}@${A.domain}`;
     const madeA = await aPm.send('POST', '/users', { name: `${STAMP} shared ${i}`, email, password, role: 'site_engineer' });
-    const madeV = await vPm.send('POST', '/users', { name: `${STAMP} shared ${i}`, email, role: 'qs' });
-    // The identity's id, from its own sign-in (adding an existing identity to V answers with V's record of it).
-    const xId = (await api.signIn(email, aOrg)).user?.id || madeA.body?.data?.id;
+    const joined = await invitations.joinByInvitation({ inviter: vPm, email, role: 'qs', via: 'users', name: `${STAMP} shared ${i}`, homeOrgId: aOrg });
+    const xId = madeA.body?.data?.id || (await api.signIn(email, aOrg)).user?.id;
     const onTeam = await vPm.send('POST', `/projects/${pV.id}/team`, { userId: xId });
-    check(`${tag} setup: a person of both companies, on V's project team`, madeA.status === 201 && [200, 201].includes(madeV.status) && [200, 201].includes(onTeam.status), `${said(madeA)} | ${said(madeV)} | ${said(onTeam)}`);
+    check(`${tag} setup: a person of both companies (invited into V, accepted), on V's project team`, madeA.status === 201 && joined.invited?.status === 202 && joined.accepted?.status === 200 && [200, 201].includes(onTeam.status), `${said(madeA)} | invite ${joined.invited ? said(joined.invited) : '-'} accept ${joined.accepted ? said(joined.accepted) : '-'} | ${said(onTeam)}`);
 
     // ── workspace switching ──────────────────────────────────────────────
     const aToken = await api.tokenFor(`pm@${A.domain}`, aOrg);

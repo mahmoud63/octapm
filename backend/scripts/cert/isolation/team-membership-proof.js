@@ -20,6 +20,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '..', '..', '.env') 
 const crypto = require('crypto');
 const fs = require('fs');
 const api = require('../lib/api');
+const invitations = require('../lib/invitations');
 const { buildPopulation } = require('../lib/spec');
 const guard = require('../lib/cert-env');
 
@@ -51,11 +52,12 @@ const main = async () => {
   const yEmail = `team.home.${STAMP}@${A.domain}`;
   const madeX = await aPm.send('POST', '/users', { name: `Team both ${STAMP}`, email: xEmail, password, role: 'site_engineer' });
   const madeY = await aPm.send('POST', '/users', { name: `Team home ${STAMP}`, email: yEmail, password, role: 'site_engineer' });
-  const inV = await vPm.send('POST', '/users', { name: `Team both ${STAMP}`, email: xEmail, role: 'qs' });
+  // X joins V the one way the product allows (L38): V invites, X accepts with their own session.
+  const inV = await invitations.joinByInvitation({ inviter: vPm, email: xEmail, role: 'qs', via: 'users', name: `Team both ${STAMP}` });
   const xId = madeX.body?.data?.id;
   const yId = madeY.body?.data?.id;
   const [membership] = (await db.query('select m.role, m.status from "OrganizationMembership" m join "Organisation" o on o.id = m."orgId" where m."userId" = $1 and o.slug like $2', [xId, `cert-${V.code}-%`])).rows;
-  check('setup: X is a member of A (home) and of V as a quantity surveyor; Y belongs to A only', madeX.status === 201 && madeY.status === 201 && [200, 201].includes(inV.status) && membership?.role === 'qs' && membership?.status === 'active', `${said(madeX)} | ${said(madeY)} | ${said(inV)} | V membership ${JSON.stringify(membership)}`);
+  check('setup: X is a member of A (home) and of V as a quantity surveyor (invited, accepted); Y belongs to A only', madeX.status === 201 && madeY.status === 201 && inV.invited?.status === 202 && inV.accepted?.status === 200 && membership?.role === 'qs' && membership?.status === 'active', `${said(madeX)} | ${said(madeY)} | invite ${inV.invited ? said(inV.invited) : '-'} accept ${inV.accepted ? said(inV.accepted) : '-'} | V membership ${JSON.stringify(membership)}`);
 
   const add = (userId) => vPm.send('POST', `/projects/${pV}/team`, { userId });
   const x = await add(xId);

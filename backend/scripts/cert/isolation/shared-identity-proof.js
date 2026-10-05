@@ -15,6 +15,7 @@
 
 const crypto = require('crypto');
 const { as, raw } = require('../lib/api');
+const invitations = require('../lib/invitations');
 const { buildPopulation } = require('../lib/spec');
 const guard = require('../lib/cert-env');
 
@@ -46,8 +47,9 @@ const main = async () => {
   };
   const solo = await mk('solo');
   const shared = await mk('shared');
-  const addedElsewhere = await otherPm.send('POST', '/users', { name: `L39 shared ${STAMP}`, email: shared.email, role: 'qs' });
-  check('the shared person is a member of both companies (setup)', addedElsewhere.status === 201 || addedElsewhere.status === 200, said(addedElsewhere));
+  // OTHER invites the person; they accept with their own session (L38).
+  const addedElsewhere = await invitations.joinByInvitation({ inviter: otherPm, email: shared.email, role: 'qs', via: 'users', name: `L39 shared ${STAMP}` });
+  check('the shared person is a member of both companies (setup: invited by the other company, accepted)', addedElsewhere.invited?.status === 202 && addedElsewhere.accepted?.status === 200, `${addedElsewhere.invited ? said(addedElsewhere.invited) : '-'} | ${addedElsewhere.accepted ? said(addedElsewhere.accepted) : '-'}`);
 
   const login = async (email, pwd) => (await raw('POST', '/auth/login', { json: { email, password: pwd } })).status;
   const newEmail = (who) => `l39.${who}.moved.${STAMP}@${home.domain}`;

@@ -47,6 +47,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const api = require('../lib/api');
+const invitations = require('../lib/invitations');
 const { buildPopulation } = require('../lib/spec');
 const guard = require('../lib/cert-env');
 const fingerprint = require('./fingerprint');
@@ -157,10 +158,12 @@ const main = async () => {
   const password = process.env.CERT_PASSWORD;
   const bothEmail = `pe3.both.${stamp}@shared.octapm-cert.test`;
   const madeHome = await vPm('POST', '/users', { name: `PE3 both ${STAMP}`, email: bothEmail, password, role: 'site_engineer' });
-  const madeHere = await pm('POST', '/users', { name: `PE3 both ${STAMP}`, email: bothEmail, role: 'site_engineer' });
+  // The attacker's company invites the person; they accept with their own session (L38).
+  const joined = await invitations.joinByInvitation({ inviter: api.as(`pm@c${ATTACKER}.octapm-cert.test`), email: bothEmail, role: 'site_engineer', via: 'users', name: `PE3 both ${STAMP}` });
+  const madeHere = joined.accepted || joined.invited;
   const both = await userByEmail(bothEmail);
   const bothHome = await val('select "orgId"::text from "User" where id = $1', [both]);
-  check(`setup: ${both} is a person whose home workspace is company ${VICTIM} and who is an active member of company ${ATTACKER} too`, [200, 201].includes(madeHome.status) && [200, 201].includes(madeHere.status) && bothHome === victimOrg && (await memberOf(both, attackerOrg)) === 'active' && (await memberOf(both, victimOrg)) === 'active', `${said(madeHome)} | ${said(madeHere)} | home ${bothHome}`);
+  check(`setup: ${both} is a person whose home workspace is company ${VICTIM} and who is an active member of company ${ATTACKER} too`, [200, 201].includes(madeHome.status) && joined.accepted?.status === 200 && bothHome === victimOrg && (await memberOf(both, attackerOrg)) === 'active' && (await memberOf(both, victimOrg)) === 'active', `${said(madeHome)} | ${said(madeHere)} | home ${bothHome}`);
 
   // An own site photo, uploaded now the way the site-reporting form uploads it.
   const uploaded = await pm('POST', `${AP}/site-reporting/uploads`, undefined, {
