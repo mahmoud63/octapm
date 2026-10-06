@@ -409,3 +409,15 @@ Also recorded, not tenant: D-VAL-1 (transmittal / NCR submit accept non-string `
 **Backend suite**: 290/296 suites passed on a quiet full run of the change before the last review fixes; on the final code the last full run was 289/296 — the 6 suites not executable because the expected development PostgreSQL on :55432 was unavailable, plus `identifier-shapes.routes.test.js` "POST team userId", which already took 4.3 s of jest's 5 s at round 7 and times out in some full runs (passes alone, 91/91; D-TEST-1). Affected unit suites all pass. Short sentinel on the final code: census 0 → 0, read sweep 7,513 attacks refused/filtered/empty, realtime 117/117.
 
 **Next exact action**: CERT-3 (construction workflows) under QUALITY-FIRST: plan from `C:\Temp\octapm-cert\scratch\cert3-gaps.md` on representative deep companies, keeping the 100-company evidence; Codex adversarial plan review before high-risk changes.
+
+## 2026-10-05 (evening) — CERT-2 accepted by the owner; CERT-3 started
+
+**Owner acceptance**: CERT-2 = **PASS**; P0 = 0; P1 tenant-isolation = 0. The tenant-isolation evidence is authoritative; CERT-2 is not reopened. CERT-0, CERT-1 and CERT-2 are not restarted.
+
+**Owner decision D-ID-1**: a fully invitation-based user add — the same neutral answer for new and existing e-mails; no admin creates or sets another person's password; the recipient creates or signs into their own identity and accepts; membership activates only after acceptance. First bounded identity/onboarding item of CERT-3.
+
+**Carried to final release**: the six backend suites that need the development PostgreSQL on :55432 must pass in their intended environment; the slow "POST team userId" test (D-TEST-1) is tracked and not hidden by a timeout unless a real performance regression is proven.
+
+**CERT-3 mode**: QUALITY-FIRST — Claude integration owner; Codex independent review of high-risk plans and diffs; automated evidence mandatory; code review at meaningful batches; PR Review Toolkit before an important merge; Ralph Loop only with explicit stop conditions. The CERT-3 plan is returned to the owner before any high-risk workflow-rule change. Representative deep companies; the 100-company CERT-2 population and evidence are kept (clean baseline: snapshot `octapm_cert_snap_cert2c`).
+
+**Next exact action**: map D-ID-1's surface and the CERT-3 workflow areas; D-ID-1 plan → Codex plan review → implement → proof; the CERT-3 plan to the owner.
