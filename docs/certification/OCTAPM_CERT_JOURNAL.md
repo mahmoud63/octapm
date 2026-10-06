@@ -421,3 +421,22 @@ Also recorded, not tenant: D-VAL-1 (transmittal / NCR submit accept non-string `
 **CERT-3 mode**: QUALITY-FIRST — Claude integration owner; Codex independent review of high-risk plans and diffs; automated evidence mandatory; code review at meaningful batches; PR Review Toolkit before an important merge; Ralph Loop only with explicit stop conditions. The CERT-3 plan is returned to the owner before any high-risk workflow-rule change. Representative deep companies; the 100-company CERT-2 population and evidence are kept (clean baseline: snapshot `octapm_cert_snap_cert2c`).
 
 **Next exact action**: map D-ID-1's surface and the CERT-3 workflow areas; D-ID-1 plan → Codex plan review → implement → proof; the CERT-3 plan to the owner.
+
+## 2026-10-05 (night) — CERT-3 plan returned; D-ID-1 design review adjudicated
+
+**CERT-3 plan** (`OCTAPM_CERT3_PLAN.md`, `5e819c1`) returned to the owner: D-ID-1 design, deep companies 087/052/011, WP-0..WP-9, the §5 high-risk rule decisions, exit criteria and sequencing.
+
+**Codex adversarial review of the D-ID-1 design**: INCOMPLETE. Every finding was checked in code by eight read-only checkers, then adjudicated by the integration owner (`C:\Temp\octapm-cert\scratch\did1-adjudication.md`). Confirmed HIGH:
+- **MP-1**: SSO auto-provisioning is a second user-add door with no invitation. It is on by default, an empty domain list allows any domain, and a missing `email_verified` is accepted.
+- **MP-2, new D-SSO-2**: a non-home company's SSO session can enrol the global second factor and bind the global SSO subject of a shared person, which locks them out of every company.
+- **MP-4, new D-ID-4**: a password reset does not evict a live bearer. `POST /auth/workspaces/:orgId/session` mints a fresh refresh family from a pre-reset access or identity token, indefinitely.
+- **MP-7**: an outstanding project or party link survives suspension and reverses it. For a closed identity it sets a new password without a session.
+
+Downgraded to MEDIUM: the reset-e-mail route, registration pre-claiming (closed in production by default), flag-off acceptance (the switch is never set off), the mobile app-link catch-all and mobile MFA (unreleased client), SSO-only recipients, and sole-owner recovery. Rejected: keeping the old link valid until a resend is delivered (the fail-closed revoke-before-send stays).
+
+**Plan §2 revised (revision 2)**:
+- Settled now, no new rule: eligibility under the lock; suspension cancels outstanding links; identity-wide admin guards count present memberships; a delivery-failure contract; the reset-e-mail route specified; the web edit payload; the cross-organisation acceptance code; the helper matches its invitation.
+- Questions Q1–Q14 to the owner, each with a recommendation.
+- Proof checks C1–C11 and mutations M1–M16.
+
+**Next exact action**: implement the settled part of D-ID-1 (§2.1, §2.3–§2.5) while the owner answers Q1–Q14 and the open CERT-3 plan questions.
