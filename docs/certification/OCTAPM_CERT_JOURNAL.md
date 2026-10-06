@@ -440,3 +440,24 @@ Downgraded to MEDIUM: the reset-e-mail route, registration pre-claiming (closed 
 - Proof checks C1–C11 and mutations M1–M16.
 
 **Next exact action**: implement the settled part of D-ID-1 (§2.1, §2.3–§2.5) while the owner answers Q1–Q14 and the open CERT-3 plan questions.
+
+## 2026-10-05 (late night) — owner decisions on D-ID-1 revision 2; plan revision 3
+
+**Owner decisions:** Q1–Q14 decided. They are recorded verbatim in substance in `OCTAPM_CERT3_PLAN.md` §0.1 and §2.2, with the resulting design.
+- **Now in the D-ID-1 batch (coupled security fixes):**
+  - SSO never creates identities or memberships;
+  - per-workspace SSO links;
+  - SSO sessions cannot change the identity's factors;
+  - a completed reset is a global security event (credential epoch);
+  - no enumeration through sign-in or reset;
+  - sign-up closed in production;
+  - the emergency switch fails closed for expansion only;
+  - an operator owner-recovery command with two-person approval;
+  - Android leaves auth links to the web.
+- **Release gates:** real e-mail delivery (D-MAIL-1); D-ID-1 before the first real user (D-ID-5); the mobile installed-app and no-app device test (D-MOB-DL-1).
+- **Deep companies:** 087 and 052 are approved. The third is a small Business or Trial company, chosen in WP-0; 011 stays for Individual-plan cases.
+- **Rules decided:** HR-Q1, HR-P1, HR-C1, HR-S2 and HR-X1.
+- **Finance:** L34 comes into CERT-3 if reproduction confirms it; L35 and L36 stay in CERT-5.
+- **The ~174 mapping findings** are suspects: reproduce, classify, then fix or defer.
+
+**Next exact action:** implement the identity batch (server, then proofs C1–C18 and mutations M1–M24, then web, mobile, docs and scripts). Then Codex reviews the final diff and the findings are adjudicated. WP-0 follows.

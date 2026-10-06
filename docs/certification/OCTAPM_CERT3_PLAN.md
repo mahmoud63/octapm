@@ -1,6 +1,6 @@
 # CERT-3 plan: construction-workflow certification
 
-**Status:** draft for the owner's review, 2026-10-05; §2 revised (revision 2) after the Codex design review. Branch `cert/full-saas-certification`. Repository root: `C:\Users\mabde29\OneDrive - Louisiana State University\Constech\octapm-main\octapm-main\.claude\worktrees\cert`; every path below is relative to it.
+**Status:** draft for the owner's review, 2026-10-05; §2 revised after the Codex design review (revision 2) and the owner's decisions (revision 3). Branch `cert/full-saas-certification`. Repository root: `C:\Users\mabde29\OneDrive - Louisiana State University\Constech\octapm-main\octapm-main\.claude\worktrees\cert`; every path below is relative to it.
 
 Nothing in this plan has been run. The expected figures come from the five read-only area maps. Each one is derived again on paper in the answer book before its proof runs. Items marked **(assumption)** must be confirmed before the step that depends on them.
 
@@ -8,12 +8,31 @@ Nothing in this plan has been run. The expected figures come from the five read-
 
 ## 0. What I need you to decide
 
-1. **D-ID-1 questions Q1–Q14 (§2.2).** Codex's design review is adjudicated and the design revised (revision 2). The settled part (§2.1) is being implemented; each question has a recommendation, and the parts that depend on one wait for your answer.
-2. **The deep companies (§3):** 087 (large), 052 (medium) and 011 (small).
-3. **The high-risk rule decisions (§5).** For each group you can approve the recommendations, change them or hold them. No fix that changes one of these rules starts before you answer on it.
-4. **Where the open finance P1s go.** L34, L35 and L36 are open P1s; X-FINANCE-1 is a related P2.
-   - Recommended: they stay with CERT-5, as the register says. CERT-3 builds their known-answer tests and leaves those tests red and labelled.
-   - The other option is to fix them inside CERT-3. L34 is the strongest case for this, because a period lock freezes the wrong actual cost (AC).
+1. **D-ID-1:** decided (§0.1, §2.2). Implementation of the identity batch is in progress. Nothing further is needed from you before its close-out report.
+2. **The deep companies (§3):** decided (§0.1). The third company is chosen in WP-0.
+3. **The high-risk rule decisions (§5).** HR-Q1, HR-P1, HR-C1, HR-S2 and HR-X1 are decided (§0.1). The rest wait for the confirm-first sweep. No fix that changes one of these rules starts before you answer on it.
+4. **The open finance P1s:** decided (§0.1). L34 comes into CERT-3 if reproduction confirms it; L35 and L36 stay in CERT-5.
+
+### 0.1 Decisions in force (owner, 2026-10-05)
+
+These are no longer open questions.
+
+- **D-ID-1, revision 2.** Accepted, with the decisions in §2.2 (Q1–Q14). D-ID-1 and the coupled security fixes form one bounded identity batch. It closes before any unrelated §5 rule change starts, and WP-0 follows it.
+- **Deep companies.**
+  - **087 Oakmont: approved.**
+  - **052 Summit: approved.**
+  - **011 Granite Peak is not the third deep workflow company**, because it is an Individual-plan workspace. It stays in use for Individual-plan and entitlement cases.
+  - **The third deep company** is an existing small Business or Trial certification company with about 2–5 people. It is chosen in WP-0 from `OCTAPM_100_COMPANY_MATRIX.md`, and the choice and its reason go in the journal.
+- **High-risk rules already decided:**
+  - **HR-Q1: approved to fix.**
+  - **HR-P1: approved to fix.** A legitimate downward correction of progress goes through an explicit, authorised correction that keeps its history.
+  - **HR-C1: no silent 5% fallback.** Retention comes from authoritative contract configuration or an explicitly configured "no retention". Otherwise configuration is required.
+  - **HR-S2:** milestones are valid zero-duration elements and must not block approval or baseline by themselves.
+  - **HR-X1:** move to canonical OctaPM evidence references through a coordinated backend and client change, without abruptly breaking current mobile behaviour.
+- **Finance.**
+  - **L34** comes into CERT-3 if reproduction confirms that it corrupts actual cost in a locked reporting period.
+  - **L35 and L36** stay in CERT-5 unless reproduction proves they corrupt authoritative CERT-3 workflow state.
+- **The ~174 mapping findings are suspected defects only.** Each one goes through suspect → reproduce → classify → fix or defer. None becomes implementation work automatically.
 
 ---
 
@@ -67,7 +86,7 @@ Authorisation inside one company is certified as part of each workflow: persona 
 | CERT-4 billing | Seats and plan gates (any 402 in the small lane); L37 (project limit through templates); the billing seat suite's move to the invitation helper |
 | CERT-5 finance | AC definition (L34); stocked-material cost (L35, L36, X-FINANCE-1); money precision (D-FIN-1); currency minor units; definitions of "invoiced" and invoice gross (HR-C4); the budget-revision register's baseline; cash-flow completeness (L115, L120); the population-wide reconciliation and the 0.00 delta |
 | CERT-6 web, mobile, files, jobs | Running the migrated Playwright and mobile specs; spec 68 with the exception engine on; drawing-set processing (needs the job worker); notification delivery and realtime; fake-success bulk user actions (users `data-table-bulk-actions.tsx`); D-DQ-1; L11 |
-| CERT-7 performance and security | The SSO error-code and lookup oracles and unverified domains (D-SSO-1); MFA enforcement (D-SEC-1) and mobile MFA sign-in (MOB-MFA-1); the registration existence leak; D-OPS-1; D-PERF-1; OPS-1. Q2, Q6, Q7 and Q8 (§2.2) may move parts of this into CERT-3 |
+| CERT-7 performance and security | The SSO lookup and start (provider-discovery) oracle and unverified domains (D-SSO-1); MFA enforcement (D-SEC-1) and mobile MFA sign-in (MOB-MFA-1); D-OPS-1; D-PERF-1; OPS-1 |
 | Before release | Re-run the six suites that need :55432; D-TEST-1; production e-mail working (ID-h); the C0-3 key rotation |
 
 ### 1.4 Working rules (quality-first)
@@ -84,6 +103,8 @@ Authorisation inside one company is certified as part of each workflow: persona 
 ---
 
 ## 2. Item 1: D-ID-1, invitation-only user add
+
+**Revision 3 (2026-10-05):** the owner's decisions on Q1–Q14 are applied (§2.2). D-ID-1 now includes the coupled security fixes: SSO is no longer a door; SSO links are per workspace and SSO sessions cannot change factors; a reset ends sessions; login and reset no longer enumerate; production sign-up is closed; the emergency switch fails closed; operator owner recovery; Android links reach the web. Checks C10–C18 and mutations M17–M24 are added.
 
 **Revision 2 (2026-10-05)** follows the Codex adversarial design review. Its verdict was INCOMPLETE. The adjudication is in `C:\Temp\octapm-cert\scratch\did1-adjudication.md`. Changes from revision 1:
 - eligibility moves under the invitation lock;
@@ -128,24 +149,28 @@ These follow from your D-ID-1 decision or from the adjudication. None changes a 
   6. Answer `202 {sent:true}`, with no token.
 - A suspended person gets nothing until Activate, because a reset request for an inactive identity sends nothing.
 
-### 2.2 Questions for you (each has a recommendation)
+### 2.2 Owner decisions (2026-10-05) and the resulting design
 
-| Q | Finding | Question | Recommended |
-|---|---|---|---|
-| Q1 | MP-1, HIGH | Single sign-on (SSO) auto-provisioning creates brand-new OctaPM accounts, with an active membership, for any e-mail an admin's own identity provider (IdP) asserts. There is no invitation. It is on by default, an empty domain list allows any domain, and a missing `email_verified` is accepted. Any active identity can create a workspace and do this. Close it inside D-ID-1? | **Yes.** SSO no longer creates new identities or memberships. People join an SSO company by invitation, and SSO works after they accept. `ssoAutoProvision` defaults to false. The legacy branch (a person homed in the workspace without a membership row) stays. The register's D-SSO-1 keeps only the error-code oracle (CERT-7). |
-| Q2 | MP-2, HIGH | A company where a person is only a member or guest can, through its own SSO, enrol a second factor on that person's global identity and bind their global SSO subject. That locks the person out of every company, and no product path unlinks it. This is the L39 class: one company seizing a shared identity. New defect D-SSO-2 (P1 candidate). When? | **CERT-3, next to D-ID-1.** A session from a non-home company's SSO cannot change identity-wide settings: MFA setup, enable, disable and backup codes; account rename; creating organisations. That gives `403 SSO_SESSION_BOUND`. Only the home workspace's SSO writes `ssoSubject`, and a home admin can unlink it. |
-| Q3 | ID-f, MP-7 | How does a suspended person come back? | **Only through Activate.** Active and suspended members, including closed+SUSPENDED home accounts and legacy inactive home rows, get `409 ALREADY_MEMBER`, and suspension cancels their links (SUSP). An invitation reopens only someone who has **left**: a LEFT row, or closed+LEFT. This reverses L38's documented rule (B: invitation reopens) for the suspended state only. l38 checks A4 and W are recorded as superseded. |
-| Q4 | ID-d | Who may send a person a password-reset e-mail? | **Only their home company**, as with admin MFA reset. Other companies tell the person to use "Forgot password". |
-| Q5 | ID-g | Who may see pending invitations? The list shows the e-mails of people who have not joined. | **Only people who can invite** (the invite gate), not everyone who can read the people list. |
-| Q6 | MP-4, HIGH | A password reset does not sign out a live session. `POST /auth/workspaces/:orgId/session` turns a pre-reset access token (15 min) or identity token (10 min) into a fresh, unrevoked refresh family, again and again. Logout, deactivation and reactivation have the same gap. D-ID-1 makes the reset e-mail the only recovery. New defect D-ID-4. When? | **CERT-3 item 2, straight after D-ID-1.** Add `User.credentialEpoch` as a `cep` claim on access, identity and refresh tokens. It is bumped by reset, identity close, deactivation and the reopening acceptance. It is checked in `authenticate`, `subjectOfToken`, `refresh` and the socket handshake (L159). A missing claim counts as 0, so deploying it signs nobody out. |
-| Q7 | MP-8 | Account existence also leaks through sign-in timing (an unknown e-mail skips bcrypt), reset-request timing (an active account waits for the mail provider), the public SSO lookup fallback, and the SSO callback's codes. | **Fix sign-in and reset timing inside D-ID-1** (a dummy bcrypt compare; send the reset mail after the response). Leave the SSO lookup and callback oracles with D-SSO-1 in CERT-7. D-ID-1's closure then reads: "add-person, sign-in and reset are neutral; the SSO oracles stay open until CERT-7". |
-| Q8 | MP-3 | With registration open, anyone can register someone else's unused e-mail with a password they choose. Production is closed by default (L103: the check keys on `NODE_ENV === 'production'` exactly). Will self-service sign-up ever be opened in production? | **Guard now:** production boot refuses `PUBLIC_REGISTRATION=true` until sign-up proves the mailbox first. Verification-first sign-up becomes a release gate only if you want self-service sign-up. Development and certification stay open (C7 needs it). New ID D-REG-1. |
-| Q9 | MP-6 | Passwords that admins chose before D-ID-1 stay valid. The population has none; only throwaway fixtures do. Will any environment holding real people added or reset by an admin be carried into production? | **No.** Record "D-ID-1 ships before the first real user" as a release condition and change nothing else. If yes: a reset is required at the next sign-in for those accounts. |
-| Q10 | MP-5 | With `AUTH_MEMBERSHIP_WRITE=false`, acceptance turns a party guest into a staff principal, and it consumes a foreign identity's link with no membership. The switch defaults on and is set nowhere. Keep the switch? | **Keep it, fail closed.** While it is off, invitation and acceptance answer `503 INVITATIONS_UNAVAILABLE`. No link is consumed and no User row is written. |
-| Q11 | ID-h | What evidence passes the e-mail release gate? | Real delivery of one invitation, one reset and one first-admin link to an outside mailbox, from production SES out of sandbox, with a verified domain (DKIM, SPF, DMARC). Bounce and complaint visibility is recorded as a known limitation, not a gate. |
-| Q12 | ONB-SSO | A non-admin whose only company is SSO-only cannot accept another company's invitation: password sign-in is refused and the SSO session is bound. This has been true since L38. Which fix? | **(a)** Their home company's SSO sign-in counts as their own proof for accepting. Acceptance then answers `signInRequired` for the new company. This is safe only together with Q1 and Q2. Until then it is a known limitation with a refusal check. (b) would let a password prove identity for a company that mandates SSO. |
-| Q13 | RD-1 | D-ID-1 removes the only in-product recovery for a sole owner who loses both mailbox and password. How do we restore control? | **Before release:** a support-verified, audited operator command that makes an existing active member the owner. It handles no password. |
-| Q14 | MOB-DL | The Android app-link filter claims every path. Once app links are hosted, `/accept-invite`, `/reset-password`, `/sso/complete` and the first-admin link open the app and lose their token. Nil today: nothing is hosted and the app has never run on a phone. | **Inside D-ID-1, small:** narrow the intent filter to the paths the app resolves, hand unknown links on the web origin to the browser, and add a unit test. The iOS AASA exclusions are written when the AASA is. |
+You accepted revision 2 with the decisions below. Each row is now part of D-ID-1 (the "coupled security fixes"). This bounded identity batch closes before any unrelated §5 rule change starts. WP-0 follows it.
+
+| Q | Decision | Design |
+|---|---|---|
+| Q1 SSO account creation | **Fix inside D-ID-1.** SSO alone never creates an identity or a membership. A valid invitation or a pre-provisioned entitlement must exist first. | **No creation.** `sso.service.callback` never creates a User and never creates a membership. The callback admits only: (a) an existing identity with an ACTIVE membership in the SSO workspace; (b) the legacy pre-provisioned case, a person homed in the workspace with no membership row, whose row is written from the User columns. **One refusal code.** Anyone else (unknown e-mail, identity elsewhere, closed, left) gets one `SSO_USER_NOT_FOUND`, decided before any identity state is revealed. **Setting retired.** `ssoAutoProvision` is retired: the column defaults false, a migration sets every row false, settings report false, and `autoProvision: true` is refused with `400 SSO_AUTO_PROVISION_RETIRED`. The web toggle is removed. **New person.** An invited new person creates the identity by accepting the e-mailed link and can then use SSO. The optional "establish the identity through SSO while accepting" path (your *may*) is **not built in this batch**. It is recorded as D-SSO-3 (enhancement); nothing depends on it. |
+| Q2 Cross-company SSO/MFA | **Fix now.** One organisation's configuration must not alter another organisation's member's global identity-security state. | **SSO links are per workspace.** A new table `SsoIdentityLink(orgId, userId, issuer, subject)` is unique on (orgId, subject) and on (orgId, userId). The callback matches and links **only within the SSO workspace**, so a subject bound by one company never blocks or affects another company's provider. The global `User.ssoSubject` is no longer written or read for matching. Existing values are backfilled as links to the identity's home workspace, which is where today's code most plausibly wrote them; the backfill is recorded. **Factor changes need a credential session.** A session issued by any company's SSO (token claim `sso`) cannot change the identity's own second factor: `/auth/mfa/setup`, `/enable`, `/disable` and `/backup-codes` answer `403 SSO_SESSION_BOUND`. Identity security is changed only from a session the person opened with their own credentials. This is not a home-company shortcut: a session from the home company's SSO is refused too. |
+| Q3 Suspended member | **Approved.** | As in §2.1 SUSP and ID-f: active and suspended (including closed+SUSPENDED and legacy inactive home rows) get `409 ALREADY_MEMBER` for **every** invitation payload (workspace, project, company, party). The one exception is an **active** member being assigned a project or party. Suspension revokes outstanding links. `acceptOffer` never reactivates a SUSPENDED row. Only LEFT (or closed+LEFT) may be invited again. Return is through Activate only. |
+| Q4 Reset e-mail | **Modified.** Canonical recovery is self-service. An authorised administrator may ask OctaPM to send the reset e-mail only for a person who is a current or suspended member of that organisation. The administrator never receives the token or URL, never sets the password, never changes the destination, and learns no secret state. The action is rate-limited and audited. | **The route.** `POST /users/:id/password-reset-email`. The target must have a **present** membership here (active or suspended), or be a legacy home member with no row. Otherwise the answer is 404 (identical for a foreign id and a random UUID). Not home-only. **The answer.** Always `202 {sent:true}`, with no token, no URL and no state field. The e-mail goes to the identity's stored address. A closed identity gets nothing, and the answer is the same. **Limits.** Limited per (org, target) and per actor. **Audit.** An audit line with the actor, the requesting org and the target. |
+| Q5 Pending invitations | **Approved.** Only invitation managers may list, see e-mails, or revoke. | List and revoke use the invite gate (`user_management` submit + `user.invite`). |
+| Q6 Reset ends sessions | **Fix as part of D-ID-1.** A successful reset is a global identity-security event. | **The epoch.** `User.credentialEpoch` is carried as `cep` on access, identity, refresh and MFA-challenge tokens. A missing claim counts as 0, so the deploy signs nobody out. **What bumps it** (in the same transaction that revokes every refresh session): a completed reset, an identity close, an admin MFA reset, and the acceptance that reopens a closed+LEFT account. **Where it is checked:** `authenticate` (access and identity tokens), `subjectOfToken` (workspace switching, the resolve route and the acceptance proof), `refresh`, the MFA challenge, and the socket handshake. A mismatch is `401 SESSION_REVOKED`. **Deactivation** also revokes that workspace's refresh sessions, so reactivation cannot revive them. **Proof:** a pre-reset access token, identity token and refresh token each fail to keep a session alive, through workspace switching, refresh, `/auth/me`, acceptance and sockets. |
+| Q7 Enumeration | **Fix with D-ID-1** (not the SSO discovery issue, which stays in CERT-7). | **Login.** An unknown e-mail (or one without a password hash) runs a dummy bcrypt-12 compare, and the answer is the same `401 INVALID_CREDENTIALS`. **Reset request.** The database work happens in every branch: unknown and inactive e-mails write the same kind of audit row, and the mail is handed off **after** the response (asynchronous, failure audited). The answer is always `{sent:true}`. **Proof.** Response text and status are identical, and the medians of N requests differ by less than a bound fixed in the answer book. |
+| Q8 Sign-up | **Blocked in production** until mailbox verification is built and certified. Invite-only is the launch model. | `isPublicRegistrationOpen` returns false in production whatever `PUBLIC_REGISTRATION` says, and the production preflight refuses to start with `PUBLIC_REGISTRATION=true`. L103 is closed too: registration is open only when `NODE_ENV` is `development` or `test`, so any other value (`staging`, a typo) is treated as closed. Recorded as D-REG-1 (verification-first sign-up before it is ever opened). |
+| Q9 Legacy admin passwords | **Approved.** | Release condition: D-ID-1 ships before the first real production user. No development or test identity data is promoted into production. Recorded in the register. |
+| Q10 Emergency switch | **Keep it, fail closed.** Block access-expanding operations; keep security-reducing ones available. | While `AUTH_MEMBERSHIP_WRITE=false`, a single guard `assertAccessExpansionAllowed()` answers `503 MEMBERSHIP_WRITES_SUSPENDED` for: inviting (both doors), accepting, activating, role changes, admin or owner grants, project team additions and party member additions. **Still available:** deactivate/suspend (it now writes the membership status even while the switch is off), revoking an invitation, removing project access, and revoking admin. Nothing in the switch blocks revoking access. |
+| Q11 E-mail release gate | **Approved.** | **Release-gate evidence:** real delivery, through the production provider to an external mailbox, of an invitation, a reset and the first-admin e-mail. **Proved now, locally:** one-time tokens (second use refused), expiry, links on the configured `WEB_APP_URL` domain, and no token in the production-format request log or in the audit rows. The production preflight refuses the `log` mail transport. |
+| Q12 SSO as identity proof | **Approved with a boundary.** | `assertInvitationIdentityProof` accepts a valid server-issued session of the same identity, **including one issued by another company's SSO**, as proof of who the person is. That proof never satisfies the target workspace's policy. When the proof is SSO-bound to a different organisation, acceptance completes and answers `signInRequired`, with no session. The person then signs in to the target workspace under its own SSO, MFA and access rules. There is no home-company shortcut. |
+| Q13 Sole-owner recovery | **Approved as a pre-release operator capability.** | **The command.** `npm run ops:recover-owner` (`backend/src/cli/recover-owner.js`), CLI only, never in any web UI. **Two steps by two different operators** (two-person approval is mandatory in production; one operator only outside production, with `--single-operator`): `request --org --user --ticket --reason` records an immutable pending request; `approve --request` executes it. **Operator check.** Each operator is an OctaPM identity in the `RECOVERY_OPERATOR_EMAILS` allow-list with MFA enabled, and proves it with a current TOTP code (single use, the same replay guard as sign-in). **Target.** The target must be an existing **active** member of exactly that workspace. **Effect.** The target is granted owner and admin. Nothing else changes: no password, no e-mail, and no secret is printed. **Audit.** Request, approval and execution go to an append-only `OperatorRecoveryRequest` row plus audit events. A request expires after 24 h. **Runbook.** `docs/operations/OWNER_RECOVERY_RUNBOOK.md` records the identity-verification procedure. |
+| Q14 Android links | **Fix inside D-ID-1.** | **Android filter.** The intent filter lists only the paths the app resolves (record and app paths). `/accept-invite`, `/reset-password`, `/forgot-password`, `/sign-in` and `/sso/*` are never claimed. **Fallback.** As defence in depth, `+native-intent` hands any unresolved link on the web origin to the browser (`expo-web-browser`) with its full URL, instead of dropping it. **Tests.** A unit test covers the resolver and the hand-off, and a static check covers `app.json`. **Device testing.** Installed-app and no-app behaviour cannot run on this machine, because the app has never run on a device. That test is recorded as a mobile release-gate item with the exact steps (D-MOB-DL-1). |
+
+**Deep companies** (§3) and the §5 decisions you made are recorded in §0.1.
 
 ### 2.3 Server behaviour after the change
 - **One door.** `POST /users/invitations` (`inviteUser`) is the only way to add a person, gated by `user_management` submit plus `user.invite`. `POST /users` is the same chain (ID-a).
@@ -235,8 +260,6 @@ These follow from your D-ID-1 decision or from the adjudication. None changes a 
 | C7 Races at acceptance | **Seat:** two pending member links into the empty personal fixture, accepted with a forced interleave (the proof holds the organisation lock). Exactly one wins, and the loser leaves no orphan identity. **Across organisations:** two organisations' links for one new e-mail, accepted at once. Exactly one User row; the loser gets `401 INVITATION_SIGN_IN_REQUIRED` and its link stays pending. **Invite against accept:** after an acceptance wins the lock, the queued invite answers `409 ALREADY_MEMBER`, and no pending link exists for an active member. |
 | C8 One gate | A route inventory asserts that both doors register the same middleware function references. In process, an injected policy granting `user_management:create` without `user.invite` gets 403 on both doors. |
 | C9 Web | Static: the add dialog has no create path, password field or "Person added" branch, and shows one toast. The edit payload has no `email`. The reset action is the reset e-mail. The pending list's resend sends the stored offer. Web typecheck and lint pass. |
-| C10 SSO is not a door (Q1) | With the L10 throwaway IdP, auto-provision on and an unknown e-mail: no User row, no membership, `SSO_USER_NOT_FOUND`. |
-| C11 Timing (Q7) | The median of N sign-ins and N reset requests for unknown and existing e-mails is within a fixed bound. The bound is set in the answer book before the run. |
 
 **Mutations.** Each must turn the named check red. None is ever committed.
 
@@ -259,6 +282,34 @@ These follow from your D-ID-1 decision or from the adjudication. None changes a 
 | M15 let SSO create a new identity (Q1) | C10 |
 | M16 return early for an unknown e-mail at sign-in (Q7) | C11 |
 
+
+**Checks added by the owner decisions (revision 3).** They are in the same proof unless named otherwise.
+
+| Check | What it proves |
+|---|---|
+| C10 SSO is not a door (Q1) | The L10 throwaway IdP is used with an unknown e-mail, an identity homed elsewhere that is not a member, a closed identity and a LEFT former member. Every one gets the same `SSO_USER_NOT_FOUND` redirect, and no User, membership or link row is written. `autoProvision: true` in the settings gives `400 SSO_AUTO_PROVISION_RETIRED`. An active member signs in, and so does a legacy homed person with no membership row. |
+| C11 No enumeration (Q7) | **Login:** unknown, existing with a wrong password, and closed with a wrong password give the identical `401 INVALID_CREDENTIALS`. **Reset request:** unknown, active and closed give the identical `{sent:true}`. **Timing:** the medians of N login and N reset requests for unknown and existing e-mails stay within the bound fixed in the answer book. |
+| C12 Reset ends sessions (Q6) | A person holds an access token, an identity token and a refresh token, then completes a reset. Afterwards each old token is refused: `/auth/me` and a module route give 401; `POST /auth/workspaces/:orgId/session` gives 401 `SESSION_REVOKED`; refresh gives 401; using the old token as acceptance proof gives 401; a socket handshake is refused. A fresh sign-in works. Deactivation then reactivation inside the refresh lifetime does not revive the old refresh token. |
+| C13 SSO cannot touch global identity security (Q2) | A person's home is A and they are an active member (and separately a guest) of B, which has its own throwaway IdP. With a B-SSO session, MFA setup, enable, disable and backup codes each give `403 SSO_SESSION_BOUND`. `mfaEnabled`, `mfaSecretEnc` and the A-side link are unchanged. A's IdP still signs the person in to A after B's IdP has linked a different subject. Within B the person stays bound (`SSO_SESSION_BOUND` for A). |
+| C14 SSO session as acceptance proof (Q12) | A B-SSO session of the invited identity accepts C's invitation. The membership is written, and the answer is `signInRequired` with no session. C's SSO-only policy still refuses a password session for a non-admin. The bearer of a different identity, or of a link alone, gets 401. |
+| C15 The emergency switch (Q10) | With `process.env.AUTH_MEMBERSHIP_WRITE='false'` set in process: invite (both doors), accept, activate, role change, admin grant, project-team add and party-member add each give `503 MEMBERSHIP_WRITES_SUSPENDED` and write nothing. Deactivate suspends the membership and the old token is refused at once. Revoke invitation, project-team removal and admin revocation still succeed. |
+| C16 Owner recovery (Q13) | **Refusals, each writing nothing:** an operator not on the allow-list; no MFA; a wrong or replayed TOTP code; a missing ticket or reason; a target that is not an active member of the workspace; the same operator approving their own request; an expired request; production without a second operator. **The happy path:** request, then approval by a second operator, makes the target owner and admin. No password, hash, token or secret appears in stdout or stderr, and the request row and audit events are complete. Runs in process. |
+| C17 Links reach the web (Q14) | **Mobile unit tests:** `resolveLink` never claims `/accept-invite`, `/reset-password`, `/forgot-password` or `/sso/complete`; `redirectSystemPath` hands an unresolved web-origin URL to the browser with its full query; the Android intent filter in `app.json` lists no catch-all `/` prefix. **Device behaviour** (installed app and no app) is the D-MOB-DL-1 release-gate item. |
+| C18 Mail and link hygiene (Q11, local part) | Invitation and reset tokens work once, a second use is refused, and expiry is enforced at the claim. Links point at `WEB_APP_URL`. The production-format request log (`REQUEST_LOG_FORMAT=json`) and the audit rows of the run contain no raw token. The production preflight refuses `EMAIL_PROVIDER=log`. |
+
+**Mutations added:**
+
+| Mutation | Must fail |
+|---|---|
+| M17 drop the epoch check in `subjectOfToken` | C12 |
+| M18 drop the epoch check in `authenticate` | C12 |
+| M19 stop bumping the epoch on reset | C12 |
+| M20 allow MFA setup from an SSO-bound session | C13 |
+| M21 match SSO subjects globally again (ignore the workspace) | C13 |
+| M22 let the emergency switch allow acceptance | C15 |
+| M23 let one operator approve their own recovery request | C16 |
+| M24 accept an SSO-bound proof and issue a target session | C14 |
+
 **Regression.**
 - `l38-invitation-proof.js`: 54 checks minus those recorded as superseded.
 - Every CERT-2 proof that creates people passes after the helper change.
@@ -278,16 +329,18 @@ These follow from your D-ID-1 decision or from the adjudication. None changes a 
 
 | ID | What | Where |
 |---|---|---|
-| D-ID-4 | A reset, logout, deactivation or reactivation does not evict a live bearer. Access tokens carry no credential epoch. | Q6 (recommended: CERT-3 item 2) |
-| D-SSO-2 | A non-home company's SSO session writes global MFA and the global SSO subject, and can rename the identity and create organisations. No unlink exists. | Q2 (recommended: CERT-3, with D-ID-1) |
-| D-SSO-1 | SSO error-code oracle; public lookup and start fallback; `orgForEmail` takes the first self-declared domain match (no verified domains) | CERT-7 |
-| D-REG-1 | Registration pre-claims an e-mail with no mailbox proof | Q8 |
-| D-ID-5 | Historical admin-chosen passwords | Q9 (release condition) |
+| D-ID-4 | A reset does not evict a live bearer (no credential epoch) | **In this batch** (Q6) |
+| D-SSO-2 | A non-home company's SSO session can write global MFA and the SSO subject | **In this batch** (Q2) |
+| D-SSO-1 | SSO lookup and start (provider discovery) fallback; `orgForEmail` takes the first self-declared domain match | CERT-7 |
+| D-REG-1 | Sign-up has no mailbox proof | Guard **in this batch** (Q8); verification-first sign-up is needed before sign-up is ever opened |
+| D-ID-5 | Historical admin-chosen passwords | Release condition: D-ID-1 ships before the first real user, and no dev or test identities go to production (Q9) |
 | D-ID-6 | No self-service sign-in e-mail change (P2) | Recorded |
-| D-OWN-1 | No recovery for a sole owner who loses mailbox and password | Q13 (before release) |
+| D-OWN-1 | Sole-owner recovery | **In this batch** as the operator command (Q13) |
 | MOB-MFA-1 | Mobile cannot complete an MFA sign-in, and maps `SSO_REQUIRED` and `USER_INACTIVE` to a role message | CERT-7 with D-SEC-1 |
-| MOB-DL-1 | The app-link catch-all swallows auth links | Q14 |
+| MOB-DL-1 | The app-link catch-all swallows auth links | **In this batch** (Q14). Installed-app and no-app device test: D-MOB-DL-1 release gate |
 | D-ID-2, D-ID-3 | Earlier identity leftovers (P3) | WP-0 assessment |
+| D-SSO-3 | Optional: an invited new person establishes the identity through the inviting company's SSO while accepting | Enhancement, not built (Q1 *may*) |
+| D-MAIL-1 | Real delivery through the production provider (invitation, reset, first admin) | Release gate (Q11) |
 | — | The fake-success bulk invite, activate and deactivate actions (P2) | CERT-6 |
 
 ---
@@ -295,6 +348,8 @@ These follow from your D-ID-1 decision or from the adjudication. None changes a 
 ## 3. Representative deep companies
 
 ### 3.1 Choice (from `docs/certification/OCTAPM_100_COMPANY_MATRIX.md` and `scripts/cert/lib/spec.js`)
+
+**Owner decision (§0.1):** 087 and 052 are approved. 011 is an Individual-plan workspace, so it stays for Individual-plan and entitlement cases only. D3 becomes a small Business or Trial company with about 2–5 people, chosen in WP-0. The D3 column below describes 011 as originally proposed.
 
 | | D1: **087** Oakmont Constructors | D2: **052** Summit General Contractors | D3: **011** Granite Peak Construction |
 |---|---|---|---|
@@ -1032,7 +1087,7 @@ P2/P3 defects are recorded, not fixed, under the scope freeze.
 
 | # | Criterion |
 |---|---|
-| E1 | **D-ID-1.** The proof passes every check (the count is fixed before the first run). Every applicable mutation of M1–M16 is caught (M15 and M16 apply only if Q1 and Q7 are approved). Codex has no CRITICAL or HIGH finding open. OpenAPI validation passes. The CERT-2 proofs that create people pass after the helper change, except the checks recorded as superseded. The short CERT-2 sentinel shows leaks 0, writes accepted 0, 5xx 0, census 0 and realtime 117/117. |
+| E1 | **D-ID-1.** The proof passes every check (the count is fixed before the first run). Mutations M1–M24 are all caught. Codex has no CRITICAL or HIGH finding open after its review of the final diff, and every finding is adjudicated. OpenAPI validation passes. The regressions pass: membership and workspace, authentication and session, SSO, and the invitation and reset-link clients. The CERT-2 proofs that create people pass after the helper change, except the checks recorded as superseded. The short CERT-2 sentinel shows leaks 0, writes accepted 0, 5xx 0, census 0 and realtime 117/117. |
 | E2 | **Deep population.** Three companies are built and every creation is asserted (builder exit 0). The 97 other companies' fingerprint is unchanged. Snapshot `cert3d` is taken. |
 | E3 | **Known answers.** Every CERT-3 check either passes or is linked to a register row that you have dispositioned (fixed, deferred to a named checkpoint, or accepted). Unexplained failures: 0. Checks that only note a value: 0. |
 | E4 | **CLAUDE.md rules.** 10 of 10 have a passing known-answer check, or a register row carrying your decision. |
@@ -1045,7 +1100,7 @@ P2/P3 defects are recorded, not fixed, under the scope freeze.
 | E11 | **Reviews.** Every high-risk diff has a Codex review and an adjudication file. Every batch has had a code review. The PR Review Toolkit passes before the merge into integration. |
 
 ### 6.2 Guards that need a caught mutation
-- **D-ID-1:** M1 to M16 (§2.8).
+- **D-ID-1:** M1 to M24 (§2.8).
 - **WP-1:** TF ≤ 0; the SS backward branch; the BOQ baseline gate; `REVISION_NOT_ACTIVATED`; staged imports do not write.
 - **WP-2:** the hold-point check; the evidence check at approval; the submit permission; idempotent approval; the method-stands check; `openHoldPoints`; the negative-quantity guard; the bulk transaction.
 - **WP-3:** the 0.9 alert boundary; the locked-period snapshot; the readiness gate on lock; EV reads approved progress only.
