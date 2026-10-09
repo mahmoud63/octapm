@@ -43,12 +43,12 @@
       "expect": "'takes the identity lock before the guarded write…' (no identity lock) and 'refuses the admin reset when another workspace's acceptance commits while it waits for the identity lock' (the reset clears the factor) fail"
     },
     {
-      "name": "MU-5 the admin MFA reset leaves the identity's SSO tickets unspent",
+      "name": "MU-5 the admin MFA reset ends refresh sessions only (endIdentitySessions not used: SSO tickets unspent, keys left alive)",
       "file": "backend/src/services/mfa.service.js",
-      "from": "      if (tx.ssoTicket?.updateMany) await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: new Date() } });",
-      "to": "",
+      "from": "      await require(\"./auth.service\").endIdentitySessions(tx, userId, new Date(), { reason: \"mfa_reset_by_admin\", actorId: actor?.id || null });",
+      "to": "      await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });",
       "suite": "src/services/__tests__/mfa.service.test.js",
-      "expect": "'takes the identity lock before the guarded write, and spends the identity's SSO tickets with its sessions' fails"
+      "expect": "'takes the identity lock before the guarded write, and spends the identity's SSO tickets with its sessions' and 'revokes the API keys the person created…' fail"
     },
     {
       "name": "MS-1 SSO complete() issues without the ticket identity's epoch",
@@ -110,7 +110,7 @@
       "name": "MA-1 acceptance by an existing identity does not hold its session's epoch before the claim",
       "file": "backend/src/services/auth.service.js",
       "from": "        if (!reactivatesIdentity) await holdCredentialEpoch(tx, existingUser.id, Number.isInteger(identityEpoch) ? identityEpoch : -1);",
-      "to": "",
+      "to": "        if (!reactivatesIdentity) { /* (mutant) the bearer's epoch is not held */ }",
       "suite": "src/services/__tests__/auth-password-reset-invitations.service.test.js",
       "expect": "'answers SESSION_REVOKED when a reset moved the epoch since the session was minted, and claims nothing' fails (the link is claimed; the answer is signInRequired, not a rejection)"
     },
@@ -164,12 +164,12 @@
       "expect": "'takes the identity lock after the (org, e-mail) lock and before the guarded close…' fails (one advisory lock, not two)"
     },
     {
-      "name": "MD-3 deactivation leaves SSO tickets unspent",
+      "name": "MD-3 a deactivation that leaves the identity open leaves this workspace's SSO tickets unspent",
       "file": "backend/src/services/user.service.js",
-      "from": "      await tx.ssoTicket.updateMany({ where: closedIdentity ? { userId, usedAt: null } : { userId, orgId, usedAt: null }, data: { usedAt: now } });",
+      "from": "        await tx.ssoTicket.updateMany({ where: { userId, orgId, usedAt: null }, data: { usedAt: now } });",
       "to": "",
       "suite": "src/services/__tests__/user-identity.service.test.js",
-      "expect": "'…spends every ticket of a closed identity' and 'spends only this workspace's tickets when the identity stays open elsewhere' fail"
+      "expect": "'spends only this workspace's tickets when the identity stays open elsewhere' fails"
     },
     {
       "name": "MREG-1 PUBLIC_REGISTRATION=true opens registration under an unknown NODE_ENV again",
@@ -182,8 +182,8 @@
     {
       "name": "MU-6 the epoch hold is FOR SHARE again (D-ID-1 R1 reverted: concurrent sign-ins of one person deadlock upgrading to the lastLogin update)",
       "file": "backend/src/services/auth.service.js",
-      "from": "'active' FOR NO KEY UPDATE`;",
-      "to": "'active' FOR SHARE`;",
+      "from": "AND \"status\" = 'active' FOR NO KEY UPDATE`;",
+      "to": "AND \"status\" = 'active' FOR SHARE`;",
       "suite": "src/services/__tests__/mfa.service.test.js (also src/services/__tests__/sso.service.test.js, src/services/__tests__/auth-password-reset-invitations.service.test.js)",
       "expect": "mfa 'holds the identity at the epoch the code was checked against…', sso 'holds the ticket's identity at its epoch…' and 'writes the callback's ticket inside a transaction that first holds…', reset 'answers SESSION_REVOKED when a reset moved the epoch…' and 'issues a new identity's session held at the epoch its acceptance wrote…' fail (…FOR NO KEY UPDATE$ expected, FOR SHARE received)"
     },
@@ -644,6 +644,94 @@
       "to": "  const sameSet = () => false;\n  const unusedSameSet = (a = [], b = []) =>",
       "suite": "src/services/__tests__/api-client.service.test.js",
       "expect": "'lets a rename through with the switch off when the form resends the same scopes, projects and expiry' fails (503)"
+    },
+    {
+      "name": "MD-6 closing the identity ends sessions only (endIdentitySessions not used: tickets unspent, keys left alive)",
+      "file": "backend/src/services/user.service.js",
+      "from": "      await require(\"./auth.service\").endIdentitySessions(tx, userId, now, { reason: \"identity_closed\", actorId: actor?.id || null });",
+      "to": "      await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } });",
+      "suite": "src/services/__tests__/user-identity.service.test.js",
+      "expect": "'closes a home identity in one guarded write…' and '…spends every ticket of a closed identity' fail"
+    },
+    {
+      "name": "MR-4 endIdentitySessions revokes no API keys (Q-KEY reverted)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "  if (tx.apiClient?.updateMany) {",
+      "to": "  if (false && tx.apiClient?.updateMany) {",
+      "suite": "src/services/__tests__/auth-password-reset-invitations.service.test.js",
+      "expect": "'revokes the API keys the person created when a reset completes, and audits each' fails"
+    },
+    {
+      "name": "MR-5 endIdentitySessions revokes the keys acting as the person instead of those the person created",
+      "file": "backend/src/services/auth.service.js",
+      "from": "where: { createdBy: userId, status: \"active\" }",
+      "to": "where: { userId, status: \"active\" }",
+      "suite": "src/services/__tests__/auth-password-reset-invitations.service.test.js",
+      "expect": "'revokes the API keys the person created when a reset completes, and audits each' fails"
+    },
+    {
+      "name": "MAPI-6 a new key is written without holding the actor's credential epoch",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "  const row = await atActorEpoch(actor, (tx) => tx.apiClient.create({",
+      "to": "  const row = await ((write) => write(prisma))((tx) => tx.apiClient.create({",
+      "suite": "src/services/__tests__/api-client.service.test.js",
+      "expect": "'creates a key inside a transaction that first holds the session's epoch' and 'writes no key when the hold refuses' fail"
+    },
+    {
+      "name": "MAPI-7 a widening is written without holding the actor's credential epoch",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "    ? await atActorEpoch(actor, write)",
+      "to": "    ? await write(prisma)",
+      "suite": "src/services/__tests__/api-client.service.test.js",
+      "expect": "'holds the epoch for a change to scopes…' and 'leaves the key unchanged when the hold refuses a widening' fail"
+    },
+    {
+      "name": "MAPI-8 a revocation or rename waits on the actor's credential epoch too",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "  const row = changesReach && data.status !== \"revoked\"",
+      "to": "  const row = true",
+      "suite": "src/services/__tests__/api-client.service.test.js",
+      "expect": "'holds the epoch for a change to scopes, projects or expiry, and never for a rename or a revocation' fails"
+    },
+    {
+      "name": "MAPI-9 the hold ignores the session's epoch (reads the one the row has now)",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "  let epoch = actor?.credentialEpoch;",
+      "to": "  let epoch = null;",
+      "suite": "src/services/__tests__/api-client.service.test.js",
+      "expect": "'creates a key inside a transaction that first holds the session's epoch' fails (held at 0, not 3)"
+    },
+    {
+      "name": "MR-6 the audit rows are written one by one (no createMany; Codex review M1 reverted)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "      await tx.authAuditEvent.createMany({",
+      "to": "      for (const row of keys.map((key) => ({ orgId: key.orgId, userId, actorId, entityType: \"api_client\", entityId: key.id, action: \"api_key_revoked\", metadataJson: { reason, name: key.name } }))) await tx.authAuditEvent.create({ data: row });\n      if (false) await tx.authAuditEvent.createMany({",
+      "suite": "src/services/__tests__/auth-password-reset-invitations.service.test.js",
+      "expect": "'revokes the API keys the person created when a reset completes, and audits each' fails (createMany not called once)"
+    },
+    {
+      "name": "MR-7 the audit read-back ignores the event's instant (a key revoked by hand meanwhile is audited too; review L1 reverted)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "where: { createdBy: userId, status: \"revoked\", revokedAt: now }",
+      "to": "where: { createdBy: userId, status: \"revoked\" }",
+      "suite": "src/services/__tests__/auth-password-reset-invitations.service.test.js",
+      "expect": "'revokes the API keys the person created when a reset completes, and audits each' fails (read-back without the instant)"
+    },
+    {
+      "name": "MAPI-10 a reach field resent unchanged is written back (Codex review H2 reverted)",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "  if (\"scopes\" in data && sameSet(data.scopes, existing.scopes || [])) delete data.scopes;",
+      "to": "",
+      "suite": "src/services/__tests__/api-client.service.test.js",
+      "expect": "'leaves reach fields resent unchanged out of the write' fails"
+    },
+    {
+      "name": "MAPI-11 only a change of scopes is held",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "    changesReach = true;",
+      "to": "    changesReach = \"scopes\" in data;",
+      "suite": "src/services/__tests__/api-client.service.test.js",
+      "expect": "'holds the epoch for a change to its projects…' and '…its expiry…' fail"
     }
   ],
   "round3": "Round 3 (D-ID-1 Codex r2 fixes): MU-3 and MD-1 `from` refreshed to the current text; MU-6..MU-13, MS-4, MA-3, MB-1, MM-1..MM-4, MUU-1, MD-4, MD-5, MAPI-1..MAPI-4, MP-1..MP-10, MSK-2, MSK-3 added. Not applied, not run.",

@@ -327,14 +327,17 @@ const deactivateUser = async ({ orgId, userId, actor = null, context = {} }) => 
       });
       closedIdentity = closed.count === 1;
     }
-    await tx.refreshSession.updateMany({
-      where: closedIdentity ? { userId, revokedAt: null } : { userId, orgId, revokedAt: null },
-      data: { revokedAt: now },
-    });
-    // An SSO sign-in ticket not yet exchanged would open a session here (or,
-    // for a closed identity, anywhere) after the suspension.
-    if (tx.ssoTicket?.updateMany) {
-      await tx.ssoTicket.updateMany({ where: closedIdentity ? { userId, usedAt: null } : { userId, orgId, usedAt: null }, data: { usedAt: now } });
+    if (closedIdentity) {
+      // A credential event: every session, unexchanged SSO ticket and API key
+      // the person created ends, in every workspace (D-ID-1 Q6, Q-KEY).
+      await require("./auth.service").endIdentitySessions(tx, userId, now, { reason: "identity_closed", actorId: actor?.id || null });
+    } else {
+      await tx.refreshSession.updateMany({ where: { userId, orgId, revokedAt: null }, data: { revokedAt: now } });
+      // An SSO sign-in ticket not yet exchanged would open a session here
+      // after the suspension.
+      if (tx.ssoTicket?.updateMany) {
+        await tx.ssoTicket.updateMany({ where: { userId, orgId, usedAt: null }, data: { usedAt: now } });
+      }
     }
     // Links this workspace sent the person stop working: a suspension is not
     // undone by accepting an offer made before it (D-ID-1 Q3).

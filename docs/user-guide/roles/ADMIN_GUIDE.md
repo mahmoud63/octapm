@@ -193,6 +193,12 @@ Company → Security; Integrations (API keys and their scopes).
   project) or suspended here (use **Activate**).
 - **A person was signed out everywhere.** They (or you, through the reset email) changed their
   password, or their account was closed or their second factor reset; they sign in again.
+- **An integration stopped working (401 "API key is invalid or revoked").** The person who
+  created its API key changed their password, had their second factor reset, or had their account
+  closed. Those events revoke every key the person created, so a stolen session cannot leave a
+  working key behind. Keys other people created are not affected. Create a new key under Company →
+  Integrations and give it to the integration. With **Show revoked** on, the old key is listed as
+  revoked.
 - **Inviting or activating answers that membership changes are paused.** The deployment's
   emergency switch is on; removing access still works. Contact OctaPM support.
 

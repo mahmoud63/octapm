@@ -8,10 +8,16 @@ Nothing in this plan has been run. The expected figures come from the five read-
 
 ## 0. What I need you to decide
 
-1. **D-ID-1:** decided (§0.1, §2.2). Implementation of the identity batch is in progress. Nothing further is needed from you before its close-out report.
+1. **D-ID-1:** decided (§0.1, §2.2) and **closed on 2026-10-09**, with Q-KEY (journal entry of that date; register section "CERT-3 identity batch").
 2. **The deep companies (§3):** decided (§0.1). The third company is chosen in WP-0.
 3. **The high-risk rule decisions (§5).** HR-Q1, HR-P1, HR-C1, HR-S2 and HR-X1 are decided (§0.1). The rest wait for the confirm-first sweep. No fix that changes one of these rules starts before you answer on it.
 4. **The open finance P1s:** decided (§0.1). L34 comes into CERT-3 if reproduction confirms it; L35 and L36 stay in CERT-5.
+5. **Raised by WP-0 preparation (2026-10-09); none blocks WP-0 itself:**
+   - **HR-A1, company administration.** Being a company admin grants more than the two JSON modules (`user_management`, `project_parties`). It also gives org-wide project visibility, the `/company` administration routes (cost codes, vendors, prequalification, templates), report management and moderation. For example, 052's finance administrator can create company cost codes and vendors, but 087's cost controller cannot. Is that by design? The permission probe records these grants and does not fail on them until you answer.
+   - **HR-A2, deletes guarded as updates.** Weather delays, drawings, transmittals, correspondence and daily-log entries are deleted under the module's `update` key, while the JSON `delete` row for these modules is empty. Should `delete` be its own key, or does delete mean archive (an update)?
+   - **HR-A3, a company with no finance member.** Recording a client payment and releasing retention are finance-only, so a PM cannot take those two steps for a missing finance role. For D3 (006) a finance person is invited, so the lane runs. Should a small company without finance be able to record payments some other way?
+   - **087-SCH's 72,000 row (§3.2).** "One 72,000 row stays unallocated until the baseline step covers it" names neither the activity nor the effect on earned value. The answer book reads it as follows: at the baseline step the row is allocated to A220, so 087-SCH's EV budget is 459,000.00 after the baseline. WP-2's own figures still use the five allocations, which total 387,000.00. This reading stands unless you say otherwise.
+   - **Q-KEY follow-ups.** First, webhook subscriptions and accounting connections created from a stolen session survive a credential event; Q-KEY covers API keys only. Second, suspending an administrator in one workspace, when their identity stays open, is not a credential event, so keys they created there that act as other people keep working. Should either be extended? Nothing changes until you say.
 
 ### 0.1 Decisions in force (owner, 2026-10-05)
 
@@ -33,6 +39,7 @@ These are no longer open questions.
   - **L34** comes into CERT-3 if reproduction confirms that it corrupts actual cost in a locked reporting period.
   - **L35 and L36** stay in CERT-5 unless reproduction proves they corrupt authoritative CERT-3 workflow state.
 - **The ~174 mapping findings are suspected defects only.** Each one goes through suspect → reproduce → classify → fix or defer. None becomes implementation work automatically.
+- **Q-KEY (2026-10-09, extends Q6): option (a) approved.** A credential event revokes the active API keys the person **created** (`ApiClient.createdBy`), so a session that was stolen cannot leave a working key behind. The credential events are a completed password reset, an administrator's MFA reset, the identity being closed, and a closed identity being reopened. Keys created by other people are untouched. Creating a key or widening one holds the creator's credential epoch in the same transaction, so a key cannot be minted from a session that a reset has just ended. Revoking a key never waits on that and is never refused. A legitimate integration that the person created has to be re-issued after such an event; the admin guide says so.
 
 ---
 
@@ -65,7 +72,7 @@ The CLAUDE.md business rules each get a known answer:
 | EAC = budget / CPI | WP-3 | 317,538.46 | CPI 0 gives BAC (HR-E3) |
 | BOQ > 60 → chunk by section, max 60 | WP-6 | 130 rows → [60, 60, 10]; sections 50/50/30 → [50, 50, 30]; 70/45 → [60, 55] | The AI job ignores the rule (L131); no section column |
 | XER hours / 8 = working days | WP-1 | 40 h → 5, 80 → 10, 12 → 2, 20 → 3, 4 → 1, 3 → 0 | Rounding policy (HR-S4) |
-| Retention default 5% | WP-4 | 40,000 → retention 2,000, net 38,000 | A project with no default certifies at 0% (HR-C1) |
+| Retention default 5% | WP-4 | Superseded by owner decision HR-C1 (§0.1): there is no silent 5%. Retention comes from the contract configuration or an explicit "no retention". With neither, certification is refused because configuration is required. With an explicit 10%: 40,000 → retention 4,000, net 36,000 (I2). CLAUDE.md still lists the 5% default; the owner decides whether to change it. | Today a project with no default certifies at 0% (HR-C1) |
 | Weather warning at 70%+ | WP-7 | 13/20 → 65%, no warning; 14/20 → 70%, warning | Half-days stored as 0 (HR-C11) |
 | Quality score | WP-8, WP-9 | 2 major + 3 minor + 1 failed ITP → 21; 6 major → 0 | Form ITPs are not counted (HR-Q3) |
 | Activity auto-status | WP-1 | 0 → todo; 1–99 → in progress; 100 → complete; past end and < 100 → delayed | Imported file percent leaks out (HR-P5); dashboards count calendar days (HR-K2) |
@@ -351,6 +358,25 @@ You accepted revision 2 with the decisions below. Each row is now part of D-ID-1
 
 **Owner decision (§0.1):** 087 and 052 are approved. 011 is an Individual-plan workspace, so it stays for Individual-plan and entitlement cases only. D3 becomes a small Business or Trial company with about 2–5 people, chosen in WP-0. The D3 column below describes 011 as originally proposed.
 
+**WP-0 choice of D3 (2026-10-09): 006 Atlas Infrastructure.** It replaces the 011 column below, and its facts are confirmed against the database before the build.
+- **Plan:** Business, active, monthly, 5 seats.
+- **People:** 4. These are the PM (owner and only admin), a site engineer, a QS, and `shared.12`, a multi-company PM whose home is 085. One finance person is invited by D-ID-1 invitation, which makes 5.
+- **Currency and time zone:** AED (two decimals) and Asia/Dubai, +04:00 with no DST.
+- **Projects:** 3 live projects against a limit of 25. `006-01` exists.
+- **Outsider for the 404 probes:** PM of 018.
+
+**Why 006.** Only three small Business companies have an active subscription: 004, 006 and 015. No Trial company qualifies, because every population trial ended between 2026-10-03 and 2026-10-09 and each trial's one-project limit is already used. Of those three:
+- 006 is the only one not over its seats.
+- It is the only one that adds a time-zone kind the other deep companies lack.
+- It is the only one no proof or driver uses.
+
+**Fallbacks.** 015 is the fallback: it has the same zone and currency as 087, and it is where the realtime proof leaves its people. 004 is rejected: it has 8 people, 3 of them multi-company identities, and is over its seats.
+
+**Corrections the choice brought out:**
+- **087 is a DST company.** Egypt observes DST in 2026 (+03:00 from 2026-04-23T22:00Z to 2026-10-29T21:00Z, tzdata 2026b), so the table's "no DST" premise is wrong. The three deep companies therefore cover Egyptian DST, US DST and no DST.
+- **Half-hour offsets.** No deep company has one, so +05:30 and +05:45 are tested in process with an injected zone.
+- **Billing period ends** for the deep companies fall inside the window: 052 on 10-11, 006 on 10-18, 087 on 11-26. At HEAD an active subscription is never expired by its period end. This is a CERT-4 note.
+
 | | D1: **087** Oakmont Constructors | D2: **052** Summit General Contractors | D3: **011** Granite Peak Construction |
 |---|---|---|---|
 | Size / people | large / 51 active, 1 not | medium / 15 active, 2 suspended | small / 4 |
@@ -367,7 +393,7 @@ You accepted revision 2 with the decisions below. Each row is now part of D-ID-1
 **Why these three.** Together they cover:
 - all three sizes and three active plans;
 - three owner roles and three ways of holding company administration;
-- three kinds of time zone: daylight saving, none, and a half-hour offset;
+- three kinds of time zone in the original draft: daylight saving, none, and a half-hour offset. Corrected in WP-0 (see above): Egyptian DST, US DST, and none with 006. Half-hour offsets are tested in process;
 - certified and non-certified companies.
 
 All three bill in two-decimal currencies. KWD and JPY raise minor-unit questions that belong to CERT-5.
@@ -384,7 +410,7 @@ All three bill in two-decimal currencies. KWD and JPY raise minor-unit questions
 | **087-IMP** "CERT3 Import parity" | Scratch | WP-1 | F2: rounding, lag and negative-float rows. F3: a start-to-start predecessor that drives the finish (A 80 h, SS + 16 h, then B 24 h), activated. F4: an XER with two projects. F5: Windows-1252 names. F6: a second calendar id. The F1 programme also as P6 XML, MSPDI and xlsx with a calendar column. |
 | **087-EV** "CERT3 Earned value" | Starts 2026-01-05 | WP-3 | The F1 programme activated. Approved cost loadings: 60,000 on 01-23, 30,000 on 01-28, 90,000 on 02-13, 135,000 on 03-20, 72,000 on 04-10. Approved progress: A110 100, A120 50, A130 25. Direct costs: A110 50,000 on 01-20 and 10,000 on 09-30; A130 20,000 on 02-10; later 30,000 on A120 on 10-01. A budget revision of +13,000 effective 03-01. Reporting periods 2026-01, 2026-02 and one with a future cutoff; one locked normally and one locked with a PM override. Finally, a 5,000 cost on A140 and then a revision that retires A140. Steps run in answer-book order. |
 | **087-COM** "CERT3 Commercial" | Created **without** `defaultRetentionRate` | WP-4, WP-5, WP-6, WP-7 (claims) | Contract value established. A BOQ workbook of at least 130 rows in at least 3 sections. Cost codes and lines for all eight cost types. Commitments: a subcontract with required insurance, one executed on a PM override, and a PO commitment, with commitment COs in every state. Pay applications in every state, including a revoked and re-certified one, a paid one and a final one at the closeout gate. Change events with RFQs to two vendors on one line. Prime COs in every state: one with a split budget allocation, one with allocation links on a split BOQ row, one from an RFI. At least four IPC periods: paid with retention released; part-paid; submitted; draft; PM override; materials on site with a deduction. A retention cap, an advance with recovery, and tax. Cash flow: client, subcontract and direct-cost payments in different months, manual rows and an advance receipt. EOT claims in every state, two of them approved, one linked to a weather delay; `ldRatePerDay` set. A bid package with three bidders, awarded to one who is not the lowest on an override, plus a late bid and a withdrawal. POs in every status: part-delivered then closed short, fully received then closed, acknowledged before delivery, cancelled, and one raised from the award. Two warehouses with bins and a serial item. Receipts with damage and rejection. Issues to an activity and to a cost code only. Reservations, quarantine, transfers (full, short, damaged), returns, and material plan rows linked to PO lines. Direct costs of every type and state. Supplier invoices with a price variance, an over-invoiced service line, one approved before its receipt, and one voided after approval. Approved progress on the allocated activities, for the IPC and pay-application caps. |
-| **087-COM-B** | — | WP-4, WP-5 | Project retention 10%, prime contract 7.5%; `PO-00001` collides with 087-COM. |
+| **087-COM-B** | — | WP-4, WP-5 | Project retention 7.5% and prime contract 10%, as WP-4 I2 ("the contract rate of 10") and C3 ("a project at 7.5") require. The rates were swapped in the first draft and corrected in WP-0. `PO-00001` collides with 087-COM. |
 | **087-COM-C** | — | WP-4 | Contract value only from the BOQ fallback, for the certify gate. |
 | **087-FLD** "CERT3 Field & quality" | Relative to the run date | WP-7 (weather), WP-8 | At least 8 activities, with separate ones for a pending, a failed, a voided and a retroactive hold, and a plain one. Locations. `weatherAllowanceDays` 20, set explicitly. A subcontractor party company and a party user brought in by **invitation and acceptance** (the D-ID-1 helper), plus a supplier. Crews of 3 or more workers with different rates and overtime multipliers, one of them 0.5. Timesheets in every variant. 7 days of daily logs covering all six sections, internal and party entries and quantity rows, with one day approved straight from open. Delay entries of 2 h, 6 h and 10 h promoted to weather delays. Manual delays reaching exactly 13 and then 14 contractual days of 20, including half-days, plus one 10-day non-contractual delay. A daily report with equipment on a hold-point activity. A form ITP with 2 hold points and a required inspector signature, with instances in every state, including a closed one later hit by a template edit. Legacy ITPs: failed, waived, passed. NCRs: 2 major and 3 minor across every state (score 21), plus a 6-major variant. Punch items in every state, with a final approver. Observations of every type. Safety: an open near miss, a closed LTI with lost days, an archived near miss. RFIs in every state, including one overdue only by `responseRequiredBy` and one answered after `dueDate`. Submittals: one direct, and one on a 2-step template (QS 3 days, Planner 4 days). Drawing S-1 revisions A to F. A transmittal citing a revision and an activity. A contractual notice letter linked to a weather delay. A meeting with `createTask` action items and a change event raised from an action item. |
 | **087-EXC** "CERT3 Controls" | Starts about 2026-06-01, five-day calendar | WP-9 | **BOQ and quantities:** Q1 100 m3 allocated to X10 (quantity method); approved entries 60 + 45, later 113; a CO link of +10 m3. **Money:** L1 10,000 against executed SC-1 10,500; L2 with a typed forecast of 23,000; an IPC certified above earned value on an override; two approved COs with the same description and activity impact; a budget revision linked to `VO-999`. **Periods and cost:** one past and locked, one past and unlocked for more than 7 days, one future; cost loadings so PV > 0; costs on both sides of a cutoff. **Schedule:** a locked baseline and a later revision. **Change and risk:** change events raised from an exception, voided and converted; risks in every state, including overdue and archived, with activity links. |
@@ -396,18 +422,18 @@ Also in 087:
 - A party guest on 087-EXC with no procurement or change-order read.
 - One QS with the commercial notification category switched off.
 - Report definitions (private, project and organisation), with a schedule sent to someone other than its owner.
-- One fresh certified-lifecycle run (WP-0) **(assumption: the runner makes a fresh project on each full run, as its header says)**.
+- One fresh certified-lifecycle run (WP-0). The assumption that "the runner makes a fresh project on each full run" was **wrong**: the stamp is fixed to C087, so stage 1's companies would collide. The proving run therefore uses its own stamp, `C087R`, with state in `p21-087R.json`. snapshot.js's one-live-project check is scoped to the run's own project id. The certified C087 project stays read only.
 
 **D2, company 052**
-- **052-SCH-EV:** the F1 programme through to baseline. The core gates of WP-2 (T1, T3, T4 hold point, quantity T2/T3) and WP-3 T1–T4, with the same figures in USD. The reporting zone (America/Chicago) is asserted through `reporting.timeZoneSource`.
+- **052-SCH-EV:** the F1 programme through to baseline. The core gates of WP-2 (T1, T3, T4 hold point, quantity T2/T3) and WP-3 T1–T4, with the same figures in USD. The reporting zone (America/Chicago) is asserted through `reporting.timeZoneSource`. **Order (decided in WP-0):** WP-2 T1, T3 and T4; then A110 raised to 100; then WP-3 T1–T4; then quantity T2/T3. Running the quantity gates first would add A310's 81,000.00 to EV, and WP-3 would no longer show 087's figures.
 - **052-COM:** IPC I1, I3, I4 and I8; pay applications P3 and P4; change events E1 and E2; commitments C1 and C2; PO O2.
 - **052-FLD:** quality 21; safety 75; weather 65% then 70%; labour 650.00.
 - **Purpose:** the drivers take the company as a parameter. The same answers under a different owner and administration structure show that the answers are not tied to 087's people. The D-ID-1 proof also runs here.
 
-**D3, company 011** (one new project; individual plan limit 3)
-- **011-LITE:** the F1 programme, which the PM imports, submits, approves, activates and baselines (there is no planner). A 5-row BOQ with allocations. The site engineer submits progress and the QS approves it. WP-3 T1 figures. One CO. One IPC certified by the QS or PM and paid by finance (the retention-default case). One daily log, one NCR and one RFI.
-- **What it shows:** the PM can take every step a missing role would take.
-- **Plan gates:** a 402 from a plan-gated module is recorded under CERT-4 **(assumption: the individual plan opens the modules this lane uses)**.
+**D3, company 006** (one new project; Business limit 25). Originally drafted as 011-LITE; 011 stays for Individual-plan and entitlement cases.
+- **006-LITE:** the F1 programme, which the PM imports, submits, approves, activates and baselines, since there is no planner. A 5-row BOQ with allocations. The site engineer submits progress and the QS approves it. WP-3 T1 figures. One CO. One IPC: the QS submits it, the PM certifies it (`period.certify` is PM and finance only), and the invited finance person records the payment. The project is created with **explicit** retention, per HR-C1 (no silent default). Retention left unconfigured is the refusal case, asserted first. Also one daily log, one NCR and one RFI.
+- **What it shows:** the PM can take every step of a missing planner, and the main path runs with four roles. It does not show that the PM can record a payment: at HEAD payment and retention release are finance-only (owner question HR-A3).
+- **Plan gates:** none expected; Business opens every module this lane uses. A 402 would be recorded under CERT-4.
 
 ### 3.3 How the companies are built
 - **Drivers.** New drivers in `scripts/cert/cert3/build/` (assumed path) use the API only. They sign in as the population personas with `CERT_PASSWORD`. The party user is brought in by invitation and acceptance; the link is read in process or from `CERT_API_LOG`.
@@ -440,7 +466,7 @@ Each work package ends with a "confirm first" list: suspected defects that are r
 - **Answer book.** `scripts/cert/cert3/answers.js` (assumed path): every expected figure, with its derivation.
 - **Harness rules for every CERT-3 proof.** `check()` only; codes asserted; money in cents. Exit 0 means pass, 2 means a defect is present, 1 means a setup error. Results go to `C:\Temp\octapm-cert\results\cert3\`.
 - **Permission probe matrix.** For every transition used in WP-1 to WP-9, the expected allow or deny for each role is read from `shared/permissions.json`. It is probed with the nine personas of 087 on throwaway records.
-  - It also probes whether company administration grants module rights; 052's finance persona is a company admin **(assumption: it grants none)**.
+  - It also probes whether company administration grants module rights; 052's finance persona is a company admin. The earlier assumption that it grants none was wrong. WP-0 found no JSON module rights beyond `user_management` and `project_parties`, but several grants outside the JSON (owner question HR-A1). The probe records those grants and does not fail on them.
   - Any mismatch is a finding.
 - **Weak lifecycle checks.**
   - **Read-only verifier.** `cert3/lifecycle-posthoc-verifier.js` reads the 14 certified projects. The database fingerprint must be the same before and after.
@@ -648,11 +674,11 @@ Each work package ends with a "confirm first" list: suspected defects that are r
 - **Commitments.**
   - C1: every refusal code.
   - C2: committed 100,000.00; a CO of +10,000 counts only once approved (110,000.00).
-  - C3: a project with no default and no commitment rate gives 5; a project at 7.5 gives 7.5.
+  - C3: a project at 7.5 gives 7.5. A project with no default and no commitment rate gives no silent 5 (HR-C1); the commitment needs configuration. The refusal step and code are chosen by the HR-C1 fix.
   - C4 (L108): PO commitment cost lands on two different lines.
   - C5 (L116): retention cannot be released.
 - **IPC.**
-  - I1: certifying 40,000 should give retention 2,000 and net 38,000 (today 0 and 40,000).
+  - I1 (HR-C1): certifying 40,000 with no retention configured is refused because configuration is required. It is never settled at a silent rate; today it settles at 0 retention, net 40,000. After explicit configuration at 10%, the figures are those of I2.
   - I2: the contract rate of 10 gives net 36,000.00.
   - I3: the A130 limit should be 600 / 90,000.00 (today 650 / 97,500).
   - I4: the state-machine refusals.
@@ -1140,7 +1166,7 @@ P2/P3 defects are recorded, not fixed, under the scope freeze.
 |---|---|---|
 | 0 | You review this plan and the D-ID-1 decisions. In parallel, Codex reviews the D-ID-1 design and the §5 list as an adversary; you get the adjudication as a delta. | In session |
 | 1 | Stop the API, restore `cert2c`, start the API. D-ID-1: implement, prove, run mutations, Codex diff review, code review, move scripts and fixtures, re-run the CERT-2 proofs that create people, run the short sentinel. | Proofs in session; the CERT-2 proof re-run and the sentinel **detached** if they could pass 1.5 h |
-| 2 | WP-0: answer book, builders, permission matrix, read-only verifier over the 14 projects. Build 087, 052 and 011, fingerprint, take snapshot `cert3d`. One fresh lifecycle run in 087. | Builders **detached with the watchdog**; the lifecycle run detached if its length is unknown |
+| 2 | WP-0: answer book, builders, permission matrix, read-only verifier over the 14 projects. Build 087, 052 and 006, fingerprint, take snapshot `cert3d`. One fresh lifecycle run in 087. | Builders **detached with the watchdog**; the lifecycle run detached if its length is unknown |
 | 3 | Confirm-first sweep: every reproduction script runs on `cert3d`, giving a classification table. You get one delta report: the confirmed defects with proposed severities, and any HR item whose reproduction changes the picture. | In session (each script is short) |
 | 4 | WP-1 → WP-9 in order. For each: proofs (red where a defect is confirmed), fixes for confirmed P0/P1 and approved rules, green, mutations, Codex diff review (high risk), code review, commit and push, journal. `cert3d` is restored before a package whose proofs need a clean state **(assumption: restore is quick enough; otherwise proofs use fresh records)**. | In session; any batch over 1.5 h detached |
 | 5 | Exit run on the final code: restore `cert2c`, rebuild the deep companies, run every CERT-3 proof, the fresh lifecycle run in 087, `snapshot.js` on the 14 projects, and a short CERT-2 sentinel; then the tally. | **Detached with the watchdog**; progress in `C:\Temp\octapm-cert\logs\cert3\status.txt` |
@@ -1164,7 +1190,7 @@ P2/P3 defects are recorded, not fixed, under the scope freeze.
 
 ## Assumptions to confirm
 - **A1** The company choice uses the matrix as of 2026-10-05. 087 has staff in the roles 087-OTH needs (confirm from `spec.js`).
-- **A2** The individual plan opens the modules that 011's lane uses. A 402 is recorded under CERT-4.
+- **A2** ~~The individual plan opens the modules that 011's lane uses.~~ Superseded in WP-0: D3 is 006 (Business), which opens every module its lane uses. A 402 would be recorded under CERT-4.
 - **A3** Builders and proofs can read invitation links in process (`latestInvitationToken`, `CERT_API_LOG`).
 - **A4** Self-registration is open on the certification API (confirmed: `NODE_ENV=development`). The Q8 guard keeps it open outside production.
 - **A5** Confirmed: there is no self-service e-mail change (`routes/auth.js` `/me/profile` and `/me/account` take no e-mail). Recorded as D-ID-6.

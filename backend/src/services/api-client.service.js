@@ -86,6 +86,31 @@ const resolveProjectIds = async ({ orgId, projectIds }) => {
   return ids;
 };
 
+/**
+ * A key is access minted by a session, so it is written only while that
+ * session's identity is still at the credential epoch it was authenticated at
+ * (owner decision Q-KEY): a reset, an identity closed or a factor reset that
+ * commits first is seen here and refused (401 SESSION_REVOKED, nothing
+ * written); one that commits after waits for this write and then revokes the
+ * key with the others the person created. The route passes the session's
+ * epoch; a caller without one is held at the epoch the row has now.
+ */
+const holdActorEpoch = async (tx, actor) => {
+  let epoch = actor?.credentialEpoch;
+  if (!Number.isInteger(epoch) && actor?.id) {
+    epoch = (await tx.user.findUnique({ where: { id: actor.id }, select: { credentialEpoch: true } }))?.credentialEpoch;
+  }
+  if (!actor?.id || !Number.isInteger(epoch)) throw new HttpError(401, "SESSION_REVOKED", "This session has ended; sign in again");
+  await require("./auth.service").holdCredentialEpoch(tx, actor.id, epoch);
+};
+
+/** Runs `write` in a transaction that first holds the actor's credential epoch. */
+const atActorEpoch = (actor, write) =>
+  prisma.$transaction(async (tx) => {
+    await holdActorEpoch(tx, actor);
+    return write(tx);
+  });
+
 const createApiClient = async ({ orgId, actor, payload = {} }) => {
   // A new key is new access: paused while the emergency membership switch is
   // off (owner decision D-ID-1 Q10). Revoking a key still works.
@@ -105,10 +130,10 @@ const createApiClient = async ({ orgId, actor, payload = {} }) => {
   const expiresAt = payload.expiresAt ? new Date(payload.expiresAt) : null;
   if (expiresAt && Number.isNaN(expiresAt.getTime())) throw new HttpError(400, "API_EXPIRY_INVALID", "Expiry must be a date");
   const token = `${API_KEY_PREFIX}${crypto.randomBytes(24).toString("base64url")}`;
-  const row = await prisma.apiClient.create({
+  const row = await atActorEpoch(actor, (tx) => tx.apiClient.create({
     data: { orgId, userId: owner.id, name, description: trimOrNull(payload.description), keyPrefix: token.slice(0, API_KEY_PREFIX.length + 8), keyHash: hashKey(token), scopes, projectIds, expiresAt, createdBy: actor?.id || null, ...(ownerMembership ? { membershipId: ownerMembership.id } : {}) },
     include: { user: userSelect },
-  });
+  }));
   await auditService.recordEvent({ orgId, projectId: null, entityType: auditService.ENTITY_TYPES.API_CLIENT || "api_client", entityId: row.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, summary: { name, scopes, projectIds: projectIds.length, owner: owner.email } }).catch(() => null);
   return serialize(row, { token });
 };
@@ -135,18 +160,31 @@ const updateApiClient = async ({ orgId, actor, apiClientId, payload = {} }) => {
   // values, so a form that sends them back unchanged with a new name passes.
   const sameSet = (a = [], b = []) => a.length === b.length && [...a].sort().every((value, index) => value === [...b].sort()[index]);
   const sameTime = (a, b) => (a ? new Date(a).getTime() : null) === (b ? new Date(b).getTime() : null);
+  // A reach field resent unchanged is left out of the write (Q-KEY review H2):
+  // written back, it would restore what a concurrent narrowing has just
+  // removed, outside the hold below. What remains is a real change.
+  if ("scopes" in data && sameSet(data.scopes, existing.scopes || [])) delete data.scopes;
+  if ("projectIds" in data && sameSet(data.projectIds, existing.projectIds || [])) delete data.projectIds;
+  if ("expiresAt" in data && sameTime(data.expiresAt, existing.expiresAt)) delete data.expiresAt;
+  let changesReach = false;
   if (
     ("scopes" in data && !sameSet(data.scopes, existing.scopes || [])) ||
     ("projectIds" in data && !sameSet(data.projectIds, existing.projectIds || [])) ||
     ("expiresAt" in data && !sameTime(data.expiresAt, existing.expiresAt))
   ) {
+    changesReach = true;
     require("./membership.service").assertAccessExpansionAllowed();
   }
   if (payload.status === "revoked" && existing.status !== "revoked") {
     data.status = "revoked";
     data.revokedAt = new Date();
   }
-  const row = await prisma.apiClient.update({ where: { id: existing.id }, data, include: { user: userSelect } });
+  // A change to what the key may reach is written at the caller's credential
+  // epoch, like a new key (Q-KEY); a revocation never waits on it.
+  const write = (tx) => tx.apiClient.update({ where: { id: existing.id }, data, include: { user: userSelect } });
+  const row = changesReach && data.status !== "revoked"
+    ? await atActorEpoch(actor, write)
+    : await write(prisma);
   await auditService.recordEvent({ orgId, projectId: null, entityType: auditService.ENTITY_TYPES.API_CLIENT || "api_client", entityId: row.id, action: data.status === "revoked" ? auditService.ACTIONS.DELETED || "deleted" : auditService.ACTIONS.UPDATED, actorId: actor?.id || null, summary: { name: row.name, fields: Object.keys(payload) } }).catch(() => null);
   return serialize(row);
 };

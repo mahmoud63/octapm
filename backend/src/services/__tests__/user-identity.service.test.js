@@ -21,10 +21,15 @@ const mockPrisma = {
   authAuditEvent: { create: jest.fn() },
 };
 const mockRequestPasswordReset = jest.fn();
+// The real helper, recorded: closing the identity is a credential event (Q-KEY).
+const mockEndIdentitySessions = jest.fn((...args) => jest.requireActual("../auth.service").endIdentitySessions(...args));
 
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 jest.mock("../email.service", () => ({ sendEmail: jest.fn(), templates: {} }));
-jest.mock("../auth.service", () => ({ requestPasswordReset: (...args) => mockRequestPasswordReset(...args) }));
+jest.mock("../auth.service", () => ({
+  requestPasswordReset: (...args) => mockRequestPasswordReset(...args),
+  endIdentitySessions: (...args) => mockEndIdentitySessions(...args),
+}));
 
 const userService = require("../user.service");
 
@@ -384,7 +389,10 @@ describe("user.service identity rules (D-ID-1)", () => {
         },
         data: { status: "inactive", credentialEpoch: { increment: 1 } },
       });
-      // The identity closed: every session of it ends, not only this workspace's.
+      // The identity closed: every session of it ends, not only this workspace's,
+      // through the one helper every credential event uses (Q-KEY: it also
+      // revokes the API keys the person created), named as the close.
+      expect(mockEndIdentitySessions).toHaveBeenCalledWith(mockTx, "user-9", expect.any(Date), { reason: "identity_closed", actorId: "admin-1" });
       expect(mockTx.refreshSession.updateMany).toHaveBeenCalledWith({
         where: { userId: "user-9", revokedAt: null },
         data: { revokedAt: expect.any(Date) },
@@ -409,6 +417,8 @@ describe("user.service identity rules (D-ID-1)", () => {
         data: { revokedAt: expect.any(Date) },
       });
       expect(mockTx.user.findUnique).not.toHaveBeenCalled();
+      // A suspension that leaves the identity open is not a credential event.
+      expect(mockEndIdentitySessions).not.toHaveBeenCalled();
     });
 
     it("still suspends while the emergency switch is off: narrowing access is never paused", async () => {

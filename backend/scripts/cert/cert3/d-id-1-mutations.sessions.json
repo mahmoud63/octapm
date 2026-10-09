@@ -133,7 +133,7 @@
       "name": "R2.9 acceptance by an existing identity no longer holds the bearer's epoch",
       "file": "backend/src/services/auth.service.js",
       "from": "        if (!reactivatesIdentity) await holdCredentialEpoch(tx, existingUser.id, Number.isInteger(identityEpoch) ? identityEpoch : -1);",
-      "to": "        // (the bearer's epoch is not held)",
+      "to": "        if (!reactivatesIdentity) { /* (mutant) the bearer's epoch is not held */ }",
       "expect": "C12.13 (the acceptance waits at its User name write instead and then commits: 200 accepted with signInRequired, the link is used and the project assigned)"
     },
     {

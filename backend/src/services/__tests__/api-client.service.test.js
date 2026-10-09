@@ -1,4 +1,10 @@
 const rows = [];
+const mockTrace = [];
+const mockOwnerEpoch = { value: 0 };
+// auth.service's holdCredentialEpoch, recorded: the live proof (d-id-1-keys-proof.js K5) holds the real row.
+const mockHold = jest.fn(async (tx, userId, epoch) => {
+  mockTrace.push(`hold ${userId} ${epoch}`);
+});
 const owner = { id: "u-1", name: "Pat", email: "pat@example.com", role: "qs", status: "active", isCompanyAdmin: false, orgId: "org-1" };
 const mockPrisma = {
   apiClient: {
@@ -16,20 +22,122 @@ const mockPrisma = {
       return { ...row, user: owner };
     }),
   },
-  user: { findFirst: jest.fn(async ({ where }) => (where.id === owner.id ? owner : null)) },
+  user: {
+    findFirst: jest.fn(async ({ where }) => (where.id === owner.id ? owner : null)),
+    // The epoch a caller without one is held at (Q-KEY fallback).
+    findUnique: jest.fn(async ({ where }) => (where.id === owner.id ? { credentialEpoch: mockOwnerEpoch.value } : null)),
+  },
+  // The hold and the key write share one transaction (Q-KEY).
+  $transaction: jest.fn(async (fn) => {
+    mockTrace.push("begin");
+    const result = await fn(mockPrisma);
+    mockTrace.push("commit");
+    return result;
+  }),
   project: { findMany: jest.fn(async ({ where }) => where.id.in.filter((id) => id.startsWith("p")).map((id) => ({ id }))) },
 };
 const mockAudit = { ENTITY_TYPES: { API_CLIENT: "api_client" }, ACTIONS: { CREATED: "created", UPDATED: "updated", DELETED: "deleted" }, recordEvent: jest.fn(async () => ({})) };
 
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 jest.mock("../audit.service", () => mockAudit);
+jest.mock("../auth.service", () => ({ holdCredentialEpoch: (...args) => mockHold(...args) }));
 
 const service = require("../api-client.service");
 
 describe("api clients", () => {
   beforeEach(() => {
     rows.length = 0;
+    mockTrace.length = 0;
+    mockOwnerEpoch.value = 0;
     jest.clearAllMocks();
+  });
+
+  // Owner decision Q-KEY: a new key, or a change to what one may reach, is
+  // written in the transaction that holds the caller's credential epoch, so a
+  // session a credential event has ended cannot mint access; a revocation
+  // never waits on it.
+  describe("the actor's credential epoch (Q-KEY)", () => {
+    const actor = { ...owner, credentialEpoch: 3 };
+
+    it("creates a key inside a transaction that first holds the session's epoch", async () => {
+      mockPrisma.apiClient.create.mockImplementationOnce(async (args) => {
+        mockTrace.push("create");
+        const row = { id: "key-1", status: "active", createdAt: new Date(), updatedAt: new Date(), lastUsedAt: null, revokedAt: null, ...args.data, user: owner };
+        rows.push(row);
+        return row;
+      });
+      await service.createApiClient({ orgId: "org-1", actor, payload: { name: "ERP", scopes: ["*:read"] } });
+      expect(mockTrace).toEqual(["begin", "hold u-1 3", "create", "commit"]);
+      expect(rows[0].createdBy).toBe("u-1");
+    });
+
+    it("writes no key when the hold refuses (401 SESSION_REVOKED)", async () => {
+      mockHold.mockRejectedValueOnce(Object.assign(new Error("This session has ended; sign in again"), { status: 401, code: "SESSION_REVOKED" }));
+      await expect(service.createApiClient({ orgId: "org-1", actor, payload: { name: "ERP", scopes: ["*:read"] } })).rejects.toMatchObject({ status: 401, code: "SESSION_REVOKED" });
+      expect(mockPrisma.apiClient.create).not.toHaveBeenCalled();
+      expect(mockAudit.recordEvent).not.toHaveBeenCalled();
+      expect(rows).toHaveLength(0);
+    });
+
+    it("holds a caller that carries no epoch at the epoch the row has now", async () => {
+      mockOwnerEpoch.value = 7;
+      await service.createApiClient({ orgId: "org-1", actor: owner, payload: { name: "ERP", scopes: ["*:read"] } });
+      expect(mockHold).toHaveBeenCalledWith(mockPrisma, "u-1", 7);
+    });
+
+    it("refuses 401 SESSION_REVOKED, and writes nothing, when no epoch can be found for the caller", async () => {
+      await expect(service.createApiClient({ orgId: "org-1", actor: { ...owner, id: "u-gone" }, payload: { name: "ERP", scopes: ["*:read"], userId: "u-1" } })).rejects.toMatchObject({ status: 401, code: "SESSION_REVOKED" });
+      expect(mockHold).not.toHaveBeenCalled();
+      expect(rows).toHaveLength(0);
+    });
+
+    it("holds the epoch for a change to scopes, projects or expiry, and never for a rename or a revocation", async () => {
+      const created = await service.createApiClient({ orgId: "org-1", actor, payload: { name: "Reader", scopes: ["rfi:read"] } });
+      mockHold.mockClear();
+      await service.updateApiClient({ orgId: "org-1", actor, apiClientId: created.id, payload: { scopes: ["*:write"] } });
+      expect(mockHold).toHaveBeenCalledTimes(1);
+      expect(mockHold).toHaveBeenCalledWith(mockPrisma, "u-1", 3);
+      mockHold.mockClear();
+      await service.updateApiClient({ orgId: "org-1", actor, apiClientId: created.id, payload: { name: "Renamed" } });
+      await service.revokeApiClient({ orgId: "org-1", actor, apiClientId: created.id });
+      expect(mockHold).not.toHaveBeenCalled();
+      expect(rows[0]).toMatchObject({ name: "Renamed", scopes: ["*:write"], status: "revoked" });
+    });
+
+    it("leaves the key unchanged when the hold refuses a widening", async () => {
+      const created = await service.createApiClient({ orgId: "org-1", actor, payload: { name: "Reader", scopes: ["rfi:read"] } });
+      mockHold.mockRejectedValueOnce(Object.assign(new Error("ended"), { status: 401, code: "SESSION_REVOKED" }));
+      await expect(service.updateApiClient({ orgId: "org-1", actor, apiClientId: created.id, payload: { scopes: ["*:write"] } })).rejects.toMatchObject({ code: "SESSION_REVOKED" });
+      expect(mockPrisma.apiClient.update).not.toHaveBeenCalled();
+      expect(rows[0].scopes).toEqual(["rfi:read"]);
+    });
+
+    it.each([
+      ["its projects (all projects)", { projectIds: [] }],
+      ["its projects (another project)", { projectIds: ["p2"] }],
+      ["its expiry (none)", { expiresAt: null }],
+      ["its expiry (later)", { expiresAt: "2099-01-01T00:00:00Z" }],
+    ])("holds the epoch for a change to %s", async (_label, payload) => {
+      const created = await service.createApiClient({ orgId: "org-1", actor, payload: { name: "Reader", scopes: ["rfi:read"], projectIds: ["p1"], expiresAt: "2030-01-01T00:00:00Z" } });
+      mockHold.mockClear();
+      await service.updateApiClient({ orgId: "org-1", actor, apiClientId: created.id, payload });
+      expect(mockHold).toHaveBeenCalledWith(mockPrisma, "u-1", 3);
+    });
+
+    // Codex Q-KEY review H2: a reach field resent unchanged must not be written
+    // back, or it restores what a concurrent narrowing just removed, unheld.
+    it("leaves reach fields resent unchanged out of the write, and holds nothing for them", async () => {
+      const created = await service.createApiClient({ orgId: "org-1", actor, payload: { name: "Reader", scopes: ["rfi:read"], projectIds: ["p1"], expiresAt: "2030-01-01T00:00:00Z" } });
+      mockHold.mockClear();
+      mockPrisma.apiClient.update.mockClear();
+      await service.updateApiClient({ orgId: "org-1", actor, apiClientId: created.id, payload: { name: "Renamed", scopes: ["rfi:read"], projectIds: ["p1"], expiresAt: "2030-01-01T00:00:00Z" } });
+      expect(mockHold).not.toHaveBeenCalled();
+      const written = mockPrisma.apiClient.update.mock.calls[0][0].data;
+      expect(written).toMatchObject({ name: "Renamed" });
+      expect(written).not.toHaveProperty("scopes");
+      expect(written).not.toHaveProperty("projectIds");
+      expect(written).not.toHaveProperty("expiresAt");
+    });
   });
 
   it("creates a key shown once, stores only its hash and validates scopes", async () => {

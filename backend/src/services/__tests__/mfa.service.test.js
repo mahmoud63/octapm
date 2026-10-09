@@ -1,6 +1,6 @@
 const bcrypt = require("bcryptjs");
 
-const store = { users: [], memberships: [], sessions: [], audit: [] };
+const store = { users: [], memberships: [], sessions: [], audit: [], keys: [] };
 const ORG = { id: "org-1", name: "Constech", mfaRequired: false, ssoEnabled: false, ssoRequired: false, ssoDomainsJson: [] };
 
 // Just enough of Prisma's filters for the service's conditional writes.
@@ -94,7 +94,20 @@ const mockPrisma = {
   },
   // A credential event also spends the identity's unexchanged SSO tickets (Codex D-ID-1 diff review #3).
   ssoTicket: { updateMany: jest.fn(async () => ({ count: 0 })) },
-  authAuditEvent: { create: jest.fn(async ({ data }) => store.audit.push(data)) },
+  // The API keys a credential event revokes: those the person created (owner decision Q-KEY).
+  apiClient: {
+    // `revokedAt` is matched by identity: the helper reads back with the instant it wrote.
+    findMany: jest.fn(async ({ where }) => store.keys.filter((key) => matches(key, where)).map(({ id, orgId, name }) => ({ id, orgId, name }))),
+    updateMany: jest.fn(async ({ where, data }) => {
+      let count = 0;
+      store.keys = store.keys.map((key) => (matches(key, where) ? (count += 1, { ...key, ...data }) : key));
+      return { count };
+    }),
+  },
+  authAuditEvent: {
+    create: jest.fn(async ({ data }) => store.audit.push(data)),
+    createMany: jest.fn(async ({ data }) => ({ count: store.audit.push(...data) })),
+  },
   $queryRaw: jest.fn(async (strings, ...values) => {
     trace.push({ kind: "query", sql: strings.join("?"), values, inTransaction: txDepth > 0 });
     return evaluateUserHold(strings, values);
@@ -139,6 +152,7 @@ describe("two-factor authentication", () => {
     store.memberships = [];
     store.sessions = [];
     store.audit = [];
+    store.keys = [];
     ORG.mfaRequired = false;
     trace.length = 0;
     txDepth = 0;
@@ -354,6 +368,27 @@ describe("two-factor authentication", () => {
     expect(mockPrisma.ssoTicket.updateMany).toHaveBeenCalledWith({ where: { userId: "u-1", usedAt: null }, data: { usedAt: expect.any(Date) } });
   });
 
+  // Owner decision Q-KEY: the admin MFA reset is a credential event, so the API
+  // keys the person created are revoked with the sessions — and only those.
+  it("revokes the API keys the person created, audited with the admin as actor, and leaves keys others created alone", async () => {
+    store.users[0] = { ...store.users[0], mfaEnabled: true, mfaSecretEnc: "v1.sealed" };
+    store.keys = [
+      { id: "k-own", orgId: "org-1", name: "ERP", createdBy: "u-1", userId: "u-1", status: "active", revokedAt: null },
+      { id: "k-as-other", orgId: "org-2", name: "BI", createdBy: "u-1", userId: "u-2", status: "active", revokedAt: null },
+      { id: "k-admins", orgId: "org-1", name: "Sync", createdBy: "u-admin", userId: "u-1", status: "active", revokedAt: null },
+    ];
+    await expect(mfaService.adminReset({ orgId: "org-1", userId: "u-1", actor: { id: "u-admin" } })).resolves.toEqual({ reset: true });
+    expect(store.keys.map((key) => [key.id, key.status, Boolean(key.revokedAt)])).toEqual([
+      ["k-own", "revoked", true],
+      ["k-as-other", "revoked", true],
+      ["k-admins", "active", false],
+    ]);
+    expect(store.audit.filter((row) => row.action === "api_key_revoked").map((row) => [row.entityId, row.orgId, row.actorId, row.metadataJson.reason])).toEqual([
+      ["k-own", "org-1", "u-admin", "mfa_reset_by_admin"],
+      ["k-as-other", "org-2", "u-admin", "mfa_reset_by_admin"],
+    ]);
+  });
+
   it("refuses the admin reset when another workspace's acceptance commits while it waits for the identity lock", async () => {
     store.users[0] = { ...store.users[0], mfaEnabled: true, mfaSecretEnc: "v1.sealed" };
     // The acceptance elsewhere held the identity lock; it commits, and only then
@@ -367,6 +402,7 @@ describe("two-factor authentication", () => {
     expect(store.users[0]).toMatchObject({ mfaEnabled: true, mfaSecretEnc: "v1.sealed", credentialEpoch: 0 });
     expect(mockPrisma.refreshSession.updateMany).not.toHaveBeenCalled();
     expect(mockPrisma.ssoTicket.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.apiClient.updateMany).not.toHaveBeenCalled();
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 

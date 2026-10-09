@@ -215,11 +215,33 @@ const createRefreshSession = async (tx, principal, context = {}) => {
  * voids (D-ID-1 Q6): every refresh session, and every SSO sign-in ticket not
  * yet exchanged — a ticket issued before the event would otherwise open a
  * session at the new epoch. Live sockets are dropped by the caller's route.
+ *
+ * The API keys the person created go too, in every workspace (owner decision
+ * Q-KEY): a session that was stolen cannot leave a working key behind. Keys
+ * other people created are left alone, those acting as this person included.
+ * Each revoked key is audited with `reason`, the event that ended it.
+ *
+ * Callers hold the User row first, so a key the person is creating either
+ * committed before the revocation reads or waits on that row and then fails
+ * its epoch hold. The revocation and its audit are a fixed number of
+ * statements whatever the count: a stolen session that piled keys up must
+ * not be able to time the event out (Q-KEY review M1).
  */
-const endIdentitySessions = async (tx, userId, now = new Date()) => {
+const endIdentitySessions = async (tx, userId, now = new Date(), { reason = null, actorId = null } = {}) => {
   await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } });
   if (tx.ssoTicket?.updateMany) {
     await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } });
+  }
+  if (tx.apiClient?.updateMany) {
+    const revoked = await tx.apiClient.updateMany({ where: { createdBy: userId, status: "active" }, data: { status: "revoked", revokedAt: now } });
+    if (revoked.count) {
+      // Only the keys this event revoked carry its instant: one revoked by
+      // hand meanwhile keeps its own, and its own audit row (review L1).
+      const keys = await tx.apiClient.findMany({ where: { createdBy: userId, status: "revoked", revokedAt: now }, select: { id: true, orgId: true, name: true } });
+      await tx.authAuditEvent.createMany({
+        data: keys.map((key) => ({ orgId: key.orgId, userId, actorId, entityType: "api_client", entityId: key.id, action: "api_key_revoked", metadataJson: { reason, name: key.name } })),
+      });
+    }
   }
 };
 
@@ -1157,7 +1179,7 @@ const resetPassword = async ({ token, password }, context = {}) => {
       data: { revokedAt: now },
     });
 
-    await endIdentitySessions(tx, resetToken.userId, now);
+    await endIdentitySessions(tx, resetToken.userId, now, { reason: "password_reset" });
 
     await recordAuthAuditEvent({
       tx,
@@ -1427,6 +1449,18 @@ const acceptInvitation = async (
         // The person proved themselves with a session at some credential epoch;
         // a reset since then voids that proof (D-ID-1 Q6).
         if (!reactivatesIdentity) await holdCredentialEpoch(tx, existingUser.id, Number.isInteger(identityEpoch) ? identityEpoch : -1);
+        // Reopening holds the identity's row from here, and only while it is
+        // still closed (Q-KEY review H1). An identity reopened since the read
+        // above (by another reopening link; Activate cannot reach a person
+        // who left) is an open account, which accepts with its own session;
+        // and the row is held before the revocation below reads, as in every
+        // other credential event.
+        else if (typeof tx.$queryRaw === "function") {
+          const stillClosed = await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${existingUser.id} AND "status" <> 'active' FOR NO KEY UPDATE`;
+          if (!stillClosed.length) {
+            throw new HttpError(401, "INVITATION_SIGN_IN_REQUIRED", "Sign in as the invited account to accept this invitation");
+          }
+        }
       }
       // The link is claimed first, and only while it is still pending: one
       // revoked, accepted or expired since it was read above — by a newer
@@ -1453,7 +1487,7 @@ const acceptInvitation = async (
             // credential event: anything minted before is dead (D-ID-1 Q6).
             data.status = "active";
             data.credentialEpoch = { increment: 1 };
-            await endIdentitySessions(tx, existingUser.id, now);
+            await endIdentitySessions(tx, existingUser.id, now, { reason: "identity_reopened" });
           }
           if (name?.trim()) data.name = name.trim();
           if (phone !== undefined) data.phone = phone || null;
@@ -1908,6 +1942,7 @@ module.exports = {
   getInvitationPreview,
   acceptInvitation,
   createAuthSessionPayload,
+  endIdentitySessions,
   holdCredentialEpoch,
   issueWorkspaceSession,
   sanitizeUser,

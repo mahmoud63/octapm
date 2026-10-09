@@ -44,24 +44,24 @@
       "expect": "R2 finding 3 (password reset): the pre-reset ticket row is still unused after the reset, and redeeming it answers 200 with a session at the new epoch (complete() reads the epoch at redemption, so the epoch hold passes) and a refresh session is written"
     },
     {
-      "name": "R2-F3b an admin MFA reset stops voiding unredeemed SSO tickets",
+      "name": "R2-F3b an admin MFA reset stops voiding unredeemed SSO tickets (endIdentitySessions replaced by a sessions-only revoke)",
       "file": "backend/src/services/mfa.service.js",
-      "from": "      if (tx.ssoTicket?.updateMany) await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: new Date() } });",
-      "to": "      // (mutant) an admin MFA reset leaves unredeemed SSO tickets valid",
+      "from": "      await require(\"./auth.service\").endIdentitySessions(tx, userId, new Date(), { reason: \"mfa_reset_by_admin\", actorId: actor?.id || null });",
+      "to": "      await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }); // (mutant) unredeemed SSO tickets stay valid",
       "expect": "R2 finding 3 (admin MFA reset): the pre-reset ticket row is still unused after the reset, and redeeming it answers 200 with a session (and a refresh session) instead of 401 SSO_TICKET_INVALID"
     },
     {
       "name": "R2-F3c deactivation in a workspace stops voiding that workspace's unredeemed SSO tickets (identity not closed)",
       "file": "backend/src/services/user.service.js",
-      "from": "      await tx.ssoTicket.updateMany({ where: closedIdentity ? { userId, usedAt: null } : { userId, orgId, usedAt: null }, data: { usedAt: now } });",
-      "to": "      await tx.ssoTicket.updateMany({ where: closedIdentity ? { userId, usedAt: null } : { id: \"__mutant_no_ticket__\" }, data: { usedAt: now } });",
+      "from": "        await tx.ssoTicket.updateMany({ where: { userId, orgId, usedAt: null }, data: { usedAt: now } });",
+      "to": "        await tx.ssoTicket.updateMany({ where: { id: \"__mutant_no_ticket__\" }, data: { usedAt: now } });",
       "expect": "R2 finding 3 (deactivation): D's Y ticket row stays unused after the deactivation and its redemption answers 403 USER_INACTIVE (the suspended membership still refuses the session, defence in depth) instead of 401 SSO_TICKET_INVALID"
     },
     {
       "name": "R2-F3d deactivation in one workspace voids the identity's unredeemed SSO tickets everywhere (over-broad scope)",
       "file": "backend/src/services/user.service.js",
-      "from": "      await tx.ssoTicket.updateMany({ where: closedIdentity ? { userId, usedAt: null } : { userId, orgId, usedAt: null }, data: { usedAt: now } });",
-      "to": "      await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } });",
+      "from": "        await tx.ssoTicket.updateMany({ where: { userId, orgId, usedAt: null }, data: { usedAt: now } });",
+      "to": "        await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } });",
       "expect": "R2 finding 3 (deactivation): D's X ticket is voided by Y's deactivation (X ticket used=true; X redeem 401 SSO_TICKET_INVALID instead of 200 bound to X)"
     },
     {

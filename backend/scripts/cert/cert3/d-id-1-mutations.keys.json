@@ -1,0 +1,118 @@
+{
+  "proof": "scripts/cert/cert3/d-id-1-keys-proof.js",
+  "note": "Q-KEY (owner decision 2026-10-09, plan §0.1): a credential event revokes the API keys the person created; creating or widening a key holds the actor's credential epoch; revoking never waits. Every from string occurs exactly once in its file (checked with C:\\Temp\\octapm-cert\\scratch\\checkmut.js before the run).",
+  "mutations": [
+    {
+      "name": "QK1 endIdentitySessions revokes no API keys",
+      "file": "backend/src/services/auth.service.js",
+      "from": "  if (tx.apiClient?.updateMany) {",
+      "to": "  if (false && tx.apiClient?.updateMany) {",
+      "expect": "K1.1, K1.3, K2.1, K2.3, K3.1, K3.2, K4.1 fail"
+    },
+    {
+      "name": "QK2 the keys revoked are those acting as the person, not those the person created",
+      "file": "backend/src/services/auth.service.js",
+      "from": "where: { createdBy: userId, status: \"active\" }",
+      "to": "where: { userId, status: \"active\" }",
+      "expect": "K1.1 (KR2 acts as T) and K1.2 (ZR acts as KR) fail; K3.1 fails"
+    },
+    {
+      "name": "QK3 a revoked key leaves no audit row",
+      "file": "backend/src/services/auth.service.js",
+      "from": "      await tx.authAuditEvent.createMany({",
+      "to": "      if (false) await tx.authAuditEvent.createMany({",
+      "expect": "K1.3, K2.3, K3.2, K4.1 fail"
+    },
+    {
+      "name": "QK4 a completed reset ends sessions and tickets but not the keys the person created",
+      "file": "backend/src/services/auth.service.js",
+      "from": "    await endIdentitySessions(tx, resetToken.userId, now, { reason: \"password_reset\" });",
+      "to": "    await tx.refreshSession.updateMany({ where: { userId: resetToken.userId, revokedAt: null }, data: { revokedAt: now } }); await tx.ssoTicket.updateMany({ where: { userId: resetToken.userId, usedAt: null }, data: { usedAt: now } });",
+      "expect": "K1.1, K1.3 fail"
+    },
+    {
+      "name": "QK5 the admin MFA reset ends sessions and tickets but not the keys the person created",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "      await require(\"./auth.service\").endIdentitySessions(tx, userId, new Date(), { reason: \"mfa_reset_by_admin\", actorId: actor?.id || null });",
+      "to": "      await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }); await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: new Date() } });",
+      "expect": "K2.1, K2.3 fail"
+    },
+    {
+      "name": "QK6 closing the identity ends sessions and tickets but not the keys the person created",
+      "file": "backend/src/services/user.service.js",
+      "from": "      await require(\"./auth.service\").endIdentitySessions(tx, userId, now, { reason: \"identity_closed\", actorId: actor?.id || null });",
+      "to": "      await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } }); await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } });",
+      "expect": "K3.1, K3.2 fail"
+    },
+    {
+      "name": "QK7 reopening a closed identity ends sessions and tickets but not the keys the person created",
+      "file": "backend/src/services/auth.service.js",
+      "from": "            await endIdentitySessions(tx, existingUser.id, now, { reason: \"identity_reopened\" });",
+      "to": "            await tx.refreshSession.updateMany({ where: { userId: existingUser.id, revokedAt: null }, data: { revokedAt: now } }); await tx.ssoTicket.updateMany({ where: { userId: existingUser.id, usedAt: null }, data: { usedAt: now } });",
+      "expect": "K4.1 fails"
+    },
+    {
+      "name": "QK8 creating a key holds no credential epoch",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "  const row = await atActorEpoch(actor, (tx) => tx.apiClient.create({",
+      "to": "  const row = await ((write) => write(prisma))((tx) => tx.apiClient.create({",
+      "expect": "K5.1, K5.2 fail (a key is written)"
+    },
+    {
+      "name": "QK9 widening a key holds no credential epoch",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "    ? await atActorEpoch(actor, write)",
+      "to": "    ? await write(prisma)",
+      "expect": "K5.3 fails (the scopes widen)"
+    },
+    {
+      "name": "QK10 revoking a key holds the actor's epoch too (waits behind a credential event)",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "  const row = changesReach && data.status !== \"revoked\"",
+      "to": "  const row = true",
+      "expect": "K5.4 fails (the revocation waits for the row)"
+    },
+    {
+      "name": "QK11 the hold reads the actor's current epoch instead of the one the session was authenticated at",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "  let epoch = actor?.credentialEpoch;",
+      "to": "  let epoch = null;",
+      "expect": "K5.2 fails (the create parked across a completed reset writes a key)"
+    },
+    {
+      "name": "QK12 the integrations routes stop passing the session's epoch to the service",
+      "file": "backend/src/routes/integrations.js",
+      "from": "credentialEpoch: req.user.credentialEpoch",
+      "to": "credentialEpochNotPassed: req.user.credentialEpoch",
+      "expect": "K5.2 fails"
+    },
+    {
+      "name": "QK13 the epoch hold runs outside the transaction (its row lock ends before the key is written)",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "  await require(\"./auth.service\").holdCredentialEpoch(tx, actor.id, epoch);",
+      "to": "  await require(\"./auth.service\").holdCredentialEpoch(prisma, actor.id, epoch);",
+      "expect": "K5.6 fails (the reset completes while the create is parked; the key is written active afterwards)"
+    },
+    {
+      "name": "QK14 only a change of scopes is held; projects and expiry changes are not",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "    changesReach = true;",
+      "to": "    changesReach = \"scopes\" in data;",
+      "expect": "K5.3b and K5.3c fail (the widening is written)"
+    },
+    {
+      "name": "QK15 a reopening acceptance does not re-check, under the User row, that the identity is still closed (Codex review H1 reverted)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "          if (!stillClosed.length) {",
+      "to": "          if (false) {",
+      "expect": "K4.2 fails (the acceptance reopens and re-passwords an open account)"
+    },
+    {
+      "name": "QK16 a reach field resent unchanged is written back (Codex review H2 reverted)",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "  if (\"scopes\" in data && sameSet(data.scopes, existing.scopes || [])) delete data.scopes;",
+      "to": "",
+      "expect": "K5.5 fails (the queued resend restores *:read over the narrowing)"
+    }
+  ]
+}

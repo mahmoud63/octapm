@@ -23,8 +23,14 @@ const mockTx = {
   ssoTicket: {
     updateMany: jest.fn(),
   },
+  // Owner decision Q-KEY: a credential event revokes the API keys the person created.
+  apiClient: {
+    findMany: jest.fn(async () => []),
+    updateMany: jest.fn(async () => ({ count: 0 })),
+  },
   authAuditEvent: {
     create: jest.fn(),
+    createMany: jest.fn(async ({ data }) => ({ count: data.length })),
   },
 };
 
@@ -324,6 +330,66 @@ describe("auth password reset and invitation tokens", () => {
       where: { userId: activeUser.id, usedAt: null },
       data: { usedAt: expect.any(Date) },
     });
+  });
+
+  // Owner decision Q-KEY: a completed reset revokes every active API key the
+  // person created, in every workspace, each audited with the reason.
+  it("revokes the API keys the person created when a reset completes, and audits each", async () => {
+    mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
+      id: "reset-1",
+      userId: activeUser.id,
+      orgId: activeUser.orgId,
+      email: activeUser.email,
+      usedAt: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      user: activeUser,
+    });
+    mockTx.passwordResetToken.updateMany.mockResolvedValue({ count: 1 });
+    mockTx.apiClient.updateMany.mockResolvedValueOnce({ count: 2 });
+    // Read back by this event's instant: a key revoked by hand meanwhile is not among them.
+    mockTx.apiClient.findMany.mockResolvedValueOnce([
+      { id: "key-1", orgId: activeUser.orgId, name: "ERP" },
+      { id: "key-2", orgId: "org-elsewhere", name: "BI" },
+    ]);
+
+    await authService.resetPassword({ token: "raw-token", password: "Password1" });
+
+    expect(mockTx.apiClient.updateMany).toHaveBeenCalledWith({
+      where: { createdBy: activeUser.id, status: "active" },
+      data: { status: "revoked", revokedAt: expect.any(Date) },
+    });
+    const instant = mockTx.apiClient.updateMany.mock.calls[0][0].data.revokedAt;
+    expect(mockTx.apiClient.findMany).toHaveBeenCalledWith({
+      where: { createdBy: activeUser.id, status: "revoked", revokedAt: instant },
+      select: { id: true, orgId: true, name: true },
+    });
+    // One statement for the audit rows, whatever the number of keys (review M1).
+    expect(mockTx.authAuditEvent.createMany).toHaveBeenCalledTimes(1);
+    expect(mockTx.authAuditEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        { orgId: activeUser.orgId, userId: activeUser.id, actorId: null, entityType: "api_client", entityId: "key-1", action: "api_key_revoked", metadataJson: { reason: "password_reset", name: "ERP" } },
+        { orgId: "org-elsewhere", userId: activeUser.id, actorId: null, entityType: "api_client", entityId: "key-2", action: "api_key_revoked", metadataJson: { reason: "password_reset", name: "BI" } },
+      ],
+    });
+  });
+
+  it("reads and audits no key when the reset revoked none", async () => {
+    mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
+      id: "reset-1",
+      userId: activeUser.id,
+      orgId: activeUser.orgId,
+      email: activeUser.email,
+      usedAt: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      user: activeUser,
+    });
+    mockTx.passwordResetToken.updateMany.mockResolvedValue({ count: 1 });
+    await authService.resetPassword({ token: "raw-token", password: "Password1" });
+    expect(mockTx.apiClient.updateMany).toHaveBeenCalledTimes(1);
+    expect(mockTx.apiClient.findMany).not.toHaveBeenCalled();
+    expect(mockTx.authAuditEvent.createMany).not.toHaveBeenCalled();
   });
 
   // Codex D-ID-1 diff review (LOW, reset expiry judged at request start): the

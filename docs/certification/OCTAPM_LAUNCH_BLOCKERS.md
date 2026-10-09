@@ -20,7 +20,7 @@ Open P0 and P1 rows of the register (5). L38 closed on 2026-10-05 on the owner's
 - **L36 (P1)** — finance: A stock return is not bounded by prior issues: it creates stock value from nothing and posts negative project cost; with an activity it answers 500
 - **L37 (P1)** — finance: The plan's project limit is not applied to create-project-from-template
 
-Also open until their evidence is in: **D-ID-4 (P1)** and **D-SSO-2 (P1)**, fixed in the uncommitted D-ID-1 identity batch, evidence pending (proofs C12 and C13). The release gates that must pass before the first real production user (D-MAIL-1, D-ID-5, D-MOB-DL-1, D-REG-1, and the :55432 carry) are listed in "CERT-3 identity batch (D-ID-1): release gates and recorded items" at the end.
+**D-ID-4 (P1)** and **D-SSO-2 (P1)** are fixed and proven by the D-ID-1 identity batch, closed on 2026-10-09; see the section at the end. The release gates that must pass before the first real production user (D-MAIL-1, D-ID-5, D-MOB-DL-1, D-REG-1, and the :55432 carry) are listed in "CERT-3 identity batch (D-ID-1): release gates and recorded items" at the end.
 
 ## C0-3 in detail — the Stripe values in the deploy workflow
 
@@ -230,7 +230,7 @@ Proof: `scripts/cert/isolation/l38-invitation-proof.js` (the owner's cases A–M
 Deferred (recorded, not L38):
 
 - **D-SEC-1 (P2, CERT-7)** A workspace's "MFA required" policy only flags `mfaEnrollmentRequired`; nothing enforces enrolment (sign-in, middleware or web), so an unenrolled member works normally. Acceptance now behaves exactly as sign-in.
-- **D-ID-1 (P3 → CERT-3 item 1; owner decision 2026-10-05)** `POST /users` still answers 201 for a new e-mail (account created with an admin-set password) and 202 for an existing one (invitation), so an admin can tell that an account exists for an e-mail. **Decision:** a fully invitation-based user add — the same neutral answer for new and existing e-mails, no admin creates or sets another person's password, the recipient creates or signs into their own identity and accepts, membership only after acceptance. First bounded identity/onboarding item of CERT-3 (CERT-2 not reopened).
+- **D-ID-1 (P3 → CERT-3 item 1; owner decision 2026-10-05) — FIXED 2026-10-09** (identity batch; see the section at the end). Original finding: `POST /users` still answers 201 for a new e-mail (account created with an admin-set password) and 202 for an existing one (invitation), so an admin can tell that an account exists for an e-mail. **Decision:** a fully invitation-based user add — the same neutral answer for new and existing e-mails, no admin creates or sets another person's password, the recipient creates or signs into their own identity and accepts, membership only after acceptance. First bounded identity/onboarding item of CERT-3 (CERT-2 not reopened).
 - **D-ID-2 (P3, CERT-3)** Lists of past records (project team history, API-client owners) still show a former member's current name and e-mail.
 - **D-SSO-1 (P3, CERT-7)** SSO errors (`SSO_USER_NOT_FOUND`, `USER_INACTIVE`, `SSO_IDENTITY_CONFLICT`) let a company's own identity provider tell whether an e-mail has an account elsewhere.
 - **D-ID-3 (P3, CERT-3)** `POST /projects/:id/parties/:partyId/members` takes a caller-supplied `acceptedAt` for the workspace's own members.
@@ -239,7 +239,22 @@ Deferred (recorded, not L38):
 
 ## CERT-3 identity batch (D-ID-1): release gates and recorded items (2026-10-05)
 
-Owner decisions Q1–Q14 on D-ID-1 (`OCTAPM_CERT3_PLAN.md` §2.2) made user add invitation-only and brought the coupled security fixes into one bounded identity batch. Design: `docs/architecture/OCTAPM_MEMBERSHIP_AND_RBAC.md` §5. The batch is implemented on the server and not yet committed; its proof (`scripts/cert/cert3/d-id-1-invitation-only-proof.js`, checks C1–C18, mutations M1–M24) has not run. Nothing below is marked Fixed until that proof passes and the batch is committed.
+Owner decisions Q1–Q14 on D-ID-1 (`OCTAPM_CERT3_PLAN.md` §2.2) made user add invitation-only and brought the coupled security fixes into one bounded identity batch. The owner's Q-KEY decision of 2026-10-09 (§0.1) completed it. Design: `docs/architecture/OCTAPM_MEMBERSHIP_AND_RBAC.md` §5.
+
+**Closed 2026-10-09.** Commits `886c9f1` (the batch) and the Q-KEY commit that follows it.
+
+**Evidence**, all against the certification database (proofs in `scripts/cert/cert3/`):
+
+| Evidence | Result |
+|---|---|
+| D-ID-1 proofs | 335/335: user-add 48, guards 68, sessions 67, SSO 36, owner recovery 74, keys (Q-KEY) 23, client-static 19 |
+| CERT-2 regression proofs | 506/506 |
+| Realtime | 188/188 |
+| L26 | exits 2 as expected (D-SEC-1, CERT-7) |
+| Mutation run on `886c9f1` | 207 of 208 caught. The one survivor, M17, was a proof gap: the resolve route was untested. Check C12.7b now covers it. |
+| Targeted re-run after Q-KEY | M17 and every mutation in code Q-KEY touched; see the journal |
+| Codex | Rounds 1–3 on the batch and one round on Q-KEY: no CRITICAL or HIGH open after adjudication |
+| Backend unit suites | Pass, except D-PAGE-1 below |
 
 ### Release gates
 
@@ -256,9 +271,25 @@ Each gate must pass, with its evidence recorded in the journal, before the first
 
 | ID | Sev | Finding | Where | Status |
 |---|---|---|---|---|
-| D-ID-4 | P1 (design review HIGH, MP-4) | A password reset did not evict a live bearer: `POST /auth/workspaces/:orgId/session` minted a fresh refresh family from a pre-reset access or identity token, indefinitely | D-ID-1 batch (Q6): credential epoch `cep`, checked on requests, refresh, workspace switch, the MFA challenge and sockets; 401 `SESSION_REVOKED` | Fixed in batch — evidence pending (C12, M17–M19) |
-| D-SSO-2 | P1 (design review HIGH, MP-2) | A non-home company's SSO session could enrol the global second factor and bind the global SSO subject of a shared person, locking them out of every company | D-ID-1 batch (Q2): SSO links per workspace (`OrganizationMembership.ssoSubject`); MFA setup/enable/disable/backup codes refused 403 `SSO_SESSION_BOUND` from any SSO session | Fixed in batch — evidence pending (C13, M20–M21) |
+| D-ID-4 | P1 (design review HIGH, MP-4) | A password reset did not evict a live bearer: `POST /auth/workspaces/:orgId/session` minted a fresh refresh family from a pre-reset access or identity token, indefinitely | D-ID-1 batch (Q6): credential epoch `cep`, checked on requests, refresh, workspace switch, the MFA challenge and sockets; 401 `SESSION_REVOKED` | **Fixed** (sessions proof C12, 27 checks incl. races; mutations M17–M19, R2.x, R3.x caught) |
+| D-SSO-2 | P1 (design review HIGH, MP-2) | A non-home company's SSO session could enrol the global second factor and bind the global SSO subject of a shared person, locking them out of every company | D-ID-1 batch (Q2): SSO links per workspace (`OrganizationMembership.ssoSubject`); MFA setup/enable/disable/backup codes refused 403 `SSO_SESSION_BOUND` from any SSO session | **Fixed** (SSO proof, 36 checks; SSO mutations caught) |
 | D-SSO-3 | — (enhancement) | An invited new person cannot establish the identity through the inviting company's SSO while accepting; they accept the e-mailed link first, then use SSO | Optional under owner Q1; nothing depends on it | Not built |
 | MOB-MFA-1 | P2 (design review MEDIUM) | The mobile app cannot complete a sign-in for a person with two-factor authentication on, and maps `SSO_REQUIRED` and `USER_INACTIVE` to a role message | CERT-7, with D-SEC-1 (`docs/mobile/OCTAPM_MOBILE_FEATURE_MATRIX.md` sign-in row corrected) | Deferred (CERT-7) |
 | D-ID-6 | P2 | No self-service change of a person's sign-in e-mail; administrators cannot change it either (`PATCH /users/:id` with `email` → 400 `USER_EMAIL_IDENTITY_OWNED`). A person who loses their mailbox is invited at the new address as a new identity (admin guide, "A person has lost access to their email") | Recorded | Deferred |
-| D-OWN-1 | — | A sole owner who loses both mailbox and password could not be recovered | D-ID-1 batch (Q13): operator command `npm run ops:recover-owner`, two-person approval in production; procedure in `docs/operations/OWNER_RECOVERY_RUNBOOK.md` | Built in batch — evidence pending (C16, M23) |
+| D-OWN-1 | — | A sole owner who loses both mailbox and password could not be recovered | D-ID-1 batch (Q13): operator command `npm run ops:recover-owner`, two-person approval in production; procedure in `docs/operations/OWNER_RECOVERY_RUNBOOK.md` | **Built** (owner-recovery proof, 74 checks; its 14 mutations caught). Production use still needs the operator MFA and ticket set-up the runbook names |
+| Q-KEY | — (owner decision 2026-10-09, extends Q6) | A stolen session could leave a working API key behind after the person's password reset, MFA reset or account closure | `auth.service.endIdentitySessions` revokes every active key the person created, in every workspace, audited per key with the event. Creating or widening a key holds the session's credential epoch; revoking never waits. After the Codex review: reach fields resent unchanged are not written back; a reopening acceptance re-checks the identity under its row lock; revocation and audit are a fixed number of statements | **Fixed** (keys proof, 23 checks; QK1–QK16 and the unit mutations, see the journal) |
+| Q-KEY-F1 | — (owner question) | Webhook subscriptions and accounting connections created from a stolen session survive a credential event | Q-KEY covers API keys only | Open: owner question (plan §0 item 5) |
+| Q-KEY-F2 | — (owner question) | Suspending an administrator in one workspace, with their identity left open, is not a credential event, so keys they created there that act as other people keep working | — | Open: owner question (plan §0 item 5) |
+| D-PAGE-1 | P2 (proposed) | `GET /users` pages by `createdAt` alone. People created in the same instant (bulk imports; 24 of 27 in CERT-044) are split across pages unpredictably, and some are never returned. Reproduced: 3 of 27 people in CERT-044 are reachable by no page. The users half of `cursor-pagination.test.js` passed only while its workspace held 20 people or fewer. `listUsers` also ignores `limit` (always 20) | Found by the full unit run after Q-KEY; not caused by it. A sweep of every cursor list at `886c9f1` found the same missing unique tie-breaker in `task.service listTasks` (due, priority and status sorts, including the default), `meeting.service listMeetings` (scheduled, status and type sorts, including the default), and `conversation.service listMessages`. listMessages pages older messages by `createdAt < cursor` with no id tie-break; an unknown cursor returns the newest page again. The other 12 cursor lists end their sort with `id` | Confirmed (users reproduced; the other three by code reading). Fix in its own commit after D-ID-1: a unique tie-breaker on every sort, `limit` honoured by `GET /users`, listMessages paged by (createdAt, id) with 400 on an unknown cursor, and tests with tied rows |
+
+**Recorded LOW or pre-existing items** (Codex rounds 3 and 4, adjudicated). These are bounded and not fixed in the batch:
+- the socket delivery window of one database round trip;
+- the self-service MFA disable and spend-seed predicates;
+- overlapping reset requests leaving two links, and the reissue-versus-reset deadlock;
+- Prisma's 5 s interactive timeout under contention;
+- a party lost update with the switch on;
+- a project save re-syncing role parties;
+- a party-guest add materialising a legacy home member;
+- the project/party lock-order inversion in `project.service.updateProject`;
+- the security-overview roster by home organisation;
+- a key PATCH that both widens and revokes is refused while the emergency switch is off.

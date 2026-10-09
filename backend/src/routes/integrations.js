@@ -18,7 +18,9 @@ const accounting = require("../services/accounting.service");
  */
 const router = express.Router();
 
-const actor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffectiveRole(req) });
+// The session's credential epoch goes with the actor, so a new or widened API
+// key is written only while that session is still current (Q-KEY).
+const actor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffectiveRole(req), credentialEpoch: req.user.credentialEpoch });
 
 // OAuth callback — arrives without a bearer token; the signed state carries the organisation.
 router.get(

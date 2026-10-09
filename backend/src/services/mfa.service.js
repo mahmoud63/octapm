@@ -273,8 +273,8 @@ const adminReset = async ({ orgId, userId, actor, context = {} }) => {
       data: { mfaEnabled: false, mfaSecretEnc: null, mfaPendingSecretEnc: null, mfaEnrolledAt: null, mfaLastTotpStep: null, mfaBackupCodesJson: [], credentialEpoch: { increment: 1 } },
     });
     if (count === 1) {
-      await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
-      if (tx.ssoTicket?.updateMany) await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: new Date() } });
+      // Sessions, SSO tickets and the API keys the person created (Q-KEY).
+      await require("./auth.service").endIdentitySessions(tx, userId, new Date(), { reason: "mfa_reset_by_admin", actorId: actor?.id || null });
     }
     return count === 1;
   });

@@ -461,3 +461,84 @@ Downgraded to MEDIUM: the reset-e-mail route, registration pre-claiming (closed 
 - **The ~174 mapping findings** are suspects: reproduce, classify, then fix or defer.
 
 **Next exact action:** implement the identity batch (server, then proofs C1–C18 and mutations M1–M24, then web, mobile, docs and scripts). Then Codex reviews the final diff and the findings are adjudicated. WP-0 follows.
+
+## 2026-10-09 — D-ID-1 identity batch closed (with Q-KEY); WP-0 prepared
+
+**Implemented** (`886c9f1`, then the Q-KEY commit). The owner decisions Q1–Q14 are built as one bounded identity batch:
+- **User add** is invitation only: `POST /users` is an alias of the invitation, gives the same neutral answer for new and existing e-mails, and no administrator sets a password. Pending invitations can be listed, revoked and resent by invitation managers. The administrator's reset route is replaced by a reset e-mail.
+- **Credential epoch.** Every token carries `cep`. A completed reset, an identity closed, an admin MFA reset and a reopening acceptance each bump the epoch and end every refresh session, SSO ticket and (Q-KEY) API key the person created. The epoch is checked on requests, refresh, workspace switching and its resolve route, the MFA challenge and sockets.
+- **SSO.** SSO creates no identity or membership, links are per workspace, and an SSO session cannot change the identity's second factor.
+- **No enumeration** through sign-in or the reset request.
+- **Registration** is closed outside development and test.
+- **The emergency switch** fails closed for expansion only.
+- **Owner recovery** is an operator command with two-person approval.
+- **Mobile** leaves invitation and reset links to the browser.
+
+**Owner decision Q-KEY (2026-10-09), option (a).** A credential event revokes the keys the person created; creating or widening a key holds the session's epoch; revoking never waits. Implemented in `auth.service.endIdentitySessions`, which is now the one helper for every credential event, and in `api-client.service` (`atActorEpoch`).
+
+**Codex review of the Q-KEY diff:**
+
+| Finding | Severity | Verdict and fix |
+|---|---|---|
+| A reach field resent unchanged was written back over a concurrent narrowing | HIGH | Confirmed. Unchanged reach fields are now left out of the write. |
+| A reopening acceptance did not re-check the identity under its row | HIGH | Partial, downgraded to LOW. Codex's Activate path answers 404 for a member who left (proven live). The guard is kept: it locks the row first and gives 401 INVITATION_SIGN_IN_REQUIRED. |
+| Per-key audit inserts inside the 5 s transaction | MEDIUM | Confirmed. Now a fixed number of statements, with `createMany`. |
+| A hand revocation audited as a credential event | LOW | Confirmed. The read-back is by the event's instant. |
+
+The five proof gaps Codex named are all closed with checks: K1.4, K4.2, K5.3b/c, K5.5, K5.6. Adjudication: `C:\Temp\octapm-cert\scratch\qkey-adjudication.md`.
+
+**Evidence** (final code, cert API restarted on it):
+
+| Evidence | Result |
+|---|---|
+| D-ID-1 proofs | 335/335: user-add 48, guards 68, sessions 67, SSO 36, owner recovery 74, keys 23, client-static 19 |
+| CERT-2 regression proofs | 506/506 |
+| Realtime (`--from=040` and `--from=094`, 4 pairs each) | 188/188 |
+| L26 | exits 2 as expected (D-SEC-1, CERT-7) |
+| Full mutation run on `886c9f1` | 207/208 caught. The 130 proof mutations failed checks (exit 2); the 77 unit mutations failed named tests. M17 survived because no check covered the resolve route; C12.7b now covers it. |
+| Targeted re-run after Q-KEY | 73/73 caught (`results\cert3\d-id-1-mutations-qkey.json`):
+  - QK1–QK16 on the keys proof;
+  - M17, now caught by C12.7b;
+  - the re-targeted MU-5, MD-3 and R2-F3b/c/d;
+  - the new unit mutations MR-4..7, MD-6 and MAPI-6..11;
+  - every existing mutation in code Q-KEY touched.
+  R2.9 and MA-1 had stopped parsing after the H1 guard (a dangling `else`), so their first catches proved nothing. Both were re-targeted and re-run, and both are caught by their intended checks (C12.13; the named unit test). A syntax check of all 235 applied mutations (`scratch\qkey\mutsyntax.js`) now runs before each run: 0 unparseable. Inventory: 235 mutations. |
+| Backend unit suite | 6287/6288. The one failure is D-PAGE-1 (below), a product defect exposed by population growth, not caused by Q-KEY. |
+| Codex | Rounds 1–3 on the batch and one round on Q-KEY: no CRITICAL or HIGH open after adjudication |
+
+**Register:**
+- D-ID-1, D-ID-4, D-SSO-2 and Q-KEY are Fixed; D-OWN-1 is Built.
+- New: D-PAGE-1, and the Q-KEY follow-ups F1 and F2 (owner questions).
+- The recorded LOWs are listed under the D-ID-1 section of `OCTAPM_LAUNCH_BLOCKERS.md`.
+
+**D-PAGE-1 (new, P2 proposed, confirmed).** `GET /users` pages by `createdAt` alone. In CERT-044, 24 of 27 people share one creation instant, and 3 of them are returned by no page. The users half of `cursor-pagination.test.js` compared against a single page, so it passed only while that workspace had 20 people or fewer; its baseline now comes from the database. The fix is a separate commit: a unique tie-breaker, plus a sweep of the other cursor lists.
+
+**WP-0 prepared** (no database work yet; the mutation runs held the tree):
+- **Answer book** `scripts/cert/cert3/answers/` (schedule 706, commercial 580, field and controls 268 figures). Each section was drafted, then re-derived by an independent verifier (1,439 of 1,477 agreed). The disagreements were adjudicated in `C:\Temp\octapm-cert\scratch\wp0\adjudication.md` and applied, and the applied changes verified again.
+- **Permission matrix and probe** (292 transitions × 9 roles, computed from `shared/permissions.json`).
+- **Lifecycle post-hoc verifier** over the 14 certified projects, and the stage-script edits that assert the stage table's known answers. The proving run uses stamp `C087R`.
+- **D-ID-2 and D-ID-3 reproduction scripts**, and the shared harness `scripts/cert/cert3/lib/harness.js`.
+- **Third deep company: 006 Atlas Infrastructure** (Business, active, 4 people, AED, Asia/Dubai with no DST); one finance person is to be invited. Plan corrections:
+  - 087 observes DST;
+  - 087-COM-B's retention rates were swapped;
+  - the 052-SCH-EV order;
+  - HR-C1 written into C3 and I1;
+  - the D3 lane.
+- **New owner questions in plan §0 item 5:**
+  - HR-A1: company administration grants beyond the policy;
+  - HR-A2: deletes guarded as updates;
+  - HR-A3: no finance member;
+  - the Q-KEY follow-ups;
+  - the 087-SCH 72,000 row.
+  CLAUDE.md's "Retention default 5%" conflicts with HR-C1; that is the owner's to change.
+
+**Next exact action:**
+1. Commit the D-PAGE-1 fix separately.
+2. Run WP-0 live, one database writer at a time:
+   - confirm the 006 facts;
+   - D-ID-2 and D-ID-3 repro;
+   - the permission probe in process;
+   - the post-hoc verifier with the API idle;
+   - the C087R proving lifecycle, detached.
+3. Classify every finding.
+4. Build the deep companies 087, 052 and 006 (detached, with watchdog); snapshot `cert3d`.

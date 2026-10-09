@@ -114,8 +114,9 @@ const RESET_BOUND_MS = 40;
  * C11 4, C12 18, C15 11, C18 9, final 2.
  * Round 3 adds setup (round 3) 1 and C12.18-C12.25 8: setup 3, C4 11, C11 4,
  * C12 26, C15 11, C18 9, final 2.
+ * The final mutation run adds C12.7b (the resolve route, M17): C12 27.
  */
-const EXPECTED_CHECKS = 66;
+const EXPECTED_CHECKS = 67;
 
 const results = [];
 const answers = [];
@@ -462,6 +463,17 @@ const main = async () => {
   check('C12.7 a fresh sign-in with the new password works (identity token, A session, /auth/me 200); the old password gets 401 INVALID_CREDENTIALS',
     fresh.status === 200 && Boolean(fresh.body?.data?.identityToken) && freshA.status === 200 && Boolean(newRefresh) && meNew?.status === 200 && said(oldPassword) === '401 INVALID_CREDENTIALS',
     `login ${said(fresh)}; session ${said(freshA)}; me ${said(meNew)}; old password ${said(oldPassword)}`);
+  // The resolve route reads the identity's memberships from any of its tokens,
+  // so a pre-reset token is dead there too. Only subjectOfToken's own epoch
+  // check refuses it here: the workspace-session route (C12.3) also refuses at
+  // issuance, which hid a missing route check (mutation M17 survived).
+  const resolvePath = `/auth/workspaces/resolve?projectId=${projectA}`;
+  const resolveOld = keep('old access resolve', await api.raw('GET', resolvePath, { token: old.token }));
+  const resolveOldIdentity = keep('old identity resolve', await api.raw('GET', resolvePath, { token: old.identityToken }));
+  const resolveNew = keep('new access resolve', newAccess ? await api.raw('GET', resolvePath, { token: newAccess }) : null);
+  check('C12.7b GET /auth/workspaces/resolve?projectId=<A project> with the old access token and with the old identity token: 401 SESSION_REVOKED each; with the fresh access token: 200 naming workspace A',
+    said(resolveOld) === '401 SESSION_REVOKED' && said(resolveOldIdentity) === '401 SESSION_REVOKED' && resolveNew?.status === 200 && JSON.stringify(resolveNew.body?.data || {}).includes(orgA.id),
+    `${said(resolveOld)} | ${said(resolveOldIdentity)} | fresh ${said(resolveNew)} ${resolveNew?.text || ''}`);
   const s12Deactivate = keep('A deactivates S12', await aPm.send('PATCH', `/users/${S12.id}/deactivate`, {}));
   const s12IdentityMid = (await userRow(S12.id))?.status;
   const s12Activate = keep('A activates S12', await aPm.send('PATCH', `/users/${S12.id}/activate`, {}));
