@@ -18,7 +18,7 @@
  */
 const fs = require("fs");
 const path = require("path");
-const { GET, POST, probe, cents, money, check, note, section, summary, readLedger } = require("./harness");
+const { API, login, GET, POST, probe, cents, money, check, note, section, summary, readLedger } = require("./harness");
 
 const CONTEXT = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
 const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
@@ -27,6 +27,64 @@ const { pm, planner, site, cost } = ctx.people;
 
 /** activity code -> percent complete to book */
 const PROGRESS = { A110: 100, A120: 50 };
+
+/**
+ * The known answers (CERT-3 WP-0), worked on paper from stage 3's allocations
+ * and the percentages booked here — never from the percentages the product
+ * reports back, which would make the EV check circular:
+ *
+ *   allocated   A110 60,000.00   A120 30,000.00   A130 90,000.00
+ *               A310 135,000.00  A320 72,000.00   = 387,000.00
+ *   9.1  official A110 100, A120 50   EV = 60,000 + 15,000          =  75,000.00
+ *   9.4  official A130 25             EV = 75,000 + 22,500          =  97,500.00
+ */
+const EXPECTED_ALLOCATED = { A110: 60_000, A120: 30_000, A130: 90_000, A310: 135_000, A320: 72_000 };
+const EXPECTED_OFFICIAL = { A110: 100, A120: 50 };
+const EXPECTED_A130 = 25;
+const EXPECTED_EV = 60_000 + 15_000; // 75,000.00
+const EXPECTED_EV_AFTER_A130 = EXPECTED_EV + 22_500; // 97,500.00
+
+/**
+ * One request, answered with the status the server actually sent: an approval
+ * must answer 200 itself. Written when probe() reported every success as 200;
+ * probe() now reports the real status too (harness.js, CERT-3 WP-0), and this
+ * local send() is kept so the asserted approvals below stay as they were.
+ */
+async function send(who, method, urlPath, payload) {
+  const token = await login(who);
+  const res = await fetch(`${API}${urlPath}`, {
+    method,
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(payload === undefined ? {} : { "content-type": "application/json" }),
+    },
+    ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+  });
+  const text = await res.text();
+  let body = null;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      throw new Error(`${method} ${urlPath} -> ${res.status} but the body was not JSON: ${text.slice(0, 200)}`);
+    }
+  }
+  return { status: res.status, ok: res.ok, code: body?.error?.code ?? null, message: body?.error?.message ?? null, data: body?.data };
+}
+
+/** The open claim on an activity, approved by the PM: it must exist, answer 200 and come back approved. */
+async function approveOpenClaim(code, activityId) {
+  const pending = await GET(pm, `/projects/${P}/activities/${activityId}/progress-submissions`);
+  const list = pending.items || pending.submissions || (Array.isArray(pending) ? pending : []);
+  const open = list.find((s) => s.status === "submitted" || s.status === "pending");
+  check(`${code}: the claim is waiting for approval`, true, Boolean(open));
+  if (!open) return null;
+  const approved = await send(pm, "POST", `/projects/${P}/activities/${activityId}/progress-submissions/${open.id}/approve`, {});
+  note(`  ${code} approved`, `${approved.status} ${approved.code ?? "ok"}`);
+  check(`${code}: the approval answers 200`, 200, approved.status);
+  check(`${code}: the claim is now approved`, "approved", approved.data?.status ?? null);
+  return approved;
+}
 
 /**
  * Only APPROVED allocations carry earned value — a draft allocation is a
@@ -113,6 +171,10 @@ async function main() {
   const acts = await GET(planner, `/projects/${P}/activities`);
   const actRows = Array.isArray(acts) ? acts : acts.items || [];
   const byCode = new Map(actRows.map((a) => [a.activityCode, a]));
+  // The EV basis, activity by activity, against the figures stage 3 set.
+  for (const [code, amount] of Object.entries(EXPECTED_ALLOCATED)) {
+    check(`${code} carries ${money(cents(amount))} of approved allocation`, cents(amount), byActivity.get(byCode.get(code)?.id) ?? 0);
+  }
 
   // ── 9.1 progress, submitted and approved ─────────────────────────────────
   section("9.1  Progress — booked by the site engineer, approved by the PM");
@@ -128,15 +190,9 @@ async function main() {
     });
     note(`${code} claimed at ${pct}%`, `status=${submitted.status ?? "submitted"}`);
 
-    const pending = await GET(pm, `/projects/${P}/activities/${activity.id}/progress-submissions`);
-    const list = pending.items || pending.submissions || (Array.isArray(pending) ? pending : []);
-    const open = list.find((s) => s.status === "submitted" || s.status === "pending");
-    if (open) {
-      const approved = await probe(pm, "POST", `/projects/${P}/activities/${activity.id}/progress-submissions/${open.id}/approve`, {});
-      note(`  ${code} approved`, `${approved.status} ${approved.code ?? "ok"}`);
-    } else {
-      note(`  ${code}`, "no open submission — already approved");
-    }
+    // One clean pass: the claim just made must be open, and its approval
+    // must answer 200 with the claim approved — not merely be attempted.
+    await approveOpenClaim(code, activity.id);
   }
 
   // ── 9.2 EV, computed here before anything is read from the product ───────
@@ -145,16 +201,17 @@ async function main() {
   const after = await GET(planner, `/projects/${P}/activities`);
   const afterRows = Array.isArray(after) ? after : after.items || [];
 
-  let expectedEV = 0;
-  const workings = [];
-  for (const activity of afterRows) {
-    const allocated = byActivity.get(activity.id) ?? 0;
-    if (!allocated) continue;
-    const pct = Number(activity.pctComplete ?? 0);
-    const earned = Math.round((allocated * pct) / 100);
-    expectedEV += earned;
-    if (pct > 0) workings.push(`${activity.activityCode} ${money(allocated)} x ${pct}% = ${money(earned)}`);
+  // The official percentages the product now holds, against the ones booked.
+  for (const [code, pct] of Object.entries(EXPECTED_OFFICIAL)) {
+    check(`official progress ${code} is ${pct}%`, pct, Number(afterRows.find((a) => a.activityCode === code)?.pctComplete ?? NaN));
   }
+
+  // EV from the known answers alone: stage 3's allocations x the percentages
+  // booked above. Nothing the product reports back enters this figure.
+  const workings = Object.entries(EXPECTED_OFFICIAL).map(
+    ([code, pct]) => `${code} ${money(cents(EXPECTED_ALLOCATED[code]))} x ${pct}% = ${money(Math.round((cents(EXPECTED_ALLOCATED[code]) * pct) / 100))}`,
+  );
+  const expectedEV = cents(EXPECTED_EV);
   for (const line of workings) note("  ", line);
   note("EXPECTED EV", money(expectedEV));
 
@@ -165,6 +222,8 @@ async function main() {
   section("9.3  What the product reports");
 
   const ev = await probe(cost, "GET", `/projects/${P}/reports/ev`);
+  // A failed EV report fails the stage: every EV check below depends on it.
+  check("the EV report answers", 200, ev.status);
   if (!ev.ok) {
     note("EV report", `${ev.status} ${ev.code} — recorded, not assumed`);
     ctx.evReport = `${ev.status} ${ev.code}`;
@@ -178,7 +237,7 @@ async function main() {
     const reportedEV = cents(totals.ev ?? totals.earnedValue ?? 0);
     const reportedAC = cents(totals.ac ?? totals.actualCost ?? 0);
 
-    check("the product's EV matches the one worked out here", expectedEV, reportedEV);
+    check("the product's EV is 75,000.00 (60,000 x 100% + 30,000 x 50%)", expectedEV, reportedEV);
     check("the product's AC matches the cost ledger", AC, reportedAC);
     note("PV (the product's, from its data date and calendar)", money(reportedPV));
 
@@ -197,7 +256,6 @@ async function main() {
   // ── 9.4 progress moves EV, and only EV ───────────────────────────────────
   section("9.4  Progressing more work moves EV, and leaves cost alone");
 
-  const before = expectedEV;
   const a130 = byCode.get("A130");
   // Advance from wherever it stands, so a repeated run still measures a real
   // movement rather than re-booking a percentage it already has.
@@ -212,20 +270,22 @@ async function main() {
     status: "submitted",
     source: "manual",
   });
-  const subs = await GET(pm, `/projects/${P}/activities/${a130.id}/progress-submissions`);
-  const list = subs.items || subs.submissions || (Array.isArray(subs) ? subs : []);
-  const open = list.find((s) => s.status === "submitted" || s.status === "pending");
-  if (open) await probe(pm, "POST", `/projects/${P}/activities/${a130.id}/progress-submissions/${open.id}/approve`, {});
+  await approveOpenClaim("A130", a130.id);
+  const afterA130 = await GET(planner, `/projects/${P}/activities`);
+  const afterA130Rows = Array.isArray(afterA130) ? afterA130 : afterA130.items || [];
+  check(`official progress A130 is ${EXPECTED_A130}%`, EXPECTED_A130, Number(afterA130Rows.find((a) => a.activityCode === "A130")?.pctComplete ?? NaN));
 
   const ledgerAfter = readLedger(await GET(cost, `/projects/${P}/cost/reconciliation`));
   check("booking progress is not a cost", lifetimeAC, ledgerAfter.ledgerCents);
 
   const evAfter = await probe(cost, "GET", `/projects/${P}/reports/ev`);
+  // A failed EV report fails the stage here too.
+  check("the EV report answers after A130's approval", 200, evAfter.status);
   if (evAfter.ok) {
     const t = evAfter.data.totals ?? evAfter.data.summary ?? evAfter.data;
     const newEV = cents(t.ev ?? t.earnedValue ?? 0);
-    const expectedNew = before + Math.round(((byActivity.get(a130.id) ?? 0) * (nextPct - currentPct)) / 100);
-    check("EV rose by exactly the extra percentage of the foundations allocation", expectedNew, newEV);
+    // From the known answers: 75,000 + 90,000 x 25% = 97,500.00.
+    check("EV rose by exactly 25% of the foundations allocation, to 97,500.00", cents(EXPECTED_EV_AFTER_A130), newEV);
     note("EV now", money(newEV));
     ctx.evAfter = { ev: newEV, ac: ledgerAfter.ledgerCents };
   }

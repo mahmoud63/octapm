@@ -21,6 +21,17 @@ const API_BASE = (process.env.P21_API_BASE || "http://127.0.0.1:5000").replace(/
 if ((process.env.P21_CONTEXT || process.env.P21_EMAIL_DOMAIN) && (!process.env.P21_API_BASE || new URL(API_BASE).port === "5000")) {
   throw new Error("P21_CONTEXT / P21_EMAIL_DOMAIN name a certification run but P21_API_BASE is unset or names port 5000");
 }
+// A run's stamp and its state file must agree (CERT-3 WP-0, the proving run).
+// Stage 1 records P21_STAMP in the state file and every later stage takes the
+// stamp and the project from that file, so a stage started with one run's
+// stamp and another run's state file (P21_STAMP=C087R with p21-087.json, or
+// C087 with p21-087R.json) would work on the other run's project. Refused.
+if (process.env.P21_CONTEXT && process.env.P21_STAMP && require("fs").existsSync(process.env.P21_CONTEXT)) {
+  const recorded = JSON.parse(require("fs").readFileSync(process.env.P21_CONTEXT, "utf8")).stamp;
+  if (recorded !== process.env.P21_STAMP) {
+    throw new Error(`P21_STAMP is ${process.env.P21_STAMP} but the state file ${process.env.P21_CONTEXT} is stamp ${recorded}: a stage never works on another run's project`);
+  }
+}
 const API = `${API_BASE}/api/v1`;
 const PASSWORD = process.env.P21_PASSWORD || "DemoPassw0rd!";
 
@@ -78,10 +89,10 @@ async function login(email) {
 }
 
 /**
- * One request. Returns the unwrapped `data` on success and throws ApiError
- * otherwise — the caller never has to check a status by hand.
+ * One request, answered with the HTTP status the server sent and the unwrapped
+ * `data`; throws ApiError on a refusal. call() and probe() are both this.
  */
-async function call(who, method, path, payload) {
+async function exchange(who, method, path, payload) {
   const token = await login(who);
   const res = await fetch(`${API}${path}`, {
     method,
@@ -103,14 +114,28 @@ async function call(who, method, path, payload) {
   }
 
   if (!res.ok) throw new ApiError(method, path, res.status, body);
-  return body?.data;
+  return { status: res.status, data: body?.data };
 }
 
-/** The same request, but the status is the answer — for permission probes. */
+/**
+ * One request. Returns the unwrapped `data` on success and throws ApiError
+ * otherwise — the caller never has to check a status by hand.
+ */
+async function call(who, method, path, payload) {
+  return (await exchange(who, method, path, payload)).data;
+}
+
+/**
+ * The same request, but the status is the answer — for permission probes and
+ * asserted workflow steps. A success reports the status the server actually
+ * sent (201 for a create, 200 for a transition): it used to report 200 for
+ * every success, so a check of the status could not tell them apart (CERT-3
+ * WP-0). A refusal reports its status and code, as before.
+ */
 async function probe(who, method, path, payload) {
   try {
-    const data = await call(who, method, path, payload);
-    return { status: 200, ok: true, code: null, data };
+    const { status, data } = await exchange(who, method, path, payload);
+    return { status, ok: true, code: null, data };
   } catch (err) {
     if (err instanceof ApiError) {
       return { status: err.status, ok: false, code: err.code, message: err.serverMessage, details: err.details };

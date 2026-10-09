@@ -100,8 +100,23 @@ async function main() {
     const mark = c.id === P ? " <= CONTINUING" : c.archivedAt ? " (archived)" : "";
     note(`  ${c.id}`, `${c.name}${mark}`);
   }
+  // Scoped to this run's project, by the id in its state file (CERT-3 WP-0): a
+  // proving run (stamp C087R) shares its company with the certified run's live
+  // project (C087), which is listed above and left alone, not counted against it.
+  // What the old one-live-project count caught still fails: a second live copy
+  // of this run's project (the same name — a stray from an aborted stage 1), and
+  // any other live PHASE21 project carrying this run's stamp as a whole word
+  // (stage 7's isolation project left unarchived, a re-run stage 1). On the
+  // certified run (stamp C087) the proving run's "... C087R" is not its stamp
+  // ("C087R" is not the word "C087"), so it alone never fails the certified run.
   const live = candidates.filter((c) => !c.archivedAt);
-  check("exactly one live PHASE21 project, and it is this one", 1, live.length);
+  const others = live.filter((c) => c.id !== P);
+  const stamp = ctx.stamp ?? String(project.name).trim().split(/\s+/).pop();
+  const carriesStamp = (c) => String(c.name).trim().split(/\s+/).includes(stamp);
+  note("live PHASE21 projects of other runs (listed, not this run's)", others.length);
+  check("exactly one live PHASE21 project has this run's id (the state file's project)", 1, live.filter((c) => c.id === P).length);
+  check(`no other live project has this run's name "${project.name}" (a stray copy from an aborted stage 1)`, [], others.filter((c) => c.name === project.name).map((c) => c.id));
+  check(`no other live PHASE21 project carries this run's stamp ${stamp}`, [], others.filter(carriesStamp).map((c) => `${c.id} ${c.name}`));
 
   // ── the structure 21A built ──────────────────────────────────────────────
   section("2.1  Structure");

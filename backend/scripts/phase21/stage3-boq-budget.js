@@ -42,6 +42,29 @@ const BUDGET = [
 
 const ORIGINAL_BUDGET = BUDGET.reduce((sum, row) => sum + row[3], 0); // 1,700,000
 
+/**
+ * The known answers of the allocation step (CERT-3 WP-0), stated here and not
+ * read back from the figures the calls below send — so changing an amount in
+ * a call fails a check instead of moving its own expectation:
+ *
+ *   B-001 -> A110    60,000.00   (5,000 of 5,000 m3)
+ *   B-002 -> A120    30,000.00   (200 of 800 m3)
+ *   B-002 -> A130    90,000.00   (600 of 800 m3)
+ *   B-004 -> A310   135,000.00   (3,000 of 3,000 m2)
+ *   B-005 -> A320    72,000.00   (4,000 of 4,000 m2)
+ *                   387,000.00 allocated
+ *   B-003            72,000.00   unallocated (60 t @ 1,200.00), and nothing on it
+ */
+const EXPECTED_ALLOCATIONS = [
+  ["B-001", "A110", 60_000],
+  ["B-002", "A120", 30_000],
+  ["B-002", "A130", 90_000],
+  ["B-004", "A310", 135_000],
+  ["B-005", "A320", 72_000],
+];
+const EXPECTED_ALLOCATED = 387_000;
+const EXPECTED_UNALLOCATED = 72_000;
+
 async function main() {
   section(`PHASE 21 · STAGE 3 — BOQ and budget   project=${ctx.projectName}`);
 
@@ -107,6 +130,26 @@ async function main() {
   check("five allocations exist (one of them a split)", 5, allocRows.length);
   check("B-002 is split across two activities", 2, (ctx.allocations["B-002"] || []).length);
   check("B-003 is deliberately unallocated", undefined, ctx.allocations["B-003"]);
+
+  // The same, as the server holds it rather than as this script remembers it.
+  check(
+    "the server holds no allocation on B-003",
+    0,
+    allocRows.filter((r) => r.boqItemId === ctx.boq["B-003"]).length,
+  );
+  for (const [boqCode, activityCode, amount] of EXPECTED_ALLOCATIONS) {
+    const rows = allocRows.filter((r) => r.boqItemId === ctx.boq[boqCode] && r.activityId === A[activityCode]);
+    check(`${boqCode} -> ${activityCode}: one allocation of ${money(cents(amount))}`, [1, cents(amount)], [rows.length, rows.length === 1 ? cents(rows[0].amount) : null]);
+  }
+  const allocatedTotal = allocRows.reduce((sum, r) => sum + cents(r.amount), 0);
+  check("387,000.00 of the bill is allocated", cents(EXPECTED_ALLOCATED), allocatedTotal);
+  check("72,000.00 of the bill is unallocated (the BOQ total less what is allocated)", cents(EXPECTED_UNALLOCATED), boqTotal - allocatedTotal);
+  const b003 = (allocs.summary?.items || []).find((i) => i.boqItemId === ctx.boq["B-003"]);
+  check(
+    "the coverage reports B-003 unmapped, all 72,000.00 of it unallocated",
+    ["unmapped", cents(EXPECTED_UNALLOCATED)],
+    [b003?.mappingState ?? null, b003 ? cents(b003.unallocatedAmount) : null],
+  );
 
   // No shadow activity was invented: still fourteen.
   const acts = await GET(planner, `/projects/${P}/activities`);

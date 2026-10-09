@@ -13,7 +13,7 @@
  */
 const fs = require("fs");
 const path = require("path");
-const { GET, POST, probe, cents, money, check, note, section, summary, readLedger, upload, download } = require("./harness");
+const { API, login, GET, POST, probe, cents, money, check, note, section, summary, readLedger, upload, download } = require("./harness");
 
 const CONTEXT = process.env.P21_CONTEXT || path.join(__dirname, "context.json");
 const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
@@ -25,6 +25,58 @@ const CERTIFIED_GROSS = 60_000;
 const RETENTION_RATE = 10;
 const EXPECTED_RETENTION = 6_000;
 const EXPECTED_PAYMENT = 54_000;
+
+/**
+ * Where each record stands in its life (CERT-3 WP-0). A step answered 409 is
+ * accepted only when the record already stands at or beyond the status the
+ * step leads to — the answer to a step repeated on a record that is past it.
+ * A 409 on a record that has not got there (a workflow lock, a guard) fails.
+ */
+const COMMITMENT_ORDER = ["draft", "pending", "approved", "executed", "closed"];
+const PAY_APP_ORDER = ["draft", "submitted", "under_review", "approved", "paid"];
+
+/**
+ * One request, answered with the status the server actually sent — a payment
+ * must answer 201. Written when probe() reported every success as 200; probe()
+ * now reports the real status too (harness.js, CERT-3 WP-0), and this local
+ * send() is kept so the asserted steps below stay as they were.
+ */
+async function send(who, method, urlPath, payload) {
+  const token = await login(who);
+  const res = await fetch(`${API}${urlPath}`, {
+    method,
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(payload === undefined ? {} : { "content-type": "application/json" }),
+    },
+    ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+  });
+  const text = await res.text();
+  let body = null;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      throw new Error(`${method} ${urlPath} -> ${res.status} but the body was not JSON: ${text.slice(0, 200)}`);
+    }
+  }
+  return { status: res.status, ok: res.ok, code: body?.error?.code ?? null, message: body?.error?.message ?? null, data: body?.data };
+}
+
+/** One workflow step, asserted: 200 and the expected status, or a 409 on a record already past it. */
+async function advance(label, who, urlPath, expected, order, readStatus) {
+  const res = await send(who, "POST", urlPath, {});
+  note(`  ${label}`, `${res.status} ${res.code ?? "ok"}`);
+  if (res.status === 409) {
+    const now = await readStatus();
+    const past = order.includes(now) && order.indexOf(now) >= order.indexOf(expected);
+    check(`${label}: a 409 is accepted only on a record already ${expected} or beyond (it is ${now})`, true, past);
+    return res;
+  }
+  check(`${label} answers 200`, 200, res.status);
+  check(`${label} leaves it ${expected}`, expected, res.data?.status ?? null);
+  return res;
+}
 
 async function main() {
   section(`PHASE 21 · STAGE 5 — subcontract, certification and payment`);
@@ -79,12 +131,12 @@ async function main() {
   check("the agreement renders as a PDF for signature", "%PDF", pdf.subarray(0, 4).toString());
   ctx.agreementBytes = pdf.length;
 
-  for (const step of ["submit", "approve"]) {
+  const commitmentStatus = async () => (await GET(qs, `/projects/${P}/commitments/${commitment.id}`)).status;
+  for (const [step, expected] of [["submit", "pending"], ["approve", "approved"]]) {
     // The QS raises and submits it; approving and executing a subcontract is
     // the project manager's, which is why the QS is refused those.
     const who = step === "submit" ? qs : pm;
-    const res = await probe(who, "POST", `/projects/${P}/commitments/${commitment.id}/${step}`, {});
-    note(`  ${step}`, `${res.status} ${res.code ?? "ok"}`);
+    const res = await advance(`commitment ${step}`, who, `/projects/${P}/commitments/${commitment.id}/${step}`, expected, COMMITMENT_ORDER, commitmentStatus);
     if (!res.ok && res.status !== 409) {
       throw new Error(`commitment ${step} failed: ${res.status} ${res.code} ${res.message}`);
     }
@@ -135,17 +187,22 @@ async function main() {
   // Certify 60% of the line.
   if (lines[0]) {
     const lineId = lines[0].sovLineId;
-    const updated = await probe(qs, "PATCH", `/projects/${P}/pay-apps/${payApp.id}`, {
+    const updated = await send(qs, "PATCH", `/projects/${P}/pay-apps/${payApp.id}`, {
       lines: [{ sovLineId: lineId, thisPeriodAmount: CERTIFIED_GROSS }],
     });
     note("  set this period to 60,000", `${updated.status} ${updated.code ?? "ok"}`);
     ctx.payAppLineUpdate = `${updated.status} ${updated.code ?? "ok"}`;
+    check("setting this period's claim answers 200", 200, updated.status);
+    const claimed = (updated.data?.lines || []).find((l) => l.sovLineId === lineId);
+    check("the line now claims 60,000.00 this period", cents(CERTIFIED_GROSS), claimed ? cents(claimed.thisPeriodAmount) : null);
   }
 
-  for (const step of ["submit", "review", "approve"]) {
+  // Submitted by the QS, reviewed by the QS, approved by the PM — each step
+  // asserted, so a refused step can no longer pass as a note.
+  const payAppStatus = async () => (await GET(qs, `/projects/${P}/pay-apps/${payApp.id}`)).status;
+  for (const [step, expected] of [["submit", "submitted"], ["review", "under_review"], ["approve", "approved"]]) {
     const who = step === "approve" ? pm : qs;
-    const res = await probe(who, "POST", `/projects/${P}/pay-apps/${payApp.id}/${step}`, {});
-    note(`  ${step}`, `${res.status} ${res.code ?? "ok"}`);
+    await advance(`pay app ${step}`, who, `/projects/${P}/pay-apps/${payApp.id}/${step}`, expected, PAY_APP_ORDER, payAppStatus);
   }
 
   const certified = await GET(qs, `/projects/${P}/pay-apps/${payApp.id}`);
@@ -182,26 +239,37 @@ async function main() {
   // ── 5.5 payment moves cash, not cost ─────────────────────────────────────
   section("5.5  Payment — cash out, cost unchanged");
 
-  const payment = await probe(finance, "POST", `/projects/${P}/pay-apps/${payApp.id}/payments`, {
+  const payment = await send(finance, "POST", `/projects/${P}/pay-apps/${payApp.id}/payments`, {
     amount: EXPECTED_PAYMENT,
     paidAt: "2027-04-15",
     reference: `${ctx.tag}-PMT-1`,
     method: "bank_transfer",
   });
   note("payment", `${payment.status} ${payment.code ?? "recorded"}`);
+  // Now the HTTP status itself (probe() recorded every success as 200).
   ctx.paymentStatus = payment.status;
+  // A payment that did not happen must fail here: the cost check below would
+  // otherwise pass on a payment that was never made.
+  check("the payment answers 201", 201, payment.status);
+  check("the payment pays the application in full", "paid", payment.data?.status ?? null);
+  check("paid 54,000.00", cents(EXPECTED_PAYMENT), cents(payment.data?.paidAmount ?? 0));
+  const paidApp = await GET(qs, `/projects/${P}/pay-apps/${payApp.id}`);
+  check("read back, the application is paid", "paid", paidApp.status);
+  check("read back, 54,000.00 paid", cents(EXPECTED_PAYMENT), cents(paidApp.paidAmount ?? 0));
 
   const afterPayment = readLedger(await GET(cost, `/projects/${P}/cost/reconciliation`));
   check("paying the subcontractor did not change actual cost", afterCertify.ledgerCents, afterPayment.ledgerCents);
   ctx.financials.afterPayment = afterPayment;
 
   const cashFlow = await probe(finance, "GET", `/projects/${P}/cash-flow`);
+  check("the cash flow answers", 200, cashFlow.status);
   if (cashFlow.ok) {
     note("cash flow keys", Object.keys(cashFlow.data).join(", "));
     ctx.cashFlow = cashFlow.data;
   } else {
     note("cash flow", `${cashFlow.status} ${cashFlow.code}`);
   }
+  check("cash out is the 54,000.00 paid", cents(EXPECTED_PAYMENT), cents(cashFlow.data?.summary?.outflow ?? 0));
 
   fs.writeFileSync(CONTEXT, JSON.stringify(ctx, null, 2));
   return summary();

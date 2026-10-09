@@ -61,6 +61,28 @@ const CRITICAL = ["A100", "A110", "A120", "A130", "A200", "A210", "A220", "A230"
 /** Spurs nothing depends on: they must carry float. */
 const FLOATERS = ["A140", "A300"];
 
+/**
+ * The known answers, in working days from the project start, worked on paper
+ * from the network above (CERT-3 WP-0; plan §4 WP-1 T1 is the same network).
+ * TF = LF - EF, and a spur's late finish is the project finish:
+ *
+ *   A140  ES 30 (A130 finishes at 5+10+3+12)  EF 34   LF 81   TF 47
+ *   A300  ES 51 (A220 finishes at 30+8+6+7)   EF 61   LF 81   TF 20
+ *   M900  EF 81, the longest path
+ *
+ * With A110 at 20 days everything after it moves 10 days: M900 EF 91, and the
+ * spurs keep their float (A140 44/91, A300 71/91). Restored, M900 is 81 again.
+ */
+const KNOWN = {
+  A140: { earlyFinish: 34, lateFinish: 81, totalFloat: 47 },
+  A300: { earlyFinish: 61, lateFinish: 81, totalFloat: 20 },
+  m900EarlyFinish: 81,
+  m900EarlyFinishWithA110At20: 91,
+};
+
+/** A CPM figure as the API reports it; a missing one stays null, so it can never equal a known answer. */
+const cpmFigure = (value) => (value === null || value === undefined ? null : Number(value));
+
 async function main() {
   section(`PHASE 21 · STAGE 2 — cost coding, WBS and schedule   project=${ctx.projectName}`);
 
@@ -151,7 +173,10 @@ async function main() {
 
   for (const code of FLOATERS) {
     const a = byCode.get(code);
-    check(`${code} (nothing depends on it) carries float`, true, Number(a?.totalFloat) > 0);
+    const known = KNOWN[code];
+    check(`${code} (nothing depends on it) carries a total float of ${known.totalFloat}`, known.totalFloat, cpmFigure(a?.totalFloat));
+    check(`${code} early finish is day ${known.earlyFinish}`, known.earlyFinish, cpmFigure(a?.earlyFinish));
+    check(`${code} late finish is day ${known.lateFinish}, the project finish`, known.lateFinish, cpmFigure(a?.lateFinish));
     note(`${code} float`, a?.totalFloat);
   }
 
@@ -164,6 +189,7 @@ async function main() {
   ctx.plannedFinish = milestone?.earlyFinishDate ?? milestone?.endDate ?? null;
   note("project finish (milestone early finish)", ctx.plannedFinish);
   check("the completion milestone is on the critical path", 0, Number(milestone?.totalFloat));
+  check(`the completion milestone finishes on day ${KNOWN.m900EarlyFinish}`, KNOWN.m900EarlyFinish, cpmFigure(milestone?.earlyFinish));
 
   // ── 2.4 CPM recomputes, on the same activity identities ──────────────────
   section("2.4  Lengthen a predecessor — CPM must move, identities must not");
@@ -183,6 +209,14 @@ async function main() {
   const newFinish = afterByCode.get("M900")?.earlyFinishDate ?? afterByCode.get("M900")?.endDate ?? null;
   note("finish after +10 days on excavation", newFinish);
   check("the project finish moved", true, newFinish !== ctx.plannedFinish);
+  check(
+    `with A110 at 20 days the milestone finishes on day ${KNOWN.m900EarlyFinishWithA110At20}`,
+    KNOWN.m900EarlyFinishWithA110At20,
+    cpmFigure(afterByCode.get("M900")?.earlyFinish),
+  );
+  for (const code of FLOATERS) {
+    check(`with A110 at 20 days ${code} keeps its float of ${KNOWN[code].totalFloat}`, KNOWN[code].totalFloat, cpmFigure(afterByCode.get(code)?.totalFloat));
+  }
 
   // put it back so later stages work against the planned network
   await PATCH(planner, `/projects/${P}/activities/${excavation}`, { duration: 10 });
@@ -193,6 +227,11 @@ async function main() {
     restoredRows.find((a) => a.activityCode === "M900")?.endDate ??
     null;
   check("restoring the duration restores the finish", ctx.plannedFinish, restoredFinish);
+  const restoredByCode = new Map(restoredRows.map((a) => [a.activityCode, a]));
+  check(`restored, the milestone finishes on day ${KNOWN.m900EarlyFinish} again`, KNOWN.m900EarlyFinish, cpmFigure(restoredByCode.get("M900")?.earlyFinish));
+  for (const code of FLOATERS) {
+    check(`restored, ${code} float is ${KNOWN[code].totalFloat}`, KNOWN[code].totalFloat, cpmFigure(restoredByCode.get(code)?.totalFloat));
+  }
 
   // ── 2.5 a planner may plan; a warehouse storeman may not ─────────────────
   const bySite = await probe(ctx.people.warehouse, "POST", `/projects/${P}/activities`, {

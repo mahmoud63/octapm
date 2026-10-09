@@ -241,7 +241,9 @@ async function main() {
     costCodeId: ctx.costCodes["02-100"],
     reference: `${ctx.tag}-RBAC-PROBE`,
   });
-  check("the storeman may issue stock — that is his job", 200, storemanIssue.status);
+  // A stock issue is a create: the route answers 201 (inventory.js). probe()
+  // now reports the status the server sent, not 200 for every success (CERT-3 WP-0).
+  check("the storeman may issue stock — that is his job", 201, storemanIssue.status);
 
   // The site engineer can too; recorded rather than asserted, because whether
   // a site engineer should draw stock is a business decision, not a bug.
@@ -263,7 +265,8 @@ async function main() {
 
   const ledgerAfter = readLedger(await GET(cost, `/projects/${P}/cost/reconciliation`));
   const probeCost = ledgerAfter.ledgerCents - ledgerAtStart.ledgerCents;
-  const issuedBags = (storemanIssue.status === 200 ? 1 : 0) + (siteIssue.status === 200 ? 1 : 0);
+  // Counted by success, as before: probe() used to report every success as 200.
+  const issuedBags = (storemanIssue.ok ? 1 : 0) + (siteIssue.ok ? 1 : 0);
   note("bags issued by the RBAC probes", issuedBags);
   check("the probes moved the ledger by exactly what they issued", issuedBags * 1100, probeCost);
   ctx.financials.rbacProbeCents = probeCost;
@@ -277,7 +280,7 @@ async function main() {
       activityId: ctx.activities.A130, costCodeId: ctx.costCodes["02-100"],
       reference: `${ctx.tag}-RBAC-PROBE-RETURN`, notes: "the RBAC probes' bags, returned so the stage leaves the ledger where it found it",
     });
-    check("the probes' bags are returned", 200, giveBack.status);
+    check("the probes' bags are returned", 201, giveBack.status); // a stock movement is a create: 201
     ledgerRestored = readLedger(await GET(cost, `/projects/${P}/cost/reconciliation`));
     check("the probes leave the ledger where they found it", ledgerAtStart.ledgerCents, ledgerRestored.ledgerCents);
   }

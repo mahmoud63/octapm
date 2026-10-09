@@ -84,12 +84,24 @@ async function main() {
     });
     ctx.companies[kind] = { id: created.id, name: created.name };
     check(`company created: ${kind}`, true, Boolean(created.id));
+    // Known answers (CERT-3 WP-0): the directory keeps the name as sent, and
+    // every party this job works with is an external company.
+    check(`${kind}: the directory keeps the name "${payload.name}"`, payload.name, created.name);
+    check(`${kind}: the directory records it as external`, "external", created.type);
   }
 
-  // Reuse proof: the directory returns them.
+  // Reuse proof: the directory returns them — the same four records, not
+  // merely four of something.
   const directory = await GET(PEOPLE.admin, "/companies?limit=100&search=" + encodeURIComponent(TAG));
-  const found = (directory.items || []).filter((c) => c.name.startsWith(TAG));
+  // The tag and its space: "P21-C087" is a prefix of a proving run's "P21-C087R"
+  // (CERT-3 WP-0), whose companies share the directory and the search.
+  const found = (directory.items || []).filter((c) => c.name.startsWith(`${TAG} `));
   check("all four companies appear in the directory", 4, found.length);
+  check(
+    "the directory returns the same four ids this stage created",
+    Object.values(ctx.companies).map((c) => c.id).sort(),
+    found.map((c) => c.id).sort(),
+  );
 
   // ── the greenfield project ───────────────────────────────────────────────
   section("1.2  Greenfield project — created through the product, not the database");

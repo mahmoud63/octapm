@@ -13,6 +13,12 @@
  * certified project (state/p21-<code>.json) is refused by that script rather
  * than run twice. Exit code 0 only if every company passed every stage.
  *
+ * Certified runs only (CERT-3 WP-0): when P21_STAMP is set it must be C<code>
+ * for every company asked for, or nothing runs (exit 1). A proving run
+ * (P21_STAMP=C087R) is run-certified-lifecycle.js's alone: its logs are
+ * 087R-*, and this script's <code>-run.log and <code>-summary.json are the
+ * certified run's, never truncated or read for another stamp.
+ *
  * Long: run it through run-with-watchdog.js, detached (start-detached.ps1).
  */
 
@@ -36,10 +42,26 @@ if (unknown.length) {
   process.exit(64);
 }
 
+// The stamp each child runs under, as run-certified-lifecycle.js reads it
+// (an empty P21_STAMP is the certified C<code> there too). Anything but C<code>
+// is a proving run: refused here, before any log is opened, so the certified
+// run's <code>-run.log and <code>-summary.json are never truncated or read.
+const stampOf = (code) => process.env.P21_STAMP || `C${code}`;
+const notCertified = codes.filter((code) => stampOf(code) !== `C${code}`);
+if (notCertified.length) {
+  console.error(
+    `P21_STAMP=${process.env.P21_STAMP} is not the certified stamp C<code> of ${notCertified.join(', ')}: this script runs certified lifecycles only and writes <code>-run.log / <code>-summary.json. ` +
+      `For a proving run use run-certified-lifecycle.js, one company at a time: $env:P21_STAMP='C087R'; node scripts/cert/run-certified-lifecycle.js 087; Remove-Item Env:P21_STAMP`,
+  );
+  process.exit(1);
+}
+// The run's own name, after the stamp (087 for C087): with the refusal above it is always the code.
+const runName = (code) => stampOf(code).slice(1);
+
 const runOne = (code) =>
   new Promise((resolve) => {
     fs.mkdirSync(LOGS, { recursive: true });
-    const log = fs.openSync(path.join(LOGS, `${code}-run.log`), 'w');
+    const log = fs.openSync(path.join(LOGS, `${runName(code)}-run.log`), 'w');
     const started = Date.now();
     const child = spawn(process.execPath, [path.join(__dirname, 'run-certified-lifecycle.js'), code], { cwd: path.join(__dirname, '..', '..'), env: process.env, stdio: ['ignore', log, log] });
     child.on('exit', (exit) => {
@@ -66,7 +88,7 @@ const main = async () => {
     const run = done.find((d) => d.code === code);
     let summary = null;
     try {
-      summary = JSON.parse(fs.readFileSync(path.join(LOGS, `${code}-summary.json`), 'utf8'));
+      summary = JSON.parse(fs.readFileSync(path.join(LOGS, `${runName(code)}-summary.json`), 'utf8'));
     } catch {
       /* the run died before writing it */
     }

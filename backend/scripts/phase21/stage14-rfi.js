@@ -29,6 +29,38 @@ const SUBJECT = `${ctx.tag} RFI-01 Founding level at grid A-D against borehole B
 const CHANGE_VALUE = 4_500;
 const CHANGE_DESCRIPTION = `${ctx.tag} From RFI-01: additional 150mm excavation to competent stratum at grid A-D`;
 
+/**
+ * Where each record stands in its life (CERT-3 WP-0, as stage 5 does it). A
+ * step answered 409 is accepted only when the record already stands at or
+ * beyond the status the step leads to — the answer to a step repeated on a
+ * record that is past it. A 409 on a record that has not got there (a lock, a
+ * guard) fails. Archived and rejected are off the way forward, never "past".
+ * Statuses at HEAD: rfi.service.js RFI_STATUSES (submit -> open, answer ->
+ * answered, close -> closed); change-order.service.js CHANGE_ORDER_STATUSES
+ * (submit -> pending, approve -> approved).
+ */
+const RFI_ORDER = ["draft", "open", "answered", "closed"];
+const CHANGE_ORDER_ORDER = ["draft", "pending", "approved"];
+
+/**
+ * One workflow step, asserted: 200 and the expected status, or a 409 on a
+ * record already past it. Any other refusal stops the stage, as before.
+ */
+async function advance(label, who, urlPath, body, expected, order, readStatus) {
+  const res = await probe(who, "POST", urlPath, body);
+  note(`  ${label}`, `${res.status} ${res.code ?? "ok"}`);
+  if (res.status === 409) {
+    const now = await readStatus();
+    const past = order.includes(now) && order.indexOf(now) >= order.indexOf(expected);
+    check(`${label}: a 409 is accepted only on a record already ${expected} or beyond (it is ${now})`, true, past);
+    return res;
+  }
+  if (!res.ok) throw new Error(`${label}: ${res.status} ${res.code} ${res.message}`);
+  check(`${label} answers 200`, 200, res.status);
+  check(`${label} leaves it ${expected}`, expected, res.data?.status ?? null);
+  return res;
+}
+
 async function budgetRevised() {
   const b = await GET(cost, `/projects/${P}/budget/lines`);
   const lines = b.items || b.lines || [];
@@ -54,6 +86,11 @@ async function main() {
   }
   ctx.locationId = location.id;
   check("a project location exists to anchor the RFI", true, Boolean(location.id));
+  // Known answers (CERT-3 WP-0): the location is the one named here — its code
+  // and its kind — not merely a location with an id; 14.2 then asserts that
+  // the RFI points to it.
+  check("the location's code is <stamp>-GRID-AD", `${ctx.stamp}-GRID-AD`, location.code ?? null);
+  check("the location is a zone", "zone", location.kind ?? null);
 
   // ── 14.2 raise it ────────────────────────────────────────────────────────
   section("14.2  Raised by the site engineer, assigned to the planner, managed by the PM");
@@ -99,10 +136,9 @@ async function main() {
   // ── 14.3 submit — the ball goes to the assignee ──────────────────────────
   section("14.3  Submit — the ball is with the planner, and only the planner");
 
+  const rfiStatus = async () => (await GET(site, `/projects/${P}/rfi/${rfi.id}`)).status;
   if (cur.status === "draft") {
-    const sub = await probe(site, "POST", `/projects/${P}/rfi/${rfi.id}/submit`, {});
-    note("  submit", `${sub.status} ${sub.code ?? "ok"}`);
-    if (!sub.ok && sub.status !== 409) throw new Error(`submit: ${sub.status} ${sub.code} ${sub.message}`);
+    await advance("submit", site, `/projects/${P}/rfi/${rfi.id}/submit`, {}, "open", RFI_ORDER, rfiStatus);
     cur = await GET(site, `/projects/${P}/rfi/${rfi.id}`);
   }
   if (cur.status === "open") {
@@ -121,15 +157,13 @@ async function main() {
   section("14.4  Answer by the planner — the ball returns to the PM");
 
   if (cur.status === "open") {
-    const ans = await probe(planner, "POST", `/projects/${P}/rfi/${rfi.id}/answer`, {
+    await advance("answer", planner, `/projects/${P}/rfi/${rfi.id}/answer`, {
       response:
         "Lower the founding level by 150mm at grid A-D to bear on the competent stratum; pad depth unchanged. " +
         "Additional excavation and blinding to be instructed as a variation.",
       answeredDate: "2027-01-18",
       activityLinks: [{ activityId: ctx.activities.A130, relationType: "impacted", scheduleImpactDays: 3, costImpact: CHANGE_VALUE }],
-    });
-    note("  answer", `${ans.status} ${ans.code ?? "ok"}`);
-    if (!ans.ok && ans.status !== 409) throw new Error(`answer: ${ans.status} ${ans.code} ${ans.message}`);
+    }, "answered", RFI_ORDER, rfiStatus);
     cur = await GET(site, `/projects/${P}/rfi/${rfi.id}`);
   }
   if (cur.status === "answered") {
@@ -190,10 +224,10 @@ async function main() {
     });
     const docId = (attached.items || attached.attachments || [])[0]?.documentId ?? (attached.items || [])[0]?.id;
     await PATCH(qs, `/projects/${P}/change-orders/${change.id}`, { documentIds: [docId] });
-    for (const [step, who] of [["submit", qs], ["approve", pm]]) {
-      const r = await probe(who, "POST", `/projects/${P}/change-orders/${change.id}/${step}`, { comment: `${ctx.tag} ${step} from ${cur.ref}` });
-      note(`  ${step}`, `${r.status} ${r.code ?? "ok"}`);
-      if (!r.ok && r.status !== 409) throw new Error(`change ${step}: ${r.status} ${r.code} ${r.message}`);
+    // There is no GET by id for a change order; the register is the read model (stage 8).
+    const changeStatus = async () => (await GET(qs, `/projects/${P}/change-orders?limit=200`)).orders.find((c) => c.id === change.id)?.status ?? null;
+    for (const [step, who, expected] of [["submit", qs, "pending"], ["approve", pm, "approved"]]) {
+      await advance(`change ${step}`, who, `/projects/${P}/change-orders/${change.id}/${step}`, { comment: `${ctx.tag} ${step} from ${cur.ref}` }, expected, CHANGE_ORDER_ORDER, changeStatus);
     }
     const budgetAfter = await budgetRevised();
     check("Revised Budget rose by exactly the RFI's 4,500.00", cents(CHANGE_VALUE), budgetAfter.revised - budgetBefore.revised);

@@ -31,6 +31,15 @@ const EXPECTED_WA = 11; // (100*10 + 50*13) / 150
 const EXPECTED_ISSUE_COST = ISSUE_QTY * EXPECTED_WA; // 660.00
 const TOTAL_RECEIVED_VALUE = 100 * 10 + 50 * 13; // 1,650.00
 
+/**
+ * Each order's value, worked on paper and stated as a figure (CERT-3 WP-0) —
+ * not recomputed from the quantity and unit cost the order is raised with,
+ * so raising PO-A at 10.50 (1,050.00) fails the check instead of moving it.
+ */
+const EXPECTED_PO_VALUE = { A: 1_000, B: 650 };
+/** The field of GET /purchase-orders/:id that carries the order's value (purchase-order.service serializeOrder). */
+const PO_VALUE_FIELD = "value";
+
 
 async function main() {
   section(`PHASE 21 · STAGE 4 — procurement to actual cost   project=${ctx.projectName}`);
@@ -164,10 +173,28 @@ async function main() {
   ctx.purchaseOrders = { A: poA.id, B: poB.id };
   note("PO-A", `${poA.ref} 100 bags @ 10.00`);
   note("PO-B", `${poB.ref} 50 bags @ 13.00`);
-  check("both orders carry the activity link", true, Boolean(poA.id && poB.id));
+  check("both orders were raised", true, Boolean(poA.id && poB.id));
 
-  const poRead = await GET(procurement, `/projects/${P}/purchase-orders/${poA.id}`);
-  check("PO value is quantity x rate", cents(1000), cents(poRead.value ?? poRead.total ?? 1000));
+  // Read back, each order's line must carry the activity and the cost code,
+  // and its value must come from the named field — a missing field is a
+  // failure, never a fallback to the expected figure.
+  for (const [key, order] of [["A", poA], ["B", poB]]) {
+    const poRead = await GET(procurement, `/projects/${P}/purchase-orders/${order.id}`);
+    const lines = poRead.lines || [];
+    check(`PO-${key} has one line`, 1, lines.length);
+    check(`PO-${key} line carries the activity link (A130)`, ctx.activities.A130, lines[0]?.activityId ?? null);
+    check(`PO-${key} line carries cost code 02-100`, ctx.costCodes["02-100"], lines[0]?.costCodeId ?? null);
+    check(
+      `PO-${key} answers its value in the field "${PO_VALUE_FIELD}"`,
+      true,
+      Object.prototype.hasOwnProperty.call(poRead, PO_VALUE_FIELD) && poRead[PO_VALUE_FIELD] !== null && Number.isFinite(Number(poRead[PO_VALUE_FIELD])),
+    );
+    check(
+      `PO-${key} value is ${money(cents(EXPECTED_PO_VALUE[key]))}`,
+      cents(EXPECTED_PO_VALUE[key]),
+      Object.prototype.hasOwnProperty.call(poRead, PO_VALUE_FIELD) ? cents(poRead[PO_VALUE_FIELD]) : null,
+    );
+  }
 
   // ── 4.5 actual cost before any delivery ──────────────────────────────────
   const before = readLedger(await GET(cost, `/projects/${P}/cost/reconciliation`));
