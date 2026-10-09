@@ -1,5 +1,4 @@
 const { createHash, randomBytes } = require("crypto");
-const bcrypt = require("bcryptjs");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const auditService = require("./audit.service");
@@ -235,90 +234,15 @@ const listUsers = async ({ orgId, query }) => {
 };
 
 /**
- * POST /users. A new email makes an identity and its membership. An email
- * that already names an identity is never attached directly (owner decision
- * L38): somebody already part of this workspace is refused (409
- * EMAIL_EXISTS); anyone else — another company's person, a former member, a
- * closed account — is sent an invitation they accept with their own session,
- * and the answer is that invitation's (202, `invited: true`), the same for
- * every such e-mail: nothing of the identity is told — name, phone, last
- * sign-in, standing or other companies. The password is not used.
+ * POST /users — the deprecated alias of POST /users/invitations (owner
+ * decision D-ID-1). Adding a person is always an invitation: nobody's
+ * account or password is made here, and the answer is the invitation's,
+ * identical for an e-mail that has an account and one that has none. The
+ * person creates or signs in to their own identity and accepts; only then
+ * do they belong to the workspace.
  */
-const createUser = async ({ orgId, actor = null, payload, context = {} }) => {
-  const email = normalizeEmail(payload.email);
-  const existing = await prisma.user.findUnique({
-    where: { email },
-  });
-
-  const role =
-    payload.role && ALLOWED_ROLES.includes(payload.role)
-      ? payload.role
-      : "site_engineer";
-
-  if (existing) {
-    const membershipAware = membershipService.hasMembershipModel(prisma) && membershipService.isMembershipWriteEnabled();
-    const membership = membershipAware ? await membershipService.findMembership({ tx: prisma, orgId, userId: existing.id }) : null;
-    const alreadyHere = membership
-      ? membershipService.PRESENT_STATUSES.includes(membership.status)
-      : existing.orgId === orgId;
-    if (!membershipAware || alreadyHere) {
-      throw new HttpError(409, "EMAIL_EXISTS", "Email already exists");
-    }
-    const invitation = await inviteUser({ orgId, actor, payload: { email, role }, context, via: "users.create" });
-    return { invited: true, ...invitation };
-  }
-
-  if (!payload.password) {
-    throw new HttpError(400, "VALIDATION_ERROR", "A password is required for a new account");
-  }
-  // Asked before the account exists: a personal workspace's one-member rule
-  // (ENT-6) refuses the seat, and must not leave an identity behind with no
-  // membership when it does.
-  await membershipService.assertWorkspaceAcceptsMember({ tx: prisma, orgId });
-  const passwordHash = await bcrypt.hash(payload.password, 12);
-
-  // The identity and its seat in one transaction, as SSO provisioning and
-  // invitation acceptance do: the check above is a fast refusal, but the
-  // seat is decided under the organisation-row lock inside ensureMembership,
-  // and a seat taken meanwhile (409) must roll the new identity back with it
-  // rather than leave an account homed here with no membership.
-  const { user, ensured } = await prisma.$transaction(async (tx) => {
-    const created = await tx.user.create({
-      data: {
-        orgId,
-        name: payload.name,
-        email,
-        phone: payload.phone ?? null,
-        passwordHash,
-        role,
-        status: "active",
-      },
-      include: withCount,
-    });
-
-    const seat = await membershipService.ensureMembership({
-      tx,
-      orgId,
-      userId: created.id,
-      role,
-      invitedById: actor?.id || null,
-    });
-    if (seat) {
-      await membershipService.recordMembershipEvent({
-        tx,
-        orgId,
-        membership: seat.membership,
-        action: "membership.created",
-        actor,
-        context,
-        metadata: { role, existingIdentity: false },
-      });
-    }
-    return { user: created, ensured: seat };
-  });
-
-  return sanitizeUser(user, ensured?.membership || null);
-};
+const createUser = async ({ orgId, actor = null, payload, context = {} }) =>
+  inviteUser({ orgId, actor, payload, context, via: "users.create" });
 
 const getUserById = async ({ orgId, userId }) => {
   const user = await findUserInOrg({ orgId, userId });
@@ -342,12 +266,27 @@ const deactivateUser = async ({ orgId, userId, actor = null, context = {} }) => 
     throw new HttpError(400, "ALREADY_INACTIVE", "User is already inactive");
   }
 
-  const membershipAware = Boolean(membership) && membershipService.isMembershipWriteEnabled();
-  const closeIdentity =
-    user.orgId === orgId && !(await membershipService.hasOtherActiveMembership({ tx: prisma, orgId, userId }));
-
   const updated = await prisma.$transaction(async (tx) => {
-    const suspended = membershipAware
+    // Under the lock invitations and acceptances of this e-mail here take,
+    // so no link is minted or accepted half-way through the suspension.
+    if (typeof tx.$executeRaw === "function") {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orgId}), hashtext(${user.email}))`;
+    }
+    // Stamped once the lock is held, so the sessions, tickets and links it
+    // ends are never dated before rows written while it waited.
+    const now = new Date();
+    // Read again under the lock: an acceptance that held it a moment ago may
+    // have written the person's row here since the read above (D-ID-1 R2).
+    const current = membershipService.hasMembershipModel(tx)
+      ? await membershipService.findMembership({ tx, orgId, userId })
+      : null;
+    if (current && current.status !== membershipService.MEMBERSHIP_STATUSES.ACTIVE) {
+      throw new HttpError(400, "ALREADY_INACTIVE", "User is already inactive");
+    }
+    // Narrowing access is never paused: the suspension is written to the
+    // membership even while the emergency switch is off (D-ID-1 Q10), since
+    // the membership row is what every request is judged by.
+    let suspended = current
       ? await membershipService.changeMembership({
           tx,
           orgId,
@@ -357,16 +296,79 @@ const deactivateUser = async ({ orgId, userId, actor = null, context = {} }) => 
           context,
         })
       : null;
-    const row = closeIdentity
-      ? await tx.user.update({
-          where: { id: userId },
-          data: { status: "inactive" },
-          include: withCount,
-        })
-      : user;
+    // A person homed here before memberships has no row to suspend. They get
+    // one, suspended, from their own columns — otherwise the User-column
+    // fallback would keep admitting them here whenever the identity itself
+    // stays open because another workspace holds them (D-ID-1 SUSP).
+    if (!current && user.orgId === orgId && membershipService.hasMembershipModel(tx)) {
+      const row = await tx.organizationMembership.create({
+        data: {
+          ...membershipService.membershipFromUser(user),
+          role: membershipService.isMembershipRoleValid({ role: user.role }) ? user.role : "site_engineer",
+          status: membershipService.MEMBERSHIP_STATUSES.SUSPENDED,
+        },
+        include: membershipService.PRINCIPAL_INCLUDE,
+      });
+      await membershipService.recordMembershipEvent({ tx, orgId, membership: row, action: "membership.suspended", actor, context, metadata: { from: "legacy", to: "suspended" } });
+      suspended = { membership: row };
+    }
+    // The identity itself closes only when this was its home and it is part of
+    // no other workspace — active or suspended there (D-ID-1 ID-GUARD): a
+    // suspension elsewhere is that company's to lift. The identity lock comes
+    // first, so an acceptance into another workspace running now is either
+    // committed and seen by the write below, or waits for this one.
+    // Closing is a credential event: every token of the identity stops working.
+    let closedIdentity = false;
+    if (user.orgId === orgId) {
+      await membershipService.lockIdentity(tx, userId);
+      const closed = await tx.user.updateMany({
+        where: { id: userId, orgId, status: "active", ...membershipService.noOtherPresentMembershipWhere(orgId) },
+        data: { status: "inactive", credentialEpoch: { increment: 1 } },
+      });
+      closedIdentity = closed.count === 1;
+    }
+    await tx.refreshSession.updateMany({
+      where: closedIdentity ? { userId, revokedAt: null } : { userId, orgId, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    // An SSO sign-in ticket not yet exchanged would open a session here (or,
+    // for a closed identity, anywhere) after the suspension.
+    if (tx.ssoTicket?.updateMany) {
+      await tx.ssoTicket.updateMany({ where: closedIdentity ? { userId, usedAt: null } : { userId, orgId, usedAt: null }, data: { usedAt: now } });
+    }
+    // Links this workspace sent the person stop working: a suspension is not
+    // undone by accepting an offer made before it (D-ID-1 Q3).
+    const pending = await tx.invitationToken.findMany({
+      where: { orgId, email: user.email, status: "pending", acceptedAt: null, revokedAt: null },
+      select: { id: true, projectId: true },
+    });
+    if (pending.length) {
+      await tx.invitationToken.updateMany({
+        where: { id: { in: pending.map((row) => row.id) }, status: "pending", acceptedAt: null, revokedAt: null },
+        data: { status: "revoked", revokedAt: now },
+      });
+      for (const row of pending) {
+        await recordAuthAuditEvent({
+          tx,
+          orgId,
+          projectId: row.projectId || null,
+          userId,
+          actorId: actor?.id || null,
+          actorRole: actor?.role || null,
+          entityType: "invitation",
+          entityId: row.id,
+          action: "invitation_revoked",
+          email: user.email,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+          metadata: { reason: "member_suspended" },
+        });
+      }
+    }
     await tx.projectAssignment.deleteMany({ where: { userId, project: { orgId } } });
     await tx.activityAssignment.deleteMany({ where: { userId, activity: { project: { orgId } } } });
-    return sanitizeUser(row, suspended?.membership || (closeIdentity ? null : membership));
+    const row = closedIdentity ? await tx.user.findUnique({ where: { id: userId }, include: withCount }) : user;
+    return sanitizeUser(row, suspended?.membership || (closedIdentity ? null : current));
   });
 
   return updated;
@@ -379,6 +381,8 @@ const deactivateUser = async ({ orgId, userId, actor = null, context = {} }) => 
  * closed is refused, as it is for the name, email and password.
  */
 const activateUser = async ({ orgId, userId, actor = null, context = {} }) => {
+  // Reactivation widens access: paused while the emergency switch is off (D-ID-1 Q10).
+  membershipService.assertAccessExpansionAllowed();
   const user = await findUserInOrg({ orgId, userId });
   if (!user) throw new HttpError(404, "USER_NOT_FOUND", "User not found");
   const membership = user.memberships?.[0] || null;
@@ -398,6 +402,12 @@ const activateUser = async ({ orgId, userId, actor = null, context = {} }) => {
 
   const membershipAware = Boolean(membership) && membershipService.isMembershipWriteEnabled();
   return prisma.$transaction(async (tx) => {
+    // One standing change at a time for this person here: activation,
+    // deactivation, a role edit and an invitation take the same lock (D-ID-1 N1).
+    if (typeof tx.$executeRaw === "function") {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orgId}), hashtext(${user.email}))`;
+    }
+    if (user.status !== "active") await membershipService.lockIdentity(tx, userId);
     const reactivated =
       membershipAware && !membershipActive
         ? await membershipService.changeMembership({
@@ -434,28 +444,18 @@ const updateUser = async ({ orgId, userId, actor = null, payload, context = {} }
   if (!user) throw new HttpError(404, "USER_NOT_FOUND", "User not found");
   const homeOrg = user.orgId === orgId;
 
+  // The sign-in e-mail is the person's own (owner decision D-ID-1): moving it
+  // would let whoever moved it take the account over through the reset link,
+  // and probing for a clash told them which addresses have accounts. Refused
+  // whatever the value — the route refuses the field before this runs.
+  if (Object.prototype.hasOwnProperty.call(payload, "email")) {
+    throw new HttpError(400, "USER_EMAIL_IDENTITY_OWNED", "A person's sign-in e-mail is theirs; it cannot be changed from user management");
+  }
+
   const data = {};
   if (payload.name !== undefined) data.name = payload.name;
   if (payload.phone !== undefined) data.phone = payload.phone || null;
 
-  if (payload.email !== undefined) {
-    const normalized = payload.email.trim().toLowerCase();
-    if (normalized !== user.email) {
-      const clash = await prisma.user.findUnique({
-        where: { email: normalized },
-      });
-      if (clash)
-        throw new HttpError(409, "EMAIL_EXISTS", "Email already exists");
-      // The login e-mail is the key to every workspace the identity belongs to.
-      // A home admin must not move it for a person who also belongs to other
-      // companies — doing so would let them capture the account through the
-      // self-service reset link (certification finding L39).
-      if (await membershipService.hasOtherActiveMembership({ orgId, userId })) {
-        throw new HttpError(403, "IDENTITY_SHARED", "This person also belongs to other workspaces; they change their own sign-in e-mail");
-      }
-      data.email = normalized;
-    }
-  }
   if (Object.keys(data).length && !homeOrg) {
     throw new HttpError(403, "FORBIDDEN", "This person's name, phone and email are managed by their own workspace");
   }
@@ -468,18 +468,47 @@ const updateUser = async ({ orgId, userId, actor = null, payload, context = {} }
     payload.role !== undefined || payload.isCompanyAdmin !== undefined || payload.isOwner !== undefined;
   let membership = user.memberships?.[0] || null;
 
-  if (wantsStanding) {
-    const membershipAware = membershipService.hasMembershipModel(prisma) && membershipService.isMembershipWriteEnabled();
-    if (membershipAware) {
-      // In a transaction: a missing seat is decided under the organisation-row
-      // lock the one-member rule takes, which lasts only until the caller's
-      // transaction ends — outside one, the count and the insert would not be
-      // serialised against a concurrent seat.
-      membership = await prisma.$transaction((tx) => membershipService.ensureMembershipForUser({ tx, user, orgId }));
+  // A fast refusal only: while the emergency switch is off a role change or a
+  // grant is refused (D-ID-1 Q10). The decision that counts is taken again
+  // under the lock, against the row as it is then (changeMembership, and the
+  // User-column branch below) — a snapshot read here can be stale by then.
+  if (!membershipService.isMembershipWriteEnabled()) {
+    const current = membership || { role: user.role, isAdmin: user.isCompanyAdmin, isOwner: false };
+    const roleChanges = payload.role !== undefined && payload.role !== current.role;
+    const grantsAdmin = payload.isCompanyAdmin === true && !(current.isAdmin || current.isOwner);
+    const grantsOwner = payload.isOwner === true && !current.isOwner;
+    if (roleChanges || grantsAdmin || grantsOwner) membershipService.assertAccessExpansionAllowed();
+  }
+
+  if (!wantsStanding) {
+    const updated = Object.keys(data).length
+      ? await prisma.user.update({ where: { id: userId }, data, include: withCount })
+      : user;
+    return sanitizeUser(updated, membership);
+  }
+
+  // Standing is changed in one transaction, under the lock deactivation,
+  // activation and invitations of this e-mail here take (D-ID-1 N1, R2): the
+  // membership is read — or, for a person homed here before memberships,
+  // written — under it, the change is judged against that row, and the User
+  // columns that mirror it in the home workspace are written in the same
+  // transaction, so a delayed mirror can never undo a later change.
+  const updated = await prisma.$transaction(async (tx) => {
+    if (typeof tx.$executeRaw === "function") {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orgId}), hashtext(${user.email}))`;
     }
-    if (membership) {
+    const locked = await tx.user.findUnique({ where: { id: userId }, include: withCount });
+    if (!locked) throw new HttpError(404, "USER_NOT_FOUND", "User not found");
+    // A missing seat is decided under the organisation-row lock the one-member
+    // rule takes inside ensureMembershipForUser. With the emergency switch off
+    // no row is written (that would be a seat); an existing row is returned.
+    const row = membershipService.hasMembershipModel(tx)
+      ? (await membershipService.ensureMembershipForUser({ tx, user: locked, orgId })) ||
+        (await membershipService.findMembership({ tx, orgId, userId }))
+      : null;
+    if (row) {
       const changed = await membershipService.changeMembership({
-        tx: prisma,
+        tx,
         orgId,
         userId,
         actor,
@@ -496,9 +525,12 @@ const updateUser = async ({ orgId, userId, actor = null, payload, context = {} }
         data.isCompanyAdmin = Boolean(membership.isAdmin || membership.isOwner);
       }
     } else {
-      const roleChanges = payload.role !== undefined && payload.role !== user.role;
+      // No membership row anywhere here (the read switched off, or a client
+      // that knows none): the User columns are the standing, judged as read
+      // under the lock.
+      const roleChanges = payload.role !== undefined && payload.role !== locked.role;
       const adminChanges =
-        payload.isCompanyAdmin !== undefined && Boolean(payload.isCompanyAdmin) !== Boolean(user.isCompanyAdmin);
+        payload.isCompanyAdmin !== undefined && Boolean(payload.isCompanyAdmin) !== Boolean(locked.isCompanyAdmin);
       if (actor?.id && actor.id === userId && (roleChanges || adminChanges)) {
         throw new HttpError(403, "SELF_ELEVATION_FORBIDDEN", "You cannot change your own role or standing");
       }
@@ -509,82 +541,72 @@ const updateUser = async ({ orgId, userId, actor = null, payload, context = {} }
       if ((adminChanges || wantsOwner) && !actor?.isCompanyAdmin) {
         throw new HttpError(403, "OWNER_REQUIRED", "Only a workspace owner can grant or revoke ownership or administration");
       }
+      const grants = roleChanges || (payload.isCompanyAdmin === true && !locked.isCompanyAdmin) || wantsOwner;
+      if (grants) membershipService.assertAccessExpansionAllowed();
       if (payload.role !== undefined) data.role = payload.role;
       if (payload.isCompanyAdmin !== undefined) data.isCompanyAdmin = Boolean(payload.isCompanyAdmin);
     }
-  }
-
-  const updated = Object.keys(data).length
-    ? await prisma.user.update({
-        where: { id: userId },
-        data,
-        include: withCount,
-      })
-    : user;
+    return Object.keys(data).length
+      ? tx.user.update({ where: { id: userId }, data, include: withCount })
+      : locked;
+  });
 
   return sanitizeUser(updated, membership);
 };
 
-const resetPassword = async ({
-  orgId,
-  userId,
-  newPassword,
-  actor = null,
-  context = {},
-}) => {
+/**
+ * POST /users/:id/password-reset-email (owner decision D-ID-1 Q4). Recovery is
+ * the person's own: an administrator may only ask OctaPM to send the ordinary
+ * self-service reset e-mail, to the address the identity already has, for
+ * someone who is part of this workspace (active or suspended here, or homed
+ * here before memberships). The administrator never sees the token or the
+ * link, never sets the password, never changes where it goes, and the answer
+ * — always `{ sent: true }` — says nothing about the account's state: a
+ * closed identity is sent nothing and answered the same.
+ */
+const sendPasswordResetEmail = async ({ orgId, userId, actor = null, context = {} }) => {
   const user = await findUserInOrg({ orgId, userId });
   if (!user) throw new HttpError(404, "USER_NOT_FOUND", "User not found");
-  // A password belongs to the identity: only its own workspace resets it.
-  if (user.orgId !== orgId) {
-    throw new HttpError(403, "FORBIDDEN", "This person's password is managed by their own workspace");
-  }
-  // And when the identity also belongs to other companies, the home admin may
-  // not set a password of their choosing — that is a takeover of the account
-  // in those companies too (certification finding L39). The person resets it
-  // themselves through the self-service e-mail flow.
-  if (await membershipService.hasOtherActiveMembership({ orgId, userId })) {
-    throw new HttpError(403, "IDENTITY_SHARED", "This person also belongs to other workspaces; ask them to reset their own password");
-  }
-
-  const passwordHash = await bcrypt.hash(newPassword, 12);
-  await prisma.$transaction(async (tx) => {
-    await tx.user.update({ where: { id: userId }, data: { passwordHash } });
-    await tx.refreshSession?.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-    await recordAuthAuditEvent({
-      tx,
-      orgId,
-      userId,
-      actorId: actor?.id || null,
-      actorRole: actor?.role || null,
-      entityType: "password_reset",
-      entityId: userId,
-      action: "password_reset_admin_completed",
-      email: user.email,
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent,
-    });
+  await recordAuthAuditEvent({
+    orgId,
+    userId,
+    actorId: actor?.id || null,
+    actorRole: actor?.role || null,
+    entityType: "password_reset",
+    entityId: userId,
+    action: "password_reset_email_requested_by_admin",
+    email: user.email,
+    ipAddress: context.ipAddress,
+    userAgent: context.userAgent,
   });
-
-  return { id: user.id, reset: true };
+  const authService = require("./auth.service");
+  await authService.requestPasswordReset({ email: user.email }, context);
+  return { sent: true };
 };
 
 /**
- * POST /users/invitations, and POST /users for an e-mail that already names
- * an identity (`via: "users.create"`). The answer is the invitation alone —
- * the same keys whether or not the e-mail has an account — and nothing is
- * written to any membership: the invited person becomes part of the workspace
- * only by accepting with their own session (auth.service acceptInvitation;
- * owner decision L38). One pending invitation per (workspace, e-mail): a new
- * one replaces the old, whose link stops working.
+ * POST /users/invitations — the one way a person is added (owner decision
+ * D-ID-1), and POST /users, its deprecated alias. The answer is the
+ * invitation alone, with the same keys and values whether or not the e-mail
+ * has an account, and nothing is written to any identity or membership: the
+ * person creates or signs in to their own identity and accepts with it
+ * (auth.service acceptInvitation). One pending invitation per (workspace,
+ * e-mail): a new one replaces the old, whose link stops working.
+ *
+ * Who is already part of the workspace is decided under the lock that
+ * acceptance and deactivation of the same e-mail here take, so an invitation
+ * can never be judged against a membership that changes under it.
  */
-const inviteUser = async ({ orgId, actor, payload, context = {}, via = "users.invite" }) => {
+const inviteUser = async ({ orgId, actor, payload, context = {}, via = "users.invite", resendOf = null }) => {
+  // Inviting widens access: paused while the emergency switch is off (D-ID-1 Q10).
+  membershipService.assertAccessExpansionAllowed();
   const email = normalizeEmail(payload.email);
-  const role = ALLOWED_ROLES.includes(payload.role)
-    ? payload.role
-    : "site_engineer";
+  // The offer names a role the workspace really has; an unknown one is refused
+  // as PATCH refuses it, not quietly turned into another role.
+  if (!ALLOWED_ROLES.includes(payload.role)) {
+    throw new HttpError(400, "INVALID_ROLE", "Role is invalid");
+  }
+  const role = payload.role;
   let projectId = payload.projectId || null;
   let companyId = payload.companyId || null;
   const projectPartyId = payload.projectPartyId || null;
@@ -607,7 +629,7 @@ const inviteUser = async ({ orgId, actor, payload, context = {}, via = "users.in
     companyId = projectParty.companyId;
   }
 
-  const [org, project, company, existingUser] = await Promise.all([
+  const [org, project, company] = await Promise.all([
     prisma.organisation.findUnique({
       where: { id: orgId },
       select: { id: true, name: true },
@@ -624,7 +646,6 @@ const inviteUser = async ({ orgId, actor, payload, context = {}, via = "users.in
           select: { id: true, name: true },
         })
       : Promise.resolve(null),
-    prisma.user.findUnique({ where: { email } }),
   ]);
 
   if (!org) {
@@ -638,45 +659,60 @@ const inviteUser = async ({ orgId, actor, payload, context = {}, via = "users.in
     throw new HttpError(404, "COMPANY_NOT_FOUND", "Company not found");
   }
 
-  // An identity that exists in another workspace may be invited (membership
-  // doc §5): acceptance gives it a second membership. One that is already an
-  // active member here needs no workspace invitation — a project or party
-  // invitation still makes sense, it assigns them. A membership that was left
-  // or suspended is left as it is: acceptance, not the invitation, rewrites it
-  // to the offer (an `invited` row made the person listable, assignable and
-  // activatable before they had agreed to anything — certification L38).
-  const existingMembership = existingUser
-    ? await membershipService.findMembership({ tx: prisma, orgId, userId: existingUser.id })
-    : null;
-  const activeHere = existingMembership
-    ? existingMembership.status === membershipService.MEMBERSHIP_STATUSES.ACTIVE
-    : Boolean(existingUser && existingUser.orgId === orgId && existingUser.status === "active");
-  if (activeHere && !projectId && !companyId && !projectPartyId) {
-    throw new HttpError(409, "ALREADY_MEMBER", "This person is already a member of the workspace");
-  }
-  // Acceptance seats a guest only for a party invitation (auth.service
-  // isPartyInvitation: a projectPartyId); every other invitation — a
-  // workspace, project or company-directory one — seats a member. A personal
-  // workspace refuses those before the invitation is minted (ENT-6), so
-  // nobody is sent a link that acceptance would refuse. The one exemption is
-  // somebody already holding a member seat here, who is only being assigned
-  // a project; an active guest is not, and accepting would take a seat.
-  const seatedMemberHere =
-    activeHere && existingMembership?.kind === membershipService.MEMBERSHIP_KINDS.MEMBER;
-  if (!projectPartyId && !seatedMemberHere) {
-    await membershipService.assertWorkspaceAcceptsMember({ tx: prisma, orgId, userId: existingUser?.id || null });
-  }
-
   const rawToken = createAccountToken();
   const expiresAt = getInvitationExpiresAt();
   const now = new Date();
 
-  const invitation = await prisma.$transaction(async (tx) => {
-    // Invitations of one e-mail to one workspace are made one at a time, so
-    // two at once cannot both stay pending.
+  const { invitation, existingUserId } = await prisma.$transaction(async (tx) => {
+    // Invitations, acceptances and deactivations of one e-mail in one
+    // workspace are made one at a time.
     if (typeof tx.$executeRaw === "function") {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orgId}), hashtext(${email}))`;
     }
+    // A resend is judged under the lock too: the link it replaces may have
+    // been accepted a moment ago, and then there is nothing to send again.
+    if (resendOf) {
+      const original = await tx.invitationToken.findFirst({ where: { id: resendOf, orgId }, select: { status: true, acceptedAt: true } });
+      if (!original || original.acceptedAt || original.status === "accepted") {
+        throw new HttpError(409, "INVITATION_NOT_PENDING", "This invitation is no longer pending");
+      }
+    }
+    const existingUser = await tx.user.findUnique({
+      where: { email },
+      select: { id: true, orgId: true, status: true },
+    });
+    // Somebody already part of this workspace is not invited into it again
+    // (owner decision D-ID-1 Q3): an active member needs no workspace
+    // invitation (a project or party one still assigns them), and a suspended
+    // one — including a closed account homed here, or a person homed here
+    // before memberships whose account is closed — comes back only through
+    // Activate, never through an offer. Someone who left may be invited again.
+    const existingMembership = existingUser
+      ? await membershipService.findMembership({ tx, orgId, userId: existingUser.id })
+      : null;
+    const legacyHome = Boolean(existingUser) && !existingMembership && existingUser.orgId === orgId;
+    const activeHere = existingMembership
+      ? existingMembership.status === membershipService.MEMBERSHIP_STATUSES.ACTIVE
+      : legacyHome && existingUser.status === "active";
+    const suspendedHere = existingMembership
+      ? existingMembership.status === membershipService.MEMBERSHIP_STATUSES.SUSPENDED
+      : legacyHome && existingUser.status !== "active";
+    if (suspendedHere || (activeHere && !projectId && !companyId && !projectPartyId)) {
+      throw new HttpError(409, "ALREADY_MEMBER", "This person is already a member of the workspace");
+    }
+    // Acceptance seats a guest only for a party invitation (auth.service
+    // isPartyInvitation: a projectPartyId); every other invitation — a
+    // workspace, project or company-directory one — seats a member. A personal
+    // workspace refuses those before the invitation is minted (ENT-6), so
+    // nobody is sent a link that acceptance would refuse. The one exemption is
+    // somebody already holding a member seat here, who is only being assigned
+    // a project; an active guest is not, and accepting would take a seat.
+    const seatedMemberHere =
+      activeHere && (!existingMembership || existingMembership.kind === membershipService.MEMBERSHIP_KINDS.MEMBER);
+    if (!projectPartyId && !seatedMemberHere) {
+      await membershipService.assertWorkspaceAcceptsMember({ tx, orgId, userId: existingUser?.id || null });
+    }
+
     const pendingBefore = await tx.invitationToken.findMany({
       where: { orgId, email, status: "pending", acceptedAt: null, revokedAt: null },
       select: { id: true },
@@ -791,7 +827,7 @@ const inviteUser = async ({ orgId, actor, payload, context = {}, via = "users.in
       });
     }
 
-    return created;
+    return { invitation: created, existingUserId: existingUser?.id || null };
   });
 
   const acceptUrl = buildAcceptInvitationUrl(rawToken);
@@ -805,30 +841,194 @@ const inviteUser = async ({ orgId, actor, payload, context = {}, via = "users.in
     expiresAt: invitation.expiresAt,
   });
 
-  await sendEmail({
-    to: email,
-    ...template,
-    metadata: {
+  // A failed send has one answer for every e-mail and every transport fault
+  // (D-ID-1 ID-h): the invitation stays pending — the earlier link was
+  // already replaced, which keeps a corrected offer from leaving the old one
+  // usable — the failure is audited, and the admin sends it again from the
+  // pending list.
+  try {
+    await sendEmail({
+      to: email,
+      ...template,
+      metadata: {
+        orgId,
+        projectId,
+        companyId,
+        projectPartyId,
+        invitationId: invitation.id,
+        type: "invitation",
+      },
+    });
+  } catch (error) {
+    console.error(
+      `[users] invitation ${invitation.id} e-mail was not delivered: ${error?.code || error?.name || "ERROR"}`,
+    );
+    await recordAuthAuditEvent({
       orgId,
       projectId,
-      companyId,
-      projectPartyId,
-      invitationId: invitation.id,
-      type: "invitation",
+      userId: existingUserId,
+      actorId: actor?.id || null,
+      actorRole: actor?.role || null,
+      entityType: "invitation",
+      entityId: invitation.id,
+      action: "invitation_delivery_failed",
+      email,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: { code: error?.code || error?.name || null },
+    }).catch(() => null);
+    const failure = new HttpError(
+      502,
+      "INVITATION_EMAIL_FAILED",
+      "The invitation was saved but its e-mail could not be sent; send it again from pending invitations",
+      { invitationId: invitation.id },
+    );
+    failure.expose = true;
+    throw failure;
+  }
+
+  return { ...sanitizeInvitation(invitation), invited: true };
+};
+
+const PENDING_PAGE = 50;
+
+/** The invitation-manager's view of an invitation: the offer and its state, nothing about any account. */
+const pendingInvitationView = (invitation, failures) => ({
+  ...sanitizeInvitation(invitation),
+  note: invitation.note ?? null,
+  lastDeliveryFailedAt: failures.get(invitation.id) || null,
+});
+
+/**
+ * GET /users/invitations (owner decision D-ID-1 Q5): the invitations of this
+ * workspace still waiting to be accepted — pending and unexpired — for the
+ * people who manage invitations. Each carries its offer and whether its last
+ * e-mail failed, and nothing about whether the address has an account.
+ */
+const listInvitations = async ({ orgId, query = {} }) => {
+  const rows = await prisma.invitationToken.findMany({
+    where: { orgId, status: "pending", acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: PENDING_PAGE + 1,
+    ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+  });
+  let nextCursor = null;
+  if (rows.length > PENDING_PAGE) {
+    rows.pop();
+    nextCursor = rows[rows.length - 1].id;
+  }
+  const failures = new Map();
+  if (rows.length && prisma.authAuditEvent?.findMany) {
+    const failed = await prisma.authAuditEvent.findMany({
+      where: { orgId, entityType: "invitation", action: "invitation_delivery_failed", entityId: { in: rows.map((row) => row.id) } },
+      select: { entityId: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+    });
+    for (const row of failed) if (!failures.has(row.entityId)) failures.set(row.entityId, row.createdAt);
+  }
+  return {
+    items: rows.map((row) => pendingInvitationView(row, failures)),
+    pagination: { limit: PENDING_PAGE, nextCursor },
+  };
+};
+
+const findWorkspaceInvitation = async ({ orgId, invitationId }) => {
+  const row = await prisma.invitationToken.findFirst({ where: { id: invitationId, orgId } });
+  if (!row) throw new HttpError(404, "INVITATION_NOT_FOUND", "Invitation not found");
+  return row;
+};
+
+/**
+ * DELETE /users/invitations/:id: the link stops working, exactly as an
+ * expired one does. Taken under the e-mail's lock and as a conditional write
+ * on the pending state, so a revoke and an acceptance of the same link cannot
+ * both succeed: whichever comes second finds it no longer pending (409 here,
+ * an invalid link there). An expired link that was never revoked can still be
+ * revoked, once.
+ */
+const revokeInvitation = async ({ orgId, invitationId, actor = null, context = {} }) => {
+  const row = await findWorkspaceInvitation({ orgId, invitationId });
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    if (typeof tx.$executeRaw === "function") {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orgId}), hashtext(${row.email}))`;
+    }
+    const { count } = await tx.invitationToken.updateMany({
+      where: { id: row.id, orgId, status: "pending", acceptedAt: null, revokedAt: null },
+      data: { status: "revoked", revokedAt: now },
+    });
+    if (count !== 1) throw new HttpError(409, "INVITATION_NOT_PENDING", "This invitation is no longer pending");
+    await recordAuthAuditEvent({
+      tx,
+      orgId,
+      projectId: row.projectId || null,
+      actorId: actor?.id || null,
+      actorRole: actor?.role || null,
+      entityType: "invitation",
+      entityId: row.id,
+      action: "invitation_revoked",
+      email: row.email,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: { reason: "revoked_by_admin" },
+    });
+    if (row.projectId) {
+      await auditService.recordEvent({
+        tx,
+        orgId,
+        projectId: row.projectId,
+        entityType: "user_invitation",
+        entityId: row.id,
+        action: auditService.ACTIONS.UPDATED,
+        actorId: actor?.id || null,
+        actorRole: actor?.role || null,
+        summary: { email: row.email, role: row.role, status: "revoked" },
+        metadata: {},
+      });
+    }
+  });
+  return { id: row.id, revoked: true };
+};
+
+/**
+ * POST /users/invitations/:id/resend: a new invitation with the stored offer
+ * — the same e-mail, role, project, company, party and note, never a re-typed
+ * one — which replaces the earlier link. An accepted invitation is not
+ * re-sent.
+ */
+const resendInvitation = async ({ orgId, invitationId, actor = null, context = {} }) => {
+  const row = await findWorkspaceInvitation({ orgId, invitationId });
+  if (row.acceptedAt || row.status === "accepted") {
+    throw new HttpError(409, "INVITATION_NOT_PENDING", "This invitation is no longer pending");
+  }
+  return inviteUser({
+    orgId,
+    actor,
+    context,
+    via: "users.invitation_resend",
+    resendOf: row.id,
+    payload: {
+      email: row.email,
+      role: row.role,
+      projectId: row.projectId,
+      companyId: row.projectPartyId ? null : row.companyId,
+      projectPartyId: row.projectPartyId,
+      note: row.note,
     },
   });
-
-  return sanitizeInvitation(invitation);
 };
 
 module.exports = {
   listUsers,
   createUser,
   inviteUser,
+  listInvitations,
+  revokeInvitation,
+  resendInvitation,
   ALLOWED_ROLES,
   getUserById,
   updateUser,
-  resetPassword,
+  sendPasswordResetEmail,
   deactivateUser,
   activateUser,
 };

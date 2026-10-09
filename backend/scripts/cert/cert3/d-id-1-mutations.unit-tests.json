@@ -1,0 +1,651 @@
+{
+  "proof": "jest mocked unit suites (backend/src/**/__tests__), run one suite at a time from backend/: node ../node_modules/jest/bin/jest.js --runInBand --ci --silent --runTestsByPath <suite> with DATABASE_URL unset",
+  "note": "Drafted for the D-ID-1 round-2 fixes; not applied and not run. Each mutation names the suite that must FAIL under it. Not read by mutate-multi.js (its LISTS map names the five live proofs only).",
+  "mutations": [
+    {
+      "name": "MU-1 an epoch-stale MFA challenge answers MFA_CHALLENGE_INVALID again (the Q6 code reverted)",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "  if (!tokenEpochCurrent(payload, user)) throw new HttpError(401, \"SESSION_REVOKED\", \"This session has ended; sign in again\");",
+      "to": "  if (!tokenEpochCurrent(payload, user)) throw new HttpError(401, \"MFA_CHALLENGE_INVALID\", \"Start the sign-in again\");",
+      "suite": "src/services/__tests__/mfa.service.test.js",
+      "expect": "'voids a login challenge minted before a credential event (D-ID-1 Q6)' fails: SESSION_REVOKED expected, MFA_CHALLENGE_INVALID received"
+    },
+    {
+      "name": "MU-2 no epoch hold at issuance (login outcome and createAuthSessionPayload both stop holding the User row)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "    await holdCredentialEpoch(tx, user.id, provenEpoch);",
+      "to": "",
+      "also": [
+        {
+          "file": "backend/src/services/auth.service.js",
+          "from": "  if (expectedEpoch !== null) await holdCredentialEpoch(tx, user.id, expectedEpoch);",
+          "to": ""
+        }
+      ],
+      "suite": "src/services/__tests__/mfa.service.test.js (also sso.service.test.js, auth-password-reset-invitations.service.test.js)",
+      "expect": "mfa: 'holds the identity at the epoch the code was checked against…' (no hold), 'answers SESSION_REVOKED… between the code check and the issuance' and '…between the password check and the issuance' (a session is minted) fail; sso: 'holds the ticket's identity at its epoch…' and 'answers SESSION_REVOKED… between the ticket's read and the issuance' fail; reset/acceptance: 'accepts at the session's epoch and issues the workspace session held at that same epoch' fails (no issuance hold)"
+    },
+    {
+      "name": "MU-3 the epoch hold stops naming the epoch (holds any active row)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "WHERE \"id\" = ${userId} AND \"credentialEpoch\" = ${epoch} AND \"status\" = 'active' FOR NO KEY UPDATE",
+      "to": "WHERE \"id\" = ${userId} AND \"status\" = 'active' FOR NO KEY UPDATE",
+      "suite": "src/services/__tests__/mfa.service.test.js (also sso.service.test.js, auth-password-reset-invitations.service.test.js)",
+      "expect": "the hold-shape assertions (FROM \"User\" WHERE \"id\" = ? AND \"credentialEpoch\" = ? …) fail, and the overlapping-reset checks in mfa and sso mint a session instead of SESSION_REVOKED",
+      "refreshed": "round 3: the hold is FOR NO KEY UPDATE since D-ID-1 R1 (was FOR SHARE); same mutation, current text"
+    },
+    {
+      "name": "MU-4 the admin MFA reset takes no identity lock before its guarded write",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "    await membershipService.lockIdentity(tx, userId);",
+      "to": "",
+      "suite": "src/services/__tests__/mfa.service.test.js",
+      "expect": "'takes the identity lock before the guarded write…' (no identity lock) and 'refuses the admin reset when another workspace's acceptance commits while it waits for the identity lock' (the reset clears the factor) fail"
+    },
+    {
+      "name": "MU-5 the admin MFA reset leaves the identity's SSO tickets unspent",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "      if (tx.ssoTicket?.updateMany) await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: new Date() } });",
+      "to": "",
+      "suite": "src/services/__tests__/mfa.service.test.js",
+      "expect": "'takes the identity lock before the guarded write, and spends the identity's SSO tickets with its sessions' fails"
+    },
+    {
+      "name": "MS-1 SSO complete() issues without the ticket identity's epoch",
+      "file": "backend/src/services/sso.service.js",
+      "from": "    authService.createAuthSessionPayload(tx, user, context, { orgId: row.orgId, ssoOrgId: row.orgId, expectedEpoch: row.user.credentialEpoch ?? 0 }),",
+      "to": "    authService.createAuthSessionPayload(tx, user, context, { orgId: row.orgId, ssoOrgId: row.orgId }),",
+      "suite": "src/services/__tests__/sso.service.test.js",
+      "expect": "'holds the ticket's identity at its epoch inside the issuing transaction…' and 'answers SESSION_REVOKED, and writes no session, when a reset commits between the ticket's read and the issuance' fail"
+    },
+    {
+      "name": "MS-2 the first SSO link overwrites (the ssoSubject: null condition dropped)",
+      "file": "backend/src/services/sso.service.js",
+      "from": "          where: { id: membership.id, ssoSubject: null },",
+      "to": "          where: { id: membership.id },",
+      "suite": "src/services/__tests__/sso.service.test.js",
+      "expect": "'answers SSO_IDENTITY_CONFLICT, and keeps the first link, when another subject linked this membership after it was read' fails (the second subject overwrites and a ticket is issued)"
+    },
+    {
+      "name": "MS-3 a lost first-link race is not answered SSO_IDENTITY_CONFLICT",
+      "file": "backend/src/services/sso.service.js",
+      "from": "      if (linked.count !== 1 && current?.ssoSubject !== subject) {",
+      "to": "      if (false) {",
+      "suite": "src/services/__tests__/sso.service.test.js",
+      "expect": "'answers SSO_IDENTITY_CONFLICT, and keeps the first link, when another subject linked this membership after it was read' fails (a ticket is issued against the other subject's link)"
+    },
+    {
+      "name": "MUI-1 a resend does not re-check the replaced link under the (org, e-mail) lock",
+      "file": "backend/src/services/user.service.js",
+      "from": "      if (!original || original.acceptedAt || original.status === \"accepted\") {",
+      "to": "      if (false) {",
+      "suite": "src/services/__tests__/user-invitations.service.test.js",
+      "expect": "the three 'answers 409 INVITATION_NOT_PENDING when the link was … and writes and sends nothing' cases fail (a new link is minted and sent)"
+    },
+    {
+      "name": "MR-1 a reset leaves the identity's SSO tickets unspent (endIdentitySessions)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "    await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } });",
+      "to": "",
+      "suite": "src/services/__tests__/auth-password-reset-invitations.service.test.js",
+      "expect": "'uses a reset token once and revokes existing refresh sessions' fails (no ssoTicket.updateMany)"
+    },
+    {
+      "name": "MR-2 the reset no longer names whose sessions ended (sockets are not dropped)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "  return { reset: true, endedSessionsOf: resetToken.userId };",
+      "to": "  return { reset: true };",
+      "suite": "src/services/__tests__/auth-password-reset-invitations.service.test.js",
+      "expect": "'uses a reset token once and revokes existing refresh sessions' fails ({ reset: true, endedSessionsOf: 'user-1' } expected)"
+    },
+    {
+      "name": "MR-3 the reset claim judges expiry at request start again",
+      "file": "backend/src/services/auth.service.js",
+      "from": "        expiresAt: { gt: new Date() },",
+      "to": "        expiresAt: { gt: now },",
+      "suite": "src/services/__tests__/auth-password-reset-invitations.service.test.js",
+      "expect": "'judges the link's expiry at the claim, after the password is hashed' fails (the bound predates the transaction)"
+    },
+    {
+      "name": "MA-1 acceptance by an existing identity does not hold its session's epoch before the claim",
+      "file": "backend/src/services/auth.service.js",
+      "from": "        if (!reactivatesIdentity) await holdCredentialEpoch(tx, existingUser.id, Number.isInteger(identityEpoch) ? identityEpoch : -1);",
+      "to": "",
+      "suite": "src/services/__tests__/auth-password-reset-invitations.service.test.js",
+      "expect": "'answers SESSION_REVOKED when a reset moved the epoch since the session was minted, and claims nothing' fails (the link is claimed; the answer is signInRequired, not a rejection)"
+    },
+    {
+      "name": "MA-2 acceptance by an existing identity takes no identity lock",
+      "file": "backend/src/services/auth.service.js",
+      "from": "        await membershipService.lockIdentity(tx, existingUser.id);",
+      "to": "",
+      "suite": "src/services/__tests__/auth-password-reset-invitations.service.test.js",
+      "expect": "both 'an existing identity's acceptance under the identity lock…' checks fail (lock, lock, hold order not met)"
+    },
+    {
+      "name": "MSK-1 a socket from before a credential event still joins project rooms",
+      "file": "backend/src/realtime/socket.js",
+      "from": "    if ((account.credentialEpoch ?? 0) !== (user.credentialEpoch ?? 0)) {",
+      "to": "    if (false) {",
+      "suite": "src/realtime/__tests__/socket.test.js",
+      "expect": "'refuses a project join from a socket opened before the identity's last credential event, and disconnects it' fails (the join is acked ok)"
+    },
+    {
+      "name": "MW-1 the workspace-session route stops passing the token's epoch",
+      "file": "backend/src/routes/workspaces.js",
+      "from": "        { userId: req.tokenSubject.userId, orgId: req.params.orgId, ssoOrgId: req.tokenSubject.ssoOrgId, expectedEpoch: req.tokenSubject.epoch },",
+      "to": "        { userId: req.tokenSubject.userId, orgId: req.params.orgId, ssoOrgId: req.tokenSubject.ssoOrgId },",
+      "suite": "src/routes/__tests__/workspace-session-sso.routes.test.js",
+      "expect": "'hands the token's own epoch to the service as expectedEpoch (0 for a token minted before epochs)' fails"
+    },
+    {
+      "name": "MRT-1 POST /auth/reset-password does not drop the identity's sockets",
+      "file": "backend/src/routes/auth.js",
+      "from": "    if (endedSessionsOf) disconnectUser(req.app.get(\"io\"), endedSessionsOf);",
+      "to": "",
+      "suite": "src/routes/__tests__/auth-refresh-cookie.test.js",
+      "expect": "'drops the identity's live sockets after a reset, and leaves endedSessionsOf out of the answer' fails (io.in not called)"
+    },
+    {
+      "name": "MD-1 suspending a legacy home member writes no suspended membership row",
+      "file": "backend/src/services/user.service.js",
+      "from": "    if (!current && user.orgId === orgId && membershipService.hasMembershipModel(tx)) {",
+      "to": "    if (false) {",
+      "suite": "src/services/__tests__/user-identity.service.test.js",
+      "expect": "'writes a suspended membership from the User columns for a legacy home member another workspace holds…' fails (no row, no membership.suspended event)",
+      "refreshed": "round 3: deactivateUser acts on the membership re-read under the lock (`current`) since D-ID-1 R2; same mutation, current text"
+    },
+    {
+      "name": "MD-2 deactivation closes the identity without the identity lock",
+      "file": "backend/src/services/user.service.js",
+      "from": "      await membershipService.lockIdentity(tx, userId);",
+      "to": "",
+      "suite": "src/services/__tests__/user-identity.service.test.js",
+      "expect": "'takes the identity lock after the (org, e-mail) lock and before the guarded close…' fails (one advisory lock, not two)"
+    },
+    {
+      "name": "MD-3 deactivation leaves SSO tickets unspent",
+      "file": "backend/src/services/user.service.js",
+      "from": "      await tx.ssoTicket.updateMany({ where: closedIdentity ? { userId, usedAt: null } : { userId, orgId, usedAt: null }, data: { usedAt: now } });",
+      "to": "",
+      "suite": "src/services/__tests__/user-identity.service.test.js",
+      "expect": "'…spends every ticket of a closed identity' and 'spends only this workspace's tickets when the identity stays open elsewhere' fail"
+    },
+    {
+      "name": "MREG-1 PUBLIC_REGISTRATION=true opens registration under an unknown NODE_ENV again",
+      "file": "backend/src/config/registration.js",
+      "from": "  if (!OPEN_BY_DEFAULT.has(String(env.NODE_ENV ?? \"\").trim().toLowerCase())) return false;",
+      "to": "  if ([\"true\", \"1\"].includes(String(env.PUBLIC_REGISTRATION ?? \"\").trim().toLowerCase()) && String(env.NODE_ENV ?? \"\").trim().toLowerCase() !== \"production\") return true;\n  if (!OPEN_BY_DEFAULT.has(String(env.NODE_ENV ?? \"\").trim().toLowerCase())) return false;",
+      "suite": "src/config/__tests__/registration.test.js",
+      "expect": "'PUBLIC_REGISTRATION=true cannot open it where NODE_ENV=\"staging\"' (and prod/qa/develop/\"\"/undefined) and getPublicConfig's staging+true case fail"
+    },
+    {
+      "name": "MU-6 the epoch hold is FOR SHARE again (D-ID-1 R1 reverted: concurrent sign-ins of one person deadlock upgrading to the lastLogin update)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "'active' FOR NO KEY UPDATE`;",
+      "to": "'active' FOR SHARE`;",
+      "suite": "src/services/__tests__/mfa.service.test.js (also src/services/__tests__/sso.service.test.js, src/services/__tests__/auth-password-reset-invitations.service.test.js)",
+      "expect": "mfa 'holds the identity at the epoch the code was checked against…', sso 'holds the ticket's identity at its epoch…' and 'writes the callback's ticket inside a transaction that first holds…', reset 'answers SESSION_REVOKED when a reset moved the epoch…' and 'issues a new identity's session held at the epoch its acceptance wrote…' fail (…FOR NO KEY UPDATE$ expected, FOR SHARE received)"
+    },
+    {
+      "name": "MU-7 the admin MFA reset awaits the notice e-mail before answering (D-ID-1 R3 reverted)",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "  setImmediate(() => {\r\n    const { sendEmail, templates } = require(\"./email.service\");\r\n    sendEmail(",
+      "to": "  await (() => {\r\n    const { sendEmail, templates } = require(\"./email.service\");\r\n    return sendEmail(",
+      "also": [
+        {
+          "file": "backend/src/services/mfa.service.js",
+          "from": "  });\r\n  return { reset: true };",
+          "to": "  })();\r\n  return { reset: true };"
+        }
+      ],
+      "suite": "src/services/__tests__/mfa.service.test.js",
+      "expect": "'answers the admin reset before the notice is sent, even when the provider never answers' fails (adminReset never resolves while the provider hangs: the 5 s test timeout)"
+    },
+    {
+      "name": "MU-8 own-factor writes drop the request's epoch (D-ID-1 N2 epoch predicate removed)",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "    where: { id: userId, status: \"active\", ...(Number.isInteger(epoch) ? { credentialEpoch: epoch } : {}), ...expect },",
+      "to": "    where: { id: userId, status: \"active\", ...expect },",
+      "suite": "src/services/__tests__/mfa.service.test.js",
+      "expect": "'enables at the request's epoch, on the pending seed it read' (where shape), 'answers 401 SESSION_REVOKED to a setup from a session minted before a credential event' (the seed is written), 'refuses an enable whose code was checked before an admin reset committed' and 'refuses a disable proven before a password reset committed' (409 MFA_STATE_CHANGED instead of 401), 'refuses new backup codes from a session minted before a credential event' (the codes are replaced) fail"
+    },
+    {
+      "name": "MU-9 enable no longer requires the pending seed it read (a seed replaced or cleared meanwhile is enabled anyway)",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "    expect: { mfaEnabled: false, mfaPendingSecretEnc: user.mfaPendingSecretEnc },",
+      "to": "    expect: { mfaEnabled: false },",
+      "suite": "src/services/__tests__/mfa.service.test.js",
+      "expect": "'answers 409 MFA_STATE_CHANGED when another setup replaced the pending seed at the same epoch, and keeps the newer seed' (the factor is enabled from the old seed) and 'enables at the request's epoch, on the pending seed it read' (where shape) fail"
+    },
+    {
+      "name": "MU-10 disable no longer requires the password hash it checked",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "expect: { mfaEnabled: true, passwordHash: user.passwordHash }",
+      "to": "expect: { mfaEnabled: true }",
+      "suite": "src/services/__tests__/mfa.service.test.js",
+      "expect": "'answers 409 MFA_STATE_CHANGED to a disable whose password changed meanwhile at the same epoch' (the factor is turned off) and 'refuses a disable proven before a password reset committed' (where shape: no passwordHash) fail"
+    },
+    {
+      "name": "MU-11 new backup codes no longer require the seed the code was checked against",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "expect: { mfaEnabled: true, mfaSecretEnc: user.mfaSecretEnc }",
+      "to": "expect: { mfaEnabled: true }",
+      "suite": "src/services/__tests__/mfa.service.test.js",
+      "expect": "'answers 409 MFA_STATE_CHANGED to new backup codes when the seed changed meanwhile, and keeps the codes there are' fails (the codes are replaced)"
+    },
+    {
+      "name": "MU-12 a lost own-factor write is always 409 MFA_STATE_CHANGED (a credential event is not answered SESSION_REVOKED)",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "  if (!now || now.status !== \"active\" || (Number.isInteger(epoch) && now.credentialEpoch !== epoch)) {",
+      "to": "  if (false) {",
+      "suite": "src/services/__tests__/mfa.service.test.js",
+      "expect": "every own-factor 401 case fails with 409 MFA_STATE_CHANGED: 'answers 401 SESSION_REVOKED to a setup from a session minted before a credential event', '…when the identity was closed meanwhile at the same epoch', 'refuses an enable whose code was checked before an admin reset committed', 'refuses a disable proven before a password reset committed', 'refuses new backup codes from a session minted before a credential event'"
+    },
+    {
+      "name": "MU-13 own-factor writes no longer require an active identity",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "    where: { id: userId, status: \"active\", ...(Number.isInteger(epoch)",
+      "to": "    where: { id: userId, ...(Number.isInteger(epoch)",
+      "suite": "src/services/__tests__/mfa.service.test.js",
+      "expect": "'answers 401 SESSION_REVOKED when the identity was closed meanwhile at the same epoch, and writes no seed' fails (the seed is written for a closed identity); the suite's beforeOwnFactorWrite recognises the own-factor write by `where.status`, so the other interleavings fail as well (their commit never lands) and 'enables at the request's epoch…' fails on the where shape"
+    },
+    {
+      "name": "MS-4 the SSO callback writes its ticket without holding the identity's epoch (Codex r2 #3 reverted)",
+      "file": "backend/src/services/sso.service.js",
+      "from": "      await require(\"./auth.service\").holdCredentialEpoch(tx, user.id, Number.isInteger(user.credentialEpoch) ? user.credentialEpoch : 0);",
+      "to": "",
+      "suite": "src/services/__tests__/sso.service.test.js",
+      "expect": "'writes the callback's ticket inside a transaction that first holds the identity at the epoch the callback read' (trace is [ticket], no hold) and 'answers SESSION_REVOKED, and writes no ticket, when a reset commits between the callback's identity read and the ticket' (a ticket is written, no error) fail"
+    },
+    {
+      "name": "MA-3 a new identity's acceptance issues its session at whatever epoch the row has by then (Codex r2 #1 reverted)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "        : Number.isInteger(accepted.credentialEpoch) ? accepted.credentialEpoch : 0;",
+      "to": "        : null;",
+      "suite": "src/services/__tests__/auth-password-reset-invitations.service.test.js",
+      "expect": "'issues a new identity's session held at the epoch its acceptance wrote, and answers signInRequired when a reset moved it before the issuance' fails (the hold is at epoch 1 and a session is minted)"
+    },
+    {
+      "name": "MB-1 bootstrap reissue counts used links without locking them (D-ID-1 N3 reverted)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "      await tx.$queryRaw`SELECT \"id\" FROM \"PasswordResetToken\" WHERE \"userId\" = ${user.id} FOR UPDATE`;",
+      "to": "",
+      "suite": "src/services/__tests__/auth-password-reset-invitations.service.test.js",
+      "expect": "'takes the bootstrap lock, then locks the administrator's link rows FOR UPDATE, and only then counts the used ones' (no links-lock) and 'refuses (409 BOOTSTRAP_NOT_EMPTY), and issues no link, when a reset completing the first link commits while the reissue waits for the link rows' (a second usable link is issued) fail"
+    },
+    {
+      "name": "MM-1 changeMembership writes unconditionally (the row-as-read where dropped; D-ID-1 N1 reverted)",
+      "file": "backend/src/services/membership.service.js",
+      "from": "    where: { id: membership.id, role: membership.role, isAdmin: membership.isAdmin, isOwner: membership.isOwner, status: membership.status },",
+      "to": "    where: { id: membership.id },",
+      "suite": "src/services/__tests__/membership-change.service.test.js (also src/services/__tests__/user-identity.service.test.js)",
+      "expect": "membership-change: 'writes only the role, conditional on…' and 'writes only the status…' (where shape), the three 409 MEMBERSHIP_CHANGED cases (the stale edit is written); user-identity: 'changes standing under the (org, e-mail) lock…' and the R2 'suspends the membership an acceptance wrote…' (where shape) fail"
+    },
+    {
+      "name": "MM-2 changeMembership writes every field again (the stale status written back)",
+      "file": "backend/src/services/membership.service.js",
+      "from": "  for (const field of changed) data[field] = next[field];",
+      "to": "  for (const field of [\"role\", \"isAdmin\", \"isOwner\", \"status\"]) data[field] = next[field];",
+      "suite": "src/services/__tests__/membership-change.service.test.js (also src/services/__tests__/user-identity.service.test.js)",
+      "expect": "membership-change: 'writes only the role, conditional on…' and 'writes only the status (and its own dates)…' fail (data carries all four fields); user-identity: 'changes standing under the (org, e-mail) lock…' and the R2 'suspends the membership an acceptance wrote…' fail (data shape)"
+    },
+    {
+      "name": "MM-3 a lost conditional write is not answered 409 MEMBERSHIP_CHANGED",
+      "file": "backend/src/services/membership.service.js",
+      "from": "  if (written.count !== 1) {",
+      "to": "  if (false) {",
+      "suite": "src/services/__tests__/membership-change.service.test.js",
+      "expect": "'answers 409 MEMBERSHIP_CHANGED to a role edit when a suspension committed after the read…', '…when another admin changed the role meanwhile…' and '…to a suspension when administration was granted meanwhile…' fail (resolved, events recorded)"
+    },
+    {
+      "name": "MM-4 changeMembership writes even when nothing changed",
+      "file": "backend/src/services/membership.service.js",
+      "from": "  if (!changed.length) return { membership, before: membership, changed };",
+      "to": "",
+      "suite": "src/services/__tests__/membership-change.service.test.js",
+      "expect": "'writes nothing when nothing changed (a form re-sending the same values)' fails (updateMany called with empty data)"
+    },
+    {
+      "name": "MUU-1 updateUser changes standing without the (org, e-mail) lock (D-ID-1 N1)",
+      "file": "backend/src/services/user.service.js",
+      "from": "  const updated = await prisma.$transaction(async (tx) => {\r\n    if (typeof tx.$executeRaw === \"function\") {",
+      "to": "  const updated = await prisma.$transaction(async (tx) => {\r\n    if (false) {",
+      "suite": "src/services/__tests__/user-identity.service.test.js",
+      "expect": "'changes standing under the (org, e-mail) lock: a suspension that committed while it waited stays, and only the role is written' fails (no lock call; the modelled suspension never commits, so the where reads status active); round 4: so do the six round-4 updateUser cases that model their interleaving at the lock ('writes the User mirror…', 'mirrors the membership as it is under the lock…', 'refuses (503) … an unchanged admin flag…', 'lets the same re-grant through…', and both User-column 'refuses (503)…' cases)",
+      "refreshed": "round 4: updateUser makes the whole standing change one transaction (`const updated = …`) since the Codex r3 fixes; same mutation, current text (deactivateUser's own `const updated = await prisma.$transaction` is followed by a comment, so this two-line text is unique)"
+    },
+    {
+      "name": "MD-4 deactivation acts on the membership read before the lock again (D-ID-1 R2 reverted)",
+      "file": "backend/src/services/user.service.js",
+      "from": "      ? await membershipService.findMembership({ tx, orgId, userId })",
+      "to": "      ? membership",
+      "suite": "src/services/__tests__/user-identity.service.test.js",
+      "expect": "'suspends the membership an acceptance wrote while it waited for the lock, instead of inserting a second row' (create hits the unique violation) and 'refuses (400 ALREADY_INACTIVE), and ends nothing, when the row it re-reads under the lock is no longer active' (the stale active read goes on to close and end sessions) fail"
+    },
+    {
+      "name": "MD-5 deactivation goes on when the membership re-read under the lock is no longer active",
+      "file": "backend/src/services/user.service.js",
+      "from": "    if (current && current.status !== membershipService.MEMBERSHIP_STATUSES.ACTIVE) {",
+      "to": "    if (false) {",
+      "suite": "src/services/__tests__/user-identity.service.test.js",
+      "expect": "'refuses (400 ALREADY_INACTIVE), and ends nothing, when the row it re-reads under the lock is no longer active' fails (resolves; user.updateMany and refreshSession.updateMany are called)"
+    },
+    {
+      "name": "MAPI-1 createApiClient is not guarded by the emergency switch (Codex r2 #6 reverted)",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "Revoking a key still works.\r\n  require(\"./membership.service\").assertAccessExpansionAllowed();",
+      "to": "Revoking a key still works.\r\n",
+      "suite": "src/services/__tests__/api-client.service.test.js",
+      "expect": "both 'refuses to create … (503 MEMBERSHIP_WRITES_SUSPENDED) before anything is read or written' cases fail (a key is created)"
+    },
+    {
+      "name": "MAPI-2 updateApiClient changes scopes, projects and expiry while the switch is off",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "    require(\"./membership.service\").assertAccessExpansionAllowed();\r\n  }\r\n  if (payload.status === \"revoked\"",
+      "to": "    void 0;\r\n  }\r\n  if (payload.status === \"revoked\"",
+      "suite": "src/services/__tests__/api-client.service.test.js",
+      "expect": "all six 'refuses to change a key to … (503), and the key is unchanged' cases fail (the key is widened)",
+      "refreshed": "review fix round"
+    },
+    {
+      "name": "MAPI-3 updateApiClient refuses every edit while the switch is off (a rename too)",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "  const sameSet = ",
+      "to": "  require(\"./membership.service\").assertAccessExpansionAllowed();\r\n  const sameSet = ",
+      "suite": "src/services/__tests__/api-client.service.test.js",
+      "expect": "'still renames, describes and revokes a key while the switch is off' fails (503 on the rename)",
+      "refreshed": "review fix round"
+    },
+    {
+      "name": "MAPI-4 updateApiClient refuses scope/project/expiry edits whatever the switch says",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "    require(\"./membership.service\").assertAccessExpansionAllowed();\r\n  }\r\n  if (payload.status === \"revoked\"",
+      "to": "    throw new HttpError(503, \"MEMBERSHIP_WRITES_SUSPENDED\", \"paused\");\r\n  }\r\n  if (payload.status === \"revoked\"",
+      "suite": "src/services/__tests__/api-client.service.test.js",
+      "expect": "'lets the same changes through with the switch on' fails (503 with the switch on)",
+      "refreshed": "review fix round"
+    },
+    {
+      "name": "MP-1 a party's permission template changes while the switch is off",
+      "file": "backend/src/services/company-party.service.js",
+      "from": "      (data.permissionTemplateId !== undefined && differs(data.permissionTemplateId, current.permissionTemplateId)) ||",
+      "to": "",
+      "suite": "src/services/__tests__/company-party.service.test.js",
+      "expect": "'refuses a party PATCH to a broader template…', '…to no template (the restriction removed)…' and '…to a broader template beside a contact edit…' fail (the template is written)"
+    },
+    {
+      "name": "MP-2 a closed party is brought back while the switch is off",
+      "file": "backend/src/services/company-party.service.js",
+      "from": "      (data.status === \"active\" && current.status !== \"active\");",
+      "to": "      false;",
+      "suite": "src/services/__tests__/company-party.service.test.js",
+      "expect": "'refuses to bring a closed party back while the switch is off (503), and it stays closed' fails (the party is reactivated)"
+    },
+    {
+      "name": "MP-3 a party moves to another company while the switch is off",
+      "file": "backend/src/services/company-party.service.js",
+      "from": "      (payload.partyId && company.id !== current.companyId) ||",
+      "to": "",
+      "suite": "src/services/__tests__/company-party.service.test.js",
+      "expect": "'refuses a party PATCH to another company…' fails (companyId is written)"
+    },
+    {
+      "name": "MP-4 the party updater never refuses (the 503 dropped)",
+      "file": "backend/src/services/company-party.service.js",
+      "from": "    if (widens) require(\"./membership.service\").assertAccessExpansionAllowed();",
+      "to": "",
+      "suite": "src/services/__tests__/company-party.service.test.js",
+      "expect": "all eight 'refuses a party PATCH to …' cases and 'refuses to bring a closed party back…' fail"
+    },
+    {
+      "name": "MP-5 the party updater refuses every change while the switch is off (contact edits and closing too)",
+      "file": "backend/src/services/company-party.service.js",
+      "from": "  if (current && !require(\"./membership.service\").isMembershipWriteEnabled()) {",
+      "to": "  if (current && !require(\"./membership.service\").isMembershipWriteEnabled()) { require(\"./membership.service\").assertAccessExpansionAllowed();",
+      "suite": "src/services/__tests__/company-party.service.test.js",
+      "expect": "'still edits a party's contact details, re-sends its own values, and closes it while the switch is off' fails (503 on the contact edit)"
+    },
+    {
+      "name": "MP-6 a party's access level changes while the switch is off",
+      "file": "backend/src/services/company-party.service.js",
+      "from": "      differs(data.accessLevel, current.accessLevel) ||",
+      "to": "",
+      "suite": "src/services/__tests__/company-party.service.test.js",
+      "expect": "'refuses a party PATCH to a higher access level…' fails"
+    },
+    {
+      "name": "MP-7 a party's explicit permissions change while the switch is off",
+      "file": "backend/src/services/company-party.service.js",
+      "from": "      differs(data.permissionsJson, current.permissionsJson) ||",
+      "to": "",
+      "suite": "src/services/__tests__/company-party.service.test.js",
+      "expect": "'refuses a party PATCH to explicit permissions…' fails"
+    },
+    {
+      "name": "MP-8 a party's permission profile changes while the switch is off",
+      "file": "backend/src/services/company-party.service.js",
+      "from": "      differs(data.permissionProfile, current.permissionProfile) ||",
+      "to": "",
+      "suite": "src/services/__tests__/company-party.service.test.js",
+      "expect": "'refuses a party PATCH to another permission profile…' fails"
+    },
+    {
+      "name": "MP-9 a party's role changes while the switch is off",
+      "file": "backend/src/services/company-party.service.js",
+      "from": "      role !== current.role ||",
+      "to": "",
+      "suite": "src/services/__tests__/company-party.service.test.js",
+      "expect": "'refuses a party PATCH to another role…' fails"
+    },
+    {
+      "name": "MP-10 the party updater refuses widening whatever the switch says",
+      "file": "backend/src/services/company-party.service.js",
+      "from": "  if (current && !require(\"./membership.service\").isMembershipWriteEnabled()) {",
+      "to": "  if (current) {",
+      "also": [
+        {
+          "file": "backend/src/services/company-party.service.js",
+          "from": "    if (widens) require(\"./membership.service\").assertAccessExpansionAllowed();",
+          "to": "    if (widens) throw new HttpError(503, \"MEMBERSHIP_WRITES_SUSPENDED\", \"paused\");"
+        }
+      ],
+      "suite": "src/services/__tests__/company-party.service.test.js",
+      "expect": "'lets the same widening changes through with the switch on' fails (503 with the switch on)"
+    },
+    {
+      "name": "MSK-2 the connection re-read ignores the credential epoch (a pre-reset handshake keeps its socket)",
+      "file": "backend/src/realtime/socket.js",
+      "from": "        if (!account || (account.credentialEpoch ?? 0) !== (user.credentialEpoch ?? 0)) socket.disconnect(true);",
+      "to": "        if (!account) socket.disconnect(true);",
+      "suite": "src/realtime/__tests__/socket.test.js",
+      "expect": "'disconnects a socket whose handshake read the standing a credential event has since changed, after joining its rooms' fails (not disconnected)"
+    },
+    {
+      "name": "MSK-3 no re-read after joining the rooms (the handshake's read is trusted; Codex r2 #2 reverted)",
+      "file": "backend/src/realtime/socket.js",
+      "from": "    accountStanding({ userId: user.id, orgId: user.orgId, membershipId: user.membershipId || null })",
+      "to": "    Promise.resolve(user)",
+      "suite": "src/realtime/__tests__/socket.test.js",
+      "expect": "'disconnects a socket whose handshake read the standing a credential event has since changed…' and 'disconnects a socket whose account is gone by the re-read' (not disconnected) and 'keeps a socket whose account still stands…' (findUnique not called) fail"
+    },
+    {
+      "name": "MUU-2 updateUser writes the User mirror through the outer client, outside the locked transaction (Codex r3 mirror fix reverted)",
+      "file": "backend/src/services/user.service.js",
+      "from": "      ? tx.user.update({ where: { id: userId }, data, include: withCount })",
+      "to": "      ? prisma.user.update({ where: { id: userId }, data, include: withCount })",
+      "suite": "src/services/__tests__/user-identity.service.test.js",
+      "expect": "'changes standing under the (org, e-mail) lock…' (mockTx.user.update not called; mockPrisma.user.update called), 'writes the User mirror (role, administration) with the name and phone inside the locked transaction…', 'mirrors the membership as it is under the lock…', 'lets the same re-grant through with the switch on, and mirrors it inside the transaction', and the User-column 'lets the same grant through with the switch on…' and 'lets narrowing through with the switch off…' fail (no write recorded through the transaction)"
+    },
+    {
+      "name": "MUU-3 the User-column branch judges the switch against the pre-lock snapshot again",
+      "file": "backend/src/services/user.service.js",
+      "from": "      const grants = roleChanges || (payload.isCompanyAdmin === true && !locked.isCompanyAdmin) || wantsOwner;",
+      "to": "      const grants = (payload.role !== undefined && payload.role !== user.role) || (payload.isCompanyAdmin === true && !user.isCompanyAdmin) || wantsOwner;",
+      "suite": "src/services/__tests__/user-identity.service.test.js",
+      "expect": "both User-column 'refuses (503), and writes nothing, … with the switch off' cases fail (the snapshot says unchanged; the stale grant / role is written)"
+    },
+    {
+      "name": "MUU-4 the User-column branch takes no switch decision under the lock",
+      "file": "backend/src/services/user.service.js",
+      "from": "      if (grants) membershipService.assertAccessExpansionAllowed();",
+      "to": "",
+      "suite": "src/services/__tests__/user-identity.service.test.js",
+      "expect": "both User-column 'refuses (503), and writes nothing, … with the switch off' cases fail (resolved; the grant / role is written)"
+    },
+    {
+      "name": "MUU-5 updateUser does not re-read the User row under the lock (the snapshot is trusted)",
+      "file": "backend/src/services/user.service.js",
+      "from": "    const locked = await tx.user.findUnique({ where: { id: userId }, include: withCount });",
+      "to": "    const locked = user;",
+      "suite": "src/services/__tests__/user-identity.service.test.js",
+      "expect": "'changes standing under the (org, e-mail) lock…' and 'writes the User mirror (role, administration) with the name and phone…' (tx.user.findUnique not called) and both User-column 'refuses (503)…' cases (the snapshot shows no grant; it is written) fail"
+    },
+    {
+      "name": "MUU-6 the User mirror copies the pre-lock membership snapshot, not the row as changed under the lock",
+      "file": "backend/src/services/user.service.js",
+      "from": "      membership = changed.membership;",
+      "to": "      void changed.membership;",
+      "suite": "src/services/__tests__/user-identity.service.test.js",
+      "expect": "'changes standing under the (org, e-mail) lock…' (mirror data role qs, not pm), 'writes the User mirror (role, administration) with the name and phone…' (role qs) and 'mirrors the membership as it is under the lock…' (role qs, isCompanyAdmin true from the snapshot) fail"
+    },
+    {
+      "name": "MM-5 changeMembership takes no switch decision (only the pre-lock snapshot check in updateUser remains; Codex r3 reverted)",
+      "file": "backend/src/services/membership.service.js",
+      "from": "  if (expands) assertAccessExpansionAllowed();",
+      "to": "",
+      "suite": "src/services/__tests__/membership-change.service.test.js (also src/services/__tests__/user-identity.service.test.js)",
+      "expect": "membership-change: all five 'refuses … (503 MEMBERSHIP_WRITES_SUSPENDED) while the switch is off, and writes nothing' cases and 'judges the flag against the row…' (the revoked flag is re-granted) fail; user-identity: 'refuses (503), and writes nothing, an unchanged admin flag against a row whose administration was revoked while it waited, with the switch off' fails (administration restored)"
+    },
+    {
+      "name": "MM-6 a grant of administration is not judged as widening",
+      "file": "backend/src/services/membership.service.js",
+      "from": "    (next.isAdmin && !membership.isAdmin) ||",
+      "to": "",
+      "suite": "src/services/__tests__/membership-change.service.test.js (also src/services/__tests__/user-identity.service.test.js)",
+      "expect": "membership-change: 'refuses a grant of administration (503…)' and 'judges the flag against the row…' fail; user-identity: 'refuses (503), and writes nothing, an unchanged admin flag…' fails"
+    },
+    {
+      "name": "MM-7 a return to active is not judged as widening",
+      "file": "backend/src/services/membership.service.js",
+      "from": "    (changed.includes(\"status\") && next.status === MEMBERSHIP_STATUSES.ACTIVE);",
+      "to": "    false;",
+      "suite": "src/services/__tests__/membership-change.service.test.js",
+      "expect": "'refuses a return to active from suspended (503…)' and 'refuses a return to active from left (503…)' fail (reactivated)"
+    },
+    {
+      "name": "MM-8 a role change is not judged as widening",
+      "file": "backend/src/services/membership.service.js",
+      "from": "    changed.includes(\"role\") ||",
+      "to": "",
+      "suite": "src/services/__tests__/membership-change.service.test.js",
+      "expect": "'refuses a role change (503…) while the switch is off, and writes nothing' fails (the role is written)"
+    },
+    {
+      "name": "MM-9 a grant of ownership is not judged as widening",
+      "file": "backend/src/services/membership.service.js",
+      "from": "    (next.isOwner && !membership.isOwner) ||",
+      "to": "",
+      "suite": "src/services/__tests__/membership-change.service.test.js",
+      "expect": "'refuses a grant of ownership to an administrator (503…)' fails (the target is already an administrator, so only the ownership clause can refuse it)"
+    },
+    {
+      "name": "MM-10 changeMembership refuses every change while the switch is off (narrowing too)",
+      "file": "backend/src/services/membership.service.js",
+      "from": "  if (expands) assertAccessExpansionAllowed();",
+      "to": "  assertAccessExpansionAllowed();",
+      "suite": "src/services/__tests__/membership-change.service.test.js",
+      "expect": "the four 'lets narrowing through with the switch off: …' cases fail (503); 'judges the flag against the row…' still passes, since an unchanged row returns before the switch is judged"
+    },
+    {
+      "name": "MO-1 owners are removed without the workspace owners lock (Codex r3 reverted)",
+      "file": "backend/src/services/membership.service.js",
+      "from": "      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('owners'), hashtext(${orgId}))`;",
+      "to": "",
+      "suite": "src/services/__tests__/membership-change.service.test.js",
+      "expect": "the three 'takes the workspace's owners lock before counting the other owners when an owner …' cases (no lock) and 'answers 409 LAST_OWNER, and writes nothing, when the other owner was removed while this removal waited for the owners lock' (the stale count lets the last owner go) fail"
+    },
+    {
+      "name": "MO-2 an owner suspended or leaving is not an ownership loss (no lock, no last-owner count)",
+      "file": "backend/src/services/membership.service.js",
+      "from": "    (!next.isOwner || next.status !== MEMBERSHIP_STATUSES.ACTIVE);",
+      "to": "    !next.isOwner;",
+      "suite": "src/services/__tests__/membership-change.service.test.js",
+      "expect": "'takes the workspace's owners lock … when an owner is suspended' and '… when an owner leaves' fail (no lock, count not called)"
+    },
+    {
+      "name": "MO-3 the owners lock is taken but the other owners are not counted",
+      "file": "backend/src/services/membership.service.js",
+      "from": "    if ((await countActiveOwners({ tx, orgId, excludeUserId: userId })) === 0) {",
+      "to": "    if (false) {",
+      "suite": "src/services/__tests__/membership-change.service.test.js",
+      "expect": "'answers 409 LAST_OWNER, and writes nothing, when the other owner was removed while this removal waited…' fails (the last owner is removed) and the three lock cases fail on count not called"
+    },
+    {
+      "name": "MOR-1 recovery approval does not hold the approving operator's epoch (Codex r3 reverted)",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "      await require(\"./auth.service\").holdCredentialEpoch(tx, approver.id, Number.isInteger(approver.credentialEpoch) ? approver.credentialEpoch : 0);",
+      "to": "",
+      "suite": "src/services/__tests__/owner-recovery.service.test.js",
+      "expect": "all five owner-recovery cases fail: 'holds the approver at the epoch proven before the transaction…' (trace has no hold), the three 'refuses RECOVERY_OPERATOR_NOT_ALLOWED…' cases (ownership granted) and 'passes any other failure of the hold on unchanged…' (no hold, so no error: the grant is made)"
+    },
+    {
+      "name": "MOR-2 an ended operator proof is not turned into RECOVERY_OPERATOR_NOT_ALLOWED",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "      if (error?.code === \"SESSION_REVOKED\") {",
+      "to": "      if (false) {",
+      "suite": "src/services/__tests__/owner-recovery.service.test.js",
+      "expect": "the three 'refuses RECOVERY_OPERATOR_NOT_ALLOWED…' cases fail (401 SESSION_REVOKED received; the refusal row records SESSION_REVOKED)"
+    },
+    {
+      "name": "MOR-3 every failure of the operator hold becomes an operator refusal",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "      if (error?.code === \"SESSION_REVOKED\") {",
+      "to": "      if (true) {",
+      "suite": "src/services/__tests__/owner-recovery.service.test.js",
+      "expect": "'passes any other failure of the hold on unchanged…' fails (403 RECOVERY_OPERATOR_NOT_ALLOWED instead of the P1017 error)"
+    },
+    {
+      "name": "MOR-4 the operator is held at the epoch the row has now, not the one proven before the wait",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "holdCredentialEpoch(tx, approver.id, Number.isInteger(approver.credentialEpoch) ? approver.credentialEpoch : 0);",
+      "to": "holdCredentialEpoch(tx, approver.id, (await tx.user.findUnique({ where: { id: approver.id } })).credentialEpoch ?? 0);",
+      "suite": "src/services/__tests__/owner-recovery.service.test.js",
+      "expect": "the two epoch-moved cases ('…the operator's password reset…', '…an administrator's MFA reset of the operator…') fail (the hold finds the moved epoch and ownership is granted); the closure case still refuses on status"
+    },
+    {
+      "name": "MORG-1 createWorkspace is not guarded by the emergency switch (Codex r3 reverted: an ownerless workspace commits)",
+      "file": "backend/src/services/organisation.service.js",
+      "from": "  membershipService.assertAccessExpansionAllowed();",
+      "to": "",
+      "suite": "src/services/__tests__/organisation-create-workspace.service.test.js",
+      "expect": "'refuses 503 MEMBERSHIP_WRITES_SUSPENDED while the switch is off, before any lock, read or write' fails (the transaction runs, the organisation row is created and no owner membership is written)"
+    },
+    {
+      "name": "MS-5 the SSO callback materialises a legacy home member without the (org, e-mail) lock (Codex r3 reverted)",
+      "file": "backend/src/services/sso.service.js",
+      "from": "          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${org.id}), hashtext(${user.email}))`;",
+      "to": "",
+      "suite": "src/services/__tests__/sso.service.test.js",
+      "expect": "'takes the lock inside a transaction before it writes the row from the User columns' (trace [create, query, ticket]) and 'refuses USER_INACTIVE … when a deactivation wrote the row suspended while the callback waited for the lock' (the modelled suspension never lands; an active row is created and a ticket issued) fail"
+    },
+    {
+      "name": "MS-6 the SSO legacy branch signs in on a row the lock-holder left suspended",
+      "file": "backend/src/services/sso.service.js",
+      "from": "        if (row && row.status !== membershipService.MEMBERSHIP_STATUSES.ACTIVE) {",
+      "to": "        if (false) {",
+      "suite": "src/services/__tests__/sso.service.test.js",
+      "expect": "'refuses USER_INACTIVE, and writes, links and issues nothing, when a deactivation wrote the row suspended…' fails (the suspended row is linked, membership.created is recorded and a ticket is issued)"
+    },
+    {
+      "name": "MAPI-5 the switch guard on key updates judges presence again, not values (an unchanged resend counts as a change)",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "  const sameSet = (a = [], b = []) =>",
+      "to": "  const sameSet = () => false;\n  const unusedSameSet = (a = [], b = []) =>",
+      "suite": "src/services/__tests__/api-client.service.test.js",
+      "expect": "'lets a rename through with the switch off when the form resends the same scopes, projects and expiry' fails (503)"
+    }
+  ],
+  "round3": "Round 3 (D-ID-1 Codex r2 fixes): MU-3 and MD-1 `from` refreshed to the current text; MU-6..MU-13, MS-4, MA-3, MB-1, MM-1..MM-4, MUU-1, MD-4, MD-5, MAPI-1..MAPI-4, MP-1..MP-10, MSK-2, MSK-3 added. Not applied, not run.",
+  "round4": "Round 4 (D-ID-1 Codex r3 fixes): MUU-1 `from` refreshed to the current text; MUU-2..MUU-6, MM-5..MM-10, MO-1..MO-3, MOR-1..MOR-4, MORG-1, MS-5, MS-6 added for the new unit checks (user-identity, membership-change, owner-recovery, organisation-create-workspace, sso suites). Not applied to the working tree. Each of these 22 was run once (2026-10-08) against a scratch copy of backend/src + shared/ (jest resolving from the repo node_modules): every one made every suite it names fail, and the `expect` texts record the tests observed failing."
+}

@@ -4,7 +4,9 @@ const mockAssertProjectAccess = jest.fn();
 const mockPrisma = { user: { findUnique: jest.fn(async () => ({ id: "user-1", orgId: "org-1", status: "active", isCompanyAdmin: false })) } };
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 
+// The real credential-epoch comparison (D-ID-1 Q6); only the signature check is stubbed.
 jest.mock("../../utils/tokens", () => ({
+  ...jest.requireActual("../../utils/tokens"),
   verifyAccessToken: mockVerifyAccessToken,
 }));
 jest.mock("../../services/project-authorization.service", () => ({
@@ -115,7 +117,31 @@ describe("realtime socket auth", () => {
       membershipId: null,
       orgKind: "company",
       orgSlug: null,
+      credentialEpoch: 0,
     });
+  });
+
+  // Owner decision D-ID-1 Q6: a token minted before the identity's last
+  // credential event (a reset, the identity closed) opens no socket.
+  it("refuses a token minted before the identity's last credential event with SESSION_REVOKED", async () => {
+    mockVerifyAccessToken.mockReturnValue({ sub: "user-1", orgId: "org-1", role: "pm", cep: 0 });
+    mockPrisma.user.findUnique.mockResolvedValueOnce({ id: "user-1", orgId: "org-1", status: "active", isCompanyAdmin: false, credentialEpoch: 1 });
+    const socket = createFakeSocket({ auth: { token: "old-token" } });
+    const next = jest.fn();
+
+    await authenticateSocket(socket, next);
+
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
+    expect(next.mock.calls[0][0].data).toEqual({ code: "SESSION_REVOKED" });
+    expect(socket.data.user).toBeUndefined();
+
+    mockVerifyAccessToken.mockReturnValue({ sub: "user-1", orgId: "org-1", role: "pm", cep: 1 });
+    mockPrisma.user.findUnique.mockResolvedValueOnce({ id: "user-1", orgId: "org-1", status: "active", isCompanyAdmin: false, credentialEpoch: 1 });
+    const current = createFakeSocket({ auth: { token: "new-token" } });
+    const accepted = jest.fn();
+    await authenticateSocket(current, accepted);
+    expect(accepted).toHaveBeenCalledWith();
+    expect(current.data.user).toMatchObject({ id: "user-1", credentialEpoch: 1 });
   });
 });
 
@@ -159,6 +185,34 @@ describe("realtime project rooms", () => {
       projectId: PROJECT_ID,
       code: "PROJECT_ACCESS_DENIED",
     });
+  });
+
+  // Codex D-ID-1 diff review #2: a socket opened before a reset (or an admin
+  // factor reset) keeps its saved epoch; its next project join finds the
+  // account's epoch moved, is refused SESSION_REVOKED and the socket goes.
+  it("refuses a project join from a socket opened before the identity's last credential event, and disconnects it", async () => {
+    mockAssertProjectAccess.mockResolvedValue({ id: PROJECT_ID });
+    const socket = createFakeSocket();
+    socket.data.user = { id: "user-1", orgId: "org-1", role: "pm", credentialEpoch: 0 };
+    mockPrisma.user.findUnique.mockResolvedValueOnce({ id: "user-1", orgId: "org-1", status: "active", isCompanyAdmin: false, credentialEpoch: 1 });
+    const ack = jest.fn();
+
+    await handleProjectJoin(socket, { projectId: PROJECT_ID }, ack);
+
+    expect(ack).toHaveBeenCalledWith({ ok: false, projectId: PROJECT_ID, code: "SESSION_REVOKED" });
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+    expect(mockAssertProjectAccess).not.toHaveBeenCalled();
+    expect(socket.join).not.toHaveBeenCalled();
+
+    // A socket at the account's current epoch joins as before.
+    const current = createFakeSocket();
+    current.data.user = { id: "user-1", orgId: "org-1", role: "pm", credentialEpoch: 1 };
+    mockPrisma.user.findUnique.mockResolvedValueOnce({ id: "user-1", orgId: "org-1", status: "active", isCompanyAdmin: false, credentialEpoch: 1 });
+    const joined = jest.fn();
+    await handleProjectJoin(current, { projectId: PROJECT_ID }, joined);
+    expect(joined).toHaveBeenCalledWith({ ok: true, projectId: PROJECT_ID });
+    expect(current.disconnect).not.toHaveBeenCalled();
+    expect(current.join).toHaveBeenCalledWith(ROOMS.project(PROJECT_ID));
   });
 
   it("validates the project id before touching the database", async () => {
@@ -269,6 +323,52 @@ describe("realtime broadcast", () => {
       expect.objectContaining({ userId: "user-1", orgId: "org-1" }),
     );
     handle.unsubscribe();
+  });
+
+  // Codex D-ID-1 diff review r2 #2: a handshake could read the account just
+  // before a reset committed, miss the reset's disconnect sweep (the socket
+  // was not in the person's rooms yet), then join them. Once in its rooms the
+  // socket reads the account again and disconnects when it is gone or its
+  // credential epoch is no longer the one the handshake saw.
+  describe("re-reads the account once its rooms are joined (D-ID-1 Q6)", () => {
+    const connect = (user) => {
+      const { io } = createFakeIo();
+      const handle = attachRealtime(io);
+      const onConnection = io.on.mock.calls.find(([name]) => name === "connection")[1];
+      const socket = createFakeSocket();
+      socket.data.user = user;
+      onConnection(socket);
+      return { socket, handle };
+    };
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+    it("disconnects a socket whose handshake read the standing a credential event has since changed, after joining its rooms", async () => {
+      // The handshake saw epoch 0; the reset committed before this read.
+      mockPrisma.user.findUnique.mockResolvedValueOnce({ id: "user-1", orgId: "org-1", status: "active", isCompanyAdmin: false, credentialEpoch: 1 });
+      const { socket, handle } = connect({ id: "user-1", orgId: "org-1", role: "pm", credentialEpoch: 0 });
+      await settle();
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.user.findUnique.mock.invocationCallOrder[0]).toBeGreaterThan(Math.max(...socket.join.mock.invocationCallOrder));
+      expect(socket.disconnect).toHaveBeenCalledWith(true);
+      handle.unsubscribe();
+    });
+
+    it("disconnects a socket whose account is gone by the re-read", async () => {
+      mockPrisma.user.findUnique.mockResolvedValueOnce(null);
+      const { socket, handle } = connect({ id: "user-1", orgId: "org-1", role: "pm", credentialEpoch: 0 });
+      await settle();
+      expect(socket.disconnect).toHaveBeenCalledWith(true);
+      handle.unsubscribe();
+    });
+
+    it("keeps a socket whose account still stands at the handshake's epoch", async () => {
+      mockPrisma.user.findUnique.mockResolvedValueOnce({ id: "user-1", orgId: "org-1", status: "active", isCompanyAdmin: false, credentialEpoch: 2 });
+      const { socket, handle } = connect({ id: "user-1", orgId: "org-1", role: "pm", credentialEpoch: 2 });
+      await settle();
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledTimes(1);
+      expect(socket.disconnect).not.toHaveBeenCalled();
+      handle.unsubscribe();
+    });
   });
 });
 

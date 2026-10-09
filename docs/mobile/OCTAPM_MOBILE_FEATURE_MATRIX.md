@@ -11,7 +11,7 @@ Every level assumes the role holds the permission on the server for that project
 
 | Feature | Phone | Tablet | Web | Milestone | Roles | Notes |
 |---|---|---|---|---|---|---|
-| Sign in (email/password), biometric unlock, sign out | FULL | FULL | FULL | M0 | all | native session contract; SSO opens the web sign-in in the system browser |
+| Sign in (email/password), biometric unlock, sign out | LIMITED | LIMITED | FULL | M0 | all | native session contract; SSO opens the web sign-in in the system browser. **People with two-factor authentication on cannot sign in on mobile:** the app does not complete the second-factor step, and it shows a role message for `SSO_REQUIRED` and `USER_INACTIVE` (MOB-MFA-1, carried to CERT-7 with D-SEC-1). A 401 `SESSION_REVOKED` (after a password reset) signs the person out. |
 | Company SSO | LIMITED | LIMITED | FULL | M0 | all | the identity-provider round trip completes on the web; the app has no app-scheme callback yet |
 | Workspace / Home (Needs You, today, quick actions, outbox) | FULL | FULL | FULL | M1 | all | Home is field-first: Needs You before anything else |
 | Projects list and switch | FULL | FULL | FULL | M1 | all | switching clears project-scoped state |

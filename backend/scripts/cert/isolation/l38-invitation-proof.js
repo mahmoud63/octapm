@@ -35,6 +35,13 @@
  * field of type person or company takes this company's only, and a report
  * never prints another company's person or company by name.
  *
+ * Since D-ID-1 (CERT-3 plan §2.6) the identities are made by invitation and
+ * acceptance (lib/invitations createByInvitation), and the checks that asserted
+ * the contract it replaced — POST /users creating an account (201) or
+ * answering 202, POST /users answering EMAIL_EXISTS, an SSO-bound session
+ * refused as proof, a suspended person invited back (A4, W) — are reported as
+ * SUPERSEDED BY D-ID-1, not run and not counted.
+ *
  * Exit 0 when every check holds, 2 otherwise.
  */
 
@@ -45,6 +52,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const api = require('../lib/api');
 const invitations = require('../lib/invitations');
+const { reportSuperseded, superseded } = require('../lib/superseded');
 const { buildPopulation } = require('../lib/spec');
 const guard = require('../lib/cert-env');
 const fingerprint = require('./fingerprint');
@@ -94,11 +102,14 @@ const main = async () => {
   const T = person('former');
   const U = person('proof');
   const V = person('party');
-  const W = person('guest');
-  const N = { email: `l38.new.${STAMP}@${A.domain}`, name: `L38 new ${STAMP}` };
-  for (const p of [S, M, F, X, T, U, V, W]) {
-    const made = keep(`setup ${p.label}`, await bPm.send('POST', '/users', { name: p.name, email: p.email, phone: p.phone, password: PASSWORD, role: 'qs' }));
-    p.id = made.body?.data?.id;
+  // (W, the guest suspended and invited again, is superseded by D-ID-1 Q3 — see below — and no longer made.)
+  const N ={ email: `l38.new.${STAMP}@${A.domain}`, name: `L38 new ${STAMP}` };
+  // Each is made the one way D-ID-1 allows: B invites the new e-mail and it accepts with its own name, phone and password.
+  for (const p of [S, M, F, X, T, U, V]) {
+    const made = await invitations.createByInvitation({ inviter: bPm, email: p.email, role: 'qs', name: p.name, phone: p.phone, password: PASSWORD, db });
+    keep(`setup ${p.label} invite`, made.invited);
+    keep(`setup ${p.label} accept`, made.accepted);
+    p.id = made.userId;
   }
   await api.signIn(S.email); // a real lastLogin worth hiding
   const intoC = await invitations.joinByInvitation({ inviter: cPm, email: M.email, role: 'planning_eng', name: M.name });
@@ -148,16 +159,19 @@ const main = async () => {
   check('A: inviting a new e-mail makes no account before acceptance', (await q('select count(*)::int as n from "User" where email = $1', [N.email]))[0].n === 0);
 
   // POST /users with an e-mail that already names an identity: an invitation, not a membership.
-  const directS = keep('POST /users S', await aPm.send('POST', '/users', { name: 'Not their name', email: S.email, password: PASSWORD, role: 'site_engineer' }));
+  // No password field: under D-ID-1 one is refused 400 USER_PASSWORD_NOT_ACCEPTED whatever its value (the old
+  // request carried one the server ignored for an existing identity); the name is ignored as before.
+  const directS = keep('POST /users S', await aPm.send('POST', '/users', { name: 'Not their name', email: S.email, role: 'site_engineer' }));
   const tokenS2 = await invitations.latestInvitationToken(S.email);
   const directX = keep('POST /users X', await aPm.send('POST', '/users', { name: 'Not their name', email: X.email, role: 'site_engineer' }));
-  check('B: POST /users with an existing identity\'s e-mail answers 202 with an invitation (invited: true), no account fields',
-    directS.status === 202 && directS.body?.data?.invited === true && directS.body?.data?.id !== S.id && !('existingIdentity' in (directS.body?.data || {})) && !('lastLogin' in (directS.body?.data || {})) && !('phone' in (directS.body?.data || {})),
+  superseded('B: POST /users with an existing identity\'s e-mail answers 202', `POST /users is the alias of POST /users/invitations and answers 201 with the invitation for every e-mail; answered ${said(directS)}`);
+  check('B: POST /users with an existing identity\'s e-mail answers with an invitation (invited: true), no account fields',
+    directS.status < 300 && directS.body?.data?.invited === true && directS.body?.data?.id !== S.id && !('existingIdentity' in (directS.body?.data || {})) && !('lastLogin' in (directS.body?.data || {})) && !('phone' in (directS.body?.data || {})),
     `${said(directS)} ${shape(directS)}`);
   check('B/J: …carrying nothing of the identity (its name, phone, id, home company)', carries(directS, foreignWords(S)).length === 0, carries(directS, foreignWords(S)).join(', ') || 'clean');
-  check('B: a closed identity elsewhere is answered the same way (no USER_INACTIVE: its standing is not disclosed)', directX.status === 202 && shape(directX) === shape(directS) && carries(directX, foreignWords(X)).length === 0, `${said(directX)} ${shape(directX)}`);
-  const sameDirect = keep('POST /users N2', await aPm.send('POST', '/users', { name: `L38 new2 ${STAMP}`, email: `l38.new2.${STAMP}@${A.domain}`, password: PASSWORD, role: 'qs' }));
-  check('A: POST /users with a new e-mail still creates the account (201)', sameDirect.status === 201 && sameDirect.body?.data?.email === `l38.new2.${STAMP}@${A.domain}`, said(sameDirect));
+  superseded('B: a closed identity elsewhere is answered 202', `every add answers 201 with the invitation; answered ${said(directX)}`);
+  check('B: a closed identity elsewhere is answered the same way (no USER_INACTIVE: its standing is not disclosed)', directX.status === directS.status && shape(directX) === shape(directS) && carries(directX, foreignWords(X)).length === 0, `${said(directX)} ${shape(directX)}`);
+  superseded('A: POST /users with a new e-mail still creates the account (201)', 'adding a person is always an invitation (D-ID-1 ID-a/ID-b): POST /users creates no account, and a password field is refused 400 USER_PASSWORD_NOT_ACCEPTED; not sent');
 
   // ── D, E: pending and existing members ─────────────────────────────────────
   console.log('\n── pending and existing members ──');
@@ -170,7 +184,8 @@ const main = async () => {
   const eInvite = keep('invite member', await aPm.send('POST', '/users/invitations', { email: member, role: 'qs' }));
   const eDirect = keep('POST /users member', await aPm.send('POST', '/users', { name: 'x', email: member, role: 'qs' }));
   const invitesAfter = (await q('select count(*)::int as n from "InvitationToken" where "orgId" = $1 and email = $2', [orgA.id, member]))[0].n;
-  check('E: an existing member is refused (409 ALREADY_MEMBER / 409 EMAIL_EXISTS) and nothing is written', said(eInvite) === '409 ALREADY_MEMBER' && said(eDirect) === '409 EMAIL_EXISTS' && invitesAfter === invitesBefore, `${said(eInvite)} | ${said(eDirect)}; invitations ${invitesBefore} -> ${invitesAfter}`);
+  superseded('E: POST /users with an existing member\'s e-mail is refused 409 EMAIL_EXISTS', `POST /users runs the invitation chain, whose refusal for an active member is 409 ALREADY_MEMBER; answered ${said(eDirect)}`);
+  check('E: an existing member is refused (409 ALREADY_MEMBER through POST /users/invitations; POST /users refused) and nothing is written', said(eInvite) === '409 ALREADY_MEMBER' && eDirect.status >= 400 && eDirect.status < 500 && invitesAfter === invitesBefore, `${said(eInvite)} | ${said(eDirect)}; invitations ${invitesBefore} -> ${invitesAfter}`);
 
   // ── K: nothing before acceptance ───────────────────────────────────────────
   console.log('\n── before acceptance ──');
@@ -257,9 +272,11 @@ const main = async () => {
   await db.query(`update "OrganizationMembership" set "isAdmin" = true, status = 'left', "leftAt" = now() where "orgId" = $1 and "userId" = $2`, [orgA.id, T.id]);
   const tActivate = keep('activate T (left)', await aPm.send('PATCH', `/users/${T.id}/activate`, {}));
   check('M1: a former member who left cannot be activated by A (nothing changes)', said(tJoined.accepted) === '200' && tActivate.status >= 400 && tActivate.status < 500 && (await membershipInA(T.id))?.status === 'left', `join ${said(tJoined.accepted)}; activate ${said(tActivate)}; ${JSON.stringify(await membershipInA(T.id))}`);
+  const tMailsBefore = invitations.mailsTo(T.email).length;
   const tInvite = keep('re-invite T', await aPm.send('POST', '/users', { name: 'x', email: T.email, role: 'site_engineer' }));
-  const tToken = await invitations.latestInvitationToken(T.email, { after: invitations.mailsTo(T.email).length - 1 });
-  check('M1/M2: re-inviting the former member leaves the membership as it was (no "invited" row that lists or activates them)', tInvite.status === 202 && (await membershipInA(T.id))?.status === 'left', `${said(tInvite)}; ${JSON.stringify(await membershipInA(T.id))}`);
+  const tToken = await invitations.invitationTokenFor({ email: T.email, invitationId: tInvite.body?.data?.id, after: tMailsBefore, db });
+  superseded('M1/M2: re-inviting the former member through POST /users answers 202', `every add answers 201 with the invitation (someone who left may be invited again); answered ${said(tInvite)}`);
+  check('M1/M2: re-inviting the former member leaves the membership as it was (no "invited" row that lists or activates them)', tInvite.status < 300 && (await membershipInA(T.id))?.status === 'left', `${said(tInvite)}; ${JSON.stringify(await membershipInA(T.id))}`);
   // A row left "invited" by the code before this fix: not part of A either.
   await db.query(`update "OrganizationMembership" set status = 'invited' where "orgId" = $1 and "userId" = $2`, [orgA.id, T.id]);
   const tListed = ((await aPm.send('GET', `/users?search=${encodeURIComponent(T.email)}`)).body?.data?.items || []).filter((u) => u.email === T.email);
@@ -280,11 +297,12 @@ const main = async () => {
   const mixed = keep('M bearer + U password', await accept(tokenU, { bearer: mToken, password: PASSWORD }));
   const uPasswordOnly = keep('U password only', await accept(tokenU, { password: PASSWORD }));
   const { createAccessToken } = require('../../../src/utils/tokens');
-  const ssoBound = createAccessToken({ id: U.id, orgId: orgB.id, role: 'qs', email: U.email, name: U.name, ssoOrgId: orgB.id });
-  const viaSso = keep('U SSO-bound to B', await accept(tokenU, { bearer: ssoBound }));
-  check('A1/A2/H: another identity\'s session with the right password, the password alone, and U\'s own session bound to B\'s single sign-on are all refused; nothing written',
-    uInvite.status === 201 && said(mixed) === '401 INVITATION_SIGN_IN_REQUIRED' && said(uPasswordOnly) === '401 INVITATION_SIGN_IN_REQUIRED' && said(viaSso) === '403 SSO_SESSION_BOUND' && !(await membershipInA(U.id)) && (await pending(U.email)).length === 1,
-    `${said(mixed)} | ${said(uPasswordOnly)} | ${said(viaSso)}`);
+  // Not sent: under D-ID-1 a session bound to another company's single sign-on is identity proof, so the
+  // acceptance would succeed (accepted, signInRequired, no session) and U would join A before the cases below.
+  superseded('A1/A2/H: U\'s own session bound to B\'s single sign-on is refused (403 SSO_SESSION_BOUND)', 'an acceptance with a bearer from another company\'s SSO is identity proof and answers { accepted: true, signInRequired: true } with no session (judged by the D-ID-1 proof); not sent, so U stays pending for the cases below');
+  check('A1/A2/H: another identity\'s session with the right password, and the password alone, are refused; nothing written',
+    uInvite.status === 201 && said(mixed) === '401 INVITATION_SIGN_IN_REQUIRED' && said(uPasswordOnly) === '401 INVITATION_SIGN_IN_REQUIRED' && !(await membershipInA(U.id)) && (await pending(U.email)).length === 1,
+    `${said(mixed)} | ${said(uPasswordOnly)}`);
   // Two invitations at once leave one pending; three acceptances at once of the two links let exactly one through.
   const before = invitations.mailsTo(U.email).length;
   const [inv1, inv2] = await Promise.all([aPm.send('POST', '/users/invitations', { email: U.email, role: 'qs' }), aPm.send('POST', '/users/invitations', { email: U.email, role: 'qs' })]);
@@ -316,25 +334,19 @@ const main = async () => {
     `party ${said(party)}; move ${said(moved)} ${companyBefore !== companyAfter}; ${said(vAccepted)}; company memberships ${vCompany[0].n}`);
 
   // H: an account of A's own that A closed, reopened by A's invitation: a new password, and no session from the link.
-  const H = { email: `l38.home.${STAMP}@${A.domain}`, name: `L38 home ${STAMP}` };
-  const hMade = keep('create H', await aPm.send('POST', '/users', { name: H.name, email: H.email, password: PASSWORD, role: 'qs' }));
-  H.id = hMade.body?.data?.id;
-  keep('close H', await aPm.send('PATCH', `/users/${H.id}/deactivate`, {}));
-  keep('invite H', await aPm.send('POST', '/users/invitations', { email: H.email, role: 'qs' }));
-  const tokenH = await invitations.latestInvitationToken(H.email);
-  const newPassword = `${PASSWORD}x9`;
-  const hAccepted = keep('H accepts', await accept(tokenH, { password: newPassword, name: H.name }));
-  const hSignIn = await api.raw('POST', '/auth/login', { json: { email: H.email, password: newPassword } });
-  check('A4: a closed account reopened by its own company sets its new password but gets no session from the link; it then signs in',
-    hAccepted.status === 200 && hAccepted.body?.data?.signInRequired === true && !hAccepted.body?.data?.tokens && hSignIn.status === 200,
-    `${said(hAccepted)} signInRequired=${hAccepted.body?.data?.signInRequired}; login ${said(hSignIn)}`);
+  // Not run: under D-ID-1 (Q3) a suspended person — a closed account homed here included — comes back only through
+  // Activate; inviting them answers 409 ALREADY_MEMBER, so there is no link to accept.
+  superseded('A4: a closed account reopened by its own company sets its new password but gets no session from the link; it then signs in', 'Q3: a suspended person (a closed account homed in the workspace included) is not invited again — 409 ALREADY_MEMBER — and comes back only through Activate; not run');
 
   // ── the verification's cases (Codex, 2026-10-05) ───────────────────────────
   console.log('\n── a home identity whose membership ended or is only an invitation; malformed names; single sign-on ──');
   // H2: homed in A, its membership in A has ended (and then is only an invitation): the
   // home column does not make it part of A.
   const H2 = { email: `l38.homeleft.${STAMP}@${A.domain}`, name: `L38 home left ${STAMP}` };
-  H2.id = keep('create H2', await aPm.send('POST', '/users', { name: H2.name, email: H2.email, password: PASSWORD, role: 'qs' })).body?.data?.id;
+  const h2Made = await invitations.createByInvitation({ inviter: aPm, email: H2.email, role: 'qs', name: H2.name, password: PASSWORD, db });
+  keep('create H2 invite', h2Made.invited);
+  keep('create H2 accept', h2Made.accepted);
+  H2.id = h2Made.userId;
   for (const standing of ['left', 'invited']) {
     await db.query(`update "OrganizationMembership" set status = $3 where "orgId" = $1 and "userId" = $2`, [orgA.id, H2.id, standing]);
     const listedH2 = ((await aPm.send('GET', `/users?search=${encodeURIComponent(H2.email)}`)).body?.data?.items || []).filter((u) => u.email === H2.email);
@@ -392,22 +404,9 @@ const main = async () => {
 
   // W: a guest of A's party P1, suspended by A, then invited to a new party P3: acceptance
   // brings back only P3 — the old P1 place stays closed.
-  const P1 = keep('party P1', await aPm.send('POST', `/projects/${projectA}/parties`, { role: 'subcontractor', companyName: `L38 P1 ${STAMP}` })).body?.data?.id;
-  const wFirst = keep('invite W to P1', await aPm.send('POST', '/users/invitations', { email: W.email, role: 'site_engineer', projectId: projectA, projectPartyId: P1 }));
-  const wToken1 = await invitations.latestInvitationToken(W.email);
-  const wBearer = await api.tokenFor(W.email, orgB.id);
-  const wJoined = keep('W accepts P1', await accept(wToken1, { bearer: wBearer }));
-  const wOff = keep('A suspends W', await aPm.send('PATCH', `/users/${W.id}/deactivate`, {}));
-  const P3 = keep('party P3', await aPm.send('POST', `/projects/${projectA}/parties`, { role: 'subcontractor', companyName: `L38 P3 ${STAMP}` })).body?.data?.id;
-  keep('invite W to P3', await aPm.send('POST', '/users/invitations', { email: W.email, role: 'site_engineer', projectId: projectA, projectPartyId: P3 }));
-  const wToken3 = await invitations.latestInvitationToken(W.email);
-  api.forget(W.email);
-  const wBack = keep('W accepts P3', await accept(wToken3, { bearer: await api.tokenFor(W.email, orgB.id) }));
-  const wPlaces = Object.fromEntries((await q(`select "projectPartyId" as party, status from "ProjectPartyMember" where "userId" = $1 and "projectPartyId" = any($2::text[])`, [W.id, [P1, P3]])).map((r) => [r.party, r.status]));
-  const wMembership = await membershipInA(W.id);
-  check('review: a suspended guest who accepts a new party offer gets that party only — the earlier party place stays closed',
-    wFirst.status === 201 && wJoined.status === 200 && wOff.status === 200 && wBack.status === 200 && wPlaces[P3] === 'active' && wPlaces[P1] === 'inactive' && wMembership?.status === 'active' && wMembership.kind === 'guest',
-    `P1 ${wPlaces[P1]}; P3 ${wPlaces[P3]}; membership ${JSON.stringify(wMembership)}; ${said(wJoined)} ${said(wOff)} ${said(wBack)}`);
+  // Not run: under D-ID-1 (Q3) a suspended person is not invited again (409 ALREADY_MEMBER for every invitation)
+  // and comes back only through Activate, so there is no P3 link to accept.
+  superseded('review: a suspended guest who accepts a new party offer gets that party only — the earlier party place stays closed', 'Q3: inviting a person suspended in the workspace answers 409 ALREADY_MEMBER for every invitation, a party one included; a suspension is undone only by Activate; not run');
 
   // ── M8: person and company custom fields name only this company's ──────────
   console.log('\n── custom fields of type person and company ──');
@@ -467,7 +466,8 @@ const main = async () => {
 
   await db.end();
   const failed = results.filter((r) => !r.ok).length;
-  console.log(`\nl38 invitation proof: ${results.length - failed} passed, ${failed} failed of ${results.length}`);
+  const replaced = reportSuperseded('l38 invitation proof');
+  console.log(`\nl38 invitation proof: ${results.length - failed} passed, ${failed} failed of ${results.length}${replaced.length ? `; ${replaced.length} superseded by D-ID-1 (not counted)` : ''}`);
   process.exitCode = failed ? 2 : 0;
 };
 

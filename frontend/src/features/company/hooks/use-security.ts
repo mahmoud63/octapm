@@ -10,7 +10,9 @@ export interface SsoSettings {
   clientId: string | null
   clientSecretSet: boolean
   domains: string[]
-  autoProvision: boolean
+  /** Retired (D-ID-1): always false — single sign-on never creates accounts. */
+  autoProvision: false
+  /** Served for older clients; nothing uses it since provisioning was retired. */
   defaultRole: string
   required: boolean
   mfaRequired: boolean
@@ -45,8 +47,7 @@ export interface SsoSettingsPayload {
   clientId?: string | null
   clientSecret?: string | null
   domains?: string[]
-  autoProvision?: boolean
-  defaultRole?: string
+  // No autoProvision: the server refuses `true` (SSO_AUTO_PROVISION_RETIRED).
   required?: boolean
   mfaRequired?: boolean
 }

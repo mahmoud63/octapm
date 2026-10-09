@@ -84,4 +84,25 @@ describe('auth login abuse integration', () => {
     expect(bcrypt.compare).toHaveBeenCalledTimes(5);
     expect(mockPrisma.user.findUnique).toHaveBeenCalledTimes(5);
   });
+
+  // Owner decision D-ID-1 Q7: an unknown address does the same password work
+  // as a known one (a comparison against a cost-12 hash of a secret nobody
+  // holds), so the answer's timing does not say whether it has an account.
+  it('compares the password for an unknown address too, and answers exactly as for a wrong password', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+    bcrypt.hash.mockResolvedValue('dummy-cost-12-hash');
+
+    const unknown = await authService.login({ email: 'nobody@example.com', password: 'whatever-1' }, { ipAddress: '203.0.113.12' }).catch((error) => error);
+    expect(unknown).toMatchObject({ status: 401, code: 'INVALID_CREDENTIALS' });
+    expect(bcrypt.compare).toHaveBeenCalledTimes(1);
+    expect(bcrypt.compare).toHaveBeenCalledWith('whatever-1', expect.any(String));
+    // The stand-in hash is made at cost 12 (once per process, then reused).
+    expect(bcrypt.hash).toHaveBeenCalledWith(expect.any(String), 12);
+    expect(bcrypt.compare).toHaveBeenCalledWith('whatever-1', 'dummy-cost-12-hash');
+
+    mockPrisma.user.findUnique.mockResolvedValue(activeUser);
+    const wrong = await authService.login({ email: 'pm@example.com', password: 'whatever-1' }, { ipAddress: '203.0.113.13' }).catch((error) => error);
+    expect(wrong).toMatchObject({ status: unknown.status, code: unknown.code, message: unknown.message });
+    expect(bcrypt.compare).toHaveBeenLastCalledWith('whatever-1', 'hashed-password');
+  });
 });

@@ -66,7 +66,8 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const { api, check, db, fake, fakeBase, finding, finish, onboard, ownerDecision, ownIds, preflight, reportOwnerDecisions, webhook } = require('./lib');
-const { joinByInvitation } = require('../lib/invitations');
+const { createByInvitation, joinByInvitation } = require('../lib/invitations');
+const { reportSuperseded, superseded } = require('../lib/superseded');
 
 const SUITE = 'billing isolation and idempotency';
 const RUN = crypto.randomBytes(3).toString('hex');
@@ -395,7 +396,8 @@ const onePersonTwoCompanies = async (shared) => {
 
   // An existing person is invited, never attached (L38): they join Y by accepting with their own session.
   const joined = await joinByInvitation({ inviter: Y.pm, email: person, role: 'pm', via: 'users', name: 'Member Of Two Companies', homeOrgId: X.orgId });
-  check('the administrator of Y invites the owner of X: an existing person is sent an invitation (202) and joins by accepting it (200)', [202, 200], [joined.invited?.status, joined.accepted?.status]);
+  superseded('the administrator of Y invites the owner of X: an existing person is sent an invitation (202)', `every add answers 201 with the invitation; answered ${joined.invited?.status}`);
+  check('the administrator of Y invites the owner of X: an existing person is sent an invitation and joins by accepting it (200)', [true, 200], [joined.invited?.status < 300, joined.accepted?.status]);
   const personId = (await api.signIn(person, X.orgId)).user?.id;
   // Made an administrator of Y as well, so that what follows does not depend on who holds billing authority (section 4).
   must('making the person an administrator of Y', await Y.pm.send('PATCH', `/users/${personId}`, { isCompanyAdmin: true }), 200);
@@ -471,8 +473,10 @@ const rolesAndKeys = async (shared) => {
   const ids = {};
   for (const role of ['pm', ...OTHER_ROLES]) {
     const email = `${role.replace(/_/g, '')}.${stamp}@billing.octapm-cert.test`;
-    const made = must(`adding a ${role}`, await R.pm.send('POST', '/users', { name: `Cert ${role} ${stamp}`, email, password: process.env.CERT_PASSWORD, role }), 201);
-    ids[role] = made.body.data.id;
+    // Added the one way D-ID-1 allows: R invites the new e-mail, which accepts with its own name and password.
+    const made = await createByInvitation({ inviter: R.pm, email, role, name: `Cert ${role} ${stamp}` });
+    if (!made.userId) throw new Error(`adding a ${role}: invitation answered ${made.invited.status} ${errorCode(made.invited) || ''}, acceptance ${made.accepted ? `${made.accepted.status} ${errorCode(made.accepted) || ''}` : 'not reached'}`);
+    ids[role] = made.userId;
     people[role === 'pm' ? 'pm (second, not owner)' : role] = api.as(email, R.orgId);
   }
   const names = Object.keys(people);
@@ -949,10 +953,12 @@ const main = async () => {
   await section('9. The population', () => populationUntouched({ before, snapshotBefore, suiteMark }));
   await finish(SUITE);
   reportOwnerDecisions(SUITE);
+  reportSuperseded(SUITE);
 };
 
 main().catch(async (error) => {
   console.error(error);
   reportOwnerDecisions(`${SUITE} (STOPPED by an error before the end)`);
+  reportSuperseded(`${SUITE} (STOPPED by an error before the end)`);
   process.exitCode = 1;
 });

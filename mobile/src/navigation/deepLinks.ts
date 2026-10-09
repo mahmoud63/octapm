@@ -94,6 +94,19 @@ const HOME_BY_MODULE: Record<string, string> = {
   approvals: '/workflow',
 }
 
+/**
+ * Web pages that finish in the browser: signing in, signing up, a second
+ * factor, accepting an invitation, a password reset and the SSO return. Their
+ * token, ticket or code belongs to the page; an https link to one is never the
+ * app's, even when it shares a name with an app route (owner decision Q14).
+ */
+const WEB_ONLY_ROOTS = ['sign-in', 'sign-up', 'otp', 'accept-invite', 'reset-password', 'forgot-password', 'sso']
+
+/** The hosts the app is registered for (app.json: iOS associatedDomains, Android intentFilters). */
+export const OCTAPM_WEB_HOSTS = ['app.octapm.com', 'octapm.com']
+
+const WEB_LINK = /^(https?):\/\/([^/?#]*)(.*)$/i
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const DAY = /^\d{4}-\d{2}-\d{2}$/
 
@@ -161,6 +174,7 @@ export function resolveLink(input: string): ResolvedLink | null {
   const segments = path.split('/').filter(Boolean)
   if (segments.length === 0) return link('/', null, workspace)
   const head = segments[0]!
+  if (WEB_ONLY_ROOTS.includes(head) && WEB_LINK.test(input.trim())) return null
 
   // The Projects tab itself; anything else under /projects must name a real project.
   if (head === 'projects' && segments.length === 1) return link('/projects', null, workspace)
@@ -205,6 +219,27 @@ export function resolveLink(input: string): ResolvedLink | null {
     return link(`${path}${query ? `?${query}` : ''}`, first(params, 'projectId'), workspace)
   }
   return null
+}
+
+/**
+ * The link to hand to the browser when it reached the app from an OctaPM web
+ * origin and names nothing the app has a screen for: the whole URL, path and
+ * query, so the token or ticket the page needs arrives with it. Null for any
+ * other link — another site, the app's own scheme, a bare path — which the
+ * app keeps. `webOrigin` is the build's own web origin (EXPO_PUBLIC_WEB_ORIGIN),
+ * so a staging or local build hands over its own links too.
+ */
+export function webHandoffUrl(input: string, webOrigin?: string | null): string | null {
+  const url = input.trim()
+  const match = url.match(WEB_LINK)
+  if (!match) return null
+  const [, protocol, authority] = match
+  // Credentials in the authority are never a link of ours.
+  if (!authority || authority.includes('@')) return null
+  const origin = `${protocol!.toLowerCase()}://${authority.toLowerCase()}`
+  const own = webOrigin ? webOrigin.trim().replace(/\/+$/, '').toLowerCase() : null
+  const registered = protocol!.toLowerCase() === 'https' && OCTAPM_WEB_HOSTS.includes(authority.toLowerCase().replace(/:443$/, ''))
+  return registered || origin === own ? url : null
 }
 
 export interface NotificationLinkData {

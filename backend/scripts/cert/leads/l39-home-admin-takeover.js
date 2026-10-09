@@ -11,9 +11,14 @@
  * login e-mail, which U does not control.
  *
  * No persona and no multi-company persona (user.a/b/c) is modified.
+ *
+ * Since D-ID-1 (CERT-3 plan §2.6) U is made by invitation and acceptance, and
+ * the reset step (3) is SUPERSEDED BY D-ID-1: the route was removed, so it is
+ * not sent and is listed as superseded at the end of the output.
  */
 const { as, raw, API } = require('../lib/api');
-const { joinByInvitation } = require('../lib/invitations');
+const { createByInvitation, joinByInvitation } = require('../lib/invitations');
+const { reportSuperseded, superseded } = require('../lib/superseded');
 
 const PASSWORD = process.env.CERT_PASSWORD; // read, never printed
 const ADMIN_CHOSEN_PW = 'Seized0nce1'; // the password the home admin sets; a throwaway's only
@@ -32,8 +37,11 @@ const show = (label, res) => {
   const org24 = (await pm24.GET('/auth/me')).active.orgId;
   const org25 = (await pm25.GET('/auth/me')).active.orgId;
 
-  // 1. U is created with HOME = 024.
-  const u = await pm24.POST('/users', { name: 'U Shared Identity', email: uEmail, password: PASSWORD, role: 'site_engineer' });
+  // 1. U is created with HOME = 024: since D-ID-1 the one way is an invitation from 024 that the
+  //    new e-mail accepts with its own name and password.
+  const made = await createByInvitation({ inviter: pm24, email: uEmail, role: 'site_engineer', name: 'U Shared Identity', password: PASSWORD });
+  if (!made.userId) throw new Error(`setup: U was not created in 024 (invite ${made.invited?.status} / accept ${made.accepted?.status})`);
+  const u = { id: made.userId };
   console.log('[setup] U created, home 024, id =', u.id);
 
   // 2. U is also made a member of 025 (role qs there): 025 invites, U accepts
@@ -46,8 +54,10 @@ const show = (label, res) => {
   console.log('[setup] original-password login status:', loginBefore.status, '(U controls the account)');
 
   // 3. The 024 admin resets U's password to a value THE ADMIN chooses.
-  const reset = await pm24.send('POST', `/users/${u.id}/reset-password`, { newPassword: ADMIN_CHOSEN_PW });
-  show('[attack] POST /users/:id/reset-password (024, U home workspace)', reset);
+  //    SUPERSEDED BY D-ID-1 (Q4): POST /users/:id/reset-password was removed for every person; an
+  //    administrator can only have the self-service reset e-mail sent and never sets or sees a password.
+  //    The step is not sent; the steps after it still try the admin-chosen password and report what happens.
+  superseded('[attack] POST /users/:id/reset-password (024, U home workspace): the home admin sets U\'s password', 'Q4: the route was removed for every person; an administrator can only have the self-service reset e-mail sent (POST /users/:id/password-reset-email) and never sets or sees a password; not sent');
 
   // 3b. The original password no longer works (U is locked out / sessions revoked).
   const oldPwLogin = await raw('POST', '/auth/login', { json: { email: uEmail, password: PASSWORD } });
@@ -85,6 +95,7 @@ const show = (label, res) => {
   console.log('  reached a full session inside 025 as U (role qs) :', enteredB, roleInB);
   console.log('  acted on 025 data as U (GET /projects 200)       :', projectsStatusInB === 200);
   console.log('  home admin also rewrote U\'s login e-mail        :', emailChange.body?.data?.email === newEmail);
+  reportSuperseded('L39');
 
   if (takeover) {
     process.exitCode = 2;

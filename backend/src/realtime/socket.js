@@ -1,4 +1,4 @@
-const { verifyAccessToken } = require("../utils/tokens");
+const { tokenEpochCurrent, verifyAccessToken } = require("../utils/tokens");
 const { prisma } = require("../config/db");
 const {
   assertProjectAccess,
@@ -112,6 +112,10 @@ const authenticateSocket = async (socket, next) => {
     if (!account) {
       return next(socketError("USER_INACTIVE", "This account is no longer active"));
     }
+    // A token from before the identity's last credential event opens no socket (D-ID-1 Q6).
+    if (!tokenEpochCurrent(payload, account)) {
+      return next(socketError("SESSION_REVOKED", "This session has ended; sign in again"));
+    }
     socket.data = socket.data || {};
     socket.data.user = {
       ...account,
@@ -148,6 +152,13 @@ const handleProjectJoin = async (socket, payload, ack) => {
     const account = await accountStanding({ userId: user.id, orgId: user.orgId, membershipId: user.membershipId || null });
     if (!account) {
       return ackSafely(ack, { ok: false, projectId, code: "USER_INACTIVE" });
+    }
+    // A socket opened before the identity's last credential event joins nothing
+    // more, and goes (D-ID-1 Q6).
+    if ((account.credentialEpoch ?? 0) !== (user.credentialEpoch ?? 0)) {
+      ackSafely(ack, { ok: false, projectId, code: "SESSION_REVOKED" });
+      socket.disconnect(true);
+      return undefined;
     }
     await assertProjectAccess({
       orgId: user.orgId,
@@ -374,6 +385,16 @@ const attachRealtime = (io) => {
     socket.join(ROOMS.org(user.orgId));
     socket.join(ROOMS.user(user.id));
     socket.join(ROOMS.member(memberKey));
+    // The handshake read the account a moment ago. A credential event that
+    // committed since then swept the person's sockets before this one was in
+    // their room, so it is checked once more now that it is: an event before
+    // this read is caught here, one after it reaches the socket through the
+    // room (D-ID-1 Q6).
+    accountStanding({ userId: user.id, orgId: user.orgId, membershipId: user.membershipId || null })
+      .then((account) => {
+        if (!account || (account.credentialEpoch ?? 0) !== (user.credentialEpoch ?? 0)) socket.disconnect(true);
+      })
+      .catch(() => socket.disconnect(true));
 
     socket.on("project:join", (payload, ack) =>
       handleProjectJoin(socket, payload, ack),

@@ -30,6 +30,7 @@ const fs = require('fs');
 const { io: connectSocket } = require('socket.io-client');
 const api = require('../lib/api');
 const invitations = require('../lib/invitations');
+const { reportSuperseded, superseded } = require('../lib/superseded');
 const { buildPopulation } = require('../lib/spec');
 
 if (process.env.CERT_INPROCESS === '1') throw new Error('realtime-proof needs the certification API: unset CERT_INPROCESS');
@@ -96,11 +97,13 @@ const main = async () => {
     // A person of both companies, on V's project team. They join V the one way
     // the product allows (L38): V invites the e-mail, they accept with their own session.
     const email = `rt.shared.${STAMP.toLowerCase()}.${i}@${A.domain}`;
-    const madeA = await aPm.send('POST', '/users', { name: `${STAMP} shared ${i}`, email, password, role: 'site_engineer' });
+    // Made in A the one way D-ID-1 allows: A invites the new e-mail, which accepts with its own name and password.
+    const madeA = await invitations.createByInvitation({ inviter: aPm, email, role: 'site_engineer', name: `${STAMP} shared ${i}`, password });
     const joined = await invitations.joinByInvitation({ inviter: vPm, email, role: 'qs', via: 'users', name: `${STAMP} shared ${i}`, homeOrgId: aOrg });
-    const xId = madeA.body?.data?.id || (await api.signIn(email, aOrg)).user?.id;
+    const xId = madeA.userId || (await api.signIn(email, aOrg)).user?.id;
     const onTeam = await vPm.send('POST', `/projects/${pV.id}/team`, { userId: xId });
-    check(`${tag} setup: a person of both companies (invited into V, accepted), on V's project team`, madeA.status === 201 && joined.invited?.status === 202 && joined.accepted?.status === 200 && [200, 201].includes(onTeam.status), `${said(madeA)} | invite ${joined.invited ? said(joined.invited) : '-'} accept ${joined.accepted ? said(joined.accepted) : '-'} | ${said(onTeam)}`);
+    superseded(`${tag} setup: V's POST /users for an existing identity answers 202`, `every add answers 201 with the invitation; answered ${joined.invited ? said(joined.invited) : '-'}`);
+    check(`${tag} setup: a person of both companies (invited into V, accepted), on V's project team`, Boolean(madeA.userId) && joined.invited?.status < 300 && joined.accepted?.status === 200 && [200, 201].includes(onTeam.status), `made in A: invite ${madeA.invited ? said(madeA.invited) : '-'} accept ${madeA.accepted ? said(madeA.accepted) : '-'} | invite ${joined.invited ? said(joined.invited) : '-'} accept ${joined.accepted ? said(joined.accepted) : '-'} | ${said(onTeam)}`);
 
     // ── workspace switching ──────────────────────────────────────────────
     const aToken = await api.tokenFor(`pm@${A.domain}`, aOrg);
@@ -171,7 +174,8 @@ const main = async () => {
     Object.values(sockets).forEach((s) => s.socket.close());
   }
 
-  console.log(`\nrealtime proof: ${passed} passed, ${failed} failed of ${passed + failed}`);
+  const replaced = reportSuperseded('realtime proof');
+  console.log(`\nrealtime proof: ${passed} passed, ${failed} failed of ${passed + failed}${replaced.length ? `; ${replaced.length} superseded by D-ID-1 (not counted)` : ''}`);
   process.exitCode = failed ? 2 : 0;
 };
 

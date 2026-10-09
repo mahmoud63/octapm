@@ -84,6 +84,62 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "auth",
     message: "This person joins when they accept their invitation",
   },
+  // D-ID-1 identity batch (CERT-3)
+  USER_PASSWORD_NOT_ACCEPTED: {
+    status: 400,
+    category: "auth",
+    message: "People choose their own password when they accept their invitation; remove the password field",
+  },
+  USER_EMAIL_IDENTITY_OWNED: {
+    status: 400,
+    category: "auth",
+    message: "A person's sign-in e-mail is theirs; it cannot be changed from user management",
+  },
+  INVITATION_NOT_FOUND: {
+    status: 404,
+    category: "auth",
+    message: "Invitation not found",
+  },
+  INVITATION_NOT_PENDING: {
+    status: 409,
+    category: "auth",
+    message: "This invitation is no longer pending",
+  },
+  INVITATION_EMAIL_FAILED: {
+    status: 502,
+    category: "notification",
+    message: "The invitation was saved but its e-mail could not be sent; send it again from pending invitations",
+  },
+  MEMBERSHIP_WRITES_SUSPENDED: {
+    status: 503,
+    category: "auth",
+    message: "Adding people and widening access are paused on this deployment; removing access still works",
+  },
+  MFA_STATE_CHANGED: {
+    status: 409,
+    category: "auth",
+    message: "Your two-factor settings changed meanwhile; start again",
+  },
+  MEMBERSHIP_CHANGED: {
+    status: 409,
+    category: "auth",
+    message: "This person's membership changed meanwhile; reload and try again",
+  },
+  SESSION_REVOKED: {
+    status: 401,
+    category: "auth",
+    message: "This session has ended; sign in again",
+  },
+  SSO_SESSION_BOUND: {
+    status: 403,
+    category: "auth",
+    message: "This session came from a company's single sign-on; sign in with your own password to do this",
+  },
+  SSO_AUTO_PROVISION_RETIRED: {
+    status: 400,
+    category: "auth",
+    message: "Single sign-on no longer creates accounts; invite people and they can use SSO after accepting",
+  },
   TOKEN_EXPIRED: {
     status: 401,
     category: "auth",

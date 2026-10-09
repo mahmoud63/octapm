@@ -1,5 +1,4 @@
 const crypto = require("crypto");
-const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
@@ -63,7 +62,7 @@ const settingsOut = (org) => ({
   clientId: org.ssoClientId || null,
   clientSecretSet: Boolean(org.ssoClientSecretEnc),
   domains: Array.isArray(org.ssoDomainsJson) ? org.ssoDomainsJson : [],
-  autoProvision: Boolean(org.ssoAutoProvision),
+  autoProvision: false,
   defaultRole: org.ssoDefaultRole || "site_engineer",
   required: Boolean(org.ssoRequired),
   mfaRequired: Boolean(org.mfaRequired),
@@ -90,7 +89,11 @@ const updateSettings = async ({ orgId, payload = {}, actor = null }) => {
   if (payload.clientId !== undefined) data.ssoClientId = trimOrNull(payload.clientId);
   if (trimOrNull(payload.clientSecret)) data.ssoClientSecretEnc = encryptSecret(String(payload.clientSecret).trim());
   if (payload.domains !== undefined) data.ssoDomainsJson = normalizeDomains(payload.domains);
-  if (payload.autoProvision !== undefined) data.ssoAutoProvision = Boolean(payload.autoProvision);
+  // SSO no longer creates accounts or memberships (owner decision D-ID-1 Q1):
+  // the setting is retired, and asking to turn it on is refused rather than
+  // silently ignored, so an administrator is not misled about who can get in.
+  if (payload.autoProvision === true) throw new HttpError(400, "SSO_AUTO_PROVISION_RETIRED", "Single sign-on no longer creates accounts; invite people and they can use SSO after accepting");
+  if (payload.autoProvision !== undefined) data.ssoAutoProvision = false;
   if (payload.defaultRole !== undefined) {
     if (!ROLES.includes(payload.defaultRole)) throw new HttpError(400, "SSO_ROLE_INVALID", `Default role must be one of ${ROLES.join(", ")}`);
     data.ssoDefaultRole = payload.defaultRole;
@@ -232,86 +235,91 @@ const callback = async ({ code, state, error = null, errorDescription = null }, 
     const email = trimOrNull(claims.email || claims.preferred_username || claims.upn)?.toLowerCase();
     if (!email || !email.includes("@")) throw new HttpError(401, "SSO_EMAIL_MISSING", "The identity provider did not return an email address");
     if (claims.email_verified === false) throw new HttpError(401, "SSO_EMAIL_UNVERIFIED", "The identity provider reports the email as unverified");
-    // The identity is found by its subject or its email wherever it lives
-    // (membership doc §5): an email that exists in another workspace is
-    // linked and given a membership here, not refused. The identity is the
-    // email's; an OIDC subject is issuer-scoped, not unique across
-    // providers, so a subject match speaks only for an identity this
-    // organisation's IdP linked — one that now presents a different email,
-    // or an identity already linked to a different subject, is an
-    // identity-level conflict and is refused. Another organisation's IdP
-    // happening to issue the same subject string is not.
+    // SSO signs people in; it never makes them (owner decision D-ID-1 Q1). The
+    // person must already be part of this workspace — a membership here, or a
+    // person homed here before memberships — which only an invitation they
+    // accepted themselves (or the workspace's own creation) can have made.
+    // Anyone else, whatever their account's state elsewhere, gets the same
+    // refusal, decided before anything about their account is looked at.
+    //
+    // The provider's subject is linked per workspace (owner decision D-ID-1
+    // Q2): this workspace's provider binds the person's sign-in here and
+    // nowhere else, and another company's provider can never bind, block or
+    // replace it.
     const subject = String(claims.sub);
-    let user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      const linkedHere = await prisma.user.findFirst({
-        where: {
-          ssoSubject: subject,
-          OR: [{ orgId: org.id }, ...(membershipService.hasMembershipModel(prisma) ? [{ memberships: { some: { orgId: org.id } } }] : [])],
-        },
-      });
-      if (linkedHere) throw new HttpError(403, "SSO_IDENTITY_CONFLICT", "This sign-in belongs to a different account");
+    const notFound = () => new HttpError(403, "SSO_USER_NOT_FOUND", "No account here matches this sign-in — ask a company admin to invite you");
+    const user = await prisma.user.findUnique({ where: { email } });
+    let membership = user ? await membershipService.findMembership({ tx: prisma, orgId: org.id, userId: user.id }) : null;
+    const legacyHome = Boolean(user) && !membership && user.orgId === org.id;
+    const partOfWorkspace = legacyHome || (membership && membershipService.PRESENT_STATUSES.includes(membership.status));
+    if (!partOfWorkspace) throw notFound();
+
+    // From here the person is part of this workspace, whose administrators
+    // already see them, so the specific answers tell nobody anything new.
+    if (user.status !== "active") throw new HttpError(403, "USER_INACTIVE", "Your account is not active");
+    if (membership && membership.status !== membershipService.MEMBERSHIP_STATUSES.ACTIVE) {
+      throw new HttpError(403, "USER_INACTIVE", "Your account is not active");
     }
-    const canProvision = (whom) => {
-      if (!org.ssoAutoProvision) throw new HttpError(403, "SSO_USER_NOT_FOUND", `No ${whom} exists for this email — ask a company admin to invite you`);
-      if (!domainMatches(email, org.ssoDomainsJson) && (Array.isArray(org.ssoDomainsJson) ? org.ssoDomainsJson : []).length) throw new HttpError(403, "SSO_DOMAIN_NOT_ALLOWED", "This email domain is not allowed to sign in here");
-    };
-    let membership = null;
-    let linkSubject = false;
-    if (!user) {
-      canProvision("account");
-      // The identity and its seat are written in one transaction (ENT-6): a
-      // seat the organisation refuses — a personal workspace already has its
-      // one member, 409 PERSONAL_WORKSPACE_CONVERT_REQUIRED — rolls the new
-      // identity back with it. Written separately, the refusal used to leave an
-      // active User homed in the workspace with no membership, which the legacy
-      // User.orgId fallback would later let in as a second member.
-      const defaultRole = org.ssoDefaultRole || "site_engineer";
-      const passwordHash = await bcrypt.hash(crypto.randomBytes(24).toString("base64url"), 12);
-      const provisioned = await prisma.$transaction(async (tx) => {
-        const created = await tx.user.create({ data: { orgId: org.id, name: trimOrNull(claims.name) || [claims.given_name, claims.family_name].filter(Boolean).join(" ") || email.split("@")[0], email, passwordHash, role: defaultRole, status: "active", ssoSubject: subject, ssoProvider: "oidc", ssoLinkedAt: new Date() } });
-        const seat = await membershipService.ensureMembership({ tx, orgId: org.id, userId: created.id, role: ROLES.includes(created.role) ? created.role : "site_engineer", isAdmin: false });
-        return { created, seat };
+    const linkedHere = await prisma.organizationMembership.findFirst({
+      where: { orgId: org.id, ssoSubject: subject },
+      select: { userId: true },
+    });
+    if (linkedHere && linkedHere.userId !== user.id) {
+      throw new HttpError(403, "SSO_IDENTITY_CONFLICT", "This sign-in belongs to a different account");
+    }
+    if (membership?.ssoSubject && membership.ssoSubject !== subject) {
+      throw new HttpError(403, "SSO_IDENTITY_CONFLICT", "This sign-in belongs to a different account");
+    }
+
+    // A person homed here before memberships gets their row from their own
+    // User columns — the entitlement they already had, not a new one.
+    if (legacyHome) {
+      // Under the lock a deactivation of this person here takes, so the row is
+      // written before it (and then suspended by it) or after it (and then it
+      // already exists, suspended) — never alongside it (D-ID-1 R2).
+      const written = await prisma.$transaction(async (tx) => {
+        if (typeof tx.$executeRaw === "function") {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${org.id}), hashtext(${user.email}))`;
+        }
+        const row = await membershipService.ensureMembershipForUser({ tx, user, orgId: org.id });
+        if (row && row.status !== membershipService.MEMBERSHIP_STATUSES.ACTIVE) {
+          throw new HttpError(403, "USER_INACTIVE", "Your account is not active");
+        }
+        return row;
       });
-      user = provisioned.created;
-      if (provisioned.seat) {
-        membership = provisioned.seat.membership;
-        await membershipService.recordMembershipEvent({ tx: prisma, orgId: org.id, membership, action: "membership.created", context, metadata: { via: "sso", role: membership.role } });
-      }
-      if (prisma.authAuditEvent?.create) await prisma.authAuditEvent.create({ data: { orgId: org.id, userId: user.id, entityType: "user", entityId: user.id, action: "sso.user_provisioned", email, ipAddress: context.ipAddress || null, userAgent: context.userAgent || null, metadataJson: { issuer: org.ssoIssuer, role: user.role } } }).catch(() => null);
-    } else if (user.status !== "active") throw new HttpError(403, "USER_INACTIVE", "Your account is not active");
-    else if (user.ssoSubject && user.ssoSubject !== subject) throw new HttpError(403, "SSO_IDENTITY_CONFLICT", "This sign-in belongs to a different account");
-    // Linking the subject changes the identity itself: done only once this company is
-    // known to be entitled to sign the person in (below), never on a refused sign-in.
-    else if (!user.ssoSubject) linkSubject = true;
-    // The membership in the SSO organisation: an existing one decides the
-    // role and must be live; a missing one is provisioned with the default
-    // role — for an identity from another workspace only when the
-    // organisation auto-provisions, since that is what "may this person join
-    // us through the IdP" means here.
-    if (!membership) membership = await membershipService.findMembership({ tx: prisma, orgId: org.id, userId: user.id });
-    if (membership) {
-      if (membership.status !== "active") throw new HttpError(403, "USER_INACTIVE", "Your account is not active");
-    } else {
-      // An identity that lives in another company is never admitted or given a seat
-      // here on the word of this company's identity provider (certification finding
-      // L10: an administrator could point their SSO at a provider they control, assert
-      // anyone's e-mail and take over that person's account across companies). Such a
-      // person joins through an invitation they accept themselves; afterwards SSO works.
-      if (user.orgId !== org.id) throw new HttpError(403, "SSO_USER_NOT_FOUND", "No membership exists here for this email — ask a company admin to invite you");
-      const role = user.orgId === org.id && ROLES.includes(user.role) ? user.role : org.ssoDefaultRole || "site_engineer";
-      // In a transaction: the one-member rule's organisation-row lock lasts
-      // until the caller's transaction ends, so the seat check and the insert
-      // hold it together and a concurrent seat in a personal workspace waits.
-      const provisioned = await prisma.$transaction((tx) => membershipService.ensureMembership({ tx, orgId: org.id, userId: user.id, role, isAdmin: user.orgId === org.id && Boolean(user.isCompanyAdmin) }));
-      if (provisioned) {
-        membership = provisioned.membership;
-        await membershipService.recordMembershipEvent({ tx: prisma, orgId: org.id, membership, action: "membership.created", context, metadata: { via: "sso", role: membership.role } });
+      if (written) {
+        membership = written;
+        await membershipService.recordMembershipEvent({ tx: prisma, orgId: org.id, membership, action: "membership.created", context, metadata: { via: "sso_legacy_home", role: membership.role } });
       }
     }
-    if (linkSubject) user = await prisma.user.update({ where: { id: user.id }, data: { ssoSubject: subject, ssoProvider: "oidc", ssoLinkedAt: new Date() } });
+    if (membership && !membership.ssoSubject) {
+      // Linked only while still unlinked: two first sign-ins at once with two
+      // different subjects cannot both bind, the second finds the link made.
+      let linked;
+      try {
+        linked = await prisma.organizationMembership.updateMany({
+          where: { id: membership.id, ssoSubject: null },
+          data: { ssoSubject: subject, ssoLinkedAt: new Date() },
+        });
+      } catch (error) {
+        // Another person's sign-in linked the same subject here a moment ago.
+        if (error?.code === "P2002") throw new HttpError(403, "SSO_IDENTITY_CONFLICT", "This sign-in belongs to a different account");
+        throw error;
+      }
+      const current = await prisma.organizationMembership.findUnique({ where: { id: membership.id } });
+      if (linked.count !== 1 && current?.ssoSubject !== subject) {
+        throw new HttpError(403, "SSO_IDENTITY_CONFLICT", "This sign-in belongs to a different account");
+      }
+      membership = current || membership;
+    }
     const ticket = crypto.randomBytes(32).toString("base64url");
-    await prisma.ssoTicket.create({ data: { orgId: org.id, userId: user.id, tokenHash: hashToken(ticket), expiresAt: new Date(Date.now() + TICKET_TTL_MS), ipAddress: context.ipAddress || null, ...(membership ? { membershipId: membership.id } : {}) } });
+    // Written while the identity is held at the epoch read above (D-ID-1 Q6):
+    // a reset landing before this either makes the hold refuse, or waits for
+    // the ticket to exist and then voids it with the person's other tickets.
+    await prisma.$transaction(async (tx) => {
+      await require("./auth.service").holdCredentialEpoch(tx, user.id, Number.isInteger(user.credentialEpoch) ? user.credentialEpoch : 0);
+      await tx.ssoTicket.create({ data: { orgId: org.id, userId: user.id, tokenHash: hashToken(ticket), expiresAt: new Date(Date.now() + TICKET_TTL_MS), ipAddress: context.ipAddress || null, ...(membership ? { membershipId: membership.id } : {}) } });
+    });
     const target = new URL(`${webAppUrl()}/sso/complete`);
     target.searchParams.set("ticket", ticket);
     if (payload.redirectTo && payload.redirectTo.startsWith("/")) target.searchParams.set("redirect", payload.redirectTo);
@@ -336,7 +344,11 @@ const complete = async ({ ticket }, context = {}) => {
   const authService = require("./auth.service");
   const user = await prisma.user.update({ where: { id: row.user.id }, data: { lastLogin: new Date() } });
   // The session is bound to the membership in the organisation the ticket was issued for — the SSO org, not the identity's home.
-  const payload = await authService.createAuthSessionPayload(prisma, user, context, { orgId: row.orgId, ssoOrgId: row.orgId });
+  // At the epoch the identity had when the ticket was read: a reset that lands
+  // now is not answered with a session (D-ID-1 Q6).
+  const payload = await prisma.$transaction((tx) =>
+    authService.createAuthSessionPayload(tx, user, context, { orgId: row.orgId, ssoOrgId: row.orgId, expectedEpoch: row.user.credentialEpoch ?? 0 }),
+  );
   if (prisma.authAuditEvent?.create) await prisma.authAuditEvent.create({ data: { orgId: user.orgId, userId: user.id, entityType: "user", entityId: user.id, action: "sso.login", email: user.email, ipAddress: context.ipAddress || null, userAgent: context.userAgent || null, metadataJson: {} } }).catch(() => null);
   return payload;
 };
@@ -352,8 +364,14 @@ const testConnection = async ({ orgId, fetchImpl = null }) => {
 
 /** Company admins' overview: who has MFA, who is linked to SSO. */
 const securityOverview = async ({ orgId }) => {
-  const [settings, users] = await Promise.all([settingsFor({ orgId }), prisma.user.findMany({ where: { orgId }, select: { id: true, name: true, email: true, role: true, status: true, isCompanyAdmin: true, mfaEnabled: true, mfaEnrolledAt: true, ssoSubject: true, ssoLinkedAt: true, lastLogin: true }, orderBy: { name: "asc" } })]);
-  return { sso: settings, mfaRequired: settings.mfaRequired, users: users.map((user) => ({ id: user.id, name: user.name, email: user.email, role: user.role, status: user.status, isCompanyAdmin: user.isCompanyAdmin, mfaEnabled: user.mfaEnabled, mfaEnrolledAt: user.mfaEnrolledAt ? user.mfaEnrolledAt.toISOString() : null, ssoLinked: Boolean(user.ssoSubject), ssoLinkedAt: user.ssoLinkedAt ? user.ssoLinkedAt.toISOString() : null, lastLogin: user.lastLogin ? user.lastLogin.toISOString() : null })), summary: { users: users.length, mfaEnabled: users.filter((user) => user.mfaEnabled).length, ssoLinked: users.filter((user) => user.ssoSubject).length } };
+  const [settings, users, links] = await Promise.all([
+    settingsFor({ orgId }),
+    prisma.user.findMany({ where: { orgId }, select: { id: true, name: true, email: true, role: true, status: true, isCompanyAdmin: true, mfaEnabled: true, mfaEnrolledAt: true, lastLogin: true }, orderBy: { name: "asc" } }),
+    // This workspace's own SSO links (D-ID-1 Q2), not another company's.
+    prisma.organizationMembership.findMany({ where: { orgId, ssoSubject: { not: null } }, select: { userId: true, ssoLinkedAt: true } }),
+  ]);
+  const linkedAt = new Map(links.map((link) => [link.userId, link.ssoLinkedAt]));
+  return { sso: settings, mfaRequired: settings.mfaRequired, users: users.map((user) => ({ id: user.id, name: user.name, email: user.email, role: user.role, status: user.status, isCompanyAdmin: user.isCompanyAdmin, mfaEnabled: user.mfaEnabled, mfaEnrolledAt: user.mfaEnrolledAt ? user.mfaEnrolledAt.toISOString() : null, ssoLinked: linkedAt.has(user.id), ssoLinkedAt: linkedAt.get(user.id) ? linkedAt.get(user.id).toISOString() : null, lastLogin: user.lastLogin ? user.lastLogin.toISOString() : null })), summary: { users: users.length, mfaEnabled: users.filter((user) => user.mfaEnabled).length, ssoLinked: users.filter((user) => linkedAt.has(user.id)).length } };
 };
 
 const clearDiscoveryCache = () => discoveryCache.clear();

@@ -765,6 +765,8 @@ const updateTemplate = async ({
   actorId = null,
   actorRole = null,
 }) => {
+  // Changing who may do what on a project can widen access: paused while the emergency membership switch is off (D-ID-1 Q10).
+  require("./membership.service").assertAccessExpansionAllowed();
   const existing = await requireTemplate({ orgId, templateId });
   const data = { updatedBy: actorId };
 
@@ -854,6 +856,8 @@ const updateTemplate = async ({
 };
 
 const archiveTemplate = async ({ orgId, templateId, actorId = null, actorRole = null }) => {
+  // Changing who may do what on a project can widen access: paused while the emergency membership switch is off (D-ID-1 Q10).
+  require("./membership.service").assertAccessExpansionAllowed();
   const existing = await requireTemplate({ orgId, templateId });
   if (existing.isSystem) {
     throw new HttpError(
@@ -1093,6 +1097,9 @@ const addProjectMember = async ({
   actorId = null,
   actorRole = null,
 }) => {
+  // Adding someone to a project widens their access: refused while the
+  // emergency membership switch is off (owner decision D-ID-1 Q10).
+  require("./membership.service").assertAccessExpansionAllowed();
   // A colleague is a member of this organisation, by membership as for every
   // request (certification CERT-2): a person whose home workspace is another
   // company but who belongs to this one is a colleague here, with the role and
@@ -1320,6 +1327,8 @@ const setProjectUserPermission = async ({
   actorId = null,
   actorRole = null,
 }) => {
+  // Changing who may do what on a project can widen access: paused while the emergency membership switch is off (D-ID-1 Q10).
+  require("./membership.service").assertAccessExpansionAllowed();
   const templateId = trimOrNull(payload.templateId);
   const overrides = normalizeOverrides(payload.overrides);
 
@@ -1366,6 +1375,8 @@ const removeProjectUserPermission = async ({
   actorId = null,
   actorRole = null,
 }) => {
+  // Changing who may do what on a project can widen access: paused while the emergency membership switch is off (D-ID-1 Q10).
+  require("./membership.service").assertAccessExpansionAllowed();
   const result = await prisma.$transaction(async (tx) => {
     const deleted = await tx.projectUserPermission.deleteMany({
       where: { orgId, projectId, userId },
@@ -1395,6 +1406,8 @@ const setPartyTemplate = async ({
   actorId = null,
   actorRole = null,
 }) => {
+  // Changing who may do what on a project can widen access: paused while the emergency membership switch is off (D-ID-1 Q10).
+  require("./membership.service").assertAccessExpansionAllowed();
   const templateId = trimOrNull(payload.templateId);
   const party = await prisma.$transaction(async (tx) => {
     const existing = await tx.projectParty.findFirst({

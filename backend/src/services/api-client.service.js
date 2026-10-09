@@ -87,6 +87,9 @@ const resolveProjectIds = async ({ orgId, projectIds }) => {
 };
 
 const createApiClient = async ({ orgId, actor, payload = {} }) => {
+  // A new key is new access: paused while the emergency membership switch is
+  // off (owner decision D-ID-1 Q10). Revoking a key still works.
+  require("./membership.service").assertAccessExpansionAllowed();
   const name = trimOrNull(payload.name);
   if (!name) throw new HttpError(400, "API_CLIENT_NAME_REQUIRED", "Give the key a name");
   const scopes = normalizeScopes(payload.scopes);
@@ -125,6 +128,19 @@ const updateApiClient = async ({ orgId, actor, apiClientId, payload = {} }) => {
     const expiresAt = payload.expiresAt ? new Date(payload.expiresAt) : null;
     if (expiresAt && Number.isNaN(expiresAt.getTime())) throw new HttpError(400, "API_EXPIRY_INVALID", "Expiry must be a date");
     data.expiresAt = expiresAt;
+  }
+  // What a key may reach — its scopes, its projects, how long it lives — is
+  // not changed while the emergency membership switch is off (D-ID-1 Q10);
+  // its name and description, and revoking it, still are. Judged on the
+  // values, so a form that sends them back unchanged with a new name passes.
+  const sameSet = (a = [], b = []) => a.length === b.length && [...a].sort().every((value, index) => value === [...b].sort()[index]);
+  const sameTime = (a, b) => (a ? new Date(a).getTime() : null) === (b ? new Date(b).getTime() : null);
+  if (
+    ("scopes" in data && !sameSet(data.scopes, existing.scopes || [])) ||
+    ("projectIds" in data && !sameSet(data.projectIds, existing.projectIds || [])) ||
+    ("expiresAt" in data && !sameTime(data.expiresAt, existing.expiresAt))
+  ) {
+    require("./membership.service").assertAccessExpansionAllowed();
   }
   if (payload.status === "revoked" && existing.status !== "revoked") {
     data.status = "revoked";

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { type Table } from '@tanstack/react-table'
-import { Trash2, UserX, UserCheck, Mail } from 'lucide-react'
+import { Trash2, UserX, UserCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { useCanPerform } from '@/lib/permissions'
 import { sleep } from '@/lib/utils'
@@ -21,13 +21,12 @@ type DataTableBulkActionsProps<TData> = {
 export function DataTableBulkActions<TData>({
   table,
 }: DataTableBulkActionsProps<TData>) {
-  const canCreateUser = useCanPerform('user_management', 'create')
   const canUpdateUser = useCanPerform('user_management', 'update')
   const canDeleteUser = useCanPerform('user_management', 'delete')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const selectedRows = table.getFilteredSelectedRowModel().rows
 
-  if (!canCreateUser && !canUpdateUser && !canDeleteUser) return null
+  if (!canUpdateUser && !canDeleteUser) return null
 
   const handleBulkStatusChange = (status: 'active' | 'inactive') => {
     const selectedUsers = selectedRows.map((row) => row.original as User)
@@ -42,43 +41,11 @@ export function DataTableBulkActions<TData>({
     table.resetRowSelection()
   }
 
-  const handleBulkInvite = () => {
-    const selectedUsers = selectedRows.map((row) => row.original as User)
-    toast.promise(sleep(2000), {
-      loading: 'Inviting users...',
-      success: () => {
-        table.resetRowSelection()
-        return `Invited ${selectedUsers.length} user${selectedUsers.length > 1 ? 's' : ''}`
-      },
-      error: 'Error inviting users',
-    })
-    table.resetRowSelection()
-  }
-
+  // No bulk "invite": the people listed here are already in the workspace,
+  // and adding a person is one invitation at a time (owner decision D-ID-1).
   return (
     <>
       <BulkActionsToolbar table={table} entityName='user'>
-        {canCreateUser && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant='outline'
-                size='icon'
-                onClick={handleBulkInvite}
-                className='size-8'
-                aria-label='Invite selected users'
-                title='Invite selected users'
-              >
-                <Mail />
-                <span className='sr-only'>Invite selected users</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Invite selected users</p>
-            </TooltipContent>
-          </Tooltip>
-        )}
-
         {canUpdateUser && (
           <Tooltip>
             <TooltipTrigger asChild>

@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { isEndedSession } from '@/services/api/client'
 import { Loader2, MailPlus, Send } from 'lucide-react'
 import { toast } from 'sonner'
-import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -35,7 +35,11 @@ import {
   useProjects,
 } from '@/features/projects/hooks/use-projects'
 import { roles } from '../data/data'
-import { useInviteUserMutation } from '../hooks/use-users'
+import {
+  invitationErrorMessage,
+  isInvitationEmailFailed,
+  useInviteUserMutation,
+} from '../hooks/use-users'
 
 const formSchema = z.object({
   email: z.email({
@@ -98,15 +102,29 @@ export function UsersInviteDialog({
             : undefined,
         note: values.note || undefined,
       })
+      // One neutral answer whoever the address belongs to: the person
+      // joins when they accept, with a password (or sign-in) of their own.
       form.reset()
-      toast.success(`Invitation sent to ${values.email}`)
+      toast.success(
+        `Invitation sent to ${values.email}. They join when they accept it.`
+      )
       onOpenChange(false)
     } catch (error) {
+      // An ended session was already announced by the request layer (D-ID-1 N4).
+      if (isEndedSession(error)) return
       if (isConvertRequiredError(error)) {
         setConvertRequired(true)
         return
       }
-      toast.error(getServerErrorMessage(error, 'Unable to send invitation.'))
+      // Saved, but its e-mail failed (502): the invitation is pending and
+      // is sent again from Pending invitations, never re-typed here.
+      if (isInvitationEmailFailed(error)) {
+        form.reset()
+        toast.warning(invitationErrorMessage(error))
+        onOpenChange(false)
+        return
+      }
+      toast.error(invitationErrorMessage(error))
     }
   }
 
@@ -140,11 +158,12 @@ export function UsersInviteDialog({
       <DialogContent className='sm:max-w-md'>
         <DialogHeader className='text-start'>
           <DialogTitle className='flex items-center gap-2'>
-            <MailPlus /> Invite User
+            <MailPlus /> Invite a person
           </DialogTitle>
           <DialogDescription>
-            Invite new user to join your team by sending them an email
-            invitation. Assign a role to define their access level.
+            Everyone joins by invitation. We e-mail them a link; they choose
+            their own password (or use their company sign-in) when they
+            accept. The role sets their access level.
           </DialogDescription>
         </DialogHeader>
         {convertRequired && (

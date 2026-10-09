@@ -2,7 +2,7 @@ const { body, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { validate } = require("../middleware/validate");
-const { authenticate } = require("../middleware/auth");
+const { authenticate, requireCredentialSession } = require("../middleware/auth");
 const { noApiKey } = require("../middleware/rbac");
 const { loginLimiter } = require("../middleware/rate-limit");
 const authService = require("../services/auth.service");
@@ -29,11 +29,13 @@ const register = (router, { sendSession, getRequestContext }) => {
   );
 
   // ── MFA: enrolment and management (signed in) ──
+  // A change to the identity's own second factor needs a session the person
+  // opened with their own credentials, never one a company's SSO issued (D-ID-1 Q2).
   router.get("/mfa", authenticate, asyncHandler(async (req, res) => sendSuccess(res, await mfaService.status({ userId: req.user.id }))));
-  router.post("/mfa/setup", authenticate, noApiKey, asyncHandler(async (req, res) => sendSuccess(res, await mfaService.beginEnrollment({ userId: req.user.id }))));
-  router.post("/mfa/enable", authenticate, noApiKey, [body("code").isString().trim().isLength({ min: 6, max: 8 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await mfaService.enable({ userId: req.user.id, code: req.body.code, context: getRequestContext(req) }))));
-  router.post("/mfa/disable", authenticate, noApiKey, [body("password").isString().notEmpty(), body("code").isString().trim().isLength({ min: 6, max: 12 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await mfaService.disable({ userId: req.user.id, password: req.body.password, code: req.body.code, context: getRequestContext(req) }))));
-  router.post("/mfa/backup-codes", authenticate, noApiKey, [body("code").isString().trim().isLength({ min: 6, max: 8 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await mfaService.regenerateBackupCodes({ userId: req.user.id, code: req.body.code, context: getRequestContext(req) }))));
+  router.post("/mfa/setup", authenticate, noApiKey, requireCredentialSession, asyncHandler(async (req, res) => sendSuccess(res, await mfaService.beginEnrollment({ userId: req.user.id, epoch: req.user.credentialEpoch }))));
+  router.post("/mfa/enable", authenticate, noApiKey, requireCredentialSession, [body("code").isString().trim().isLength({ min: 6, max: 8 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await mfaService.enable({ userId: req.user.id, code: req.body.code, epoch: req.user.credentialEpoch, context: getRequestContext(req) }))));
+  router.post("/mfa/disable", authenticate, noApiKey, requireCredentialSession, [body("password").isString().notEmpty(), body("code").isString().trim().isLength({ min: 6, max: 12 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await mfaService.disable({ userId: req.user.id, password: req.body.password, code: req.body.code, epoch: req.user.credentialEpoch, context: getRequestContext(req) }))));
+  router.post("/mfa/backup-codes", authenticate, noApiKey, requireCredentialSession, [body("code").isString().trim().isLength({ min: 6, max: 8 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await mfaService.regenerateBackupCodes({ userId: req.user.id, code: req.body.code, epoch: req.user.credentialEpoch, context: getRequestContext(req) }))));
 
   // ── SSO ──
   router.get("/sso/lookup", [query("email").isString().isEmail(), validate], asyncHandler(async (req, res) => sendSuccess(res, await ssoService.lookup({ email: req.query.email }))));

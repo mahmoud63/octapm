@@ -1,0 +1,124 @@
+{
+  "proof": "backend/scripts/cert/cert3/d-id-1-sso-proof.js",
+  "mutations": [
+    {
+      "name": "M15 SSO creates a new identity again for an unknown e-mail (the callback makes the User, then the legacy-home branch seats it)",
+      "file": "backend/src/services/sso.service.js",
+      "from": "    const user = await prisma.user.findUnique({ where: { email } });",
+      "to": "    const user = (await prisma.user.findUnique({ where: { email } })) || (await prisma.user.create({ data: { email, name: String(claims.name || email), passwordHash: crypto.randomBytes(32).toString(\"hex\"), orgId: org.id, role: org.ssoDefaultRole || \"site_engineer\" } }));",
+      "expect": "C10: an unknown e-mail: the callback redirects with ssoError=SSO_USER_NOT_FOUND; no User, membership, ticket or SSO link is written (and C10: the four refusals are the same answer)"
+    },
+    {
+      "name": "M20 MFA setup allowed from an SSO-bound session (requireCredentialSession removed from POST /auth/mfa/setup)",
+      "file": "backend/src/routes/auth-security.js",
+      "from": "router.post(\"/mfa/setup\", authenticate, noApiKey, requireCredentialSession, asyncHandler(",
+      "to": "router.post(\"/mfa/setup\", authenticate, noApiKey, asyncHandler(",
+      "expect": "C13: with a Y-SSO session, POST /auth/mfa/setup is refused 403 SSO_SESSION_BOUND (also the identity-unchanged check and the X-SSO home-session check)"
+    },
+    {
+      "name": "M20 MFA enable allowed from an SSO-bound session (requireCredentialSession removed from POST /auth/mfa/enable)",
+      "file": "backend/src/routes/auth-security.js",
+      "from": "router.post(\"/mfa/enable\", authenticate, noApiKey, requireCredentialSession, [",
+      "to": "router.post(\"/mfa/enable\", authenticate, noApiKey, [",
+      "expect": "C13: with a Y-SSO session, POST /auth/mfa/enable is refused 403 SSO_SESSION_BOUND (also the X-SSO home-session check)"
+    },
+    {
+      "name": "M21 SSO subjects matched globally again (the callback's linkedHere lookup ignores the workspace)",
+      "file": "backend/src/services/sso.service.js",
+      "from": "      where: { orgId: org.id, ssoSubject: subject },",
+      "to": "      where: { ssoSubject: subject },",
+      "expect": "C13: X's provider, asserting a different subject sx (the string Y's provider bound to Q), still signs P in to X and stores sx on the X membership; sy and Q's link stay"
+    },
+    {
+      "name": "M24 an SSO-bound acceptance proof is accepted and a target-workspace session issued (the SSO binding dropped in acceptInvitation)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "    return await issueWorkspaceSession({ userId: accepted.id, orgId: invitation.orgId, ssoOrgId: ownSso, expectedEpoch: ownEpoch }, context);",
+      "to": "    return await issueWorkspaceSession({ userId: accepted.id, orgId: invitation.orgId, ssoOrgId: null, expectedEpoch: ownEpoch }, context);",
+      "expect": "C14: P with a Y-SSO session bearer accepts: { accepted: true, signInRequired: true } and no session (no tokens, no cookie, no refresh session in Z)"
+    },
+    {
+      "name": "R2-F3a a password reset stops voiding unredeemed SSO tickets (the ssoTicket part of endIdentitySessions removed)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "    await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } });",
+      "to": "    // (mutant) a credential event leaves unredeemed SSO tickets valid",
+      "expect": "R2 finding 3 (password reset): the pre-reset ticket row is still unused after the reset, and redeeming it answers 200 with a session at the new epoch (complete() reads the epoch at redemption, so the epoch hold passes) and a refresh session is written"
+    },
+    {
+      "name": "R2-F3b an admin MFA reset stops voiding unredeemed SSO tickets",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "      if (tx.ssoTicket?.updateMany) await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: new Date() } });",
+      "to": "      // (mutant) an admin MFA reset leaves unredeemed SSO tickets valid",
+      "expect": "R2 finding 3 (admin MFA reset): the pre-reset ticket row is still unused after the reset, and redeeming it answers 200 with a session (and a refresh session) instead of 401 SSO_TICKET_INVALID"
+    },
+    {
+      "name": "R2-F3c deactivation in a workspace stops voiding that workspace's unredeemed SSO tickets (identity not closed)",
+      "file": "backend/src/services/user.service.js",
+      "from": "      await tx.ssoTicket.updateMany({ where: closedIdentity ? { userId, usedAt: null } : { userId, orgId, usedAt: null }, data: { usedAt: now } });",
+      "to": "      await tx.ssoTicket.updateMany({ where: closedIdentity ? { userId, usedAt: null } : { id: \"__mutant_no_ticket__\" }, data: { usedAt: now } });",
+      "expect": "R2 finding 3 (deactivation): D's Y ticket row stays unused after the deactivation and its redemption answers 403 USER_INACTIVE (the suspended membership still refuses the session, defence in depth) instead of 401 SSO_TICKET_INVALID"
+    },
+    {
+      "name": "R2-F3d deactivation in one workspace voids the identity's unredeemed SSO tickets everywhere (over-broad scope)",
+      "file": "backend/src/services/user.service.js",
+      "from": "      await tx.ssoTicket.updateMany({ where: closedIdentity ? { userId, usedAt: null } : { userId, orgId, usedAt: null }, data: { usedAt: now } });",
+      "to": "      await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } });",
+      "expect": "R2 finding 3 (deactivation): D's X ticket is voided by Y's deactivation (X ticket used=true; X redeem 401 SSO_TICKET_INVALID instead of 200 bound to X)"
+    },
+    {
+      "name": "R2-F1 SSO ticket redemption mints without the epoch hold (complete() without expectedEpoch)",
+      "file": "backend/src/services/sso.service.js",
+      "from": "    authService.createAuthSessionPayload(tx, user, context, { orgId: row.orgId, ssoOrgId: row.orgId, expectedEpoch: row.user.credentialEpoch ?? 0 }),",
+      "to": "    authService.createAuthSessionPayload(tx, user, context, { orgId: row.orgId, ssoOrgId: row.orgId }),",
+      "expect": "R2 finding 1/3 (race): the complete queued behind the epoch bump answers 200 with tokens at the new epoch (the user row it re-read after the bump committed) and a refresh session is written, instead of 401 SESSION_REVOKED"
+    },
+    {
+      "name": "R2-F11 the first SSO binding is written by id alone again (the ssoSubject: null condition dropped)",
+      "file": "backend/src/services/sso.service.js",
+      "from": "          where: { id: membership.id, ssoSubject: null },",
+      "to": "          where: { id: membership.id },",
+      "expect": "R2 finding 11 (race): both queued callbacks link (count 1 each) and both issue tickets; the later write overwrites the first binding, so there is no SSO_IDENTITY_CONFLICT loser and W's ticket count rises by 2"
+    },
+    {
+      "name": "R3-F3a the callback writes its ticket without the epoch hold (holdCredentialEpoch removed from the ticket transaction)",
+      "file": "backend/src/services/sso.service.js",
+      "from": "      await require(\"./auth.service\").holdCredentialEpoch(tx, user.id, Number.isInteger(user.credentialEpoch) ? user.credentialEpoch : 0);",
+      "to": "      // (mutant) the callback's ticket is written without holding the identity at the epoch it read",
+      "expect": "R3 item 3 (race): the callback never waits (no waiter behind the held User row; waitForBlocked gives up after 20 s with 0, no FOR NO KEY UPDATE waiter) and redirects to /sso/complete with a ticket instead of /sign-in?ssoError=SESSION_REVOKED; V's SsoTicket count rises by 1 while the bump is still held. R3 item 3 (control) still passes."
+    },
+    {
+      "name": "R3-F3b the callback's ticket is written outside the epoch-hold transaction, before the hold (prisma.ssoTicket.create on its own connection, then the hold)",
+      "file": "backend/src/services/sso.service.js",
+      "from": "      await require(\"./auth.service\").holdCredentialEpoch(tx, user.id, Number.isInteger(user.credentialEpoch) ? user.credentialEpoch : 0);",
+      "to": "      await prisma.ssoTicket.create({ data: { orgId: org.id, userId: user.id, tokenHash: hashToken(ticket), expiresAt: new Date(Date.now() + TICKET_TTL_MS), ipAddress: context.ipAddress || null, ...(membership ? { membershipId: membership.id } : {}) } }); await require(\"./auth.service\").holdCredentialEpoch(tx, user.id, Number.isInteger(user.credentialEpoch) ? user.credentialEpoch : 0); return;",
+      "expect": "R3 item 3 (race): the callback still waits at the hold and still redirects with ssoError=SESSION_REVOKED, but the ticket row was already committed outside the transaction: V's SsoTicket count is before+1 while the bump is held and after it commits (the 'no SsoTicket row written' part fails). R3 item 3 (control) still passes (one ticket, it redeems)."
+    },
+    {
+      "name": "R3-F3c the callback checks the epoch with a plain read inside the ticket transaction instead of the row lock",
+      "file": "backend/src/services/sso.service.js",
+      "from": "      await require(\"./auth.service\").holdCredentialEpoch(tx, user.id, Number.isInteger(user.credentialEpoch) ? user.credentialEpoch : 0);",
+      "to": "      { const seen = await tx.user.findUnique({ where: { id: user.id }, select: { credentialEpoch: true, status: true } }); if (!seen || seen.status !== \"active\" || seen.credentialEpoch !== (Number.isInteger(user.credentialEpoch) ? user.credentialEpoch : 0)) throw new HttpError(401, \"SESSION_REVOKED\", \"This session has ended; sign in again\"); }",
+      "expect": "R3 item 3 (race): the read sees the last committed epoch (the bump is uncommitted), so the callback never waits (0 waiters after 20 s), writes the ticket and redirects to /sso/complete instead of ssoError=SESSION_REVOKED; V's SsoTicket count rises by 1. R3 item 3 (control) still passes."
+    },
+    {
+      "name": "R3-F3d the epoch hold no longer locks the User row (FOR NO KEY UPDATE dropped from holdCredentialEpoch)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "  const rows = await tx.$queryRaw`SELECT \"id\" FROM \"User\" WHERE \"id\" = ${userId} AND \"credentialEpoch\" = ${epoch} AND \"status\" = 'active' FOR NO KEY UPDATE`;",
+      "to": "  const rows = await tx.$queryRaw`SELECT \"id\" FROM \"User\" WHERE \"id\" = ${userId} AND \"credentialEpoch\" = ${epoch} AND \"status\" = 'active'`;",
+      "expect": "R3 item 3 (race): the hold reads the pre-bump row without waiting (0 waiters after 20 s), the ticket is written and the callback redirects to /sso/complete instead of ssoError=SESSION_REVOKED; V's SsoTicket count rises by 1. R3 item 3 (control) still passes. (R2 finding 1/3 (race) is not expected to fail here: complete() queues on its lastLogin update of T's row, and the unlocked hold then reads the committed bump and refuses.)"
+    },
+    {
+      "name": "R3-CTL the callback holds a stale epoch (one below the epoch it read), so every SSO callback is refused",
+      "file": "backend/src/services/sso.service.js",
+      "from": "      await require(\"./auth.service\").holdCredentialEpoch(tx, user.id, Number.isInteger(user.credentialEpoch) ? user.credentialEpoch : 0);",
+      "to": "      await require(\"./auth.service\").holdCredentialEpoch(tx, user.id, Number.isInteger(user.credentialEpoch) ? user.credentialEpoch - 1 : -1);",
+      "expect": "R3 item 3 (control): the non-racing callback redirects to /sign-in?ssoError=SESSION_REVOKED with no ticket (no SsoTicket row, redeem of the placeholder 401 SSO_TICKET_INVALID, no /auth/me). Collateral: R3 item 3 (race) fails too (the hold's WHERE filters the row out before locking, so it is refused at once and no waiter is seen), and every check that needs an SSO ticket (C10 Q and G, C13 P via Y and via X, C14 with the Y-SSO bearer, R2 fresh sign-ins, tickets and the binding race) fails with SESSION_REVOKED at the callback."
+    },
+    {
+      "name": "R4-LEGACY the callback's legacy branch materialises the Y row without the (org, e-mail) advisory lock",
+      "file": "backend/src/services/sso.service.js",
+      "from": "          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${org.id}), hashtext(${user.email}))`;",
+      "to": "          // (mutant) the legacy branch writes the membership row without the (org, e-mail) lock",
+      "expect": "R4 legacy SSO vs deactivation (race): the callback never queues at the held (Y, e-mail) lock (callback queued 0, no advisory waiter; the wait ends as soon as it answers) and, while the proof still holds the lock, G2's Y row is written active and a ticket is issued (Y row present while held, G2 tickets before+1 while held). The deactivation then queues alone (both queued 1, one advisory waiter), suspends the row and voids the ticket, so the outcome parts (200, suspended, redeem 401 SSO_TICKET_INVALID, no Y session) still hold; the serialisation parts fail. C10 legacy (G) still passes (no contention)."
+    }
+  ]
+}

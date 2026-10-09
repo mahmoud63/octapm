@@ -133,8 +133,14 @@ class RealtimeClient {
     })
     socket.on('connect_error', (error: Error & { data?: { code?: string } }) => {
       const code = error?.data?.code
-      if (code === 'USER_INACTIVE' || code === 'INVALID_TOKEN') {
-        // nothing to retry with this token: the account is gone or the token is not honoured
+      if (
+        code === 'USER_INACTIVE' ||
+        code === 'INVALID_TOKEN' ||
+        code === 'SESSION_REVOKED'
+      ) {
+        // nothing to retry with this token: the account is gone, the token is
+        // not honoured, or it predates a password reset (D-ID-1 Q6) — the
+        // request layer's refresh decides whether the session goes on
         this.disconnect()
         return
       }

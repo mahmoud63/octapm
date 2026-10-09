@@ -386,7 +386,7 @@
         "user.invite": ["pm"],
         "user.activate": ["pm"],
         "user.deactivate": ["pm"],
-        "user.reset_password": ["pm"],
+        "user.send_password_reset": ["pm"],
         "user.assign_role": ["pm"]
       }
     },

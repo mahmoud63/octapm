@@ -774,6 +774,13 @@ const updateProject = async ({
   });
 
   await prisma.$transaction(async (tx) => {
+    // A save that re-syncs the parties takes the party rows first, in id
+    // order, and the project row after — the order a party edit takes them
+    // (the party, then the project's legacy names), so the two never wait on
+    // each other in a cycle.
+    if (partySyncPayload && typeof tx.$queryRaw === "function") {
+      await tx.$queryRaw`SELECT "id" FROM "ProjectParty" WHERE "projectId" = ${projectId} ORDER BY "id" FOR UPDATE`;
+    }
     if (Object.keys(data).length > 0) {
       await tx.project.update({
         where: { id: projectId },

@@ -166,8 +166,30 @@ const stripeWebhookLimiter = createRateLimiter({
   message: 'Too many webhook requests. Try again later.',
 });
 
+// An administrator asking OctaPM to send someone the reset e-mail (D-ID-1 Q4):
+// limited per person in each workspace, so no company can flood a person's
+// mailbox or keep cancelling the reset link they asked for themselves, and per
+// administrator, so one account cannot sweep a workspace.
+const passwordResetEmailTargetLimiter = createRateLimiter({
+  name: 'reset-email-target',
+  windowMs: readPositiveInt(process.env.RATE_LIMIT_RESET_EMAIL_WINDOW_MS, 60 * 60_000),
+  max: readPositiveInt(process.env.RATE_LIMIT_RESET_EMAIL_TARGET_MAX, 3),
+  keyGenerator: (req) => `${req.user?.orgId || 'none'}:${String(req.params?.id || '')}`,
+  message: 'A reset e-mail was sent to this person recently. Try again later.',
+});
+
+const passwordResetEmailActorLimiter = createRateLimiter({
+  name: 'reset-email-actor',
+  windowMs: readPositiveInt(process.env.RATE_LIMIT_RESET_EMAIL_WINDOW_MS, 60 * 60_000),
+  max: readPositiveInt(process.env.RATE_LIMIT_RESET_EMAIL_ACTOR_MAX, 20),
+  keyGenerator: (req) => `${req.user?.orgId || 'none'}:${req.user?.id || clientIp(req)}`,
+  message: 'Too many reset e-mails requested. Try again later.',
+});
+
 module.exports = {
   aiGenerationLimiter,
+  passwordResetEmailActorLimiter,
+  passwordResetEmailTargetLimiter,
   apiRateLimiter,
   authLimiter,
   billingLimiter,

@@ -57,6 +57,25 @@ const flagOn = (name) =>
 const isMembershipReadEnabled = () => flagOn("AUTH_MEMBERSHIP_READ");
 const isMembershipWriteEnabled = () => flagOn("AUTH_MEMBERSHIP_WRITE");
 
+/**
+ * The emergency switch fails closed (owner decision D-ID-1 Q10): while
+ * membership writes are off, nothing that widens anyone's access runs —
+ * inviting, accepting, activating, a role change, an administration or
+ * ownership grant, a project-team or party addition. Everything that narrows
+ * access (suspend, revoke an invitation, remove from a project, revoke
+ * administration) stays available, so the switch never stands between an
+ * operator and revoking compromised access.
+ */
+const assertAccessExpansionAllowed = () => {
+  if (!isMembershipWriteEnabled()) {
+    throw new HttpError(
+      503,
+      "MEMBERSHIP_WRITES_SUSPENDED",
+      "Adding people and widening access are paused on this deployment; removing access still works",
+    );
+  }
+};
+
 /** Whether this client (real or a test double) knows the membership model at all. */
 const hasMembershipModel = (tx) =>
   Boolean(tx?.organizationMembership?.findFirst);
@@ -153,6 +172,7 @@ const PRINCIPAL_USER_SELECT = {
   orgId: true,
   role: true,
   isCompanyAdmin: true,
+  credentialEpoch: true,
 };
 const PRINCIPAL_ORG_SELECT = { id: true, name: true, kind: true, slug: true, status: true };
 const PRINCIPAL_INCLUDE = {
@@ -178,6 +198,9 @@ const principalFromMembership = (membership) => ({
   kind: membership.kind || MEMBERSHIP_KINDS.MEMBER,
   email: membership.user?.email ?? null,
   name: membership.user?.name ?? null,
+  credentialEpoch: membership.user?.credentialEpoch ?? 0,
+  // Whether this workspace's own single sign-on is linked (D-ID-1 Q2).
+  ssoLinked: Boolean(membership.ssoSubject),
 });
 
 /** The same shape from a User row alone: the pre-membership fallback. */
@@ -194,6 +217,7 @@ const principalFromUser = (user) => ({
   kind: MEMBERSHIP_KINDS.MEMBER,
   email: user.email ?? null,
   name: user.name ?? null,
+  credentialEpoch: user.credentialEpoch ?? 0,
 });
 
 const isLive = (membership) =>
@@ -544,6 +568,11 @@ const acceptOffer = async ({
   if (!isMembershipWriteEnabled() || !hasMembershipModel(tx)) return null;
   const offeredRole = assertRoleForKind({ role, kind });
   const existing = await tx.organizationMembership.findFirst({ where: { orgId, userId } });
+  // A suspension is the workspace's decision and only its Activate undoes it
+  // (owner decision D-ID-1 Q3): no offer, however old, reactivates the row.
+  if (existing?.status === MEMBERSHIP_STATUSES.SUSPENDED) {
+    throw new HttpError(400, "INVITATION_TOKEN_INVALID", "Invitation token is invalid, expired, or already used");
+  }
   const active = existing?.status === MEMBERSHIP_STATUSES.ACTIVE;
   if (active && (existing.kind === MEMBERSHIP_KINDS.MEMBER || kind === MEMBERSHIP_KINDS.GUEST)) {
     const membership = await tx.organizationMembership.findFirst({ where: { id: existing.id }, include: PRINCIPAL_INCLUDE });
@@ -672,13 +701,30 @@ const changeMembership = async ({ tx = prisma, orgId, userId, actor = null, chan
   if (changed.includes("isOwner") && !actor?.isOwner) {
     throw new HttpError(403, "OWNER_REQUIRED", OWNER_REQUIRED_MESSAGE);
   }
+  // The emergency switch is judged here, against the row as the caller read
+  // it under its lock — not against whatever an earlier snapshot said
+  // (D-ID-1 Q10): a role change, a grant of administration or ownership, or a
+  // return to active widens access; anything that narrows still goes through.
+  const expands =
+    changed.includes("role") ||
+    (next.isAdmin && !membership.isAdmin) ||
+    (next.isOwner && !membership.isOwner) ||
+    (changed.includes("status") && next.status === MEMBERSHIP_STATUSES.ACTIVE);
+  if (expands) assertAccessExpansionAllowed();
 
   const losesOwnership =
     membership.isOwner &&
     membership.status === MEMBERSHIP_STATUSES.ACTIVE &&
     (!next.isOwner || next.status !== MEMBERSHIP_STATUSES.ACTIVE);
-  if (losesOwnership && (await countActiveOwners({ tx, orgId, excludeUserId: userId })) === 0) {
-    throw new HttpError(409, "LAST_OWNER", "This workspace needs at least one active owner");
+  if (losesOwnership) {
+    // Owners are removed one at a time per workspace: two owners demoting or
+    // suspending each other at once would each count the other and leave none.
+    if (typeof tx?.$executeRaw === "function") {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('owners'), hashtext(${orgId}))`;
+    }
+    if ((await countActiveOwners({ tx, orgId, excludeUserId: userId })) === 0) {
+      throw new HttpError(409, "LAST_OWNER", "This workspace needs at least one active owner");
+    }
   }
   // A member coming back from `left` takes a seat again — ensureMembership
   // counts it the same way — so a personal workspace's one-member rule
@@ -693,20 +739,25 @@ const changeMembership = async ({ tx = prisma, orgId, userId, actor = null, chan
   }
 
   const now = new Date();
-  const updated = await tx.organizationMembership.update({
-    where: { id: membership.id },
-    data: {
-      role: next.role,
-      isAdmin: next.isAdmin,
-      isOwner: next.isOwner,
-      status: next.status,
-      ...(next.status === MEMBERSHIP_STATUSES.LEFT ? { leftAt: now } : {}),
-      ...(next.status === MEMBERSHIP_STATUSES.ACTIVE && membership.status !== MEMBERSHIP_STATUSES.ACTIVE
-        ? { leftAt: null, joinedAt: membership.joinedAt || now }
-        : {}),
-    },
-    include: PRINCIPAL_INCLUDE,
+  // Only what changed is written, and only onto the row as it was read: a
+  // role edit racing a suspension must neither write the old status back
+  // (reactivating the person) nor overwrite the suspension's own fields
+  // (D-ID-1 N1). A row that moved meanwhile is a conflict, not a retry here.
+  const data = {};
+  for (const field of changed) data[field] = next[field];
+  if (changed.includes("status") && next.status === MEMBERSHIP_STATUSES.LEFT) data.leftAt = now;
+  if (changed.includes("status") && next.status === MEMBERSHIP_STATUSES.ACTIVE) {
+    data.leftAt = null;
+    data.joinedAt = membership.joinedAt || now;
+  }
+  const written = await tx.organizationMembership.updateMany({
+    where: { id: membership.id, role: membership.role, isAdmin: membership.isAdmin, isOwner: membership.isOwner, status: membership.status },
+    data,
   });
+  if (written.count !== 1) {
+    throw new HttpError(409, "MEMBERSHIP_CHANGED", "This person's membership changed meanwhile; reload and try again");
+  }
+  const updated = await tx.organizationMembership.findFirst({ where: { id: membership.id }, include: PRINCIPAL_INCLUDE });
 
   const events = [];
   if (changed.includes("role")) events.push(["membership.role_changed", { from: membership.role, to: next.role }]);
@@ -737,6 +788,41 @@ const hasOtherActiveMembership = async ({ tx = prisma, orgId, userId }) => {
   if (!hasMembershipModel(tx)) return false;
   const count = await tx.organizationMembership.count({
     where: { userId, orgId: { not: orgId }, status: MEMBERSHIP_STATUSES.ACTIVE },
+  });
+  return count > 0;
+};
+
+/**
+ * The guard for an identity-wide action one workspace takes (closing the
+ * identity, clearing its second factor): it is refused while the person is
+ * part of any other workspace — active or suspended there (D-ID-1 ID-GUARD).
+ * A suspension elsewhere is that company's to lift, and lifting it must find
+ * the identity as that company left it.
+ *
+ * As a `where` fragment for a conditional write on User, so the check and the
+ * write are one statement and cannot be split by a concurrent acceptance.
+ */
+const noOtherPresentMembershipWhere = (orgId) => ({
+  memberships: { none: { orgId: { not: orgId }, status: { in: [...PRESENT_STATUSES] } } },
+});
+
+/**
+ * The lock every identity-wide change (closing the identity, clearing its
+ * factor) and every acceptance of an existing identity takes, so the two are
+ * made one at a time. Taken before the change's own statement, which then
+ * reads the memberships as the other left them; a condition on the statement
+ * alone cannot see a membership another transaction has not committed yet.
+ */
+const lockIdentity = async (tx, userId) => {
+  if (typeof tx?.$executeRaw === "function") {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('identity'), hashtext(${userId}))`;
+  }
+};
+
+const hasOtherPresentMembership = async ({ tx = prisma, orgId, userId }) => {
+  if (!hasMembershipModel(tx)) return false;
+  const count = await tx.organizationMembership.count({
+    where: { userId, orgId: { not: orgId }, status: { in: [...PRESENT_STATUSES] } },
   });
   return count > 0;
 };
@@ -778,7 +864,11 @@ module.exports = {
   CATALOGUE_ROLES,
   PRESENT_STATUSES,
   acceptOffer,
+  assertAccessExpansionAllowed,
   assertWorkspaceAcceptsMember,
+  hasOtherPresentMembership,
+  lockIdentity,
+  noOtherPresentMembershipWhere,
   findBillingRecipient,
   GUEST_ROLE,
   MEMBERSHIP_KINDS,

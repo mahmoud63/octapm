@@ -14,6 +14,7 @@ const {
   getAccessTokenExpiresInSeconds,
   getRefreshTokenExpiresAt,
   hashRefreshToken,
+  tokenEpochCurrent,
   verifyRefreshToken,
 } = require("../utils/tokens");
 const membershipService = require("./membership.service");
@@ -24,6 +25,13 @@ const companyPartyService = require("./company-party.service");
 const { isPublicRegistrationOpen } = require("../config/registration");
 
 const PASSWORD_RESET_EXPIRY_MINUTES = 60;
+// A cost-12 hash of a random secret nobody holds: compared against when an
+// address has no account, so sign-in costs the same either way (D-ID-1 Q7).
+let dummyPasswordHash = null;
+const getDummyPasswordHash = async () => {
+  if (!dummyPasswordHash) dummyPasswordHash = await bcrypt.hash(randomBytes(24).toString("base64url"), 12);
+  return dummyPasswordHash;
+};
 const INVITATION_EXPIRY_DAYS = 7;
 
 const normalizeEmail = (email) => email.trim().toLowerCase();
@@ -144,7 +152,9 @@ const sanitizeUser = (user, principal = null) => ({
   status: user.status,
   lastLogin: user.lastLogin,
   mfaEnabled: Boolean(user.mfaEnabled),
-  ssoLinked: Boolean(user.ssoSubject),
+  // The SSO link is the active workspace's own (D-ID-1 Q2); a session with no
+  // membership behind it has none.
+  ssoLinked: Boolean(principal?.ssoLinked),
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });
@@ -200,9 +210,49 @@ const createRefreshSession = async (tx, principal, context = {}) => {
  * A session for a user row, bound to their membership in `orgId` (their own
  * organisation unless the caller names another workspace they belong to).
  */
-const createAuthSessionPayload = async (tx, user, context = {}, { orgId = null, ssoOrgId = null } = {}) => {
+/**
+ * Everything a credential event ends besides the tokens the epoch already
+ * voids (D-ID-1 Q6): every refresh session, and every SSO sign-in ticket not
+ * yet exchanged — a ticket issued before the event would otherwise open a
+ * session at the new epoch. Live sockets are dropped by the caller's route.
+ */
+const endIdentitySessions = async (tx, userId, now = new Date()) => {
+  await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } });
+  if (tx.ssoTicket?.updateMany) {
+    await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } });
+  }
+};
+
+const sessionRevokedError = () =>
+  new HttpError(401, "SESSION_REVOKED", "This session has ended; sign in again");
+
+/**
+ * Holds the identity at the credential epoch its proof was checked against
+ * (D-ID-1 Q6), for the rest of the caller's transaction. A reset, an identity
+ * closed or a factor reset updates the User row, so this row lock either
+ * waits for it to commit — and then finds the epoch moved and refuses — or
+ * makes it wait until the new session is written, which its revocation then
+ * covers. Without it, a request that proved itself just before a reset could
+ * mint a session at the new epoch just after it.
+ *
+ * FOR NO KEY UPDATE, not FOR SHARE: the same transaction may go on to update
+ * the row (a sign-in stamps lastLogin), and two shared locks upgrading at
+ * once deadlock; this lock makes concurrent sessions of one person queue
+ * instead. It does not block the key-share locks that inserting a session row
+ * takes.
+ */
+const holdCredentialEpoch = async (tx, userId, epoch) => {
+  if (!Number.isInteger(epoch) || typeof tx.$queryRaw !== "function") return;
+  const rows = await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} AND "credentialEpoch" = ${epoch} AND "status" = 'active' FOR NO KEY UPDATE`;
+  if (!rows.length) throw sessionRevokedError();
+};
+
+const createAuthSessionPayload = async (tx, user, context = {}, { orgId = null, ssoOrgId = null, expectedEpoch = null } = {}) => {
+  if (expectedEpoch !== null) await holdCredentialEpoch(tx, user.id, expectedEpoch);
   const resolved = await membershipService.resolveSessionPrincipal(tx, user, { orgId });
   const principal = ssoOrgId ? { ...resolved, ssoOrgId } : resolved;
+  // Tokens carry the epoch that was proven, not whatever the row says now.
+  if (expectedEpoch !== null) principal.credentialEpoch = expectedEpoch;
   const refreshSession = await createRefreshSession(tx, principal, context);
   return buildAuthPayload(user, principal, refreshSession);
 };
@@ -416,6 +466,13 @@ const login = async ({ email, password }, context = {}) => {
     where: { email: normalizedEmail },
   });
 
+  // An unknown address does the same password work as a known one, so the
+  // answer's timing does not say whether the address has an account (owner
+  // decision D-ID-1 Q7); the answer itself is already the same.
+  const isPasswordValid = await bcrypt.compare(
+    String(password ?? ""),
+    user?.passwordHash || (await getDummyPasswordHash()),
+  );
   if (!user) {
     await recordInvalidLogin();
     throw new HttpError(
@@ -425,7 +482,6 @@ const login = async ({ email, password }, context = {}) => {
     );
   }
 
-  const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
   if (!isPasswordValid) {
     await recordInvalidLogin();
     throw new HttpError(
@@ -569,6 +625,11 @@ const resolveLoginEntry = async (user) => {
 
 const issueLoginOutcome = async ({ user, entry, org, context }) =>
   prisma.$transaction(async (tx) => {
+    // The password (and code) were checked against `user` as it was read: a
+    // reset that landed since then must not be answered with a session at the
+    // new epoch (D-ID-1 Q6).
+    const provenEpoch = Number.isInteger(user.credentialEpoch) ? user.credentialEpoch : 0;
+    await holdCredentialEpoch(tx, user.id, provenEpoch);
     const updatedUser = await tx.user.update({
       where: { id: user.id },
       data: { lastLogin: new Date() },
@@ -579,12 +640,12 @@ const issueLoginOutcome = async ({ user, entry, org, context }) =>
       // is chosen with POST /auth/workspaces/:orgId/session.
       return {
         ...(entry.mode === "many" ? { chooseWorkspace: true } : { needsWorkspace: true }),
-        identityToken: createIdentityToken(updatedUser),
+        identityToken: createIdentityToken({ ...updatedUser, credentialEpoch: provenEpoch }),
         memberships: entry.workspaces,
       };
     }
 
-    const payload = await createAuthSessionPayload(tx, updatedUser, context, { orgId: entry.orgId });
+    const payload = await createAuthSessionPayload(tx, updatedUser, context, { orgId: entry.orgId, expectedEpoch: provenEpoch });
     payload.user.mfaEnrollmentRequired = Boolean(
       org?.mfaRequired && !updatedUser.mfaEnabled,
     );
@@ -598,7 +659,7 @@ const issueLoginOutcome = async ({ user, entry, org, context }) =>
  * that membership on the caller's channel. Nothing is revoked: the other
  * workspace's session family stays valid so the person can switch back.
  */
-const issueWorkspaceSession = async ({ userId, orgId, ssoOrgId = null }, context = {}) => {
+const issueWorkspaceSession = async ({ userId, orgId, ssoOrgId = null, expectedEpoch = null }, context = {}) => {
   // A session from a company's single sign-on opens that company only (certification
   // finding L10): that company's identity provider vouches for nobody elsewhere.
   if (ssoOrgId && ssoOrgId !== orgId) {
@@ -632,7 +693,13 @@ const issueWorkspaceSession = async ({ userId, orgId, ssoOrgId = null }, context
 
   const memberships = await membershipService.listWorkspacesForUser(userId);
   return prisma.$transaction(async (tx) => {
-    const payload = await createAuthSessionPayload(tx, user, context, { orgId, ssoOrgId });
+    // Held at the epoch of the token that asked (D-ID-1 Q6), or at the one this
+    // request read when the caller has just proven the identity itself.
+    const payload = await createAuthSessionPayload(tx, user, context, {
+      orgId,
+      ssoOrgId,
+      expectedEpoch: Number.isInteger(expectedEpoch) ? expectedEpoch : (Number.isInteger(user.credentialEpoch) ? user.credentialEpoch : 0),
+    });
     payload.user.mfaEnrollmentRequired = Boolean(org.mfaRequired && !user.mfaEnabled);
     const workspace = membership
       ? membershipService.workspaceEntry({ ...membership, org })
@@ -737,6 +804,15 @@ const refresh = async ({
 
     if (!session.user || session.user.status !== "active") {
       return refuse(session, "session", createInvalidRefreshTokenError());
+    }
+    // A token from before the identity's last credential event (a reset, an
+    // identity closed) is dead with its whole family (D-ID-1 Q6).
+    if (!tokenEpochCurrent(payload, session.user)) {
+      return refuse(
+        session,
+        "family",
+        new HttpError(401, "SESSION_REVOKED", "This session has ended; sign in again"),
+      );
     }
 
     // The token and the stored session must name the same membership, and
@@ -869,6 +945,16 @@ const getProfile = async ({ userId, orgId, principal = null }) => {
   };
 };
 
+// Reset e-mails still being handed to the transport after their answer went out.
+const pendingResetDeliveries = new Set();
+
+/** Waits for the reset e-mails already handed off (tests and in-process proofs). */
+const flushPasswordResetDeliveries = async () => {
+  while (pendingResetDeliveries.size) {
+    await Promise.allSettled([...pendingResetDeliveries]);
+  }
+};
+
 const requestPasswordReset = async ({ email }, context = {}) => {
   const normalizedEmail = normalizeEmail(email);
   const user = await prisma.user.findUnique({
@@ -876,27 +962,33 @@ const requestPasswordReset = async ({ email }, context = {}) => {
     include: { org: true },
   });
 
-  if (!user || user.status !== "active") {
-    await recordAuthAuditEvent({
-      orgId: user?.orgId || null,
-      userId: user?.id || null,
-      entityType: "password_reset",
-      action: user
-        ? "password_reset_requested_inactive"
-        : "password_reset_requested_unknown",
-      email: normalizedEmail,
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent,
-    });
-    return { sent: true };
-  }
-
   const rawToken = createAccountToken();
   const tokenHash = hashAccountToken(rawToken);
   const expiresAt = getPasswordResetExpiresAt();
   const now = new Date();
+  const eligible = Boolean(user) && user.status === "active";
 
+  // Every address takes the same path: one transaction that writes the audit
+  // line, and for an active account the token too. Nothing waits on the mail
+  // provider before the answer, so neither the answer nor its timing says
+  // whether the address has an account (owner decision D-ID-1 Q7).
   const resetToken = await prisma.$transaction(async (tx) => {
+    if (!eligible) {
+      await recordAuthAuditEvent({
+        tx,
+        orgId: user?.orgId || null,
+        userId: user?.id || null,
+        entityType: "password_reset",
+        action: user
+          ? "password_reset_requested_inactive"
+          : "password_reset_requested_unknown",
+        email: normalizedEmail,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+      });
+      return null;
+    }
+
     await tx.passwordResetToken.updateMany({
       where: {
         userId: user.id,
@@ -935,47 +1027,51 @@ const requestPasswordReset = async ({ email }, context = {}) => {
     return created;
   });
 
-  const resetUrl = buildWebAppUrl("/reset-password", rawToken);
-  const template = templates.passwordReset({
-    name: user.name,
-    resetUrl,
-    expiresAt: resetToken.expiresAt,
-  });
-
-  // A failed send is recorded, never reported. The answer has to be the same
-  // {sent:true} whether or not the address belongs to anyone: a 5xx here only
-  // for real accounts would tell a stranger which emails are registered. The
-  // person can simply ask again; the operator finds the failure in the audit
-  // trail and the log.
-  try {
-    await sendEmail({
-      to: normalizedEmail,
-      ...template,
-      metadata: {
-        orgId: user.orgId,
-        userId: user.id,
-        tokenId: resetToken.id,
-        type: "password_reset",
-      },
+  if (resetToken) {
+    const resetUrl = buildWebAppUrl("/reset-password", rawToken);
+    const template = templates.passwordReset({
+      name: user.name,
+      resetUrl,
+      expiresAt: resetToken.expiresAt,
     });
-  } catch (error) {
-    console.error(
-      `[auth] password reset email for user ${user.id} was not delivered: ${error?.code || error?.name || "ERROR"}`,
-    );
-    await recordAuthAuditEvent({
-      orgId: user.orgId,
-      userId: user.id,
-      entityType: "password_reset",
-      entityId: resetToken.id,
-      action: "password_reset_delivery_failed",
-      email: normalizedEmail,
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent,
-      metadata: {
-        code: error?.code || null,
-        status: error?.details?.status || error?.status || null,
-      },
-    }).catch(() => null);
+
+    // A failed send is recorded, never reported: the answer has to be the same
+    // {sent:true} whether or not the address belongs to anyone. The person can
+    // simply ask again; the operator finds the failure in the audit trail.
+    const delivery = (async () => {
+      try {
+        await sendEmail({
+          to: normalizedEmail,
+          ...template,
+          metadata: {
+            orgId: user.orgId,
+            userId: user.id,
+            tokenId: resetToken.id,
+            type: "password_reset",
+          },
+        });
+      } catch (error) {
+        console.error(
+          `[auth] password reset email for user ${user.id} was not delivered: ${error?.code || error?.name || "ERROR"}`,
+        );
+        await recordAuthAuditEvent({
+          orgId: user.orgId,
+          userId: user.id,
+          entityType: "password_reset",
+          entityId: resetToken.id,
+          action: "password_reset_delivery_failed",
+          email: normalizedEmail,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+          metadata: {
+            code: error?.code || null,
+            status: error?.details?.status || error?.status || null,
+          },
+        }).catch(() => null);
+      }
+    })();
+    pendingResetDeliveries.add(delivery);
+    delivery.finally(() => pendingResetDeliveries.delete(delivery));
   }
 
   return { sent: true };
@@ -1032,7 +1128,9 @@ const resetPassword = async ({ token, password }, context = {}) => {
         id: resetToken.id,
         usedAt: null,
         revokedAt: null,
-        expiresAt: { gt: now },
+        // Judged when claimed, not when the request began: hashing the new
+        // password can take long enough for a link to expire meanwhile.
+        expiresAt: { gt: new Date() },
       },
       data: { usedAt: now },
     });
@@ -1040,9 +1138,13 @@ const resetPassword = async ({ token, password }, context = {}) => {
       throw createInvalidResetTokenError();
     }
 
+    // A completed reset is a credential event for the whole identity (owner
+    // decision D-ID-1 Q6): the epoch moves, so every access, identity and
+    // refresh token minted before it is refused everywhere, including the
+    // workspace switch that used to mint fresh sessions from an old bearer.
     await tx.user.update({
       where: { id: resetToken.userId },
-      data: { passwordHash },
+      data: { passwordHash, credentialEpoch: { increment: 1 } },
     });
 
     await tx.passwordResetToken.updateMany({
@@ -1055,13 +1157,7 @@ const resetPassword = async ({ token, password }, context = {}) => {
       data: { revokedAt: now },
     });
 
-    await tx.refreshSession.updateMany({
-      where: {
-        userId: resetToken.userId,
-        revokedAt: null,
-      },
-      data: { revokedAt: now },
-    });
+    await endIdentitySessions(tx, resetToken.userId, now);
 
     await recordAuthAuditEvent({
       tx,
@@ -1076,10 +1172,11 @@ const resetPassword = async ({ token, password }, context = {}) => {
     });
   });
 
-  return { reset: true };
+  // Live sockets opened before the reset end too (the route drops them).
+  return { reset: true, endedSessionsOf: resetToken.userId };
 };
 
-const assertUsableInvitationToken = (invitation, now = new Date()) => {
+const assertUsableInvitationToken =(invitation, now = new Date()) => {
   if (
     !invitation ||
     invitation.status !== "pending" ||
@@ -1157,7 +1254,7 @@ const getInvitationPreview = async ({ token }) => {
  * sign-on issued vouches for that company only (certification L10). A
  * brand-new identity still sets its password with the token alone.
  */
-const assertInvitationIdentityProof = ({ existingUser, identityUserId, identitySsoOrgId, invitation }) => {
+const assertInvitationIdentityProof = ({ existingUser, identityUserId }) => {
   if (!identityUserId || identityUserId !== existingUser.id) {
     throw new HttpError(
       401,
@@ -1165,13 +1262,11 @@ const assertInvitationIdentityProof = ({ existingUser, identityUserId, identityS
       "Sign in as the invited account to accept this invitation",
     );
   }
-  if (identitySsoOrgId && identitySsoOrgId !== invitation.orgId) {
-    throw new HttpError(
-      403,
-      "SSO_SESSION_BOUND",
-      "This session came from your company's single sign-on and opens that company only. Sign in with your own password to accept this invitation.",
-    );
-  }
+  // A session another company's single sign-on issued proves who the person
+  // is (owner decision D-ID-1 Q12) — and nothing more: it never satisfies the
+  // inviting workspace's own access policy, so acceptance with it ends in
+  // `signInRequired` for that workspace (issueWorkspaceSession refuses to
+  // turn an SSO session of one company into a session of another).
 };
 
 /** Why a link cannot be used, for the audit line (the caller is told only that it is invalid). */
@@ -1184,9 +1279,12 @@ const invitationRefusalReason = (invitation, now) => {
 };
 
 const acceptInvitation = async (
-  { token, name, password, phone, identityUserId = null, identitySsoOrgId = null },
+  { token, name, password, phone, identityUserId = null, identitySsoOrgId = null, identityEpoch = null },
   context = {},
 ) => {
+  // Joining widens access: paused while the emergency switch is off, before
+  // anything is read or the link is used (owner decision D-ID-1 Q10).
+  membershipService.assertAccessExpansionAllowed();
   const tokenHash = hashAccountToken(token);
   const now = new Date();
   const invitation = await prisma.invitationToken.findUnique({
@@ -1234,12 +1332,25 @@ const acceptInvitation = async (
   // and status back to active — and by nothing else, so no session is ever
   // minted for an account another workspace cannot see is closed.
   const reactivatesIdentity = Boolean(existingUser) && existingUser.status !== "active";
+  const currentMembership = existingUser
+    ? await membershipService.findMembership({ tx: prisma, orgId: invitation.orgId, userId: existingUser.id })
+    : null;
   try {
     if (reactivatesIdentity && !homeOrg) {
       throw new HttpError(403, "USER_INACTIVE", "This account was closed by its own workspace");
     }
+    // A suspension is undone only by the workspace's Activate (owner decision
+    // D-ID-1 Q3): a person suspended here — or a closed account homed here
+    // that is suspended rather than gone, or homed here before memberships —
+    // is not brought back by any link. Only someone who left is reopened.
+    const suspendedHere =
+      currentMembership?.status === membershipService.MEMBERSHIP_STATUSES.SUSPENDED ||
+      (reactivatesIdentity && currentMembership?.status !== membershipService.MEMBERSHIP_STATUSES.LEFT);
+    if (suspendedHere) {
+      throw createInvalidInvitationTokenError();
+    }
     if (existingUser && !reactivatesIdentity) {
-      assertInvitationIdentityProof({ existingUser, identityUserId, identitySsoOrgId, invitation });
+      assertInvitationIdentityProof({ existingUser, identityUserId });
     }
     // The party offered must still be the party acceptance would join.
     await companyPartyService.assertPartyOffer({ invitation });
@@ -1286,9 +1397,6 @@ const acceptInvitation = async (
   // them — a role change goes through changeMembership, with its guards
   // and its audit line.
   const isPartyInvitation = Boolean(invitation.projectPartyId);
-  const currentMembership = existingUser
-    ? await membershipService.findMembership({ tx: prisma, orgId: invitation.orgId, userId: existingUser.id })
-    : null;
   // A person homed here with no membership row at all (seeded before the
   // backfill) is a current member too: their row is written from the User
   // columns and kept, not re-graded by a project or party invitation.
@@ -1301,202 +1409,248 @@ const acceptInvitation = async (
       currentMembership.status === membershipService.MEMBERSHIP_STATUSES.ACTIVE &&
       currentMembership.kind === membershipService.MEMBERSHIP_KINDS.MEMBER);
 
-  const accepted = await prisma.$transaction(async (tx) => {
-    // Acceptance and a new invitation of the same e-mail to the same workspace
-    // are made one at a time (inviteUser takes the same lock), so neither
-    // judges the other's half-written state.
-    if (typeof tx.$executeRaw === "function") {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${invitation.orgId}), hashtext(${invitation.email}))`;
-    }
-    // The link is claimed first, and only while it is still pending: one
-    // revoked, accepted or expired since it was read above — by a newer
-    // invitation, a second submission, the clock — writes nothing.
-    // Expiry is judged at the claim, not at the start of the request.
-    const claimed = await tx.invitationToken.updateMany({
-      where: { id: invitation.id, status: "pending", acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
-      data: { status: "accepted", acceptedAt: now },
-    });
-    if (claimed.count !== 1) throw createInvalidInvitationTokenError();
+  let accepted;
+  try {
+    accepted = await prisma.$transaction(async (tx) => {
+      // Acceptance and a new invitation of the same e-mail to the same workspace
+      // are made one at a time (inviteUser takes the same lock), so neither
+      // judges the other's half-written state.
+      if (typeof tx.$executeRaw === "function") {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${invitation.orgId}), hashtext(${invitation.email}))`;
+      }
+      if (existingUser) {
+        // One identity-wide change at a time (D-ID-1 ID-GUARD): a workspace
+        // closing this identity or clearing its factor takes the same lock, so
+        // it sees this membership once it is written, or this acceptance sees
+        // the identity as that change left it.
+        await membershipService.lockIdentity(tx, existingUser.id);
+        // The person proved themselves with a session at some credential epoch;
+        // a reset since then voids that proof (D-ID-1 Q6).
+        if (!reactivatesIdentity) await holdCredentialEpoch(tx, existingUser.id, Number.isInteger(identityEpoch) ? identityEpoch : -1);
+      }
+      // The link is claimed first, and only while it is still pending: one
+      // revoked, accepted or expired since it was read above — by a newer
+      // invitation, a second submission, the clock — writes nothing.
+      // Expiry is judged at the claim, not at the start of the request.
+      const claimed = await tx.invitationToken.updateMany({
+        where: { id: invitation.id, status: "pending", acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
+        data: { status: "accepted", acceptedAt: now },
+      });
+      if (claimed.count !== 1) throw createInvalidInvitationTokenError();
 
-    let user;
-    if (existingUser) {
-      const data = {};
-      if (homeOrg) {
-        // The home User columns mirror the membership written below: the
-        // offered role, and never administration (an invitation confers none).
-        if (!keepsRole) {
-          data.role = invitation.role;
-          data.isCompanyAdmin = false;
+      let user;
+      if (existingUser) {
+        const data = {};
+        if (homeOrg) {
+          // The home User columns mirror the membership written below: the
+          // offered role, and never administration (an invitation confers none).
+          if (!keepsRole) {
+            data.role = invitation.role;
+            data.isCompanyAdmin = false;
+          }
+          if (reactivatesIdentity) {
+            // Reopening a closed account with a password its holder chooses is a
+            // credential event: anything minted before is dead (D-ID-1 Q6).
+            data.status = "active";
+            data.credentialEpoch = { increment: 1 };
+            await endIdentitySessions(tx, existingUser.id, now);
+          }
+          if (name?.trim()) data.name = name.trim();
+          if (phone !== undefined) data.phone = phone || null;
+          if (passwordHash) data.passwordHash = passwordHash;
         }
-        if (reactivatesIdentity) data.status = "active";
-        if (name?.trim()) data.name = name.trim();
-        if (phone !== undefined) data.phone = phone || null;
-        if (passwordHash) data.passwordHash = passwordHash;
+
+        user = Object.keys(data).length
+          ? await tx.user.update({
+              where: { id: existingUser.id },
+              data,
+            })
+          : existingUser;
+      } else {
+        user = await tx.user.create({
+          data: {
+            orgId: invitation.orgId,
+            name: name.trim(),
+            email: invitation.email,
+            phone: phone || null,
+            passwordHash,
+            role: invitation.role,
+            status: "active",
+          },
+        });
       }
 
-      user = Object.keys(data).length
-        ? await tx.user.update({
-            where: { id: existingUser.id },
-            data,
-          })
-        : existingUser;
-    } else {
-      user = await tx.user.create({
-        data: {
-          orgId: invitation.orgId,
-          name: name.trim(),
-          email: invitation.email,
-          phone: phone || null,
-          passwordHash,
-          role: invitation.role,
-          status: "active",
-        },
-      });
-    }
-
-    // Exactly the membership offered: its role and kind, no administration or
-    // ownership, whatever the person held here before (membershipService.acceptOffer).
-    // A legacy member's own row is written from the User columns and kept.
-    const ensured = legacyMember
-      ? { membership: await membershipService.ensureMembershipForUser({ tx, user, orgId: invitation.orgId }), created: true, reactivated: false, kept: true }
-      : await membershipService.acceptOffer({
+      // Exactly the membership offered: its role and kind, no administration or
+      // ownership, whatever the person held here before (membershipService.acceptOffer).
+      // A legacy member's own row is written from the User columns and kept.
+      const ensured = legacyMember
+        ? { membership: await membershipService.ensureMembershipForUser({ tx, user, orgId: invitation.orgId }), created: true, reactivated: false, kept: true }
+        : await membershipService.acceptOffer({
+            tx,
+            orgId: invitation.orgId,
+            userId: user.id,
+            role: isPartyInvitation ? membershipService.GUEST_ROLE : invitation.role,
+            kind: isPartyInvitation ? membershipService.MEMBERSHIP_KINDS.GUEST : membershipService.MEMBERSHIP_KINDS.MEMBER,
+            invitedById: invitation.invitedById || null,
+            invitationId: invitation.id,
+            joinedAt: now,
+          });
+      // A membership coming back from suspension or departure brings nothing it
+      // held before: its old party places, company memberships and project
+      // assignments here go, and only the offered ones are written below.
+      if (ensured?.reactivated) {
+        await tx.projectPartyMember.updateMany({
+          where: { userId: user.id, status: "active", projectParty: { project: { orgId: invitation.orgId } } },
+          data: { status: "inactive" },
+        });
+        await tx.companyMembership.updateMany({
+          where: { userId: user.id, orgId: invitation.orgId, status: "active" },
+          data: { status: "inactive" },
+        });
+        await tx.projectAssignment.deleteMany({ where: { userId: user.id, orgId: invitation.orgId } });
+      }
+      if (ensured) {
+        await membershipService.recordMembershipEvent({
           tx,
           orgId: invitation.orgId,
-          userId: user.id,
-          role: isPartyInvitation ? membershipService.GUEST_ROLE : invitation.role,
-          kind: isPartyInvitation ? membershipService.MEMBERSHIP_KINDS.GUEST : membershipService.MEMBERSHIP_KINDS.MEMBER,
-          invitedById: invitation.invitedById || null,
-          invitationId: invitation.id,
-          joinedAt: now,
+          membership: ensured.membership,
+          action: "membership.invitation_accepted",
+          actor: invitation.invitedById ? { id: invitation.invitedById } : null,
+          context,
+          metadata: {
+            invitationId: invitation.id,
+            created: ensured.created,
+            reactivated: ensured.reactivated,
+            roleKept: ensured.kept,
+            kind: ensured.membership.kind,
+            provedBy: existingUser && !reactivatesIdentity ? "session" : null,
+          },
         });
-    // A membership coming back from suspension or departure brings nothing it
-    // held before: its old party places, company memberships and project
-    // assignments here go, and only the offered ones are written below.
-    if (ensured?.reactivated) {
-      await tx.projectPartyMember.updateMany({
-        where: { userId: user.id, status: "active", projectParty: { project: { orgId: invitation.orgId } } },
-        data: { status: "inactive" },
+      }
+
+      if (invitation.projectPartyId || invitation.companyId) {
+        await companyPartyService.acceptProjectPartyInvitation({
+          tx,
+          invitation,
+          user,
+        });
+      } else if (invitation.projectId) {
+        await tx.projectAssignment.upsert({
+          where: {
+            projectId_userId: {
+              projectId: invitation.projectId,
+              userId: user.id,
+            },
+          },
+          create: {
+            projectId: invitation.projectId,
+            userId: user.id,
+            role: invitation.role,
+            orgId: invitation.orgId,
+          },
+          update: {
+            role: invitation.role,
+            orgId: invitation.orgId,
+          },
+        });
+      }
+
+      await tx.invitationToken.update({
+        where: { id: invitation.id },
+        data: {
+          acceptedById: user.id,
+          ...(ensured ? { membershipId: ensured.membership.id } : {}),
+        },
       });
-      await tx.companyMembership.updateMany({
-        where: { userId: user.id, orgId: invitation.orgId, status: "active" },
-        data: { status: "inactive" },
+
+      const siblings = await tx.invitationToken.findMany({
+        where: {
+          orgId: invitation.orgId,
+          email: invitation.email,
+          id: { not: invitation.id },
+          status: "pending",
+          acceptedAt: null,
+          revokedAt: null,
+        },
+        select: { id: true },
       });
-      await tx.projectAssignment.deleteMany({ where: { userId: user.id, orgId: invitation.orgId } });
-    }
-    if (ensured) {
-      await membershipService.recordMembershipEvent({
+      if (siblings.length) {
+        await tx.invitationToken.updateMany({
+          where: { id: { in: siblings.map((row) => row.id) }, status: "pending" },
+          data: { status: "revoked", revokedAt: now },
+        });
+        // Audited as revoked only what this update revoked.
+        const revoked = await tx.invitationToken.findMany({
+          where: { id: { in: siblings.map((row) => row.id) }, status: "revoked", revokedAt: now },
+          select: { id: true },
+        });
+        for (const row of revoked) {
+          await recordAuthAuditEvent({
+            tx,
+            orgId: invitation.orgId,
+            userId: user.id,
+            entityType: "invitation",
+            entityId: row.id,
+            action: "invitation_revoked",
+            email: invitation.email,
+            ipAddress: context.ipAddress,
+            userAgent: context.userAgent,
+            metadata: { reason: "accepted_other", acceptedInvitationId: invitation.id },
+          });
+        }
+      }
+
+      await recordAuthAuditEvent({
         tx,
         orgId: invitation.orgId,
-        membership: ensured.membership,
-        action: "membership.invitation_accepted",
-        actor: invitation.invitedById ? { id: invitation.invitedById } : null,
-        context,
+        projectId: invitation.projectId,
+        userId: user.id,
+        actorId: invitation.invitedById || null,
+        entityType: "invitation",
+        entityId: invitation.id,
+        action: "invitation_accepted",
+        email: invitation.email,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
         metadata: {
-          invitationId: invitation.id,
-          created: ensured.created,
-          reactivated: ensured.reactivated,
-          roleKept: ensured.kept,
-          kind: ensured.membership.kind,
+          role: invitation.role,
+          projectId: invitation.projectId,
+          companyId: invitation.companyId,
+          projectPartyId: invitation.projectPartyId,
           provedBy: existingUser && !reactivatesIdentity ? "session" : null,
         },
       });
-    }
 
-    if (invitation.projectPartyId || invitation.companyId) {
-      await companyPartyService.acceptProjectPartyInvitation({
-        tx,
-        invitation,
-        user,
-      });
-    } else if (invitation.projectId) {
-      await tx.projectAssignment.upsert({
-        where: {
-          projectId_userId: {
-            projectId: invitation.projectId,
-            userId: user.id,
-          },
-        },
-        create: {
-          projectId: invitation.projectId,
-          userId: user.id,
-          role: invitation.role,
-          orgId: invitation.orgId,
-        },
-        update: {
-          role: invitation.role,
-          orgId: invitation.orgId,
-        },
-      });
-    }
-
-    await tx.invitationToken.update({
-      where: { id: invitation.id },
-      data: {
-        acceptedById: user.id,
-        ...(ensured ? { membershipId: ensured.membership.id } : {}),
-      },
+      return user;
     });
-
-    const siblings = await tx.invitationToken.findMany({
-      where: {
+  } catch (error) {
+    // Two workspaces' links for the same new address accepted at once (or a
+    // sign-up racing an acceptance): the e-mail is unique, so the second
+    // identity is refused and its whole transaction — the claim of this link
+    // included — rolls back. The identity exists now: this link stays usable
+    // by signing in as it (D-ID-1 XORG).
+    const target = [].concat(error?.meta?.target || []).join(",");
+    if (!existingUser && error?.code === "P2002" && /email/i.test(target)) {
+      throw new HttpError(401, "INVITATION_SIGN_IN_REQUIRED", "Sign in as the invited account to accept this invitation");
+    }
+    // A proof from before the identity's last credential event, refused under
+    // the lock, is recorded like every other refused acceptance.
+    if (error?.code === "SESSION_REVOKED") {
+      await recordAuthAuditEvent({
         orgId: invitation.orgId,
-        email: invitation.email,
-        id: { not: invitation.id },
-        status: "pending",
-        acceptedAt: null,
-        revokedAt: null,
-      },
-      select: { id: true },
-    });
-    if (siblings.length) {
-      await tx.invitationToken.updateMany({
-        where: { id: { in: siblings.map((row) => row.id) }, status: "pending" },
-        data: { status: "revoked", revokedAt: now },
-      });
-      // Audited as revoked only what this update revoked.
-      const revoked = await tx.invitationToken.findMany({
-        where: { id: { in: siblings.map((row) => row.id) }, status: "revoked", revokedAt: now },
-        select: { id: true },
-      });
-      for (const row of revoked) {
-        await recordAuthAuditEvent({
-          tx,
-          orgId: invitation.orgId,
-          userId: user.id,
-          entityType: "invitation",
-          entityId: row.id,
-          action: "invitation_revoked",
-          email: invitation.email,
-          ipAddress: context.ipAddress,
-          userAgent: context.userAgent,
-          metadata: { reason: "accepted_other", acceptedInvitationId: invitation.id },
-        });
-      }
-    }
-
-    await recordAuthAuditEvent({
-      tx,
-      orgId: invitation.orgId,
-      projectId: invitation.projectId,
-      userId: user.id,
-      actorId: invitation.invitedById || null,
-      entityType: "invitation",
-      entityId: invitation.id,
-      action: "invitation_accepted",
-      email: invitation.email,
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent,
-      metadata: {
-        role: invitation.role,
         projectId: invitation.projectId,
-        companyId: invitation.companyId,
-        projectPartyId: invitation.projectPartyId,
-        provedBy: existingUser && !reactivatesIdentity ? "session" : null,
-      },
-    });
-
-    return user;
-  });
+        userId: existingUser?.id || null,
+        entityType: "invitation",
+        entityId: invitation.id,
+        action: "invitation_accept_rejected",
+        email: invitation.email,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        metadata: { reason: "SESSION_REVOKED" },
+      }).catch(() => null);
+    }
+    throw error;
+  }
 
   // The acceptance stands; the session for the workspace just joined is issued
   // as every workspace session is (issueWorkspaceSession): the workspace's
@@ -1512,7 +1666,14 @@ const acceptInvitation = async (
     // a bearer of anyone else (a colleague's session in the same browser, on a
     // brand-new account's acceptance) lends it nothing.
     const ownSso = identityUserId && identityUserId === accepted.id ? identitySsoOrgId : null;
-    return await issueWorkspaceSession({ userId: accepted.id, orgId: invitation.orgId, ssoOrgId: ownSso }, context);
+    // The epoch the acceptance proved: the bearer's for an existing identity,
+    // the one the acceptance itself wrote for a new one — never whatever the
+    // row says by the time the session is issued (a reset may have landed).
+    const ownEpoch =
+      identityUserId && identityUserId === accepted.id && Number.isInteger(identityEpoch)
+        ? identityEpoch
+        : Number.isInteger(accepted.credentialEpoch) ? accepted.credentialEpoch : 0;
+    return await issueWorkspaceSession({ userId: accepted.id, orgId: invitation.orgId, ssoOrgId: ownSso, expectedEpoch: ownEpoch }, context);
   } catch (error) {
     if (error instanceof HttpError && error.status < 500) return signIn({ code: error.code, message: error.message });
     throw error;
@@ -1676,6 +1837,13 @@ const reissueBootstrapLink = async ({ email }) => {
     const user = normalizedEmail
       ? await tx.user.findUnique({ where: { email: normalizedEmail } })
       : null;
+    // The administrator's links are locked before "has a password been set"
+    // is judged, so a reset completing the first link right now either has
+    // committed — and is seen below — or waits, and then finds that link
+    // revoked (D-ID-1 N3).
+    if (user && typeof tx.$queryRaw === "function") {
+      await tx.$queryRaw`SELECT "id" FROM "PasswordResetToken" WHERE "userId" = ${user.id} FOR UPDATE`;
+    }
     const passwordsSet = user
       ? await tx.passwordResetToken.count({
           where: { userId: user.id, usedAt: { not: null } },
@@ -1735,10 +1903,12 @@ module.exports = {
   logout,
   getProfile,
   requestPasswordReset,
+  flushPasswordResetDeliveries,
   resetPassword,
   getInvitationPreview,
   acceptInvitation,
   createAuthSessionPayload,
+  holdCredentialEpoch,
   issueWorkspaceSession,
   sanitizeUser,
 };

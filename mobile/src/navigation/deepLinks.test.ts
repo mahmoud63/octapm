@@ -1,4 +1,4 @@
-import { linkLeavesWorkspace, normaliseLinkPath, resolveLink, resolveNotificationData, routeForResolvedLink, type ResolvedLink } from './deepLinks'
+import { linkLeavesWorkspace, normaliseLinkPath, resolveLink, resolveNotificationData, routeForResolvedLink, webHandoffUrl, type ResolvedLink } from './deepLinks'
 
 const P = 'a2153ef4-0bbb-4b9a-875c-44a0f69f9a12'
 const ORG_A = '0f6f1a2e-0000-4000-8000-00000000000a'
@@ -41,6 +41,45 @@ describe('deep links', () => {
     expect(resolveLink('octapm://quality/inspections/f1')).toEqual(link('/quality/inspections/f1', null))
     expect(resolveLink('/activities/a1?projectId=' + P)).toEqual(link(`/activities/a1?projectId=${P}`, P))
     expect(resolveLink('https://octapm.com/marketing')).toBeNull()
+  })
+
+  it('never claims the web pages that finish in the browser: invitation, password reset, forgotten password, sign-in, SSO return (Q14)', () => {
+    for (const host of ['https://app.octapm.com', 'https://octapm.com', 'http://localhost:5173']) {
+      expect(resolveLink(`${host}/accept-invite?token=inv-secret-1`)).toBeNull()
+      expect(resolveLink(`${host}/reset-password?token=reset-secret-1`)).toBeNull()
+      expect(resolveLink(`${host}/forgot-password`)).toBeNull()
+      expect(resolveLink(`${host}/sso/complete?ticket=sso-ticket-1`)).toBeNull()
+      expect(resolveLink(`${host}/sign-in?ssoError=SSO_USER_NOT_FOUND`)).toBeNull()
+      expect(resolveLink(`${host}/sign-up`)).toBeNull()
+      expect(resolveLink(`${host}/otp`)).toBeNull()
+      // A workspace handle in front changes nothing.
+      expect(resolveLink(`${host}/o/acme/accept-invite?token=inv-secret-1`)).toBeNull()
+    }
+    // The bare paths a notification or the server could carry are not app screens either.
+    expect(resolveLink('/accept-invite?token=inv-secret-1')).toBeNull()
+    expect(resolveLink('/reset-password?token=reset-secret-1')).toBeNull()
+    expect(resolveLink('/sso/complete?ticket=sso-ticket-1')).toBeNull()
+    // The app's own sign-in route, from its scheme or from expo-router, is still the app's.
+    expect(resolveLink('octapm://sign-in')).toEqual(link('/sign-in', null))
+    expect(resolveLink('/sign-in')).toEqual(link('/sign-in', null))
+  })
+
+  it('hands an OctaPM web link to the browser whole, query included — and nothing else', () => {
+    const invite = 'https://app.octapm.com/accept-invite?token=inv-secret-1&orgSlug=acme'
+    expect(webHandoffUrl(invite)).toBe(invite)
+    expect(webHandoffUrl('https://octapm.com/reset-password?token=reset-secret-1')).toBe('https://octapm.com/reset-password?token=reset-secret-1')
+    expect(webHandoffUrl('HTTPS://APP.OCTAPM.COM:443/sso/complete?ticket=t1')).toBe('HTTPS://APP.OCTAPM.COM:443/sso/complete?ticket=t1')
+    // The build's own web origin (staging, local) is handed over too, on its own scheme.
+    expect(webHandoffUrl('https://app.staging.octapm.com/accept-invite?token=x', 'https://app.staging.octapm.com/')).toBe('https://app.staging.octapm.com/accept-invite?token=x')
+    expect(webHandoffUrl('http://localhost:5173/reset-password?token=x', 'http://localhost:5173')).toBe('http://localhost:5173/reset-password?token=x')
+    // Plain http to the production hosts, another site, credentials in the authority, the scheme, a bare path: kept.
+    expect(webHandoffUrl('http://app.octapm.com/accept-invite?token=x')).toBeNull()
+    expect(webHandoffUrl('https://evil.example/accept-invite?token=x')).toBeNull()
+    expect(webHandoffUrl('https://app.octapm.com.evil.example/accept-invite?token=x')).toBeNull()
+    expect(webHandoffUrl('https://user@app.octapm.com/accept-invite?token=x')).toBeNull()
+    expect(webHandoffUrl('octapm://accept-invite?token=x')).toBeNull()
+    expect(webHandoffUrl('/accept-invite?token=x')).toBeNull()
+    expect(webHandoffUrl('')).toBeNull()
   })
 
   it('reads the workspace an app link or a push payload names, and keeps it off the screen’s own query', () => {

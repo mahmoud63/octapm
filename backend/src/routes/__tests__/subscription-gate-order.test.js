@@ -3,8 +3,10 @@ const request = require('supertest');
 const mockProjectService = {
   createProject: jest.fn(),
 };
+// POST /users is the deprecated alias of the invitation (owner decision D-ID-1):
+// both routes run userService.inviteUser.
 const mockUserService = {
-  createUser: jest.fn(),
+  inviteUser: jest.fn(),
 };
 const mockSubscriptionService = {
   ensureSubscription: jest.fn(),
@@ -33,6 +35,8 @@ jest.mock('../../middleware/auth', () => ({
   authenticate: fakeAuthenticate,
   // The org-level gate app.js mounts: authenticates the same way here.
   requireOrganizationMembership: () => fakeAuthenticate,
+  // The MFA routes' SSO-session guard (D-ID-1 Q2); not exercised here.
+  requireCredentialSession: (_req, _res, next) => next(),
 }));
 jest.mock('../../services/project.service', () => mockProjectService);
 jest.mock('../../services/user.service', () => mockUserService);
@@ -85,34 +89,30 @@ describe('subscription gate route ordering', () => {
     expect(mockProjectService.createProject).not.toHaveBeenCalled();
   });
 
-  it('blocks authenticated user creation for expired organizations before persistence', async () => {
-    mockUserService.createUser.mockResolvedValue({
-      id: 'user-2',
-      email: 'site.engineer@example.com',
-    });
+  it.each(['/api/v1/users', '/api/v1/users/invitations'])(
+    'blocks adding a person (%s) for expired organizations before persistence',
+    async (path) => {
+      const res = await request(app)
+        .post(path)
+        .send({
+          email: 'site.engineer@example.com',
+          role: 'site_engineer',
+        });
 
-    const res = await request(app)
-      .post('/api/v1/users')
-      .send({
-        name: 'Site Engineer',
-        email: 'site.engineer@example.com',
-        password: 'Password1',
-        role: 'site_engineer',
+      expect(res.status).toBe(402);
+      expect(res.body).toEqual({
+        success: false,
+        error: {
+          code: 'SUBSCRIPTION_REQUIRED',
+          message: 'Your trial or subscription has ended. Subscribe to continue.',
+          // Every error carries the request id (M0 contract).
+          requestId: expect.any(String),
+        },
       });
-
-    expect(res.status).toBe(402);
-    expect(res.body).toEqual({
-      success: false,
-      error: {
-        code: 'SUBSCRIPTION_REQUIRED',
-        message: 'Your trial or subscription has ended. Subscribe to continue.',
-        // Every error carries the request id (M0 contract).
-        requestId: expect.any(String),
-      },
-    });
-    expect(mockSubscriptionService.ensureSubscription).toHaveBeenCalledWith('org-1');
-    expect(mockUserService.createUser).not.toHaveBeenCalled();
-  });
+      expect(mockSubscriptionService.ensureSubscription).toHaveBeenCalledWith('org-1');
+      expect(mockUserService.inviteUser).not.toHaveBeenCalled();
+    },
+  );
 
   it('allows authenticated project creation for organizations with active access', async () => {
     mockSubscriptionService.isExpired.mockReturnValue(false);
@@ -144,44 +144,63 @@ describe('subscription gate route ordering', () => {
     });
   });
 
-  it('allows authenticated user creation for organizations with active access', async () => {
+  // Owner decision D-ID-1: POST /users is the deprecated alias of POST
+  // /users/invitations — the same chain and the same 201 with the invitation
+  // (data.id is the invitation's id). Name and phone are not passed on.
+  it.each([
+    ['/api/v1/users', 'users.create'],
+    ['/api/v1/users/invitations', 'users.invite'],
+  ])('allows adding a person (%s) for organizations with active access, as an invitation', async (path, via) => {
     mockSubscriptionService.isExpired.mockReturnValue(false);
-    mockUserService.createUser.mockResolvedValue({
-      id: 'user-2',
+    const invitation = {
+      id: 'invite-2',
       email: 'site.engineer@example.com',
-    });
+      role: 'site_engineer',
+      status: 'pending',
+      invited: true,
+    };
+    mockUserService.inviteUser.mockResolvedValue(invitation);
 
     const res = await request(app)
-      .post('/api/v1/users')
+      .post(path)
       .send({
         name: 'Site Engineer',
+        phone: '+1 555 0100',
         email: 'site.engineer@example.com',
-        password: 'Password1',
         role: 'site_engineer',
       });
 
     expect(res.status).toBe(201);
-    expect(res.body).toEqual({
-      success: true,
-      data: {
-        id: 'user-2',
-        email: 'site.engineer@example.com',
-      },
-    });
+    expect(res.body).toEqual({ success: true, data: invitation });
     expect(mockSubscriptionService.ensureSubscription).toHaveBeenCalledWith('org-1');
     // The route also hands the service the actor and request context (ENT-2:
     // the membership audit trail names who added the person).
-    expect(mockUserService.createUser).toHaveBeenCalledWith(
+    expect(mockUserService.inviteUser).toHaveBeenCalledWith(
       expect.objectContaining({
         orgId: 'org-1',
         actor: expect.objectContaining({ id: 'user-1', orgId: 'org-1' }),
         payload: {
-          name: 'Site Engineer',
           email: 'site.engineer@example.com',
-          password: 'Password1',
           role: 'site_engineer',
+          projectId: undefined,
+          companyId: undefined,
+          projectPartyId: undefined,
+          note: undefined,
         },
+        via,
       }),
     );
+  });
+
+  it('refuses a password field on POST /users, whatever its value, before anything is looked up', async () => {
+    mockSubscriptionService.isExpired.mockReturnValue(false);
+    for (const password of ['Password1', '', null, false]) {
+      const res = await request(app)
+        .post('/api/v1/users')
+        .send({ email: 'site.engineer@example.com', role: 'site_engineer', password });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('USER_PASSWORD_NOT_ACCEPTED');
+    }
+    expect(mockUserService.inviteUser).not.toHaveBeenCalled();
   });
 });

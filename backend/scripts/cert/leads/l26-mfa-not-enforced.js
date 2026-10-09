@@ -10,6 +10,7 @@
  * Proven on a throwaway member of 024, so no persona is touched.
  */
 const { as, raw } = require('../lib/api');
+const { createByInvitation } = require('../lib/invitations');
 
 const PASSWORD = process.env.CERT_PASSWORD; // read, never printed
 const stamp = Date.now();
@@ -24,11 +25,11 @@ const show = (label, res) => {
 (async () => {
   const pm24 = as('pm@c024.octapm-cert.test');
 
-  // 1. Create a throwaway member in 024 (mfaEnabled defaults to false).
-  const member = await pm24.POST('/users', {
-    name: 'L26 Non-enrolled Member', email: memberEmail, password: PASSWORD, role: 'site_engineer',
-  });
-  console.log('[setup] member created in 024, id =', member.id);
+  // 1. Create a throwaway member in 024 (mfaEnabled defaults to false): since D-ID-1 the one way is an
+  //    invitation from 024 that the new e-mail accepts with its own name and password.
+  const member = await createByInvitation({ inviter: pm24, email: memberEmail, role: 'site_engineer', name: 'L26 Non-enrolled Member', password: PASSWORD });
+  if (!member.userId) throw new Error(`setup: the member was not created in 024 (invite ${member.invited?.status} / accept ${member.accepted?.status})`);
+  console.log('[setup] member created in 024, id =', member.userId);
 
   // 2. Admin turns the org-wide MFA requirement ON.
   const policy = await pm24.send('PUT', '/company/security/sso', { mfaRequired: true });

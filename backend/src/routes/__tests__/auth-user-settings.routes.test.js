@@ -50,6 +50,8 @@ jest.mock("../../middleware/auth", () => ({
     };
     return next();
   },
+  // The MFA routes' SSO-session guard (D-ID-1 Q2); not exercised here.
+  requireCredentialSession: (_req, _res, next) => next(),
 }));
 
 const authRouter = require("../auth");

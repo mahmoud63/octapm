@@ -1,7 +1,9 @@
 # Company / Admin
 
 Validated in the browser on 15 September 2026 as Dana Okafor (company administrator; the Project
-Manager account holds company administration in this release).
+Manager account holds company administration in this release). The people workflows (adding a
+person, pending invitations, password-reset e-mail, lost mailbox) were rewritten on 5 October 2026
+for the invitation-only change (CERT-3, D-ID-1) and are not yet re-validated in the browser.
 
 ## A. Role overview
 
@@ -49,9 +51,10 @@ Submittal workflows, Workflows, Custom fields, Integrations, Security, Permissio
 Add and edit companies (name, trade name, type, contact, active flag) with a duplicate-name
 refusal; vendor profiles and prequalification; cost-code import and edit; project creation from a
 template; invitations by email with the role chosen from the policy's roles (including Quality
-Engineer); adding an existing colleague to a project by name; per-project permission templates;
-password resets, activation and deactivation; API keys for integrations; security settings (MFA,
-SSO).
+Engineer) — the only way to add a person; pending invitations (revoke, resend); adding an existing
+colleague to a project by name; per-project permission templates; sending a person the
+password-reset e-mail; activation and deactivation; API keys for integrations; security settings
+(MFA, SSO).
 
 ## F. Your core workflows
 
@@ -74,14 +77,65 @@ SSO).
 3. What happens next: projects adopt the code on Cost Control → Budget (**Cost codes** → tick →
    **Apply**), and it is offered on budget lines, direct costs, timesheets and change events.
 
-**Add a person**
-1. People → **Add person** (an account you set up) or **Invite by email** (the person sets their
-   own password from the email's link).
+**Add a person (always an invitation)**
+1. People → **Invite** → the person's email. Inviting is the only way to add someone: you never
+   create an account or choose a password for anyone. The person sets their own name and password
+   from the email's link, or, if they already use OctaPM elsewhere, signs in with their own account
+   and accepts.
 2. Choose the role: Project Manager, Planning Engineer, QS, Cost Controller, Procurement, Warehouse,
    Site Engineer, Quality Engineer, Finance. Optionally the project and, for an outside company's
-   representative, the party (see chapter 11 of the User Guide on what that person receives).
-3. What happens next: the person appears on People with the role label; on acceptance they sign
-   in and land on Workspace Control.
+   representative, the party (see chapter 11 of the User Guide on what that person receives), and a
+   note for the email.
+3. What happens next: the invitation is listed under **Pending invitations** until it is accepted.
+   The person appears on People only after they accept; then they sign in and land on Workspace
+   Control. The link works once and expires after 7 days.
+4. If the email could not be sent, People says so and the invitation stays pending: fix the
+   address or wait, then **Resend** it from Pending invitations.
+5. Someone who is already a member, or who is suspended here, cannot be invited ("already a
+   member"). To put an existing member on a project use Team (below); to bring a suspended person
+   back use **Activate**.
+
+**Pending invitations**
+1. People → **Pending invitations** lists every invitation not yet accepted and not expired, with
+   the role, project, note, expiry and whether its last email failed.
+2. **Revoke** stops the link at once (an invitation already accepted cannot be revoked).
+3. **Resend** sends a fresh link for the same offer (role, project, company, party and note as
+   originally sent); the earlier link stops working. To change the offer, revoke it and invite again.
+4. Inviting the same email again also replaces the earlier link: only the newest email works.
+
+**A person cannot sign in (forgotten password)**
+1. The person uses **Forgot password?** on the sign-in page; that is the normal way back.
+2. If they ask you, People → the person → **Send password-reset e-mail**. OctaPM sends its ordinary
+   reset email to the address on their account. You never see the link and never set the password,
+   and the screen always says the email was sent, whatever the state of the account. The action is
+   limited in how often it can be repeated.
+3. When the person completes the reset, every session they had open (web, mobile, other
+   workspaces) is signed out and they sign in again with the new password.
+
+**Deactivate and bring back a person**
+1. People → the person → **Deactivate**. Their access to this workspace stops at once, their
+   project assignments here are removed, and any invitation of yours still pending for them stops
+   working.
+2. To bring them back use **Activate**. An invitation link does not bring back a suspended person.
+3. Project assignments are not restored by Activate; put them back on their projects from Team.
+
+**A person has lost access to their email**
+OctaPM cannot move an account to a new address, and no administrator can change a person's sign-in
+email. If the person still knows their password they keep signing in as before. If they cannot
+sign in and cannot receive email at the old address:
+1. Invite them at their new email address. This creates a **new** account with only the role you
+   choose; it has none of the old account's administration or ownership and none of its project
+   assignments.
+2. When they have accepted, put the new account on its projects (Team) and, if appropriate, ask a
+   workspace owner to grant administration or ownership again.
+3. **Deactivate** the old account so nobody can use it.
+History recorded under the old account stays under the old name.
+
+**The only owner has lost both email and password**
+Nobody in the workspace can recover this from People. Contact OctaPM support: support verifies who
+is asking outside the product and can then make another active member of the workspace its owner
+(support procedure: `docs/operations/OWNER_RECOVERY_RUNBOOK.md`). To avoid needing this, keep at
+least two owners.
 
 **Put a person on a project**
 1. Project → More → Team → **Add existing user** → search by name or email → pick → set the role
@@ -116,7 +170,11 @@ Company → Security; Integrations (API keys and their scopes).
 
 - Creating a company twice under slightly different names; the Directory refuses an exact
   duplicate but not a variant. Search before adding.
-- Inviting a person with the wrong role; change it on People, and set the project role on Team.
+- Inviting a person with the wrong role; before acceptance revoke the invitation and invite again,
+  after acceptance change it on People, and set the project role on Team.
+- Re-inviting a suspended person to bring them back; it is refused. Use **Activate**.
+- Inviting a person at a new address because they forgot their password; that makes a second
+  account. Ask them to use **Forgot password?**, or send them the password-reset e-mail.
 - Archiving a cost code that budget lines still use; the lines keep it, but new records cannot
   pick it.
 
@@ -128,6 +186,15 @@ Company → Security; Integrations (API keys and their scopes).
   Vendors, or let the PM record an override reason on the invitation.
 - **A company does not appear in a picker.** It is inactive; switch **Show inactive companies** on
   and re-activate it.
+- **A person says the invitation link does not work.** Only the newest invitation email works, and
+  only once and for 7 days. Check Pending invitations; **Resend** if it is still there, otherwise
+  invite again.
+- **"Already a member" when inviting.** The person is active here (use Team to add them to a
+  project) or suspended here (use **Activate**).
+- **A person was signed out everywhere.** They (or you, through the reset email) changed their
+  password, or their account was closed or their second factor reset; they sign in again.
+- **Inviting or activating answers that membership changes are paused.** The deployment's
+  emergency switch is on; removing access still works. Contact OctaPM support.
 
 ## L. Quick reference
 
@@ -136,14 +203,17 @@ Company → Security; Integrations (API keys and their scopes).
 | Add or edit a company | Company → Directory |
 | Manage a vendor's profile | Company → Vendors |
 | Add or edit a cost code | Company → Cost codes |
-| Add or invite a person | People |
+| Invite a person | People → Invite |
+| Revoke or resend an invitation | People → Pending invitations |
+| Help a person who forgot their password | People → the person → Send password-reset e-mail |
+| Bring back a deactivated person | People → the person → Activate |
 | Put a person on a project | Project → More → Team |
 | Change what a role may do on a project | Company → Permissions, then Team |
 | Create an API key | Company → Integrations |
 
 ## M. Daily checklist
 
-- [ ] Invitations pending acceptance.
+- [ ] Invitations pending acceptance (People → Pending invitations; resend any whose email failed).
 - [ ] Requests for new companies, vendors, cost codes.
 - [ ] People joining or leaving projects.
 - [ ] Vendors awaiting prequalification.

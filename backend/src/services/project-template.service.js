@@ -325,6 +325,12 @@ const createProjectFromTemplate = async ({
   // Template parties are applied below with their permission templates.
   delete projectPayload.parties;
 
+  // A template that assigns people widens their access: refused while the
+  // emergency membership switch is off (owner decision D-ID-1 Q10) — before
+  // the project is made, so a refusal leaves nothing behind.
+  if (toArray(template.assignmentsJson).length) {
+    require("./membership.service").assertAccessExpansionAllowed();
+  }
   const project = await projectService.createProject({ orgId, userId, role, payload: projectPayload, commercialAccessFor });
   const applied = { parties: 0, folders: 0, locations: 0, assignments: 0 };
 

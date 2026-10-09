@@ -139,19 +139,31 @@ const buildProviderHeaders = () => {
 };
 
 async function sendViaWebhook({ to, subject, body, html, metadata, replyTo }) {
-  const response = await fetch(getEmailProviderUrl(), {
-    method: "POST",
-    headers: buildProviderHeaders(),
-    body: JSON.stringify({
-      to,
-      subject,
-      text: body,
-      html: html || null,
-      ...(replyTo ? { replyTo } : {}),
-      metadata: metadata || {},
-    }),
-    signal: AbortSignal.timeout(EMAIL_SEND_TIMEOUT_MS),
-  });
+  // A network fault or timeout is a delivery failure like a refusal, not a
+  // server crash: the caller decides what the person is told (D-ID-1 ID-h).
+  let response;
+  try {
+    response = await fetch(getEmailProviderUrl(), {
+      method: "POST",
+      headers: buildProviderHeaders(),
+      body: JSON.stringify({
+        to,
+        subject,
+        text: body,
+        html: html || null,
+        ...(replyTo ? { replyTo } : {}),
+        metadata: metadata || {},
+      }),
+      signal: AbortSignal.timeout(EMAIL_SEND_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
+    console.error(`[email:webhook] request failed: ${timedOut ? "timeout" : "network error"}`);
+    throw new HttpError(502, "EMAIL_DELIVERY_FAILED", "Email delivery provider could not be reached", {
+      provider: "webhook",
+      reason: timedOut ? "Timeout" : "NetworkError",
+    });
+  }
 
   if (!response.ok) {
     throw new HttpError(
@@ -214,6 +226,17 @@ const formatExpiry = (expiresAt) =>
   }).format(new Date(expiresAt));
 
 const templates = {
+  mfaResetNotice: ({ name }) => ({
+    subject: "Your Octa PM two-factor authentication was reset",
+    body: [
+      `Hi ${name || "there"},`,
+      "",
+      "An administrator of your workspace reset your two-factor authentication.",
+      "You have been signed out everywhere. Sign in again and set up two-factor authentication.",
+      "",
+      "If you did not expect this, contact your administrator.",
+    ].join("\n"),
+  }),
   passwordReset: ({ name, resetUrl, expiresAt }) => ({
     subject: "Reset your Octa PM password",
     body: [

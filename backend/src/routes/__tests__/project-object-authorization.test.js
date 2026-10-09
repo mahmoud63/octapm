@@ -54,6 +54,8 @@ jest.mock('../../middleware/auth', () => ({
   authenticate: fakeAuthenticate,
   // The org-level gate app.js mounts: authenticates the same way here.
   requireOrganizationMembership: () => fakeAuthenticate,
+  // The MFA routes' SSO-session guard (D-ID-1 Q2); not exercised here.
+  requireCredentialSession: (_req, _res, next) => next(),
 }));
 jest.mock('../../services/project.service', () => mockProjectService);
 jest.mock('../../services/schedule.service', () => mockScheduleService);

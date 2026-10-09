@@ -191,7 +191,9 @@ Parties: **owner** read/export; **consultant** read; **contractor** read.
 | approve | ✓ | · | · | · | · | · | · | · | · |
 | export | ✓ | · | · | · | · | · | · | · | · |
 
-Transitions: `user.invite` → PM; `user.activate` → PM; `user.deactivate` → PM; `user.reset_password` → PM; `user.assign_role` → PM.
+Transitions: `user.invite` → PM; `user.activate` → PM; `user.deactivate` → PM; `user.send_password_reset` → PM; `user.assign_role` → PM.
+
+`user.send_password_reset` replaced `user.reset_password` in D-ID-1 (2026-10-05): an administrator can only ask OctaPM to send the person the self-service reset e-mail (`POST /users/:id/password-reset-email`, `update` + this transition); nobody sets another person's password. Adding a person is always an invitation (`POST /users/invitations`, `submit` + `user.invite`; `POST /users` is a deprecated alias); listing, revoking and resending pending invitations use the same gate. Company administrators pass the `user_management` module gate whatever their role. See the [API map §1.6](OCTAPM_MOBILE_API_MAP.md).
 
 ### Project Parties (`project_parties`) — mobile: web only
 

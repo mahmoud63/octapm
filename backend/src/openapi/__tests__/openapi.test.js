@@ -92,4 +92,45 @@ describe('OpenAPI documentation', () => {
     expect(progress.responses[400].content['application/json'].schema.$ref).toBe('#/components/schemas/ErrorEnvelope');
     expect(exportXlsx.responses[200].content['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']).toBeDefined();
   });
+
+  // Owner decision D-ID-1: adding a person is always an invitation, the admin
+  // never sets a password, and the identity's e-mail is its own. The mobile
+  // team reads this contract, so the document must say so.
+  it('documents the D-ID-1 user-management contract', () => {
+    const paths = openApiSpec.paths;
+    const invitePermission = { module: 'user_management', action: 'submit', transition: 'user.invite' };
+
+    const alias = paths['/users'].post;
+    expect(alias.deprecated).toBe(true);
+    expect(alias['x-permissions']).toMatchObject(invitePermission);
+    expect(alias.requestBody.content['application/json'].schema.$ref).toBe('#/components/schemas/UserInvitationRequest');
+    expect(alias.responses[201]).toBeDefined();
+    expect(alias.responses[202]).toBeUndefined();
+    expect(paths['/users/invitations'].post['x-permissions']).toMatchObject(invitePermission);
+
+    expect(paths['/users/invitations'].get['x-permissions']).toMatchObject(invitePermission);
+    expect(paths['/users/invitations/{invitationId}'].delete['x-permissions']).toMatchObject(invitePermission);
+    expect(paths['/users/invitations/{invitationId}/resend'].post['x-permissions']).toMatchObject(invitePermission);
+
+    expect(paths['/users/{id}/reset-password']).toBeUndefined();
+    const resetEmail = paths['/users/{id}/password-reset-email'].post;
+    expect(resetEmail['x-permissions']).toMatchObject({ module: 'user_management', action: 'update', transition: 'user.send_password_reset' });
+    expect(resetEmail.responses[202]).toBeDefined();
+    expect(resetEmail.requestBody).toBeUndefined();
+
+    expect(paths['/users/{id}'].patch.description).toMatch(/USER_EMAIL_IDENTITY_OWNED/);
+
+    const errorCodes = openApiSpec.components.schemas.ErrorCode.enum;
+    expect(errorCodes).toEqual(expect.arrayContaining([
+      'USER_PASSWORD_NOT_ACCEPTED',
+      'USER_EMAIL_IDENTITY_OWNED',
+      'INVITATION_NOT_FOUND',
+      'INVITATION_NOT_PENDING',
+      'INVITATION_EMAIL_FAILED',
+      'MEMBERSHIP_WRITES_SUSPENDED',
+      'SESSION_REVOKED',
+      'SSO_SESSION_BOUND',
+      'SSO_AUTO_PROVISION_RETIRED',
+    ]));
+  });
 });

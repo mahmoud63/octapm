@@ -4,7 +4,8 @@ const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
 const { validate } = require("../middleware/validate");
 const { loginLimiter } = require("../middleware/rate-limit");
-const { verifyAccessToken } = require("../utils/tokens");
+const { prisma } = require("../config/db");
+const { tokenEpoch, tokenEpochCurrent, verifyAccessToken } = require("../utils/tokens");
 const { API_KEY_PREFIX } = require("../services/api-client.service");
 const authService = require("../services/auth.service");
 const workspaceLinkService = require("../services/workspace-link.service");
@@ -48,11 +49,22 @@ const subjectOfToken = (req, _res, next) => {
   } catch (error) {
     return next(tokenError(error));
   }
-  // An identity token names no workspace; an access token names the one the
-  // session is bound to, which is what "is this link's project in the active
-  // workspace" is answered against.
-  req.tokenSubject = { userId: payload.sub, type: payload.type, orgId: payload.orgId || null, ssoOrgId: payload.sso || null };
-  return next();
+  // A token minted before the identity's last credential event (a reset, the
+  // identity closed) is dead here too: this is where an old bearer used to be
+  // turned into a fresh session, again and again (owner decision D-ID-1 Q6).
+  return prisma.user
+    .findUnique({ where: { id: payload.sub }, select: { credentialEpoch: true } })
+    .then((account) => {
+      if (!account || !tokenEpochCurrent(payload, account)) {
+        return next(new HttpError(401, "SESSION_REVOKED", "This session has ended; sign in again"));
+      }
+      // An identity token names no workspace; an access token names the one the
+      // session is bound to, which is what "is this link's project in the active
+      // workspace" is answered against.
+      req.tokenSubject = { userId: payload.sub, type: payload.type, orgId: payload.orgId || null, ssoOrgId: payload.sso || null, epoch: tokenEpoch(payload) };
+      return next();
+    })
+    .catch(next);
 };
 
 /**
@@ -99,7 +111,7 @@ const register = (router, { sendSession, getRequestContext }) => {
     subjectOfToken,
     asyncHandler(async (req, res) => {
       const result = await authService.issueWorkspaceSession(
-        { userId: req.tokenSubject.userId, orgId: req.params.orgId, ssoOrgId: req.tokenSubject.ssoOrgId },
+        { userId: req.tokenSubject.userId, orgId: req.params.orgId, ssoOrgId: req.tokenSubject.ssoOrgId, expectedEpoch: req.tokenSubject.epoch },
         getRequestContext(req),
       );
       return sendSession(req, res, result);

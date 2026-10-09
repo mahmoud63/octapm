@@ -319,6 +319,14 @@ const upsertProjectPartyWithTx = async ({
   payload,
 }) => {
   await ensureProject({ tx, orgId, projectId });
+  // The party is locked before it is read, so an edit is judged — and
+  // written — against the party as it is, not as it was before a concurrent
+  // closure: a stale read written back would reopen a party someone just
+  // closed, even while the emergency switch is off (D-ID-1 Q10).
+  const canLock = tx !== prisma && typeof tx.$queryRaw === "function";
+  if (payload.partyId && canLock) {
+    await tx.$queryRaw`SELECT "id" FROM "ProjectParty" WHERE "id" = ${payload.partyId} AND "projectId" = ${projectId} FOR UPDATE`;
+  }
   const existingById = payload.partyId
     ? await assertProjectParty({
         tx,
@@ -351,6 +359,9 @@ const upsertProjectPartyWithTx = async ({
     payload.accessLevel ?? existingById?.accessLevel,
   );
 
+  if (canLock) {
+    await tx.$queryRaw`SELECT "id" FROM "ProjectParty" WHERE "projectId" = ${projectId} AND "companyId" = ${company.id} AND "role"::text = ${role} FOR UPDATE`;
+  }
   const existing = await tx.projectParty.findFirst({
     where: { projectId, companyId: company.id, role },
   });
@@ -394,6 +405,25 @@ const upsertProjectPartyWithTx = async ({
       }
     }
     data.permissionTemplateId = permissionTemplateId;
+  }
+
+  // While the emergency membership switch is off, a party's members get no
+  // more than they have (owner decision D-ID-1 Q10): a change to what the
+  // party may do — its role, access level, permission profile, permissions or
+  // template — or bringing an inactive party back is refused. Closing a party,
+  // or editing its contact details, still works.
+  const current = existingById || existing;
+  if (current && !require("./membership.service").isMembershipWriteEnabled()) {
+    const differs = (a, b) => JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+    const widens =
+      role !== current.role ||
+      differs(data.accessLevel, current.accessLevel) ||
+      differs(data.permissionProfile, current.permissionProfile) ||
+      differs(data.permissionsJson, current.permissionsJson) ||
+      (data.permissionTemplateId !== undefined && differs(data.permissionTemplateId, current.permissionTemplateId)) ||
+      (payload.partyId && company.id !== current.companyId) ||
+      (data.status === "active" && current.status !== "active");
+    if (widens) require("./membership.service").assertAccessExpansionAllowed();
   }
 
   if (payload.partyId) {
@@ -659,6 +689,8 @@ const addProjectPartyMemberWithTx = async ({
 };
 
 const addProjectPartyMember = async ({ orgId, projectId, partyId, payload }) => {
+  // Widens access: refused while the emergency membership switch is off (D-ID-1 Q10).
+  require("./membership.service").assertAccessExpansionAllowed();
   const member = await prisma.$transaction((tx) =>
     addProjectPartyMemberWithTx({
       tx,

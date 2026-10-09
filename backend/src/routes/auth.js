@@ -13,6 +13,7 @@ const {
   refreshLimiter,
 } = require("../middleware/rate-limit");
 const authService = require("../services/auth.service");
+const { disconnectUser } = require("../realtime/socket");
 const userSettingsService = require("../services/user-settings.service");
 
 const router = express.Router();
@@ -214,10 +215,12 @@ router.post(
     validate,
   ],
   asyncHandler(async (req, res) => {
-    const result = await authService.resetPassword(
+    const { endedSessionsOf, ...result } = await authService.resetPassword(
       req.body,
       getRequestContext(req),
     );
+    // A reset ends every session, live sockets included (D-ID-1 Q6).
+    if (endedSessionsOf) disconnectUser(req.app.get("io"), endedSessionsOf);
     return sendSuccess(res, result);
   }),
 );
@@ -258,7 +261,7 @@ router.post(
   require("./workspaces").optionalTokenSubject,
   asyncHandler(async (req, res) => {
     const result = await authService.acceptInvitation(
-      { ...req.body, identityUserId: req.tokenSubject?.userId || null, identitySsoOrgId: req.tokenSubject?.ssoOrgId || null },
+      { ...req.body, identityUserId: req.tokenSubject?.userId || null, identitySsoOrgId: req.tokenSubject?.ssoOrgId || null, identityEpoch: req.tokenSubject ? req.tokenSubject.epoch : null },
       getRequestContext(req),
     );
     // Accepted, but the workspace sends the person through its own sign-in

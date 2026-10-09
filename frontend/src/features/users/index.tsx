@@ -3,13 +3,15 @@ import { Navigate, getRouteApi } from '@tanstack/react-router'
 import { type SortingState } from '@tanstack/react-table'
 import { useCanPerform } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Main } from '@/components/layout/main'
 import { useSubscription } from '@/features/billing/hooks/use-billing'
 import { UsersDialogs } from './components/users-dialogs'
+import { UsersPendingInvitations } from './components/users-pending-invitations'
 import { UsersPrimaryButtons } from './components/users-primary-buttons'
 import { useUsers, UsersProvider } from './components/users-provider'
 import { UsersTable } from './components/users-table'
-import { useUsersQuery } from './hooks/use-users'
+import { useCanInvite, useUsersQuery } from './hooks/use-users'
 
 const route = getRouteApi('/_authenticated/o/$orgSlug/users/')
 
@@ -33,6 +35,8 @@ export function UsersGate() {
 export function Users() {
   const search = route.useSearch()
   const navigate = route.useNavigate()
+  // Pending invitations are for the people who can invite (D-ID-1 Q5).
+  const canInvite = useCanInvite()
 
   const [sorting, setSorting] = useState<SortingState>([])
   const activeSort = sorting[0]
@@ -47,6 +51,25 @@ export function Users() {
 
   const users = data?.items ?? []
 
+  const people = isLoading ? (
+    <div className='py-12 text-center text-muted-foreground'>
+      Loading users...
+    </div>
+  ) : users.length === 0 ? (
+    <div className='flex flex-col items-center justify-center py-16 text-center'>
+      <p className='mb-4 text-muted-foreground'>No people yet.</p>
+      <InviteFirstPersonButton />
+    </div>
+  ) : (
+    <UsersTable
+      data={users}
+      search={search}
+      navigate={navigate}
+      sorting={sorting}
+      onSortingChange={setSorting}
+    />
+  )
+
   return (
     <UsersProvider>
       <Main className='flex flex-1 flex-col gap-4 sm:gap-6'>
@@ -60,23 +83,24 @@ export function Users() {
           <UsersPrimaryButtons />
         </div>
 
-        {isLoading ? (
-          <div className='py-12 text-center text-muted-foreground'>
-            Loading users...
-          </div>
-        ) : users.length === 0 ? (
-          <div className='flex flex-col items-center justify-center py-16 text-center'>
-            <p className='mb-4 text-muted-foreground'>No engineers yet.</p>
-            <AddFirstEngineerButton />
-          </div>
+        {canInvite ? (
+          <Tabs defaultValue='people' className='gap-4'>
+            <TabsList>
+              <TabsTrigger value='people'>People</TabsTrigger>
+              <TabsTrigger
+                value='invitations'
+                data-testid='uat-users-pending-tab'
+              >
+                Pending invitations
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value='people'>{people}</TabsContent>
+            <TabsContent value='invitations'>
+              <UsersPendingInvitations />
+            </TabsContent>
+          </Tabs>
         ) : (
-          <UsersTable
-            data={users}
-            search={search}
-            navigate={navigate}
-            sorting={sorting}
-            onSortingChange={setSorting}
-          />
+          people
         )}
       </Main>
 
@@ -85,13 +109,13 @@ export function Users() {
   )
 }
 
-function AddFirstEngineerButton() {
+function InviteFirstPersonButton() {
   const { setOpen } = useUsers()
-  const canCreateUser = useCanPerform('user_management', 'create')
+  const canInvite = useCanInvite()
   const { data: subscription } = useSubscription()
   const subscriptionAllowsWrites = subscription?.hasAccess !== false
 
-  if (!canCreateUser || !subscriptionAllowsWrites) return null
+  if (!canInvite || !subscriptionAllowsWrites) return null
 
-  return <Button onClick={() => setOpen('add')}>+ Add person</Button>
+  return <Button onClick={() => setOpen('invite')}>+ Invite a person</Button>
 }

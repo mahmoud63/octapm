@@ -1,0 +1,233 @@
+{
+  "proof": "scripts/cert/cert3/d-id-1-guards-proof.js",
+  "runner": "C:/Program Files/nodejs/node.exe C:/Temp/octapm-cert/run-locked.js scripts/cert/cert3/d-id-1-guards-proof.js",
+  "note": "Drafted, never applied or run. Every from string is a single line copied from the current file and occurs exactly once in it (recounted 2026-10-08 after the round-3 fixes; G6's from was stale, since the R2 fix renamed the deactivation's membership read from `membership` to `current`, and now names the current line); several of these files use CRLF line endings, so no from string spans a line break. The permission-template guards are the same line in five functions, so each of those mutations edits the function's own unique signature line instead: it adds a destructured parameter named `require` whose default answers \"./membership.service\" with a no-op assertAccessExpansionAllowed and hands every other id to module.require, which disables that one function's guard and nothing else (G17 does the same to createApiClient, spreading the real module so its later findUserInOrg/findMembership still resolve). mutate-multi.js needs a LISTS entry before it reads this file: guards: ['scripts/cert/cert3/d-id-1-guards-proof.js', true]. Round 4 (2026-10-08): G19 re-anchored (see its reanchored field); G22-G28 added for the round-4 checks P.race.off/P.race.on/P.race.key, U.admin-snapshot, U.mirror.held, O.race, E.midflight and F.create-off; G25 and G19 both edit updateUser's signature line, which is unique, and each is applied on its own.",
+  "mutations": [
+    {
+      "name": "G1 deactivateUser no longer takes the identity lock before closing the identity",
+      "file": "backend/src/services/user.service.js",
+      "from": "      await membershipService.lockIdentity(tx, userId);",
+      "to": "      // (the identity lock is not taken)",
+      "expect": "A.deact.accept-first (the deactivation never queues: waiters 1 not 2; it closes the identity first and the acceptance gets 401), A.deact.deact-first (waiters 1/1), A.deact.midflight (no waiter on the identity lock; the close waits on the acceptance's row lock and then closes the identity with the B membership committed), A.invariant, W.deact.create-first (waiters 1/1), W.deact.deact-first (waiters 0/1)"
+    },
+    {
+      "name": "G2 the admin MFA reset no longer takes the identity lock before clearing the factor",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "    await membershipService.lockIdentity(tx, userId);",
+      "to": "    // (the identity lock is not taken)",
+      "expect": "A.mfa.accept-first (the reset never queues and clears the factor first; the acceptance gets 401 instead of 200), A.mfa.reset-first (waiters 1/1), A.mfa.midflight (the reset clears the factor while the acceptance's B membership commits), A.invariant, W.mfa.create-first (waiters 1/1), W.mfa.reset-first (waiters 0/1)"
+    },
+    {
+      "name": "G3 acceptance of an existing identity no longer takes the identity lock",
+      "file": "backend/src/services/auth.service.js",
+      "from": "        await membershipService.lockIdentity(tx, existingUser.id);",
+      "to": "        // (the identity lock is not taken)",
+      "expect": "A.deact.accept-first and A.mfa.accept-first (the acceptance never queues: waiters 0/1), A.deact.deact-first and A.mfa.reset-first (the acceptance commits B while the close or reset waits: acceptance 200 instead of 401 SESSION_REVOKED, the identity stays open / the factor stays), A.deact.midflight and A.mfa.midflight (the acceptance holds no identity lock; the close or reset lands on the old snapshot while B commits), A.invariant"
+    },
+    {
+      "name": "G4 deactivation closes the home identity whatever other memberships it has",
+      "file": "backend/src/services/user.service.js",
+      "from": "        where: { id: userId, orgId, status: \"active\", ...membershipService.noOtherPresentMembershipWhere(orgId) },",
+      "to": "        where: { id: userId, orgId, status: \"active\" },",
+      "expect": "A.deact.accept-first and A.deact.midflight (identity closed with the B membership active), A.invariant, B.suspend (the identity is closed), B.enters-b (L can no longer enter B), W.deact.create-first and W.invariant (identity closed while the person owns the new workspace), N.edit-first, N.deact-first and N.midflight (the shared identity is closed: inactive, epoch +1), R.accept-first and R.deact-first (the shared identity is closed)"
+    },
+    {
+      "name": "G5 the admin MFA reset clears the factor whatever other memberships the identity has",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "      where: { id: userId, orgId, ...membershipService.noOtherPresentMembershipWhere(orgId) },",
+      "to": "      where: { id: userId, orgId },",
+      "expect": "A.mfa.accept-first and A.mfa.midflight (reset 200 and the factor cleared with the B membership active), A.invariant, W.mfa.create-first and W.invariant (reset 200 and the factor cleared while the person owns the new workspace)"
+    },
+    {
+      "name": "G6 deactivation no longer writes a suspended membership for a legacy home member (finding 5 restored)",
+      "file": "backend/src/services/user.service.js",
+      "from": "    if (!current && user.orgId === orgId && membershipService.hasMembershipModel(tx)) {",
+      "to": "    if (false && !current && user.orgId === orgId && membershipService.hasMembershipModel(tx)) {",
+      "expect": "B.suspend (200 but no A membership row, no membership.suspended event), B.bearer (the legacy A bearer is still admitted 200 and a new A workspace session is issued), R.deact-first (no A row, no suspended-from-legacy event; the legacy A bearer is admitted)"
+    },
+    {
+      "name": "G7 permission-template updateTemplate loses its emergency-switch guard",
+      "file": "backend/src/services/permission-template.service.js",
+      "from": "const updateTemplate = async ({",
+      "to": "const updateTemplate = async ({ require = (id) => (id === \"./membership.service\" ? { assertAccessExpansionAllowed: () => {} } : module.require(id)),",
+      "expect": "C.updateTemplate (200; the assigned template is renamed and audited while the switch is off)"
+    },
+    {
+      "name": "G8 permission-template archiveTemplate loses its emergency-switch guard",
+      "file": "backend/src/services/permission-template.service.js",
+      "from": "const archiveTemplate = async ({ orgId, templateId, actorId = null, actorRole = null }) => {",
+      "to": "const archiveTemplate = async ({ orgId, templateId, actorId = null, actorRole = null, require = (id) => (id === \"./membership.service\" ? { assertAccessExpansionAllowed: () => {} } : module.require(id)) }) => {",
+      "expect": "C.archiveTemplate (200; the unused template is archived while the switch is off)"
+    },
+    {
+      "name": "G9 setProjectUserPermission loses its emergency-switch guard",
+      "file": "backend/src/services/permission-template.service.js",
+      "from": "const setProjectUserPermission = async ({",
+      "to": "const setProjectUserPermission = async ({ require = (id) => (id === \"./membership.service\" ? { assertAccessExpansionAllowed: () => {} } : module.require(id)),",
+      "expect": "C.setUserPermission (200; X's permission row moves from T1 to T2 and is audited while the switch is off)"
+    },
+    {
+      "name": "G10 removeProjectUserPermission loses its emergency-switch guard",
+      "file": "backend/src/services/permission-template.service.js",
+      "from": "const removeProjectUserPermission = async ({",
+      "to": "const removeProjectUserPermission = async ({ require = (id) => (id === \"./membership.service\" ? { assertAccessExpansionAllowed: () => {} } : module.require(id)),",
+      "expect": "C.removeUserPermission (200; X's permission row is deleted while the switch is off)"
+    },
+    {
+      "name": "G11 setPartyTemplate loses its emergency-switch guard",
+      "file": "backend/src/services/permission-template.service.js",
+      "from": "const setPartyTemplate = async ({",
+      "to": "const setPartyTemplate = async ({ require = (id) => (id === \"./membership.service\" ? { assertAccessExpansionAllowed: () => {} } : module.require(id)),",
+      "expect": "C.setPartyTemplate (200; the party takes T3 while the switch is off)"
+    },
+    {
+      "name": "G12 createProjectFromTemplate checks the switch only after the project is made (finding 8 restored)",
+      "file": "backend/src/services/project-template.service.js",
+      "from": "    require(\"./membership.service\").assertAccessExpansionAllowed();",
+      "to": "    // (the switch is checked after createProject below)",
+      "also": [
+        {
+          "file": "backend/src/services/project-template.service.js",
+          "from": "  const project = await projectService.createProject({ orgId, userId, role, payload: projectPayload, commercialAccessFor });",
+          "to": "  const project = await projectService.createProject({ orgId, userId, role, payload: projectPayload, commercialAccessFor }); if (toArray(template.assignmentsJson).length) require(\"./membership.service\").assertAccessExpansionAllowed();"
+        }
+      ],
+      "expect": "C.projectFromTemplate (still 503, but a Project row of that name exists and A's project count rose by one); the cleanup deletes it through DELETE /projects/:id"
+    },
+    {
+      "name": "G13 owner-recovery approval no longer consults the emergency switch (finding 7 restored)",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "  membershipService.assertAccessExpansionAllowed();",
+      "to": "  // (the emergency switch is not consulted)",
+      "expect": "C.recovery (the approval succeeds while the switch is off: an execution row, T owner and administrator, grant events, no refusal row); the cleanup takes the grant back and suspends T"
+    },
+    {
+      "name": "G14 removing someone from a project is paused by the switch too (narrowing blocked)",
+      "file": "backend/src/services/permission-template.service.js",
+      "from": "const removeProjectMember = async ({",
+      "to": "const removeProjectMember = async ({ __switch = require(\"./membership.service\").assertAccessExpansionAllowed(),",
+      "expect": "C.removeMember (503 MEMBERSHIP_WRITES_SUSPENDED instead of 200; the assignment and the permission row remain); the cleanup removes X after the switch is restored"
+    },
+    {
+      "name": "G15 workspace creation no longer takes the identity lock (round-2 item 4 restored)",
+      "file": "backend/src/services/organisation.service.js",
+      "from": "    await membershipService.lockIdentity(tx, userId);",
+      "to": "    // (the identity lock is not taken)",
+      "expect": "W.deact.create-first and W.mfa.create-first (the creation never queues on the held identity lock and commits at once: waiters 0/1), W.deact.deact-first and W.mfa.reset-first (waiters 1/1: the creation commits while the close or reset waits on the held lock; the close then sees the new membership and leaves the identity open, the reset answers 403)"
+    },
+    {
+      "name": "G16 party updates lose the emergency-switch guard (round-2 item 6, party path restored)",
+      "file": "backend/src/services/company-party.service.js",
+      "from": "    if (widens) require(\"./membership.service\").assertAccessExpansionAllowed();",
+      "to": "    if (false && widens) require(\"./membership.service\").assertAccessExpansionAllowed();",
+      "expect": "S.party.template, S.party.access, S.party.role and S.party.permissions (200 and the party row written while the switch is off), S.project.parties (200: PATCH /projects/:id widens or adds the party), S.party.reactivate (POST /projects/:id/parties answers 201 and the closed party is active again; the project PATCH then answers 200); the cleanup deletes every active party of the run's company name"
+    },
+    {
+      "name": "G17 API-key creation loses its emergency-switch guard (round-2 item 6, key creation restored)",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "const createApiClient = async ({ orgId, actor, payload = {} }) => {",
+      "to": "const createApiClient = async ({ orgId, actor, payload = {}, require = (id) => (id === \"./membership.service\" ? { ...module.require(id), assertAccessExpansionAllowed: () => {} } : module.require(id)) }) => {",
+      "expect": "S.key.create (201: a *:write key is made while the switch is off); the cleanup revokes it"
+    },
+    {
+      "name": "G18 API-key updates lose the emergency-switch guard (round-2 item 6, key widening restored)",
+      "file": "backend/src/services/api-client.service.js",
+      "from": "    require(\"./membership.service\").assertAccessExpansionAllowed();\r\n  }\r\n  if (payload.status === \"revoked\"",
+      "to": "    void 0;\r\n  }\r\n  if (payload.status === \"revoked\"",
+      "expect": "S.key.scopes, S.key.projects and S.key.expiry (200: the key's scopes, projects or expiry widened while the switch is off)",
+      "refreshed": "review fix round"
+    },
+    {
+      "name": "G19 updateUser makes its standing change outside the (org, e-mail) lock, with tx = prisma (N1 locking restored)",
+      "file": "backend/src/services/user.service.js",
+      "from": "const updateUser = async ({ orgId, userId, actor = null, payload, context = {} }) => {",
+      "to": "const updateUser = async ({ orgId, userId, actor = null, payload, context = {}, prisma = new Proxy(require(\"../config/db\").prisma, { get: (client, key) => (key === \"$transaction\" ? (run) => run(client) : client[key]) }) }) => {",
+      "expect": "N.midflight (the role edit's advisory lock is taken and released in its own statement, so it holds no (A, e-mail) lock while stopped at its write: holders 0; the deactivation never waits on that lock and its conditional write loses to the role edit: 409 MEMBERSHIP_CHANGED or a transaction timeout; the membership stays active with role qs and the A bearer is admitted), U.mirror.held (released, the grant holds no lock at its mirror write and the revoke runs to its own: two sessions on the User row, none waiting on the lock), E.midflight (the role edit holds no (A, e-mail) lock while stopped at its insert: holders 0; the deactivation does not wait on it, reads no row and its insert then fails on the unique constraint)",
+      "reanchored": "round 4 (2026-10-08): the earlier from, `      const changed = await prisma.$transaction(async (tx) => {`, no longer exists after the round-4 restructure of updateUser"
+    },
+    {
+      "name": "G20 changeMembership writes every field by id, unconditionally (N1 restored)",
+      "file": "backend/src/services/membership.service.js",
+      "from": "  const written = await tx.organizationMembership.updateMany({",
+      "to": "  Object.assign(data, next); const written = await tx.organizationMembership.updateMany({",
+      "also": [
+        {
+          "file": "backend/src/services/membership.service.js",
+          "from": "    where: { id: membership.id, role: membership.role, isAdmin: membership.isAdmin, isOwner: membership.isOwner, status: membership.status },",
+          "to": "    where: { id: membership.id },"
+        }
+      ],
+      "expect": "N.stale-read (no 409: the stale write lands by id with every field it read, so status active is written over the suspension: role qs, membership active again, one role_changed event)"
+    },
+    {
+      "name": "G21 deactivation acts on the membership it read before the (org, e-mail) lock (R2 restored)",
+      "file": "backend/src/services/user.service.js",
+      "from": "      ? await membershipService.findMembership({ tx, orgId, userId })",
+      "to": "      ? membership",
+      "expect": "R.accept-first (the deactivation still believes there is no A row and inserts one after the acceptance wrote it: unique violation, answered 409 CONFLICT, the transaction rolls back; the A row stays active and the legacy A bearer is admitted)"
+    },
+    {
+      "name": "MW-R3 createWorkspace no longer holds the caller's credential epoch under the identity lock",
+      "file": "backend/src/services/organisation.service.js",
+      "from": "    await require(\"./auth.service\").holdCredentialEpoch(tx, userId, epoch);",
+      "to": "    void epoch;",
+      "expect": "W.deact.deact-first, W.mfa.reset-first, W.invariant (a closed or factor-reset identity comes out owning a new workspace)"
+    },
+    {
+      "name": "G22 the party is no longer locked before it is read on the partyId path (round-3 finding \"contact edit reopens a party\", by id)",
+      "file": "backend/src/services/company-party.service.js",
+      "from": "    await tx.$queryRaw`SELECT \"id\" FROM \"ProjectParty\" WHERE \"id\" = ${payload.partyId} AND \"projectId\" = ${projectId} FOR UPDATE`;",
+      "to": "    // (the party is not locked before it is read)",
+      "expect": "P.race.off and P.race.on (the edit reads the party active before the closure, waits only at the lock by company and role, and then writes the stale active status back with its contact name: 200 and the party reopened, with the switch off as much as on)"
+    },
+    {
+      "name": "G23 the party is no longer locked before it is read on the (company, role) path (round-3 finding \"contact edit reopens a party\", upsert)",
+      "file": "backend/src/services/company-party.service.js",
+      "from": "    await tx.$queryRaw`SELECT \"id\" FROM \"ProjectParty\" WHERE \"projectId\" = ${projectId} AND \"companyId\" = ${company.id} AND \"role\"::text = ${role} FOR UPDATE`;",
+      "to": "    // (the party is not locked by company and role before it is read)",
+      "expect": "P.race.key (the upsert reads the party active, so the switch sees no reopening; it waits only at its UPDATE behind the held row and then writes status active: 201 and the closed party reopened while the switch is off)"
+    },
+    {
+      "name": "G24 changeMembership no longer judges the emergency switch against the row read under the lock (round-3 finding \"unchanged admin field restores administration\")",
+      "file": "backend/src/services/membership.service.js",
+      "from": "  if (expands) assertAccessExpansionAllowed();",
+      "to": "  void expands; // (the switch is not judged against the row read under the lock)",
+      "expect": "U.admin-snapshot (the grant, cleared by the pre-lock check against a snapshot that still showed administration, restores it under the lock while the switch is off: 200, membership and User.isCompanyAdmin true, a new admin_granted event); the cleanup revokes it through the product"
+    },
+    {
+      "name": "G25 updateUser writes the User mirror after its transaction, outside the (org, e-mail) lock (round-3 finding \"delayed User mirror\")",
+      "file": "backend/src/services/user.service.js",
+      "from": "const updateUser = async ({ orgId, userId, actor = null, payload, context = {} }) => {",
+      "to": "const updateUser = async (args) => { const after = []; const result = await updateUserInTx({ ...args, after }); for (const write of after) await write(); return result; }; const updateUserInTx = async ({ orgId, userId, actor = null, payload, context = {}, after = [] }) => {",
+      "also": [
+        {
+          "file": "backend/src/services/user.service.js",
+          "from": "      ? tx.user.update({ where: { id: userId }, data, include: withCount })",
+          "to": "      ? (after.push(() => prisma.user.update({ where: { id: userId }, data })), locked)"
+        }
+      ],
+      "expect": "U.mirror.held (released from the lock, the grant commits its membership change and waits on the held User row outside the lock; the revoke then takes the lock, commits its own change and waits on the row too: two sessions on the row, none on the lock, the committed membership already qs). U.mirror.queued may still pass: without the held row the first mirror usually lands before the second"
+    },
+    {
+      "name": "G26 changeMembership no longer serialises owner removals per workspace (round-3 finding \"concurrent owner removals leave zero owners\")",
+      "file": "backend/src/services/membership.service.js",
+      "from": "      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('owners'), hashtext(${orgId}))`;",
+      "to": "      // (the owners lock is not taken)",
+      "expect": "O.race (no request waits on the owners lock: 0; each counts the other owner, waits at its write on the held owner row, and both commit: two 200s and no active owner left in the workspace)"
+    },
+    {
+      "name": "G27 updateUser materialises a legacy membership before its transaction, outside the (org, e-mail) lock (round-3 finding \"unlocked legacy materialisation\")",
+      "file": "backend/src/services/user.service.js",
+      "from": "  let membership = user.memberships?.[0] || null;",
+      "to": "  let membership = user.memberships?.[0] || (wantsStanding ? await membershipService.ensureMembershipForUser({ tx: prisma, user, orgId }) : null) || null;",
+      "expect": "E.midflight (the role edit stops at its materialising insert holding no (A, e-mail) lock: holders 0; the deactivation takes the lock, reads no row and its own insert waits on the role edit's; released, the role edit's active row commits first and the deactivation fails on the unique constraint, 409 CONFLICT, rolled back: the A row stays active and the legacy A bearer is admitted)"
+    },
+    {
+      "name": "G28 createWorkspace no longer consults the emergency switch before writing (round-3 finding \"switch-off workspace creation\")",
+      "file": "backend/src/services/organisation.service.js",
+      "from": "  membershipService.assertAccessExpansionAllowed();",
+      "to": "  // (the emergency switch is not consulted before the workspace is written)",
+      "expect": "F.create-off (201: an Organisation row of that name is committed with no owner membership, since ensureMembership writes nothing while the switch is off, and a workspace.created event is recorded); the workspace carries the CERT-931 name, so G.fingerprint leaves it out, and it stays (no product route deletes a workspace)"
+    }
+  ]
+}

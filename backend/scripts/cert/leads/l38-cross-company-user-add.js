@@ -11,6 +11,7 @@
  * We prove it on a throwaway identity created in 025 so no persona is touched.
  */
 const { as, raw } = require('../lib/api');
+const { createByInvitation } = require('../lib/invitations');
 
 const PASSWORD = process.env.CERT_PASSWORD; // read, never printed
 const stamp = Date.now();
@@ -33,12 +34,11 @@ const show = (label, res) => {
   console.log('workspace A (attacker) 024 =', org24);
   console.log('workspace B (victim)   025 =', org25);
 
-  // 1. Create the victim identity in 025 (home = 025), with a real profile.
-  const created = await pm25.POST('/users', {
-    name: victimName, email: victimEmail, phone: victimPhone,
-    password: PASSWORD, role: 'qs',
-  });
-  console.log('\n[setup] victim created in 025, id =', created.id, 'name =', created.name);
+  // 1. Create the victim identity in 025 (home = 025), with a real profile: since D-ID-1 the one way
+  //    is an invitation from 025 that the new e-mail accepts with its own name, phone and password.
+  const created = await createByInvitation({ inviter: pm25, email: victimEmail, role: 'qs', name: victimName, phone: victimPhone, password: PASSWORD });
+  if (!created.userId) throw new Error(`setup: the victim was not created in 025 (invite ${created.invited?.status} / accept ${created.accepted?.status})`);
+  console.log('\n[setup] victim created in 025, id =', created.userId, 'name =', victimName);
 
   // Log the victim in once so lastLogin is a real value worth leaking.
   await as(victimEmail).GET('/auth/me');

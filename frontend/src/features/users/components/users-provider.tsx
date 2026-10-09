@@ -2,13 +2,14 @@ import React, { useState } from 'react'
 import useDialogState from '@/hooks/use-dialog-state'
 import { type User } from '../data/schema'
 
+// Adding a person is always an invitation (owner decision D-ID-1): there is
+// no separate "add" dialog, and no dialog sets anybody's password.
 type UsersDialogType =
   | 'invite'
-  | 'add'
   | 'edit'
   | 'delete'
   | 'deactivate'
-  | 'resetPassword'
+  | 'sendResetEmail'
 
 type UsersContextType = {
   open: UsersDialogType | null

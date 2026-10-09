@@ -23,7 +23,8 @@
     "test:watch": "jest --watch",
     "worker": "node src/worker.js",
     "test:live": "jest --config jest.live.config.js --runInBand --forceExit",
-    "admin:bootstrap": "node src/cli/bootstrap-admin.js"
+    "admin:bootstrap": "node src/cli/bootstrap-admin.js",
+    "ops:recover-owner": "node src/cli/recover-owner.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",

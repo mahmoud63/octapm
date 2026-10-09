@@ -69,6 +69,7 @@ const http = require('http');
 const path = require('path');
 const { api, check, db, fake, finding, finish, onboard, ownerDecision, ownIds, preflight, reportOwnerDecisions, webhook } = require('./lib');
 const guard = require('../lib/cert-env');
+const { createByInvitation } = require('../lib/invitations');
 
 const BACKEND = path.join(__dirname, '..', '..', '..');
 const MOBILE_ERRORS = path.join(BACKEND, '..', 'mobile', 'src', 'api', 'errors.ts');
@@ -119,9 +120,18 @@ const liveProjects = async (c) => (await db.prisma()).project.count({ where: { o
 const row = (c) => db.subscription(c.orgId);
 const billingRead = async (session) => (await session.send('GET', '/billing/subscription')).body?.data || {};
 
-/** A member added through POST /users, and a session for them. */
-const addMember = (c, role = 'site_engineer', tag = 'member') =>
-  c.pm.send('POST', '/users', { name: `Cert ${tag} ${hex(2)}`, email: `${tag}.${hex(5)}@billing.octapm-cert.test`, password: process.env.CERT_PASSWORD, role });
+/**
+ * A member added through POST /users — since D-ID-1 the deprecated alias of POST /users/invitations, which answers
+ * 201 with an invitation and creates no account — and accepted by the new e-mail with its own name and password
+ * (lib/invitations createByInvitation). Answers as the old POST /users did, so the cases judge the same thing:
+ * 201 with { id, email } once the person is a member, else the refusal (of the invitation, or of the acceptance).
+ */
+const addMember = async (c, role = 'site_engineer', tag = 'member') => {
+  const email = `${tag}.${hex(5)}@billing.octapm-cert.test`;
+  const made = await createByInvitation({ inviter: c.pm, email, role, name: `Cert ${tag} ${hex(2)}`, via: 'users' });
+  if (made.userId) return { status: 201, headers: made.accepted.headers, text: '', body: { success: true, data: { id: made.userId, email } } };
+  return made.accepted && made.accepted.status >= 300 ? made.accepted : made.invited;
+};
 const mustMember = async (c, role, tag) => {
   const user = must(await addMember(c, role, tag), 201, `add a ${role} member`);
   return { ...user, session: api.as(user.email, c.orgId) };
@@ -678,7 +688,8 @@ const seats = async () => {
   check(
     'a personal workspace refuses a second member (the only member-count rule enforced; it is not a seat rule)',
     '409 PERSONAL_WORKSPACE_CONVERT_REQUIRED',
-    answer(await c.personal.send('POST', '/users', { name: 'Cert second person', email: `second.${hex(5)}@billing.octapm-cert.test`, password: process.env.CERT_PASSWORD, role: 'site_engineer' }))
+    // No password field: under D-ID-1 one is refused 400 USER_PASSWORD_NOT_ACCEPTED before the workspace is judged.
+    answer(await c.personal.send('POST', '/users', { name: 'Cert second person', email: `second.${hex(5)}@billing.octapm-cert.test`, role: 'site_engineer' }))
   );
 };
 

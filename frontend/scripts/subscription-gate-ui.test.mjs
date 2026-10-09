@@ -28,7 +28,7 @@ for (const file of [
   'src/features/users/components/users-action-dialog.tsx',
   'src/features/users/components/users-dialogs.tsx',
   'src/features/users/components/data-table-row-actions.tsx',
-  'src/features/users/components/users-reset-password-dialog.tsx',
+  'src/features/users/components/users-send-reset-email-dialog.tsx',
 ]) {
   const source = read(file)
   assert.ok(
@@ -42,6 +42,7 @@ for (const file of [
   'src/features/users/components/users-primary-buttons.tsx',
   'src/features/users/components/data-table-row-actions.tsx',
   'src/features/users/index.tsx',
+  'src/features/users/components/users-pending-invitations.tsx',
 ]) {
   const source = read(file)
   assert.ok(

@@ -1,5 +1,8 @@
-const { verifyAccessToken } = require('../utils/tokens');
+const { tokenEpochCurrent, verifyAccessToken } = require('../utils/tokens');
 const { HttpError } = require('../utils/http-error');
+
+const sessionRevoked = () =>
+  new HttpError(401, 'SESSION_REVOKED', 'This session has ended; sign in again');
 const { prisma } = require('../config/db');
 const { API_KEY_PREFIX, authenticateApiKey } = require('../services/api-client.service');
 const { resolveRequestPrincipal } = require('../services/membership.service');
@@ -86,10 +89,13 @@ const authenticate = (req, res, next) => {
         );
       }
       return prisma.user
-        .findUnique({ where: { id: payload.sub }, select: { id: true, status: true } })
+        .findUnique({ where: { id: payload.sub }, select: { id: true, status: true, credentialEpoch: true } })
         .then((account) => {
           if (!account || account.status !== 'active') {
             return next(new HttpError(401, 'USER_INACTIVE', 'This account is no longer active'));
+          }
+          if (!tokenEpochCurrent(payload, account)) {
+            return next(sessionRevoked());
           }
           req.user = identityPrincipal(payload);
           req.authResolved = true;
@@ -115,10 +121,18 @@ const authenticate = (req, res, next) => {
         if (!principal) {
           return next(new HttpError(401, 'USER_INACTIVE', 'This account is no longer active'));
         }
+        // A token minted before the identity's last credential event (a
+        // reset, the identity closed) is dead (owner decision D-ID-1 Q6).
+        if (!tokenEpochCurrent(payload, principal)) {
+          return next(sessionRevoked());
+        }
         req.user = {
           ...principal,
           email: principal.email || payload.email,
           name: principal.name || payload.name,
+          // The company whose single sign-on issued this session, if any:
+          // such a session cannot change the identity's own security (D-ID-1 Q2).
+          ssoOrgId: payload.sso || null,
         };
         req.authResolved = true;
         return next();
@@ -175,4 +189,25 @@ const requireOrganizationMembership = ({ kind = null } = {}) => {
   };
 };
 
-module.exports = { authenticate, requireOrganizationMembership };
+/**
+ * Changes to the identity's own security — its second factor — are made only
+ * from a session the person opened with their own credentials (owner decision
+ * D-ID-1 Q2). A session a company's single sign-on issued speaks for that
+ * company's access to that company, not for the person's identity: with it,
+ * one company could enrol a factor that then locks the person out of every
+ * other workspace. Applied whichever company's SSO it was, the home one too.
+ */
+const requireCredentialSession = (req, _res, next) => {
+  if (req.user?.ssoOrgId) {
+    return next(
+      new HttpError(
+        403,
+        'SSO_SESSION_BOUND',
+        "This session came from a company's single sign-on; sign in with your own password to change your account security",
+      ),
+    );
+  }
+  return next();
+};
+
+module.exports = { authenticate, requireOrganizationMembership, requireCredentialSession };

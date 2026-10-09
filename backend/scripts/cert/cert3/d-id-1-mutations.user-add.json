@@ -1,0 +1,104 @@
+{
+  "proof": "scripts/cert/cert3/d-id-1-user-add-proof.js",
+  "command": [
+    "C:/Program Files/nodejs/node.exe",
+    "C:/Temp/octapm-cert/run-locked.js",
+    "scripts/cert/cert3/d-id-1-user-add-proof.js"
+  ],
+  "note": "Each mutation is applied alone, the proof is run, the file is restored. services/*.js are CRLF (the \\r\\n in from/to are literal bytes); routes/users.js is LF.",
+  "mutations": [
+    {
+      "name": "M1 a reachable direct account-creation path on POST /users (a new e-mail gets an account and a membership at once)",
+      "file": "backend/src/routes/users.js",
+      "from": "router.post(\"/\", ...inviteChain);",
+      "to": "router.post(\"/\", inviteGate, asyncHandler(async (req, res, next) => {\n  const { prisma } = require(\"../config/db\");\n  const email = String(req.body?.email || \"\").trim().toLowerCase();\n  if (!email || (await prisma.user.findUnique({ where: { email } }))) return next();\n  const user = await prisma.user.create({ data: { orgId: req.user.orgId, name: req.body.name || email, email, passwordHash: \"!\", role: req.body.role || \"site_engineer\" } });\n  await prisma.organizationMembership.create({ data: { orgId: req.user.orgId, userId: user.id, role: user.role } });\n  return sendSuccess(res, { id: user.id, email: user.email, role: user.role, status: user.status }, 201);\n}), ...inviteChain);",
+      "expect": "C1.ws/C1.project/C1.party (POST /users for the new e-mail answers a different body) and C2.nouser (a User row exists for N before acceptance); also C3.matrix/C3.statements and C8.routes"
+    },
+    {
+      "name": "M3 acceptance proceeds while the emergency switch is off (assertAccessExpansionAllowed dropped from acceptInvitation)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "  membershipService.assertAccessExpansionAllowed();",
+      "to": "  // (mutation M3) the emergency switch is not consulted at acceptance",
+      "expect": "C3.flagoff.accept (answers are not 503) and C3.flagoff.nowrite (the new party guest gets a User row and its link is used)"
+    },
+    {
+      "name": "M4 the password refusal runs only after the e-mail has been looked up",
+      "file": "backend/src/routes/users.js",
+      "from": "const refusePasswordFields = (req, _res, next) => {",
+      "to": "const refusePasswordFields = async (req, _res, next) => {\n  await require(\"../config/db\").prisma.user.findUnique({ where: { email: String(req.body?.email || \"\").trim().toLowerCase() } }).catch(() => null);",
+      "expect": "C3.statements (statements carrying the target e-mail > 0; the answers stay identical)"
+    },
+    {
+      "name": "M5 inviting an existing identity writes an `invited` membership at invitation time",
+      "file": "backend/src/services/user.service.js",
+      "from": "    await membershipService.recordMembershipEvent({\r\n      tx,\r\n      orgId,\r\n      membership: existingMembership,",
+      "to": "    if (existingUser && !existingMembership) await membershipService.ensureMembership({ tx, orgId, userId: existingUser.id, role, status: \"invited\", invitedById: actor?.id || null, invitationId: created.id });\r\n    await membershipService.recordMembershipEvent({\r\n      tx,\r\n      orgId,\r\n      membership: existingMembership,",
+      "expect": "C2.rows (S1, S2, XB, SE get a membership row in A before acceptance)",
+      "refreshed": "review fix round"
+    },
+    {
+      "name": "M6 POST /users gets its own chain gated by user_management create only",
+      "file": "backend/src/routes/users.js",
+      "from": "router.post(\"/\", ...inviteChain);",
+      "to": "router.post(\"/\", requirePermission(\"user_management\", \"create\"), ...inviteChain.slice(1));",
+      "expect": "C8.routes (the handler references differ) and C8.policy (POST /users answers 201 under the injected policy)"
+    },
+    {
+      "name": "M8 the organisation seat lock is dropped at acceptance (count-then-insert unserialised)",
+      "file": "backend/src/services/membership.service.js",
+      "from": "    const [locked] = await tx.$queryRaw`SELECT \"kind\" FROM \"Organisation\" WHERE \"id\" = ${orgId} FOR NO KEY UPDATE`;",
+      "to": "    const [locked] = await tx.$queryRaw`SELECT \"kind\" FROM \"Organisation\" WHERE \"id\" = ${orgId}`;",
+      "expect": "C7.seat (both acceptances into the empty personal workspace win)"
+    },
+    {
+      "name": "M9 inviteUser reads eligibility (the identity) before it takes the (org, e-mail) lock",
+      "file": "backend/src/services/user.service.js",
+      "from": "    if (typeof tx.$executeRaw === \"function\") {\r\n      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orgId}), hashtext(${email}))`;\r\n    }\r\n",
+      "to": "",
+      "expect": "C7.invite-accept (forced rounds: the queued invitation answers 201 after the acceptance won, leaving an active member with a pending workspace link)",
+      "also": [
+        {
+          "file": "backend/src/services/user.service.js",
+          "from": "    if (suspendedHere || (activeHere && !projectId && !companyId && !projectPartyId)) {",
+          "to": "    if (typeof tx.$executeRaw === \"function\") {\r\n      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orgId}), hashtext(${email}))`;\r\n    }\r\n    if (suspendedHere || (activeHere && !projectId && !companyId && !projectPartyId)) {"
+        }
+      ],
+      "refreshed": "review fix round"
+    },
+    {
+      "name": "M10 deactivateUser stops revoking the person's pending invitations",
+      "file": "backend/src/services/user.service.js",
+      "from": "    if (pending.length) {",
+      "to": "    if (false && pending.length) {",
+      "expect": "C5.susp (the project link is not revoked and no member_suspended audit row is written)"
+    },
+    {
+      "name": "M11a acceptOffer reactivates a SUSPENDED membership (its suspended refusal removed)",
+      "file": "backend/src/services/membership.service.js",
+      "from": "  if (existing?.status === MEMBERSHIP_STATUSES.SUSPENDED) {",
+      "to": "  if (false && existing?.status === MEMBERSHIP_STATUSES.SUSPENDED) {",
+      "expect": "C5.interleave (the membership suspended while the acceptance waits on the lock is reactivated; 200 instead of 400). Not caught by C5.direct/C5.cs, which the early auth.service check still refuses."
+    },
+    {
+      "name": "M11b acceptInvitation's early suspendedHere refusal removed (acceptOffer still refuses inside the transaction)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "    if (suspendedHere) {",
+      "to": "    if (false && suspendedHere) {",
+      "expect": "C5.direct and C5.cs through their audit assertion: the refusal is no longer made before anything is written, so no invitation_accept_rejected row is recorded (status and code stay 400 INVITATION_TOKEN_INVALID because acceptOffer rolls the transaction back)"
+    },
+    {
+      "name": "M12 a send failure answers with the transport's own code (502 EMAIL_DELIVERY_FAILED)",
+      "file": "backend/src/services/user.service.js",
+      "from": "    throw failure;",
+      "to": "    throw error;",
+      "expect": "C1.502"
+    },
+    {
+      "name": "M14 the cross-organisation e-mail conflict is no longer mapped to 401 INVITATION_SIGN_IN_REQUIRED",
+      "file": "backend/src/services/auth.service.js",
+      "from": "    if (!existingUser && error?.code === \"P2002\" && /email/i.test(target)) {",
+      "to": "    if (false && !existingUser && error?.code === \"P2002\" && /email/i.test(target)) {",
+      "expect": "C7.xorg (the loser answers 409 CONFLICT, not 401 INVITATION_SIGN_IN_REQUIRED)"
+    }
+  ]
+}

@@ -1,0 +1,196 @@
+{
+  "proof": "scripts/cert/cert3/d-id-1-sessions-proof.js",
+  "runner": "C:/Program Files/nodejs/node.exe C:/Temp/octapm-cert/run-locked.js scripts/cert/cert3/d-id-1-sessions-proof.js",
+  "note": "All from strings are single lines copied from the files (several of these files use CRLF line endings, so no from string spans a line break). M7 needs both of its edits applied together (entry plus its 'also' edit): the route and the service each refuse the e-mail field on their own (defence in depth), so either edit alone is expected to survive. R2.2 and R3.7 likewise need their 'also' edits applied with the entry.",
+  "mutations": [
+    {
+      "name": "M2 restore an admin reset-password route that sets a password",
+      "file": "backend/src/routes/users.js",
+      "from": "router.post(\"/invitations\", ...inviteChain);",
+      "to": "router.post(\"/invitations\", ...inviteChain);\nrouter.post(\"/:id/reset-password\", requirePermission(\"user_management\", \"update\"), asyncHandler(async (req, res) => {\n  const bcrypt = require(\"bcryptjs\");\n  const { prisma } = require(\"../config/db\");\n  await prisma.user.updateMany({ where: { id: req.params.id, orgId: req.user.orgId }, data: { passwordHash: await bcrypt.hash(String(req.body?.password || \"Temp-Passw0rd1\"), 12) } });\n  return sendSuccess(res, { reset: true });\n}));",
+      "expect": "C4.1 (personas no longer all 404 NOT_FOUND), C4.2 (route inventory finds /:id/reset-password), C4.9 (R1's passwordHash changes)"
+    },
+    {
+      "name": "M7 allow the admin e-mail change (refuseEmailField no-op and the service accepts email)",
+      "file": "backend/src/routes/users.js",
+      "from": "  if (hasField(req, \"email\")) {",
+      "to": "  if (false && hasField(req, \"email\")) {",
+      "also": [
+        {
+          "file": "backend/src/services/user.service.js",
+          "from": "  if (Object.prototype.hasOwnProperty.call(payload, \"email\")) {",
+          "to": "  if (payload.email !== undefined) await prisma.user.updateMany({ where: { id: userId, orgId }, data: { email: String(payload.email).trim().toLowerCase() } });\n  if (false) {"
+        }
+      ],
+      "expect": "C4.8 (PATCH with email answers 200/403 instead of 400 USER_EMAIL_IDENTITY_OWNED; the home person's e-mail changes), C4.9"
+    },
+    {
+      "name": "M13 the admin MFA-reset guard counts only active memberships elsewhere",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "      where: { id: userId, orgId, ...membershipService.noOtherPresentMembershipWhere(orgId) },",
+      "to": "      where: { id: userId, orgId, memberships: { none: { orgId: { not: orgId }, status: \"active\" } } },",
+      "expect": "C4.10 (the reset of a person only suspended in C succeeds instead of 403 IDENTITY_SHARED; the factor is cleared)"
+    },
+    {
+      "name": "M16 sign-in with an unknown e-mail skips the dummy bcrypt compare",
+      "file": "backend/src/services/auth.service.js",
+      "from": "  const isPasswordValid = await bcrypt.compare(",
+      "to": "  const isPasswordValid = user && await bcrypt.compare(",
+      "expect": "C11.3 (unknown-e-mail median falls by the cost of one bcrypt-12 compare, far beyond the 60 ms bound)"
+    },
+    {
+      "name": "M17 drop the credential-epoch check in routes/workspaces.js subjectOfToken",
+      "file": "backend/src/routes/workspaces.js",
+      "from": "      if (!account || !tokenEpochCurrent(payload, account)) {",
+      "to": "      if (!account) {",
+      "expect": "C12.3 (old access and identity tokens open a B session), C12.5 (the old bearer is accepted as acceptance proof)"
+    },
+    {
+      "name": "M18 drop the credential-epoch check for access tokens in middleware/auth.js authenticate",
+      "file": "backend/src/middleware/auth.js",
+      "from": "        if (!tokenEpochCurrent(payload, principal)) {",
+      "to": "        if (false && !tokenEpochCurrent(payload, principal)) {",
+      "expect": "C12.2 (the old access token still reads /auth/me and GET /projects)"
+    },
+    {
+      "name": "M19 resetPassword stops bumping credentialEpoch",
+      "file": "backend/src/services/auth.service.js",
+      "from": "      data: { passwordHash, credentialEpoch: { increment: 1 } },",
+      "to": "      data: { passwordHash },",
+      "expect": "C12.2, C12.3, C12.5, C12.6 (every pre-reset access and identity token stays valid)"
+    },
+    {
+      "name": "M22 the emergency switch lets acceptance through",
+      "file": "backend/src/services/auth.service.js",
+      "from": "  membershipService.assertAccessExpansionAllowed();",
+      "to": "  // (the emergency switch is not consulted at acceptance)",
+      "expect": "C15.2 (accepting with AUTH_MEMBERSHIP_WRITE=false is no longer 503 MEMBERSHIP_WRITES_SUSPENDED; a User row is written and the link is consumed)"
+    },
+    {
+      "name": "R2.1 createAuthSessionPayload no longer holds the proven epoch (the hold is dropped there; tokens still carry the proven epoch)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "  if (expectedEpoch !== null) await holdCredentialEpoch(tx, user.id, expectedEpoch);",
+      "to": "  // (the proven epoch is not held here)",
+      "expect": "C12.9 (the workspace session waits on nothing: it answers 200 before the reset commits and writes a refresh session), C12.10 (200 and a refresh session written after the reset, its tokens at the old epoch)"
+    },
+    {
+      "name": "R2.2 issueLoginOutcome mints at the epoch of the row it has just updated (its own hold dropped)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "    await holdCredentialEpoch(tx, user.id, provenEpoch);",
+      "to": "    // (the proven epoch is not held)",
+      "also": [
+        {
+          "file": "backend/src/services/auth.service.js",
+          "from": "    const payload = await createAuthSessionPayload(tx, updatedUser, context, { orgId: entry.orgId, expectedEpoch: provenEpoch });",
+          "to": "    const payload = await createAuthSessionPayload(tx, updatedUser, context, { orgId: entry.orgId, expectedEpoch: updatedUser.credentialEpoch });"
+        }
+      ],
+      "expect": "C12.11 (the sign-in waits at its lastLogin write instead, then mints at the new epoch: 200 with a live session and a refresh session written after the commit), C12.12 (the MFA completion likewise: 200 and a live session at the new epoch)"
+    },
+    {
+      "name": "R2.3 routes/workspaces.js stops passing the token's epoch to issuance",
+      "file": "backend/src/routes/workspaces.js",
+      "from": "        { userId: req.tokenSubject.userId, orgId: req.params.orgId, ssoOrgId: req.tokenSubject.ssoOrgId, expectedEpoch: req.tokenSubject.epoch },",
+      "to": "        { userId: req.tokenSubject.userId, orgId: req.params.orgId, ssoOrgId: req.tokenSubject.ssoOrgId },",
+      "expect": "C12.10 (issuance re-reads the row after the reset and holds the new epoch: 200 with a live session from the pre-reset token). C12.9 is expected to survive this one: there issuance reads the row while the reset is still uncommitted, so it holds the old epoch and is refused anyway"
+    },
+    {
+      "name": "R2.4 POST /auth/reset-password stops dropping the person's live sockets",
+      "file": "backend/src/routes/auth.js",
+      "from": "    if (endedSessionsOf) disconnectUser(req.app.get(\"io\"), endedSessionsOf);",
+      "to": "    // (live sockets are left alone)",
+      "expect": "C12.15 (the socket that joined the project room stays connected after the reset: no disconnect within 5 s)"
+    },
+    {
+      "name": "R2.5 handleProjectJoin no longer compares the socket's credential epoch with the account's",
+      "file": "backend/src/realtime/socket.js",
+      "from": "    if ((account.credentialEpoch ?? 0) !== (user.credentialEpoch ?? 0)) {",
+      "to": "    if (false) {",
+      "expect": "C12.16 (after the epoch moves under the socket, project:join answers ok: true and the socket stays connected)"
+    },
+    {
+      "name": "R2.6 the admin MFA reset stops dropping the person's live sockets",
+      "file": "backend/src/routes/company-security.js",
+      "from": "  disconnectUser(req.app.get(\"io\"), req.params.userId);",
+      "to": "  // (live sockets are left alone)",
+      "expect": "C12.17 (the person's socket stays connected after POST /company/security/users/:id/mfa/reset)"
+    },
+    {
+      "name": "R2.7 an explicit PUBLIC_REGISTRATION=true opens registration under any NODE_ENV but exact production (the pre-fix behaviour)",
+      "file": "backend/src/config/registration.js",
+      "from": "  if (!OPEN_BY_DEFAULT.has(String(env.NODE_ENV ?? \"\").trim().toLowerCase())) return false;",
+      "to": "  if (env.NODE_ENV !== \"production\" && String(env.PUBLIC_REGISTRATION ?? \"\").trim().toLowerCase() === \"true\") return true;\n  if (!OPEN_BY_DEFAULT.has(String(env.NODE_ENV ?? \"\").trim().toLowerCase())) return false;",
+      "expect": "C18.9 (staging, 'prod', '' and unset NODE_ENV with PUBLIC_REGISTRATION=true come back open). C18.8 is expected to survive: none of its cases sets the flag outside production"
+    },
+    {
+      "name": "R2.8 resolveChallenge no longer compares the MFA challenge's epoch with the account's",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "  if (!tokenEpochCurrent(payload, user)) throw new HttpError(401, \"SESSION_REVOKED\", \"This session has ended; sign in again\");",
+      "to": "  // (the challenge's epoch is not compared)",
+      "expect": "C12.14 (the pre-reset challenge with a valid code answers 200 and writes a session at the new epoch)"
+    },
+    {
+      "name": "R2.9 acceptance by an existing identity no longer holds the bearer's epoch",
+      "file": "backend/src/services/auth.service.js",
+      "from": "        if (!reactivatesIdentity) await holdCredentialEpoch(tx, existingUser.id, Number.isInteger(identityEpoch) ? identityEpoch : -1);",
+      "to": "        // (the bearer's epoch is not held)",
+      "expect": "C12.13 (the acceptance waits at its User name write instead and then commits: 200 accepted with signInRequired, the link is used and the project assigned)"
+    },
+    {
+      "name": "R3.1 a brand-new identity's acceptance issues without the epoch it wrote (ownEpoch back to null for a new identity, so issuance holds whatever the row says by then)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "        : Number.isInteger(accepted.credentialEpoch) ? accepted.credentialEpoch : 0;",
+      "to": "        : null;",
+      "expect": "C12.18 (issueWorkspaceSession reads the row after the committed bump and holds the new epoch: 200 with live tokens, a refresh session written for the new identity, no signInRequired). C12.13 survives (an existing identity still passes the bearer's epoch)"
+    },
+    {
+      "name": "R3.2 the socket connection handler no longer re-checks the account after joining its rooms",
+      "file": "backend/src/realtime/socket.js",
+      "from": "        if (!account || (account.credentialEpoch ?? 0) !== (user.credentialEpoch ?? 0)) socket.disconnect(true);",
+      "to": "        if (false) socket.disconnect(true);",
+      "expect": "C12.19 (the handshake that read the pre-reset account stays connected in its rooms past 2 s and hears the probe addressed to the person)"
+    },
+    {
+      "name": "R3.3 holdCredentialEpoch takes FOR SHARE again (the pre-R1 lock)",
+      "file": "backend/src/services/auth.service.js",
+      "from": "  const rows = await tx.$queryRaw`SELECT \"id\" FROM \"User\" WHERE \"id\" = ${userId} AND \"credentialEpoch\" = ${epoch} AND \"status\" = 'active' FOR NO KEY UPDATE`;",
+      "to": "  const rows = await tx.$queryRaw`SELECT \"id\" FROM \"User\" WHERE \"id\" = ${userId} AND \"credentialEpoch\" = ${epoch} AND \"status\" = 'active' FOR SHARE`;",
+      "expect": "C12.20 (the eight sign-ins released together all take the shared lock, then each one's lastLogin update waits on the others: deadlock victims answer 5xx instead of 200, fewer than 8 refresh sessions) and the final 'no answer was a 5xx' check. C12.21 survives (a workspace session does not update the User row)"
+    },
+    {
+      "name": "R3.4 the self-service MFA enable writes the factor without the request's epoch",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "    epoch,",
+      "to": "    epoch: null,",
+      "expect": "C12.22 (the conditional write fails on the cleared seed instead and the request answers 409 MFA_STATE_CHANGED, not 401 SESSION_REVOKED). The from string is the 4-space-indented line of enable's writeOwnFactor call, the only one in the file"
+    },
+    {
+      "name": "R3.5 the self-service MFA disable writes the factor without the request's epoch",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "  await writeOwnFactor({ userId, epoch, expect: { mfaEnabled: true, passwordHash: user.passwordHash },",
+      "to": "  await writeOwnFactor({ userId, epoch: null, expect: { mfaEnabled: true, passwordHash: user.passwordHash },",
+      "expect": "C12.23 (the conditional write fails on the changed password hash instead and the request answers 409 MFA_STATE_CHANGED, not 401 SESSION_REVOKED)"
+    },
+    {
+      "name": "R3.6 the self-service MFA setup writes the pending seed without the request's epoch",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "  await writeOwnFactor({ userId, epoch, expect: { mfaEnabled: false }, data: { mfaPendingSecretEnc: seal(secret) } });",
+      "to": "  await writeOwnFactor({ userId, epoch: null, expect: { mfaEnabled: false }, data: { mfaPendingSecretEnc: seal(secret) } });",
+      "expect": "C12.24 (after the held epoch bump commits the setup answers 200 with a secret and a pending seed is written on the identity whose sessions just ended)"
+    },
+    {
+      "name": "R3.7 the admin MFA reset awaits the notice e-mail before it returns (the pre-R3 order)",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "  setImmediate(() => {",
+      "to": "  await ((fn) => fn())(() => {",
+      "also": [
+        {
+          "file": "backend/src/services/mfa.service.js",
+          "from": "    sendEmail({ to: user.email, ...templates.mfaResetNotice({ name: user.name }), metadata: { orgId, userId, type: \"mfa_reset_notice\" } })",
+          "to": "    return sendEmail({ to: user.email, ...templates.mfaResetNotice({ name: user.name }), metadata: { orgId, userId, type: \"mfa_reset_notice\" } })"
+        }
+      ],
+      "expect": "C12.25 (the reset answers only after the webhook's 8 s delay, far beyond the 2 s bound, and the route drops the socket only then). Both edits go together: the first runs the notice before returning, the second makes it return the delivery promise that is awaited"
+    }
+  ]
+}

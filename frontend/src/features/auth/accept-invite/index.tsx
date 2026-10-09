@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { roles } from '@/features/users/data/data'
 import { AuthLayout } from '../auth-layout'
 import { AcceptInviteForm } from './components/accept-invite-form'
+import { REFUSED_INVITATION_MESSAGE } from './invitation-errors'
 
 const roleLabel = (role: string) =>
   roles.find((item) => item.value === role)?.label || role
@@ -51,8 +52,9 @@ export function AcceptInvite() {
         <CardContent className='space-y-4'>
           {!token ? (
             <p className='text-sm text-muted-foreground'>
-              This invitation link is missing its token. Ask your project
-              administrator to send a new invite.
+              This invitation link is missing its token. Open the link in the
+              newest invitation e-mail you received, or ask your administrator
+              to send a new invitation.
             </p>
           ) : invitationQuery.isPending ? (
             <div className='space-y-3'>
@@ -61,8 +63,11 @@ export function AcceptInvite() {
               <Skeleton className='h-10 w-full' />
             </div>
           ) : invitationQuery.isError ? (
-            <p className='text-sm text-muted-foreground'>
-              This invitation is invalid, expired, or already accepted.
+            <p
+              className='text-sm text-muted-foreground'
+              data-testid='accept-invite-refused'
+            >
+              {REFUSED_INVITATION_MESSAGE}
             </p>
           ) : (
             <>

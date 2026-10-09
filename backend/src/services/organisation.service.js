@@ -227,6 +227,9 @@ const createWorkspace = async ({
   }
   const workspaceName = String(name || "").trim();
   if (!workspaceName) throw new HttpError(400, "VALIDATION_ERROR", "A workspace name is required");
+  // A workspace is born with its owner's membership; while the emergency
+  // switch stops membership writes it would be born with nobody (D-ID-1 Q10).
+  membershipService.assertAccessExpansionAllowed();
   // Checked before the transaction opens: a bad default is the caller's
   // mistake, not a half-written workspace to roll back.
   workspaceDefaults({ currency, timezone });
@@ -235,6 +238,19 @@ const createWorkspace = async ({
   // anywhere after the organisation row leaves no organisation behind with no
   // owner (acceptance §16; the lifecycle live test injects one).
   return prisma.$transaction(async (tx) => {
+    // A membership in a further workspace is one of the identity's places: the
+    // identity lock orders it with a home workspace closing the identity or
+    // clearing its factor, which must see it (D-ID-1 ID-GUARD).
+    await membershipService.lockIdentity(tx, userId);
+    // And judged under that lock: an identity a home workspace closed, or
+    // whose factor it cleared, while this request waited — that event ended
+    // the session that asked — does not come out owning a new workspace. Held
+    // at the epoch of the caller's session; a caller with none (an in-process
+    // use) is held at the epoch the identity has now.
+    const epoch = Number.isInteger(actor?.credentialEpoch)
+      ? actor.credentialEpoch
+      : (await tx.user.findUnique({ where: { id: userId }, select: { credentialEpoch: true } }))?.credentialEpoch ?? 0;
+    await require("./auth.service").holdCredentialEpoch(tx, userId, epoch);
     const org = await createOrganisationRow(tx, { name: workspaceName, kind, createdByUserId: userId, currency, timezone });
     const membership = await provisionWorkspace({ tx, org, ownerUserId: userId, actor, context });
     return workspaceResult({ tx, org, membership, userId });

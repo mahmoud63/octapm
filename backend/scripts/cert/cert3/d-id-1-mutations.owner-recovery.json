@@ -1,0 +1,124 @@
+{
+  "proof": "scripts/cert/cert3/d-id-1-owner-recovery-proof.js",
+  "mutations": [
+    {
+      "name": "M23 one operator approves their own request in production (the production clause of the two-person rule dropped)",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "if (sameOperator && (isProduction(env) || !meta.singleOperator)) {",
+      "to": "if (sameOperator && !meta.singleOperator) {",
+      "expect": "C16 in production the requester approves their own --single-operator request: refused 403 RECOVERY_TWO_PERSON_REQUIRED (and its 'nothing written' and 'refused audit row' checks) must fail"
+    },
+    {
+      "name": "M23b two-person rule dropped: the approver is compared with the target instead of the requesting operator",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "const sameOperator = approver.id === request.actorId;",
+      "to": "const sameOperator = approver.id === request.userId;",
+      "expect": "C16 the requester approves their own request: refused 403 RECOVERY_TWO_PERSON_REQUIRED (and its 'nothing written' check) must fail; the production self-approval checks fail too"
+    },
+    {
+      "name": "M23c operator allow-list not enforced (any active identity with two-factor may act as an operator)",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "if (!normalized || !operatorAllowList(env).has(normalized)) {",
+      "to": "if (!normalized) {",
+      "expect": "C16 an operator not on RECOVERY_OPERATOR_EMAILS (two-factor on, a current code): refused 403 RECOVERY_OPERATOR_NOT_ALLOWED (and its 'nothing written' and 'refused audit row' checks) must fail"
+    },
+    {
+      "name": "M23d operator authenticator code not single-use (the step is checked but never spent)",
+      "file": "backend/src/services/mfa.service.js",
+      "from": "return spendTotpStep(user.id, step);",
+      "to": "return step !== null;",
+      "expect": "C16 a replayed authenticator code (accepted once, still current): refused 403 RECOVERY_OPERATOR_CODE_INVALID (and its 'nothing written' and 'refused audit row' checks) must fail"
+    },
+    {
+      "name": "F10 expiry not judged again after the pre-lock check (the request-lock and the post-grant re-checks both removed: the approval carries out a request that expired while it waited)",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "    // out a request that expired meanwhile.\n    if (new Date(meta.expiresAt) <= new Date()) {",
+      "to": "    // out a request that expired meanwhile.\n    if (false && new Date(meta.expiresAt) <= new Date()) {",
+      "also": [
+        {
+          "file": "backend/src/services/owner-recovery.service.js",
+          "from": "    // still live when it was written. Expired now, the transaction rolls back.\n    if (new Date(meta.expiresAt) <= new Date()) {",
+          "to": "    // still live when it was written. Expired now, the transaction rolls back.\n    if (false && new Date(meta.expiresAt) <= new Date()) {"
+        }
+      ],
+      "expect": "Finding 10: a request that expires while its approval (a second operator) waits on the request lock: refused 409 RECOVERY_REQUEST_EXPIRED, its 'nothing written' and its 'refused audit row' checks must fail (the approval answers ok and T2 becomes owner and administrator); both Item 10 races (T5 target lock, T6 membership row) fail their three checks too; the pre-lock 'C16 an expired request' checks still pass. (Round 3: the request-lock re-check removed ALONE is masked by the post-grant re-check, which then refuses with the same 409 and rolls back, so this mutation removes both.)"
+    },
+    {
+      "name": "F10p post-grant expiry re-check removed (the round-2 state: expiry judged under the request lock only, not after the target's lock or the grant)",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "    // still live when it was written. Expired now, the transaction rolls back.\n    if (new Date(meta.expiresAt) <= new Date()) {",
+      "to": "    // still live when it was written. Expired now, the transaction rolls back.\n    if (false && new Date(meta.expiresAt) <= new Date()) {",
+      "expect": "Item 10: a request that expires while its approval (a second operator), past the request-lock expiry judgement, waits on the target's (org, e-mail) lock: refused 409 RECOVERY_REQUEST_EXPIRED, its 'nothing written' and its 'refused audit row' checks must fail (the approval answers ok; T5 becomes owner and administrator; an executed row). Item 10: ... grant waits on the target's membership row: its three checks must fail the same way (T6). Finding 10 (request lock) still passes (the request-lock re-check refuses it)"
+    },
+    {
+      "name": "F10q post-grant expiry re-check moved before the grant (judged after the target's lock and the standing check, not after the grant's wait on the membership row)",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "    // still live when it was written. Expired now, the transaction rolls back.\n    if (new Date(meta.expiresAt) <= new Date()) {",
+      "to": "    // still live when it was written. Expired now, the transaction rolls back.\n    if (false && new Date(meta.expiresAt) <= new Date()) {",
+      "also": [
+        {
+          "file": "backend/src/services/owner-recovery.service.js",
+          "from": "    const { membership, user } = await assertActiveMember({ tx, orgId: request.orgId, userId: request.userId });\n",
+          "to": "    const { membership, user } = await assertActiveMember({ tx, orgId: request.orgId, userId: request.userId });\n    if (new Date(meta.expiresAt) <= new Date()) {\n      throw new HttpError(409, \"RECOVERY_REQUEST_EXPIRED\", \"This request has expired; make a new one\");\n    }\n"
+        }
+      ],
+      "expect": "Item 10: a request that expires while its approval's grant waits on the target's membership row: refused 409 RECOVERY_REQUEST_EXPIRED, its 'nothing written' and its 'refused audit row' checks must fail (the moved check runs before the expiry, the grant then waits past it and commits; T6 becomes owner and administrator). Item 10 (T5, target lock) and Finding 10 still pass (the moved check runs after the target's lock)"
+    },
+    {
+      "name": "F9 target's (org, e-mail) lock removed and the grant written by membership id alone (the pre-fix approval)",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "    if (target) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${request.orgId}), hashtext(${target.email}))`;",
+      "to": "    if (false && target) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${request.orgId}), hashtext(${target.email}))`;",
+      "also": [
+        {
+          "file": "backend/src/services/owner-recovery.service.js",
+          "from": "      where: { id: membership.id, status: membershipService.MEMBERSHIP_STATUSES.ACTIVE },",
+          "to": "      where: { id: membership.id },"
+        }
+      ],
+      "expect": "Finding 9 (b1): all three checks must fail (no waiter on the advisory lock; the approval answers ok before the fixture suspension; T3 ends suspended with isOwner/isAdmin true). Finding 9 (b2): all three checks must fail (the grant waits on the row, then writes owner/admin onto the now-suspended membership and answers ok)"
+    },
+    {
+      "name": "F9a target's (org, e-mail) lock removed alone (the conditional grant kept)",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "    if (target) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${request.orgId}), hashtext(${target.email}))`;",
+      "to": "    if (false && target) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${request.orgId}), hashtext(${target.email}))`;",
+      "expect": "Finding 9 (b1): its three checks must fail (the approval does not wait on the proof's (org, e-mail) lock and grants while T3 is still active; the fixture suspension lands afterwards on an owner/admin membership). Finding 9 (b2) still passes (the conditional grant alone refuses)"
+    },
+    {
+      "name": "F9b grant written by membership id alone (the target lock kept)",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "      where: { id: membership.id, status: membershipService.MEMBERSHIP_STATUSES.ACTIVE },",
+      "to": "      where: { id: membership.id },",
+      "expect": "Finding 9 (b2): its three checks must fail (the grant waits on the uncommitted suspension, then writes owner/admin onto the suspended membership and answers ok). Finding 9 (b1) still passes (under the lock the standing check sees the suspension)"
+    },
+    {
+      "name": "F7 emergency switch not consulted by owner recovery",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "  membershipService.assertAccessExpansionAllowed();",
+      "to": "  // membershipService.assertAccessExpansionAllowed();",
+      "expect": "Finding 7: AUTH_MEMBERSHIP_WRITE=false, a second operator approves a valid request: refused 503 MEMBERSHIP_WRITES_SUSPENDED, its 'nothing written' and its 'refused audit row' checks must fail (the approval answers ok and T2 becomes owner and administrator)"
+    },
+    {
+      "name": "R4a the approver's credential epoch hold removed (the round-3 state: op2 proven before the transaction, never held or re-judged)",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "      await require(\"./auth.service\").holdCredentialEpoch(tx, approver.id, Number.isInteger(approver.credentialEpoch) ? approver.credentialEpoch : 0);",
+      "to": "      // await require(\"./auth.service\").holdCredentialEpoch(tx, approver.id, Number.isInteger(approver.credentialEpoch) ? approver.credentialEpoch : 0);",
+      "expect": "Round 4: the approving operator (op2) completes a self-service password reset while the approval waits on the target's (org, e-mail) lock: refused 403 RECOVERY_OPERATOR_NOT_ALLOWED, its 'nothing written' and its 'refused audit row' checks must fail (the approval answers ok after the reset; T7 becomes owner and administrator; an owner_recovery.executed row; no refused row). Every other check still passes (the happy path's op2 approval has no credential event to miss)"
+    },
+    {
+      "name": "R4b the approver's epoch held at the value read inside the transaction, not the one proven before it",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "      await require(\"./auth.service\").holdCredentialEpoch(tx, approver.id, Number.isInteger(approver.credentialEpoch) ? approver.credentialEpoch : 0);",
+      "to": "      await require(\"./auth.service\").holdCredentialEpoch(tx, approver.id, (await tx.user.findUnique({ where: { id: approver.id }, select: { credentialEpoch: true } }))?.credentialEpoch ?? 0);",
+      "expect": "Round 4: the approving operator (op2) completes a self-service password reset while the approval waits on the target's (org, e-mail) lock: its three checks must fail as under R4a (the hold reads op2's new, post-reset epoch and holds it, so the grant goes ahead). Every other check still passes"
+    },
+    {
+      "name": "R4c the approver's ended proof not mapped to the recovery refusal (SESSION_REVOKED rethrown as is)",
+      "file": "backend/src/services/owner-recovery.service.js",
+      "from": "      if (error?.code === \"SESSION_REVOKED\") {",
+      "to": "      if (false && error?.code === \"SESSION_REVOKED\") {",
+      "expect": "Round 4: ... refused 403 RECOVERY_OPERATOR_NOT_ALLOWED must fail (the approval answers 401 SESSION_REVOKED) and its 'refused audit row' check must fail (the row's code is SESSION_REVOKED); its 'nothing written' check still passes (the grant is still refused). Every other check still passes"
+    }
+  ]
+}

@@ -12,6 +12,7 @@ import { toast } from 'sonner'
 import { registerSW } from 'virtual:pwa-register'
 import { useAuthStore } from '@/stores/auth-store'
 import { handleServerError } from '@/lib/handle-server-error'
+import { isSessionRevokedError, onSessionEnded } from '@/services/api/client'
 // Types meta.reportsOwnError on every mutation (the handler below reads it).
 import '@/lib/mutation-meta'
 import {
@@ -57,6 +58,9 @@ const queryClient = new QueryClient({
   mutationCache: new MutationCache({
     onError: (error, _variables, _context, mutation) => {
       if (mutation.meta?.reportsOwnError || mutation.options.onError) return
+      // An ended session is not an error to toast: the request layer has
+      // already sent the person to sign in again (D-ID-1 Q6).
+      if (isSessionRevokedError(error)) return
       handleServerError(error)
 
       if (error instanceof AxiosError) {
@@ -119,6 +123,20 @@ const router = createRouter({
   context: { queryClient },
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,
+})
+
+// A session the server revoked (401 SESSION_REVOKED: a password reset, an
+// account close or an administrator's MFA reset since the token was minted)
+// ends like an expired one — one toast, then the sign-in page — never a
+// stream of error toasts (D-ID-1 Q6). The request layer has already emptied
+// the store; this only decides where the person lands.
+onSessionEnded(() => {
+  toast.error('Your session has ended. Please sign in again.', {
+    id: 'session-expired',
+  })
+  if (router.state.location.pathname.startsWith('/sign-in')) return
+  const redirect = `${router.history.location.href}`
+  router.navigate({ to: '/sign-in', search: { redirect } })
 })
 
 // Register the router instance for type safety

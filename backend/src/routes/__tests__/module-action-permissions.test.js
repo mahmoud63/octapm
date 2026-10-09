@@ -44,9 +44,15 @@ const mockIpcService = {
   recordIpcPayment: jest.fn(),
   releaseIpcRetention: jest.fn(),
 };
+// Owner decision D-ID-1: adding a person is always an invitation (POST /users
+// is its deprecated alias), and an administrator only asks OctaPM to send
+// the self-service reset e-mail.
 const mockUserService = {
-  createUser: jest.fn(),
   inviteUser: jest.fn(),
+  listInvitations: jest.fn(),
+  revokeInvitation: jest.fn(),
+  resendInvitation: jest.fn(),
+  sendPasswordResetEmail: jest.fn(),
 };
 const mockDailyReportService = {
   REPORT_STATUSES: ["draft", "submitted", "approved", "rejected"],
@@ -507,19 +513,59 @@ const routeSpecs = [
     response: { id: ids.alert, status: "resolved" },
   },
   {
+    // The deprecated alias: the invitation chain (user_management submit + user.invite).
     name: "user creation",
     method: "post",
     path: "/users",
     body: {
       name: "Project Engineer",
       email: "project.engineer@example.com",
-      password: "Password1",
       role: "site_engineer",
     },
     allowed: ["pm"],
     expectedStatus: 201,
-    mock: mockUserService.createUser,
-    response: { id: "new-user", role: "site_engineer" },
+    mock: mockUserService.inviteUser,
+    response: { id: "invite-2", status: "pending", invited: true },
+  },
+  {
+    name: "pending invitation list",
+    method: "get",
+    path: "/users/invitations",
+    body: {},
+    allowed: ["pm"],
+    expectedStatus: 200,
+    mock: mockUserService.listInvitations,
+    response: { items: [], pagination: { limit: 50, nextCursor: null } },
+  },
+  {
+    name: "invitation revocation",
+    method: "delete",
+    path: `/users/invitations/${ids.task}`,
+    body: {},
+    allowed: ["pm"],
+    expectedStatus: 200,
+    mock: mockUserService.revokeInvitation,
+    response: { id: ids.task, revoked: true },
+  },
+  {
+    name: "invitation resend",
+    method: "post",
+    path: `/users/invitations/${ids.task}/resend`,
+    body: {},
+    allowed: ["pm"],
+    expectedStatus: 201,
+    mock: mockUserService.resendInvitation,
+    response: { id: "invite-3", status: "pending", invited: true },
+  },
+  {
+    name: "password reset e-mail",
+    method: "post",
+    path: `/users/${ids.meeting}/password-reset-email`,
+    body: {},
+    allowed: ["pm"],
+    expectedStatus: 202,
+    mock: mockUserService.sendPasswordResetEmail,
+    response: { sent: true },
   },
   {
     name: "user invitation",

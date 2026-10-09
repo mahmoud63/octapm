@@ -6,13 +6,6 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { PasswordInput } from '@/components/password-input'
 import { CompanySection } from './components/company-section'
@@ -23,18 +16,6 @@ import {
   useUpdateSso,
   type SsoTestResult,
 } from './hooks/use-security'
-
-const ROLES = [
-  ['pm', 'Project manager'],
-  ['planning_eng', 'Planning engineer'],
-  ['qs', 'Quantity surveyor'],
-  ['cost_controller', 'Cost controller'],
-  ['procurement', 'Procurement'],
-  ['warehouse', 'Warehouse'],
-  ['site_engineer', 'Site engineer'],
-  ['quality_engineer', 'Quality engineer'],
-  ['finance', 'Finance'],
-] as const
 
 /** Company › Security: single sign-on, the two-factor policy and every user's status. */
 export function CompanySecurity() {
@@ -48,8 +29,6 @@ export function CompanySecurity() {
     clientId: '',
     clientSecret: '',
     domains: '',
-    autoProvision: true,
-    defaultRole: 'site_engineer',
     required: false,
     mfaRequired: false,
   })
@@ -64,8 +43,6 @@ export function CompanySecurity() {
       clientId: data.sso.clientId ?? '',
       clientSecret: '',
       domains: data.sso.domains.join(', '),
-      autoProvision: data.sso.autoProvision,
-      defaultRole: data.sso.defaultRole,
       required: data.sso.required,
       mfaRequired: data.mfaRequired,
     })
@@ -91,8 +68,8 @@ export function CompanySecurity() {
           .split(/[,\s]+/)
           .map((item) => item.trim())
           .filter(Boolean),
-        autoProvision: form.autoProvision,
-        defaultRole: form.defaultRole,
+        // Single sign-on never creates accounts (owner decision D-ID-1):
+        // auto-provisioning and its default role are not sent at all.
         required: form.required,
         mfaRequired: form.mfaRequired,
       })
@@ -240,32 +217,15 @@ export function CompanySecurity() {
                   sign-in page.
                 </p>
               </div>
-              <div className='space-y-1'>
-                <Label>Default role for new SSO users</Label>
-                <Select
-                  value={form.defaultRole}
-                  onValueChange={(value) => set('defaultRole', value)}
+              <div className='space-y-3 sm:col-span-2'>
+                <p
+                  className='text-xs text-muted-foreground'
+                  data-testid='uat-sso-invitation-note'
                 >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ROLES.map(([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className='space-y-3'>
-                <label className='flex items-center gap-2 text-sm'>
-                  <Switch
-                    checked={form.autoProvision}
-                    onCheckedChange={(value) => set('autoProvision', value)}
-                  />{' '}
-                  Create accounts on first sign-in
-                </label>
+                  Single sign-on never creates accounts. People join by
+                  invitation from People; once they have accepted, they can
+                  sign in with SSO.
+                </p>
                 <label className='flex items-center gap-2 text-sm'>
                   <Switch
                     checked={form.required}

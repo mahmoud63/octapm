@@ -168,4 +168,54 @@ describe('auth refresh sessions', () => {
       data: { revokedAt: expect.any(Date) },
     });
   });
+
+  // Owner decision D-ID-1 Q6: a refresh token minted before the identity's
+  // last credential event (a reset, the identity closed) is dead with its
+  // whole family, and mints nothing.
+  it('refuses a refresh token from before the last credential event with SESSION_REVOKED and revokes its family', async () => {
+    const staleToken = createRefreshToken({ ...activeUser, credentialEpoch: 0 }, 'session-1');
+    mockTx.refreshSession.findUnique.mockResolvedValue({
+      id: 'session-1',
+      userId: activeUser.id,
+      orgId: activeUser.orgId,
+      tokenHash: hashRefreshToken(staleToken),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      revokedAt: null,
+      replacedBySessionId: null,
+      user: { ...activeUser, credentialEpoch: 1 },
+    });
+    mockPrisma.refreshSession.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(authService.refresh({ refreshToken: staleToken })).rejects.toMatchObject({
+      status: 401,
+      code: 'SESSION_REVOKED',
+    });
+    expect(mockTx.refreshSession.create).not.toHaveBeenCalled();
+    expect(mockPrisma.refreshSession.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['session-1'] }, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
+  it('carries the current epoch into the rotated pair', async () => {
+    const currentToken = createRefreshToken({ ...activeUser, credentialEpoch: 2 }, 'session-1');
+    mockTx.refreshSession.findUnique.mockResolvedValue({
+      id: 'session-1',
+      userId: activeUser.id,
+      orgId: activeUser.orgId,
+      tokenHash: hashRefreshToken(currentToken),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      revokedAt: null,
+      replacedBySessionId: null,
+      user: { ...activeUser, credentialEpoch: 2 },
+    });
+    mockTx.refreshSession.create.mockImplementation(async ({ data }) => data);
+    mockTx.refreshSession.update.mockResolvedValue({});
+    mockTx.refreshSession.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await authService.refresh({ refreshToken: currentToken });
+    const jwt = require('jsonwebtoken');
+    expect(jwt.decode(result.tokens.accessToken).cep).toBe(2);
+    expect(jwt.decode(result.refreshToken).cep).toBe(2);
+  });
 });

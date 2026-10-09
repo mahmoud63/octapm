@@ -8,6 +8,7 @@ const { qrToSvg } = require("../utils/qr");
 const authAbuseService = require("./auth-abuse.service");
 const membershipService = require("./membership.service");
 const { keyring } = require("../utils/keyring");
+const { epochClaim, tokenEpochCurrent } = require("../utils/tokens");
 
 /**
  * Two-factor authentication (OCTA-SEC-AUTH-040): TOTP with an authenticator
@@ -83,24 +84,49 @@ const loadUser = async (userId) => {
 
 const status = async ({ userId }) => {
   const user = await loadUser(userId);
-  return { enabled: Boolean(user.mfaEnabled), enrolledAt: user.mfaEnrolledAt ? user.mfaEnrolledAt.toISOString() : null, backupCodesRemaining: user.mfaEnabled ? remainingBackupCodes(user) : 0, pending: Boolean(user.mfaPendingSecretEnc) && !user.mfaEnabled, required: Boolean(user.org?.mfaRequired), enrollmentRequired: Boolean(user.org?.mfaRequired) && !user.mfaEnabled, ssoLinked: Boolean(user.ssoSubject) };
+  // SSO links live on the memberships, one per workspace (D-ID-1 Q2).
+  const ssoLinks = membershipService.hasMembershipModel(prisma)
+    ? await prisma.organizationMembership.count({ where: { userId, ssoSubject: { not: null } } })
+    : 0;
+  return { enabled: Boolean(user.mfaEnabled), enrolledAt: user.mfaEnrolledAt ? user.mfaEnrolledAt.toISOString() : null, backupCodesRemaining: user.mfaEnabled ? remainingBackupCodes(user) : 0, pending: Boolean(user.mfaPendingSecretEnc) && !user.mfaEnabled, required: Boolean(user.org?.mfaRequired), enrollmentRequired: Boolean(user.org?.mfaRequired) && !user.mfaEnabled, ssoLinked: ssoLinks > 0 };
+};
+
+/**
+ * Writes a change to the person's own factor only onto the state it was
+ * judged against (D-ID-1 N2): at the credential epoch the request was
+ * authenticated at, and with the factor fields as they were read. A request
+ * that proved itself before an admin reset or a password reset — and waited
+ * behind it — would otherwise restore a cleared seed or enrol one on an
+ * identity whose sessions were just ended.
+ */
+const writeOwnFactor = async ({ userId, epoch, expect = {}, data }) => {
+  const { count } = await prisma.user.updateMany({
+    where: { id: userId, status: "active", ...(Number.isInteger(epoch) ? { credentialEpoch: epoch } : {}), ...expect },
+    data,
+  });
+  if (count === 1) return;
+  const now = await prisma.user.findUnique({ where: { id: userId }, select: { credentialEpoch: true, status: true } });
+  if (!now || now.status !== "active" || (Number.isInteger(epoch) && now.credentialEpoch !== epoch)) {
+    throw new HttpError(401, "SESSION_REVOKED", "This session has ended; sign in again");
+  }
+  throw new HttpError(409, "MFA_STATE_CHANGED", "Your two-factor settings changed meanwhile; start again");
 };
 
 /** Creates a fresh secret and returns what the authenticator app needs (the secret is not stored in the clear). */
-const beginEnrollment = async ({ userId }) => {
+const beginEnrollment = async ({ userId, epoch = null }) => {
   const user = await loadUser(userId);
   // An enabled factor is not replaced by enrolling another: turning it off
   // takes the password and a current code, and only then can a new device
   // be enrolled (Phase 21D, CX21-429).
   if (user.mfaEnabled) throw new HttpError(409, "MFA_ALREADY_ENABLED", "Two-factor is already on; turn it off with your password and a current code before enrolling a new device");
   const secret = generateSecret();
-  await prisma.user.update({ where: { id: userId }, data: { mfaPendingSecretEnc: seal(secret) } });
+  await writeOwnFactor({ userId, epoch, expect: { mfaEnabled: false }, data: { mfaPendingSecretEnc: seal(secret) } });
   const url = otpauthUrl({ issuer: ISSUER(), account: user.email, secret });
   return { secret, otpauthUrl: url, qrSvg: qrToSvg(url, { moduleSize: 5, quietZone: 3 }), issuer: ISSUER(), account: user.email };
 };
 
 /** Confirms the enrolment with a code from the app; returns the backup codes once. */
-const enable = async ({ userId, code, context = {} }) => {
+const enable = async ({ userId, code, epoch = null, context = {} }) => {
   const user = await loadUser(userId);
   const pending = unseal(user.mfaPendingSecretEnc);
   if (!pending) throw new HttpError(409, "MFA_NOT_PENDING", "Start the setup first to get a QR code");
@@ -108,7 +134,14 @@ const enable = async ({ userId, code, context = {} }) => {
   if (step === null) throw new HttpError(400, "MFA_CODE_INVALID", "That code is not valid — check the time on your device and try the next code");
   const codes = newBackupCodes();
   // The enrolment code counts as used, so it cannot then sign in as well.
-  await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: true, mfaSecretEnc: pending.stale ? seal(pending.value) : user.mfaPendingSecretEnc, mfaPendingSecretEnc: null, mfaEnrolledAt: new Date(), mfaLastTotpStep: step, mfaBackupCodesJson: codes.map((value) => ({ hash: hashCode(value), usedAt: null })) } });
+  // Enabled only from the pending seed that was read: one cleared meanwhile
+  // (an admin reset) is not brought back.
+  await writeOwnFactor({
+    userId,
+    epoch,
+    expect: { mfaEnabled: false, mfaPendingSecretEnc: user.mfaPendingSecretEnc },
+    data: { mfaEnabled: true, mfaSecretEnc: pending.stale ? seal(pending.value) : user.mfaPendingSecretEnc, mfaPendingSecretEnc: null, mfaEnrolledAt: new Date(), mfaLastTotpStep: step, mfaBackupCodesJson: codes.map((value) => ({ hash: hashCode(value), usedAt: null })) },
+  });
   await audit({ orgId: user.orgId, userId, action: "mfa.enabled", context });
   return { enabled: true, backupCodes: codes };
 };
@@ -179,25 +212,40 @@ const resealIfStale = async (user, opened) => {
   await prisma.user.updateMany({ where: { id: user.id, mfaSecretEnc: user.mfaSecretEnc }, data: { mfaSecretEnc: seal(opened.value) } });
 };
 
-const disable = async ({ userId, password, code, context = {} }) => {
+/**
+ * A current code from the person's authenticator app — never a backup code —
+ * spent like a sign-in code, so it works once. For operator commands that must
+ * be confirmed by the operator's own second factor (D-ID-1 Q13).
+ */
+const verifyAuthenticatorCode = async ({ user, code }) => {
+  if (!user?.mfaEnabled) return false;
+  const opened = unseal(user.mfaSecretEnc);
+  const step = opened ? verifyTotp(opened.value, String(code || "").trim()) : null;
+  if (step === null) return false;
+  return spendTotpStep(user.id, step);
+};
+
+const disable = async ({ userId, password, code, epoch = null, context = {} }) => {
   const user = await loadUser(userId);
   if (!user.mfaEnabled) throw new HttpError(409, "MFA_NOT_ENABLED", "Two-factor authentication is not enabled");
   if (!password || !(await bcrypt.compare(String(password), user.passwordHash))) throw new HttpError(401, "INVALID_CREDENTIALS", "Password is incorrect");
   if (!(await verifyCode({ user, code }))) throw new HttpError(400, "MFA_CODE_INVALID", "That code is not valid");
   if (user.org?.mfaRequired && !user.isCompanyAdmin) throw new HttpError(403, "MFA_REQUIRED_BY_ORG", "Your organisation requires two-factor authentication; ask a company admin to reset it instead");
-  await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: false, mfaSecretEnc: null, mfaPendingSecretEnc: null, mfaEnrolledAt: null, mfaLastTotpStep: null, mfaBackupCodesJson: [] } });
+  // Only at the epoch the password and code were checked under: a reset that
+  // landed meanwhile changed the password they proved (D-ID-1 N2).
+  await writeOwnFactor({ userId, epoch, expect: { mfaEnabled: true, passwordHash: user.passwordHash }, data: { mfaEnabled: false, mfaSecretEnc: null, mfaPendingSecretEnc: null, mfaEnrolledAt: null, mfaLastTotpStep: null, mfaBackupCodesJson: [] } });
   await audit({ orgId: user.orgId, userId, action: "mfa.disabled", context });
   return { enabled: false };
 };
 
-const regenerateBackupCodes = async ({ userId, code, context = {} }) => {
+const regenerateBackupCodes = async ({ userId, code, epoch = null, context = {} }) => {
   const user = await loadUser(userId);
   if (!user.mfaEnabled) throw new HttpError(409, "MFA_NOT_ENABLED", "Two-factor authentication is not enabled");
   const secret = open(user.mfaSecretEnc);
   const step = secret ? verifyTotp(secret, code) : null;
   if (step === null || !(await spendTotpStep(userId, step))) throw new HttpError(400, "MFA_CODE_INVALID", "Enter a current code from your authenticator app");
   const codes = newBackupCodes();
-  await prisma.user.update({ where: { id: userId }, data: { mfaBackupCodesJson: codes.map((value) => ({ hash: hashCode(value), usedAt: null })) } });
+  await writeOwnFactor({ userId, epoch, expect: { mfaEnabled: true, mfaSecretEnc: user.mfaSecretEnc }, data: { mfaBackupCodesJson: codes.map((value) => ({ hash: hashCode(value), usedAt: null })) } });
   await audit({ orgId: user.orgId, userId, action: "mfa.backup_codes_regenerated", context });
   return { backupCodes: codes };
 };
@@ -208,12 +256,38 @@ const adminReset = async ({ orgId, userId, actor, context = {} }) => {
   if (!user) throw new HttpError(404, "USER_NOT_FOUND", "User not found");
   // Clearing the second factor from a workspace this person only visits would
   // weaken their sign-in to the companies they belong to (certification
-  // finding L39): refuse when the identity has other active memberships.
-  if (user.orgId !== orgId || (await membershipService.hasOtherActiveMembership({ orgId, userId }))) {
-    throw new HttpError(403, "IDENTITY_SHARED", "This person's second factor is managed from their own workspace");
-  }
-  await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: false, mfaSecretEnc: null, mfaPendingSecretEnc: null, mfaEnrolledAt: null, mfaLastTotpStep: null, mfaBackupCodesJson: [] } });
+  // finding L39): refused while the identity is part of any other workspace —
+  // active or suspended there (D-ID-1 ID-GUARD). The check is the write's own
+  // condition, so an acceptance elsewhere cannot land between them. Clearing
+  // a factor is a credential event: the person's sessions end, and they are
+  // told by e-mail.
+  const shared = () => new HttpError(403, "IDENTITY_SHARED", "This person's second factor is managed from their own workspace");
+  if (user.orgId !== orgId) throw shared();
+  const cleared = await prisma.$transaction(async (tx) => {
+    // Taken before the conditional write, so a membership another workspace is
+    // accepting for this identity right now is either committed and seen, or
+    // waits for this (D-ID-1 ID-GUARD).
+    await membershipService.lockIdentity(tx, userId);
+    const { count } = await tx.user.updateMany({
+      where: { id: userId, orgId, ...membershipService.noOtherPresentMembershipWhere(orgId) },
+      data: { mfaEnabled: false, mfaSecretEnc: null, mfaPendingSecretEnc: null, mfaEnrolledAt: null, mfaLastTotpStep: null, mfaBackupCodesJson: [], credentialEpoch: { increment: 1 } },
+    });
+    if (count === 1) {
+      await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      if (tx.ssoTicket?.updateMany) await tx.ssoTicket.updateMany({ where: { userId, usedAt: null }, data: { usedAt: new Date() } });
+    }
+    return count === 1;
+  });
+  if (!cleared) throw shared();
   await audit({ orgId, userId, actorId: actor?.id || null, action: "mfa.reset_by_admin", context });
+  // The notice goes after the answer, so the route drops the person's live
+  // sockets at once rather than after the mail provider (D-ID-1 R3).
+  setImmediate(() => {
+    const { sendEmail, templates } = require("./email.service");
+    sendEmail({ to: user.email, ...templates.mfaResetNotice({ name: user.name }), metadata: { orgId, userId, type: "mfa_reset_notice" } })
+      .catch((error) => audit({ orgId, userId, actorId: actor?.id || null, action: "mfa.reset_notice_failed", metadata: { code: error?.code || null }, context }))
+      .catch(() => null);
+  });
   return { reset: true };
 };
 
@@ -225,7 +299,7 @@ const secretFor = (name) => {
   return value;
 };
 
-const createChallenge = (user) => jwt.sign({ sub: user.id, orgId: user.orgId, type: "mfa" }, secretFor("JWT_SECRET"), { expiresIn: CHALLENGE_EXPIRY });
+const createChallenge = (user) => jwt.sign({ sub: user.id, orgId: user.orgId, type: "mfa", ...epochClaim(user) }, secretFor("JWT_SECRET"), { expiresIn: CHALLENGE_EXPIRY });
 
 const verifyChallenge = (token) => {
   let payload;
@@ -242,7 +316,9 @@ const verifyChallenge = (token) => {
 const resolveChallenge = async ({ mfaToken, code, context = {} }) => {
   const payload = verifyChallenge(mfaToken);
   const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+  // A challenge from before a credential event (a reset meanwhile) is void (D-ID-1 Q6).
   if (!user || user.status !== "active") throw new HttpError(401, "MFA_CHALLENGE_INVALID", "Start the sign-in again");
+  if (!tokenEpochCurrent(payload, user)) throw new HttpError(401, "SESSION_REVOKED", "This session has ended; sign in again");
   await authAbuseService.assertLoginAllowed({ email: user.email, ipAddress: context.ipAddress });
   if (!user.mfaEnabled || !(await verifyCode({ user, code }))) {
     await authAbuseService.recordLoginFailure({ email: user.email, ipAddress: context.ipAddress });
@@ -253,4 +329,4 @@ const resolveChallenge = async ({ mfaToken, code, context = {} }) => {
   return user;
 };
 
-module.exports = { BACKUP_CODE_COUNT, seal, open, hashCode, status, beginEnrollment, enable, disable, regenerateBackupCodes, adminReset, verifyCode, createChallenge, verifyChallenge, resolveChallenge };
+module.exports = { BACKUP_CODE_COUNT, seal, open, hashCode, status, beginEnrollment, enable, disable, regenerateBackupCodes, adminReset, verifyCode, verifyAuthenticatorCode, createChallenge, verifyChallenge, resolveChallenge };

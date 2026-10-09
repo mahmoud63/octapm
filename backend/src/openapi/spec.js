@@ -218,6 +218,7 @@ const operation = ({
   status = 200,
   security = true,
   permissions = authenticatedOnly,
+  deprecated = false,
 }) => {
   const spec = {
     tags: [tag],
@@ -236,6 +237,7 @@ const operation = ({
   };
 
   if (description) spec.description = description;
+  if (deprecated) spec.deprecated = true;
   if (requestBody) spec.requestBody = requestBody;
   if (security) {
     spec.security = [{ bearerAuth: [] }];
@@ -1157,6 +1159,19 @@ const components = {
         "INVITATION_SIGN_IN_REQUIRED",
         "INVITATION_OFFER_CHANGED",
         "MEMBERSHIP_PENDING_ACCEPTANCE",
+        // Invitation-only user add and identity security (D-ID-1, CERT-3)
+        "USER_PASSWORD_NOT_ACCEPTED",
+        "USER_EMAIL_IDENTITY_OWNED",
+        "INVITATION_NOT_FOUND",
+        "INVITATION_NOT_PENDING",
+        "INVITATION_EMAIL_FAILED",
+        "MEMBERSHIP_WRITES_SUSPENDED",
+        "SESSION_REVOKED",
+        "MFA_STATE_CHANGED",
+        "MEMBERSHIP_CHANGED",
+        "SSO_SESSION_BOUND",
+        "SSO_USER_NOT_FOUND",
+        "SSO_AUTO_PROVISION_RETIRED",
         "WORKFLOW_ACTIVITY_NOT_FOUND",
         "WORKFLOW_PROJECT_PARTY_NOT_FOUND",
         "WBS_NODE_NOT_FOUND",
@@ -7749,7 +7764,7 @@ add(
     tag: "Auth",
     summary: "Accept an invitation and start a session.",
     description:
-      "Creates a user and their membership, or gives an existing identity a membership in the inviting workspace — an identity that already exists in another workspace is welcome, keeps its name, password, MFA and SSO links, and gets a second workspace (a party invitation makes a guest membership). An existing identity accepts only with a session of its own: an Authorization bearer for that identity (an access or identity token from its own sign-in); the link alone, a password, or another identity's bearer answer 401 INVITATION_SIGN_IN_REQUIRED, and a session issued by another company's single sign-on answers 403 SSO_SESSION_BOUND. The membership written is exactly the offer — the invited role and kind, never administration or ownership, whatever the person held there before. The link is claimed atomically: a link revoked, expired or accepted meanwhile writes nothing (400 INVITATION_TOKEN_INVALID). A party invitation whose party has since moved to another company or closed answers 409 INVITATION_OFFER_CHANGED. An identity its own workspace deactivated can be reopened only by a re-invitation from that workspace (403 USER_INACTIVE from any other); a reopened identity sets its password and then signs in. The session is issued as any workspace session is (the workspace's single-sign-on policy and second-factor enrolment apply); when the workspace has the person sign in another way, the answer is { accepted: true, signInRequired: true, orgId, reason } with no tokens.",
+      "Creates a user and their membership, or gives an existing identity a membership in the inviting workspace — an identity that already exists in another workspace is welcome, keeps its name, password, MFA and SSO links, and gets a second workspace (a party invitation makes a guest membership). An existing identity accepts only with a session of its own: an Authorization bearer for that identity (an access or identity token from its own sign-in); the link alone, a password, or another identity's bearer answer 401 INVITATION_SIGN_IN_REQUIRED, and a bearer minted before the identity's last password reset answers 401 SESSION_REVOKED. A session issued by another company's single sign-on proves the identity (owner decision D-ID-1 Q12) but never the inviting workspace's own access policy: the invitation is accepted and the answer is signInRequired. The membership written is exactly the offer — the invited role and kind, never administration or ownership, whatever the person held there before. The link is claimed atomically: a link revoked, expired or accepted meanwhile writes nothing (400 INVITATION_TOKEN_INVALID). A person suspended in the inviting workspace — including a closed account homed there that was suspended rather than left — is not brought back by any link (400 INVITATION_TOKEN_INVALID; the workspace reactivates them), and suspending someone revokes their pending links (owner decision D-ID-1 Q3). While the emergency membership switch is off, acceptance answers 503 MEMBERSHIP_WRITES_SUSPENDED before the link is used. Two workspaces' links for the same new address accepted at once: the second answers 401 INVITATION_SIGN_IN_REQUIRED and its link stays usable by signing in. A party invitation whose party has since moved to another company or closed answers 409 INVITATION_OFFER_CHANGED. An identity its own workspace closed when the person left it can be reopened only by a re-invitation from that workspace (403 USER_INACTIVE from any other); a reopened identity sets its password — which ends every earlier session — and then signs in. The session is issued as any workspace session is (the workspace's single-sign-on policy and second-factor enrolment apply); when the workspace has the person sign in another way, the answer is { accepted: true, signInRequired: true, orgId, reason } with no tokens.",
     operationId: "acceptInvitation",
     security: false,
     requestBody: jsonBody(
@@ -11831,11 +11846,13 @@ const addGenericRoute = ({
   responseDescription,
   responseSchema,
   status = 200,
+  deprecated = false,
 }) => {
   add(
     path,
     method,
     operation({
+      deprecated,
       tag,
       summary,
       description,
@@ -13108,9 +13125,9 @@ add(
   "post",
   operation({
     tag: "Users",
-    summary: "Invite a user to the organization or a project.",
+    summary: "Invite a person to the organization or a project (the one way a person is added).",
     description:
-      "Stores a hashed invitation token, sends an email invite, and audits the invitation. The invite can optionally assign a project role when accepted. The answer is the same for an email with or without an account and carries nothing of any identity; nothing is written to a membership until the invitee accepts with its own session. One invitation is pending per workspace and email: a new one revokes the previous link. An email that already belongs to an identity in another workspace may be invited (acceptance gives it a second membership); one that is already an active member here is refused with 409 ALREADY_MEMBER unless the invitation is for a project or party — and then it assigns the project without changing the member's workspace role.",
+      "Owner decision D-ID-1: adding a person is always an invitation. Stores a hashed invitation token, sends the e-mail and audits it; no identity, password or membership is created — the person creates or signs in to their own identity and accepts. The answer (201, the invitation's own fields and invited: true) is the same for an e-mail with or without an account. A request carrying a password or confirmPassword field, whatever its value, is refused with 400 USER_PASSWORD_NOT_ACCEPTED before anything is looked up; name and phone are ignored (the person sets them when accepting). One invitation is pending per workspace and e-mail: a new one revokes the previous link. Someone already part of this workspace gets 409 ALREADY_MEMBER: an active member for a workspace invitation (a project or party invitation still assigns them), and a suspended member for every invitation — they come back only through PATCH /users/{id}/activate. Someone who left may be invited again. If the e-mail cannot be sent the invitation stays pending and the answer is 502 INVITATION_EMAIL_FAILED for every e-mail. 503 MEMBERSHIP_WRITES_SUSPENDED while the emergency membership switch is off.",
     operationId: "inviteUser",
     permissions: modulePermission("user_management", "submit", "user.invite"),
     requestBody: jsonBody(ref("UserInvitationRequest"), "Invitation payload."),
@@ -13123,20 +13140,47 @@ add(
   {
     method: "post",
     path: "/users",
-    summary: "Create an organization user, or invite an existing identity to this workspace.",
+    summary: "Deprecated alias of POST /users/invitations.",
     description:
-      "A new email creates an identity (password required) and its membership (201). An email that already belongs to an identity not part of this workspace — another company's person, a former member, a closed account — is never attached directly: it is sent an invitation, which it accepts with its own session, and the answer is 202 with that invitation ({ invited: true, ...UserInvitationResponse }) — the same for every such email and carrying nothing of the identity (no name, phone, last sign-in, standing, home workspace or other memberships). The password is not used. 409 EMAIL_EXISTS when the identity is already part of this workspace (active or suspended here).",
+      "Kept for one release for existing clients (owner decision D-ID-1, ID-a). It runs exactly the POST /users/invitations chain — the same gate (user_management submit + user.invite), validation (email and role required), refusal of password fields (400 USER_PASSWORD_NOT_ACCEPTED) and answer (201, the invitation and invited: true). It never creates an account: data.id is the invitation's id, not a user's.",
     operationId: "createUser",
-    permissions: modulePermission("user_management", "create"),
-    requestBody: genericPayloadBody("User creation payload.", true),
+    deprecated: true,
+    permissions: modulePermission("user_management", "submit", "user.invite"),
+    requestBody: jsonBody(ref("UserInvitationRequest"), "Invitation payload."),
     responses: {
-      201: jsonResponse("A new account was created, with its membership here."),
-      202: jsonResponse(
-        "The email already names an identity not part of this workspace: an invitation was sent (it joins when it accepts with its own session).",
-        freeObject("The invitation's own fields (as UserInvitationResponse: id, email, role, status pending, projectId, companyId, projectPartyId, invitedById, expiresAt, createdAt) and invited: true — nothing of the identity."),
-      ),
+      201: jsonResponse("The invitation (as POST /users/invitations).", freeObject("The invitation's own fields and invited: true.")),
     },
     parameters: [],
+  },
+  {
+    method: "get",
+    path: "/users/invitations",
+    summary: "List this workspace's pending invitations.",
+    description:
+      "Invitations not yet accepted, revoked or expired, newest first, for the people who manage invitations (owner decision D-ID-1 Q5). Each carries its offer, its note and lastDeliveryFailedAt; nothing about whether the address has an account.",
+    operationId: "listUserInvitations",
+    permissions: modulePermission("user_management", "submit", "user.invite"),
+    parameters: [...cursorParams],
+  },
+  {
+    method: "delete",
+    path: "/users/invitations/{invitationId}",
+    summary: "Revoke a pending invitation.",
+    description:
+      "The link stops working, as an expired one does. 409 INVITATION_NOT_PENDING when it was already accepted or revoked (a revoke and an acceptance of the same link cannot both succeed); 404 INVITATION_NOT_FOUND for another workspace's invitation. Audited.",
+    operationId: "revokeUserInvitation",
+    permissions: modulePermission("user_management", "submit", "user.invite"),
+    parameters: [pathParam("invitationId", "Invitation UUID in this workspace.")],
+  },
+  {
+    method: "post",
+    path: "/users/invitations/{invitationId}/resend",
+    summary: "Send an invitation again with its stored offer.",
+    description:
+      "A new invitation with the same e-mail, role, project, company, party and note (never a re-typed offer); the earlier link stops working. 409 INVITATION_NOT_PENDING for an accepted invitation. Answers as POST /users/invitations.",
+    operationId: "resendUserInvitation",
+    permissions: modulePermission("user_management", "submit", "user.invite"),
+    parameters: [pathParam("invitationId", "Invitation UUID in this workspace.")],
   },
   {
     method: "get",
@@ -13150,6 +13194,8 @@ add(
     method: "patch",
     path: "/users/{id}",
     summary: "Update an organization user.",
+    description:
+      "Name, phone, role and standing. A body with an email field, whatever its value, is refused with 400 USER_EMAIL_IDENTITY_OWNED: a person's sign-in e-mail is theirs (owner decision D-ID-1).",
     operationId: "updateUser",
     permissions: modulePermission(
       "user_management",
@@ -13161,16 +13207,18 @@ add(
   },
   {
     method: "post",
-    path: "/users/{id}/reset-password",
-    summary: "Reset a user password.",
-    operationId: "resetUserPassword",
+    path: "/users/{id}/password-reset-email",
+    summary: "Ask OctaPM to send a person the self-service password-reset e-mail.",
+    description:
+      "Owner decision D-ID-1 Q4: replaces the removed admin password reset. For someone who is part of this workspace (active or suspended here); 404 otherwise, the same for another company's person and an unknown id. The e-mail goes to the person's own address; the administrator never sees the token or link and never sets the password. Always 202 { sent: true } — a closed account is sent nothing and answered the same. Rate-limited per person and per administrator (429), and audited.",
+    operationId: "sendUserPasswordResetEmail",
     permissions: modulePermission(
       "user_management",
       "update",
-      "user.reset_password",
+      "user.send_password_reset",
     ),
     parameters: [idParam],
-    requestBody: genericPayloadBody("Password reset payload.", true),
+    status: 202,
   },
   {
     method: "patch",
@@ -16714,7 +16762,7 @@ const userAuth = (path, method, { summary, description = undefined, operationId,
   add(path, method, operation({ tag: "Auth", summary, description, operationId, requestBody, responseSchema, status, permissions: { ...authenticatedOnly, note: "Any signed-in user, for their own account." } }));
 publicAuth("/auth/mfa/verify", "post", { summary: "Second login step: the challenge token from POST /auth/login plus a 6-digit authenticator code or a backup code. Issues the normal session (refresh cookie + access token); backup codes are single-use; failures count towards the login lockout.", operationId: "verifyMfaLogin", requestBody: jsonBody(objectSchema({ mfaToken: { type: "string" }, code: { type: "string" } }, ["mfaToken", "code"]), "Challenge and code."), responses: { 200: authSessionResponse("Authenticated.") } });
 userAuth("/auth/mfa", "get", { summary: "The caller's two-factor status, including whether the organisation requires it.", operationId: "getMfaStatus", responseSchema: mfaStatusSchema });
-userAuth("/auth/mfa/setup", "post", { summary: "Start (or restart) enrolment: a new secret, the otpauth URL and a QR code as SVG. Nothing is enforced until /auth/mfa/enable confirms a code.", operationId: "startMfaSetup", responseSchema: objectSchema({ secret: { type: "string" }, otpauthUrl: { type: "string" }, qrSvg: { type: "string" }, issuer: { type: "string" }, account: { type: "string" } }) });
+userAuth("/auth/mfa/setup", "post", { summary: "Start (or restart) enrolment: a new secret, the otpauth URL and a QR code as SVG. Nothing is enforced until /auth/mfa/enable confirms a code. Setup, enable, disable and backup codes answer 403 SSO_SESSION_BOUND with a session a company's single sign-on issued: the identity's own security is changed only from a session the person opened with their own credentials (owner decision D-ID-1 Q2).", operationId: "startMfaSetup", responseSchema: objectSchema({ secret: { type: "string" }, otpauthUrl: { type: "string" }, qrSvg: { type: "string" }, issuer: { type: "string" }, account: { type: "string" } }) });
 userAuth("/auth/mfa/enable", "post", { summary: "Confirm enrolment with a code from the app; returns the ten backup codes — shown once.", operationId: "enableMfa", requestBody: jsonBody(objectSchema({ code: { type: "string" } }, ["code"]), "Code."), responseSchema: objectSchema({ enabled: { type: "boolean" }, backupCodes: arrayOf({ type: "string" }) }) });
 userAuth("/auth/mfa/disable", "post", { summary: "Turn two-factor off with the password and a current code (refused when the organisation requires it, unless the caller is a company admin).", operationId: "disableMfa", requestBody: jsonBody(objectSchema({ password: { type: "string" }, code: { type: "string" } }, ["password", "code"]), "Password and code."), responseSchema: objectSchema({ enabled: { type: "boolean" } }) });
 userAuth("/auth/mfa/backup-codes", "post", { summary: "Replace the backup codes (needs a current authenticator code).", operationId: "regenerateMfaBackupCodes", requestBody: jsonBody(objectSchema({ code: { type: "string" } }, ["code"]), "Code."), responseSchema: objectSchema({ backupCodes: arrayOf({ type: "string" }) }) });
@@ -16725,7 +16773,7 @@ publicAuth("/auth/sso/complete", "post", { summary: "Exchange the one-time ticke
 const ssoSettingsSchema = objectSchema({ enabled: { type: "boolean" }, provider: { type: "string", enum: ["oidc"] }, issuer: { type: "string", nullable: true }, clientId: { type: "string", nullable: true }, clientSecretSet: { type: "boolean" }, domains: arrayOf({ type: "string" }), autoProvision: { type: "boolean" }, defaultRole: { type: "string" }, required: { type: "boolean" }, mfaRequired: { type: "boolean" }, redirectUri: { type: "string", description: "Register this with the identity provider." }, updatedAt: nullableDateString });
 [
   { method: "get", path: "/company/security", summary: "SSO settings (secret masked), the MFA policy and every user's second-factor / SSO status.", operationId: "getCompanySecurity", parameters: [], permissions: companyAdminPermission, responseSchema: objectSchema({ sso: ssoSettingsSchema, mfaRequired: { type: "boolean" }, users: arrayOf(objectSchema({ id: uuid, name: { type: "string" }, email: { type: "string" }, role: { type: "string" }, status: { type: "string" }, isCompanyAdmin: { type: "boolean" }, mfaEnabled: { type: "boolean" }, mfaEnrolledAt: nullableDateString, ssoLinked: { type: "boolean" }, ssoLinkedAt: nullableDateString, lastLogin: nullableDateString })), summary: objectSchema({ users: { type: "integer" }, mfaEnabled: { type: "integer" }, ssoLinked: { type: "integer" } }) }) },
-  { method: "put", path: "/company/security/sso", summary: "Update the OpenID Connect provider (issuer, client id, client secret — stored encrypted, email domains, auto-provisioning and default role, SSO-only policy) and the organisation-wide MFA requirement. Enabling needs issuer, client id and secret (400 SSO_INCOMPLETE); SSO-only needs at least one domain.", operationId: "updateCompanySso", parameters: [], permissions: companyAdminPermission, requestBody: jsonBody(objectSchema({ enabled: { type: "boolean" }, issuer: { type: "string", nullable: true }, clientId: { type: "string", nullable: true }, clientSecret: { type: "string", nullable: true }, domains: arrayOf({ type: "string" }), autoProvision: { type: "boolean" }, defaultRole: { type: "string" }, required: { type: "boolean" }, mfaRequired: { type: "boolean" } }), "Settings.", false), responseSchema: ssoSettingsSchema },
+  { method: "put", path: "/company/security/sso", summary: "Update the OpenID Connect provider (issuer, client id, client secret — stored encrypted, email domains, default role, SSO-only policy) and the organisation-wide MFA requirement. Auto-provisioning is retired (owner decision D-ID-1 Q1): SSO never creates an account or a membership, autoProvision is always false, and autoProvision: true answers 400 SSO_AUTO_PROVISION_RETIRED. SSO signs in only people already part of the workspace; anyone else gets the same SSO_USER_NOT_FOUND. The SSO link is kept per workspace. Enabling needs issuer, client id and secret (400 SSO_INCOMPLETE); SSO-only needs at least one domain.", operationId: "updateCompanySso", parameters: [], permissions: companyAdminPermission, requestBody: jsonBody(objectSchema({ enabled: { type: "boolean" }, issuer: { type: "string", nullable: true }, clientId: { type: "string", nullable: true }, clientSecret: { type: "string", nullable: true }, domains: arrayOf({ type: "string" }), autoProvision: { type: "boolean" }, defaultRole: { type: "string" }, required: { type: "boolean" }, mfaRequired: { type: "boolean" } }), "Settings.", false), responseSchema: ssoSettingsSchema },
   { method: "post", path: "/company/security/sso/test", summary: "Read the provider's discovery document and report its endpoints and supported PKCE methods.", operationId: "testCompanySso", parameters: [], permissions: companyAdminPermission, responseSchema: objectSchema({ ok: { type: "boolean" }, issuer: { type: "string" }, authorizationEndpoint: { type: "string" }, tokenEndpoint: { type: "string" }, jwksUri: { type: "string" }, scopes: arrayOf({ type: "string" }), codeChallengeMethods: arrayOf({ type: "string" }), redirectUri: { type: "string" } }) },
   { method: "post", path: "/company/security/users/{userId}/mfa/reset", summary: "Clear a colleague's second factor so they can enrol again (audited).", operationId: "resetUserMfa", parameters: [pathParam("userId", "User UUID.")], permissions: companyAdminPermission, responseSchema: objectSchema({ reset: { type: "boolean" } }) },
 ].forEach((route) => addGenericRoute({ tag: "Company Workspace", ...route }));

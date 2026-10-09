@@ -1,7 +1,7 @@
-import { useState } from 'react'
 import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { isEndedSession } from '@/services/api/client'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { Button } from '@/components/ui/button'
@@ -22,143 +22,86 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { PasswordInput } from '@/components/password-input'
 import { SelectDropdown } from '@/components/select-dropdown'
-import {
-  ConvertRequiredNotice,
-  isConvertRequiredError,
-} from '@/features/company/components/convert-required-notice'
 import { roles } from '../data/data'
 import { type User } from '../data/schema'
 import {
-  useCreateUserMutation,
+  type UserUpdatePayload,
   useUpdateUserMutation,
 } from '../hooks/use-users'
 
-const formSchema = z
-  .object({
-    name: z.string().min(1, 'Full name is required.'),
-    email: z
-      .email({
-        error: (iss) =>
-          iss.input === ''
-            ? 'Email is required.'
-            : 'Please enter a valid email',
-      })
-      .transform((value) => value.toLowerCase()),
-    phone: z.string().trim().optional(),
-    role: z.string().min(1, 'Role is required.'),
-    isCompanyAdmin: z.boolean(),
-    password: z.string(),
-    confirmPassword: z.string(),
-    isEdit: z.boolean(),
-  })
-  // Password rules apply only when creating — edit mode never sets a password.
-  .refine((data) => data.isEdit || data.password.length >= 8, {
-    message: 'Password must be at least 8 characters long.',
-    path: ['password'],
-  })
-  .refine((data) => data.isEdit || /[a-z]/.test(data.password), {
-    message: 'Password must contain at least one lowercase letter.',
-    path: ['password'],
-  })
-  .refine((data) => data.isEdit || /[0-9]/.test(data.password), {
-    message: 'Password must contain at least one number.',
-    path: ['password'],
-  })
-  .refine((data) => data.isEdit || data.password === data.confirmPassword, {
-    message: "Passwords don't match.",
-    path: ['confirmPassword'],
-  })
+const formSchema = z.object({
+  name: z.string().trim().min(1, 'Full name is required.'),
+  phone: z.string().trim().optional(),
+  role: z.string().min(1, 'Role is required.'),
+  isCompanyAdmin: z.boolean(),
+})
 
 type UserForm = z.infer<typeof formSchema>
 
 type UserActionDialogProps = {
-  currentRow?: User
+  currentRow: User
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
+/**
+ * Only the fields that changed are sent. A person's sign-in e-mail is theirs
+ * (owner decision D-ID-1) and is never part of the payload; their name and
+ * phone are editable here only when their account belongs to this workspace
+ * (the server answers 403 otherwise).
+ */
+const changedFields = (row: User, values: UserForm): UserUpdatePayload => ({
+  ...(values.name !== row.name && { name: values.name }),
+  ...((values.phone ?? '') !== (row.phone ?? '') && {
+    phone: values.phone ?? '',
+  }),
+  ...(values.role !== row.role && { role: values.role }),
+  ...(values.isCompanyAdmin !== Boolean(row.isCompanyAdmin) && {
+    isCompanyAdmin: values.isCompanyAdmin,
+  }),
+})
+
+/**
+ * Edits a person already in the workspace. Adding a person is always an
+ * invitation (users-invite-dialog.tsx); nobody is created here.
+ */
 export function UsersActionDialog({
   currentRow,
   open,
   onOpenChange,
 }: UserActionDialogProps) {
-  const isEdit = !!currentRow
-  const createUserMutation = useCreateUserMutation()
   const updateUserMutation = useUpdateUserMutation()
-  const isPending = createUserMutation.isPending || updateUserMutation.isPending
-  const [convertRequired, setConvertRequired] = useState(false)
+  const isPending = updateUserMutation.isPending
 
   const form = useForm<UserForm>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      name: currentRow?.name ?? '',
-      email: currentRow?.email ?? '',
-      phone: currentRow?.phone ?? '',
-      role: currentRow?.role ?? 'site_engineer',
-      isCompanyAdmin: currentRow?.isCompanyAdmin ?? false,
-      password: '',
-      confirmPassword: '',
-      isEdit,
+      name: currentRow.name ?? '',
+      phone: currentRow.phone ?? '',
+      role: currentRow.role ?? 'site_engineer',
+      isCompanyAdmin: currentRow.isCompanyAdmin ?? false,
     },
   })
 
   const onSubmit = async (values: UserForm) => {
-    if (isEdit) {
-      try {
-        await updateUserMutation.mutateAsync({
-          userId: currentRow!.id,
-          payload: {
-            name: values.name,
-            email: values.email,
-            phone: values.phone,
-            role: values.role,
-            isCompanyAdmin: values.isCompanyAdmin,
-          },
-        })
-        toast.success('Person updated.')
-        onOpenChange(false)
-      } catch (error) {
-        toast.error(getServerErrorMessage(error))
-      }
+    const payload = changedFields(currentRow, values)
+    if (Object.keys(payload).length === 0) {
+      onOpenChange(false)
       return
     }
-
     try {
-      const created = await createUserMutation.mutateAsync({
-        name: values.name,
-        email: values.email,
-        phone: values.phone,
-        role: values.role,
-        password: values.password,
+      await updateUserMutation.mutateAsync({
+        userId: currentRow.id,
+        payload,
       })
-      // An e-mail that already has an account is invited, never added
-      // directly: the person joins when they accept with their own sign-in.
-      toast.success(
-        created?.invited
-          ? `Invitation sent to ${values.email}. They join when they accept it.`
-          : 'Person added.'
-      )
-      form.reset({
-        name: '',
-        email: '',
-        phone: '',
-        role: 'site_engineer',
-        isCompanyAdmin: false,
-        password: '',
-        confirmPassword: '',
-        isEdit: false,
-      })
+      toast.success('Person updated.')
       onOpenChange(false)
     } catch (error) {
-      // A personal workspace seats one member (ENT-6): the refusal shows the
-      // way to the conversion, not an error toast.
-      if (isConvertRequiredError(error)) {
-        setConvertRequired(true)
-        return
-      }
+      // An ended session was already announced by the request layer (D-ID-1 N4).
+      if (isEndedSession(error)) return
       toast.error(getServerErrorMessage(error))
     }
   }
@@ -169,23 +112,17 @@ export function UsersActionDialog({
       onOpenChange={(state) => {
         if (!state) {
           form.reset()
-          setConvertRequired(false)
         }
         onOpenChange(state)
       }}
     >
       <DialogContent className='sm:max-w-lg'>
         <DialogHeader className='text-start'>
-          <DialogTitle>{isEdit ? 'Edit person' : 'Add person'}</DialogTitle>
+          <DialogTitle>Edit person</DialogTitle>
           <DialogDescription>
-            {isEdit
-              ? 'Update the user profile information.'
-              : 'Create a new engineer account and share credentials securely.'}
+            Update the person's role and details in this workspace.
           </DialogDescription>
         </DialogHeader>
-        {convertRequired && (
-          <ConvertRequiredNotice onNavigate={() => onOpenChange(false)} />
-        )}
         <Form {...form}>
           <form
             id='user-form'
@@ -206,19 +143,20 @@ export function UsersActionDialog({
               )}
             />
 
-            <FormField
-              control={form.control}
-              name='email'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Email</FormLabel>
-                  <FormControl>
-                    <Input placeholder='engineer@company.com' {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            <div className='space-y-2'>
+              <Label htmlFor='user-email-readonly'>Email</Label>
+              <Input
+                id='user-email-readonly'
+                value={currentRow.email}
+                readOnly
+                disabled
+                data-testid='uat-user-email-readonly'
+              />
+              <p className='text-xs text-muted-foreground'>
+                The sign-in e-mail belongs to the person and cannot be changed
+                here.
+              </p>
+            </div>
 
             <FormField
               control={form.control}
@@ -251,68 +189,28 @@ export function UsersActionDialog({
               )}
             />
 
-            {isEdit && (
-              <FormField
-                control={form.control}
-                name='isCompanyAdmin'
-                render={({ field }) => (
-                  <FormItem className='flex items-center justify-between rounded-md border p-3'>
-                    <div className='space-y-0.5'>
-                      <FormLabel>Company admin</FormLabel>
-                      <p className='text-xs text-muted-foreground'>
-                        Sees every project and manages users and permission
-                        templates.
-                      </p>
-                    </div>
-                    <FormControl>
-                      <Switch
-                        data-testid='uat-user-company-admin'
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-            )}
-
-            {!isEdit && (
-              <>
-                <FormField
-                  control={form.control}
-                  name='password'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Password</FormLabel>
-                      <FormControl>
-                        <PasswordInput
-                          placeholder='e.g., S3cur3P@ssw0rd'
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name='confirmPassword'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Confirm Password</FormLabel>
-                      <FormControl>
-                        <PasswordInput
-                          placeholder='Repeat password'
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </>
-            )}
+            <FormField
+              control={form.control}
+              name='isCompanyAdmin'
+              render={({ field }) => (
+                <FormItem className='flex items-center justify-between rounded-md border p-3'>
+                  <div className='space-y-0.5'>
+                    <FormLabel>Company admin</FormLabel>
+                    <p className='text-xs text-muted-foreground'>
+                      Sees every project and manages users and permission
+                      templates.
+                    </p>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      data-testid='uat-user-company-admin'
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
           </form>
         </Form>
 

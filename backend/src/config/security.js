@@ -664,6 +664,9 @@ const validateProductionEnv = (env = process.env) => {
   validateProductionProxy(env, problems);
   validateProductionCorsOrigins(env, problems);
   validateProductionEmailAndLinks(env, problems);
+  // Self-service sign-up stays closed until it verifies the mailbox (D-ID-1 Q8).
+  const registrationProblem = require('./registration').registrationMisconfigured(env);
+  if (registrationProblem) problems.push(registrationProblem);
   validateProductionFileStorage(env, problems);
   validateProductionDatabase(env, problems);
   validateProductionTokenLifetimes(env, problems);

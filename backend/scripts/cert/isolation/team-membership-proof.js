@@ -21,6 +21,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const api = require('../lib/api');
 const invitations = require('../lib/invitations');
+const { reportSuperseded, superseded } = require('../lib/superseded');
 const { buildPopulation } = require('../lib/spec');
 const guard = require('../lib/cert-env');
 
@@ -50,14 +51,17 @@ const main = async () => {
   // X: home A (site engineer), also a member of V (quantity surveyor). Y: A only.
   const xEmail = `team.both.${STAMP}@${A.domain}`;
   const yEmail = `team.home.${STAMP}@${A.domain}`;
-  const madeX = await aPm.send('POST', '/users', { name: `Team both ${STAMP}`, email: xEmail, password, role: 'site_engineer' });
-  const madeY = await aPm.send('POST', '/users', { name: `Team home ${STAMP}`, email: yEmail, password, role: 'site_engineer' });
+  // Both made in A the one way D-ID-1 allows: A invites the new e-mail, which accepts with its own name and password.
+  const madeX = await invitations.createByInvitation({ inviter: aPm, email: xEmail, role: 'site_engineer', name: `Team both ${STAMP}`, password, db });
+  const madeY = await invitations.createByInvitation({ inviter: aPm, email: yEmail, role: 'site_engineer', name: `Team home ${STAMP}`, password, db });
+  const madeSaid = (made) => `invite ${made.invited ? said(made.invited) : '-'} accept ${made.accepted ? said(made.accepted) : '-'}`;
   // X joins V the one way the product allows (L38): V invites, X accepts with their own session.
-  const inV = await invitations.joinByInvitation({ inviter: vPm, email: xEmail, role: 'qs', via: 'users', name: `Team both ${STAMP}` });
-  const xId = madeX.body?.data?.id;
-  const yId = madeY.body?.data?.id;
+  const inV = await invitations.joinByInvitation({ inviter: vPm, email: xEmail, role: 'qs', via: 'users', name: `Team both ${STAMP}`, db });
+  const xId = madeX.userId;
+  const yId = madeY.userId;
   const [membership] = (await db.query('select m.role, m.status from "OrganizationMembership" m join "Organisation" o on o.id = m."orgId" where m."userId" = $1 and o.slug like $2', [xId, `cert-${V.code}-%`])).rows;
-  check('setup: X is a member of A (home) and of V as a quantity surveyor (invited, accepted); Y belongs to A only', madeX.status === 201 && madeY.status === 201 && inV.invited?.status === 202 && inV.accepted?.status === 200 && membership?.role === 'qs' && membership?.status === 'active', `${said(madeX)} | ${said(madeY)} | invite ${inV.invited ? said(inV.invited) : '-'} accept ${inV.accepted ? said(inV.accepted) : '-'} | V membership ${JSON.stringify(membership)}`);
+  superseded('setup: V\'s POST /users for an existing identity answers 202', `every add answers 201 with the invitation; answered ${inV.invited ? said(inV.invited) : '-'}`);
+  check('setup: X is a member of A (home) and of V as a quantity surveyor (invited, accepted); Y belongs to A only', Boolean(xId) && Boolean(yId) && inV.invited?.status < 300 && inV.accepted?.status === 200 && membership?.role === 'qs' && membership?.status === 'active', `X ${madeSaid(madeX)} | Y ${madeSaid(madeY)} | invite ${inV.invited ? said(inV.invited) : '-'} accept ${inV.accepted ? said(inV.accepted) : '-'} | V membership ${JSON.stringify(membership)}`);
 
   const add = (userId) => vPm.send('POST', `/projects/${pV}/team`, { userId });
   const x = await add(xId);
@@ -92,7 +96,8 @@ const main = async () => {
   check('…and cannot be mentioned in V any more (400 COMMENT_MENTION_INVALID)', said(mOff) === '400 COMMENT_MENTION_INVALID', said(mOff));
 
   await db.end();
-  console.log(`\nteam membership proof: ${passed} passed, ${failed} failed of ${passed + failed}`);
+  const replaced = reportSuperseded('team membership proof');
+  console.log(`\nteam membership proof: ${passed} passed, ${failed} failed of ${passed + failed}${replaced.length ? `; ${replaced.length} superseded by D-ID-1 (not counted)` : ''}`);
   process.exitCode = failed ? 2 : 0;
 };
 

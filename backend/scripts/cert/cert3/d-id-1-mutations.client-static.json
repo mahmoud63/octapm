@@ -1,0 +1,250 @@
+{
+  "mutations": [
+    {
+      "name": "MC9-1 re-add a password field to the invite form",
+      "file": "frontend/src/features/users/components/users-invite-dialog.tsx",
+      "from": "  projectPartyId: z.string().optional(),",
+      "to": "  projectPartyId: z.string().optional(), password: z.string().min(8, 'Password must be at least 8 characters.').optional(),",
+      "expect": "C9.2"
+    },
+    {
+      "name": "MC9-2 carry a password in the invite payload type",
+      "file": "frontend/src/features/users/hooks/use-users.ts",
+      "from": "      projectPartyId?: string",
+      "to": "      projectPartyId?: string; password?: string",
+      "expect": "C9.2, C9.4"
+    },
+    {
+      "name": "MC9-3 restore the direct create call (POST /users)",
+      "file": "frontend/src/features/users/hooks/use-users.ts",
+      "from": "apiClient.post('/users/invitations', payload)",
+      "to": "apiClient.post('/users', payload)",
+      "expect": "C9.1, C9.4"
+    },
+    {
+      "name": "MC9-4 restore the \"Person added\" branch (a second toast on success)",
+      "file": "frontend/src/features/users/components/users-invite-dialog.tsx",
+      "from": "      form.reset()\r\n      toast.success(",
+      "to": "      form.reset()\r\n      toast.success('Person added.')\r\n      toast.success(",
+      "expect": "C9.3, C9.4"
+    },
+    {
+      "name": "MC9-5 send email in the edit payload",
+      "file": "frontend/src/features/users/components/users-action-dialog.tsx",
+      "from": "  ...(values.name !== row.name && { name: values.name }),",
+      "to": "  ...(values.name !== row.name && { name: values.name }),\n  email: row.email,",
+      "expect": "C9.5"
+    },
+    {
+      "name": "MC9-6 restore the admin reset call (/users/:id/reset-password)",
+      "file": "frontend/src/features/users/hooks/use-users.ts",
+      "from": ".post(`/users/${userId}/password-reset-email`)",
+      "to": ".post(`/users/${userId}/reset-password`)",
+      "expect": "C9.6, C9.7"
+    },
+    {
+      "name": "MC9-7 resend re-types the offer instead of sending the stored one",
+      "file": "frontend/src/features/users/hooks/use-users.ts",
+      "from": ".post(`/users/invitations/${invitationId}/resend`)",
+      "to": ".post(`/users/invitations/${invitationId}/resend`, { role: 'site_engineer' })",
+      "expect": "C9.8"
+    },
+    {
+      "name": "MC9-8 drop the revoke call from pending invitations",
+      "file": "frontend/src/features/users/hooks/use-users.ts",
+      "from": ".delete(`/users/invitations/${invitationId}`)",
+      "to": ".post(`/users/invitations/${invitationId}/resend`)",
+      "expect": "C9.8"
+    },
+    {
+      "name": "MC9-9 send autoProvision: true from the SSO settings",
+      "file": "frontend/src/features/company/security.tsx",
+      "from": "        required: form.required,",
+      "to": "        required: form.required, autoProvision: true,",
+      "expect": "C9.9"
+    },
+    {
+      "name": "MC17-1 re-claim \"/\" in the Android intent filter",
+      "file": "mobile/app.json",
+      "from": "{ \"scheme\": \"https\", \"host\": \"app.octapm.com\", \"path\": \"/projects\" },",
+      "to": "{ \"scheme\": \"https\", \"host\": \"app.octapm.com\", \"pathPrefix\": \"/\" }, { \"scheme\": \"https\", \"host\": \"app.octapm.com\", \"path\": \"/projects\" },",
+      "expect": "C17.1, C17.2, C17.7"
+    },
+    {
+      "name": "MC17-2 claim the invitation page in the Android intent filter",
+      "file": "mobile/app.json",
+      "from": "{ \"scheme\": \"https\", \"host\": \"octapm.com\", \"path\": \"/projects\" },",
+      "to": "{ \"scheme\": \"https\", \"host\": \"octapm.com\", \"pathPrefix\": \"/accept-invite\" }, { \"scheme\": \"https\", \"host\": \"octapm.com\", \"path\": \"/projects\" },",
+      "expect": "C17.2, C17.7"
+    },
+    {
+      "name": "MC17-3 drop the browser hand-off for an unresolved link",
+      "file": "mobile/app/+native-intent.ts",
+      "from": "    if (!resolved) {\n      handToBrowser(path)\n",
+      "to": "    if (!resolved) {\n",
+      "expect": "C17.5, C17.7"
+    },
+    {
+      "name": "MC17-4 hand off the path without its query",
+      "file": "mobile/src/navigation/deepLinks.ts",
+      "from": "return registered || origin === own ? url : null",
+      "to": "return registered || origin === own ? url.split('?')[0] : null",
+      "expect": "C17.5, C17.7"
+    },
+    {
+      "name": "MC17-5 drop the web-only refusal in resolveLink (the app claims sign-in, accept-invite …)",
+      "file": "mobile/src/navigation/deepLinks.ts",
+      "from": "  if (WEB_ONLY_ROOTS.includes(head) && WEB_LINK.test(input.trim())) return null\r\n",
+      "to": "",
+      "expect": "C17.4, C17.7"
+    },
+    {
+      "name": "MC9-10 reject the failing request with the refresh's error again (D-ID-1 N4 reverted: REFRESH_TOKEN_REUSED reaches the toaster)",
+      "file": "frontend/src/services/api/client.ts",
+      "from": "      const failure = ended ?? refreshError",
+      "to": "      const failure = refreshError",
+      "expect": "C9.10"
+    },
+    {
+      "name": "MC9-11 flush the waiting requests with the refresh's error (one toast per waiting mutation)",
+      "file": "frontend/src/services/api/client.ts",
+      "from": "      flushPendingRequests(failure)",
+      "to": "      flushPendingRequests(refreshError)",
+      "expect": "C9.10"
+    },
+    {
+      "name": "MC9-12 the mutation toaster shows the SESSION_REVOKED error",
+      "file": "frontend/src/main.tsx",
+      "from": "      if (isSessionRevokedError(error)) return",
+      "to": "",
+      "expect": "C9.10"
+    },
+    {
+      "name": "MC9-13 the edit dialog toasts an ended session again (its isEndedSession guard dropped)",
+      "file": "frontend/src/features/users/components/users-action-dialog.tsx",
+      "from": "      if (isEndedSession(error)) return",
+      "to": "",
+      "expect": "C9.11"
+    },
+    {
+      "name": "MC9-14 the activate row action toasts an ended session again",
+      "file": "frontend/src/features/users/components/data-table-row-actions.tsx",
+      "from": "      if (isEndedSession(error)) return",
+      "to": "",
+      "expect": "C9.11"
+    },
+    {
+      "name": "MC9-15 the deactivate confirmation toasts an ended session again",
+      "file": "frontend/src/features/users/components/users-dialogs.tsx",
+      "from": "      if (isEndedSession(error)) return",
+      "to": "",
+      "expect": "C9.11"
+    },
+    {
+      "name": "MC9-16 the invite dialog toasts an ended session again",
+      "file": "frontend/src/features/users/components/users-invite-dialog.tsx",
+      "from": "      if (isEndedSession(error)) return",
+      "to": "",
+      "expect": "C9.11"
+    },
+    {
+      "name": "MC9-17 the pending-invitation re-send toasts an ended session again",
+      "file": "frontend/src/features/users/components/users-pending-invitations.tsx",
+      "from": "        if (isEndedSession(error)) return\n        if (isInvitationEmailFailed(error)) {",
+      "to": "        if (isInvitationEmailFailed(error)) {",
+      "expect": "C9.11"
+    },
+    {
+      "name": "MC9-18 the pending-invitation revoke toasts before it checks for an ended session",
+      "file": "frontend/src/features/users/components/users-pending-invitations.tsx",
+      "from": "        if (isEndedSession(error)) return\n        toast.error(invitationErrorMessage(error))",
+      "to": "        toast.error(invitationErrorMessage(error))\n        if (isEndedSession(error)) return",
+      "expect": "C9.11"
+    },
+    {
+      "name": "MC9-19 the reset-e-mail dialog guards on another predicate (an ended session is toasted)",
+      "file": "frontend/src/features/users/components/users-send-reset-email-dialog.tsx",
+      "from": "        if (isEndedSession(error)) return",
+      "to": "        if (isRateLimited(error)) return",
+      "expect": "C9.11"
+    },
+    {
+      "name": "MC9-20 sign-in-to-accept toasts an ended session again",
+      "file": "frontend/src/features/auth/accept-invite/components/accept-invite-form.tsx",
+      "from": "      // layer; a refusal of the sign-in made here is shown (D-ID-1 N4).\n      if (isEndedSession(error)) return\n",
+      "to": "      // layer; a refusal of the sign-in made here is shown (D-ID-1 N4).\n",
+      "expect": "C9.11"
+    },
+    {
+      "name": "MC9-21 the new-account acceptance form toasts an ended session again",
+      "file": "frontend/src/features/auth/accept-invite/components/accept-invite-form.tsx",
+      "from": "      // An ended session was already announced by the request layer (D-ID-1 N4).\n      if (isEndedSession(error)) return\n      toast.error(acceptInvitationErrorMessage(error))",
+      "to": "      toast.error(acceptInvitationErrorMessage(error))",
+      "expect": "C9.11"
+    },
+    {
+      "name": "MC9-22 a retried request answering SESSION_REVOKED fires no ended-session listener (the session ends in silence)",
+      "file": "frontend/src/services/api/client.ts",
+      "from": "            sessionEndedListener?.()",
+      "to": "",
+      "expect": "C9.12"
+    },
+    {
+      "name": "MC9-23 a retried request answering SESSION_REVOKED leaves the store signed in",
+      "file": "frontend/src/services/api/client.ts",
+      "from": "            retriedAuth.reset()",
+      "to": "",
+      "expect": "C9.12"
+    },
+    {
+      "name": "MC9-24 a retried request answering SESSION_REVOKED ends whoever is signed in now (and again for every such answer)",
+      "file": "frontend/src/services/api/client.ts",
+      "from": "          if ((retriedAuth.user?.id ?? null) === retriedFor) {",
+      "to": "          if (true) {",
+      "expect": "C9.12"
+    },
+    {
+      "name": "MC9-25 the retried-request SESSION_REVOKED branch is disabled (the round-4 fix reverted)",
+      "file": "frontend/src/services/api/client.ts",
+      "from": "      if (originalRequest._retry && isSessionRevokedError(error)) {",
+      "to": "      if (false) {",
+      "expect": "C9.12"
+    },
+    {
+      "name": "MC9-26 a retried request's SESSION_REVOKED is not marked (its handler toasts it beside the listener)",
+      "file": "frontend/src/services/api/client.ts",
+      "from": "          markEndedSession(error)",
+      "to": "",
+      "expect": "C9.12"
+    },
+    {
+      "name": "MC9-27 the refresh-failure path does not mark the ended session (every waiting handler toasts it)",
+      "file": "frontend/src/services/api/client.ts",
+      "from": "      if (ended && askedFor !== null) markEndedSession(ended)",
+      "to": "",
+      "expect": "C9.12"
+    },
+    {
+      "name": "MC9-28 a late SESSION_REVOKED for a session already ended is not marked (its handler toasts it)",
+      "file": "frontend/src/services/api/client.ts",
+      "from": "      if (isSessionRevokedError(error)) markEndedSession(error)",
+      "to": "",
+      "expect": "C9.12"
+    },
+    {
+      "name": "MC9-29 isEndedSession is a bare alias of isSessionRevokedError (an unannounced sign-in refusal is silenced)",
+      "file": "frontend/src/services/api/client.ts",
+      "from": "  isSessionRevokedError(error) && endedSessionErrors.has(error as object)",
+      "to": "  isSessionRevokedError(error)",
+      "expect": "C9.12"
+    },
+    {
+      "name": "MC9-30 the stale-sender path announces the ended session a second time",
+      "file": "frontend/src/services/api/client.ts",
+      "from": "      if (isSessionRevokedError(error)) markEndedSession(error)",
+      "to": "      if (isSessionRevokedError(error)) { markEndedSession(error); sessionEndedListener?.() }",
+      "expect": "C9.10, C9.12"
+    }
+  ],
+  "round4": "Round 4 (D-ID-1 N4 residue, Codex r3): MC9-13..MC9-30 added for C9.11 (explicit handlers return on isEndedSession) and C9.12 (the interceptor marks a signed-in session's SESSION_REVOKED and ends the session for a retried request); C9.10 now counts the ended-session listener outside the retried-request branch (C9.12 pins the total at two). Not applied to the working tree. MC9-10..MC9-30 were each run once (2026-10-08) against a scratch copy of frontend/src and the proof: each failed exactly its expected C9 check(s) (MC9-11 also fails C9.12, whose refresh-catch marker must precede flushPendingRequests(failure))."
+}

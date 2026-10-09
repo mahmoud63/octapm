@@ -332,8 +332,11 @@ Display, Billing, Permissions. **Company** (administrators): Directory, Vendors,
 Equipment, Project templates, Inspection templates, Submittal workflows, Workflows (approval
 routes that apply on every project), Custom fields, Integrations (API keys, webhooks, accounting),
 Security, Permissions (templates assigned per project from Team). **People**: everyone in the
-organisation, their role and projects; Invite by email; Add person. The Admin guide explains
-each registry and which is authoritative.
+organisation, their role and projects; **Invite** (the only way to add a person: they set their
+own password, or accept with their existing OctaPM account); Pending invitations (revoke, resend);
+Send password-reset e-mail (an administrator never sets or sees a password); Activate and
+Deactivate. Completing a password reset signs the person out of every session; they sign in
+again. The Admin guide explains each registry and which is authoritative.
 
 ![Company directory](images/company_directory.png)
 

@@ -2,10 +2,12 @@ const express = require("express");
 const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
+const { HttpError } = require("../utils/http-error");
 const { authenticate } = require("../middleware/auth");
 const { requirePermission } = require("../middleware/rbac");
 const { subscriptionGate } = require("../middleware/subscription-gate");
 const { validate } = require("../middleware/validate");
+const { passwordResetEmailActorLimiter, passwordResetEmailTargetLimiter } = require("../middleware/rate-limit");
 const userService = require("../services/user.service");
 const { disconnectStanding } = require("../realtime/socket");
 
@@ -17,6 +19,79 @@ const getRequestContext = (req) => ({
   userAgent: req.get("user-agent") || null,
   ipAddress: req.ip || req.socket?.remoteAddress || null,
 });
+
+const hasField = (req, name) =>
+  Boolean(req.body) && typeof req.body === "object" && Object.prototype.hasOwnProperty.call(req.body, name);
+
+/**
+ * People choose their own password when they accept (owner decision D-ID-1):
+ * a request that carries a password field at all — whatever its value — is
+ * refused before anything is looked up, so the answer is the same for every
+ * e-mail and an old client is told plainly that its password was not used.
+ */
+const refusePasswordFields = (req, _res, next) => {
+  if (hasField(req, "password") || hasField(req, "confirmPassword")) {
+    return next(
+      new HttpError(400, "USER_PASSWORD_NOT_ACCEPTED", "People choose their own password when they accept their invitation; remove the password field"),
+    );
+  }
+  return next();
+};
+
+/** A person's sign-in e-mail is theirs (owner decision D-ID-1): the field is refused whatever its value. */
+const refuseEmailField = (req, _res, next) => {
+  if (hasField(req, "email")) {
+    return next(
+      new HttpError(400, "USER_EMAIL_IDENTITY_OWNED", "A person's sign-in e-mail is theirs; it cannot be changed from user management"),
+    );
+  }
+  return next();
+};
+
+// Inviting, and managing the invitations not yet accepted (D-ID-1 Q5): one gate.
+const inviteGate = requirePermission("user_management", "submit", {
+  transition: "user.invite",
+});
+
+/**
+ * POST /users/invitations is the one way a person is added; POST /users is
+ * its deprecated alias and runs exactly the same chain — the same gate, the
+ * same refusal of password fields, the same validation, the same handler and
+ * the same 201 with the invitation (owner decision D-ID-1, ID-a/ID-b). Name
+ * and phone are the person's to set when they accept; they are ignored here.
+ */
+const inviteChain = [
+  inviteGate,
+  refusePasswordFields,
+  body("email").isString().isEmail().normalizeEmail(),
+  body("role").isString().trim().notEmpty(),
+  body("projectId").optional({ values: "falsy" }).isString().isUUID(),
+  body("companyId").optional({ values: "falsy" }).isString().isUUID(),
+  body("projectPartyId").optional({ values: "falsy" }).isString().isUUID(),
+  body("projectPartyId").custom((value, { req }) => {
+    if (!value || req.body.projectId) return true;
+    throw new Error("projectId is required when projectPartyId is provided");
+  }),
+  body("note").optional().isString().trim().isLength({ max: 1000 }),
+  validate,
+  asyncHandler(async (req, res) => {
+    const result = await userService.inviteUser({
+      orgId: req.user.orgId,
+      actor: req.user,
+      payload: {
+        email: req.body.email,
+        role: req.body.role,
+        projectId: req.body.projectId,
+        companyId: req.body.companyId,
+        projectPartyId: req.body.projectPartyId,
+        note: req.body.note,
+      },
+      context: getRequestContext(req),
+      via: req.path === "/invitations" ? "users.invite" : "users.create",
+    });
+    return sendSuccess(res, result, 201);
+  }),
+];
 
 router.get(
   "/",
@@ -39,64 +114,44 @@ router.get(
   }),
 );
 
-router.post(
-  "/",
-  requirePermission("user_management", "create"),
-  [
-    body("name").isString().trim().notEmpty(),
-    body("email").isString().isEmail().normalizeEmail(),
-    // Optional here because an email that already belongs to an identity is
-    // sent an invitation, not given an account, and its password is not this
-    // workspace's to set; the service still demands a password for a new
-    // identity.
-    body("password")
-      .optional({ values: "falsy" })
-      .isString()
-      .isLength({ min: 8 })
-      .matches(/[a-z]/)
-      .withMessage("Password must contain a lowercase letter")
-      .matches(/[0-9]/)
-      .withMessage("Password must contain a number"),
-    body("phone").optional().isString().trim(),
-    body("role").optional().isString(),
-    validate,
-  ],
+router.post("/", ...inviteChain);
+router.post("/invitations", ...inviteChain);
+
+// Registered before GET /:id, which would otherwise take "invitations" for an id.
+router.get(
+  "/invitations",
+  inviteGate,
+  [query("cursor").isString().optional().isUUID(), validate],
   asyncHandler(async (req, res) => {
-    const result = await userService.createUser({
+    const result = await userService.listInvitations({ orgId: req.user.orgId, query: req.query });
+    return sendSuccess(res, result);
+  }),
+);
+
+router.delete(
+  "/invitations/:invitationId",
+  inviteGate,
+  [param("invitationId").isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    const result = await userService.revokeInvitation({
       orgId: req.user.orgId,
+      invitationId: req.params.invitationId,
       actor: req.user,
-      payload: req.body,
       context: getRequestContext(req),
     });
-    // 202: the e-mail already names an identity, which was invited (it joins
-    // when it accepts); 201: a new account was made.
-    return sendSuccess(res, result, result.invited ? 202 : 201);
+    return sendSuccess(res, result);
   }),
 );
 
 router.post(
-  "/invitations",
-  requirePermission("user_management", "submit", {
-    transition: "user.invite",
-  }),
-  [
-    body("email").isString().isEmail().normalizeEmail(),
-    body("role").isString().trim().notEmpty(),
-    body("projectId").optional({ values: "falsy" }).isString().isUUID(),
-    body("companyId").optional({ values: "falsy" }).isString().isUUID(),
-    body("projectPartyId").optional({ values: "falsy" }).isString().isUUID(),
-    body("projectPartyId").custom((value, { req }) => {
-      if (!value || req.body.projectId) return true;
-      throw new Error("projectId is required when projectPartyId is provided");
-    }),
-    body("note").optional().isString().trim().isLength({ max: 1000 }),
-    validate,
-  ],
+  "/invitations/:invitationId/resend",
+  inviteGate,
+  [param("invitationId").isUUID(), validate],
   asyncHandler(async (req, res) => {
-    const result = await userService.inviteUser({
+    const result = await userService.resendInvitation({
       orgId: req.user.orgId,
+      invitationId: req.params.invitationId,
       actor: req.user,
-      payload: req.body,
       context: getRequestContext(req),
     });
     return sendSuccess(res, result, 201);
@@ -121,10 +176,10 @@ router.patch(
   requirePermission("user_management", "update", {
     transition: "user.assign_role",
   }),
+  refuseEmailField,
   [
     param("id").isUUID(),
     body("name").optional().isString().trim().notEmpty(),
-    body("email").optional().isString().isEmail().normalizeEmail(),
     body("phone").optional().isString().trim(),
     body("role").optional().isString(),
     body("isCompanyAdmin").optional().isBoolean().toBoolean(),
@@ -152,31 +207,27 @@ router.patch(
   }),
 );
 
+/**
+ * Asks OctaPM to send the person the ordinary self-service reset e-mail
+ * (owner decision D-ID-1 Q4). The administrator never sets a password or
+ * sees the link; the answer is always 202 { sent: true }.
+ */
 router.post(
-  "/:id/reset-password",
+  "/:id/password-reset-email",
   requirePermission("user_management", "update", {
-    transition: "user.reset_password",
+    transition: "user.send_password_reset",
   }),
-  [
-    param("id").isUUID(),
-    body("newPassword")
-      .isString()
-      .isLength({ min: 8 })
-      .matches(/[a-z]/)
-      .withMessage("Password must contain a lowercase letter")
-      .matches(/[0-9]/)
-      .withMessage("Password must contain a number"),
-    validate,
-  ],
+  [param("id").isUUID(), validate],
+  passwordResetEmailActorLimiter,
+  passwordResetEmailTargetLimiter,
   asyncHandler(async (req, res) => {
-    const result = await userService.resetPassword({
+    const result = await userService.sendPasswordResetEmail({
       orgId: req.user.orgId,
       userId: req.params.id,
-      newPassword: req.body.newPassword,
       actor: req.user,
       context: getRequestContext(req),
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, result, 202);
   }),
 );
 

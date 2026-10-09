@@ -24,6 +24,46 @@ type PendingRequest = {
 const pendingRequests: PendingRequest[] = []
 let isRefreshing = false
 
+/**
+ * 401 SESSION_REVOKED (D-ID-1 Q6): the token was minted before the person's
+ * last password reset, account close or administrator MFA reset, and is
+ * refused everywhere. It is an ended session, never an error to show.
+ */
+export const isSessionRevokedError = (error: unknown) =>
+  axios.isAxiosError(error) &&
+  error.response?.status === 401 &&
+  (error.response.data as { error?: { code?: string } } | undefined)?.error
+    ?.code === 'SESSION_REVOKED'
+
+/**
+ * The SESSION_REVOKED errors of a signed-in person's session, as the response
+ * interceptor below hands them to the callers: by then it has reset the store
+ * and sent the person to sign in once — or the person who sent the request is
+ * no longer the one signed in — so nothing else is to be shown for them.
+ */
+const endedSessionErrors = new WeakSet<object>()
+const markEndedSession = (error: unknown) => {
+  if (typeof error === 'object' && error !== null) endedSessionErrors.add(error)
+}
+
+/**
+ * Whether a handler shows nothing for this error (D-ID-1 N4): a signed-in
+ * session's SESSION_REVOKED, which the request layer has already announced.
+ * A SESSION_REVOKED nobody announced — a sign-in step, or an invitation
+ * accepted with the token a sign-in just returned, with nobody signed in —
+ * is not one of these: the handler shows it like any other refusal.
+ */
+export const isEndedSession = (error: unknown) =>
+  isSessionRevokedError(error) && endedSessionErrors.has(error as object)
+
+type SessionEndedListener = () => void
+let sessionEndedListener: SessionEndedListener | null = null
+
+/** main.tsx registers where an ended session goes (the sign-in page). */
+export const onSessionEnded = (listener: SessionEndedListener) => {
+  sessionEndedListener = listener
+}
+
 /** No stored-session header: for a request that carries its own bearer (a workspace re-entry, an invitation acceptance). */
 export const authlessClient = axios.create({
   baseURL: API_BASE_URL,
@@ -105,6 +145,23 @@ apiClient.interceptors.response.use(
       requestUrl.includes('/auth/logout')
 
     if (originalRequest._retry || isAuthRequest) {
+      // A request retried after a successful refresh and refused again as an
+      // ended session (a credential event landed after the refresh) ends the
+      // session here, once: the first such answer resets the store and sends
+      // the person to sign in; a later one finds the store already empty. The
+      // callers show nothing for it (isEndedSession), so without this the
+      // session would end in silence (D-ID-1 N4).
+      if (originalRequest._retry && isSessionRevokedError(error)) {
+        const retriedFor = originalRequest._sentBy ?? null
+        if (retriedFor !== null) {
+          markEndedSession(error)
+          const { auth: retriedAuth } = useAuthStore.getState()
+          if ((retriedAuth.user?.id ?? null) === retriedFor) {
+            retriedAuth.reset()
+            sessionEndedListener?.()
+          }
+        }
+      }
       return Promise.reject(error)
     }
     // A late 401 for a request the previous person sent is not retried under
@@ -112,6 +169,10 @@ apiClient.interceptors.response.use(
     const sentBy = originalRequest._sentBy ?? null
     const signedInNow = useAuthStore.getState().auth.user?.id ?? null
     if (sentBy !== null && sentBy !== signedInNow) {
+      // Its SESSION_REVOKED belongs to a session already ended (announced by
+      // the request that ended it) or to a person no longer signed in here:
+      // nothing to show (D-ID-1 N4).
+      if (isSessionRevokedError(error)) markEndedSession(error)
       return Promise.reject(error)
     }
 
@@ -164,11 +225,34 @@ apiClient.interceptors.response.use(
 
       return apiClient(originalRequest)
     } catch (refreshError) {
-      flushPendingRequests(refreshError)
+      // A revoked session answers the request with SESSION_REVOKED and the
+      // refresh with whatever its revoked family says (REFRESH_TOKEN_REUSED,
+      // say). Every caller is then given the SESSION_REVOKED error, which the
+      // handlers treat as an ended session rather than an error to show — one
+      // toast, from the listener below, not one per waiting request (D-ID-1 N4).
+      const ended = isSessionRevokedError(error)
+        ? error
+        : isSessionRevokedError(refreshError)
+          ? refreshError
+          : null
+      const failure = ended ?? refreshError
+      // A signed-in person's ended session is announced below, once (or not
+      // at all when someone else signed in meanwhile): every caller handed
+      // this error shows nothing for it (isEndedSession).
+      if (ended && askedFor !== null) markEndedSession(ended)
+      flushPendingRequests(failure)
       // A refresh that failed for the previous person must not sign out the
       // person who signed in meanwhile.
-      if ((useAuthStore.getState().auth.user?.id ?? null) === askedFor) auth.reset()
-      return Promise.reject(refreshError)
+      if ((useAuthStore.getState().auth.user?.id ?? null) === askedFor) {
+        auth.reset()
+        // A revoked session (the request's token, or the refresh's family)
+        // goes to the sign-in page once, like an expired one — the store is
+        // already empty, so the query cache's 401 handler would not.
+        if (askedFor !== null && ended) {
+          sessionEndedListener?.()
+        }
+      }
+      return Promise.reject(failure)
     } finally {
       isRefreshing = false
     }

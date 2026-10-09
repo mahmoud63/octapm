@@ -1,3 +1,4 @@
+import { isEndedSession } from '@/services/api/client'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useDeactivateUserMutation } from '../hooks/use-users'
@@ -6,7 +7,7 @@ import { UsersDeactivateDialog } from './users-deactivate-dialog'
 import { UsersDeleteDialog } from './users-delete-dialog'
 import { UsersInviteDialog } from './users-invite-dialog'
 import { useUsers } from './users-provider'
-import { UsersResetPasswordDialog } from './users-reset-password-dialog'
+import { UsersSendResetEmailDialog } from './users-send-reset-email-dialog'
 
 export function UsersDialogs() {
   const { open, setOpen, currentRow, setCurrentRow } = useUsers()
@@ -23,18 +24,14 @@ export function UsersDialogs() {
       setOpen(null)
       setCurrentRow(null)
     } catch (error) {
+      // An ended session was already announced by the request layer (D-ID-1 N4).
+      if (isEndedSession(error)) return
       toast.error(getServerErrorMessage(error, 'Failed to deactivate engineer.'))
     }
   }
 
   return (
     <>
-      <UsersActionDialog
-        key='user-add'
-        open={open === 'add'}
-        onOpenChange={(isOpen) => setOpen(isOpen ? 'add' : null)}
-      />
-
       <UsersInviteDialog
         key='user-invite'
         open={open === 'invite'}
@@ -86,11 +83,11 @@ export function UsersDialogs() {
             currentRow={currentRow}
           />
 
-          <UsersResetPasswordDialog
-            key={`user-reset-password-${currentRow.id}`}
-            open={open === 'resetPassword'}
+          <UsersSendResetEmailDialog
+            key={`user-send-reset-email-${currentRow.id}`}
+            open={open === 'sendResetEmail'}
             onOpenChange={(isOpen) => {
-              setOpen(isOpen ? 'resetPassword' : null)
+              setOpen(isOpen ? 'sendResetEmail' : null)
               if (!isOpen) {
                 setTimeout(() => {
                   setCurrentRow(null)

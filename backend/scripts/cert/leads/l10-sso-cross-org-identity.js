@@ -17,11 +17,17 @@
  * in exactly the way a real attacker controls one they stand up themselves.
  *
  * Victim V is a throwaway created only in 025; no persona is touched.
+ *
+ * Since D-ID-1 (CERT-3 plan §2.6) V is made by invitation and acceptance, and
+ * asking for SSO auto-provisioning is refused (Q1): that step is recorded as
+ * SUPERSEDED BY D-ID-1 and the configuration is sent again without it.
  */
 const http = require('http');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { as, raw, API } = require('../lib/api');
+const { createByInvitation } = require('../lib/invitations');
+const { reportSuperseded, superseded } = require('../lib/superseded');
 
 const PASSWORD = process.env.CERT_PASSWORD; // read, never printed
 const stamp = Date.now();
@@ -71,18 +77,29 @@ const startIdp = () => new Promise((resolve) => {
     const org24 = (await pm24.GET('/auth/me')).active.orgId;
     const org25 = (await pm25.GET('/auth/me')).active.orgId;
 
-    // 1. Victim V exists ONLY in 025 (024 never created or invited it).
-    const v = await pm25.POST('/users', { name: victimName, email: victimEmail, password: PASSWORD, role: 'qs' });
-    console.log('\n[setup] victim V created in 025 only, id =', v.id, 'role in 025 = qs');
+    // 1. Victim V exists ONLY in 025 (024 never created or invited it): since D-ID-1 the one way is an
+    //    invitation from 025 that the new e-mail accepts with its own name and password.
+    const made = await createByInvitation({ inviter: pm25, email: victimEmail, role: 'qs', name: victimName, password: PASSWORD });
+    if (!made.userId) throw new Error(`setup: V was not created in 025 (invite ${made.invited?.status} / accept ${made.accepted?.status})`);
+    console.log('\n[setup] victim V created in 025 only, id =', made.userId, 'role in 025 = qs');
     const inA = await pm24.GET(`/users?search=${encodeURIComponent(victimEmail)}`);
     console.log('[setup] V present in 024 before attack?', (inA.items || []).some((u) => u.email === victimEmail));
 
     // 2. 024 admin points 024's SSO at the attacker IdP and declares 025's domain.
-    const cfg = await pm24.send('PUT', '/company/security/sso', {
+    const ssoConfig = {
       enabled: true, issuer: idp.issuer, clientId: CLIENT_ID, clientSecret: CLIENT_SECRET,
       domains: ['c025.octapm-cert.test'], autoProvision: true, defaultRole: 'site_engineer',
-    });
+    };
+    let cfg = await pm24.send('PUT', '/company/security/sso', ssoConfig);
     show('[attack] PUT /company/security/sso on 024 (issuer = attacker IdP, domain = 025)', cfg);
+    if (cfg.status === 400 && cfg.body?.error?.code === 'SSO_AUTO_PROVISION_RETIRED') {
+      // D-ID-1 Q1: SSO never creates accounts or memberships, and asking for it is refused. The rest of the
+      // attack — the callback resolving another company's identity by e-mail — is still tried without it.
+      superseded('[attack] 024 turns on SSO auto-provisioning (autoProvision: true)', 'Q1: SSO no longer creates accounts or memberships; PUT /company/security/sso with autoProvision: true answers 400 SSO_AUTO_PROVISION_RETIRED. The configuration is sent again without it and the attack goes on');
+      const { autoProvision: _retired, ...withoutProvisioning } = ssoConfig;
+      cfg = await pm24.send('PUT', '/company/security/sso', withoutProvisioning);
+      show('[attack] PUT /company/security/sso on 024 again, without autoProvision', cfg);
+    }
 
     // 3. Begin SSO for 024; read the nonce the server embedded.
     const startRes = await raw('POST', '/auth/sso/start', { json: { orgId: org24 } });
@@ -140,6 +157,7 @@ const startIdp = () => new Promise((resolve) => {
 
     // tidy up: disable 024's SSO so the shared workspace is left as found.
     await pm24.send('PUT', '/company/security/sso', { enabled: false }).catch(() => {});
+    reportSuperseded('L10');
 
     if (confirmed) {
       process.exitCode = 2;

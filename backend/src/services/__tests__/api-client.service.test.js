@@ -70,4 +70,79 @@ describe("api clients", () => {
     expect(service.scopeAllows({ scopes: ["*:write"] }, "anything", "delete")).toBe(true);
     expect(service.describeScopes().some((item) => item.scope === "sub_pay_app:write")).toBe(true);
   });
+
+  // Codex D-ID-1 diff review r2 #6: a key is access. While the emergency
+  // membership switch is off (owner decision D-ID-1 Q10) no key is created, and
+  // what a key may reach — its scopes, its projects, how long it lives — is not
+  // changed; renaming, describing and revoking a key still work.
+  describe("the emergency membership switch (AUTH_MEMBERSHIP_WRITE=false)", () => {
+    let previous;
+    const switchOff = () => {
+      process.env.AUTH_MEMBERSHIP_WRITE = "false";
+    };
+    beforeEach(() => {
+      previous = process.env.AUTH_MEMBERSHIP_WRITE;
+      delete process.env.AUTH_MEMBERSHIP_WRITE;
+    });
+    afterEach(() => {
+      if (previous === undefined) delete process.env.AUTH_MEMBERSHIP_WRITE;
+      else process.env.AUTH_MEMBERSHIP_WRITE = previous;
+    });
+
+    it.each([
+      ["a write-everything key", { name: "Writer", scopes: ["*:write"] }],
+      ["a read-only key limited to a project", { name: "Reader", scopes: ["rfi:read"], projectIds: ["p1"] }],
+    ])("refuses to create %s (503 MEMBERSHIP_WRITES_SUSPENDED) before anything is read or written", async (_label, payload) => {
+      switchOff();
+      await expect(service.createApiClient({ orgId: "org-1", actor: owner, payload })).rejects.toMatchObject({ status: 503, code: "MEMBERSHIP_WRITES_SUSPENDED" });
+      expect(mockPrisma.apiClient.create).not.toHaveBeenCalled();
+      expect(mockPrisma.user.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.project.findMany).not.toHaveBeenCalled();
+      expect(mockAudit.recordEvent).not.toHaveBeenCalled();
+      expect(rows).toHaveLength(0);
+    });
+
+    it.each([
+      ["broader scopes", { scopes: ["*:write"] }],
+      ["no project restriction (projectIds: [])", { projectIds: [] }],
+      ["other projects", { projectIds: ["p2"] }],
+      ["no expiry (expiresAt: null)", { expiresAt: null }],
+      ["a later expiry", { expiresAt: "2099-01-01T00:00:00Z" }],
+      ["broader scopes beside a rename", { name: "Renamed", scopes: ["*:write"] }],
+    ])("refuses to change a key to %s (503), and the key is unchanged", async (_label, payload) => {
+      const created = await service.createApiClient({ orgId: "org-1", actor: owner, payload: { name: "Reader", scopes: ["rfi:read"], projectIds: ["p1"], expiresAt: "2030-01-01T00:00:00Z" } });
+      const before = { ...rows[0] };
+      jest.clearAllMocks();
+      switchOff();
+      await expect(service.updateApiClient({ orgId: "org-1", actor: owner, apiClientId: created.id, payload })).rejects.toMatchObject({ status: 503, code: "MEMBERSHIP_WRITES_SUSPENDED" });
+      // The guard compares the new values with the key's (review fix: a form that
+      // resends them unchanged must pass), so the project ids may be resolved
+      // first — a read; nothing is written.
+      expect(mockPrisma.apiClient.update).not.toHaveBeenCalled();
+      expect(rows[0]).toEqual(before);
+    });
+
+    it("lets a rename through with the switch off when the form resends the same scopes, projects and expiry", async () => {
+      const created = await service.createApiClient({ orgId: "org-1", actor: owner, payload: { name: "Reader", scopes: ["rfi:read"], projectIds: ["p1"], expiresAt: "2030-01-01T00:00:00Z" } });
+      switchOff();
+      const renamed = await service.updateApiClient({ orgId: "org-1", actor: owner, apiClientId: created.id, payload: { name: "Renamed", scopes: ["rfi:read"], projectIds: ["p1"], expiresAt: "2030-01-01T00:00:00Z" } });
+      expect(renamed).toMatchObject({ name: "Renamed", scopes: ["rfi:read"], projectIds: ["p1"] });
+    });
+
+    it("still renames, describes and revokes a key while the switch is off", async () => {
+      const created = await service.createApiClient({ orgId: "org-1", actor: owner, payload: { name: "Reader", scopes: ["rfi:read"], projectIds: ["p1"] } });
+      switchOff();
+      const renamed = await service.updateApiClient({ orgId: "org-1", actor: owner, apiClientId: created.id, payload: { name: "ERP reader", description: "Nightly sync" } });
+      expect(renamed).toMatchObject({ name: "ERP reader", description: "Nightly sync", scopes: ["rfi:read"], projectIds: ["p1"], status: "active" });
+      const revoked = await service.revokeApiClient({ orgId: "org-1", actor: owner, apiClientId: created.id });
+      expect(revoked).toMatchObject({ status: "revoked", revokedAt: expect.any(String) });
+      await expect(service.authenticateApiKey(created.token)).rejects.toMatchObject({ code: "API_KEY_INVALID" });
+    });
+
+    it("lets the same changes through with the switch on", async () => {
+      const created = await service.createApiClient({ orgId: "org-1", actor: owner, payload: { name: "Reader", scopes: ["rfi:read"], projectIds: ["p1"] } });
+      const widened = await service.updateApiClient({ orgId: "org-1", actor: owner, apiClientId: created.id, payload: { scopes: ["*:write"], projectIds: [], expiresAt: null } });
+      expect(widened).toMatchObject({ scopes: ["*:write"], projectIds: [], expiresAt: null });
+    });
+  });
 });

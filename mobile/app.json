@@ -51,16 +51,26 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            {
-              "scheme": "https",
-              "host": "app.octapm.com",
-              "pathPrefix": "/"
-            },
-            {
-              "scheme": "https",
-              "host": "octapm.com",
-              "pathPrefix": "/"
-            }
+            { "scheme": "https", "host": "app.octapm.com", "path": "/projects" },
+            { "scheme": "https", "host": "app.octapm.com", "pathPrefix": "/projects/" },
+            { "scheme": "https", "host": "app.octapm.com", "path": "/tasks" },
+            { "scheme": "https", "host": "app.octapm.com", "pathPrefix": "/tasks/" },
+            { "scheme": "https", "host": "app.octapm.com", "path": "/inventory" },
+            { "scheme": "https", "host": "app.octapm.com", "pathPattern": "/o/.*/projects" },
+            { "scheme": "https", "host": "app.octapm.com", "pathPattern": "/o/.*/projects/.*" },
+            { "scheme": "https", "host": "app.octapm.com", "pathPattern": "/o/.*/tasks" },
+            { "scheme": "https", "host": "app.octapm.com", "pathPattern": "/o/.*/tasks/.*" },
+            { "scheme": "https", "host": "app.octapm.com", "pathPattern": "/o/.*/inventory" },
+            { "scheme": "https", "host": "octapm.com", "path": "/projects" },
+            { "scheme": "https", "host": "octapm.com", "pathPrefix": "/projects/" },
+            { "scheme": "https", "host": "octapm.com", "path": "/tasks" },
+            { "scheme": "https", "host": "octapm.com", "pathPrefix": "/tasks/" },
+            { "scheme": "https", "host": "octapm.com", "path": "/inventory" },
+            { "scheme": "https", "host": "octapm.com", "pathPattern": "/o/.*/projects" },
+            { "scheme": "https", "host": "octapm.com", "pathPattern": "/o/.*/projects/.*" },
+            { "scheme": "https", "host": "octapm.com", "pathPattern": "/o/.*/tasks" },
+            { "scheme": "https", "host": "octapm.com", "pathPattern": "/o/.*/tasks/.*" },
+            { "scheme": "https", "host": "octapm.com", "pathPattern": "/o/.*/inventory" }
           ],
           "category": [
             "BROWSABLE",

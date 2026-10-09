@@ -173,6 +173,37 @@ describe("auth refresh cookie security contract", () => {
     );
   });
 
+  // Codex D-ID-1 diff review #2: a reset ends the identity's live sockets too.
+  // The service names whose sessions ended; the route drops that identity's
+  // sockets and answers without the name.
+  it("drops the identity's live sockets after a reset, and leaves endedSessionsOf out of the answer", async () => {
+    const { ROOMS } = require("../../realtime/socket");
+    mockAuthService.resetPassword.mockResolvedValue({ reset: true, endedSessionsOf: "user-1" });
+    const disconnectSockets = jest.fn();
+    const io = { in: jest.fn(() => ({ disconnectSockets })) };
+    const app = buildApp();
+    app.set("io", io);
+
+    const reset = await request(app)
+      .post("/auth/reset-password")
+      .send({ token: "a".repeat(32), password: "Password1" });
+
+    expect(reset.status).toBe(200);
+    expect(reset.body).toEqual({ success: true, data: { reset: true } });
+    expect(io.in).toHaveBeenCalledWith(ROOMS.user("user-1"));
+    expect(disconnectSockets).toHaveBeenCalledWith(true);
+
+    // A refused reset drops nobody.
+    const { HttpError } = require("../../utils/http-error");
+    io.in.mockClear();
+    mockAuthService.resetPassword.mockRejectedValue(new HttpError(400, "PASSWORD_RESET_TOKEN_INVALID", "invalid"));
+    const refused = await request(app)
+      .post("/auth/reset-password")
+      .send({ token: "a".repeat(32), password: "Password1" });
+    expect(refused.status).toBe(400);
+    expect(io.in).not.toHaveBeenCalled();
+  });
+
   it("previews and accepts invitations without leaking refresh tokens in JSON", async () => {
     mockAuthService.getInvitationPreview.mockResolvedValue({
       email: "invited@example.com",

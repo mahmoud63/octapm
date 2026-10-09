@@ -15,19 +15,19 @@ Two conventions the map assumes everywhere:
 
 | Method | Path | Purpose | Permission | Notes |
 |---|---|---|---|---|
-| POST | `/auth/register` | Create org + first user (role `pm`, `isCompanyAdmin:true`) | none (authLimiter 80/15 min per IP on whole `/auth` router) | `{ orgName?, name, email, password(min 8), phone? }` → 201 `{ organisation, user, tokens:{accessToken,tokenType:'Bearer',expiresIn} }` + `Set-Cookie pmc_refresh_token`. 409 `EMAIL_ALREADY_EXISTS`. `backend/src/routes/auth.js:93`, `auth.service.js:240-277` |
+| POST | `/auth/register` | Create org + first user (role `pm`, `isCompanyAdmin:true`) | none (authLimiter 80/15 min per IP on whole `/auth` router) | `{ orgName?, name, email, password(min 8), phone? }` → 201 `{ organisation, user, tokens:{accessToken,tokenType:'Bearer',expiresIn} }` + `Set-Cookie pmc_refresh_token`. 409 `EMAIL_ALREADY_EXISTS`. **Closed in production** regardless of `PUBLIC_REGISTRATION` (403 `REGISTRATION_CLOSED`; D-ID-1 Q8, D-REG-1); the app must not offer sign-up. `backend/src/routes/auth.js:93`, `auth.service.js:240-277`, `config/registration.js` |
 | POST | `/auth/login` | Password login, step 1 | none (loginLimiter 12/15 min per IP+email; in-process abuse backoff) | `{ email, password }` → `{ user, tokens }` + cookie, **or** `{ mfaRequired:true, mfaToken, methods }` with no cookie. 401 `INVALID_CREDENTIALS`, 403 `USER_INACTIVE`, 403 `SSO_REQUIRED`, 429 `LOGIN_BACKOFF` / `LOGIN_TEMPORARILY_LOCKED`. `user.mfaEnrollmentRequired` set when org requires MFA. `auth.js:110-131`, `auth.service.js:303-399` |
 | POST | `/auth/mfa/verify` | Login step 2 | none (loginLimiter) | `{ mfaToken(>=20, JWT type 'mfa', 5 min), code(6-12) }` → `{ user, tokens }` + cookie. 401 `MFA_CHALLENGE_EXPIRED` / `MFA_CHALLENGE_INVALID` / `MFA_CODE_INVALID`. `auth-security.js:18-28`, `mfa.service.js:147-164` |
 | GET | `/auth/mfa` | Caller MFA status | auth only | `{ enabled, enrolledAt, backupCodesRemaining, pending, required, enrollmentRequired, ssoLinked }`. `auth-security.js:30` |
-| POST | `/auth/mfa/setup` / `/enable` / `/disable` / `/backup-codes` | TOTP enrolment/management | auth + `noApiKey` (403 `API_KEY_FORBIDDEN`) | enable `{ code(6-8) }` → `{ enabled:true, backupCodes[10] }`; disable `{ password, code }` (403 `MFA_REQUIRED_BY_ORG` for non-admins); backup-codes `{ code }`. `auth-security.js:31-34` |
+| POST | `/auth/mfa/setup` / `/enable` / `/disable` / `/backup-codes` | TOTP enrolment/management | auth + `noApiKey` (403 `API_KEY_FORBIDDEN`) + credential session | enable `{ code(6-8) }` → `{ enabled:true, backupCodes[10] }`; disable `{ password, code }` (403 `MFA_REQUIRED_BY_ORG` for non-admins); backup-codes `{ code }`. A session issued by any company's SSO gets 403 `SSO_SESSION_BOUND` on all four (D-ID-1 Q2). `auth-security.js:35-38`, `middleware/auth.js requireCredentialSession` |
 | GET | `/auth/sso/lookup?email=` | Whether email signs in via SSO | none | `{ sso, required, orgName\|null }`. `auth-security.js:37` |
 | POST | `/auth/sso/start` | Build OIDC authorization URL (PKCE server-side) | none (loginLimiter) | `{ email? \| orgId?, redirectTo?(<=500) }` → `{ authorizationUrl, orgName }`. 404 `SSO_NOT_CONFIGURED`. `auth-security.js:38` |
 | GET | `/auth/sso/callback` | IdP redirect target | none | 302 to `WEB_APP_URL/sso/complete?ticket=…` (default `http://localhost:5173`; ticket 2 min single-use). Web origin only. `auth-security.js:39-45`, `sso.service.js:22,51` |
 | POST | `/auth/sso/complete` | Exchange ticket for session | none (loginLimiter) | `{ ticket(20-200) }` → `{ user, tokens }` + cookie. 401 `SSO_TICKET_INVALID`. `auth-security.js:46-54` |
 | POST | `/auth/forgot-password` | Email reset link | none | `{ email }` → `{ sent:true }` always. `auth.js:133-143` |
-| POST | `/auth/reset-password` | Set new password | none | `{ token(>=20), password(>=8, lowercase+digit) }` → `{ reset:true }`. Revokes ALL refresh sessions. `auth.js:145-165`, `auth.service.js:681` |
-| GET | `/auth/invitations/:token` | Preview invitation | none | `{ email, role, org, project, company, projectParty, expiresAt, existingUser, requiresPassword }`. `auth.js:167-176` |
-| POST | `/auth/invitations/accept` | Accept invitation + session | none | `{ token, name(required), password?(>=8, lowercase+digit; required unless active user exists), phone? }` → `{ user, tokens }` + cookie. 400 `INVITATION_PASSWORD_REQUIRED`. `auth.js:178-202` |
+| POST | `/auth/reset-password` | Set new password | none | `{ token(>=20), password(>=8, lowercase+digit) }` → `{ reset:true }`. Revokes ALL refresh sessions and bumps the credential epoch, so every earlier access, identity and refresh token is refused with 401 `SESSION_REVOKED` (§1.3). `auth.js`, `auth.service.js resetPassword` |
+| GET | `/auth/invitations/:token` | Preview invitation | none | `{ email, role, org, project, company, projectParty, expiresAt, existingUser, requiresSignIn, requiresPassword }`. `requiresSignIn` = an active account exists: accept with its own session. `auth.js`, `auth.service.js getInvitationPreview` |
+| POST | `/auth/invitations/accept` | Accept invitation (+ session) | none; optional `Authorization: Bearer` of the invitee's own session | `{ token, name?(required for a new account), password?(>=8, lowercase+digit; required for a new account or a reopened one), phone? }` → `{ user, tokens }` + cookie, **or** `{ accepted:true, signInRequired:true, orgId, reason }` with no session (the target workspace's SSO/MFA policy applies, the bearer came from another company's SSO, or a closed account was reopened): the client sends the person to sign in. An existing active account must send its own bearer: link alone or another identity's bearer → 401 `INVITATION_SIGN_IN_REQUIRED`. 400 `INVITATION_PASSWORD_REQUIRED`; 503 `MEMBERSHIP_WRITES_SUSPENDED` while the emergency switch is off. `auth.js`, `auth.service.js acceptInvitation` |
 | POST | `/auth/refresh` | Rotate refresh session, mint access token | none (refreshLimiter 30/5 min per IP) | Browser: reads ONLY `Cookie: pmc_refresh_token`; the body is ignored. Native (`X-OctaPM-Client: mobile`): reads ONLY `{ refreshToken }` from the JSON body (400 `VALIDATION_ERROR` if malformed) and never falls back to the cookie. 401 `REFRESH_SESSION_REQUIRED` / `INVALID_REFRESH_TOKEN` / `REFRESH_TOKEN_EXPIRED` / `REFRESH_TOKEN_REUSED` / `REFRESH_TOKEN_CHANNEL_MISMATCH`. Reuse and channel mismatch revoke the whole session family, outside the transaction that found them. `backend/src/routes/auth.js`, `auth.service.js refresh()` |
 | POST | `/auth/logout` | Revoke the presented refresh session | none | Browser: cookie, then the cookie is cleared. Native: `{ refreshToken }` in the body; no cookie is touched. → `{ revoked:boolean }` (`false` when the token belongs to the other channel). Access token stays valid until expiry (15 min). `backend/src/routes/auth.js` |
 | GET | `/auth/me` | Profile | auth only | `{ id, orgId, name, email, phone, role, isCompanyAdmin, status, lastLogin, mfaEnabled, ssoLinked, createdAt, updatedAt }`. `auth.js:228-239` |
@@ -40,6 +40,7 @@ Two conventions the map assumes everywhere:
 
 - **Access token**: JWT (`JWT_SECRET`), payload `{ sub, orgId, role, email, name, isCompanyAdmin, type:'access' }`, `JWT_EXPIRY` default **15m**; login reports `tokens.expiresIn` in seconds. Sent as `Authorization: Bearer <jwt>`. `backend/src/utils/tokens.js:5-6, 49-87`
 - **Refresh token**: JWT (`JWT_REFRESH_SECRET`), payload `{ sub, orgId, role, type:'refresh', cli:'web'|'mobile' }`, `jti` = `RefreshSession.id`, `JWT_REFRESH_EXPIRY` default **7d**; only its SHA-256 is stored. **Browser channel**: delivered only as the httpOnly cookie `pmc_refresh_token`, `path=/api/v1/auth`, `secure` + `sameSite=none` in production (else `lax`); every JSON body is stripped of `refreshToken`/`refreshTokenExpiresAt`. **Native channel** (request header `X-OctaPM-Client: mobile`): delivered in the body as `tokens.refreshToken` + `tokens.refreshTokenExpiresAt`, no cookie is set, and the token must come back in the body of `/auth/refresh` and `/auth/logout`. The `cli` claim binds a token to the channel that issued it: a native token presented as a cookie, or a cookie token presented in a body, is refused with 401 `REFRESH_TOKEN_CHANNEL_MISMATCH` and its family revoked. Tokens minted before the claim existed are treated as browser tokens. The header selects the delivery channel and nothing else: authorization runs on the access token, through the same middleware, for both channels. `backend/src/utils/tokens.js`, `backend/src/routes/auth.js`, `auth.service.js`
+- **Credential epoch** (D-ID-1 Q6, 2026-10-05): every access, identity, refresh and MFA-challenge token carries `cep`, the identity's credential epoch (a token without it counts as 0). A completed password reset, an identity close, an admin MFA reset and the acceptance that reopens a closed account each bump the epoch. A token minted before the bump is refused with 401 `SESSION_REVOKED` on every request, on refresh, on workspace switch and at the socket handshake (the MFA challenge answers 401 `MFA_CHALLENGE_INVALID`). `utils/tokens.js tokenEpochCurrent`, `middleware/auth.js`, `routes/workspaces.js`, `realtime/socket.js`
 - **Rotation**: each refresh creates a new `RefreshSession`, marks old `revokedAt` + `replacedBySessionId`. Presenting an already-rotated token → 401 `REFRESH_TOKEN_REUSED` and the whole family is revoked. `auth.service.js:155-238, 452-458`
 - **Per-request re-read**: `authenticate` re-loads the user on every request; 401 `USER_INACTIVE` unless `status==='active'` and `account.orgId===payload.orgId`; `req.user.role`/`isCompanyAdmin` come from DB, not the token. Errors: `AUTH_REQUIRED` (no/invalid Bearer), `TOKEN_EXPIRED`, `INVALID_TOKEN`. A Bearer starting with `octapm_` is an API key (`req.apiClient`; 401 `API_KEY_INVALID` / `API_KEY_EXPIRED`). `backend/src/middleware/auth.js:19-80`
 - **Tenancy**: orgId bound at login; no org switching; `User.email` globally unique. `schema.prisma:157-161`
@@ -50,9 +51,10 @@ Two conventions the map assumes everywhere:
 
 | Event | Effect | Where |
 |---|---|---|
-| Password reset (self or admin `POST /users/:id/reset-password`) | ALL active refresh sessions revoked | `auth.service.js:681`, `user.service.js:305-321` |
+| Password reset (self-service only; the admin route `POST /users/:id/reset-password` is **removed** — an admin can only trigger the reset e-mail with `POST /users/:id/password-reset-email`) | ALL active refresh sessions revoked and the credential epoch bumped: every earlier access, identity and refresh token → 401 `SESSION_REVOKED`; sockets refused at the next handshake | `auth.service.js resetPassword`, `utils/tokens.js` |
+| Identity closed, or second factor reset by an admin | Same as a password reset: epoch bumped, every token → 401 `SESSION_REVOKED` | `user.service.js deactivateUser`, `mfa.service.js` |
 | Refresh reuse | Family revoked (`REFRESH_TOKEN_REUSED`) | `auth.service.js:215-238, 456` |
-| User deactivated (`PATCH /users/:id/deactivate`) | `status='inactive'`; all `ProjectAssignment` + `ActivityAssignment` deleted; access token refused next request (401 `USER_INACTIVE`); refresh refused; sockets disconnected; `RefreshSession` rows NOT revoked | `user.service.js:229-247` |
+| User deactivated (`PATCH /users/:id/deactivate`) | Membership suspended in that workspace; its `ProjectAssignment` + `ActivityAssignment` rows deleted; that workspace's `RefreshSession` rows revoked (all of them when the identity is closed); pending invitations of that workspace for the person revoked; access token refused next request (401 `USER_INACTIVE`, or `SESSION_REVOKED` when the identity was closed); sockets disconnected | `user.service.js deactivateUser` |
 | Role / admin change (`PATCH /users/:id`) | Sockets disconnected; next request uses new role | `users.js:110-137` |
 | Removed from project (`DELETE /projects/:projectId/team/:userId`) | `ProjectAssignment` + `ProjectUserPermission` deleted; tokens valid; next project request → 403 `PROJECT_ACCESS_DENIED` | `permission-template.service.js:1151-1178` |
 | Logout | Only the presented session; no logout-all | `auth.service.js:492-511` |
@@ -65,6 +67,7 @@ Two conventions the map assumes everywhere:
 | `auth` | 80 / 15 min per IP | whole `/auth` router |
 | `auth-login` | 12 / 15 min per IP+email | `/auth/login`, `/auth/mfa/verify`, `/auth/sso/start`, `/auth/sso/complete` |
 | `auth-refresh` | 30 / 5 min per IP | `/auth/refresh` |
+| `reset-email-target` / `reset-email-actor` | 3 / hour per (workspace, person); 20 / hour per (workspace, administrator) | `POST /users/:id/password-reset-email` (D-ID-1) |
 | `upload` | 40 / hour per project+user | multipart routes |
 | `ai-generation` | 8 / hour per project+user | AI/BOQ generation |
 | `billing` | 60 / hour per user | `/billing` |
@@ -77,7 +80,8 @@ Two conventions the map assumes everywhere:
 | Response | Action |
 |---|---|
 | 401 `TOKEN_EXPIRED` | POST `/auth/refresh` replaying the stored `pmc_refresh_token` cookie (cookie jar scoped to `/api/v1/auth`); retry once |
-| 401 `REFRESH_SESSION_REQUIRED` / `INVALID_REFRESH_TOKEN` / `REFRESH_TOKEN_EXPIRED` / `REFRESH_TOKEN_REUSED` / `USER_INACTIVE` | Discard session, force sign-in |
+| 401 `REFRESH_SESSION_REQUIRED` / `INVALID_REFRESH_TOKEN` / `REFRESH_TOKEN_EXPIRED` / `REFRESH_TOKEN_REUSED` / `USER_INACTIVE` / `SESSION_REVOKED` | Discard session, force sign-in (`SESSION_REVOKED`: "signed out: sign in again"; do not try to refresh) |
+| 503 `MEMBERSHIP_WRITES_SUSPENDED` | Membership changes are paused on the deployment (accepting an invitation, adding to a project team or party); show the message, do not retry |
 | 401 `AUTH_REQUIRED` / `INVALID_TOKEN` | Force sign-in |
 | 403 `FORBIDDEN` (details `{ module, action, transition, source:'template'\|'role' }`) | Hide/disable the action; do not retry |
 | 403 `PROJECT_ACCESS_DENIED` / 404 `PROJECT_NOT_FOUND` | Drop project from local list |
@@ -88,6 +92,22 @@ Two conventions the map assumes everywhere:
 | 429 | Honour `Retry-After`; never re-login instead of refreshing |
 
 Gate UI with `GET /auth/me/permissions?projectId=` (`modules[m].visible`, `actions[]`, `transitions[]`, `level` none/read_only/standard/admin). A project permission template, when attached, is **decisive** (no role fallback). `permission-template.service.js:364-408`
+
+### 1.6 User management: contract change for API clients (D-ID-1, 2026-10-05)
+
+The app has no add-person or admin-reset screen; this subsection is for any client (or integration) that calls `/users`. Adding a person is **always an invitation**; nobody's account or password is made by an administrator. Design: `docs/architecture/OCTAPM_MEMBERSHIP_AND_RBAC.md` §5.
+
+| Method | Path | Permission | Contract |
+|---|---|---|---|
+| POST | `/users/invitations` | `user_management` submit + transition `user.invite` | `{ email, role, projectId?, companyId?, projectPartyId?(needs projectId), note?(<=1000) }` → **201** `{ id, email, role, status:'pending', projectId, companyId, projectPartyId, invitedById, expiresAt, createdAt, invited:true }`. Same answer whether or not the e-mail has an account. 400 `USER_PASSWORD_NOT_ACCEPTED` when the body contains `password` or `confirmPassword` (any value). 409 `ALREADY_MEMBER` (active member, for a workspace invitation; suspended member, for every invitation). 409 `PERSONAL_WORKSPACE_CONVERT_REQUIRED`. 502 `INVITATION_EMAIL_FAILED` with `details.invitationId` (the invitation stays pending). 503 `MEMBERSHIP_WRITES_SUSPENDED`. |
+| POST | `/users` | as above | **Deprecated alias** of `POST /users/invitations` for one release: the same chain and the same answer. `role` is required (400 without it); `name`, `phone` are ignored; `data.id` is the **invitation** id, never a user id. No User exists until the person accepts. |
+| GET | `/users/invitations?cursor=` | invite gate | `{ items:[{ ...invitation, note, lastDeliveryFailedAt }], pagination:{ limit, nextCursor } }` — pending, unexpired invitations only. |
+| DELETE | `/users/invitations/:invitationId` | invite gate | `{ id, revoked:true }`. 409 `INVITATION_NOT_PENDING`; 404 for another workspace's id. |
+| POST | `/users/invitations/:invitationId/resend` | invite gate | 201 with the new invitation; the server re-sends the **stored** offer and the earlier link stops working. |
+| PATCH | `/users/:id` | `user_management` update + `user.assign_role` | Send only fields that changed: `name`, `phone` (only for people homed in this workspace, else 403), `role`, `isCompanyAdmin`, `isOwner`. A body containing `email` (any value) → 400 `USER_EMAIL_IDENTITY_OWNED`. |
+| POST | `/users/:id/password-reset-email` | `user_management` update + transition `user.send_password_reset` | No body → **202** `{ sent:true }` (always; no token or link). The person receives the ordinary self-service reset e-mail. 429 when rate-limited (per actor and per target). Replaces the removed `POST /users/:id/reset-password`; the transition `user.reset_password` is renamed `user.send_password_reset` in `shared/permissions.json`. |
+
+Related changes: invitation acceptance may answer `signInRequired` with no session (§1.1); 401 `SESSION_REVOKED` ends a session after a reset (§1.2, §1.5); SSO settings no longer accept `autoProvision: true` (400 `SSO_AUTO_PROVISION_RETIRED`; SSO never creates accounts).
 
 ---
 
@@ -797,7 +817,7 @@ Structured targets `{ module, child, status, source, recordId }` come only from 
 4. Email verification on registration.
 5. Organisation switching / multi-org membership; endpoint to remove a user from an org (only deactivate/activate).
 6. Mobile/app-scheme SSO callback — callback 302s to `WEB_APP_URL/sso/complete` only; no client-side PKCE.
-7. Revocation of refresh sessions on deactivation or role change.
+7. Revocation of refresh sessions on role change (deactivation revokes them since D-ID-1, §1.3).
 8. Server-enforced MFA enrolment block (only `mfaEnrollmentRequired` flag).
 9. Long-lived/offline access tokens (single `JWT_EXPIRY`); distributed login-abuse lockout (per-process Maps).
 10. `super_admin` as a policy role; `quality_engineer` in SSO `defaultRole` enum, in `POST /projects/:projectId/team` role enum, and in `ROLE_ALIASES`.
@@ -852,5 +872,5 @@ Structured targets `{ module, child, status, source, recordId }` come only from 
 
 ### Web / links / test
 45. Frontend deep-link helper; notifications page route; workflow-inbox route; `capture` module outside the project workspace; `/people` URL (`/users`); inventory and activity record deep-link handling; web handling of the task notification link `?module=tasks&taskId=`; record-opening for observation, form_instance, progress_submission, schedule_revision, boq_item, photo, equipment, meeting_action, cost_record, burn_rate_entry, commitment_change_order, ipc_item, eot_claim, sub_valuation, spec_section, document_revision, sheet_revision, markup, pin, bim_element sources; `procurement/packages` link target (procurement_package → schedule/longLead).
-46. `GET /users/invitations`; `POST /users/:id/deactivate|activate` (they are PATCH); company-admin guard on `/company/*` GET registries.
+46. ~~`GET /users/invitations`~~ — implemented in D-ID-1 (§1.6); `POST /users/:id/deactivate|activate` (they are PATCH); company-admin guard on `/company/*` GET registries.
 47. Committed native-mobile/device test suite; Playwright quality_engineer persona; npm alias for E2E reset; `final-recon.js`; offline-replay tests in E2E/UAT runners; client/owner and subcontractor external logins (scope decision).

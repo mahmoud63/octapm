@@ -67,6 +67,23 @@ const membershipClaims = (user) => {
   };
 };
 
+/**
+ * The identity's credential epoch (D-ID-1 Q6), carried as `cep` on every token
+ * an identity holds. A credential event (a completed reset, an identity closed,
+ * an admin second-factor reset, a closed account reopened) bumps the stored
+ * value, and every token minted before it is refused wherever it is presented.
+ * A token without the claim counts as epoch 0, so tokens minted before the
+ * epoch existed keep working until the first such event.
+ */
+const epochClaim = (user) => ({
+  cep: Number.isInteger(user?.credentialEpoch) ? user.credentialEpoch : 0,
+});
+const tokenEpoch = (payload) => (Number.isInteger(payload?.cep) ? payload.cep : 0);
+const storedEpoch = (account) =>
+  Number.isInteger(account?.credentialEpoch) ? account.credentialEpoch : 0;
+/** Whether a verified token was minted at the identity's current epoch. */
+const tokenEpochCurrent = (payload, account) => tokenEpoch(payload) === storedEpoch(account);
+
 const createAccessToken = (user) => {
   return jwt.sign(
     {
@@ -84,6 +101,7 @@ const createAccessToken = (user) => {
       // company (certification finding L10): it cannot be exchanged for a
       // session in another workspace the person belongs to.
       ...(user.ssoOrgId ? { sso: user.ssoOrgId } : {}),
+      ...epochClaim(user),
       type: 'access',
     },
     getEnv('JWT_SECRET'),
@@ -110,6 +128,7 @@ const createRefreshToken = (user, sessionId, client = 'web') => {
       ...(user.membershipId ? { mid: user.membershipId } : {}),
       // Carried through every refresh: an SSO session stays bound to its company (L10).
       ...(user.ssoOrgId ? { sso: user.ssoOrgId } : {}),
+      ...epochClaim(user),
       type: 'refresh',
       // The delivery channel this token was issued on: 'web' (httpOnly cookie)
       // or 'mobile' (response body, kept in the device keychain). A token that
@@ -161,6 +180,7 @@ const createIdentityToken = (user) =>
       sub: user.id,
       email: user.email,
       name: user.name,
+      ...epochClaim(user),
       type: 'identity',
     },
     getEnv('JWT_SECRET'),
@@ -199,6 +219,9 @@ const verifyRefreshToken = (token) => {
 };
 
 module.exports = {
+  epochClaim,
+  tokenEpoch,
+  tokenEpochCurrent,
   createAccessToken,
   createIdentityToken,
   createRefreshToken,

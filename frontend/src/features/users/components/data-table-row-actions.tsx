@@ -1,5 +1,6 @@
 import { DotsHorizontalIcon } from '@radix-ui/react-icons'
 import { type Row } from '@tanstack/react-table'
+import { isEndedSession } from '@/services/api/client'
 import { KeyRound, Pencil, Trash2, UserCheck, UserX } from 'lucide-react'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
@@ -15,7 +16,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { type User } from '../data/schema'
-import { useActivateUserMutation } from '../hooks/use-users'
+import {
+  useActivateUserMutation,
+  useCanSendPasswordReset,
+} from '../hooks/use-users'
 import { useUsers } from './users-provider'
 
 type DataTableRowActionsProps = {
@@ -26,6 +30,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const { setOpen, setCurrentRow } = useUsers()
   const canUpdateUser = useCanPerform('user_management', 'update')
   const canDeleteUser = useCanPerform('user_management', 'delete')
+  const canSendPasswordReset = useCanSendPasswordReset()
   const activateMutation = useActivateUserMutation()
   const { data: subscription } = useSubscription()
   const subscriptionAllowsWrites = subscription?.hasAccess !== false
@@ -35,6 +40,8 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
       await activateMutation.mutateAsync(row.original.id)
       toast.success('Engineer activated successfully.')
     } catch (error) {
+      // An ended session was already announced by the request layer (D-ID-1 N4).
+      if (isEndedSession(error)) return
       toast.error(getServerErrorMessage(error, 'Failed to activate engineer.'))
     }
   }
@@ -94,14 +101,15 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             </DropdownMenuItem>
           ))}
 
-        {canUpdateUser && (
+        {canSendPasswordReset && (
           <DropdownMenuItem
             onClick={() => {
               setCurrentRow(row.original)
-              setOpen('resetPassword')
+              setOpen('sendResetEmail')
             }}
+            data-testid='uat-user-send-reset-email'
           >
-            Reset Password
+            Send password-reset e-mail
             <DropdownMenuShortcut>
               <KeyRound size={16} />
             </DropdownMenuShortcut>

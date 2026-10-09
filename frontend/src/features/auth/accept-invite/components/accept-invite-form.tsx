@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useNavigate } from '@tanstack/react-router'
+import { isEndedSession } from '@/services/api/client'
 import {
   acceptInvitation,
   getMyProfile,
@@ -20,7 +21,6 @@ import {
 import { ArrowRight, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
-import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -34,6 +34,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PasswordInput } from '@/components/password-input'
+import { acceptInvitationErrorMessage } from '../invitation-errors'
 
 const formSchema = z
   .object({
@@ -195,7 +196,10 @@ function SignInToAccept({
       if (!bearer) throw new Error('Sign-in did not return a session.')
       await accept(bearer)
     } catch (error) {
-      toast.error(getServerErrorMessage(error, 'Unable to accept invitation.'))
+      // A signed-in session that ended was already announced by the request
+      // layer; a refusal of the sign-in made here is shown (D-ID-1 N4).
+      if (isEndedSession(error)) return
+      toast.error(acceptInvitationErrorMessage(error))
     } finally {
       setIsLoading(false)
     }
@@ -322,7 +326,9 @@ export function AcceptInviteForm({
         })
       )
     } catch (error) {
-      toast.error(getServerErrorMessage(error, 'Unable to accept invitation.'))
+      // An ended session was already announced by the request layer (D-ID-1 N4).
+      if (isEndedSession(error)) return
+      toast.error(acceptInvitationErrorMessage(error))
     } finally {
       setIsLoading(false)
     }

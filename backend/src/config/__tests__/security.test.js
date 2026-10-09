@@ -126,6 +126,16 @@ describe('security configuration', () => {
     expect(validateProductionEnv(validProductionEnv())).toEqual([]);
   });
 
+  // Owner decision D-ID-1 Q8: self-service sign-up stays closed in production
+  // until it verifies the mailbox, so asking for it is refused at start-up.
+  it.each(['true', '1', ' TRUE '])('fails production validation when PUBLIC_REGISTRATION=%s', (value) => {
+    expect(() => validateProductionEnv({ ...validProductionEnv(), PUBLIC_REGISTRATION: value })).toThrow(/PUBLIC_REGISTRATION=true is refused in production/);
+  });
+
+  it.each(['false', '0', ''])('passes production validation with PUBLIC_REGISTRATION=%j', (value) => {
+    expect(validateProductionEnv({ ...validProductionEnv(), PUBLIC_REGISTRATION: value })).toEqual([]);
+  });
+
   it('fails production validation when the Stripe webhook secret is missing', () => {
     const env = validProductionEnv();
     delete env.STRIPE_WEBHOOK_SECRET;

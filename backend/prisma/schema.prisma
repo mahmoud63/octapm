@@ -20,7 +20,7 @@ model Organisation {
   ssoClientId        String?
   ssoClientSecretEnc String?
   ssoDomainsJson     Json      @default("[]")
-  ssoAutoProvision   Boolean   @default(true)
+  ssoAutoProvision   Boolean   @default(false) // retired: SSO never creates an identity or a membership (D-ID-1 Q1)
   ssoDefaultRole     String    @default("site_engineer")
   ssoRequired        Boolean   @default(false)
   ssoUpdatedAt       DateTime?
@@ -214,9 +214,13 @@ model User {
   mfaEnrolledAt       DateTime?
   mfaBackupCodesJson  Json      @default("[]")
   mfaLastTotpStep     Int? // newest 30-second step a TOTP code was accepted for; that step or an earlier one is a replay
-  ssoSubject          String?
+  ssoSubject          String? // legacy global link, no longer read or written: SSO links live on the membership (D-ID-1 Q2)
   ssoProvider         String?
   ssoLinkedAt         DateTime?
+  // Bumped by every credential event (a completed reset, an identity closed, an
+  // admin second-factor reset, a closed account reopened). Tokens carry it as
+  // `cep`; one minted before the bump is refused everywhere (D-ID-1 Q6).
+  credentialEpoch     Int       @default(0)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -793,6 +797,11 @@ model OrganizationMembership {
   leftAt           DateTime?
   lastActiveAt     DateTime?
   defaultProjectId String?                      // last project opened in this workspace (client convenience, nullable)
+  // This workspace's own single-sign-on link (OIDC subject from its provider).
+  // Scoped to the workspace: one company's provider never binds or blocks the
+  // person's sign-in anywhere else (D-ID-1 Q2).
+  ssoSubject       String?
+  ssoLinkedAt      DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -808,6 +817,7 @@ model OrganizationMembership {
   projectUserPermissions ProjectUserPermission[]
 
   @@unique([orgId, userId])
+  @@unique([orgId, ssoSubject])
   @@index([userId, status])
   @@index([orgId, status])
   @@index([orgId, isOwner])

@@ -1,5 +1,6 @@
 import { AxiosError } from 'axios'
 import { toast } from 'sonner'
+import { isEndedSession } from '@/services/api/client'
 
 type ApiErrorPayload = {
   error?: {
@@ -54,6 +55,10 @@ export function getServerErrorMessage(
 export function handleServerError(error: unknown) {
   // eslint-disable-next-line no-console
   console.log(error)
+
+  // An ended session has already been announced, once, by the request layer
+  // (D-ID-1 Q6): no second toast from whichever handler saw it too.
+  if (isEndedSession(error)) return
 
   const errMsg = getServerErrorMessage(error)
 
