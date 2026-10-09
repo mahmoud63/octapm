@@ -633,3 +633,28 @@ Result rows are in `OCTAPM_WORKFLOW_CERTIFICATION.md` §WP-0.
    - activation losing `activityCode` and the budget (proposed P1).
    The HR-S1/S3–S6/S8 rows wait for owner decisions.
 5. Targeted proofs, mutations of the WP-1 guards (§6.2), the final run, close.
+
+## 2026-10-09 — Owner: the original CERT-3 plan stays authoritative; the WP-0 closure is withdrawn
+
+**Owner instruction.**
+- `OCTAPM_CERT3_PLAN.md` remains the source of truth, and nothing is reduced: permissions, personas, known answers, mutations, Codex, lifecycle, deep-company testing, WP-0..WP-9 and the final exit criteria all stand.
+- Only execution gets faster:
+  - rerun just invalid cases where that gives valid evidence;
+  - never rerun a whole matrix for one fixture;
+  - use targeted regression after a fix;
+  - run every full run the exit criteria require.
+- Classification stays CONFIRMED / PARTIAL / REJECTED / EXPECTED BEHAVIOUR / TEST GAP, with the plan's severity handling.
+
+These rules are recorded in plan §0.0. They replace the "fast closure mode" text recorded earlier the same day.
+
+**Corrections made.**
+- **WP-0 is NOT closed.** E1, E7 and E8 are met. E2 is outstanding: the deep population is built (builder exit 0), the 97-company fingerprint is unchanged, and snapshot `cert3d` is taken. The workflow report and register say so, and the register's WP-0 findings table uses the plan's classification.
+- **The WP-1 authoring workflow was stopped before it wrote anything.** It built its own projects, while the plan has WP-1 evidence run on the WP-0-built 087-SCH, 087-IMP and 052. It restarts once the builders exist.
+- **The deep-company builder workflow resumes.** Then the build runs in plan §3.3 order:
+  1. stop the API, restore `cert2c` and re-apply the migrations made since the snapshot;
+  2. start the API and run the D-ID-1 proof;
+  3. run the builders, detached with the watchdog;
+  4. take the fingerprint, then snapshot `cert3d`.
+- **Known dependency:** the 087-SCH build passes through WP-1 transitions. A builder step blocked by a confirmed P1 is fixed when it is reached, as the plan's severity handling says, for example a milestone blocking approval (HR-S2 is decided). Steps that depend on an undecided rule are marked BLOCKED with their HR id.
+
+**Next exact action:** finish the builders, then follow the §3.3 build order to close WP-0, then WP-1.

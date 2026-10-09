@@ -19,19 +19,19 @@ Nothing in this plan has been run. The expected figures come from the five read-
    - **087-SCH's 72,000 row (§3.2).** "One 72,000 row stays unallocated until the baseline step covers it" names neither the activity nor the effect on earned value. The answer book reads it as follows: at the baseline step the row is allocated to A220, so 087-SCH's EV budget is 459,000.00 after the baseline. WP-2's own figures still use the five allocations, which total 387,000.00. This reading stands unless you say otherwise.
    - **Q-KEY follow-ups.** First, webhook subscriptions and accounting connections created from a stolen session survive a credential event; Q-KEY covers API keys only. Second, suspending an administrator in one workspace, when their identity stays open, is not a credential event, so keys they created there that act as other people keep working. Should either be extended? Nothing changes until you say.
 
-### 0.0 Fast closure mode (owner, 2026-10-09)
+### 0.0 Execution efficiency (owner, 2026-10-09)
 
-This mode governs WP-1 to WP-9 and supersedes the plan's sequencing where the two differ.
+**This plan remains the source of truth.** No scope is reduced. Permission and persona testing, known-answer checks, mutation testing, the Codex reviews, lifecycle verification, deep-company testing, every WP-0 to WP-9 requirement and the final exit criteria all stand. The owner's efficiency rules change how the plan is executed, not what it covers:
 
-- **Method for each work package:** known answers fixed in advance; one primary proving and discovery run; every finding classified (P0, P1, P2, P3, TEST/HARNESS, EXPECTED BEHAVIOUR, DUPLICATE, DEFERRED); a fix only for P0, P1, a known-answer invariant failure, a blocker of the current work package, or a violation of an approved owner rule; targeted proofs for the changed area; one final proving run; close.
-- **P2 and P3** go to the register with a destination. They are not fixed in the work package unless designated release blockers.
-- **The ~174 mapped findings** stay suspects until their work package. No product-wide discovery.
-- **Regression is targeted.** Full suites and sentinels run only at certification checkpoints.
-- **Agents** prepare the next work package read only. Codex reviews high-risk rule plans, substantial batches and work-package closure; every Codex finding is still reproduced and adjudicated.
-- **A closed work package** reopens only on new P0 or P1 evidence, or if its result proves invalid.
-- **Deep companies (E2)** are built at the start of the work package that uses them, not all in WP-0.
+1. When only a few test cases were invalid (a wrong fixture or request), fix those and rerun only those cases, as long as that still gives valid evidence. Do not repeat the whole long test.
+2. Do not rerun a whole permission matrix because one request fixture was wrong.
+3. Every full run that an exit criterion requires is run at its checkpoint.
+4. Findings are classified as this plan says: CONFIRMED, PARTIAL, REJECTED, EXPECTED BEHAVIOUR or TEST GAP. Confirmed P0 and P1 workflow defects are fixed. P2 and P3 are recorded or deferred where this plan says so.
+5. No open-ended defect hunting beyond what this plan specifies. No new review rounds, matrices or requirements unless a P0 or P1 shows the plan's evidence is invalid.
+6. Targeted regression after a fix where it is valid. Every full proving and exit run this plan requires is still performed.
+7. Parallel agents may prepare or execute work this plan already defines, and must not widen it. Claude remains integration owner, and the plan's sequencing and gates are unchanged.
 
-**WP-0 closed 2026-10-09 (PASS):** see `OCTAPM_WORKFLOW_CERTIFICATION.md`.
+(A "fast closure mode" recorded here earlier the same day was withdrawn by the owner's instruction above. WP-0 was briefly marked closed under it. That closure was withdrawn: WP-0 closes only when E2, the deep population built and snapshot `cert3d`, is met.)
 
 ### 0.1 Decisions in force (owner, 2026-10-05)
 

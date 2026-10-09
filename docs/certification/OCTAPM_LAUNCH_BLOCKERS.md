@@ -233,34 +233,34 @@ Deferred (recorded, not L38):
 - **D-ID-1 (P3 → CERT-3 item 1; owner decision 2026-10-05) — FIXED 2026-10-09** (identity batch; see the section at the end). Original finding: `POST /users` still answers 201 for a new e-mail (account created with an admin-set password) and 202 for an existing one (invitation), so an admin can tell that an account exists for an e-mail. **Decision:** a fully invitation-based user add — the same neutral answer for new and existing e-mails, no admin creates or sets another person's password, the recipient creates or signs into their own identity and accepts, membership only after acceptance. First bounded identity/onboarding item of CERT-3 (CERT-2 not reopened).
 - **D-ID-2 (P3, CERT-3)** Lists of past records (project team history, API-client owners) still show a former member's current name and e-mail. **WP-0 reproduction 2026-10-09** (`scripts/cert/cert3/d-id-2-repro.js`): CONFIRMED, 13/13 defect checks. A former member (suspended, or left) who is renamed by their home company afterwards appears under the new name, with their e-mail, in five places: project history, the API-key owner, the task creator, comment and history entries, and the project team and party lists. One part breaks the code's own contract: `audit.service attachActorNames` promises `null` ("Former user") for a person no longer in the organisation, and gives the live name. That part is a defect whatever is decided. The rest depends on an owner rule (what may past records show about someone who left: the name at the time, the live name, or "Former user"; and the e-mail?). Proposed: names as they were, no e-mail.
 - **D-SSO-1 (P3, CERT-7)** SSO errors (`SSO_USER_NOT_FOUND`, `USER_INACTIVE`, `SSO_IDENTITY_CONFLICT`) let a company's own identity provider tell whether an e-mail has an account elsewhere.
-- **D-ID-3 (P3 → P2 proposed, CERT-3)** `POST /projects/:id/parties/:partyId/members` takes a caller-supplied `acceptedAt` for the workspace's own members. **WP-0 reproduction 2026-10-09** (`scripts/cert/cert3/d-id-3-repro.js`): CONFIRMED, 8/8 defect checks.
+- **D-ID-3 (P3, CERT-3; deferred to WP-8)** `POST /projects/:id/parties/:partyId/members` takes a caller-supplied `acceptedAt` for the workspace's own members. **WP-0 reproduction 2026-10-09** (`scripts/cert/cert3/d-id-3-repro.js`): CONFIRMED, 8/8 defect checks.
   - It stores any `acceptedAt` and `invitedAt` the caller sends: past, future (2099), or a bare number (`86400000` → 1970-01-02).
   - A re-add overwrites, or erases to null, a real acceptance time.
   - It writes the caller's date into a legacy home member's `joinedAt`.
   - Proposed fix (no owner rule needed): the dates are the server's. A direct add of the workspace's own active member stamps `acceptedAt` now, ignores or refuses the caller's dates, and never rewrites an existing acceptance.
-- **D-ID-7 (P2 proposed, new from the D-ID-3 run)** A party add turns a legacy home member (homed in A with no membership row) into a GUEST of their own home workspace (`kind guest`, role `external_party`), which narrows their access there.
-- **D-ID-8 (P2 proposed, new from the D-ID-2/3 runs)** Suspension and party places:
+- **D-ID-7 (P3, new from the D-ID-3 run; deferred to WP-8)** A party add turns a legacy home member (homed in A with no membership row) into a GUEST of their own home workspace (`kind guest`, role `external_party`), which narrows their access there.
+- **D-ID-8 (P3, new from the D-ID-2/3 runs; deferred to WP-8)** Suspension and party places:
   - A suspension leaves the person's party places active, so Activate brings the party access back. The admin guide says assignments are not restored.
   - A direct party add gives a suspended member an active place, with no standing check. The team add refuses with 409 `USER_NOT_ACTIVE`.
   - Proposed: refuse the add like the team add does, and end party places on suspension. This touches owner decision Q3 (a suspended person returns only through Activate), which it supports.
-- **D-ID-9 (P2 proposed, new from the D-ID-2 run)** A task cannot be assigned to an active member whose home is another company: `task.service ensureAssigneeInProject` filters on `User.orgId` and `User.status`, not on the membership in this workspace.
-- **CERT-3 WP-0 closure (2026-10-09, fast closure mode): classification of every WP-0 finding.** P0 = 0, P1 = 0.
+- **D-ID-9 (P2, new from the D-ID-2 run; deferred to WP-8)** A task cannot be assigned to an active member whose home is another company: `task.service ensureAssigneeInProject` filters on `User.orgId` and `User.status`, not on the membership in this workspace.
+- **CERT-3 WP-0 findings (2026-10-09).** Classified as plan §4 says: CONFIRMED, PARTIAL, REJECTED, EXPECTED BEHAVIOUR or TEST GAP. Severity is handled as the plan says: confirmed P0 and P1 are fixed, P2 and P3 are recorded or deferred. P0 = 0, P1 = 0 so far. WP-0 is not closed: E2, the deep population and snapshot `cert3d`, is still to come.
 
-  | Finding | Class | Destination |
-  |---|---|---|
-  | D-ID-2 former member's live name and e-mail on past records | P3 (one part breaks the code's own "Former user" contract) | CERT-7, with the owner rule on what past records show |
-  | D-ID-3 caller-supplied party acceptance dates | P3 | WP-8 |
-  | D-ID-7 party add makes a legacy home member a guest | P3 (legacy rows only; production has none, D-ID-5) | WP-8 |
-  | D-ID-8 party places and suspension | P3 (no access while suspended; Activate is the way back, as Q3 says) | WP-8 |
-  | D-ID-9 task assignee homed in another company refused | P2 | WP-8 |
-  | D-ID-10 key list: home role; a departed owner's key listed active | P3 | CERT-7 |
-  | WP0-INV-1 stock received for a project the person cannot open | P2 (in-company; tenant isolation intact) | WP-5 (reproduce issue and return too) |
-  | WP0-BOQ-1 BOQ template and upload narrower than `boq:read` | P3 | WP-6 |
-  | D-PAGE-1 pagination ties | P2, fixed (it blocked the unit gate) | closed `d341bd5` |
-  | HR-A1, HR-A2, HR-A3; Q-KEY F1 and F2; 087-SCH 72,000 row; CLAUDE.md 5% retention | Owner questions | plan §0 item 5 |
-  | Probe request defects (22 on 8 entries); unparseable mutants R2.9 and MA-1; the users-test baseline; the keys-proof fixtures; plan premises (087 DST, 087-COM-B rates, 052 order, HR-C1 rows) | TEST/HARNESS, fixed | — |
-  | Proof residue in 052 and 025 (thousands of throwaway people) | TEST/HARNESS | Cleared by the next `cert2c` restore; until then, new deep projects isolate their figures |
-  | `module-action-permissions` 5 s timeout under load | DUPLICATE (D-TEST-1 class) | D-TEST-1 |
+  | Finding | Classification | Severity | Destination |
+  |---|---|---|---|
+  | D-ID-2 former member's live name and e-mail on past records | CONFIRMED | P3 (one part breaks the code's own "Former user" contract) | Deferred to CERT-7, with the owner rule on what past records show |
+  | D-ID-3 caller-supplied party acceptance dates | CONFIRMED | P3 | Deferred to WP-8 |
+  | D-ID-7 party add makes a legacy home member a guest | CONFIRMED | P3 (legacy rows only; production has none, D-ID-5) | Deferred to WP-8 |
+  | D-ID-8 party places and suspension | CONFIRMED | P3 (no access while suspended; Activate is the way back, as Q3 says) | Deferred to WP-8 |
+  | D-ID-9 task assignee homed in another company refused | CONFIRMED (by code reading in the D-ID-2 run) | P2 | Deferred to WP-8 |
+  | D-ID-10 key list: home role; a departed owner's key listed active | CONFIRMED | P3 | Deferred to CERT-7 |
+  | WP0-INV-1 stock received for a project the person cannot open | CONFIRMED (permission probe S5) | P2 (in-company; tenant isolation intact) | Deferred to WP-5, which reproduces issue and return too |
+  | WP0-BOQ-1 BOQ template and upload narrower than `boq:read` | CONFIRMED (14 refusals) | P3 | Deferred to WP-6 |
+  | D-PAGE-1 pagination ties | CONFIRMED | P2, fixed (it blocked the unit gate) | Closed `d341bd5` |
+  | HR-A1, HR-A2, HR-A3; Q-KEY F1 and F2; 087-SCH 72,000 row; CLAUDE.md 5% retention | — | Owner questions | Plan §0 item 5 |
+  | Probe request defects (22 on 8 entries; only those entries were corrected); unparseable mutants R2.9 and MA-1; the users-test baseline; the keys-proof fixtures; plan premises (087 DST, 087-COM-B rates, 052 order, HR-C1 rows) | TEST GAP | — | Fixed |
+  | Proof residue in 052 and 025 (thousands of throwaway people) | TEST GAP | — | Cleared by the `cert2c` restore that comes before the deep build (plan §3.3) |
+  | `module-action-permissions` 5 s timeout under load | TEST GAP (the D-TEST-1 class) | — | D-TEST-1 |
 
 - **WP0-INV-1 (P2 proposed, CERT-3 WP-5)** Stock can be received against a project the person cannot open. `POST /inventory/stock/receive` is company-level, and `inventory.service` checks a `projectId` only against an API key's project list. Live permission probe (`scripts/cert/cert3/permission-probe.js`, S5): 087's warehouse keeper, not assigned to the project, received stock for it, 201. The same applies to the other company-level inventory routes that carry a `projectId`. Proposed fix: hold `projectId` to the project-access rule, as project routes do.
 - **WP0-BOQ-1 (P3, CERT-3 WP-6)** `GET /boq/template` and `GET /boq/uploads/:documentId` are guarded by `requireRoles(pm, planning_eng, qs)`. `shared/permissions.json` gives `boq:read` to all nine roles. Live probe: 14 refusals (403 FORBIDDEN) for policy readers (cost controller, procurement, warehouse, site, quality and finance in 087, and 052's finance). The route list is narrower than the policy. That is safe, but the two must agree: either the route follows the policy, or the policy narrows. Owner choice, folded into HR-A1.

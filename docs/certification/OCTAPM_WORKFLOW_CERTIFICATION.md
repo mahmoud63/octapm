@@ -2,19 +2,15 @@
 
 **Status: CERT-3 in progress.** One section per work package, added when the work package closes: rule → evidence → result. Plan: [OCTAPM_CERT3_PLAN.md](OCTAPM_CERT3_PLAN.md). Register: [OCTAPM_LAUNCH_BLOCKERS.md](OCTAPM_LAUNCH_BLOCKERS.md). Journal: [OCTAPM_CERT_JOURNAL.md](OCTAPM_CERT_JOURNAL.md).
 
-**Method (owner: "CERT-3 fast closure mode", 2026-10-09).** For each work package:
-1. Known answers are fixed in advance.
-2. One primary proving and discovery run.
-3. Every finding is classified (P0, P1, P2, P3, TEST/HARNESS, EXPECTED BEHAVIOUR, DUPLICATE, DEFERRED).
-4. Only P0, P1, known-answer invariant failures, blockers of the current work package, and violations of an approved owner rule are fixed in it.
-5. Targeted proofs for what changed.
-6. One final proving run, then close.
-
-**Closure rule:** the work package's known-answer checks pass; P0 = 0; relevant P1 = 0; owner rules pass; mutations of changed guards are caught; every P2/P3 finding has a register row and a destination. A closed work package reopens only on new P0/P1 evidence or an invalid result.
+**Method:** `OCTAPM_CERT3_PLAN.md` is authoritative: its scope, sequencing, exit criteria (§6.1) and review gates (§6.4) apply unchanged. The owner's efficiency rules of 2026-10-09 (plan §0.0) only change execution:
+- rerun just the invalid cases when that still gives valid evidence;
+- use targeted regression after a fix;
+- run every full run the exit criteria require.
+Findings are classified CONFIRMED, PARTIAL, REJECTED, EXPECTED BEHAVIOUR or TEST GAP. Confirmed P0 and P1 are fixed; P2 and P3 are recorded or deferred as the plan says.
 
 ---
 
-## WP-0 Foundations — CLOSED 2026-10-09 (PASS)
+## WP-0 Foundations — IN PROGRESS (E1, E7, E8 met; E2 outstanding)
 
 | Rule or item | Evidence | Result |
 |---|---|---|
@@ -26,6 +22,13 @@
 | Third deep company | `wp0-d3-confirm.js` (read only) | 006 Atlas Infrastructure confirmed, 8/8 |
 | Pagination (found by the unit gate) | `d-page-1-proof.js` | D-PAGE-1 (P2) fixed at `d341bd5`: 17/17, mutations 7/7 caught |
 
-**Severity at closure:** P0 = 0, P1 = 0. The P2 and P3 findings are deferred with destinations (register, "CERT-3 WP-0 closure").
+**Severity so far:** P0 = 0, P1 = 0. P2 and P3 findings are recorded and deferred (register, "CERT-3 WP-0 findings").
 
-**Change of plan:** the deep companies (E2) are built one work package at a time, at the start of the work package that uses them, not all at once in WP-0. WP-1 builds 087-SCH and 087-IMP and the schedule parts of the 052 and 006 lanes.
+**Outstanding for WP-0 (E2, plan §3.3):**
+1. Write the deep-company builders.
+2. Stop the API and restore `cert2c` (then re-apply the migrations made since the snapshot).
+3. Start the API and run the D-ID-1 proof.
+4. Run the builders, detached with the watchdog. Every creation is asserted, and builder exit 0 is required.
+5. Confirm the 97-company fingerprint is unchanged.
+6. Take snapshot `cert3d`.
+WP-0 closes when these pass.
