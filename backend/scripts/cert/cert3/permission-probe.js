@@ -334,7 +334,7 @@ const buildRequest = (entry, ctx) => {
     if ((probe.ghost || []).includes(name)) return name === 'period' ? GHOST_PERIOD : GHOST_ID;
     throw new SetupError(`${entry.id}: no value for {${name}}`);
   });
-  if (probe.query) route += `?${new URLSearchParams(probe.query).toString()}`;
+  if (probe.query) route += `?${new URLSearchParams(substitute(probe.query, ctx)).toString()}`;
   let json;
   if (entry.method !== 'GET') {
     if (probe.mode === 'invalid') json = substitute(probe.body, ctx);
@@ -347,7 +347,8 @@ const buildRequest = (entry, ctx) => {
   return { route, json, binary: Boolean(probe.binary) };
 };
 
-const describeAllow = (allow) => `${allow.status}${allow.code ? ` ${allow.code}` : allow.codePattern ? ` /${allow.codePattern}/` : ''}`;
+const describeOne = (allow) => `${allow.status}${allow.code ? ` ${allow.code}` : allow.codePattern ? ` /${allow.codePattern}/` : ''}`;
+const describeAllow = (allow) => (allow.anyOf ? allow.anyOf.map(describeOne).join(' or ') : describeOne(allow));
 
 /** The verdict on one answer: pass | mismatch (a finding) | setup (a probe defect) | observed (not compared). */
 const judge = (entry, expected, res) => {
@@ -373,9 +374,12 @@ const judge = (entry, expected, res) => {
   }
   if (status === 403) return { verdict: 'mismatch', reason: `the JSON allows this role; refused ${status} ${code}${details ? ` ${JSON.stringify(details)}` : ''}` };
   const { allow } = entry.probe;
-  const statusOk = status === allow.status || (entry.probe.mode === 'effect' && (status === 200 || status === 201));
-  const codeOk = allow.code ? code === allow.code : allow.codePattern ? new RegExp(allow.codePattern).test(code || '') : true;
-  if (statusOk && codeOk) return { verdict: 'pass', reason: '' };
+  const answers = (one) => {
+    const statusOk = status === one.status || (entry.probe.mode === 'effect' && (status === 200 || status === 201));
+    const codeOk = one.code ? code === one.code : one.codePattern ? new RegExp(one.codePattern).test(code || '') : true;
+    return statusOk && codeOk;
+  };
+  if ((allow.anyOf || [allow]).some(answers)) return { verdict: 'pass', reason: '' };
   return { verdict: 'setup', reason: `passed the guard but answered ${status} ${code} instead of ${describeAllow(allow)} (fix the probe body or record)${details ? ` ${JSON.stringify(details).slice(0, 300)}` : ''}` };
 };
 

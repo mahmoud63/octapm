@@ -574,3 +574,28 @@ Evidence:
 3. the post-hoc verifier with the API idle;
 4. the C087R proving lifecycle, detached.
 Then classify the findings, then build the deep companies (restore `cert2c` first).
+
+## 2026-10-09 (afternoon) — WP-0 live runs: identity leftovers, permission probe, lifecycle checks
+
+The runs below went one database writer at a time, in process unless noted.
+
+- **D3 confirmed:** `wp0-d3-confirm.js`, 8/8 (the entry above).
+- **D-ID-2:** `d-id-2-repro.js` CONFIRMED (13/13 defect checks). A former member renamed by their home company appears under the new name and with their e-mail in project history, the API-key owner, tasks and comments, and the team and party lists. Project history breaks its own contract: it should show "Former user" (null) for someone who left. The rest waits for an owner rule on what past records may show.
+- **D-ID-3:** `d-id-3-repro.js` CONFIRMED (8/8). Caller-supplied acceptance dates are stored: past, future and numeric values. A re-add overwrites or erases a real acceptance time. Proposed: P2.
+- **New register items:**
+  - D-ID-7: a party add makes a legacy home member a guest of their own workspace.
+  - D-ID-8: suspension leaves party places active, and a direct party add accepts a suspended member.
+  - D-ID-9: a member homed elsewhere cannot be assigned a task.
+  - D-ID-10: the key list shows the home role and lists a departed owner's key as active.
+- **Permission probe:** `permission-probe.js`, 292 transitions × 087's nine personas, plus 052's finance administrator. Every policy decision matched (124/126). The two failures are the registered suspects, now confirmed:
+  - WP0-INV-1: stock received for a project the person cannot open (201);
+  - WP0-BOQ-1: BOQ template and upload routes narrower than `boq:read`.
+  The first two runs found 22 defects in the probe's own requests on 8 entries, all fixed: request bodies, a query placeholder, and one answer that depends on project state (`anyOf`).
+- **Lifecycle post-hoc verifier:** `lifecycle-posthoc-verifier.js`, read only. Over the 14 certified projects, 1,694 of 1,694 stored figures match the known answers, 0 contradict, and 7 are not verifiable post hoc. The projects' rows are identical before and after.
+- **Proving lifecycle, stamp C087R, detached:** all 18 stages and the snapshot passed, 582/582 checks, on a fresh project in 087. The certified runs had 496 checks; the stage edits add the stage table's known-answer assertions. The certified C087 project was not touched.
+
+**WP-0 status:**
+- Done: answer book, harness, permission matrix and probe, weak lifecycle checks, identity leftovers, D3.
+- Remaining: the deep-company builders (plan §3.3: drivers in `scripts/cert/cert3/build/`, files generated from the answer book, resumable, every creation asserted), then the build itself. Restore `cert2c` first: the proof residue in 052 and 025 runs to thousands of throwaway people. Then the fingerprint and snapshot `cert3d`.
+
+**Next exact action:** write the deep-company builders (087, 052, 006) from the answer book, review them, restore `cert2c`, build detached with the watchdog, then fingerprint and take `cert3d`.
