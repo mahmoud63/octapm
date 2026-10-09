@@ -1,6 +1,7 @@
 const { createHash, randomBytes } = require("crypto");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
+const { normalizeLimit } = require("../utils/list-query");
 const auditService = require("./audit.service");
 const { sendEmail, templates } = require("./email.service");
 const companyPartyService = require("./company-party.service");
@@ -157,7 +158,9 @@ const findUserInOrg = ({ orgId, userId, tx = prisma }) =>
   });
 
 const listUsers = async ({ orgId, query }) => {
-  const take = 20;
+  // The caller's page size, 20 by default and at most 100 (it was always 20,
+  // whatever the request asked; D-PAGE-1).
+  const take = normalizeLimit(query.limit, { defaultLimit: 20, maxLimit: 100 });
   const membershipAware = membershipService.hasMembershipModel(prisma) && membershipService.isMembershipReadEnabled();
   // Everyone who belongs to this workspace: by membership, or by the User
   // column for rows seeded before memberships. The role filter looks at the
@@ -183,30 +186,20 @@ const listUsers = async ({ orgId, query }) => {
     });
   }
 
-  const SORT_FIELDS = {
-    name: { name: "asc" },
-    email: { email: "asc" },
-    projects: { projectAssignments: { _count: "desc" } },
-    created: { createdAt: "desc" },
-  };
-  const sortKey = SORT_FIELDS[query.sortBy] ? query.sortBy : "created";
-  let orderBy = SORT_FIELDS[sortKey];
-  if (
-    query.sortDir === "desc" &&
-    sortKey !== "projects" &&
-    sortKey !== "created"
-  ) {
-    orderBy = { [sortKey]: "desc" };
-  }
-  if (
-    query.sortDir === "asc" &&
-    (sortKey === "projects" || sortKey === "created")
-  ) {
-    orderBy =
-      sortKey === "projects"
-        ? { projectAssignments: { _count: "asc" } }
-        : { createdAt: "asc" };
-  }
+  const DEFAULT_SORT_DIR = { name: "asc", email: "asc", projects: "desc", created: "desc" };
+  const sortKey = DEFAULT_SORT_DIR[query.sortBy] ? query.sortBy : "created";
+  const dir = query.sortDir === "asc" || query.sortDir === "desc" ? query.sortDir : DEFAULT_SORT_DIR[sortKey];
+  // Every order ends on the id (D-PAGE-1). The cursor row is found by its
+  // place in the order, so rows that tie on the sort value need a unique last
+  // key: people created by one bulk import share a createdAt, and most people
+  // have the same project count, and without it some of them were returned by
+  // no page at all (3 of 27 in one certification workspace).
+  const orderBy = [
+    sortKey === "projects"
+      ? { projectAssignments: { _count: dir } }
+      : { [sortKey === "created" ? "createdAt" : sortKey]: dir },
+    { id: dir },
+  ];
 
   const users = await prisma.user.findMany({
     where,

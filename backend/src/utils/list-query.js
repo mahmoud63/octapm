@@ -99,6 +99,7 @@ module.exports = {
   cursorArgs,
   dateRangeFilter,
   equalsInsensitive,
+  normalizeLimit,
   normalizeListQuery,
   toCursorPage,
   trimToNull,

@@ -133,8 +133,12 @@ describe("cursor pagination returns every row exactly once", () => {
       });
 
     it("loses nothing across page boundaries", async () => {
-      const everything = await listPage({ limit: 100, cursor: null });
-      const expected = new Set(everything.items.map((row) => row.id));
+      // The truth comes from the database, not from a page: listUsers pages by a
+      // fixed 20 whatever `limit` says, so one call under-counts a workspace of
+      // more than 20 people — which certification runs made the busiest one.
+      const membershipService = require("../membership.service");
+      const everyone = await prisma.user.findMany({ where: membershipService.userInOrgWhere({ tx: prisma, orgId: org.id }), select: { id: true } });
+      const expected = new Set(everyone.map((row) => row.id));
       const pageSize = 2;
       expect(expected.size).toBeGreaterThan(pageSize);
 

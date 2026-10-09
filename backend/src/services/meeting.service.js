@@ -1053,9 +1053,11 @@ const listMeetings = async ({
   const orderByMap = {
     created: [{ createdAt: listQuery.sortDir }, { id: listQuery.sortDir }],
     updated: [{ updatedAt: listQuery.sortDir }, { id: listQuery.sortDir }],
-    scheduled: [{ scheduledAt: listQuery.sortDir }, { createdAt: "desc" }],
-    status: [{ status: listQuery.sortDir }, { scheduledAt: "desc" }],
-    type: [{ meetingType: listQuery.sortDir }, { scheduledAt: "desc" }],
+    // Each order ends on the id, so meetings that tie on the sort value keep
+    // one place in it and the cursor finds every one of them (D-PAGE-1).
+    scheduled: [{ scheduledAt: listQuery.sortDir }, { createdAt: "desc" }, { id: "desc" }],
+    status: [{ status: listQuery.sortDir }, { scheduledAt: "desc" }, { id: "desc" }],
+    type: [{ meetingType: listQuery.sortDir }, { scheduledAt: "desc" }, { id: "desc" }],
   };
 
   const rows = await prisma.meeting.findMany({

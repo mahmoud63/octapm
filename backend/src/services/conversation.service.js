@@ -381,8 +381,16 @@ const markRead = async ({ orgId, viewer, conversationId }) => {
 const listMessages = async ({ orgId, viewer, conversationId, cursor = null, limit = 50 }) => {
   await ensureMember({ orgId, conversationId, userId: viewer.id });
   const take = Math.min(Math.max(Number(limit) || 50, 1), 200);
-  const cursorRow = cursor ? await prisma.conversationMessage.findFirst({ where: { id: cursor, conversationId }, select: { createdAt: true } }) : null;
-  const rows = await prisma.conversationMessage.findMany({ where: { conversationId, orgId, ...(cursorRow ? { createdAt: { lt: cursorRow.createdAt } } : {}) }, include: messageInclude, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: take + 1 });
+  const cursorRow = cursor ? await prisma.conversationMessage.findFirst({ where: { id: cursor, conversationId }, select: { id: true, createdAt: true } }) : null;
+  // A cursor this conversation does not have pages nothing, as on every other
+  // list; it used to start again from the newest page, so a client could loop.
+  if (cursor && !cursorRow) return { items: [], nextCursor: null };
+  // Older than the cursor in the page's own order (createdAt, then id), so a
+  // message sent in the same instant as the cursor is not skipped (D-PAGE-1).
+  const older = cursorRow
+    ? { OR: [{ createdAt: { lt: cursorRow.createdAt } }, { createdAt: cursorRow.createdAt, id: { lt: cursorRow.id } }] }
+    : {};
+  const rows = await prisma.conversationMessage.findMany({ where: { conversationId, orgId, ...older }, include: messageInclude, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: take + 1 });
   const hasMore = rows.length > take;
   const page = rows.slice(0, take);
   return { items: page.reverse().map((row) => messageOut(row, viewer.id)), nextCursor: hasMore ? page[0].id : null };

@@ -542,3 +542,35 @@ The five proof gaps Codex named are all closed with checks: K1.4, K4.2, K5.3b/c,
    - the C087R proving lifecycle, detached.
 3. Classify every finding.
 4. Build the deep companies 087, 052 and 006 (detached, with watchdog); snapshot `cert3d`.
+
+
+## 2026-10-09 — D-PAGE-1 fixed (pagination ties); D3 confirmed
+
+**D-PAGE-1.** Four cursor lists sorted on a value that rows can share, without a unique last key, so tied rows were returned by no page or twice:
+- `listUsers`: in CERT-044, 24 of 27 people share one createdAt, and 3 were unreachable;
+- `listTasks`;
+- `listMeetings`;
+- `listMessages`: it read older messages by createdAt alone.
+
+The fix:
+- every sort ends on `id`;
+- `GET /users` honours `limit`, as its OpenAPI already documented;
+- an unknown message cursor pages nothing, instead of the newest page.
+
+Evidence:
+- `scripts/cert/cert3/d-page-1-proof.js` passes 17/17. It is read only and walks each list two rows per page, for every sort and direction, over certification data with real ties and NULL dates.
+- Mutations: 7/7 caught. The runner now has the lists `dpage` and `dpage-unit`.
+- Unit suite: 6289/6290 in the full run. The one failure was a 5 s timeout under load in `module-action-permissions.test.js`, a D-TEST-1-class timing flake; the suite passes alone 693/693.
+- Found along the way: 052 and 025 hold thousands of throwaway proof people (3,518 and 1,840 listed). The WP-0 build restores `cert2c` first, which removes them.
+
+**D3 confirmed** (`scripts/cert/cert3/wp0-d3-confirm.js`, read only, 8/8):
+- 006 is active on Business with 4 members (the PM is owner and admin), no finance member, no pending invitation, 3 live projects including 006-01, and no residue;
+- PostgreSQL agrees Cairo is UTC+3 in July 2026;
+- 052, 087 and 018 are active.
+
+**Next exact action:** the WP-0 live runs, one database writer at a time:
+1. D-ID-2 and D-ID-3 repro;
+2. the permission probe;
+3. the post-hoc verifier with the API idle;
+4. the C087R proving lifecycle, detached.
+Then classify the findings, then build the deep companies (restore `cert2c` first).

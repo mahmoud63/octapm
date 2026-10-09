@@ -1,0 +1,21 @@
+{
+  "note": "D-PAGE-1, unit side: the message ties are not present in the certification data, so the unit test is the catcher.",
+  "mutations": [
+    {
+      "name": "DPU1 older messages are read by createdAt alone again (a message in the cursor's instant is skipped)",
+      "file": "backend/src/services/conversation.service.js",
+      "from": "{ createdAt: cursorRow.createdAt, id: { lt: cursorRow.id } }",
+      "to": "{ createdAt: { lt: cursorRow.createdAt } }",
+      "suite": "src/services/__tests__/conversation.service.test.js",
+      "expect": "'pages messages sent in the same instant without skipping any…' fails"
+    },
+    {
+      "name": "DPU2 an unknown message cursor starts again from the newest page",
+      "file": "backend/src/services/conversation.service.js",
+      "from": "  if (cursor && !cursorRow) return { items: [], nextCursor: null };",
+      "to": "",
+      "suite": "src/services/__tests__/conversation.service.test.js",
+      "expect": "'…and pages nothing for a cursor it does not have' fails"
+    }
+  ]
+}

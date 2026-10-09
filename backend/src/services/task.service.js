@@ -709,9 +709,12 @@ const listTasks = async ({
   const orderByMap = {
     created: [{ createdAt: listQuery.sortDir }, { id: listQuery.sortDir }],
     updated: [{ updatedAt: listQuery.sortDir }, { id: listQuery.sortDir }],
-    due: [{ dueDate: listQuery.sortDir }, { createdAt: "desc" }],
-    priority: [{ priority: listQuery.sortDir }, { dueDate: "asc" }],
-    status: [{ status: listQuery.sortDir }, { dueDate: "asc" }],
+    // Each order ends on the id, so tasks that tie on the sort value (the same
+    // status, priority, due date or none) keep one place in it and the cursor
+    // finds every one of them (D-PAGE-1).
+    due: [{ dueDate: listQuery.sortDir }, { createdAt: "desc" }, { id: "desc" }],
+    priority: [{ priority: listQuery.sortDir }, { dueDate: "asc" }, { id: "asc" }],
+    status: [{ status: listQuery.sortDir }, { dueDate: "asc" }, { id: "asc" }],
   };
 
   const rows = await prisma.task.findMany({

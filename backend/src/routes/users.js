@@ -98,6 +98,7 @@ router.get(
   requirePermission("user_management", "read"),
   [
     query("cursor").isString().optional().isUUID(),
+    query("limit").isString().optional().isInt({ min: 1, max: 100 }),
     query("status").isString().optional().isIn(["active", "inactive"]),
     query("role").optional().isString(),
     query("search").optional().isString().trim(),

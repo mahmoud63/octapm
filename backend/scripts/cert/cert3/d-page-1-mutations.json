@@ -1,0 +1,49 @@
+{
+  "proof": "scripts/cert/cert3/d-page-1-proof.js",
+  "note": "D-PAGE-1: each mutation takes back one part of the fix; the live proof (read only, real Prisma cursors over the certification data with its ties and NULL dates) must fail. Run: node C:\\Temp\\octapm-cert\\mutate-multi.js <out> --lists=dpage,dpage-unit",
+  "mutations": [
+    {
+      "name": "DP1 the users order ends on the sort value alone (no id)",
+      "file": "backend/src/services/user.service.js",
+      "from": "    { id: dir },",
+      "to": "",
+      "expect": "the users walks miss people that tie on createdAt or project count"
+    },
+    {
+      "name": "DP2 the tasks orders end without the id (due, priority, status)",
+      "file": "backend/src/services/task.service.js",
+      "from": "    due: [{ dueDate: listQuery.sortDir }, { createdAt: \"desc\" }, { id: \"desc\" }],",
+      "to": "    due: [{ dueDate: listQuery.sortDir }, { createdAt: \"desc\" }],",
+      "also": [
+        { "file": "backend/src/services/task.service.js", "from": "    priority: [{ priority: listQuery.sortDir }, { dueDate: \"asc\" }, { id: \"asc\" }],", "to": "    priority: [{ priority: listQuery.sortDir }, { dueDate: \"asc\" }]," },
+        { "file": "backend/src/services/task.service.js", "from": "    status: [{ status: listQuery.sortDir }, { dueDate: \"asc\" }, { id: \"asc\" }],", "to": "    status: [{ status: listQuery.sortDir }, { dueDate: \"asc\" }]," }
+      ],
+      "expect": "the tasks walks miss or repeat tasks that tie on status/priority and due date"
+    },
+    {
+      "name": "DP3 the meetings orders end without the id (scheduled, status, type)",
+      "file": "backend/src/services/meeting.service.js",
+      "from": "    scheduled: [{ scheduledAt: listQuery.sortDir }, { createdAt: \"desc\" }, { id: \"desc\" }],",
+      "to": "    scheduled: [{ scheduledAt: listQuery.sortDir }, { createdAt: \"desc\" }],",
+      "also": [
+        { "file": "backend/src/services/meeting.service.js", "from": "    status: [{ status: listQuery.sortDir }, { scheduledAt: \"desc\" }, { id: \"desc\" }],", "to": "    status: [{ status: listQuery.sortDir }, { scheduledAt: \"desc\" }]," },
+        { "file": "backend/src/services/meeting.service.js", "from": "    type: [{ meetingType: listQuery.sortDir }, { scheduledAt: \"desc\" }, { id: \"desc\" }],", "to": "    type: [{ meetingType: listQuery.sortDir }, { scheduledAt: \"desc\" }]," }
+      ],
+      "expect": "the meetings walks miss or repeat meetings that tie on status/type and time"
+    },
+    {
+      "name": "DP4 an unknown message cursor starts again from the newest page",
+      "file": "backend/src/services/conversation.service.js",
+      "from": "  if (cursor && !cursorRow) return { items: [], nextCursor: null };",
+      "to": "",
+      "expect": "the unknown-cursor check gets the newest page"
+    },
+    {
+      "name": "DP5 GET /users ignores the page size asked for (always 20)",
+      "file": "backend/src/services/user.service.js",
+      "from": "  const take = normalizeLimit(query.limit, { defaultLimit: 20, maxLimit: 100 });",
+      "to": "  const take = 20;",
+      "expect": "the limit check gets 20 people, not 3"
+    }
+  ]
+}

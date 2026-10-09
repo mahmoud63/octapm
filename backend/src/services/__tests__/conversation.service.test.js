@@ -50,7 +50,9 @@ const matchMessage = (row, where = {}) =>
   Object.entries(where).every(([key, condition]) => {
     if (key === "deletedAt") return condition === null ? !row.deletedAt : true;
     if (key === "authorId") return condition && typeof condition === "object" ? row.authorId !== condition.not : row.authorId === condition;
-    if (key === "createdAt") return (!condition.gt || row.createdAt > condition.gt) && (!condition.lt || row.createdAt < condition.lt);
+    if (key === "createdAt") return condition instanceof Date ? row.createdAt.getTime() === condition.getTime() : (!condition.gt || row.createdAt > condition.gt) && (!condition.lt || row.createdAt < condition.lt);
+    if (key === "OR") return condition.some((clause) => matchMessage(row, clause));
+    if (key === "id" && condition && typeof condition === "object") return !condition.lt || row.id < condition.lt;
     return row[key] === condition;
   });
 const applyData = (row, data) => {
@@ -110,7 +112,8 @@ const mockPrisma = {
       const row = store.messages.find((item) => matchMessage(item, where));
       return row ? hydrateMessage(row) : null;
     }),
-    findMany: jest.fn(async ({ where, take }) => store.messages.filter((row) => matchMessage(row, where)).sort((a, b) => b.createdAt - a.createdAt).slice(0, take).map(hydrateMessage)),
+    // The service's order: createdAt, then id, both descending.
+    findMany: jest.fn(async ({ where, take }) => store.messages.filter((row) => matchMessage(row, where)).sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)).slice(0, take).map(hydrateMessage)),
     update: jest.fn(async ({ where, data }) => hydrateMessage(Object.assign(store.messages.find((row) => row.id === where.id), data))),
   },
   $transaction: jest.fn(async (fn) => fn(mockPrisma)),
@@ -235,6 +238,30 @@ describe("conversations", () => {
     await expect(service.sendMessage({ orgId: "org-1", viewer: pm, conversationId: group.id, payload: { body: "late" } })).rejects.toMatchObject({ code: "CONVERSATION_ARCHIVED" });
     expect((await service.listConversations({ orgId: "org-1", viewer: pm })).items).toHaveLength(0);
     expect((await service.listConversations({ orgId: "org-1", viewer: pm, query: { filter: "archived" } })).items.map((item) => item.id)).toEqual([group.id]);
+  });
+
+  // D-PAGE-1: older pages were read with createdAt < the cursor's, so a
+  // message sent in the same instant as the oldest one on a page was returned
+  // by no page; and a cursor the conversation does not have started again from
+  // the newest page, so a client could loop.
+  it("pages messages sent in the same instant without skipping any, and pages nothing for a cursor it does not have", async () => {
+    const instant = new Date(Date.now() - 60_000);
+    store.conversations.push({ id: "conv-tie", orgId: "org-1", kind: "group", title: "Pour", messageCount: 5, archivedAt: null, createdAt: instant, updatedAt: instant });
+    store.members.push({ id: "mem-tie", conversationId: "conv-tie", orgId: "org-1", userId: "u-qs", lastReadAt: null, starred: false, muted: false, joinedAt: instant, leftAt: null });
+    for (const id of ["m-a", "m-b", "m-c", "m-d", "m-e"]) {
+      store.messages.push({ id, conversationId: "conv-tie", orgId: "org-1", authorId: "u-pm", kind: "text", body: id, editedAt: null, deletedAt: null, createdAt: new Date(instant) });
+    }
+    const qs = mockUsers.find((user) => user.id === "u-qs");
+    const seen = [];
+    let cursor = null;
+    for (let page = 0; page < 10; page += 1) {
+      const result = await service.listMessages({ orgId: "org-1", viewer: qs, conversationId: "conv-tie", cursor, limit: 2 });
+      seen.push(...result.items.map((item) => item.id));
+      if (!result.nextCursor) break;
+      cursor = result.nextCursor;
+    }
+    expect([...seen].sort()).toEqual(["m-a", "m-b", "m-c", "m-d", "m-e"]);
+    await expect(service.listMessages({ orgId: "org-1", viewer: qs, conversationId: "conv-tie", cursor: "m-unknown", limit: 2 })).resolves.toEqual({ items: [], nextCursor: null });
   });
 
   it("keeps one thread per record and lets a message share a record with its title and link", async () => {
