@@ -268,6 +268,22 @@ Deferred (recorded, not L38):
 - **D-ID-10 (P3, new from the D-ID-2 run)** `GET /integrations/api-clients` shows the owner's home-company role, not the role the key acts with here. A key whose owner has left (it can no longer authenticate) is still listed as active.
 - **D-TEST-1 (P3, pre-release)** `identifier-shapes.routes.test.js` "POST team userId" takes ~4.3 s of jest's 5 s default (already at round 7) and times out in some full runs; passes alone. Owner (2026-10-05): tracked separately; not to be hidden by raising the timeout unless a real performance regression is proven — find why the team route is slow under the test's doubles.
 - **CARRY (release gate; owner 2026-10-05)** The six backend suites that need the development PostgreSQL on :55432 must be rerun in their intended environment and pass before final release certification.
+- **WP1-MS-1 (P1; owner rule HR-S2) — FIXED 2026-10-09; it blocked the WP-0 deep build.**
+  - **The defect.** CPM and every import store a zero-duration milestone with start = end. The readiness date check (`date_sanity`) failed it, so a revision holding one could not be approved or baselined. Every later PATCH of that activity answered 400 `INVALID_DATES`.
+  - **The rule (HR-S2).** Start = end is valid when the duration is 0; end < start is still refused.
+  - **The fix.** `schedule.service` `date_sanity`, and `activity.service` `assertDates` at create and update. Update judges the duration it gives, else the stored one.
+  - **Live repro** `scripts/cert/cert3/wp1-milestone-repro.js`: 11/11 on the fix; with HEAD's rule put back, its checks fail (exit 2).
+- **WP1-ACT-1 (P1) — FIXED 2026-10-09; it blocked the WP-0 deep build.** Activating a schedule file revision over existing activities:
+  - **Mapping.** No activity's code was matched, because a file states its code as the P6 id. The mapping fell back to WBS and name, which can cross activities.
+  - **Lost fields.** Every mapped activity lost its `activityCode` (set to null), its budget (set to 0) and its category.
+  - **The fix in `schedule.service`, mapping.** Identifiers before resemblance, each tier across all activities: the stated code, then the file's code, then the P6 id, then WBS and name.
+  - **The fix, what a mapped activity keeps.** Its budget. Its code and category, unless the revision states them. Its milestone flag, unless the revision's stored row states one. It does not keep a code that another row of the revision carries, so no two activities export under one ID.
+  - **Live repro** `scripts/cert/cert3/wp1-activation-code-repro.js`: 12/12 on the fix.
+  - **Reviews.** A Codex plan review, then Codex diff rounds 1 and 2 (R-H1, R-M1, G1, G2 and the round-2 test gap confirmed and closed).
+  - **Mutations.** 22/22 caught, each by its named check (`wp1-fix-mutations.*.json`).
+- **WP1-ACT-2 (P3, from Codex diff round 2; deferred to CERT-7).**
+  - **The defect.** `activityCode` accepts internal control characters: the validator trims the ends only. A code such as `A<tab>100`, crossed by hand onto another file row while the row coded `A 100` stays, exports twice as `A 100` in XER `task_code` and P6 XML `Id`, because the exports turn tabs into spaces.
+  - **Proposed fix.** Refuse control characters in `activityCode`, or compare identities as the exports write them.
 
 ## CERT-3 identity batch (D-ID-1): release gates and recorded items (2026-10-05)
 

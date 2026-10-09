@@ -658,3 +658,29 @@ These rules are recorded in plan §0.0. They replace the "fast closure mode" tex
 - **Known dependency:** the 087-SCH build passes through WP-1 transitions. A builder step blocked by a confirmed P1 is fixed when it is reached, as the plan's severity handling says, for example a milestone blocking approval (HR-S2 is decided). Steps that depend on an undecided rule are marked BLOCKED with their HR id.
 
 **Next exact action:** finish the builders, then follow the §3.3 build order to close WP-0, then WP-1.
+
+## 2026-10-09 — WP-1 blocker fixes WP1-MS-1 (HR-S2) and WP1-ACT-1 land
+
+**Why now.** The 087-SCH, 052 and 006 builders pass through WP-1 transitions. At HEAD `c5c79aa`, two confirmed defects stopped them:
+- the F1 approval answered 400 `SCHEDULE_NOT_READY` on the 0 h milestone M900;
+- activation left `activityCode` null on every mapped activity.
+
+The plan's severity handling fixes a blocking confirmed P1, and an approved owner rule, when the build reaches it. Register: WP1-MS-1, WP1-ACT-1.
+
+**Method (plan §6).**
+1. Fix plan, reviewed by Codex and adjudicated (activation: identifiers before resemblance; a mapped activity keeps its budget, and keeps its code, category and milestone flag unless the revision states them).
+2. Implementation, live repros confirm-first: both fail at HEAD's behaviour and pass on the fix.
+3. Codex diff round 1. R-H1, R-M1, G1 and G2 CONFIRMED:
+   - a generated row's P6 id could steal another activity's direct code match;
+   - a crossed file mapping could export two activities under one ID;
+   - two rules had no test.
+4. Round 2 fixed them. Mapping now runs in four tiers, each across all activities. The file-code alias is built only from rows that state no code. A mapped activity keeps no code that another row of the revision carries; this was widened to cover the doubly crossed case.
+5. Codex diff round 2: all four CORRECT. One LOW, CONFIRMED and recorded as WP1-ACT-2 (P3, CERT-7). One test gap, closed by a test and mutation M14. No round 3 (plan §0.0 rule 7).
+
+**Evidence.**
+- 21 unit suites that load schedule.service or activity.service: 1165/1165.
+- `wp1-milestone-repro.js` 11/11; `wp1-activation-code-repro.js` 12/12.
+- 22/22 mutations caught, each by its named check. Mutant syntax: 263/263 parse. Every anchor occurs once.
+- Review and adjudication notes: `C:\Temp\octapm-cert\scratch\wp1-fix-*`.
+
+**WP-0 state is unchanged.** E1, E7 and E8 are met. E2 (the deep population) comes next: settle the builder workflow, then the §3.3 build order on this commit.

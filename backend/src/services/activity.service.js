@@ -322,9 +322,15 @@ const ensureActivity = async (projectId, activityId) => {
   return activity;
 };
 
-// Hard rule: end must be after start. Throws.
-const assertDates = ({ startDate, endDate }) => {
-  if (startDate && endDate && endDate <= startDate) {
+// Hard rule: a finish before the start is refused, and so is a finish on the
+// start of an activity with a duration. A finish on the start of a
+// zero-duration activity (a milestone) is a point in time -- CPM stores it
+// so -- and is valid (HR-S2, owner decision). Throws.
+const assertDates = ({ startDate, endDate, duration = 0 }) => {
+  if (!startDate || !endDate) return;
+  const start = new Date(startDate).getTime();
+  const end = new Date(endDate).getTime();
+  if (end < start || (end === start && Number(duration || 0) > 0)) {
     throw new HttpError(
       400,
       'INVALID_DATES',
@@ -397,7 +403,7 @@ const createActivity = async ({ orgId, projectId, payload }) => {
 
   const startDate = payload.startDate ? new Date(payload.startDate) : null;
   const endDate = payload.endDate ? new Date(payload.endDate) : null;
-  assertDates({ startDate, endDate });
+  assertDates({ startDate, endDate, duration: payload.duration ?? 0 });
   const dateWarnings = collectDateWarnings({ project, startDate, endDate });
   const activityCode = normalizeActivityCode(payload.activityCode);
   await assertUniqueActivityCode({ projectId, activityCode });
@@ -544,7 +550,9 @@ const updateActivity = async ({ orgId, projectId, activityId, payload }) => {
     data.startDate !== undefined ? data.startDate : existing.startDate;
   const nextEndDate =
     data.endDate !== undefined ? data.endDate : existing.endDate;
-  assertDates({ startDate: nextStartDate, endDate: nextEndDate });
+  const nextDuration =
+    data.duration !== undefined ? data.duration : existing.duration;
+  assertDates({ startDate: nextStartDate, endDate: nextEndDate, duration: nextDuration });
 
   const engineerIds = payload.engineerIds;
   if (engineerIds !== undefined) {
@@ -829,4 +837,5 @@ module.exports = {
   updateProgress,
   bulkUpdateProgress,
   collectDateWarnings,
+  assertDates,
 };

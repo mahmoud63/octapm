@@ -708,6 +708,267 @@ describe('schedule revision lifecycle service', () => {
     expect(mockPrisma.resourceAllocation.deleteMany).not.toHaveBeenCalled();
   });
 
+  // CERT-3 WP-1 (lead only: Prisma is mocked; the pure cases are in
+  // schedule-activation-keeps-codes.test.js and the proof is live). A file
+  // revision's stored rows state no activity code, budget, category or
+  // milestone flag (buildImportSnapshot writes none), so the mapped activities
+  // keep their own; the file still drives the schedule fields.
+  it('activates a file revision keeping each mapped activity\'s code, budget, category and milestone flag (CERT-3 WP-1)', async () => {
+    const fileRow = (overrides) => ({
+      sourceActivityId: overrides.draftKey,
+      uid: null,
+      wbsCode: null,
+      calendarId: null,
+      physComplete: 0,
+      lateStart: null,
+      lateFinish: null,
+      totalFloat: 0,
+      isCritical: true,
+      ...overrides,
+    });
+    const stagedRevision = {
+      ...revision,
+      id: 'revision-3',
+      status: 'approved',
+      isActive: false,
+      source: 'xer',
+      snapshotJson: {
+        source: 'xer',
+        wbs: [],
+        activities: [
+          fileRow({ draftKey: '1001', p6ActivityId: 'A100', name: 'Site clearance (file)', duration: 5, originalDuration: 5, remainingDuration: 5, earlyStart: 0, earlyFinish: 5, startDate: '2026-01-05T08:00:00.000Z', endDate: '2026-01-09T17:00:00.000Z', sortOrder: 0 }),
+          fileRow({ draftKey: '1009', p6ActivityId: 'M900', name: 'Substructure complete (file)', duration: 0, originalDuration: 0, remainingDuration: 0, earlyStart: 5, earlyFinish: 5, startDate: '2026-01-12T08:00:00.000Z', endDate: '2026-01-12T08:00:00.000Z', sortOrder: 1 }),
+        ],
+        dependencies: [],
+      },
+    };
+    for (const row of stagedRevision.snapshotJson.activities) {
+      for (const key of ['activityCode', 'budget', 'category', 'isMilestone']) expect(row).not.toHaveProperty(key);
+    }
+    const existingActivities = [
+      { id: 'activity-1', projectId: 'project-1', name: 'Site clearance', activityCode: 'A100', p6ActivityId: null, wbsCode: null, budget: 60000, category: 'civil', isMilestone: false, duration: 3, sortOrder: 0 },
+      { id: 'activity-9', projectId: 'project-1', name: 'M900', activityCode: 'M900', p6ActivityId: null, wbsCode: null, budget: 0, category: 'inspection', isMilestone: true, duration: 0, sortOrder: 1 },
+    ];
+
+    mockPrisma.scheduleRevision.findFirst
+      .mockResolvedValueOnce(stagedRevision)
+      .mockResolvedValueOnce({ ...revision, id: 'revision-1', status: 'approved', isActive: true });
+    mockPrisma.activity.findMany.mockResolvedValueOnce(existingActivities);
+    mockPrisma.activity.update.mockImplementation(({ where, data }) => Promise.resolve({ id: where.id, ...data }));
+    mockPrisma.scheduleRevision.update.mockImplementation(({ where, data }) =>
+      Promise.resolve({ ...stagedRevision, id: where.id, ...data }),
+    );
+
+    const result = await scheduleService.activateRevision({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      revisionId: 'revision-3',
+      userId: 'pm-1',
+      mappings: [
+        { oldActivityId: 'activity-1', newActivityKey: '1001' },
+        { oldActivityId: 'activity-9', newActivityKey: '1009' },
+      ],
+      unmappedRemovals: [],
+    });
+
+    expect(result.revision.isActive).toBe(true);
+    expect(mockPrisma.activity.create).not.toHaveBeenCalled();
+    const updateOf = (id) => mockPrisma.activity.update.mock.calls.map(([call]) => call).find((call) => call.where.id === id).data;
+    expect(updateOf('activity-1')).toMatchObject({
+      activityCode: 'A100', budget: 60000, category: 'civil', isMilestone: false,
+      p6ActivityId: 'A100', name: 'Site clearance (file)', duration: 5, isActive: true,
+    });
+    expect(updateOf('activity-9')).toMatchObject({
+      activityCode: 'M900', budget: 0, category: 'inspection', isMilestone: true,
+      p6ActivityId: 'M900', name: 'Substructure complete (file)', duration: 0, isActive: true,
+    });
+  });
+
+  // CERT-3 WP-1 (lead only). A generated revision's stored row states its
+  // milestone flag, and activation reads it through the stored row at the
+  // staged row's index (storedRowByKey) — also for a duplicate draftKey,
+  // which getSnapshotActivities renames to `key#index`. Without the stored
+  // row, the activities' own (opposite) flags would be kept.
+  it('activates a generated revision taking each stored row\'s stated milestone flag, by the staged row\'s index (CERT-3 WP-1)', async () => {
+    const aiRow = (overrides) => ({
+      wbsCode: null, duration: 2, earlyStart: 0, earlyFinish: 2, totalFloat: 0, isCritical: true, budget: 10, category: 'structural', ...overrides,
+    });
+    const stagedRevision = {
+      ...revision,
+      id: 'revision-4',
+      status: 'approved',
+      isActive: false,
+      source: 'ai',
+      snapshotJson: {
+        source: 'ai',
+        activities: [
+          aiRow({ draftKey: 'G-100', activityCode: 'G-100', p6ActivityId: 'G-100', name: 'Frame complete', isMilestone: true, duration: 0, earlyFinish: 0, sortOrder: 0 }),
+          aiRow({ draftKey: 'G-100', activityCode: 'G-101', p6ActivityId: 'G-101', name: 'Columns', isMilestone: false, sortOrder: 1 }),
+        ],
+      },
+    };
+    const existingActivities = [
+      { id: 'activity-1', projectId: 'project-1', name: 'One', activityCode: 'A100', p6ActivityId: null, wbsCode: null, budget: 500, category: 'civil', isMilestone: false, sortOrder: 0 },
+      { id: 'activity-2', projectId: 'project-1', name: 'Two', activityCode: 'A110', p6ActivityId: null, wbsCode: null, budget: 700, category: 'civil', isMilestone: true, sortOrder: 1 },
+    ];
+
+    mockPrisma.scheduleRevision.findFirst
+      .mockResolvedValueOnce(stagedRevision)
+      .mockResolvedValueOnce({ ...revision, id: 'revision-1', status: 'approved', isActive: true });
+    mockPrisma.activity.findMany.mockResolvedValueOnce(existingActivities);
+    mockPrisma.activity.update.mockImplementation(({ where, data }) => Promise.resolve({ id: where.id, ...data }));
+    mockPrisma.scheduleRevision.update.mockImplementation(({ where, data }) =>
+      Promise.resolve({ ...stagedRevision, id: where.id, ...data }),
+    );
+
+    await scheduleService.activateRevision({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      revisionId: 'revision-4',
+      userId: 'pm-1',
+      mappings: [
+        { oldActivityId: 'activity-1', newActivityKey: 'G-100' },
+        { oldActivityId: 'activity-2', newActivityKey: 'G-100#2' },
+      ],
+      unmappedRemovals: [],
+    });
+
+    const updateOf = (id) => mockPrisma.activity.update.mock.calls.map(([call]) => call).find((call) => call.where.id === id).data;
+    // The revision's code, category and flag; the activity's budget (H2, H3).
+    expect(updateOf('activity-1')).toMatchObject({ activityCode: 'G-100', category: 'structural', isMilestone: true, budget: 500, name: 'Frame complete' });
+    expect(updateOf('activity-2')).toMatchObject({ activityCode: 'G-101', category: 'structural', isMilestone: false, budget: 700, name: 'Columns' });
+  });
+
+  // CERT-3 WP-1, Codex R-M1 (lead only). Every row of the revision becomes an
+  // active activity, mapped or new, so a mapped activity keeps its code only
+  // when no other row carries it (a file row carries its code as its P6 id);
+  // the exports' identity (activityCode || p6ActivityId) stays distinct.
+  it('activates crossed file mappings leaving no two activities with one export identity (CERT-3 WP-1)', async () => {
+    const fileRow = (draftKey, p6ActivityId, sortOrder) => ({
+      draftKey, sourceActivityId: draftKey, p6ActivityId, name: `Row ${p6ActivityId}`, uid: null, wbsCode: null, calendarId: null,
+      duration: 2, originalDuration: 2, remainingDuration: 2, earlyStart: 0, earlyFinish: 2, physComplete: 0,
+      lateStart: null, lateFinish: null, totalFloat: 0, isCritical: true,
+      startDate: '2026-01-05T08:00:00.000Z', endDate: '2026-01-06T17:00:00.000Z', sortOrder,
+    });
+    const stagedRevision = {
+      ...revision,
+      id: 'revision-5',
+      status: 'approved',
+      isActive: false,
+      source: 'xer',
+      snapshotJson: {
+        source: 'xer',
+        wbs: [],
+        activities: [fileRow('1001', 'A100', 0), fileRow('1002', 'A110', 1), fileRow('1003', 'A120', 2), fileRow('1004', 'A130', 3), fileRow('1005', 'A140', 4), fileRow('1006', 'A150', 5)],
+        dependencies: [],
+      },
+    };
+    const own = (id, activityCode, sortOrder) => ({ id, projectId: 'project-1', name: id, activityCode, p6ActivityId: null, wbsCode: null, budget: 100, category: 'civil', isMilestone: false, duration: 2, sortOrder });
+    const existingActivities = [
+      own('activity-1', 'A100', 0), // onto A110's row; A100's row is mapped from activity-2
+      own('activity-2', null, 1), // onto A100's row
+      own('activity-3', 'A120', 2), // onto A130's row; A120's row is created new
+      own('activity-4', 'H-9', 3), // a code no row carries, onto A150's row
+      own('activity-5', 'A140', 4), // onto the row that carries its code
+    ];
+
+    mockPrisma.scheduleRevision.findFirst
+      .mockResolvedValueOnce(stagedRevision)
+      .mockResolvedValueOnce({ ...revision, id: 'revision-1', status: 'approved', isActive: true });
+    mockPrisma.activity.findMany.mockResolvedValueOnce(existingActivities);
+    mockPrisma.activity.update.mockImplementation(({ where, data }) => Promise.resolve({ id: where.id, ...data }));
+    mockPrisma.activity.create.mockImplementation(({ data }) => Promise.resolve({ id: `new-${data.p6ActivityId}`, ...data }));
+    mockPrisma.scheduleRevision.update.mockImplementation(({ where, data }) =>
+      Promise.resolve({ ...stagedRevision, id: where.id, ...data }),
+    );
+
+    await scheduleService.activateRevision({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      revisionId: 'revision-5',
+      userId: 'pm-1',
+      mappings: [
+        { oldActivityId: 'activity-1', newActivityKey: '1002' },
+        { oldActivityId: 'activity-2', newActivityKey: '1001' },
+        { oldActivityId: 'activity-3', newActivityKey: '1004' },
+        { oldActivityId: 'activity-4', newActivityKey: '1006' },
+        { oldActivityId: 'activity-5', newActivityKey: '1005' },
+      ],
+      unmappedRemovals: [],
+    });
+
+    const updateOf = (id) => mockPrisma.activity.update.mock.calls.map(([call]) => call).find((call) => call.where.id === id).data;
+    expect(['activity-1', 'activity-2', 'activity-3', 'activity-4', 'activity-5'].map((id) => [id, updateOf(id).activityCode, updateOf(id).p6ActivityId])).toEqual([
+      ['activity-1', null, 'A110'],
+      ['activity-2', null, 'A100'],
+      ['activity-3', null, 'A130'],
+      ['activity-4', 'H-9', 'A150'],
+      ['activity-5', 'A140', 'A140'],
+    ]);
+    // A120's row is created new, with no code: its identity is its P6 id.
+    expect(mockPrisma.activity.create.mock.calls.map(([call]) => [call.data.activityCode, call.data.p6ActivityId])).toEqual([[null, 'A120']]);
+    const identities = [
+      ...['activity-1', 'activity-2', 'activity-3', 'activity-4', 'activity-5'].map((id) => updateOf(id).activityCode || updateOf(id).p6ActivityId),
+      ...mockPrisma.activity.create.mock.calls.map(([call]) => call.data.activityCode || call.data.p6ActivityId),
+    ];
+    expect(identities).toHaveLength(6);
+    expect(new Set(identities).size).toBe(identities.length);
+  });
+
+  // CERT-3 WP-1, Codex diff round 2 (lead only). A row's stated code is an
+  // identity it carries as much as its P6 id: crossing an activity coded C-X
+  // onto a code-less row, while the row stating C-X is created new, leaves
+  // the mapped activity without C-X.
+  it('activates a crossed mapping against a row that states the code, leaving no two activities with one export identity (CERT-3 WP-1)', async () => {
+    const aiRow = (overrides) => ({
+      wbsCode: null, duration: 2, earlyStart: 0, earlyFinish: 2, totalFloat: 0, isCritical: true, budget: 10, category: 'structural', isMilestone: false, ...overrides,
+    });
+    const stagedRevision = {
+      ...revision,
+      id: 'revision-6',
+      status: 'approved',
+      isActive: false,
+      source: 'ai',
+      snapshotJson: {
+        source: 'ai',
+        activities: [
+          aiRow({ draftKey: 'P-X', activityCode: 'C-X', p6ActivityId: 'P-X', name: 'States C-X', sortOrder: 0 }),
+          aiRow({ draftKey: 'P-B', p6ActivityId: 'P-B', name: 'States no code', sortOrder: 1 }),
+        ],
+      },
+    };
+    expect(stagedRevision.snapshotJson.activities[1]).not.toHaveProperty('activityCode');
+    const existingActivities = [
+      { id: 'activity-1', projectId: 'project-1', name: 'One', activityCode: 'C-X', p6ActivityId: null, wbsCode: null, budget: 500, category: 'civil', isMilestone: false, sortOrder: 0 },
+    ];
+
+    mockPrisma.scheduleRevision.findFirst
+      .mockResolvedValueOnce(stagedRevision)
+      .mockResolvedValueOnce({ ...revision, id: 'revision-1', status: 'approved', isActive: true });
+    mockPrisma.activity.findMany.mockResolvedValueOnce(existingActivities);
+    mockPrisma.activity.update.mockImplementation(({ where, data }) => Promise.resolve({ id: where.id, ...data }));
+    mockPrisma.activity.create.mockImplementation(({ data }) => Promise.resolve({ id: `new-${data.p6ActivityId}`, ...data }));
+    mockPrisma.scheduleRevision.update.mockImplementation(({ where, data }) =>
+      Promise.resolve({ ...stagedRevision, id: where.id, ...data }),
+    );
+
+    await scheduleService.activateRevision({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      revisionId: 'revision-6',
+      userId: 'pm-1',
+      mappings: [{ oldActivityId: 'activity-1', newActivityKey: 'P-B' }],
+      unmappedRemovals: [],
+    });
+
+    const updated = mockPrisma.activity.update.mock.calls.map(([call]) => call).find((call) => call.where.id === 'activity-1').data;
+    expect([updated.activityCode, updated.p6ActivityId]).toEqual([null, 'P-B']);
+    const created = mockPrisma.activity.create.mock.calls.map(([call]) => [call.data.activityCode, call.data.p6ActivityId]);
+    expect(created).toEqual([['C-X', 'P-X']]);
+    const identities = [updated.activityCode || updated.p6ActivityId, ...created.map(([code, p6]) => code || p6)];
+    expect(identities).toEqual(['P-B', 'C-X']);
+  });
+
   it('requires a reason before retiring unmapped active activities', async () => {
     const stagedRevision = {
       ...revision,
@@ -1024,5 +1285,72 @@ describe("one threshold for value, and no vacuous coverage on an in-scope bill (
   it("covered by approved allocations, the check passes", () => {
     const readiness = sound({ items: [{ amount: 100, mappingRule: "required" }], totalBoqAmount: 100, approvedAllocatedAmount: 100, pendingAllocatedAmount: 0, unallocatedAmount: 0 });
     expect(check(readiness, "allocations")).toMatchObject({ passed: true, message: "Approved allocations cover the BOQ value." });
+  });
+});
+
+// HR-S2 (owner decision, CERT-3 WP-1): a milestone, or any zero-duration
+// element, is a point in time, and CPM stores it with start = end: date_sanity
+// passes it. A finish before the start fails, and so does a finish on the
+// start of an activity that has a duration. Start and end are always two
+// distinct Date instances, so a reference comparison of the dates cannot
+// pass them.
+describe("HR-S2 — date_sanity: a zero-duration element with start = end is valid", () => {
+  const PROJECT = { id: "p", startDate: new Date("2026-01-05"), endDate: new Date("2026-12-18") };
+  const activityA = () => ({
+    id: "a", name: "A", activityCode: "A", duration: 5, earlyStart: 0, earlyFinish: 5, totalFloat: 0, isCritical: true,
+    predecessors: "", startDate: new Date("2026-01-05"), endDate: new Date("2026-01-12"),
+  });
+  const milestoneM = (overrides = {}) => ({
+    id: "m", name: "M", activityCode: "M", duration: 0, earlyStart: 5, earlyFinish: 5, totalFloat: 0, isCritical: true,
+    predecessors: "A", startDate: new Date("2026-01-12"), endDate: new Date("2026-01-12"),
+    ...overrides,
+  });
+  const readinessOf = ({ revision, m = milestoneM(), allocationSummary = {} }) =>
+    scheduleService.buildScheduleReadiness({ project: PROJECT, revision, activities: [activityA(), m], allocationSummary });
+  const dateSanity = (readiness) => readiness.checks.find((entry) => entry.key === "date_sanity");
+  const STAGED = { id: "r", isActive: false, status: "under_review" };
+  const ACTIVE = { id: "r", isActive: true, status: "approved" };
+  const COVERED = {
+    items: [{ amount: 100, mappingRule: "required" }],
+    totalBoqAmount: 100, approvedAllocatedAmount: 100, pendingAllocatedAmount: 0, unallocatedAmount: 0,
+  };
+
+  it("the fixture's milestone has one instant in two Date objects", () => {
+    const m = milestoneM();
+    expect(m.startDate).not.toBe(m.endDate);
+    expect(m.startDate.getTime()).toBe(m.endDate.getTime());
+  });
+
+  it("R1: on a staged revision the milestone passes date_sanity, and the approval is ready", () => {
+    const readiness = readinessOf({ revision: STAGED });
+    expect(dateSanity(readiness)).toMatchObject({ passed: true, fix: null, details: { invalidRows: [] } });
+    expect(readiness.ready).toBe(true);
+    expect(readiness.blockingCount).toBe(0);
+  });
+
+  it("R2: on the active revision, with the BOQ covered, the baseline is ready", () => {
+    const readiness = readinessOf({ revision: ACTIVE, allocationSummary: COVERED });
+    expect(dateSanity(readiness)).toMatchObject({ passed: true, details: { invalidRows: [] } });
+    expect([readiness.ready, readiness.baselineReady, readiness.baselineBlockingCount]).toEqual([true, true, 0]);
+  });
+
+  it("R3: start = end with duration 3 fails date_sanity, and the approval is not ready", () => {
+    const readiness = readinessOf({ revision: STAGED, m: milestoneM({ duration: 3 }) });
+    expect(dateSanity(readiness).passed).toBe(false);
+    expect(dateSanity(readiness).details.invalidRows).toEqual([{ activityId: "m", issue: "finish_date_before_start_date" }]);
+    expect(readiness.ready).toBe(false);
+  });
+
+  it("R4: a zero-duration element finishing before its start fails date_sanity as R3 does", () => {
+    const readiness = readinessOf({ revision: STAGED, m: milestoneM({ endDate: new Date("2026-01-09") }) });
+    expect(dateSanity(readiness).passed).toBe(false);
+    expect(dateSanity(readiness).details.invalidRows).toEqual([{ activityId: "m", issue: "finish_date_before_start_date" }]);
+    expect(readiness.ready).toBe(false);
+  });
+
+  it("dates given as ISO strings (a staged snapshot's stored form) are judged the same way", () => {
+    const iso = "2026-01-12T00:00:00.000Z";
+    expect(dateSanity(readinessOf({ revision: STAGED, m: milestoneM({ startDate: iso, endDate: iso }) })).passed).toBe(true);
+    expect(dateSanity(readinessOf({ revision: STAGED, m: milestoneM({ startDate: iso, endDate: iso, duration: 3 }) })).passed).toBe(false);
   });
 });

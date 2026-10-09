@@ -676,10 +676,16 @@ const buildScheduleReadiness = ({
         issue: "negative_duration",
       });
     }
+    // HR-S2 (owner decision): a milestone, or any zero-duration element, is a
+    // point in time, and CPM stores it with start = end: valid. A finish before
+    // the start is refused, and so is a finish on the start of an activity
+    // that has a duration.
     if (
       activity.startDate &&
       activity.endDate &&
-      new Date(activity.endDate) <= new Date(activity.startDate)
+      (new Date(activity.endDate) < new Date(activity.startDate) ||
+        (new Date(activity.endDate).getTime() === new Date(activity.startDate).getTime() &&
+          Number(activity.duration || 0) > 0))
     ) {
       invalidDateRows.push({
         activityId: activity.id,
@@ -1515,6 +1521,10 @@ function suggestActivityMappings(existingActivities, stagedActivities) {
   );
   const byP6 = new Map();
   const byActivityCode = new Map();
+  // A file row's own code (XER task_code, P6 XML Id, xlsx code, MSPDI UID),
+  // staged as its P6 id because a file states no activityCode. A generated
+  // row states its code, and its P6 id is never an alias for one.
+  const byFileCode = new Map();
   const byWbs = new Map();
   const byName = new Map();
 
@@ -1525,6 +1535,9 @@ function suggestActivityMappings(existingActivities, stagedActivities) {
     if (staged.p6ActivityId && !byP6.has(staged.p6ActivityId)) {
       byP6.set(staged.p6ActivityId, staged);
     }
+    if (!staged.activityCode && staged.p6ActivityId && !byFileCode.has(staged.p6ActivityId)) {
+      byFileCode.set(staged.p6ActivityId, staged);
+    }
     if (staged.wbsCode && !byWbs.has(staged.wbsCode)) {
       byWbs.set(staged.wbsCode, staged);
     }
@@ -1532,9 +1545,14 @@ function suggestActivityMappings(existingActivities, stagedActivities) {
     if (nameKey && !byName.has(nameKey)) byName.set(nameKey, staged);
   }
 
-  const mappings = [];
-  for (const existing of existingActivities) {
-    const candidates = [
+  // Identifiers before resemblance, each tier across every active activity
+  // (CERT-3 WP-1, plan §5 defect fixes). Every activity is offered, in turn:
+  // the row stating its code; the file row whose own code is its code; the
+  // row with its P6 id; and only then its WBS code or name. One activity's
+  // file code, P6 id or name can no longer take the row another activity's
+  // code names. The answer keeps the active order.
+  const tiers = [
+    (existing) => [
       {
         staged: existing.activityCode
           ? byActivityCode.get(existing.activityCode)
@@ -1542,11 +1560,22 @@ function suggestActivityMappings(existingActivities, stagedActivities) {
         matchType: "activity_code",
         confidence: 1,
       },
+    ],
+    (existing) => [
+      {
+        staged: existing.activityCode ? byFileCode.get(existing.activityCode) : null,
+        matchType: "activity_code",
+        confidence: 1,
+      },
+    ],
+    (existing) => [
       {
         staged: existing.p6ActivityId ? byP6.get(existing.p6ActivityId) : null,
         matchType: "p6_activity_id",
         confidence: 1,
       },
+    ],
+    (existing) => [
       {
         staged: existing.wbsCode ? byWbs.get(existing.wbsCode) : null,
         matchType: "wbs_code",
@@ -1557,24 +1586,33 @@ function suggestActivityMappings(existingActivities, stagedActivities) {
         matchType: "name",
         confidence: 0.8,
       },
-    ];
+    ],
+  ];
 
-    const match = candidates.find(
-      (candidate) =>
-        candidate.staged && unmatchedStaged.has(candidate.staged.draftKey),
-    );
-    if (!match) continue;
+  const matchedByExisting = new Map();
+  for (const candidatesOf of tiers) {
+    for (const existing of existingActivities) {
+      if (matchedByExisting.has(existing.id)) continue;
+      const match = candidatesOf(existing).find(
+        (candidate) =>
+          candidate.staged && unmatchedStaged.has(candidate.staged.draftKey),
+      );
+      if (!match) continue;
 
-    unmatchedStaged.delete(match.staged.draftKey);
-    mappings.push({
-      oldActivityId: existing.id,
-      newActivityKey: match.staged.draftKey,
-      matchType: match.matchType,
-      confidence: match.confidence,
-      oldActivity: activityIdentity(existing),
-      newActivity: stagedIdentity(match.staged),
-    });
+      unmatchedStaged.delete(match.staged.draftKey);
+      matchedByExisting.set(existing.id, {
+        oldActivityId: existing.id,
+        newActivityKey: match.staged.draftKey,
+        matchType: match.matchType,
+        confidence: match.confidence,
+        oldActivity: activityIdentity(existing),
+        newActivity: stagedIdentity(match.staged),
+      });
+    }
   }
+  const mappings = existingActivities
+    .filter((existing) => matchedByExisting.has(existing.id))
+    .map((existing) => matchedByExisting.get(existing.id));
 
   const mappedExisting = new Set(
     mappings.map((mapping) => mapping.oldActivityId),
@@ -1621,6 +1659,32 @@ function activityDataFromStaged(staged, projectId) {
     retiredReason: null,
     retiredRevisionId: null,
     sortOrder: staged.sortOrder,
+  };
+}
+
+/**
+ * What a mapped activity takes from the revision it is mapped into (CERT-3
+ * WP-1, plan §5 defect fixes: "activation keeps the activity code and
+ * budget"). The revision's schedule replaces the activity's: name, P6 id,
+ * WBS, calendar, dates, durations, float. The activity keeps its budget; its
+ * code unless the revision states one (a generated revision does; a schedule
+ * file never does, and activation used to null every code); its category
+ * unless the revision states one; and its milestone flag unless the
+ * revision's stored row states one. `raw` is that stored row. The activity
+ * does not keep a code that another row of the revision carries (its code,
+ * or the file's code as its P6 id; `rowsByCode` maps each to the rows'
+ * draftKeys), or two activities would export as one -- a crossed manual
+ * mapping.
+ */
+function mappedActivityData(staged, raw, existing, projectId, rowsByCode = new Map()) {
+  const carriers = [...(rowsByCode.get(existing.activityCode) || [])];
+  const ownCode = carriers.some((draftKey) => draftKey !== staged.draftKey) ? null : existing.activityCode;
+  return {
+    ...activityDataFromStaged(staged, projectId),
+    activityCode: staged.activityCode || ownCode || null,
+    budget: existing.budget,
+    category: staged.category || existing.category || null,
+    isMilestone: typeof raw?.isMilestone === "boolean" ? staged.isMilestone : existing.isMilestone,
   };
 }
 
@@ -3089,6 +3153,15 @@ async function activateRevisionSnapshot({
   const stagedByKey = new Map(
     stagedActivities.map((activity) => [activity.draftKey, activity]),
   );
+  // The revision's stored rows, in getSnapshotActivities' order (it maps every
+  // stored row, by index), so a mapped activity keeps what its row does not
+  // state (mappedActivityData).
+  const storedRows = Array.isArray(revision.snapshotJson?.activities)
+    ? revision.snapshotJson.activities
+    : [];
+  const storedRowByKey = new Map(
+    stagedActivities.map((activity, index) => [activity.draftKey, storedRows[index]]),
+  );
   const existingById = new Map(
     existingActivities.map((activity) => [activity.id, activity]),
   );
@@ -3168,6 +3241,19 @@ async function activateRevisionSnapshot({
   );
   const snapshot = revision.snapshotJson || {};
 
+  // The rows of the revision that carry each identity (a stated code, or the
+  // file's code as the P6 id). Every row becomes an active activity, mapped or
+  // new, so a mapped activity does not keep a code another row carries
+  // (mappedActivityData).
+  const rowsByCode = new Map();
+  for (const activity of stagedActivities) {
+    for (const code of [activity.activityCode, activity.p6ActivityId]) {
+      if (!code) continue;
+      if (!rowsByCode.has(code)) rowsByCode.set(code, new Set());
+      rowsByCode.get(code).add(activity.draftKey);
+    }
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     const draftKeyToActivityId = new Map();
     const newActivityIds = new Set();
@@ -3176,7 +3262,13 @@ async function activateRevisionSnapshot({
 
     for (const mapping of normalizedMappings) {
       const staged = stagedByKey.get(mapping.newActivityKey);
-      const data = activityDataFromStaged(staged, project.id);
+      const data = mappedActivityData(
+        staged,
+        storedRowByKey.get(mapping.newActivityKey),
+        existingById.get(mapping.oldActivityId),
+        project.id,
+        rowsByCode,
+      );
       const updated = await tx.activity.update({
         where: { id: mapping.oldActivityId },
         data,
@@ -4211,6 +4303,8 @@ module.exports = {
   boqStateOf,
   buildScheduleReadiness,
   buildReadinessActivitiesFromSnapshot,
+  suggestActivityMappings,
+  mappedActivityData,
   FIX_PERMISSIONS,
   readinessCheckFix,
   scheduleNotReadyMessage,

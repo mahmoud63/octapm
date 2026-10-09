@@ -1,0 +1,30 @@
+{
+  "proof": "scripts/cert/cert3/wp1-milestone-repro.js",
+  "note": "WP-1 blocker fix 1 (HR-S2). REV-S2 puts back HEAD's behaviour on both server sites: it is the confirm-first evidence (the repro must exit 2 on it). The others revert one site each.",
+  "mutations": [
+    {
+      "name": "REV-S2 HEAD behaviour: start = end refused whatever the duration, in readiness and in assertDates",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "          Number(activity.duration || 0) > 0))",
+      "to": "          true))",
+      "also": [
+        { "file": "backend/src/services/activity.service.js", "from": "  if (end < start || (end === start && Number(duration || 0) > 0)) {", "to": "  if (end <= start) {" }
+      ],
+      "expect": "A.approve (400 SCHEDULE_NOT_READY), readiness date_sanity, A.rename (400 INVALID_DATES) fail"
+    },
+    {
+      "name": "HS2-R readiness refuses start = end whatever the duration (assertDates fixed)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "          Number(activity.duration || 0) > 0))",
+      "to": "          true))",
+      "expect": "A.approve and the readiness check fail"
+    },
+    {
+      "name": "HS2-A assertDates refuses start = end whatever the duration (readiness fixed)",
+      "file": "backend/src/services/activity.service.js",
+      "from": "  if (end < start || (end === start && Number(duration || 0) > 0)) {",
+      "to": "  if (end <= start) {",
+      "expect": "A.rename fails (400 INVALID_DATES)"
+    }
+  ]
+}

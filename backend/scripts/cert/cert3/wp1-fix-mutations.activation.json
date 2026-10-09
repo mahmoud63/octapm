@@ -1,0 +1,46 @@
+{
+  "proof": "scripts/cert/cert3/wp1-activation-code-repro.js",
+  "note": "WP-1 blocker fix 2 (activation keeps code and budget; mapping by code). REV-ACT puts back HEAD's behaviour (no code lookup in the file's code; activityDataFromStaged's null code, 0 budget, null category): the confirm-first evidence. The others revert one part each.",
+  "mutations": [
+    {
+      "name": "REV-ACT HEAD behaviour: the file's code is not looked up, and a mapped activity takes the staged code, budget and category",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "        staged: existing.activityCode ? byFileCode.get(existing.activityCode) : null,",
+      "to": "        staged: null,",
+      "also": [
+        { "file": "backend/src/services/schedule.service.js", "from": "    activityCode: staged.activityCode || ownCode || null,", "to": "    activityCode: staged.activityCode," },
+        { "file": "backend/src/services/schedule.service.js", "from": "    budget: existing.budget,", "to": "    budget: staged.budget," },
+        { "file": "backend/src/services/schedule.service.js", "from": "    category: staged.category || existing.category || null,", "to": "    category: staged.category," }
+      ],
+      "expect": "B.mapByCode, B.code, B.budget, B.category fail"
+    },
+    {
+      "name": "M1 an activity's code is not looked up in the file's code (a file row's p6ActivityId)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "        staged: existing.activityCode ? byFileCode.get(existing.activityCode) : null,",
+      "to": "        staged: null,",
+      "expect": "B.mapByCode fails (wbs_code / name or unmatched)"
+    },
+    {
+      "name": "M2 a mapped activity takes the revision's code even when the revision states none",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "    activityCode: staged.activityCode || ownCode || null,",
+      "to": "    activityCode: staged.activityCode || null,",
+      "expect": "B.code fails (null after activation)"
+    },
+    {
+      "name": "M3 a mapped activity takes the staged budget",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "    budget: existing.budget,",
+      "to": "    budget: staged.budget,",
+      "expect": "B.budget fails (0 after activation)"
+    },
+    {
+      "name": "M6 a mapped activity takes the staged category even when the revision states none",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "    category: staged.category || existing.category || null,",
+      "to": "    category: staged.category || null,",
+      "expect": "B.category fails (null after activation)"
+    }
+  ]
+}

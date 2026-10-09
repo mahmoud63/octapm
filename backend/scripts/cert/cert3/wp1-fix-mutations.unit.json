@@ -1,0 +1,117 @@
+{
+  "note": "WP-1 blocker fixes, unit side: the inverse mutations (a refusal dropped) and the parts no live repro reaches (tier order, the milestone flag, the code-alias and crossed-mapping rules of Codex diff round 1).",
+  "mutations": [
+    {
+      "name": "HS2-R2 readiness accepts start = end whatever the duration (a task with a duration passes)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "          Number(activity.duration || 0) > 0))",
+      "to": "          false))",
+      "suite": "src/services/__tests__/schedule.service.test.js",
+      "expect": "R3 fails"
+    },
+    {
+      "name": "HS2-A2 assertDates accepts start = end whatever the duration",
+      "file": "backend/src/services/activity.service.js",
+      "from": "  if (end < start || (end === start && Number(duration || 0) > 0)) {",
+      "to": "  if (end < start) {",
+      "suite": "src/services/__tests__/activity-dates.test.js",
+      "expect": "A3 fails"
+    },
+    {
+      "name": "HS2-AC the update judges the stored duration, not the one it gives",
+      "file": "backend/src/services/activity.service.js",
+      "from": "    data.duration !== undefined ? data.duration : existing.duration;",
+      "to": "    existing.duration;",
+      "suite": "src/services/__tests__/activity-dates-callers.service.test.js",
+      "expect": "'refuses {duration: 5} with no dates on that milestone' fails"
+    },
+    {
+      "name": "M4 one pass again: identifiers and resemblance compete activity by activity",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "  for (const candidatesOf of tiers) {",
+      "to": "  for (const candidatesOf of [(existing) => tiers.flatMap((tier) => tier(existing))]) {",
+      "suite": "src/services/__tests__/schedule-activation-keeps-codes.test.js",
+      "expect": "T4 and T4b fail"
+    },
+    {
+      "name": "M5 a mapped activity takes the staged milestone flag even when the revision's row states none",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "    isMilestone: typeof raw?.isMilestone === \"boolean\" ? staged.isMilestone : existing.isMilestone,",
+      "to": "    isMilestone: staged.isMilestone,",
+      "suite": "src/services/__tests__/schedule-activation-keeps-codes.test.js",
+      "expect": "T7 fails"
+    },
+    {
+      "name": "M3u a mapped activity takes the staged budget (generated revision case)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "    budget: existing.budget,",
+      "to": "    budget: staged.budget,",
+      "suite": "src/services/__tests__/schedule-activation-keeps-codes.test.js",
+      "expect": "T6 and T9 fail"
+    },
+    {
+      "name": "M7 the P6-id and resemblance tiers merge: an earlier name claimant takes a later activity's P6 row (Codex G1)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "  for (const candidatesOf of tiers) {",
+      "to": "  for (const candidatesOf of [tiers[0], tiers[1], (existing) => [...tiers[2](existing), ...tiers[3](existing)]]) {",
+      "suite": "src/services/__tests__/schedule-activation-keeps-codes.test.js",
+      "expect": "T4c fails"
+    },
+    {
+      "name": "M8 an activity already matched is offered again in a later tier (Codex G2)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "      if (matchedByExisting.has(existing.id)) continue;",
+      "to": "      /* (mutant) no skip */",
+      "suite": "src/services/__tests__/schedule-activation-keeps-codes.test.js",
+      "expect": "T4d fails"
+    },
+    {
+      "name": "M9 a mapped activity keeps its code whatever other row carries it (Codex R-M1)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "  const ownCode = carriers.some((draftKey) => draftKey !== staged.draftKey) ? null : existing.activityCode;",
+      "to": "  const ownCode = existing.activityCode;",
+      "suite": "src/services/__tests__/schedule-activation-keeps-codes.test.js",
+      "expect": "T9b fails"
+    },
+    {
+      "name": "M10 the file-code alias is built from every row, a generated row's P6 id too (Codex R-H1)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "    if (!staged.activityCode && staged.p6ActivityId && !byFileCode.has(staged.p6ActivityId)) {",
+      "to": "    if (staged.p6ActivityId && !byFileCode.has(staged.p6ActivityId)) {",
+      "suite": "src/services/__tests__/schedule-activation-keeps-codes.test.js",
+      "expect": "T4e 'alone, ... is not matched to it by code' fails"
+    },
+    {
+      "name": "M11 only new rows count as carriers (the round-1 rule): a doubly crossed mapping keeps a mapped row's code",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "    for (const code of [activity.activityCode, activity.p6ActivityId]) {",
+      "to": "    for (const code of usedNewKeys.has(activity.draftKey) ? [] : [activity.activityCode, activity.p6ActivityId]) {",
+      "suite": "src/services/__tests__/schedule.service.test.js",
+      "expect": "'activates crossed file mappings leaving no two activities with one export identity' fails"
+    },
+    {
+      "name": "M12 round-1 tiering: the code tier also looks a code up in every row's P6 id, activity by activity (Codex R-H1)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "  for (const candidatesOf of tiers) {",
+      "to": "  for (const candidatesOf of [(existing) => [...tiers[0](existing), { staged: existing.activityCode ? byP6.get(existing.activityCode) : null, matchType: \"activity_code\", confidence: 1 }], tiers[2], tiers[3]]) {",
+      "suite": "src/services/__tests__/schedule-activation-keeps-codes.test.js",
+      "expect": "T4e 'the activity whose code the row states takes it' fails"
+    },
+    {
+      "name": "M13 the activity's own row counts as a carrier: a mapping onto the row that carries its code drops the code",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "  const ownCode = carriers.some((draftKey) => draftKey !== staged.draftKey) ? null : existing.activityCode;",
+      "to": "  const ownCode = carriers.length ? null : existing.activityCode;",
+      "suite": "src/services/__tests__/schedule-activation-keeps-codes.test.js",
+      "expect": "T9b fails"
+    },
+    {
+      "name": "M14 a row's stated code is not counted as an identity it carries, only its P6 id (Codex diff round 2)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "    for (const code of [activity.activityCode, activity.p6ActivityId]) {",
+      "to": "    for (const code of [activity.p6ActivityId]) {",
+      "suite": "src/services/__tests__/schedule.service.test.js",
+      "expect": "'activates a crossed mapping against a row that states the code' fails"
+    }
+  ]
+}
