@@ -599,3 +599,37 @@ The runs below went one database writer at a time, in process unless noted.
 - Remaining: the deep-company builders (plan §3.3: drivers in `scripts/cert/cert3/build/`, files generated from the answer book, resumable, every creation asserted), then the build itself. Restore `cert2c` first: the proof residue in 052 and 025 runs to thousands of throwaway people. Then the fingerprint and snapshot `cert3d`.
 
 **Next exact action:** write the deep-company builders (087, 052, 006) from the answer book, review them, restore `cert2c`, build detached with the watchdog, then fingerprint and take `cert3d`.
+
+## 2026-10-09 — WP-0 CLOSED (PASS); fast closure mode; WP-1 started
+
+**Owner directive: CERT-3 fast closure mode.** It is recorded in plan §0.0 and the workflow report.
+- Per work package: known answers, one primary run, classification, fixes only for P0, P1, invariant or owner-rule failures, targeted proofs, one final run, close.
+- P2 and P3 go to the register with destinations.
+- No product-wide discovery.
+- Agents prepare the next work package read only.
+
+**WP-0 closure.**
+- The permission probe, the lifecycle verifier and C087R had already completed (entry above).
+- `snapshot.js` was then run read only on the 14 certified projects: 14 × 52/52.
+- Every WP-0 finding is classified: register, "CERT-3 WP-0 closure".
+
+| Item | Result |
+|---|---|
+| P0 / P1 | 0 / 0 |
+| P2 deferred | D-ID-9 → WP-8; WP0-INV-1 → WP-5 |
+| P3 deferred | D-ID-2 → CERT-7; D-ID-3, D-ID-7, D-ID-8 → WP-8; D-ID-10 → CERT-7; WP0-BOQ-1 → WP-6 |
+| Fixed in WP-0 | D-PAGE-1 (P2; it blocked the unit gate) |
+
+Result rows are in `OCTAPM_WORKFLOW_CERTIFICATION.md` §WP-0.
+
+**Deep-company builder workflow stopped.** It wrote everything for every work package up front, which conflicts with the mode. Only the shared generator draft `scripts/cert/cert3/build/files.js` was written; it is kept for WP-1. From now on, each work package builds its own deep projects in its primary run.
+
+**Next exact action: WP-1 (schedule).**
+1. Write the primary proving run `scripts/cert/cert3/wp1-schedule-proof.js` from plan §4 WP-1 and `answers/schedule.js`. It builds 087-SCH and 087-IMP plus the 052 and 006 schedule lanes, and runs T1–T4, conversion and parity, revisions, baseline gates, dates and status.
+2. Run it once.
+3. Classify.
+4. Fix in WP-1, because they violate an approved owner rule or are P1:
+   - milestones blocking approval and baseline (HR-S2, decided);
+   - activation losing `activityCode` and the budget (proposed P1).
+   The HR-S1/S3–S6/S8 rows wait for owner decisions.
+5. Targeted proofs, mutations of the WP-1 guards (§6.2), the final run, close.

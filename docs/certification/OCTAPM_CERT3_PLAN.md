@@ -19,6 +19,20 @@ Nothing in this plan has been run. The expected figures come from the five read-
    - **087-SCH's 72,000 row (§3.2).** "One 72,000 row stays unallocated until the baseline step covers it" names neither the activity nor the effect on earned value. The answer book reads it as follows: at the baseline step the row is allocated to A220, so 087-SCH's EV budget is 459,000.00 after the baseline. WP-2's own figures still use the five allocations, which total 387,000.00. This reading stands unless you say otherwise.
    - **Q-KEY follow-ups.** First, webhook subscriptions and accounting connections created from a stolen session survive a credential event; Q-KEY covers API keys only. Second, suspending an administrator in one workspace, when their identity stays open, is not a credential event, so keys they created there that act as other people keep working. Should either be extended? Nothing changes until you say.
 
+### 0.0 Fast closure mode (owner, 2026-10-09)
+
+This mode governs WP-1 to WP-9 and supersedes the plan's sequencing where the two differ.
+
+- **Method for each work package:** known answers fixed in advance; one primary proving and discovery run; every finding classified (P0, P1, P2, P3, TEST/HARNESS, EXPECTED BEHAVIOUR, DUPLICATE, DEFERRED); a fix only for P0, P1, a known-answer invariant failure, a blocker of the current work package, or a violation of an approved owner rule; targeted proofs for the changed area; one final proving run; close.
+- **P2 and P3** go to the register with a destination. They are not fixed in the work package unless designated release blockers.
+- **The ~174 mapped findings** stay suspects until their work package. No product-wide discovery.
+- **Regression is targeted.** Full suites and sentinels run only at certification checkpoints.
+- **Agents** prepare the next work package read only. Codex reviews high-risk rule plans, substantial batches and work-package closure; every Codex finding is still reproduced and adjudicated.
+- **A closed work package** reopens only on new P0 or P1 evidence, or if its result proves invalid.
+- **Deep companies (E2)** are built at the start of the work package that uses them, not all in WP-0.
+
+**WP-0 closed 2026-10-09 (PASS):** see `OCTAPM_WORKFLOW_CERTIFICATION.md`.
+
 ### 0.1 Decisions in force (owner, 2026-10-05)
 
 These are no longer open questions.

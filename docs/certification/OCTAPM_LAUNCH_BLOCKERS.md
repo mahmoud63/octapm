@@ -244,6 +244,24 @@ Deferred (recorded, not L38):
   - A direct party add gives a suspended member an active place, with no standing check. The team add refuses with 409 `USER_NOT_ACTIVE`.
   - Proposed: refuse the add like the team add does, and end party places on suspension. This touches owner decision Q3 (a suspended person returns only through Activate), which it supports.
 - **D-ID-9 (P2 proposed, new from the D-ID-2 run)** A task cannot be assigned to an active member whose home is another company: `task.service ensureAssigneeInProject` filters on `User.orgId` and `User.status`, not on the membership in this workspace.
+- **CERT-3 WP-0 closure (2026-10-09, fast closure mode): classification of every WP-0 finding.** P0 = 0, P1 = 0.
+
+  | Finding | Class | Destination |
+  |---|---|---|
+  | D-ID-2 former member's live name and e-mail on past records | P3 (one part breaks the code's own "Former user" contract) | CERT-7, with the owner rule on what past records show |
+  | D-ID-3 caller-supplied party acceptance dates | P3 | WP-8 |
+  | D-ID-7 party add makes a legacy home member a guest | P3 (legacy rows only; production has none, D-ID-5) | WP-8 |
+  | D-ID-8 party places and suspension | P3 (no access while suspended; Activate is the way back, as Q3 says) | WP-8 |
+  | D-ID-9 task assignee homed in another company refused | P2 | WP-8 |
+  | D-ID-10 key list: home role; a departed owner's key listed active | P3 | CERT-7 |
+  | WP0-INV-1 stock received for a project the person cannot open | P2 (in-company; tenant isolation intact) | WP-5 (reproduce issue and return too) |
+  | WP0-BOQ-1 BOQ template and upload narrower than `boq:read` | P3 | WP-6 |
+  | D-PAGE-1 pagination ties | P2, fixed (it blocked the unit gate) | closed `d341bd5` |
+  | HR-A1, HR-A2, HR-A3; Q-KEY F1 and F2; 087-SCH 72,000 row; CLAUDE.md 5% retention | Owner questions | plan §0 item 5 |
+  | Probe request defects (22 on 8 entries); unparseable mutants R2.9 and MA-1; the users-test baseline; the keys-proof fixtures; plan premises (087 DST, 087-COM-B rates, 052 order, HR-C1 rows) | TEST/HARNESS, fixed | — |
+  | Proof residue in 052 and 025 (thousands of throwaway people) | TEST/HARNESS | Cleared by the next `cert2c` restore; until then, new deep projects isolate their figures |
+  | `module-action-permissions` 5 s timeout under load | DUPLICATE (D-TEST-1 class) | D-TEST-1 |
+
 - **WP0-INV-1 (P2 proposed, CERT-3 WP-5)** Stock can be received against a project the person cannot open. `POST /inventory/stock/receive` is company-level, and `inventory.service` checks a `projectId` only against an API key's project list. Live permission probe (`scripts/cert/cert3/permission-probe.js`, S5): 087's warehouse keeper, not assigned to the project, received stock for it, 201. The same applies to the other company-level inventory routes that carry a `projectId`. Proposed fix: hold `projectId` to the project-access rule, as project routes do.
 - **WP0-BOQ-1 (P3, CERT-3 WP-6)** `GET /boq/template` and `GET /boq/uploads/:documentId` are guarded by `requireRoles(pm, planning_eng, qs)`. `shared/permissions.json` gives `boq:read` to all nine roles. Live probe: 14 refusals (403 FORBIDDEN) for policy readers (cost controller, procurement, warehouse, site, quality and finance in 087, and 052's finance). The route list is narrower than the policy. That is safe, but the two must agree: either the route follows the policy, or the policy narrows. Owner choice, folded into HR-A1.
 - **Permission probe outcome (WP-0, 2026-10-09).** 292 transitions × 087's nine personas, plus 052's finance administrator: every decision the policy makes matched (124/126 checks). The two failures are WP0-INV-1 and WP0-BOQ-1. Company-administration grants outside the policy (org-wide project visibility, the `/company` routes, report management) were recorded for HR-A1. Results: `C:\Temp\octapm-cert\results\cert3\permission-probe.json`.
