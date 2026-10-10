@@ -770,3 +770,274 @@ Applied by Claude Main after the read-only verifier of the WP-1 fix round (`C:\T
 | WP1.baseline.siteEngineer | new: 403 FORBIDDEN | routes/schedule.js:396-399 and :421-424, `requirePermission('schedule', 'baseline', { transition: 'revision.baseline' })` (PM only); refused before the BOQ gates. |
 | WP1.revisions.hrS3Reproduction.approve.today | corrected: exactly one blocking check fails, critical_path | The old text named date_sanity as well, true at 886c9f1; since f599e67 (HR-S2 decided and fixed) M900's start = finish passes date_sanity. Observed in WP-1 debug run 4 and 5. ref HR-S3. |
 | WP1.revisions.rollback.A140id.today | new: A140 re-created with a new id, activityCode null, p6ActivityId 'A140'; the retired row stays inactive | rollbackRevision (schedule.service.js:3609-3726) re-activates the old snapshot through activateRevisionSnapshot; the retired A140 is not active, so no mapping pairs it and its staged row is created (:3280-3287). Observed on every build run (finding WP1-RB-1). ref WP1-RB-1. |
+
+# WP-2 answer-book leaves (2026-10-10)
+
+Binding source: `C:\Temp\octapm-cert\scratch\wp2\WP2-ADJUDICATION.md` (Q1-Q12; cited in the book as `WP2ADJ(...)`),
+settling the answer-book gaps G1-G23 of `C:\Temp\octapm-cert\scratch\wp2\WP2-PREP.md` §9 (cited `PREP2(...)`). Applied
+here: G1-G11, G15-G17, G22 and G23; the mutation leaves `dropMethodStands`, `removeNegativeGuard` and
+`splitBulkTransaction` now name their catchers (G3/Q5, G2/Q4, G5). Rule A10 applies: every leaf below carries its
+on-paper derivation in the book, worked from the product code at `f599e67` (`HF(file, lines)`; `backend/src`, `shared`
+and `backend/prisma` in the worktree are identical to `f599e67`), from existing book keys, or from the deep-company
+builders read at `fc29478` (new helper `BLD(file, lines)`). Plan lines are numbered at `f599e67` (`PF(...)`).
+
+Figure count: schedule 873 -> 900 (+27). No key was removed. Ten existing leaves changed, each as the adjudication
+directs and each recording what it was in its `note`: seven values (`WP2.rules.rejectWithoutReason`,
+`WP2.quantitiesA310.entryRefusals.negative`, `WP2.quantityView.withoutBoqRead.reason`, `WP2.T4.siteVoid` and the three
+mutation leaves), one value and `today` (`WP2.T4.probes.retroactiveTemplateEdit`), one derivation and `today`
+(`WP2.T6.methodBypass`, value 409 unchanged) and one note only (`WP2.bulk.mixedBatch.written`). planDisagrees 5 -> 7
+(G1, G2: the earlier codes kept as `planValue`), assumption 265 -> 270, leaves with a `today` 77 -> 77. No other leaf
+changed (checked by a before/after dump of `figures()`: 863 leaves identical in every field; WP0, CLAUDE, WP1, WP3, D2
+and D3 identical; `inputs`, `rules`, `meta` and the exports identical).
+
+Leaf contract: as WP-1's. Both leaves changed here that carry a `today` (`retroactiveTemplateEdit`, `methodBypass`)
+now name their `ref` (HR-Q2, HR-P2) and are `assumption: true` (checked at load).
+
+New helpers in schedule.js (data, not leaves): `WP2ADJ`, `PREP2`, `BLD`; `FLD_ITP` (087-FLD's form ITP and its six
+instances as the build makes them), `fldHoldsOn` (form.service's hold-point rule restated, in the builder's `holdsOn`
+shape), `FLD_HOLDS_V1`, `FLD_HOLDS_V2`, `METHOD_STANDS`, `METHOD_BYPASS`, `METHOD_BYPASS_PCT`, `EV_AFTER_IMPORT`; and a
+block of load checks after `WP2` that ties every new or changed leaf to the figures it is built from (the book refuses to
+load otherwise; each check was shown to fire by a mutant).
+
+## G1. Reject without a reason (adjudication Q7; WP-1 BOOK-3 precedent)
+
+Derivation: POST .../activities/:id/progress-submissions/:submissionId/reject with no reason is answered by the route,
+not the service: `body('reason').isString().trim().notEmpty()` (routes/activities.js:492) and `validate` (:493;
+middleware/validate.js:14-25) give 400 VALIDATION_ERROR, message 'Validation failed', error.details holding an entry
+whose field is 'reason' (message 'Invalid value'; details are sent outside production, error-handler.js:306).
+REJECTION_REASON_REQUIRED (progress.service.js:2288-2295) is unreachable through the API.
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.rules.rejectWithoutReason` | `400 REJECTION_REASON_REQUIRED` | `400 VALIDATION_ERROR`, planValue `400 REJECTION_REASON_REQUIRED`, note `details.field=reason` |
+
+## G2. The negative quantity (adjudication Q4 (a) + (b), Q8)
+
+Derivation: the POST /quantity-progress entry validator refuses -5 before the service, 'must be zero or more'
+(routes/quantity-progress.js:48-53): 400 VALIDATION_ERROR, error.details field 'quantity' for a single-entry body
+('entries[0].quantity' under entries[]). The service's 400 QUANTITY_NEGATIVE (quantity-progress.service.js:489-491,
+details.field 'entries[0].quantity') answers only in process: quantityProgressService.createEntries on P as the site
+engineer (:588-600 -> :430-574), before any write. It is the only catcher of the service guard removed alone (N2).
+Behind both layers the database keeps a third: CHECK QuantityProgressEntry_quantity_nonnegative
+(migration 20261005050000_quantity_progress:205).
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.quantitiesA310.entryRefusals.negative` | `400 QUANTITY_NEGATIVE` | `400 VALIDATION_ERROR`, planValue `400 QUANTITY_NEGATIVE` (the plan's list :580 and the book's earlier value), note `details.field=quantity` |
+| `WP2.quantitiesA310.entryRefusals.negativeService` | none | `400 QUANTITY_NEGATIVE` (in process; check `QTY.entry.negative.service`) |
+| `WP2.mutations.removeNegativeGuard` | `WP2.quantitiesA310.entryRefusals.negative red` | `QTY.entry.negative red (N3, the E6 entry; N1 too); QTY.entry.negative.service red (N2)` |
+
+Expected observation under the mutations (not a stored entry): N3 (both application layers removed) meets the database
+CHECK, so the API is expected to answer a 5xx (an unlisted database error maps to 500 INTERNAL_ERROR,
+error-handler.js:244-255) and nothing is stored; N2's in-process probe gets a database error instead of the HttpError.
+Both are red. WP2-PREP §7 and `wp2-mutations-draft.json` describe N3 as "201, -5 stored"; that description should be
+corrected (the catch is unaffected).
+
+## G3. The method-stands check's catcher (adjudication Q5)
+
+Derivation: on P, A220 has no method row (METHODS_087SCH names none), no allocation (S-006 stays unallocated on P) and
+no ITP instance, and the site engineer is assigned. The site engineer submits percent 10: with no row the client's
+method is taken (progress.service.js:1516-1518). The planner PUTs A220 to quantity m2: allowed, because
+assertMethodChangeAllowed reads approved progress only (:1023-1036). The QS approves: the method row is read again
+(:2063-2064) and assertSubmissionMethodStands (:2065 -> :1545-1561) refuses 409 PROGRESS_METHOD_MISMATCH, details
+{ activityId, effectiveMethod 'quantity', effectiveMethodBasis 'method_config', requestedMethod 'percent',
+submissionId } (:1555-1560), before the one writer (:2171). The transaction rolls back (:2254-2255): A220 stays at 0.
+With the mutation (`void configRow;`) the approval writes 10% (the quantity steps follow the submission's own method,
+:2111-2147): METHOD.stands red, while QTY.percentMethod (the submit-time rule) stays green and remains its own check.
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.methodStands.choreography` | none | the A220 sequence above (assumption) |
+| `WP2.methodStands.approve` | none | `409 PROGRESS_METHOD_MISMATCH` |
+| `WP2.methodStands.detailsSubmissionId` | none | `true` |
+| `WP2.methodStands.official` | none | `0` percent |
+| `WP2.mutations.dropMethodStands` | `WP2.quantitiesA310.percentMethod red` | `METHOD.stands red` |
+
+## G4. The withheld view: route, reason text, member, item route (adjudication Q7)
+
+Derivation: the 200-with-withheld answer is GET /activities/<A310>/quantities (schedule:read, routes/activities.js:
+253-269; withheldActivityQuantities, boq-figures.js:1859-1884). Its `reason` is the text held by the constant
+QUANTITY_FIGURES_WITHHELD (boq-figures.js:1834-1835, exported :2333), compared by importing the constant. The member is
+087-EXTRAS's T-NOBOQ site engineer on 087-SCH (build/087-extras.js:79, :139-159, :184-195; the template decides before
+the role, rbac.js:50-68). GET /boq/items/<S-003>/quantities is guarded by boq:read (routes/boq.js:318-339), so the same
+member is refused 403 FORBIDDEN, details source 'template' (rbac.js:138-165).
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.quantityView.withoutBoqRead.reason` | `QUANTITY_FIGURES_WITHHELD` | `Installed, certified, paid, received, issued and committed quantities are worked from the BOQ's rows, available only to members who may read the BOQ` (old value in note; no planValue: the plan's word names the constant) |
+| `WP2.quantityView.withoutBoqRead.route` | none | `GET /projects/:projectId/activities/<A310>/quantities` |
+| `WP2.quantityView.withoutBoqRead.member` | none | the 087-EXTRAS T-NOBOQ member on 087-SCH (people.noBoq, tariq.okafor.2) |
+| `WP2.quantityView.withoutBoqRead.itemRoute` | none | `403 FORBIDDEN` |
+
+## G5, G6. The bulk batch: its catcher and its order (adjudication Q7)
+
+Derivation: bulkUpdateProgress writes the batch in one transaction (activity.service.js:797-826); the writer refuses
+update 1 (A310 percent, PROGRESS_METHOD_MISMATCH, progress.service.js:1516-1529) and the throw rolls update 0 back.
+details.batch.written is the constant 0 in every refusal (:783, :819), so only A330's submission count shows a split.
+The order binds once HR-P1 is fixed: the batch runs before T6, when A330's official progress is 0 (T2's planner
+submission at 30 is still pending), so update 0 at 10 is not a lower figure and cannot mask the method refusal.
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.bulk.mixedBatch.a330SubmissionsDelta` | none | `0` (A330's submissions before = after; the catcher, BULK.mixed.count) |
+| `WP2.bulk.mixedBatch.choreography` | none | before T6, the planner's [A330 {pctComplete 10}, A310 {method percent, pctComplete 10}], A330 official 0 (assumption) |
+| `WP2.bulk.mixedBatch.written` | value 0, no note | value 0 unchanged; note: the constant 0, see a330SubmissionsDelta |
+| `WP2.mutations.splitBulkTransaction` | `WP2.bulk.mixedBatch.written red` | `BULK.mixed.count red` |
+
+## G7, G8. The daily report: approver, hold instance, release (adjudication Q7)
+
+Derivation: POST .../daily-reports/:reportId/approve is guarded by progress.approve + daily_report.approve
+(routes/daily-reports.js:252-268); shared/permissions.json gives the transition to pm only, so the planning engineer and
+the QS (who hold progress.approve) are refused 403 FORBIDDEN (rbac.js:138-165); the WP-0 probe observed it. The
+progressLine note is promoted to leaves: the approval runs the one writer on the report's own activity
+(daily-report.service.js:994-1005 -> progress.service.js:2084-2098), so the 409 needs an ITP instance on A320 itself
+(scheduled counts, form.service.js:1416-1431); it is released in the form HR-Q1 keeps (a completed instance, hold item
+passed), valid before and after the HR-Q1 fix.
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.dailyReport.approver` | none | `pm` |
+| `WP2.dailyReport.plannerApprove` | none | `403 FORBIDDEN` |
+| `WP2.dailyReport.qsApprove` | none | `403 FORBIDDEN` |
+| `WP2.dailyReport.holdInstance` | none (note on progressLine) | a T-HOLD form ITP instance on A320, scheduled: 1 open, pending (assumption) |
+| `WP2.dailyReport.release` | none | started, hold answered 'pass', completed: 0 open on A320 |
+
+## G9. The retroactive template edit, per activity (adjudication Q7, Q11)
+
+Derivation: 087-FLD's form ITP version 1 has two hold items; its six instances (build/087-fld.js:1186-1233) are A110
+scheduled and in progress (holds unanswered), A120 complete (hold 1 'fail', hold 2 'pass'), A140 void, A150 closed and
+A170 complete (both passed). openHoldPoints reads the hold items of the instance's template id, any non-void status
+(form.service.js:1416-1431; pass/na/yes/checked pass, fail/no fail, :34-35, :808-825). The edit adds a third hold item
+to the same template (:1267-1290). HR-Q2's recommendation (gate on the instance's own version) leaves the before-edit
+figures; HEAD reads the current template, so the new item is open on every non-void instance. The 2026-10-10 build run
+stored exactly the `today` figures (state/cert3/087-FLD.json itp.template-edit afterEdit; corroboration only).
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.T4.probes.retroactiveTemplateEdit` | value `gate reads the instance's own template version`, today `gates read the current template` | value `{A100 {0,[]}, A110 {4, 4 x pending}, A120 {1,[failed]}, A140 {0}, A150 {0}, A170 {0}}`; today `{A100 {0}, A110 {6, 6 x pending}, A120 {2,[failed,pending]}, A140 {0}, A150 {1,[pending]}, A170 {1,[pending]}}`; ref HR-Q2; assumption |
+| `WP2.T4.probes.retroactiveBeforeEdit` | none | the value's figures, as the build stores them (itp.holds.before-edit, asserted at its moment) |
+
+## G10. The progress import on P (adjudication Q1, Q7)
+
+Derivation (import.service.js importProgress :715): the site engineer's second upload finds the first upload's A110 70
+and A130 50 submissions waiting at the same figure and cannot approve: already_pending (:768-770, :847-862); A310's
+percent row is refused by the method rule first (:786-796, :828-833). The PM's upload approves the waiting A110
+submission rather than making a second (approvesPending, :834-846, :1045-1049, writer :1079-1092); A130's is left
+pending by the hold (:1093-1100). Project EV after it, in WP2-PREP §5.1's order: 151,800.00 (Q320) + 18,000.00 =
+169,800.00 (BULK, T5, T6 and METHOD.stands move no allocated activity).
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.importProgress.site.reuploadRows` | none | `{A110: already_pending, A130: already_pending, A310: refused}` |
+| `WP2.importProgress.pm.A110approvesPending` | none | `true` |
+| `WP2.importProgress.pm.projectEvAfter` | none | `16980000` cents = 169,800.00 (assumption: the §5.1 order) |
+
+## G11. The site engineer's void (adjudication Q7)
+
+Derivation: POST .../forms/:instanceId/void is guarded by inspection.approve + inspection.void (routes/forms.js:183-188);
+the site engineer holds neither: 403 FORBIDDEN (rbac.js:138-165); the WP-0 probe observed it.
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.T4.siteVoid` | `403` (bare status) | `403 FORBIDDEN` |
+
+## G15. 087-SCH's end state (optional; adjudication Q7)
+
+Derivation: the 087-SCH build approves progress on A310 only (build/087-sch.js:801-1043: every claim is on A310), ending
+at 570 m2 (MOMENT-MAP row 40); its A130 instance stays scheduled and unanswered (:801-838). No fixed check depends on
+these leaves (read live for the record).
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.endState087SCH.projectEv` | none | `8550000` cents = 85,500.00 (= `WP2.quantitiesA310.dailyLog.evA310`) |
+| `WP2.endState087SCH.A320official` | none | `0` percent |
+| `WP2.endState087SCH.A130openHolds` | none | `1` (= `WP2.T4.openList`) |
+
+## G16. The EV report's 2 dp percent (adjudication Q7)
+
+Derivation: the EV report's activity row rounds pct to 2 dp (earned-value.service.js:827, copied :1023) while EV uses the
+unrounded figure (:790-792); `WP2.quantitiesA310.dailyLog.pct` (63.333..., 3 dp) is read on GET /activities/<A310>, as
+the builder does (087-sch.js:1014-1015). The build's stored qty.dailylog570 out shows pct 63.33.
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.quantitiesA310.dailyLog.evReportPct` | none | `63.33` percent |
+
+## G17. The T3 evidence shape (adjudication Q3, Q7)
+
+Derivation: the site engineer's upload answer (file-storage.service.js serializeUploadedDocument :696-717) put into
+evidence.photos[]; the writer accepts key, documentId and fileName (progress.service.js EVIDENCE_PHOTO_FIELDS :168-175)
+and matches key and documentId to this project's documents (prepareEvidence :585-650). The canonical stored-document
+shape is valid before and after the HR-X1 batch (Q3: both formats accepted during the transition).
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.T3.withDocument.evidence` | none | `{photos: [{key: <upload.key>, documentId: <upload.documentId>, fileName: <upload.fileName>}]}` |
+
+## G22. The site engineer on A330 (adjudication Q7)
+
+Derivation: assertProgressSubmitAllowed refuses with details { activityIds: the unassigned ids } (progress.service.js:
+917-959, :951-958) before the submission row is created (:1871-1877 before :1889, one transaction).
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.T2.siteOnA330ActivityIds` | none | `["A330"]` (mapped to the id by the check) |
+| `WP2.T2.siteOnA330SubmissionsDelta` | none | `0` |
+
+## G23. The HR-P2 probe typed 30 of 100 (adjudication Q7)
+
+Derivation: A300 has no method row and no allocation; after percent 20 is approved, a typed quantity is taken under the
+client's method (progress.service.js:1516-1518; the approval asks nothing without a row, :1545-1546) and planned figure
+(deriveQuantityFigures :1422-1450): 30 / 100 = 30%. 30% is above the approved 20%, so HR-P1's lower-figure rule, once
+fixed, cannot answer first and mask HR-P2 (10 of 100 would have been refused as a lower figure).
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP2.T6.methodBypass` | value 409; probe typed 10 of 100; today `200; approval makes 10% official under quantity` | value 409 (code null) unchanged; probe typed 30 of 100; today `200; approval makes 30% official under quantity (A300's official figure moves 20 -> 30 and its method from percent to quantity)`; ref HR-P2 |
+| `WP2.T6.methodBypassInputs` | none | `{activity: A300, approvedPercent: 20, quantityComplete: 30, quantityPlanned: 100}` (assumption) |
+
+## Not applied here
+
+- G12, G13 (HR-P1, HR-Q1 contracts): wait for the fix plan's Codex review and its adjudication (Q2). `T6.olderLower.*`,
+  `Q320.typed40.reasonRequired`, `T4.hrQ1.*` keep their current leaves until then.
+- G19 (text-only evidence after HR-X1): the owner decided the batch (Q3, 2026-10-10); what text-only evidence answers is
+  part of the batch fix plan's review, so no contract is written yet. Note: `WP2.confirmFirst.textOnlyEvidence`'s value
+  ("not evidence: at least one stored project document is required") predates the transition rule (both formats accepted)
+  and is for that review to confirm or change.
+- G14 (052 live end state): not added (Q9).
+- G18 (`WP2.personas`): not added; Q6 drops the seven PERSONA.* checks (no new matrices), so the leaves would have no
+  reader. The plan-named role cases already have leaves (T1.siteApprove, T2.*, T4.siteVoid, dailyReport.approver).
+- G20 (`WP2.rules.concurrentApprove`): not needed; Q8 adopts CONC.approveTwice only if nothing else catches the idempotent
+  approval mutation, and T1.approveAgain does (WP2-PREP §7 P4).
+- G21 (plan citations): the new and changed leaves cite PF (f599e67 numbering). The existing WP2 / D2.WP2 `P(...)`
+  citations are left as they are (refreshing them would change the source of about 130 leaves). Mapping, by identical
+  line text (tools/plan-map.json): book :27/:28/:31 -> :47/:48/:51 (+20); every other cited line (:366-:1012) +39 (e.g.
+  :548 -> :587, :997 -> :1036). The worktree plan now also carries the owner's HR-X1 scope line at :52 (uncommitted), so
+  the worktree numbering is PF + 1 from :52 on.
+
+## For the proof and the lists (no change made outside the book)
+
+- METHOD.stands reads `WP2.methodStands.*` (it had no leaf); VIEW.itemRoute reads
+  `WP2.quantityView.withoutBoqRead.itemRoute`; VIEW.withheld.reason compares with the imported constant (the leaf restates
+  it); QTY.entry.negative.service reads `entryRefusals.negativeService`.
+- BULK.mixed.count reads `WP2.bulk.mixedBatch.a330SubmissionsDelta` (its bookKey still names `.written`).
+- KA.T4.retroactive judges the live 087-FLD reading against `retroactiveTemplateEdit` value / today (objects in the
+  builder's holdsOn shape); FLD.beforeEdit reads `retroactiveBeforeEdit`.
+- IMP.site.reupload reads `importProgress.site.reuploadRows`; the PM import reads `pm.A110approvesPending` and
+  `pm.projectEvAfter`.
+- T4.void.site expects `403 FORBIDDEN`; KA.T6.methodBypass sends `WP2.T6.methodBypassInputs` (30 of 100).
+- Red at HEAD before the fixes, from the book side: RULES.rejectWithoutReason and QTY.entry.negative now expect HEAD's
+  answer, and METHOD.stands, VIEW.itemRoute have leaves; D2.live has none (G14 not added). What stays red is the HR-Q1 and
+  HR-P1 rows (T4.hrQ1.*, T6.olderLower.*, Q320.typed40.reasonRequired).
+- `wp2-mutations-draft.json` N3 (and WP2-PREP §7): the expected observation is a database refusal (5xx), not "201, -5
+  stored" (see G2).
+
+Validation (scratch `C:\Temp\octapm-cert\scratch\wp2\book\`): `book-insert.js` applied to a copy of schedule.js at
+fc29478 (sha256 a097bd35...): 22 exact-anchor edits, each counted once before any write; `node --check` exit 0; the copy
+loads (900 figures, the new load checks pass, no DB access); `verify.js`: no key removed, 27 new keys exactly the expected
+list, 10 changed keys each with exactly the expected fields, 863 identical, other sections, inputs, rules, meta
+identical, LF only, non-ASCII count unchanged, no double-encoding, a second run refused; `teeth.js`: 13 mutants of the new
+leaves and models each refused at load by its own check; the WP-0 load test (`scratch/wp0/load-schedule.js`, adapted
+path): "OK: leaf contract and cross-checks pass" on the copy before and after; `tools/refusal-test.js`: a repeated
+anchor, a missing anchor and the same input/output path are refused with nothing written. Bytes: book-insert.js and the
+patched copy UTF-8 without BOM, no double-encoding, schedule.js LF; every inserted line ASCII.

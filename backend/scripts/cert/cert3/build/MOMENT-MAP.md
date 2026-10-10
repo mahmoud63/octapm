@@ -279,5 +279,6 @@ Known-answer keys are those of `backend/scripts/cert/cert3/answers/*.js` (schedu
 ## Deviations recorded by the work packages
 
 - **WP-1** (run plan `WP1-RUN-PLAN.md` §5.2, integration owner 2026-10-10): the WP-1 proof runs the T4 networks, the zero-rated and all-out-of-scope baseline refusals, the two-project XER (F4), T2, both start-date probes and both calendar probes on its own throwaway projects W and X in 087, not on 087-IMP or 087-SCH (the rows for WP1.T4.*, WP1.baseline.zeroRated / allOutOfScope and WP1.imports.twoProjectXer above). Fresh records either way; the deep projects keep their end state for re-runs. The proof's only write on a deep project is the F1float5 submit and approval on 087-IMP.
+- **WP-2** (WP-2 adjudication Q1, integration owner 2026-10-10): the live progress import runs on the WP-2 proof's own throwaway project P after T1 (A110 at 40, the book's +18,000.00), with the generated progress XER proven byte-identical (sha256) to the file 087-SCH saved; 087-SCH keeps only its stored dry run (the WP2.importProgress row above). Every WP-2 write is on P; on the deep projects the proof only reads (one replay POST on 087-SCH is sent only when exactly the build's own entry carries its clientRequestId, so it cannot write).
 
 225 entries.

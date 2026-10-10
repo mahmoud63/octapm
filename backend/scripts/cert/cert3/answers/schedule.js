@@ -98,8 +98,34 @@
  * citations are read at f599e67 (HF, `@f599e67`), plan lines PF. No other
  * existing value or today changed; load checks after WP1 tie the new leaves
  * to the figures they are built from.
- * Changed keys: answers/CHANGES-WP0-BUILDERS.md (rounds 1-2, and the section
- * "WP-1 proof authoring (2026-10-10)") and
+ *
+ * The integration owner's binding adjudication of the WP-2 preparation
+ * (2026-10-10, C:/Temp/octapm-cert/scratch/wp2/WP2-ADJUDICATION.md Q1-Q12,
+ * cited WP2ADJ(...); the preparation WP2-PREP.md beside it, PREP2(...)) is
+ * applied to the answer-book gaps of WP2-PREP.md section 9: G1
+ * (WP2.rules.rejectWithoutReason), G2 (WP2.quantitiesA310.entryRefusals.
+ * negative and negativeService, Q4), G3 (WP2.methodStands, Q5), G4
+ * (WP2.quantityView.withoutBoqRead: the reason's text, route, member,
+ * itemRoute), G5 and G6 (WP2.bulk.mixedBatch.a330SubmissionsDelta and
+ * choreography), G7 and G8 (WP2.dailyReport.approver, plannerApprove,
+ * qsApprove, holdInstance, release), G9 (WP2.T4.probes.
+ * retroactiveTemplateEdit as per-activity figures; retroactiveBeforeEdit),
+ * G10 (WP2.importProgress.site.reuploadRows, pm.A110approvesPending,
+ * pm.projectEvAfter), G11 (WP2.T4.siteVoid), G15 (WP2.endState087SCH), G16
+ * (WP2.quantitiesA310.dailyLog.evReportPct), G17
+ * (WP2.T3.withDocument.evidence), G22 (WP2.T2.siteOnA330ActivityIds and
+ * siteOnA330SubmissionsDelta) and G23 (WP2.T6.methodBypass typed 30 of 100;
+ * methodBypassInputs); WP2.mutations.dropMethodStands, removeNegativeGuard
+ * and splitBulkTransaction name their catchers. Not here: G12 and G13 wait
+ * for the HR-Q1 / HR-P1 plan review (Q2), G19 for the HR-X1 batch plan
+ * review (Q3), G14 is not added (Q9), G18 (Q6) and G20 (Q8) are not needed.
+ * Product citations are read at f599e67 (HF), plan lines PF (numbered at
+ * f599e67), build scripts BLD (@fc29478). Every changed value keeps its old
+ * value in its note; load checks after WP2 tie the new leaves to the
+ * figures they are built from.
+ * Changed keys: answers/CHANGES-WP0-BUILDERS.md (rounds 1-2, and the sections
+ * "WP-1 proof authoring (2026-10-10)" and "WP-2 answer-book leaves
+ * (2026-10-10)") and
  * answers/CHANGES-WP0-BUILDERS-r3-ev-sch-lanes-extras.md (round 3).
  */
 
@@ -120,6 +146,13 @@ const HF = (file, lines) => `${file}:${lines} @f599e67`;
 const WADJ = (item) => `C:/Temp/octapm-cert/scratch/wp1/author-adjudication.md ${item}`;
 /** The WP-1 preparation (read only, 2026-10-09), whose §7 items the adjudication settles. */
 const PREP1 = (item) => `C:/Temp/octapm-cert/scratch/wp1-prep.md ${item}`;
+
+/** The integration owner's binding adjudication of the WP-2 preparation (2026-10-10, Q1-Q12). */
+const WP2ADJ = (item) => "C:/Temp/octapm-cert/scratch/wp2/WP2-ADJUDICATION.md " + item;
+/** The WP-2 preparation (read only, 2026-10-10), whose section 9 book gaps G1-G23 the adjudication settles. */
+const PREP2 = (item) => "C:/Temp/octapm-cert/scratch/wp2/WP2-PREP.md " + item;
+/** A deep-company build script (not product code), read at fc29478. */
+const BLD = (file, lines) => "backend/scripts/cert/cert3/build/" + file + ":" + lines + " @fc29478";
 
 function F(value, unit, derivation, source, opts = {}) {
   const leaf = {
@@ -1180,6 +1213,59 @@ const EV_DR = EV_T4 + EV_DR_A320;
 const EV_TYPED50_PROJECT = EV_T4 + EV310.dailyLog570 + EV320.typed50;
 const EV_AFTER_QTY = EV_T4 + EV310.dailyLog570 + EV320.typed40;
 const IMPORT_DELTA = evOf(ALLOC.A110, PROGRESS_FILE.A110) - evOf(ALLOC.A110, 40);
+/**
+ * WP-2 answer-book leaves (2026-10-10; WP2ADJ Q4, Q5, Q7): the inputs and the
+ * small models the added leaves are worked from, restated here.
+ *
+ * 087-FLD's form ITP as the build makes it (build/087-fld.js:1100-1131,
+ * :1186-1233, :1267-1290 @fc29478): template version 1 holds two hold items
+ * (hold1, hold2; 'check' and 'witness' are not hold points); the template edit
+ * adds hold3 (version 2, the same template id). The answers per instance are
+ * the builder's.
+ */
+const FLD_ITP = {
+  activities: ["A100", "A110", "A120", "A140", "A150", "A170"],
+  holdItems: { v1: ["hold1", "hold2"], v2: ["hold1", "hold2", "hold3"] },
+  instances: [
+    { activity: "A110", status: "scheduled", answers: {} },
+    { activity: "A110", status: "in_progress", answers: { check: "pass", witness: "yes" } },
+    { activity: "A120", status: "complete", answers: { hold1: "fail", hold2: "pass", check: "pass", witness: "yes" } },
+    { activity: "A140", status: "void", answers: { check: "pass" } },
+    { activity: "A150", status: "closed", answers: { hold1: "pass", hold2: "pass", check: "pass", witness: "yes" } },
+    { activity: "A170", status: "complete", answers: { hold1: "pass", hold2: "pass", check: "pass", witness: "yes" } },
+  ],
+};
+/**
+ * The open hold points per activity as GET /forms/hold-points reads them
+ * (form.service.js openHoldPoints :1416-1431, holdPointsFor :808-825,
+ * PASSING_VALUES / DEFICIENT_VALUES :34-35 @f599e67), in the builder's holdsOn
+ * shape { open, states (sorted) }: every non-void ITP instance of the
+ * activity, each hold item of the template it is read against; an item
+ * answered pass / na / yes / checked has passed and is not open, fail / no is
+ * failed, anything else (no answer) pending.
+ */
+const fldHoldsOn = (holdItems) =>
+  Object.fromEntries(FLD_ITP.activities.map((code) => {
+    const states = [];
+    for (const instance of FLD_ITP.instances.filter((i) => i.activity === code && i.status !== "void")) {
+      for (const item of holdItems) {
+        const answer = instance.answers[item];
+        if (["pass", "na", "yes", "checked"].includes(answer)) continue;
+        states.push(["fail", "no"].includes(answer) ? "failed" : "pending");
+      }
+    }
+    return [code, { open: states.length, states: states.sort() }];
+  }));
+/** Read against version 1 (before the edit, and HR-Q2's recommendation after it) / against the current template, version 2 (HEAD after the edit). */
+const FLD_HOLDS_V1 = fldHoldsOn(FLD_ITP.holdItems.v1);
+const FLD_HOLDS_V2 = fldHoldsOn(FLD_ITP.holdItems.v2);
+/** METHOD.stands on P (WP2ADJ Q5): an activity with no method row (METHODS_087SCH names none), no allocation on P and the site engineer assigned. */
+const METHOD_STANDS = { activity: "A220", submittedPct: 10, configuredMethod: "quantity", quantityUnit: "m2" };
+/** The HR-P2 probe on P (WP2ADJ Q7, G23): A300 approved at percent 20, then a typed quantity 30 of 100 (30% > 20%). */
+const METHOD_BYPASS = { activity: "A300", approvedPercent: 20, quantityComplete: 30, quantityPlanned: 100 };
+const METHOD_BYPASS_PCT = (METHOD_BYPASS.quantityComplete / METHOD_BYPASS.quantityPlanned) * 100;
+/** Project EV on P after the PM's progress import, in the order of WP2-PREP section 5.1 (WP2ADJ Q1). */
+const EV_AFTER_IMPORT = EV_AFTER_QTY + IMPORT_DELTA;
 
 const WP2 = {
   setup: {
@@ -1191,7 +1277,11 @@ const WP2 = {
   },
   rules: {
     approveRejected: F("400 PROGRESS_NOT_APPROVABLE", "http", "Only draft or submitted submissions are approvable.", [P(538), H("backend/src/services/progress.service.js", "2055-2061")]),
-    rejectWithoutReason: F("400 REJECTION_REASON_REQUIRED", "http", "A progress rejection needs a reason.", [P(533), H("backend/src/services/progress.service.js", "2290")]),
+    rejectWithoutReason: F("400 VALIDATION_ERROR", "http",
+      "POST .../activities/:id/progress-submissions/:submissionId/reject with no reason (on P: T3's A120 draft, by the QS): the route chain body('reason').isString().trim().notEmpty() (routes/activities.js:492) fails and validate (:493; middleware/validate.js:14-25) answers before the service: 400 VALIDATION_ERROR, message 'Validation failed', error.details holding an entry whose field is 'reason' (message 'Invalid value'; details are sent outside production, middleware/error-handler.js:304-307). The service's REJECTION_REASON_REQUIRED (progress.service.js:2288-2295, after APPROVED_PROGRESS_LOCKED :2280-2286) is not reached through the route. "
+        + "Corrected as WP1.revisions.rejectWithoutReason was (BOOK-3, the WP-0 F1 precedent): HEAD's VALIDATION_ERROR naming the field is the contract, and the book's earlier code, the service's, is kept as planValue (WP2-PREP G1). Sent with a reason, the same request is answered by the service.",
+      [PF(572, 577), HF("backend/src/routes/activities.js", "484-506"), HF("backend/src/middleware/validate.js", "7-25"), HF("backend/src/middleware/error-handler.js", "304-307"), HF("backend/src/services/progress.service.js", "2257-2295"), WP2ADJ("Q7 (G1)"), PREP2("section 0 fact 3; section 9 G1")],
+      { planValue: "400 REJECTION_REASON_REQUIRED", note: "details.field=reason. Changed 2026-10-10 (WP-2 G1): the value was '400 REJECTION_REASON_REQUIRED' (progress.service.js:2290 @886c9f1), which the route's validator makes unreachable" }),
     patchBundledEntry: F("409 QUANTITY_ENTRY_BUNDLED", "http", "An entry bundled into a pending submission is not edited.", [P(542), H("backend/src/services/quantity-progress.service.js", "404")]),
     evReadsApprovedOnly: F("approved ActivityProgress only", "state", "EV reads approved progress approved on or before the cutoff instant.", [P(536, 591), H("backend/src/services/earned-value.service.js", "737-753")]),
   },
@@ -1213,6 +1303,8 @@ const WP2 = {
   },
   T2: {
     siteOnA330: F("403 ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED", "http", "The site engineer is not assigned to A330.", [P(537, 549), H("backend/src/services/progress.service.js", "930")]),
+    siteOnA330ActivityIds: F(["A330"], "list", "The refusal names the activity the site engineer is not assigned to: assertProgressSubmitAllowed answers 403 ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED with details { activityIds: the requested ids that carry no assignment of the user } (progress.service.js:917-959, the refusal :951-958), here A330's id alone (METHODS_087SCH.siteEngineerAssigned leaves A330 out; the check maps the code to the id).", [PF(576, 588), HF("backend/src/services/progress.service.js", "917-959"), WP2ADJ("Q7 (G22)"), PREP2("section 9 G22")]),
+    siteOnA330SubmissionsDelta: F(0, "count", "Nothing is written: createProgressSubmission asks the assignment rule (progress.service.js:1871-1877) before the submission row is created (:1889), inside one transaction, so A330's submission count read before and after the refusal is the same.", [PF(588), HF("backend/src/services/progress.service.js", "1847-1890"), WP2ADJ("Q7 (G22)"), PREP2("section 9 G22")]),
     plannerOverride: F(200, "http", "pm / planning_eng skip the assignment rule.", [P(549), H("backend/src/services/progress.service.js", "17")]),
     randomId: F("404 ACTIVITY_NOT_FOUND", "http", "A random activity uuid.", [P(549), H("backend/src/services/progress.service.js", "909")]),
     outsider: F("404 PROJECT_NOT_FOUND", "http", "PM of 088.", [P(366, 549)]),
@@ -1224,6 +1316,10 @@ const WP2 = {
     approveDraft: F("400 PROGRESS_EVIDENCE_REQUIRED", "http", "The gate applies again at approval.", [P(550), H("backend/src/services/progress.service.js", "2076-2082")]),
     withDocument: {
       official: FA(50, "percent", "A120 at 50% (area map; the plan gives only the EV).", [P(550), AREA]),
+      evidence: F({ photos: [{ key: "<upload.key>", documentId: "<upload.documentId>", fileName: "<upload.fileName>" }] }, "text",
+        "The T3 evidence is the photo the site engineer uploaded on P (POST .../site-reporting/uploads), named in the shape the clients send: the upload's answer (file-storage.service.js serializeUploadedDocument :696-717: documentId, key = the document id, fileName) put into evidence.photos[]. The writer accepts the photo fields key, documentId and fileName (progress.service.js EVIDENCE_PHOTO_FIELDS :168-175) and matches key and documentId against this project's documents before anything is written (prepareEvidence :585-650; another project's document or none: 400 INVALID_SITE_PHOTO_REFERENCE); hasEvidence counts the one photo (:112-117). "
+          + "HR-X1 (decided, plan :51): evidence is at least one stored project document; the owner's batch decision (WP2ADJ Q3) keeps the current references accepted during the transition, so this canonical shape is valid before and after the HR-X1 fix. Text-only evidence is WP2.confirmFirst.textOnlyEvidence.",
+        [PF(51, 589, 1051), HF("backend/src/services/file-storage.service.js", "696-717"), HF("backend/src/services/progress.service.js", "100-117,168-175,585-650"), WP2ADJ("Q3, Q7 (G17)"), PREP2("section 5.1 site photo; section 9 G17")]),
       ev: F(EV_T3, "cents", `${fmt(EV_T1)} + 30,000.00 x 50% (${fmt(evOf(ALLOC.A120, 50))}) = ${fmt(EV_T3)}. HR-X1 (decided): the evidence is an uploaded project document.`, [P(31, 550)]),
     },
   },
@@ -1244,11 +1340,21 @@ const WP2 = {
     },
     voidWithReason: F("released", "state", "A voided instance is excluded from openHoldPoints.", [P(554), H("backend/src/services/form.service.js", "1419")]),
     voidWithoutReason: F("400 FORM_REASON_REQUIRED", "http", "Void needs a reason.", [P(554), H("backend/src/services/form.service.js", "1260")]),
-    siteVoid: F(403, "http", "The site engineer may not void (code not fixed by the plan).", [P(554)]),
+    siteVoid: F("403 FORBIDDEN", "http",
+      "The site engineer may not void: POST .../forms/:instanceId/void is guarded by requirePermission('inspection', 'approve', { transition: 'inspection.void' }) (routes/forms.js:183-188); shared/permissions.json gives inspection.approve to pm, planning_eng and quality_engineer and the transition inspection.void to pm and quality_engineer, so the site engineer is refused before the service: 403 FORBIDDEN (middleware/rbac.js:138-165). The WP-0 permission probe observed it (WP2.form.void: site_engineer 403 FORBIDDEN).",
+      [PF(593), HF("backend/src/routes/forms.js", "183-188"), HF("shared/permissions.json", "modules.inspection"), HF("backend/src/middleware/rbac.js", "138-165"), "C:/Temp/octapm-cert/results/cert3/permission-probe.json WP2.form.void (WP-0, 2026-10-09)", WP2ADJ("Q7 (G11)"), PREP2("section 9 G11")],
+      { note: "Changed 2026-10-10 (WP-2 G11): the value was 403, a bare status ('code not fixed by the plan'); the route's guard fixes FORBIDDEN" }),
     probes: {
       inProgressPass: F("409 ITP_HOLD_POINT_OPEN", "http", "HR-Q1 (decided): 'pass' on an instance still in progress does not release the hold.", [P(27, 555, 1007)], { today: 200 }),
       naAnswer: F("409 ITP_HOLD_POINT_OPEN", "http", "HR-Q1 (decided): 'na' on a hold item needs the approver; an 'na' alone does not release it.", [P(27, 555, 1007)], { today: 200 }),
-      retroactiveTemplateEdit: FA("gate reads the instance's own template version", "state", "HR-Q2 (undecided) recommendation; recorded.", [P(556, 1008)], { today: "gates read the current template" }),
+      retroactiveTemplateEdit: FA(FLD_HOLDS_V1, "state",
+        "087-FLD's open hold points per activity after the build's template edit (a third hold item added, version 2, the same template id), read live at WP-2 with GET /forms/hold-points?activityId=<code>, in the builder's holdsOn shape { open, states (sorted) } (FLD_ITP, fldHoldsOn). HR-Q2 (undecided) recommends gating on the instance's own template version: every instance was made on version 1 (two hold items), so the figures stay those before the edit (retroactiveBeforeEdit): A110 " + FLD_HOLDS_V1.A110.open + " pending (two unanswered instances x 2), A120 " + FLD_HOLDS_V1.A120.open + " failed (hold 1 'fail', hold 2 'pass'), and 0 on A100 (no instance), A140 (void), A150 (closed, both passed) and A170 (complete, both passed). "
+          + "Today the gate reads the current template's hold items by templateId (form.service.js:1416-1431), so the added item is open, unanswered, on every non-void instance: A110 " + FLD_HOLDS_V2.A110.open + " pending, A120 " + FLD_HOLDS_V2.A120.open + " (failed + pending), A150 " + FLD_HOLDS_V2.A150.open + " pending, A170 " + FLD_HOLDS_V2.A170.open + " pending, A100 and A140 0.",
+        [P(556, 1008), PF(595, 617, 1047), HF("backend/src/services/form.service.js", "34-35,808-825,1416-1431"), BLD("087-fld.js", "1100-1131,1186-1233,1250-1290"), WP2ADJ("Q7 (G9), Q11"), PREP2("section 4 confirm-first; section 9 G9")],
+        { today: FLD_HOLDS_V2, ref: "HR-Q2", note: "Changed 2026-10-10 (WP-2 G9): the value was 'gate reads the instance's own template version' and today 'gates read the current template'; both are now the per-activity figures they mean. The 2026-10-10 build run stored exactly today's figures (state/cert3/087-FLD.json, itp.template-edit out afterEdit): corroboration, not evidence" }),
+      retroactiveBeforeEdit: F(FLD_HOLDS_V1, "state",
+        "087-FLD's open hold points per activity before the template edit, as the build stores them (step itp.holds.before-edit, asserted at its moment: build/087-fld.js:1250-1259): A100 0; A110 " + FLD_HOLDS_V1.A110.open + " pending; A120 " + FLD_HOLDS_V1.A120.open + " failed; A140, A150 and A170 0. Worked from the build's instances (FLD_ITP) through form.service's rule as restated in fldHoldsOn.",
+        [PF(595), HF("backend/src/services/form.service.js", "34-35,808-825,1416-1431"), BLD("087-fld.js", "1186-1259"), WP2ADJ("Q7 (G9)"), PREP2("section 1.2 T4; section 9 G9")]),
       requiredSignature: F("400 FORM_INCOMPLETE", "http", "Completing without the required signature.", [P(556), H("backend/src/services/form.service.js", "1167")]),
       weeklyRecurrenceDays: F(7, "days", "Next instance scheduled D + 7 (every week, interval 1).", [P(556), H("backend/src/services/form.service.js", "774")]),
     },
@@ -1259,6 +1365,17 @@ const WP2 = {
     reportStatus: F("submitted", "state", "The report stays submitted.", [P(557)]),
     officialProgress: F("unchanged", "state", "Official progress unchanged.", [P(557)]),
     afterRelease: F("approved", "state", "After the hold is released.", [P(557)]),
+    holdInstance: FA("an instance of the T-HOLD form ITP template (type itp, one pass_fail hold item) on A320, created scheduled by the quality engineer before the report: GET /forms/hold-points?activityId=A320 shows 1 open, pending", "text",
+      "Promoted from the progressLine note (WP2ADJ Q7, G8): daily-report approval runs the one writer on the report's own activity (daily-report.service.js:994-1005 -> progress.service.js:2084-2098), so the 409 needs an open hold point on A320 itself; A130's instance does not block an A320 line. openHoldPoints counts every non-void ITP instance of the activity, a scheduled one too (form.service.js:1416-1431; HR-Q1 keeps 'any open ITP blocks' for Phase 1). The template is P's T-HOLD (087-SCH's shape, build/087-sch.js:801-838).",
+      [PF(596, 1046), HF("backend/src/services/daily-report.service.js", "955-1054"), HF("backend/src/services/form.service.js", "808-825,851-860,1416-1431"), BLD("087-sch.js", "801-838"), WP2ADJ("Q7 (G8)"), PREP2("section 5.1; section 9 G8")]),
+    release: F("the A320 instance started, its hold item answered 'pass' and the instance completed (status complete, the hold item passed): GET /forms/hold-points?activityId=A320 shows 0 open", "text",
+      "The release before the approval (plan :596 'After the hold is released: approved'), in the form HR-Q1 (decided) keeps releasing: a completed instance with the hold item passed (plan :47, :1046), so the step holds before and after the HR-Q1 fix. start (form.service.js:1120-1131), respond (:1067-1118), complete (:1156-1247; T-HOLD asks no signature); holdPointsFor then reads the item passed (:808-825).",
+      [PF(47, 596, 1046), HF("backend/src/services/form.service.js", "808-825,1067-1131,1156-1247"), WP2ADJ("Q7 (G8)"), PREP2("section 9 G8")]),
+    approver: F("pm", "text",
+      "Daily-report approval is the PM's alone: the route is guarded by requirePermission('progress', 'approve', { transition: 'daily_report.approve' }) (routes/daily-reports.js:252-268); shared/permissions.json gives progress.approve to pm, planning_eng and qs but the transition daily_report.approve to pm only. The WP-0 permission probe observed it (WP2.dailyReport.approve: pm allowed, every other persona 403 FORBIDDEN).",
+      [PF(596), HF("backend/src/routes/daily-reports.js", "252-268"), HF("shared/permissions.json", "modules.progress.transitions"), "C:/Temp/octapm-cert/results/cert3/permission-probe.json WP2.dailyReport.approve (WP-0, 2026-10-09)", WP2ADJ("Q7 (G7)"), PREP2("section 0 fact 7; section 9 G7")]),
+    plannerApprove: F("403 FORBIDDEN", "http", "The planning engineer holds progress.approve but not daily_report.approve: requirePermission refuses before the service, 403 FORBIDDEN, details { module: 'progress', action: 'approve', transition: 'daily_report.approve', source: 'role' } (middleware/rbac.js:138-165).", [PF(596), HF("backend/src/routes/daily-reports.js", "252-256"), HF("backend/src/middleware/rbac.js", "138-165"), WP2ADJ("Q7 (G7)"), PREP2("section 9 G7")]),
+    qsApprove: F("403 FORBIDDEN", "http", "The QS holds progress.approve but not daily_report.approve: 403 FORBIDDEN, as the planning engineer (middleware/rbac.js:138-165).", [PF(596), HF("backend/src/routes/daily-reports.js", "252-256"), HF("backend/src/middleware/rbac.js", "138-165"), WP2ADJ("Q7 (G7)"), PREP2("section 9 G7")]),
     officialAfterApproval: FA((DR_LINE.quantityComplete / A320_PLANNED) * 100, "percent", "After the hold is released and the report approved: A320 official = 40 / 600 x 100 = 6.666... (plan 6.667%); compare to 3 dp.", [P(557, 566), ADJ("S2 WP2.dailyReport")]),
     evA320: FA(EV_DR_A320, "cents", `72,000.00 x 40 / 600 = ${fmt(EV_DR_A320)} (exact).`, [P(557), H("backend/src/services/earned-value.service.js", "792"), ADJ("S2 WP2.dailyReport")]),
     projectEv: FA(EV_DR, "cents", `After T4 ${fmt(EV_T4)} + A320 ${fmt(EV_DR_A320)} = ${fmt(EV_DR)}; every later projectEv carries the A320 figure until A320's own quantity steps replace it.`, [P(557), ADJ("S2 WP2.dailyReport")]),
@@ -1278,10 +1395,23 @@ const WP2 = {
       refusal: F(409, "http", "HR-P1 (approved to fix): approving an older submission after a newer approved one is refused (code to be named by the fix). Probe: A330 approved 60 (s2), then the older pending 30 (s1).", [P(28, 559, 997), AREA], { today: "200; official 30, no warning" }),
       official: F(60, "percent", "A330 stays at 60.", [P(997)], { today: 30 }),
     },
-    methodBypass: FA(409, "http", "HR-P2 (undecided) recommends locking the effective method once progress is approved. Probe: A300 approved percent 20, then a quantity submission 10 of 100. Code null: the rule is undecided, so no code is asserted (PROGRESS_METHOD_LOCKED, the configured-method code, is not assumed).", [P(559, 998), AREA, ADJ("open questions: codes for undecided refusals")], { today: "200; approval makes 10% official under quantity" }),
+    methodBypass: FA(409, "http", "HR-P2 (undecided) recommends locking the effective method once progress is approved. Probe: " + METHOD_BYPASS.activity + " approved percent " + METHOD_BYPASS.approvedPercent + ", then a quantity submission " + METHOD_BYPASS.quantityComplete + " of " + METHOD_BYPASS.quantityPlanned + " (WP2.T6.methodBypassInputs; " + METHOD_BYPASS_PCT + "% is above the approved " + METHOD_BYPASS.approvedPercent + "%, so HR-P1's lower-figure rule, once fixed, cannot answer first and mask HR-P2). Code null: the rule is undecided, so no code is asserted (PROGRESS_METHOD_LOCKED, the configured-method code, is not assumed).", [P(559, 998), AREA, ADJ("open questions: codes for undecided refusals"), PF(598, 619, 1037), WP2ADJ("Q7 (G23), Q11"), PREP2("section 0 fact 9; section 9 G23")], { today: "200; approval makes " + METHOD_BYPASS_PCT + "% official under quantity (A300's official figure moves " + METHOD_BYPASS.approvedPercent + " -> " + METHOD_BYPASS_PCT + " and its method from percent to quantity)", ref: "HR-P2", note: "Changed 2026-10-10 (WP-2 G23): the probe typed 10 of 100 and today read '200; approval makes 10% official under quantity'; 10% is below A300's approved 20%, which HR-P1's fix (a lower figure needs a reason) would refuse first, masking HR-P2" }),
+    methodBypassInputs: FA(METHOD_BYPASS, "text", "The HR-P2 probe's inputs on P (WP2ADJ Q7, G23): " + METHOD_BYPASS.activity + " is unconfigured (METHODS_087SCH.A300 null) and unallocated, the site engineer assigned. First percent " + METHOD_BYPASS.approvedPercent + " submitted and approved; then { progressMethod: 'quantity', quantityComplete: " + METHOD_BYPASS.quantityComplete + ", quantityPlanned: " + METHOD_BYPASS.quantityPlanned + " } submitted and approved. With no method row the client's method is taken (progress.service.js:1516-1518) and the approval asks nothing of it (:1545-1546); with no allocation the planned figure is the client's (deriveQuantityFigures :1422-1450, basis 'client'): " + METHOD_BYPASS.quantityComplete + " / " + METHOD_BYPASS.quantityPlanned + " x 100 = " + METHOD_BYPASS_PCT + "%.", [PF(598, 619, 1037), HF("backend/src/services/progress.service.js", "1422-1450,1516-1518,1545-1546"), WP2ADJ("Q7 (G23)"), PREP2("section 0 fact 9; section 9 G23")]),
   },
   T7: {
     retiredActivityApproval: FA(409, "http", "HR-S9 (undecided) recommends refusing approval on an activity retired by activation.", [P(559, 996)], { today: "200; an ActivityProgress row on an inactive activity" }),
+  },
+  methodStands: {
+    choreography: FA("On P (WP2ADJ Q5): " + METHOD_STANDS.activity + " unconfigured; the site engineer (assigned) submits percent " + METHOD_STANDS.submittedPct + " (submitted, pending); the planner PUTs " + METHOD_STANDS.activity + "'s progress method { method: '" + METHOD_STANDS.configuredMethod + "', quantityUnit: '" + METHOD_STANDS.quantityUnit + "' } (200: no approved progress yet); the QS approves the pending percent submission", "text",
+      "The approval-time half of the method rule (plan :578 gates; section 6.2 'the method-stands check', :1145), reached only by a submission made before its activity was configured another way: A220 has no ActivityProgressMethod row on P (METHODS_087SCH names none), no allocation (S-006 stays unallocated on P) and no ITP instance, so nothing else answers first. The submit-time rule (WP2.quantitiesA310.percentMethod, resolveSubmissionMethod) takes the client's percent while no row exists (progress.service.js:1516-1518); the PUT is allowed because assertMethodChangeAllowed reads approved progress only (:1023-1036) and upsertProgressMethod asks nothing else (:1038-1085; routes/activities.js:353-383, method.configure is the PM's and the planner's).",
+      [PF(578, 598, 1145), HF("backend/src/services/progress.service.js", "1023-1085,1505-1529"), HF("backend/src/routes/activities.js", "353-383"), WP2ADJ("Q5"), PREP2("section 0 fact 4; section 9 G3")]),
+    approve: F("409 PROGRESS_METHOD_MISMATCH", "http",
+      "approveProgressSubmissionWithClient reads the method row again where the figure would become official (progress.service.js:2063-2064) and assertSubmissionMethodStands (:2065 -> :1545-1561) refuses a submission whose method (percent) is not the configured one (quantity): 409 PROGRESS_METHOD_MISMATCH, before the evidence, hold-point and quantity steps (:2076-2147) and before the one writer (:2171). The same code as the submit-time rule (WP2.quantitiesA310.percentMethod).",
+      [PF(578, 1145), HF("backend/src/services/progress.service.js", "1531-1561,2020-2065,2171"), WP2ADJ("Q5"), PREP2("section 9 G3")]),
+    detailsSubmissionId: F(true, "bool",
+      "The refusal's details name the submission and both methods: { activityId: A220's id, effectiveMethod: 'quantity', effectiveMethodBasis: 'method_config', requestedMethod: 'percent', submissionId: the pending A220 submission's id } (progress.service.js:1555-1560); the check compares details.submissionId with that id.",
+      [PF(578), HF("backend/src/services/progress.service.js", "1545-1561"), WP2ADJ("Q5"), PREP2("section 9 G3")]),
+    official: F(0, "percent", "Nothing official is written: the refusal rolls the approval's transaction back (approveProgressSubmission, progress.service.js:2254-2255), A220 keeps no ActivityProgress row and its submission stays submitted; GET /activities/A220 reads pctComplete 0.", [PF(575, 578), HF("backend/src/services/progress.service.js", "2020-2065,2254-2255"), WP2ADJ("Q5"), PREP2("section 9 G3")]),
   },
   quantitiesA310: {
     typedZero: F("400 QUANTITY_INVALID", "http", "quantityComplete 0.", [P(561), H("backend/src/services/progress.service.js", "1247-1258")]),
@@ -1303,7 +1433,15 @@ const WP2 = {
     },
     entryRefusals: {
       unitM3: F("400 QUANTITY_UNIT_MISMATCH", "http", "S-003 is in m2.", [P(564, 541), H("backend/src/services/quantity-progress.service.js", "217")]),
-      negative: F("400 QUANTITY_NEGATIVE", "http", "-5.", [P(564), H("backend/src/services/quantity-progress.service.js", "490")]),
+      negative: F("400 VALIDATION_ERROR", "http",
+        "POST .../quantity-progress with quantity -5 (on P: the site engineer, A310, S-003, one entry as the request body): the route's entry validator refuses it before the service, custom check 'must be zero or more' (routes/quantity-progress.js:48-53, :51; the POST chain :105-116, validate :115): 400 VALIDATION_ERROR, message 'Validation failed', error.details holding an entry whose field is 'quantity' (message 'must be zero or more'; under entries[] the field is 'entries[0].quantity', express-validator's wildcard path). Nothing is written. The service's QUANTITY_NEGATIVE (quantity-progress.service.js:489-491) is not reached over HTTP; it is the in-process probe's answer (entryRefusals.negativeService). "
+          + "Integration owner's decision Q4 (a): the API-reachable guard is the route validator, as WP-0 F1 and WP-1 BOOK-3 settled; no product contract changes without a rule. The plan's code list (:580) and the book's earlier value are kept as planValue.",
+        [PF(580, 603), HF("backend/src/routes/quantity-progress.js", "43-64,105-133"), HF("backend/src/middleware/validate.js", "7-25"), HF("backend/src/services/quantity-progress.service.js", "489-491"), WP2ADJ("Q4 (a), Q7 (G2)"), PREP2("section 0 fact 2; section 7 N1-N3; section 9 G2")],
+        { planValue: "400 QUANTITY_NEGATIVE", note: "details.field=quantity (entries[0].quantity under entries[]). Changed 2026-10-10 (WP-2 G2, Q4): the value was '400 QUANTITY_NEGATIVE' (quantity-progress.service.js:490 @886c9f1), which the route's validator makes unreachable over HTTP" }),
+      negativeService: F("400 QUANTITY_NEGATIVE", "http",
+        "In process (WP2ADJ Q4 (b) and Q8, the check QTY.entry.negative.service): quantityProgressService.createEntries({ orgId, projectId: P, userId: the site engineer, userRole: 'site_engineer', entries: [{ activityId: A310, boqItemId: S-003, quantity: -5, date }] }) (quantity-progress.service.js:588-600 -> createEntriesWithClient :430-574): after the replay lookup, the assignment rule (A310 is assigned), ensureActivity and ensureBoqItem, quantityDecimal(-5) (:72-87) is negative and the service throws HttpError 400 QUANTITY_NEGATIVE, details { field: 'entries[0].quantity' } (:489-491), before any write; the transaction rolls back and nothing is written. "
+          + "It is the only catcher of the service guard removed alone (mutation N2): over HTTP the route validator answers first. Behind both application layers the database keeps a third, CHECK QuantityProgressEntry_quantity_nonnegative (prisma/migrations/20261005050000_quantity_progress/migration.sql:205), which refuses the insert itself.",
+        [PF(580, 603, 1145), HF("backend/src/services/quantity-progress.service.js", "72-87,430-500,588-600"), HF("backend/prisma/migrations/20261005050000_quantity_progress/migration.sql", "205"), WP2ADJ("Q4 (b), Q8"), PREP2("section 7 N2; section 9 G2")]),
       notAllocated: F("400 QUANTITY_ITEM_NOT_ALLOCATED", "http", "An item with no approved allocation on A310 (e.g. S-004).", [P(564), H("backend/src/services/quantity-progress.service.js", "316")]),
       patchApproved: F("409 QUANTITY_ENTRY_LOCKED", "http", "An approved entry is not edited.", [P(564), H("backend/src/services/quantity-progress.service.js", "398")]),
     },
@@ -1315,6 +1453,9 @@ const WP2 = {
       entries: F(1, "count", "A daily log quantities row of 30 m2 mints exactly one submitted entry.", [P(565), H("backend/src/services/daily-log.service.js", "233-257")]),
       installed: F(540 + 30, "m2", "540 + 30 = 570.", [P(565)]),
       pct: F((570 / A310_PLANNED) * 100, "percent", "570 / 900 x 100 = 63.333... (plan 63.333%); compare to 3 dp.", [P(565)]),
+      evReportPct: F(Number(((570 / A310_PLANNED) * 100).toFixed(2)), "percent",
+        "The EV report's activity row rounds the percent to 2 dp (earned-value.service.js:827, pct: Number(pct.toFixed(2)); the breakdown copies it, :1023) while EV is worked from the unrounded figure (:790-792): 63.333... -> " + Number(((570 / A310_PLANNED) * 100).toFixed(2)) + ". WP2.quantitiesA310.dailyLog.pct (63.333..., to 3 dp) is read on GET /activities/<A310> pctComplete, as the builder does (build/087-sch.js:1014-1015); a stored EV-report percent (087-SCH qty.dailylog570 out evA310.pct) is compared with this leaf.",
+        [PF(604), HF("backend/src/services/earned-value.service.js", "785-792,827,1023"), BLD("087-sch.js", "1010-1019"), WP2ADJ("Q7 (G16)"), PREP2("section 9 G16")]),
       evA310: F(EV310.dailyLog570, "cents", `135,000.00 x 570 / 900 = ${fmt(EV310.dailyLog570)} (exact; HEAD's float pct 63.33333333333333 also rounds to 85,500.00).`, [P(565), H("backend/src/services/earned-value.service.js", "792")]),
       projectEv: FA(EV_DR + EV310.dailyLog570, "cents", `${fmt(EV_T4)} + A320 from the daily report ${fmt(EV_DR_A320)} (WP2.dailyReport) + A310 ${fmt(EV310.dailyLog570)} = ${fmt(EV_DR + EV310.dailyLog570)}.`, [P(565), ADJ("S2 WP2.dailyReport")]),
     },
@@ -1350,14 +1491,32 @@ const WP2 = {
     withoutBoqRead: {
       http: F(200, "http", "QUANTITY_FIGURES_WITHHELD is a reason, not an error: 200 with withheld:true and no figure.", [P(544, 567), H("backend/src/utils/boq-figures.js", "1834-1857")]),
       withheld: F(true, "bool", "withheld: true; every figure value null.", [P(567)]),
-      reason: F("QUANTITY_FIGURES_WITHHELD", "text", "The reason constant.", [P(567)]),
+      reason: F("Installed, certified, paid, received, issued and committed quantities are worked from the BOQ's rows, available only to members who may read the BOQ", "text",
+        "The reason is the sentence held by the constant QUANTITY_FIGURES_WITHHELD (utils/boq-figures.js:1834-1835, exported :2333), not its identifier: withheldActivityQuantities answers { ..., figures: each { value: null, withheld: true, notAvailable: { reason } }, comparisons and items { withheld: true, reason }, withheld: true, reason } (:1859-1884). The proof compares by importing the constant; the text is restated here for the reader.",
+        [PF(583, 606), HF("backend/src/utils/boq-figures.js", "1825-1884,2333"), WP2ADJ("Q7 (G4)"), PREP2("section 0 fact 6; section 9 G4")],
+        { note: "Changed 2026-10-10 (WP-2 G4): the value was 'QUANTITY_FIGURES_WITHHELD', the constant's identifier (the plan's word, :606, which names the constant); the answer carries the constant's text" }),
+      route: F("GET /projects/:projectId/activities/<A310>/quantities", "text",
+        "Where the plan's 'gets QUANTITY_FIGURES_WITHHELD' (:606) is answered: the activity view is admitted on schedule:read (routes/activities.js:253-269) and withholds every BOQ-derived figure from a member without boq:read (withheldActivityQuantities, boq-figures.js:1859-1884; boqFigureAccess :169-172), so it answers 200 with withheld: true (withoutBoqRead.http). The BOQ item's own view is admitted on boq:read and refuses the same member (itemRoute).",
+        [PF(583, 606), HF("backend/src/routes/activities.js", "253-269"), HF("backend/src/utils/boq-figures.js", "169-172,1859-1884"), WP2ADJ("Q7 (G4)"), PREP2("section 0 fact 6; section 9 G4")]),
+      member: F("087-EXTRAS T-NOBOQ member on 087-SCH (people.noBoq: the staff site engineer tariq.okafor.2, on the team with the T-NOBOQ template)", "text",
+        "The member denied boq:read: 087-EXTRAS makes the internal template T-NOBOQ (site_engineer base, the boq tool at 'none'), puts the staff site engineer on 087-SCH's team with it and asserts that GET /boq answers 403 there (build/087-extras.js:79, :139-159, :184-195). The template decides before the role (middleware/rbac.js:50-68).",
+        [PF(606), BLD("087-extras.js", "79,139-159,184-195"), HF("backend/src/middleware/rbac.js", "50-68"), WP2ADJ("Q7 (G4)"), PREP2("section 5.2; section 9 G4")]),
+      itemRoute: F("403 FORBIDDEN", "http",
+        "The same member on GET /projects/:projectId/boq/items/<S-003>/quantities: the route is guarded by requirePermission('boq', 'read') (routes/boq.js:318-339); the T-NOBOQ template refuses boq:read, so the guard answers 403 FORBIDDEN, details { module: 'boq', action: 'read', transition: null, source: 'template' } (middleware/rbac.js:138-165), before the view.",
+        [PF(583, 606), HF("backend/src/routes/boq.js", "318-339"), HF("backend/src/middleware/rbac.js", "50-68,138-165"), WP2ADJ("Q7 (G4)"), PREP2("section 0 fact 6; section 9 G4")]),
     },
   },
   bulk: {
     mixedBatch: {
       refusal: FA("409 PROGRESS_METHOD_MISMATCH", "http", "Batch [A330 {pct 10} by the planner, A310 {method percent}]: the second update is refused (batch chosen from the area map).", [P(569), AREA, H("backend/src/services/activity.service.js", "738-822")]),
       index: F(1, "count", "details.batch.index 1.", [P(569)]),
-      written: F(0, "count", "details.batch.written 0; A330's submission count unchanged.", [P(569)]),
+      written: F(0, "count", "details.batch.written 0; A330's submission count unchanged.", [P(569)], { note: "details.batch.written is the constant 0 in every bulk refusal (activity.service.js:783, :819 @f599e67), whatever was written: a split transaction shows only in A330's submission count (WP2.bulk.mixedBatch.a330SubmissionsDelta, the catcher of WP2.mutations.splitBulkTransaction). Note added 2026-10-10 (WP-2 G5); value, derivation and source unchanged" }),
+      a330SubmissionsDelta: F(0, "count",
+        "A330's progress submissions read before and after the refused batch (GET .../activities/<A330>/progress-submissions): the same count. bulkUpdateProgress writes the batch in one transaction (activity.service.js:797-826, BULK_PROGRESS_TRANSACTION :746); the writer refuses update 1 (A310 percent, 409 PROGRESS_METHOD_MISMATCH: resolveSubmissionMethod, progress.service.js:1516-1529, from buildSubmissionData :1576) and the throw rolls update 0 (A330) back. The refusal body cannot show a split (details.batch.written is the constant 0, :819), so this count is the catcher of the split-transaction mutation (BULK.mixed.count).",
+        [PF(572, 608, 1145), HF("backend/src/services/activity.service.js", "746,758-829"), HF("backend/src/services/progress.service.js", "1516-1529,1563-1576"), WP2ADJ("Q7 (G5)"), PREP2("section 0 fact 5; section 7 P8; section 9 G5")]),
+      choreography: FA("On P, before T6 (after Q320): the planner sends [A330 { pctComplete: 10 }, A310 { method: 'percent', pctComplete: 10 }]; A330's official progress is then 0 (T2's planner submission at 30 is still pending)", "text",
+        "The order binds once HR-P1 is fixed (WP2ADJ Q7, G6): update 0 must not be a figure lower than A330's official progress, or HR-P1's rule could refuse it at index 0 and hide the method refusal at index 1. Before T6, A330 has no approved progress (official 0), so 10 is not lower. The planner may submit on A330 without an assignment (override, progress.service.js:17, :925).",
+        [PF(48, 608, 1036), HF("backend/src/services/progress.service.js", "17,917-959"), WP2ADJ("Q7 (G6)"), PREP2("section 0 fact 9; section 5.1 order; section 9 G6")]),
     },
     randomId: {
       refusal: F("404 ACTIVITY_NOT_FOUND", "http", "Unknown activity, named before anything is written.", [P(569), H("backend/src/services/activity.service.js", "774")]),
@@ -1375,25 +1534,102 @@ const WP2 = {
       ev: F("byte_identical", "state", "EV byte-identical.", [P(570)]),
       A310row: F("409 PROGRESS_METHOD_MISMATCH", "http", "A310 is quantity; the file states a percent.", [P(570), AREA]),
       reupload: F("already_pending", "state", "Uploaded again.", [P(570)]),
+      reuploadRows: F({ A110: "already_pending", A130: "already_pending", A310: "refused" }, "state",
+        "The site engineer's second upload of the same file, per row (import.service.js importProgress :715): A110 70 and A130 50 each find the submission of the first upload waiting at the same figure (:768-770) and the site engineer cannot approve, so each row is already_pending with no second submission (:847-862); A310's percent row is refused by the writer's method rule first (:786-796, :828-833: PROGRESS_METHOD_MISMATCH). Nothing is written.",
+        [PF(609), HF("backend/src/services/import.service.js", "715-883,1033-1101"), WP2ADJ("Q1, Q7 (G10)"), PREP2("section 9 G10")]),
     },
     pm: {
       A110official: FA(PROGRESS_FILE.A110, "percent", "Approved through the writer.", [P(571)]),
       evA110: FA(evOf(ALLOC.A110, PROGRESS_FILE.A110), "cents", `60,000.00 x 70% = ${fmt(evOf(ALLOC.A110, PROGRESS_FILE.A110))}.`, [P(571)]),
       evDelta: FA(IMPORT_DELTA, "cents", `A110 official 40 -> 70: +${fmt(IMPORT_DELTA)}.`, [P(571), AREA]),
       A130row: FA("pending (ITP_HOLD_POINT_OPEN)", "state", "An open hold point keeps A130's row pending (a second, scheduled ITP instance on A130).", [P(571)]),
+      A110approvesPending: F(true, "bool",
+        "The PM's upload finds the site engineer's A110 submission at 70 still waiting and, holding submission.approve (canApprove, routes/import.js:292-294), approves that one rather than making a second (row.approvesPending, import.service.js:834-846, :1045-1049); the approval goes through the one writer (:1079-1092). A130's row does the same and is left pending by the hold point (:1093-1100).",
+        [PF(610), HF("backend/src/services/import.service.js", "834-846,1045-1049,1079-1101"), HF("backend/src/routes/import.js", "265-337"), WP2ADJ("Q1, Q7 (G10)"), PREP2("section 9 G10")]),
+      projectEvAfter: FA(EV_AFTER_IMPORT, "cents",
+        "Project EV after the PM's import on P, in the order of WP2-PREP section 5.1 (WP2ADJ Q1: the import runs on P after the quantity steps): " + fmt(EV_AFTER_QTY) + " (WP2.quantitiesA320.typed40.projectEv; BULK, T5, T6 and METHOD.stands move no allocated activity) + A110 40 -> 70 (" + fmt(IMPORT_DELTA) + ", WP2.importProgress.pm.evDelta) = " + fmt(EV_AFTER_IMPORT) + ". A130's row stays pending (hold point) and A310's is refused, so neither moves EV.",
+        [PF(610), HF("backend/src/services/earned-value.service.js", "785-792"), WP2ADJ("Q1, Q7 (G10)"), PREP2("section 5.1 order; section 9 G10")]),
     },
+  },
+  endState087SCH: {
+    projectEv: F(EV310.dailyLog570, "cents", "087-SCH as the build leaves it (MOMENT-MAP row 40): the one approved figure on an allocated activity is A310 at 570 m2 (WP2.quantitiesA310.dailyLog.evA310), so project EV = 135,000.00 x 570 / 900 = " + fmt(EV310.dailyLog570) + ". The rejected 10 m2 and the draft and submitted 5 m2 entries do not count (approved entries only; steps qty.rejected10, qty.pending), and the build approves nothing on any other activity (build/087-sch.js:801-1043: every claim is on A310). Optional (WP2-PREP G15): the live end-state read, which no fixed check depends on.", [PF(423, 604), BLD("087-sch.js", "801-1043"), BLD("MOMENT-MAP.md", "row 40"), WP2ADJ("Q7 (G15)"), PREP2("section 9 G15")]),
+    A320official: F(0, "percent", "The 087-SCH build makes no progress submission on A320 (build/087-sch.js:801-1043), so GET /activities/<A320> reads pctComplete 0. Optional (WP2-PREP G15).", [PF(423), BLD("087-sch.js", "801-1043"), WP2ADJ("Q7 (G15)"), PREP2("section 9 G15")]),
+    A130openHolds: F(1, "count", "The build's A130 instance (step itp, build/087-sch.js:801-838: scheduled, its one hold item unanswered) is never answered or voided, so GET /forms/hold-points?activityId=<A130> still shows 1 open, pending (= WP2.T4.openList, read live by SCH.live.A130hold). Optional (WP2-PREP G15).", [PF(423, 590), BLD("087-sch.js", "801-838"), HF("backend/src/services/form.service.js", "1416-1431"), WP2ADJ("Q7 (G15)"), PREP2("section 9 G15")]),
   },
   mutations: {
     removeHoldPointCheck: F("WP2.T4.approve red", "state", "progress.service.js:2086-2098 removed: approval 200 with the hold open.", [P(573)]),
     removeApprovalEvidence: F("WP2.T3.approveDraft red", "state", "Evidence check at approval removed.", [P(573)]),
     submitPermissionEarlyReturn: F("WP2.T2.siteOnA330 red", "state", "assertProgressSubmitAllowed returns early.", [P(573)]),
     dropIdempotentApprove: F("WP2.T1.approveAgain red", "state", "A second approval writes a second row or refuses.", [P(573)]),
-    dropMethodStands: F("WP2.quantitiesA310.percentMethod red", "state", "assertSubmissionMethodStands dropped.", [P(573)]),
+    dropMethodStands: F("METHOD.stands red", "state",
+      "The method-stands check (plan :612, section 6.2 :1145) dropped: assertSubmissionMethodStands({ submission, configRow }) at progress.service.js:2065 replaced by 'void configRow;' (WP2-PREP section 7 P5). The pending A220 percent submission of WP2.methodStands is then approved after the planner configured A220 as quantity (200, official 10%: the approval's quantity steps follow the submission's own method, :2111-2147), so METHOD.stands (WP2.methodStands.approve) is red. The submit-time rule is not touched: QTY.percentMethod (WP2.quantitiesA310.percentMethod, resolveSubmissionMethod :1516-1529) stays green and remains its own check (WP2ADJ Q5).",
+      [P(573), PF(612, 1145), HF("backend/src/services/progress.service.js", "1516-1561,2063-2065,2111-2147"), WP2ADJ("Q5"), PREP2("section 0 fact 4; section 7 P5")],
+      { note: "Changed 2026-10-10 (WP-2 G3, Q5): the value was 'WP2.quantitiesA310.percentMethod red', the submit-time rule, which this mutation leaves green" }),
     openHoldPointsEmpty: F("WP2.T4.approve red", "state", "openHoldPoints returns [].", [P(573)]),
-    removeNegativeGuard: F("WP2.quantitiesA310.entryRefusals.negative red", "state", "-5 accepted.", [P(573)]),
-    splitBulkTransaction: F("WP2.bulk.mixedBatch.written red", "state", "The first update is written.", [P(573)]),
+    removeNegativeGuard: F("QTY.entry.negative red (N3, the E6 entry: the route validator and the service guard removed together; N1, the validator alone, too); QTY.entry.negative.service red (N2: the service guard alone)", "state",
+      "The negative-quantity guard has two application layers (WP2ADJ Q4): the POST route's validator 'must be zero or more' (routes/quantity-progress.js:51), which answers first over HTTP, and the service's QUANTITY_NEGATIVE (quantity-progress.service.js:489-491). N3 removes both: -5 is no longer refused 400 VALIDATION_ERROR, so QTY.entry.negative (WP2.quantitiesA310.entryRefusals.negative) is red. N1 removes the validator only: the service answers 400 QUANTITY_NEGATIVE, not VALIDATION_ERROR: red. N2 removes the service guard only: over HTTP nothing changes, so only the in-process probe QTY.entry.negative.service (WP2.quantitiesA310.entryRefusals.negativeService) sees it: red. "
+        + "Expected observation, not a stored entry: past both layers the insert meets the database CHECK QuantityProgressEntry_quantity_nonnegative (migration 20261005050000_quantity_progress:205), so N3 is expected to answer a 5xx (the error handler maps an unlisted database error to 500 INTERNAL_ERROR, middleware/error-handler.js:244-255) and N2's probe a database error; each is red all the same.",
+      [P(573), PF(603, 612, 1135, 1145), HF("backend/src/routes/quantity-progress.js", "48-53"), HF("backend/src/services/quantity-progress.service.js", "489-491"), HF("backend/prisma/migrations/20261005050000_quantity_progress/migration.sql", "205"), HF("backend/src/middleware/error-handler.js", "41-65,244-255"), WP2ADJ("Q4, Q8"), PREP2("section 7 N1-N3")],
+      { note: "Changed 2026-10-10 (WP-2 G2, Q4): the value was 'WP2.quantitiesA310.entryRefusals.negative red'; with the service guard alone removed (the book's citation) every HTTP check stays green" }),
+    splitBulkTransaction: F("BULK.mixed.count red", "state",
+      "The bulk transaction split (WP2-PREP section 7 P8: prisma.$transaction(async (tx) => ...) at activity.service.js:797 run as a plain call on the client, :826): update 0 (A330, the planner's 10%) is written before update 1 (A310) is refused, so A330's submission count rises by one and BULK.mixed.count (WP2.bulk.mixedBatch.a330SubmissionsDelta) is red. The refusal body is the same either way (details.batch.written is the constant 0, :819), so WP2.bulk.mixedBatch.written cannot catch it.",
+      [P(573), PF(608, 612, 1145), HF("backend/src/services/activity.service.js", "797-826"), WP2ADJ("Q7 (G5)"), PREP2("section 0 fact 5; section 7 P8")],
+      { note: "Changed 2026-10-10 (WP-2 G5): the value was 'WP2.bulk.mixedBatch.written red'; details.batch.written is the constant 0 (activity.service.js:819), so the refusal body cannot show the split" }),
   },
 };
+
+// Load checks for the WP-2 answer-book leaves (2026-10-10, WP2ADJ Q4, Q5, Q7): each added or changed leaf agrees with the figures it is built from.
+(() => {
+  const fail = (what) => {
+    throw new Error("schedule answer book: " + what);
+  };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // G1, G2: the route's contracts, the field in error.details, the earlier codes as planValue
+  const rw = WP2.rules.rejectWithoutReason;
+  if (rw.value !== "400 VALIDATION_ERROR" || rw.planValue !== "400 REJECTION_REASON_REQUIRED" || !rw.planDisagrees || !/details\.field=reason/.test(rw.note || "")) fail("WP2.rules.rejectWithoutReason must carry the route's contract, the field, and the service's code as planValue (G1)");
+  const er = WP2.quantitiesA310.entryRefusals;
+  if (er.negative.value !== "400 VALIDATION_ERROR" || er.negative.planValue !== er.negativeService.value || er.negativeService.value !== "400 QUANTITY_NEGATIVE" || !er.negative.planDisagrees || !/details\.field=quantity/.test(er.negative.note || "")) fail("WP2.quantitiesA310.entryRefusals.negative / negativeService: the route's VALIDATION_ERROR over HTTP, the service's QUANTITY_NEGATIVE in process and as planValue (G2, Q4)");
+  // G3, Q5: METHOD.stands
+  const ms = WP2.methodStands;
+  if (ms.approve.value !== WP2.quantitiesA310.percentMethod.value || ms.detailsSubmissionId.value !== true || ms.official.value !== 0) fail("WP2.methodStands: 409 PROGRESS_METHOD_MISMATCH (the submit-time rule's code), details.submissionId, nothing official (G3)");
+  if (METHODS_087SCH[METHOD_STANDS.activity] !== undefined || ALLOC[METHOD_STANDS.activity] !== undefined || !METHODS_087SCH.siteEngineerAssigned.includes(METHOD_STANDS.activity)) fail("METHOD.stands needs an activity with no method row, no allocation on P and the site engineer assigned (G3)");
+  // G4: the reason's text, the routes
+  const wb = WP2.quantityView.withoutBoqRead;
+  if (!/^[\x20-\x7e]+$/.test(wb.reason.value) || wb.reason.value === "QUANTITY_FIGURES_WITHHELD" || !/QUANTITY_FIGURES_WITHHELD/.test(wb.reason.note || "") || wb.http.value !== 200 || wb.withheld.value !== true || wb.itemRoute.value !== WP2.T1.siteApprove.value || wb.route.value.indexOf("/activities/") < 0) fail("WP2.quantityView.withoutBoqRead: the constant's text, 200 withheld on the activity route, 403 FORBIDDEN on the item route (G4)");
+  // G5, G6 and the mutation leaves' catchers
+  const mx = WP2.bulk.mixedBatch;
+  if (mx.written.value !== 0 || mx.a330SubmissionsDelta.value !== 0 || WP2.mutations.splitBulkTransaction.value !== "BULK.mixed.count red") fail("the split bulk transaction is caught by A330's submission count, not by details.batch.written (G5)");
+  if (WP2.mutations.dropMethodStands.value !== "METHOD.stands red") fail("WP2.mutations.dropMethodStands must name METHOD.stands (G3, Q5)");
+  const ng = WP2.mutations.removeNegativeGuard.value;
+  if (!/QTY\.entry\.negative red/.test(ng) || !/QTY\.entry\.negative\.service red/.test(ng)) fail("WP2.mutations.removeNegativeGuard must name QTY.entry.negative (N3) and QTY.entry.negative.service (N2) (G2, Q4)");
+  // G7: the daily-report approver
+  const dr = WP2.dailyReport;
+  if (dr.approver.value !== "pm" || dr.plannerApprove.value !== WP2.T1.siteApprove.value || dr.qsApprove.value !== WP2.T1.siteApprove.value) fail("WP2.dailyReport: the PM approves, the planner and the QS are refused 403 FORBIDDEN (G7)");
+  // G9: 087-FLD's hold points, the build's own before-edit assertions (087-fld.js:1254-1257) and HEAD's after-edit reading
+  const rt = WP2.T4.probes.retroactiveTemplateEdit;
+  if (!same(rt.value, FLD_HOLDS_V1) || !same(rt.today, FLD_HOLDS_V2) || !same(WP2.T4.probes.retroactiveBeforeEdit.value, rt.value) || rt.ref !== "HR-Q2") fail("WP2.T4.probes.retroactiveTemplateEdit: version-1 figures as value (and before the edit), version-2 figures as today (G9)");
+  if (FLD_HOLDS_V1.A100.open !== 0 || FLD_HOLDS_V1.A110.open !== 4 || !FLD_HOLDS_V1.A110.states.every((s) => s === "pending") || !same(FLD_HOLDS_V1.A120.states, ["failed"]) || FLD_HOLDS_V1.A140.open + FLD_HOLDS_V1.A150.open + FLD_HOLDS_V1.A170.open !== 0) fail("FLD_HOLDS_V1 must be the build's before-edit reading (087-fld.js:1254-1257)");
+  if (FLD_HOLDS_V2.A110.open !== 2 * FLD_ITP.holdItems.v2.length || !same(FLD_HOLDS_V2.A120.states, ["failed", "pending"]) || FLD_HOLDS_V2.A150.open !== 1 || FLD_HOLDS_V2.A170.open !== 1 || FLD_HOLDS_V2.A100.open + FLD_HOLDS_V2.A140.open !== 0) fail("FLD_HOLDS_V2: the added hold item open on every non-void instance");
+  // G10: the import on P
+  const ip = WP2.importProgress;
+  if (ip.pm.projectEvAfter.value !== WP2.quantitiesA320.typed40.projectEv.value + ip.pm.evDelta.value || ip.pm.projectEvAfter.value !== EV_AFTER_IMPORT || ip.pm.A110approvesPending.value !== true) fail("WP2.importProgress.pm.projectEvAfter must be the EV after Q320 plus the import's delta (G10)");
+  if (!same(Object.keys(ip.site.reuploadRows.value), Object.keys(PROGRESS_FILE)) || ip.site.reuploadRows.value.A110 !== ip.site.reupload.value || ip.site.reuploadRows.value.A130 !== ip.site.reupload.value || ip.site.reuploadRows.value.A310 !== "refused") fail("WP2.importProgress.site.reuploadRows must name the progress file's rows (G10)");
+  // G11, G15, G16, G17, G22, G23
+  if (WP2.T4.siteVoid.value !== WP2.T1.siteApprove.value) fail("WP2.T4.siteVoid must be the role gate's 403 FORBIDDEN (G11)");
+  const es = WP2.endState087SCH;
+  if (es.projectEv.value !== WP2.quantitiesA310.dailyLog.evA310.value || es.A130openHolds.value !== WP2.T4.openList.value || es.A320official.value !== 0) fail("WP2.endState087SCH must be A310's EV alone, A320 at 0, A130's one open hold (G15)");
+  if (WP2.quantitiesA310.dailyLog.evReportPct.value !== Number(WP2.quantitiesA310.dailyLog.pct.value.toFixed(2))) fail("WP2.quantitiesA310.dailyLog.evReportPct must be pct to 2 dp (G16)");
+  const evd = WP2.T3.withDocument.evidence.value;
+  if (!evd || !Array.isArray(evd.photos) || evd.photos.length !== 1 || !same(Object.keys(evd.photos[0]), ["key", "documentId", "fileName"])) fail("WP2.T3.withDocument.evidence must name one uploaded photo by key, documentId and fileName (G17)");
+  if (!same(WP2.T2.siteOnA330ActivityIds.value, ["A330"]) || METHODS_087SCH.siteEngineerAssigned.includes("A330") || WP2.T2.siteOnA330SubmissionsDelta.value !== 0) fail("WP2.T2.siteOnA330 details name A330 alone, nothing written (G22)");
+  const mb = WP2.T6.methodBypass;
+  const mi = WP2.T6.methodBypassInputs.value;
+  if (mb.value !== 409 || !(METHOD_BYPASS_PCT > mi.approvedPercent) || mi.quantityComplete / mi.quantityPlanned * 100 !== METHOD_BYPASS_PCT || mb.today.indexOf(METHOD_BYPASS_PCT + "% official") < 0 || METHODS_087SCH[mi.activity] !== null || ALLOC[mi.activity] !== undefined) fail("WP2.T6.methodBypass: typed above the approved percent, on an unconfigured, unallocated activity (G23)");
+  // every leaf with a today added or changed here names its ref and is an assumption
+  for (const [key, leaf] of [["T4.probes.retroactiveTemplateEdit", rt], ["T6.methodBypass", mb]]) {
+    if (leaf.today === undefined || !leaf.ref || !leaf.assumption) fail("WP2." + key + " carries a today without its ref, or is not marked an assumption");
+  }
+})();
 
 // ─── WP-3 Earned value, periods, forecast ────────────────────────────────────
 
