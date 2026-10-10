@@ -123,9 +123,41 @@
  * f599e67), build scripts BLD (@fc29478). Every changed value keeps its old
  * value in its note; load checks after WP2 tie the new leaves to the
  * figures they are built from.
+ *
+ * The integration owner's binding adjudication of the WP-3 preparation
+ * (2026-10-10, C:/Temp/octapm-cert/scratch/wp3/WP3-ADJUDICATION.md Q1-Q16,
+ * cited WP3ADJ(...); the preparation WP3-PREP.md beside it, PREP3(...)) is
+ * applied to the answer-book gaps G1-G21 of WP3-PREP.md section 10: G1
+ * (WP3.T4.fixture and WP3.T4.inputs: T4 reads the EV report on the fresh
+ * project V, Q2), G2-G4 (the four WP3.mutations leaves name their live
+ * catchers and variants, Q10), G5 (WP3.periods.afterLock.relockSame* and
+ * relockProbes), G6 (WP3.forecast.siteEngineerMoney for the T-NOBOQ member,
+ * siteEngineerMoneyMember, siteEngineerWithBoqRead, Q6), G7
+ * (WP3.forecast.evBasedFinish on V; evBasedFinishInputs), G8
+ * (WP3.forecast.L106budgetLines [] with HEAD's line as today; L106counts,
+ * L106fixture, Q7), G9 (WP3.periods.afterLock.loadingInLockedPeriod: the
+ * loading names the period, HEAD's behaviour, Q11;
+ * loadingInLockedPeriodRequest), G10 (WP3.periods.futureCutoffLock on V,
+ * Q1), G11 (WP3.periods.feb.overriddenAuditEvents and
+ * overriddenAuditFilter), G12 (WP3.L34.storedPreFix: the STORED-PRE-FIX rule
+ * of Q3), G13 (WP3.V: V's inputs, choreography and figures), G14
+ * (WP3.periods.halfHourZones, adopted, Q9), G16 (WP3.T5.deleteProbe names
+ * the PM prober, Q8), G17 (WP3.periods.concurrentLocks with HEAD's
+ * code-derived today, Q12), G18 (D2.WP3.T4 is served by V's T4;
+ * CLAUDE.SPI / CPI / EAC are WP3.T1 / T2's figures, checked at load), G19
+ * (WP3.T4.ev0.eac and eacBasis name HR-E3, Q15), G20
+ * (WP3.confirmFirst.zoneChange and zonePrecedence: WP3-TZ-1 REJECTED, Q14)
+ * and G21 (WP3.L34: the AC rule, the isActive filter kept (Q4), reversal
+ * dating, and formulaVersion, actualCostSource and the basis texts marked
+ * 'contract pending the L34 plan review', Q5). G15: the new and changed
+ * leaves cite PF (plan lines numbered at f599e67); the existing WP-3 P(...)
+ * trail it by 39 (P(598) = PF(637)), and the worktree numbering is PF + 1
+ * from :52 on. Product citations are read at f599e67 (HF), build scripts
+ * BLD (@fc29478). Every changed value keeps its old value in its note; load
+ * checks after D2 tie the new leaves to the figures they are built from.
  * Changed keys: answers/CHANGES-WP0-BUILDERS.md (rounds 1-2, and the sections
- * "WP-1 proof authoring (2026-10-10)" and "WP-2 answer-book leaves
- * (2026-10-10)") and
+ * "WP-1 proof authoring (2026-10-10)", "WP-2 answer-book leaves
+ * (2026-10-10)" and "WP-3 answer-book leaves (2026-10-10)") and
  * answers/CHANGES-WP0-BUILDERS-r3-ev-sch-lanes-extras.md (round 3).
  */
 
@@ -153,6 +185,11 @@ const WP2ADJ = (item) => "C:/Temp/octapm-cert/scratch/wp2/WP2-ADJUDICATION.md " 
 const PREP2 = (item) => "C:/Temp/octapm-cert/scratch/wp2/WP2-PREP.md " + item;
 /** A deep-company build script (not product code), read at fc29478. */
 const BLD = (file, lines) => "backend/scripts/cert/cert3/build/" + file + ":" + lines + " @fc29478";
+
+/** The integration owner's binding adjudication of the WP-3 preparation (2026-10-10, Q1-Q16). */
+const WP3ADJ = (item) => "C:/Temp/octapm-cert/scratch/wp3/WP3-ADJUDICATION.md " + item;
+/** The WP-3 preparation (read only, 2026-10-10), whose section 10 book gaps G1-G21 the adjudication settles. */
+const PREP3 = (item) => "C:/Temp/octapm-cert/scratch/wp3/WP3-PREP.md " + item;
 
 function F(value, unit, derivation, source, opts = {}) {
   const leaf = {
@@ -522,6 +559,95 @@ const EVT4 = {
 };
 const CUT_0228_CAIRO = endOfLocalDay("2026-02-28", "Africa/Cairo");
 const CUT_0228_CHICAGO = endOfLocalDay("2026-02-28", "America/Chicago");
+
+/**
+ * WP-3 answer-book leaves (2026-10-10; WP3ADJ Q1, Q2, Q5, Q9, Q13): the inputs
+ * and the small models of the added leaves, restated here.
+ *
+ * V: the WP-3 proof's own throwaway project in company 087 (WP3ADJ Q1;
+ * WP3-PREP section 5.1, V0-V25), created and archived by the proof as WP-1's
+ * W. Three hand-built activities, a three-row BOQ with each row allocated
+ * whole (BAC 387,000.00, as WP3.T1.bac) and the dated records below, in
+ * currency units as EV087 (the leaves state cents). Codes, units and dates
+ * are choices made for the figures the WP-3 checks need: T4's four reads
+ * (WP3ADJ Q2), the forecast's SPI 0.5, cost on both sides of 2026-02-28
+ * (L34), the L106 budget line, the L112 revision and the period probes
+ * (V-A, V-B, V-F).
+ */
+const V_EV = {
+  project: { name: "CERT3 WP3 Earned value <stamp>", start: "2026-01-05", end: "2027-06-30", calendar: "five_day", currency: "EGP", projectType: "building", contractType: "unit_rate", timeZone: "not named: company 087's Africa/Cairo is copied at creation" },
+  team: { planner: "planning_eng", qs: "qs", cost: "cost_controller", site: "site_engineer", finance: "finance", actorRole: "an 087 staff QS assigned on V as cost_controller (WP3ADJ Q13)" },
+  activities: [["X1", "2026-01-05", "2026-02-27"], ["X2", "2026-01-05", "2026-04-30"], ["X3", "2026-03-02", "2026-07-01"]],
+  boq: [["V-1", 900, "m3", 100, "X1"], ["V-2", 1970, "m3", 100, "X2"], ["V-3", 1000, "m3", 100, "X3"]],
+  directCostCode: "01-100",
+  l106Line: { costCode: "02-100", originalBudget: 100_000, status: "active" },
+  progressT4: { X1: 100 },
+  costsT4: [["X2", 50_000, "2026-01-15"], ["X1", 50_000, "2026-02-03"]],
+  loadingT4: ["X1", 100_000, "2026-01-20"],
+  costPlusOne: ["X1", 1, "2026-02-03"],
+  read4Cutoff: "2026-01-31",
+  loadingForecast: ["X3", 80_000, "2026-03-10"],
+  forecastAsOf: "2026-06-01T00:00:00.000Z",
+  t7: [{ activity: "X2", pct: 30, status: "draft" }, { activity: "X3", pct: 20, status: "submitted" }, { activity: "X2", pct: 40, status: "submitted", reject: true }],
+  costsL34: [["X3", 20_000, "2026-02-10"], ["X3", 10_000, "2026-03-10"]],
+  periods: {
+    A: { code: "V-A", start: "2026-02-01", end: "2026-02-28", cutoff: "2026-02-28" },
+    B: { code: "V-B", start: "2026-03-01", end: "2026-03-31", cutoff: "2026-03-31" },
+    F: "rules.futurePeriodFor(<the Cairo run date>)",
+  },
+  backdatedAfterLock: ["X1", 5_000, "2026-02-15"],
+  approvalAfterLock: ["X2", 10],
+  l112: { amount: 13_000, changeType: "addition", effectiveDate: "2026-03-01", createdAs: "submitted", editAmountTo: 20_000 },
+  actorRoleLoading: { activity: "X2", plannedValue: 1_000, plannedDate: "2026-05-01", steps: ["create", "submit"] },
+};
+const vRow = (r) => [r[0], cents(r[1]), r[2]];
+const V_ALLOC = Object.fromEntries(V_EV.boq.map((r) => [r[4], cents(r[1] * r[3])]));
+const V_BAC = Object.values(V_ALLOC).reduce((s, v) => s + v, 0);
+const vPvAt = (cutoffDate, loadings) => loadings.filter((l) => l[2] <= cutoffDate).reduce((s, l) => s + l[1], 0);
+const V_EV_T4 = Object.entries(V_EV.progressT4).reduce((s, [a, p]) => s + evOf(V_ALLOC[a], p), 0);
+const V_COSTS_T4 = V_EV.costsT4.map(vRow);
+const V_LOAD_T4 = vRow(V_EV.loadingT4);
+const V_LOAD_FC = vRow(V_EV.loadingForecast);
+/** T4's four reads on V (WP3-PREP section 5.1 V8, V10, V12, V13): cutoff date, cost rows, approved loadings, EV. */
+const V_T4_READS = {
+  read1: { cutoff: RUN, rows: V_COSTS_T4, loadings: [], ev: V_EV_T4 },
+  read2: { cutoff: RUN, rows: V_COSTS_T4, loadings: [V_LOAD_T4], ev: V_EV_T4 },
+  read3: { cutoff: RUN, rows: [...V_COSTS_T4, vRow(V_EV.costPlusOne)], loadings: [V_LOAD_T4], ev: V_EV_T4 },
+  read4: { cutoff: V_EV.read4Cutoff, rows: [...V_COSTS_T4, vRow(V_EV.costPlusOne)], loadings: [V_LOAD_T4], ev: 0 },
+};
+const V_T4_INPUTS = Object.fromEntries(Object.entries(V_T4_READS).map(([k, r]) => [k, { bac: V_BAC, pv: vPvAt(r.cutoff, r.loadings), ev: r.ev, ac: acLedger(r.cutoff, r.rows) }]));
+/** The T4 metric sets each read serves (read2 serves spi09 and cpi09, both worked from EVT4.spi09). */
+const V_T4_SERVES = { read1: ["pv0"], read2: ["spi09", "cpi09"], read3: ["ac100001"], read4: ["ev0"] };
+const V_PERIOD_A = V_EV.periods.A;
+const V_LOADINGS = [V_LOAD_T4, V_LOAD_FC];
+const V_ROWS_LOCK = [...V_T4_READS.read3.rows, ...V_EV.costsL34.map(vRow)];
+const V_ROWS_AFTER = [...V_ROWS_LOCK, vRow(V_EV.backdatedAfterLock)];
+const vMetricsAt = (cutoffDate, rows, acOf) => evMetrics({ bac: V_BAC, pv: vPvAt(cutoffDate, V_LOADINGS), ev: 0, ac: acOf(cutoffDate, rows) });
+const M_VA_LOCK = vMetricsAt(V_PERIOD_A.cutoff, V_ROWS_LOCK, acLedger);
+const M_VA_LOCK_HEAD = vMetricsAt(V_PERIOD_A.cutoff, V_ROWS_LOCK, acHead);
+const M_VA_AFTER = vMetricsAt(V_PERIOD_A.cutoff, V_ROWS_AFTER, acLedger);
+const M_VA_AFTER_HEAD = vMetricsAt(V_PERIOD_A.cutoff, V_ROWS_AFTER, acHead);
+const V_RUN_AC = { afterT4: acLedger(RUN, V_T4_READS.read3.rows), afterL34Costs: acLedger(RUN, V_ROWS_LOCK), afterBackdated: acLedger(RUN, V_ROWS_AFTER) };
+const V_FORECAST_SPI = V_EV_T4 / vPvAt(RUN, V_LOADINGS);
+const V_PLANNED_FINISH = V_EV.activities.map((a) => a[2]).sort().pop();
+const V_EV_FINISH = forecastEvFinish({ asOf: V_EV.forecastAsOf, plannedFinish: V_PLANNED_FINISH + "T00:00:00.000Z", spi: V_FORECAST_SPI });
+const V_EV_AFTER_APPROVAL = V_EV_T4 + evOf(V_ALLOC[V_EV.approvalAfterLock[0]], V_EV.approvalAfterLock[1]);
+const V_L112_BAC = { before: V_BAC, afterApproval: V_BAC + cents(V_EV.l112.amount), afterEdit: V_BAC + cents(V_EV.l112.editAmountTo), afterDelete: V_BAC };
+/**
+ * Plan section 3.1 (:391 PF; WP3ADJ Q9): +05:30 and +05:45 in process with an
+ * injected zone. The end of 2026-02-28 in each zone and the default period
+ * over 087-EV's two fixed periods 1 ms before it and at it.
+ */
+const HALF_HOUR = Object.fromEntries([["kolkata", "Asia/Kolkata", 330], ["kathmandu", "Asia/Kathmandu", 345]].map(([key, zone, minutes]) => {
+  const cutoff = endOfLocalDay("2026-02-28", zone);
+  const justBefore = new Date(Date.parse(cutoff) - 1).toISOString();
+  const offset = "+" + String(Math.floor(minutes / 60)).padStart(2, "0") + ":" + String(minutes % 60).padStart(2, "0");
+  return [key, { zone, offsetMinutes: minutes, offset, cutoff, justBefore, nextMidnight: new Date(Date.parse(cutoff) + 1).toISOString(), defaultJustBefore: defaultPeriod(EV087_FIXED_PERIODS, justBefore, zone), defaultAtCutoff: defaultPeriod(EV087_FIXED_PERIODS, cutoff, zone) }];
+}));
+/** The L34 fix's contract-visible fields wait for its Codex plan review (WP3ADJ Q5): their leaves carry this value and HEAD's as today. */
+const L34_PENDING = "contract pending the L34 plan review";
+/** The withheld forecast's reason (utils/boq-figures.js FORECAST_COST_WITHHELD_REASON :417 @f599e67). */
+const FC_WITHHELD_REASON = "Cost figures are not available to you";
 
 /** The F2 rounding file (plan :385, :490). The network is a choice made here. */
 const F2 = {
@@ -1811,6 +1937,158 @@ function t6Leaves(stage, branch) {
   return headDerivations(withValues, headTexts(h, "HEAD (HR-S9 / L118, the today of WP3.T6.acAfterRetirement: A140's cumulative CostRecord drops out with the retired activity):", `${fmt(m.ac)} - ${fmt(a140)}`));
 }
 
+// --- WP-3 answer-book leaves (2026-10-10; WP3ADJ Q1-Q16): V, the L34 fix's rule and contract, the zone item ---
+const V_SRC = [PF(425, 635, 640, 646, 647), WP3ADJ("Q1, Q2"), PREP3("section 5.1; section 10 G13"), "C:/Temp/octapm-cert/scratch/wp3/derive-v.json (V's figures worked with this book's rules)"];
+/** Sets ref on each leaf of a set that carries a today: the defect or row its today waits on. */
+const refToday = (leaves, ref) => Object.fromEntries(Object.entries(leaves).map(([k, leaf]) => [k, leaf.today === undefined ? leaf : { ...leaf, ref }]));
+/** V-A's thirteen metric leaves: as the PM's override lock stores them (stage lock), or read at 2026-02-28 after the back-dated X1 cost (stage after). */
+function vPeriodLeaves(stage) {
+  const lock = stage === "lock";
+  const m = lock ? M_VA_LOCK : M_VA_AFTER;
+  const h = lock ? M_VA_LOCK_HEAD : M_VA_AFTER_HEAD;
+  const where = lock
+    ? "On V, period V-A (" + V_PERIOD_A.start + ".." + V_PERIOD_A.end + ", cutoff " + V_PERIOD_A.cutoff + ", " + CUT_0228_CAIRO + ") as the PM's override lock stores it (WP3.V.choreography V19); the open V-A report read just before the lock (V18) is the same set."
+    : "On V, GET .../reports/ev?cutoffDate=" + V_PERIOD_A.cutoff + " after the back-dated X1 5,000.00 (WP3.V.choreography V20); V-A's own report stays its snapshot (WP3.periods.afterLock.periodReport).";
+  const src = [...V_SRC, PF(631, 639, lock ? 646 : 647), HF("backend/src/services/earned-value.service.js", "439-451,486-514,726,737-760,1745-1787")];
+  const note = "L34 (decided in CERT-3, fixed in WP-3): the value is the ledger rule (WP3.L34.acRule), the today HEAD's cumulative record. V is fresh, so after the fix this set is judged on its value (WP3.L34.storedPreFix).";
+  const leaves = metricLeaves(m, src, { headM: h, extra: { note } });
+  const withValues = {
+    ...leaves,
+    bac: { ...leaves.bac, derivation: "WP3.V.bac: V's three approved allocations X1 90,000.00 + X2 197,000.00 + X3 100,000.00 = " + fmt(m.bac) + "; no budget revision is approved before V24 (WP3.V.l112)." },
+    pv: { ...leaves.pv, derivation: "Approved loadings with plannedDate on or before 2026-02-28: X1 100,000.00 (2026-01-20); X3's 80,000.00 (2026-03-10) is after the cutoff: " + fmt(m.pv) + "." },
+    ev: { ...leaves.ev, derivation: "0.00: X1's 100% and every later approval on V are approved at the run date, after the cutoff instant " + CUT_0228_CAIRO + " (V's zone is company 087's Africa/Cairo); EV reads progress approved by the cutoff instant (earned-value.service.js:737-756)." },
+    ac: { ...leaves.ac, derivation: "Ledger postings dated on or before 2026-02-28: X2 50,000.00 (01-15) + X1 50,000.00 and 1.00 (02-03) + X3 20,000.00 (02-10)" + (lock ? "" : " + the back-dated X1 5,000.00 (02-15)") + " = " + fmt(m.ac) + "; X3's 10,000.00 (03-10) is after the cutoff." },
+  };
+  const acFormula = "one cumulative CostRecord per activity, counted whole only when its forward-only through-date is on or before the cutoff (earned-value.service.js:486-514; cost-ledger.service.js:205-224): X2 50,000.00 through 01-15 and X1 " + (lock ? "50,001.00 through 02-03" : "55,001.00 through 02-15") + " stay, X3 30,000.00 through 03-10 drops out whole";
+  const withHead = headDerivations(withValues, headTexts(h, "HEAD (L34, the today of this leaf):", acFormula));
+  return refToday(Object.fromEntries(Object.entries(withHead).map(([k, leaf]) => [k, { ...leaf, derivation: leaf.derivation + " " + where }])), "L34");
+}
+/** The proof's steps on V (WP3-PREP section 5.1, with WP3ADJ Q1, Q2, Q13). */
+const V_STEPS = [
+  "V0 PM: create V in 087 (start 2026-01-05, end 2027-06-30, five_day, EGP, building, unit_rate; no time zone named, so 087's Africa/Cairo is copied); assign the planner (planning_eng), qs, cost (cost_controller), site (site_engineer), finance and the actor-role member (an 087 staff QS assigned as cost_controller)",
+  "V1 planner: hand-build X1 2026-01-05..2026-02-27, X2 2026-01-05..2026-04-30, X3 2026-03-02..2026-07-01, engineerIds [site]",
+  "V2 qs: BOQ V-1 900 m3 x 100.00, V-2 1,970 m3 x 100.00, V-3 1,000 m3 x 100.00",
+  "V3 planner / qs: allocations V-1 -> X1, V-2 -> X2, V-3 -> X3, submitted and approved (BAC 387,000.00, WP3.V.bac)",
+  "V4 cost / PM: the direct costs are coded 01-100; one budget line on 02-100, originalBudget 100,000.00, active, nothing else (WP3.forecast.L106fixture)",
+  "V5 PM: GET /forecast before any cost (WP3.forecast.L106budgetLines, L106counts)",
+  "V6 site / qs: X1 100% submitted and approved",
+  "V7 cost / finance: direct costs X2 50,000.00 dated 2026-01-15 and X1 50,000.00 dated 2026-02-03, approved",
+  "V8 cost: read1, GET reports/ev?cutoffDate=<the Cairo run date> (WP3.T4.inputs.read1: pv0)",
+  "V9 cost / PM: cost loading X1 100,000.00 plannedDate 2026-01-20, submitted and approved",
+  "V10 cost: read2 at the run date (WP3.T4.inputs.read2: spi09, cpi09)",
+  "V11 cost / finance: direct cost X1 1.00 dated 2026-02-03, approved",
+  "V12 cost: read3 at the run date (WP3.T4.inputs.read3: ac100001)",
+  "V13 cost: read4, ?cutoffDate=2026-01-31 (WP3.T4.inputs.read4: ev0)",
+  "V14 cost / PM: cost loading X3 80,000.00 plannedDate 2026-03-10, submitted and approved (run-date SPI 0.5, WP3.V.forecastSpi)",
+  "V15 in process: forecastService.buildForecast({ orgId, projectId: V, asOf: new Date('2026-06-01T00:00:00.000Z'), access }) (WP3.forecast.evBasedFinish)",
+  "V16 cost; site; qs: hash H0 of the run-date report; X2 30% draft; X3 20% submitted; X2 40% submitted then rejected with a reason; hash H1 = H0 (WP3.T7)",
+  "V17 cost / finance: direct costs X3 20,000.00 dated 2026-02-10 and 10,000.00 dated 2026-03-10, approved",
+  "V18 cost: period V-A (2026-02-01..2026-02-28, cutoff 2026-02-28); GET reports/ev?periodId=<V-A> while open (= WP3.V.lockA)",
+  "V19 planner, finance, finance, PM: lock V-A: 403 FORBIDDEN; 409 REPORTING_READINESS_BLOCKED (no reason); 403 REPORTING_READINESS_OVERRIDE_FORBIDDEN (with a reason); the PM with a reason 200, snapshot = the open report (WP3.V.lockA), one OVERRIDDEN event",
+  "V20 cost / finance; site / qs: GET ?periodId=<V-A> (hash HA); direct cost X1 5,000.00 dated 2026-02-15, approved; X2 10% submitted and approved; GET ?periodId=<V-A> = HA; GET ?cutoffDate=2026-02-28 (WP3.V.cutoffAfter); run-date EV (WP3.V.evAfterNewApproval)",
+  "V21 PM: lock V-A again with no overrideReason: 200, the same snapshotId and lockedAt (WP3.periods.afterLock.relockProbes)",
+  "V22 cost; PM x2: period V-B (2026-03-01..2026-03-31, cutoff 2026-03-31); two PM locks with a reason sent at once (WP3.periods.concurrentLocks)",
+  "V23 cost; PM: period V-F = rules.futurePeriodFor(<the Cairo run date>); the PM locks it with a reason (WP3.periods.futureCutoffLock)",
+  "V24 cost; PM: budget revision +13,000.00 addition effective 2026-03-01, created submitted; PM PATCH status approved; PM PATCH amount 20,000.00; PM DELETE; the revision's audit events after each step (WP3.V.l112)",
+  "V25 the actor-role member: a cost loading on X2, 1,000.00, plannedDate 2026-05-01, created and submitted; its approvalHistory actorRole read (CF.actorRole)",
+  "end PM: DELETE /projects/<V> (archive); archivedAt read back",
+];
+const WP3_V = {
+  inputs: FA(V_EV, "text",
+    "V (WP3ADJ Q1): the WP-3 proof's fresh project in company 087, created by the PM and archived at the end, as WP-1's W. No time zone is named, so Project.timezone is 087's Africa/Cairo (createProject copies the workspace zone, project.service.js:441-459; WP3.setup.timeZone). Three hand-built activities, X3 finishing last (the forecast's planned finish); a three-row BOQ, each row allocated whole: V-1 900 m3 x 100.00 = 90,000.00 -> X1, V-2 1,970 m3 x 100.00 = 197,000.00 -> X2, V-3 1,000 m3 x 100.00 = 100,000.00 -> X3 (BAC " + fmt(V_BAC) + " = WP3.T1.bac, so T4's EAC figures hold). The dated records serve T4 (WP3.T4.inputs), the forecast (SPI 0.5), L34 (X3's cost on both sides of 2026-02-28), the after-lock probes (X1 5,000.00 back-dated to 2026-02-15; X2 10% approved), T7 (the open submissions), L106 (a budget line on 02-100 with no cost), L112 (the revision) and the actor role (the loading on X2). Money in currency units here (the leaves state cents). Codes, units and dates are choices made here (WP3-PREP section 5.1).",
+    [...V_SRC, HF("backend/src/services/project.service.js", "441-459"), WP3ADJ("Q13")]),
+  choreography: FA(V_STEPS, "list",
+    "The proof's steps on V, in order (WP3-PREP section 5.1; WP3ADJ Q1, Q2, Q13): each creation is asserted, and a step V needs that cannot be set up is a setup error (R-SET), never a verdict. Personas are 087's (pm, planner, qs, cost, site, finance) and the actor-role member. Running the L113 lock and the concurrent locks on V instead of 087-EV's live future period (MOMENT-MAP rows 93-94) is a WP-3 deviation, recorded in the moment map's deviation section when the proof lands (WP3ADJ Q1).",
+    [...V_SRC, PF(649, 666), BLD("MOMENT-MAP.md", "93-94"), WP3ADJ("Q13")]),
+  reportingGateReady: FA(false, "bool",
+    "V's reporting gate is blocked throughout: its activities are hand-built, so no approved schedule revision is activated and no baseline is locked, and the setup readiness's reporting gate (mode block) has blockers (project-setup-readiness.service.js:1671-1679 BASELINE_NOT_LOCKED, :2467-2477), which the lock reads through getOfficialReportingGate (:2586-2596) in resolveReportingReadinessOverride (earned-value.service.js:1642-1679). 087-EV is blocked by the same blocker after T6 (MOMENT-MAP row 93). Assumption: only ready false is asserted, not the blocker set; GET /projects/<V>/setup-readiness is read before PER.V.financeBlocked, and ready true there is a setup error (R-SET), since the 409 needs a blocked gate.",
+    [...V_SRC, HF("backend/src/services/project-setup-readiness.service.js", "1671-1679,2467-2477,2586-2596"), HF("backend/src/services/earned-value.service.js", "1642-1679"), BLD("MOMENT-MAP.md", "93")]),
+  cutoffA: F(CUT_0228_CAIRO, "instant",
+    "V-A's cutoff: the end of 2026-02-28 in V's zone, Africa/Cairo (copied from company 087), the same instant as WP3.T3.cutoff: " + CUT_0228_CAIRO + ".",
+    [...V_SRC, HF("backend/src/utils/reporting-cutoff.js", "134-138,145-156")]),
+  bac: F(V_BAC, "cents",
+    "V's approved allocations: V-1 900 m3 x 100.00 = 90,000.00 -> X1; V-2 1,970 m3 x 100.00 = 197,000.00 -> X2; V-3 1,000 m3 x 100.00 = 100,000.00 -> X3; total " + fmt(V_BAC) + " = WP3.T1.bac, so T4's EAC figures (387,000.00 / CPI) hold on V. No budget revision is approved until V24.",
+    V_SRC),
+  runDateAc: F(V_RUN_AC, "cents",
+    "Run-date AC on V (the ledger and HEAD agree at the run date: every V row is dated on or before it, so is each activity's through-date): after V11, X2 50,000.00 + X1 50,000.00 + 1.00 = " + fmt(V_RUN_AC.afterT4) + "; after V17, + X3 20,000.00 + 10,000.00 = " + fmt(V_RUN_AC.afterL34Costs) + "; after V20, + X1 5,000.00 = " + fmt(V_RUN_AC.afterBackdated) + ". Fixture figures: a read that differs is a setup error (R-SET).",
+    [...V_SRC, HF("backend/src/services/earned-value.service.js", "486-514")]),
+  forecastSpi: F(r6(V_FORECAST_SPI), "ratio",
+    "Run-date SPI on V after V14: EV X1 90,000.00 x 100% = " + fmt(V_EV_T4) + " / PV X1 100,000.00 + X3 80,000.00 = " + fmt(vPvAt(RUN, V_LOADINGS)) + " (both loadings dated on or before the run date) = 0.5. The forecast's EV-based finish runs on it (WP3.forecast.evBasedFinish).",
+    [...V_SRC, HF("backend/src/services/earned-value.service.js", "219-245,439-451")]),
+  lockA: vPeriodLeaves("lock"),
+  cutoffAfter: vPeriodLeaves("after"),
+  evAfterNewApproval: F(V_EV_AFTER_APPROVAL, "cents",
+    "Run-date EV on V after V20's new approval (X2 10%): " + fmt(V_EV_T4) + " + 197,000.00 x 10% (" + fmt(evOf(V_ALLOC.X2, 10)) + ") = " + fmt(V_EV_AFTER_APPROVAL) + ". The approval is stamped at the run date, after V-A's cutoff, so V-A's snapshot and the 2026-02-28 read keep EV 0 (WP3.V.lockA.ev, WP3.V.cutoffAfter.ev).",
+    [...V_SRC, PF(647), HF("backend/src/services/earned-value.service.js", "737-756,792")]),
+  l112: {
+    bac: F(V_L112_BAC, "cents",
+      "BAC on V as the run-date report reads it around the L112 probe (V24): before, " + fmt(V_L112_BAC.before) + "; the +13,000.00 addition (effective 2026-03-01), created submitted and approved by the PM's PATCH, " + fmt(V_L112_BAC.afterApproval) + " (approved revisions effective on or before the cutoff adjust BAC, earned-value.service.js:426-437, the rule of WP3.T5.bac); if the PM's PATCH of its amount to 20,000.00 is accepted, " + fmt(V_L112_BAC.afterEdit) + "; if the PM's DELETE is accepted, " + fmt(V_L112_BAC.afterDelete) + ". A refused step leaves the figure before it.",
+      [...V_SRC, PF(641, 663), HF("backend/src/services/earned-value.service.js", "426-437")]),
+    edit: FA("refused_or_audited", "state",
+      "L112 (plan :663 PF: approved budget revisions can be edited or deleted without audit): the PM, who holds cost:update and cost:approve, PATCHes the approved revision's amount to 20,000.00 (PATCH .../budget-revisions/:id, routes/budget-revisions.js:68-98). Expected, as WP3.T5.deleteProbe: refused, or accepted with an audit event; a refusal's code stays null (no rule is decided, no code is guessed). Today updateBudgetRevision lets anyone who may approve cost change an approved revision's money (budget-revision.service.js:218-221 refuses only one who cannot) and writes no audit event (the service has no audit call): 200, BAC " + fmt(V_L112_BAC.afterEdit) + ".",
+      [...V_SRC, PF(641, 663), HF("backend/src/routes/budget-revisions.js", "68-98"), HF("backend/src/services/budget-revision.service.js", "170-252"), WP3ADJ("Q8, Q16")],
+      { today: "200; no audit event; BAC " + fmt(V_L112_BAC.afterEdit), ref: "L112" }),
+    delete: FA("refused_or_audited", "state",
+      "L112, the delete (WP3.T5.deleteProbe's probe on fresh records): the PM DELETEs the approved revision (routes/budget-revisions.js:100-114). Expected: refused, or deleted with an audit event; a refusal's code stays null. Today deleteBudgetRevision hard-deletes it (budget-revision.service.js:279) with no audit event and answers 200 { deleted: true } (:285): BAC " + fmt(V_L112_BAC.afterDelete) + ". CF.L112 reads the revision's audit events after each step.",
+      [...V_SRC, PF(641, 663), HF("backend/src/routes/budget-revisions.js", "100-114"), HF("backend/src/services/budget-revision.service.js", "254-287"), WP3ADJ("Q8, Q16")],
+      { today: "200 { deleted: true }; no audit event; BAC " + fmt(V_L112_BAC.afterDelete), ref: "L112" }),
+  },
+};
+const L34_SRC = [PF(53, 631, 639, 661, 1091), WP3ADJ("the L34 paragraph; Q3, Q4, Q5, Q16"), PREP3("section 0 facts 6-7; section 9; section 10 G12, G21")];
+const L34_TODAY_KEYS = ["ac", "cpi", "cpiAlert", "eac", "eacBasis", "cv", "etc"];
+const l34HeadDiff = (prefix, m, h) => L34_TODAY_KEYS.filter((k) => m[k] !== h[k]).map((k) => prefix + "." + k);
+/** The leaves whose L34 today a stored build moment or a frozen snapshot shows (WP3ADJ Q3). */
+const L34_STORED_LEAVES = [
+  ...l34HeadDiff("WP3.T3", M_T3, M_T3_HEAD), "WP3.T3.acNote",
+  ...l34HeadDiff("WP3.periods.feb.snapshot", M_T3, M_T3_HEAD),
+  ...l34HeadDiff("WP3.periods.jan.snapshot", M_JAN, M_JAN_HEAD),
+  "WP3.periods.afterLock.cutoffReportAc",
+  ...l34HeadDiff("WP3.periods.afterLock.cutoffAfterCost", M_CUTOFF_AFTER_COST, M_CUTOFF_AFTER_COST_HEAD),
+  "D2.WP3.T3.ac",
+];
+const WP3_L34 = {
+  acRule: F("AC to a cutoff = the sum of the project's cost-ledger entries that carry an activity, dated incurredOn on or before the cutoff date", "text",
+    "L34 is decided for CERT-3 (plan section 0.1 :53 PF: it comes into CERT-3 once reproduction confirms that it corrupts actual cost in a locked period; the 087-EV build did: February's snapshot stores AC 20,000.00 for 70,000.00 and January's 0 for 50,000.00) and is fixed in WP-3: fix plan, Codex high-risk plan review, adjudication, fix, targeted proofs, mutations, Codex diff review (WP3ADJ). The rule is HR-E1's (plan :1091 PF): ledger entries dated by incurredOn. Every WP-3 AC value of this book is worked with it (rules.acLedger). HEAD's reading is rules.acHead: getOfficialActualCostMap takes one CostRecord per activity, whole, when its actualThroughDate, moved only forward by each posting, is on or before the cutoff (earned-value.service.js:486-514; cost-ledger.service.js:205-224), so one posting dated after a cutoff removes the activity's earlier cost at that cutoff, and a lock freezes it. The date bound is the calendar-date bound PV already uses (calendarDateBound, earned-value.service.js:142, :726, :759-760); incurredOn is a calendar date in the reporting zone (cost-ledger.service.js:83-105). Postings with no activity (a cost code only) are not in AC, as today.",
+    [...L34_SRC, HF("backend/src/services/earned-value.service.js", "142,486-514,726,759-760"), HF("backend/src/services/cost-ledger.service.js", "83-105,182-243")]),
+  isActiveFilter: F("kept: AC counts only the entries of active activities (activity isActive true), as today", "text",
+    "WP3ADJ Q4 (accepted): the L34 fix keeps HEAD's filter activity: { isActive: true } (earned-value.service.js:494, the filter PV and EV use too, :448, :738), so HR-S9 (undecided, plan :1035 PF: keep a retired activity's AC and EV in project totals) is neither decided nor moved by the fix: WP3.T6.acAfterRetirement keeps its value 120,000.00 and its today 115,000.00 (HR-S9).",
+    [...L34_SRC, PF(642, 662, 1035), HF("backend/src/services/earned-value.service.js", "448,494,738")]),
+  reversals: FA("a reversal is a ledger entry dated at the original's incurredOn, so a void nets out at every cutoff on or after the original's date", "text",
+    "A void or reversal posts a mirror entry that carries the original's incurredOn (cost-ledger.service.js:377-429, the date :414), so under WP3.L34.acRule it counts at the original's date: AC at a cutoff on or after that date drops by the amount; at an earlier cutoff the original never counted (WP3-PREP section 9, fix design item 1 and reproduction R6). Assumption: part of the fix design the L34 plan review sees; L34-M3 (reversals left out of the sum) is its optional mutation.",
+    [...L34_SRC, HF("backend/src/services/cost-ledger.service.js", "377-429")],
+    { note: "Not a contract-visible field; recorded so the reproduction's R6 and the mutation L34-M3 have a leaf" }),
+  formulaVersion: FA(L34_PENDING, "text",
+    "The EV formula version HEAD writes on every report (reporting.formulaVersion, earned-value.service.js:980) and stores on every locked snapshot (:1751, :1770) is FORMULA_VERSION 'ev.v2' (:33). The fix changes how AC is read, so its design proposes 'ev.v3', which keeps pre-fix snapshots identifiable (WP3-PREP section 9 item 4); WP3ADJ Q5 sends it to the Codex high-risk plan review with the L34 fix plan. Until the adjudicated plan fixes it, the value is 'contract pending the L34 plan review' and no check asserts it; the today is HEAD's. A snapshot locked before the fix keeps its stored ev.v2 (locked periods are never recomputed, plan :633 PF).",
+    [...L34_SRC, PF(633), HF("backend/src/services/earned-value.service.js", "33,980,1751,1770")],
+    { today: "ev.v2", ref: "L34", note: "Proposed by the fix design: ev.v3 (WP3-PREP section 9 item 4); set from the adjudicated L34 fix plan after its Codex plan review (WP3ADJ Q5)" }),
+  actualCostSource: FA(L34_PENDING, "text",
+    "HEAD labels each activity's official AC source in the report's activityBreakdown[].actualCostSource as 'cost_record.actual_through_date' (earned-value.service.js:507, :819; 'missing_official_actual' when there is none), with officialActualThroughDate the record's through-date (:820), and names the same source in sourceSummary.ac.officialSourcePriority (:934). After the fix AC comes from the ledger, so the label, the through-date field and the priority list change: the fix design proposes 'cost_ledger.incurred_on' and the latest included incurredOn (WP3-PREP section 9 item 3); client code that compares the literal (web, mobile) is for the fix plan to list. WP3ADJ Q5: contract pending the L34 plan review.",
+    [...L34_SRC, HF("backend/src/services/earned-value.service.js", "507,819-820,934")],
+    { today: { actualCostSource: "cost_record.actual_through_date", officialSourcePriority: ["cost_record.actual_through_date"] }, ref: "L34", note: "Proposed by the fix design: 'cost_ledger.incurred_on' (WP3-PREP section 9 item 3); set from the adjudicated L34 fix plan (WP3ADJ Q5)" }),
+  basisTexts: FA(L34_PENDING, "text",
+    "The report states the AC rule in words: basis.ac (EV_FORMULAS.ac, earned-value.service.js:62) and basis.actualCosts (:72-73), served on every report (:983) and frozen into each locked snapshot's basisJson (:1731, read back at :669), and the warning for active activities with no record through the cutoff (:882-886). After the fix each says the ledger rule; the fix design also names routes/health.js:40, workspace-dashboard.service.js:44, 60, 62 and the OpenAPI descriptions (WP3-PREP section 9 item 3). WP3ADJ Q5: contract pending the L34 plan review. A snapshot locked before the fix keeps its stored basis.",
+    [...L34_SRC, HF("backend/src/services/earned-value.service.js", "59-74,669,882-886,983,1731")],
+    { today: { basisAc: "AC = sum(latest CostRecord.actual by activity where the CostRecord.actualThroughDate calendar date <= the cutoff date)", basisActualCosts: "Official AC requires CostRecord.actualThroughDate. Progress actualCost fields are shown as estimates only and are excluded from official CPI/EAC.", missingActualWarning: "<n> active activities do not have official cost-record actuals through this cutoff; estimates are excluded from official AC." }, ref: "L34", note: "Set from the adjudicated L34 fix plan after its Codex plan review (WP3ADJ Q5)" }),
+  storedPreFix: F({
+    verdict: "STORED-PRE-FIX",
+    appliesTo: "an observation from a stored build moment (C:/Temp/octapm-cert/state/cert3/<project>.json steps[].out) or from a locked period's frozen snapshot, when that build or lock predates the L34 fix commit",
+    judged: "against the leaf's today, HEAD's reading before the fix: equal is STORED-PRE-FIX, reported with the register link to L34 and not a WP-3 failure; the leaf's value is value; anything else is wrong",
+    strict: "live and fresh observations (an open report recomputed now, a period locked after the fix, every read on V) are judged on the value; the exit run's rebuild (plan section 7 step 5) judges every moment and snapshot on the value",
+    leaves: L34_STORED_LEAVES,
+  }, "text",
+    "WP3ADJ Q3 (b) + (c), binding. Locked periods are never recomputed (plan :633 PF) and there is no unlock route, so after the L34 fix the stored step outputs and the snapshots locked before it keep HEAD's figures (WP3-PREP section 0 fact 6): 087-EV's checkpoint.T3, checkpoint.feb.open, lock.2026-02, lock.2026-01 and the 2026-02-28 reads of checkpoint.afterLock.*, its 2026-01 and 2026-02 snapshots as served live (frozen), and 052-SCH-EV's wp3.T3. Each such observation is judged STORED-PRE-FIX when its build predates the fix commit. The same leaves read live are strict: 087-EV's 2026-02-28 read now (WP3.periods.afterLock.cutoffAfterCost), 052-SCH-EV's (D2.WP3.T3) and V's (WP3.V.lockA, WP3.V.cutoffAfter) turn to the value with the fix. No new cert3d is built for WP-3. The listed leaves keep their todays after the fix: STORED-PRE-FIX compares with them. Before the fix every L34 today is a failure of a decided rule (the WP-1 ka() rule).",
+    [...L34_SRC, PF(633, 1186), BLD("087-ev.js", "937-1091"), BLD("052-sch-ev.js", "436-448")]),
+};
+const WP3_CF = {
+  zoneChange: F("no path changes a company's zone after creation, and a project keeps the zone it copied at creation", "text",
+    "WP3-TZ-1 (register, P3 suspect): whether a later change of the company zone reaches existing projects. No path makes such a change: Organisation.defaultTimezone is written only when the workspace is created (workspaceDefaults, organisation.service.js:107-118, its one write :115, through createOrganisationRow :121-135); routes/organisations.js offers create and convert only (:36-74), and convert writes kind, plan and name (organisation.service.js:288-292); the SSO settings update writes SSO fields only (sso.service.js:95-111). A project copies the workspace zone only at its creation (project.service.js:441-459: 'an existing project is never rewritten when the workspace's defaults change'), and the project API has no time-zone field (L117, L126). WP3ADJ Q14: classified REJECTED in WP-3, this code reading cited; the label correction (source 'project' against plan premise A8, :1213 PF) stays with the plan text (WP3.setup.timeZoneSource's planValue).",
+    [PF(632, 1213), HF("backend/src/services/organisation.service.js", "107-135,288-292"), HF("backend/src/routes/organisations.js", "36-74"), HF("backend/src/services/sso.service.js", "95-111"), HF("backend/src/services/project.service.js", "441-459"), WP3ADJ("Q14, Q16"), PREP3("section 0 fact 13; section 10 G20")],
+    { note: "WP3-TZ-1 is not a defect (WP3ADJ Q16); CF.WP3TZ1 reads this leaf and WP3.confirmFirst.zonePrecedence" }),
+  zonePrecedence: F({ timeZone: "Africa/Cairo", source: "project" }, "state",
+    "In process, the pure resolveReportingTimeZone({ project: { timezone: 'Africa/Cairo' }, organisation: { defaultTimezone: 'Asia/Dubai' } }) answers { timeZone: 'Africa/Cairo', source: 'project' }: a valid project zone wins over the organisation's (utils/reporting-cutoff.js:145-156). So even a changed company zone would not reach a project that holds its own. The pair is a choice: Africa/Cairo is 087's zone (WP3.setup.timeZone), the source WP3.setup.timeZoneSource.",
+    [PF(632), HF("backend/src/utils/reporting-cutoff.js", "145-156"), WP3ADJ("Q14"), PREP3("section 10 G20")]),
+};
+
 const WP3 = {
   setup: {
     boq: FA(BOQ_EV, "text", `087-EV's BOQ: five in-scope rows, each allocated whole to one activity (E-001 5,000 m3 x 12 = 60,000 -> A110; E-002 200 m3 x 150 = 30,000 -> A120; E-003 600 m3 x 150 = 90,000 -> A130; E-004 900 m2 x 150 = 135,000 -> A310; E-005 600 m2 x 120 = 72,000 -> A320): priced ${fmt(BOQ_EV_PRICED)}, allocated ${fmt(ALLOCATED_FIVE)}, coverage 100%. Row codes and the one-row-per-activity split are a choice; 052-SCH-EV and D3 carry the same rows.`, [P(386, 409, 546), ADJ("S2 087-EV inputs")]),
@@ -1835,6 +2113,31 @@ const WP3 = {
     acNote: F("L34", "text", `Expected AC = A110 50,000 (01-20) + A130 20,000 (02-10) = ${fmt(M_T3.ac)}. HEAD keeps one cumulative CostRecord per activity: A110 60,000 through 09-30 drops out whole, A130 20,000 through 02-10 stays, A120 through 10-01 drops -> ${fmt(M_T3_HEAD.ac)}. Red until L34 is fixed.`, [P(600, 622, 1052), H("backend/src/services/earned-value.service.js", "486-514")], { today: M_T3_HEAD.ac }),
   },
   T4: {
+    // WP-3 G1 (WP3ADJ Q2): T4 reads the EV report on V's records; the alert flags exist only in buildOfficialEvReport.
+    fixture: FA({
+      project: "V (WP3.V.inputs), steps V6-V13 of WP3.V.choreography",
+      reader: "the cost controller: GET /api/v1/projects/<V>/reports/ev through the in-process app",
+      read1: { cutoffDate: "the Cairo run date", after: "V7: X1 100% approved; X2 50,000.00 and X1 50,000.00 costs; no approved loading", serves: V_T4_SERVES.read1 },
+      read2: { cutoffDate: "the Cairo run date", after: "V9: the X1 loading 100,000.00 dated 2026-01-20 approved", serves: V_T4_SERVES.read2 },
+      read3: { cutoffDate: "the Cairo run date", after: "V11: X1 1.00 dated 2026-02-03", serves: V_T4_SERVES.read3 },
+      read4: { cutoffDate: V_EV.read4Cutoff, after: "V12", serves: V_T4_SERVES.read4 },
+    }, "text",
+      "Plan :640 PF, 'T4 (in process)'. The SPI and CPI alert flags exist only in buildOfficialEvReport (earned-value.service.js:953-956) and, for legacy snapshots, snapshotToReport (:688-691); the exported computeEvMetrics (:219-245) returns the indices and EAC but no flag. So T4 reads the report through the in-process app on V's live records (WP3ADJ Q2: 'in process' is the in-process app reading buildOfficialEvReport on V; a pure computeEvMetrics call would leave the 0.9 boundary mutation uncaught). Four reads give exactly the inputs of the T4 metric sets (WP3.T4.inputs): read1 PV 0 (pv0), read2 SPI = CPI = 0.9 (spi09, cpi09), read3 AC 100,001.00 (ac100001), read4 at 2026-01-31 EV 0 with AC > 0 (ev0). BAC is V's 387,000.00 (WP3.V.bac). A read that does not give its inputs is a setup error (R-SET), not a verdict. 052's T4 (D2.WP3.T4) is served by these reads (currency- and zone-independent).",
+      [PF(640), HF("backend/src/services/earned-value.service.js", "219-245,688-691,953-956"), WP3ADJ("Q2"), PREP3("section 0 fact 2; section 5.1 V6-V13; section 10 G1")]),
+    inputs: {
+      read1: F(V_T4_INPUTS.read1, "cents",
+        "read1 (V8, ?cutoffDate=<the Cairo run date>): BAC " + fmt(V_T4_INPUTS.read1.bac) + "; PV " + fmt(V_T4_INPUTS.read1.pv) + " (no loading approved yet); EV X1 90,000.00 x 100% = " + fmt(V_T4_INPUTS.read1.ev) + "; AC X2 50,000.00 (2026-01-15) + X1 50,000.00 (2026-02-03) = " + fmt(V_T4_INPUTS.read1.ac) + " (HEAD agrees: both through-dates on or before the run date). evMetrics gives WP3.T4.pv0: SPI null, no alert (CPI 0.9, EAC 430,000.00).",
+        [PF(640), HF("backend/src/services/earned-value.service.js", "219-245,439-451,486-514"), WP3ADJ("Q2"), PREP3("section 5.1 V8; section 10 G1")]),
+      read2: F(V_T4_INPUTS.read2, "cents",
+        "read2 (V10, the run date, after the X1 loading 100,000.00 dated 2026-01-20 is approved): PV " + fmt(V_T4_INPUTS.read2.pv) + ", EV " + fmt(V_T4_INPUTS.read2.ev) + ", AC " + fmt(V_T4_INPUTS.read2.ac) + ": SPI = CPI = 0.9 exactly, EAC = 387,000.00 x 100,000.00 / 90,000.00 = 430,000.00 (WP3.T4.spi09, WP3.T4.cpi09).",
+        [PF(640), HF("backend/src/services/earned-value.service.js", "219-245,439-451"), WP3ADJ("Q2"), PREP3("section 5.1 V10; section 10 G1")]),
+      read3: F(V_T4_INPUTS.read3, "cents",
+        "read3 (V12, the run date, after X1 1.00 dated 2026-02-03): AC " + fmt(V_T4_INPUTS.read3.ac) + ", PV and EV as read2: CPI 90,000 / 100,001 = 0.899991 (alert), EAC 430,004.30 (WP3.T4.ac100001).",
+        [PF(640), HF("backend/src/services/earned-value.service.js", "219-245,486-514"), WP3ADJ("Q2"), PREP3("section 5.1 V12; section 10 G1")]),
+      read4: F(V_T4_INPUTS.read4, "cents",
+        "read4 (V13, ?cutoffDate=" + V_EV.read4Cutoff + "): PV " + fmt(V_T4_INPUTS.read4.pv) + " (the loading's 2026-01-20 is on or before the cutoff date); EV 0 (X1's approval is stamped at the run date, after the cutoff instant); AC X2 50,000.00 (01-15) only, X1's costs being dated 02-03: " + fmt(V_T4_INPUTS.read4.ac) + " (HEAD agrees: X1's through-date 02-03 is after the cutoff, X2's 01-15 before). CPI 0 (alert), EAC = BAC 387,000.00, basis budget_cpi_zero (WP3.T4.ev0).",
+        [PF(640), HF("backend/src/services/earned-value.service.js", "219-245,439-451,486-514,737-756"), WP3ADJ("Q2"), PREP3("section 5.1 V13; section 10 G1")]),
+    },
     spi09: {
       spi: F(r6(EVT4.spi09.spi), "ratio", "EV 90,000 / PV 100,000 = 0.9.", [P(601)]),
       spiAlert: F(EVT4.spi09.spiAlert, "bool", "0.9 is not below 0.9 -> no alert.", [P(601), EVS]),
@@ -1852,8 +2155,8 @@ const WP3 = {
     ev0: {
       cpi: F(EVT4.ev0.cpi, "ratio", "EV 0 / AC 50,000 = 0.", [P(601)]),
       cpiAlert: F(EVT4.ev0.cpiAlert, "bool", "0 < 0.9 -> alert.", [P(601)]),
-      eac: F(EVT4.ev0.eac, "cents", "CPI 0 -> EAC = BAC 387,000.00 (HR-E3: keep BAC, labelled).", [P(601, 1054)]),
-      eacBasis: F(EVT4.ev0.eacBasis, "state", "The basis is stated.", [P(601), H("backend/src/utils/eac-basis.js", "29-34")]),
+      eac: FA(EVT4.ev0.eac, "cents", "CPI 0 -> EAC = BAC 387,000.00 (HR-E3: keep BAC, labelled).", [P(601, 1054)], { ref: "HR-E3", note: "Changed 2026-10-10 (WP-3 G19, WP3ADJ Q15): ref HR-E3 and assumption added, value unchanged. HR-E3 (plan section 5 :1093 PF, undecided) recommends keeping BAC, labelled, which HEAD already does (computeEvMetrics returns the budget when CPI is 0, earned-value.service.js:219-245 @f599e67); WP3ADJ Q15 asks the owner whether to keep it as is. Until then CF.HRE3 is reported; another decision would make this a known answer with HEAD's figure as its today" }),
+      eacBasis: FA(EVT4.ev0.eacBasis, "state", "The basis is stated.", [P(601), H("backend/src/utils/eac-basis.js", "29-34")], { ref: "HR-E3", note: "Changed 2026-10-10 (WP-3 G19, WP3ADJ Q15): ref HR-E3 and assumption added, value unchanged. eacBasisOf labels the budget at CPI 0 budget_cpi_zero (utils/eac-basis.js:29-34 @f599e67), HR-E3's 'labelled'; owner question Q15" }),
     },
     pv0: {
       spi: F(EVT4.pv0.spi, "ratio", "PV 0 -> SPI null.", [P(601)]),
@@ -1865,7 +2168,7 @@ const WP3 = {
     bac: F(M_T5.bac, "cents", `${fmt(BAC)} + ${fmt(cents(13_000))} = ${fmt(M_T5.bac)}.`, [P(602)]),
     eac: FA(M_T5.eac, "cents", `400,000 / CPI (T2 state, AC 110,000) = 400,000 x 110,000 / 97,500 = 451,282.0512... -> ${fmt(M_T5.eac)}.`, [P(602), AREA]),
     etc: FA(M_T5.etc, "cents", `${fmt(M_T5.eac)} - ${fmt(M_T5.ac)} = ${fmt(M_T5.etc)}.`, [P(602)]),
-    deleteProbe: FA("refused_or_audited", "state", "L112: deleting an approved budget revision is refused, or audited.", [P(602, 624)], { today: "silent delete; BAC back to 387,000.00" }),
+    deleteProbe: FA("refused_or_audited", "state", "L112 (plan :641, :663 PF; a lead with no section 5 row): deleting an approved budget revision is refused, or audited. The prober is the PM (DELETE .../budget-revisions/:id, routes/budget-revisions.js:100-114), who holds cost:delete and cost:approve (shared/permissions.json modules.cost); the cost controller holds cost:delete without cost:approve and would be refused 403 BUDGET_REVISION_APPROVAL_REQUIRED (budget-revision.service.js:276-278), an approval-authority refusal that says nothing of L112. A refusal's code stays null (no rule is decided, no code is guessed), so a refusal is judged by its status (build/087-ev.js PROBE_REFUSALS: 400, 403, 409, 422). Today deleteBudgetRevision hard-deletes the row (:279) and writes no audit event (the service has no audit call), answering 200 { deleted: true } (:285), so BAC is back to WP3.T1.bac.", [P(602, 624), PF(641, 663), HF("backend/src/routes/budget-revisions.js", "100-114"), HF("backend/src/services/budget-revision.service.js", "254-287"), HF("shared/permissions.json", "modules.cost"), BLD("087-ev.js", "168-177,805-880"), WP3ADJ("Q8, Q16"), PREP3("section 10 G16")], { today: "silent delete; BAC back to 387,000.00", ref: "L112", note: "Changed 2026-10-10 (WP-3 G16): the prober (the PM) and the null refusal code named, ref L112 added; value and today unchanged. WP3ADJ Q8: L112 is not on the plan's defect-fix list, so it is recorded (P2 proposed) unless its reproduction shows P1" }),
   },
   T6: {
     ledgerDelta: F(cents(5_000), "cents", "A 5,000 cost on A140 adds 5,000.00 to the ledger, which keeps it after the retirement.", [P(386, 603)]),
@@ -1887,7 +2190,10 @@ const WP3 = {
       cutoff: F(CUT_0228_CAIRO, "instant", "Period 2026-02, cutoff 2026-02-28 in Africa/Cairo.", [P(607)]),
       lockByPmWithReason: F(200, "http", "PM override with a reason.", [P(607)]),
       snapshot: metricLeaves(M_T3, [P(607)], { headM: M_T3_HEAD }),
-      overriddenAuditEvents: F(1, "count", "One OVERRIDDEN audit event.", [P(594, 607)]),
+      overriddenAuditEvents: F(1, "count", "One OVERRIDDEN audit event for the February lock. A lock writes one only on a readiness override (earned-value.service.js:1807-1836): entityType project_setup_readiness, entityId the project, action overridden, reason the override reason, summary.transition 'reporting_period.lock.override', summary.periodId the period; a normal lock writes none (January). Read live on 087-EV (the history persists) with WP3.periods.feb.overriddenAuditFilter: GET .../audit?entityType=project_setup_readiness&action=overridden&source=audit (routes/audit.js:42-70), then the events whose summary.periodId is the 2026-02 period: exactly one, its reason the build's overrideReason (step lock.2026-02). The relocks return the stored snapshot before any write (:1708-1710), so they add none.", [P(594, 607), PF(633, 646), HF("backend/src/services/earned-value.service.js", "1708-1710,1807-1836"), HF("backend/src/routes/audit.js", "42-70"), BLD("087-ev.js", "941-969"), WP3ADJ("Q1"), PREP3("section 10 G11")], { note: "Changed 2026-10-10 (WP-3 G11): the filter named (WP3.periods.feb.overriddenAuditFilter); value unchanged" }),
+      overriddenAuditFilter: F({ query: { entityType: "project_setup_readiness", action: "overridden", source: "audit" }, match: { "summary.periodId": "<087-EV's 2026-02 period id (state 087-EV, step periods)>", reason: "<the build's overrideReason (state 087-EV, step lock.2026-02)>" }, count: 1 }, "text",
+        "The audit read of PER.overrideAudit.feb: the route filters by entityType, action and source (routes/audit.js:46-52, :59-68; the cursor-paged list is read to its end); the proof keeps the events whose summary.periodId is February's and expects exactly one, with the build's reason. entityType and action are the audit service's constants (audit.service.js PROJECT_SETUP_READINESS :44, OVERRIDDEN :83) as the lock writes them (earned-value.service.js:1807-1836).",
+        [PF(633, 646), HF("backend/src/routes/audit.js", "42-70"), HF("backend/src/services/audit.service.js", "44,83"), HF("backend/src/services/earned-value.service.js", "1807-1836"), WP3ADJ("Q1"), PREP3("section 10 G11")]),
     },
     afterLock: {
       backdatedCost: FA(EV087.backdatedAfterLock, "text", "5,000 on A130 incurredOn 2026-02-15 (A130 chosen so HEAD's through-date stays inside the cutoff and the change is visible today too; A110 would hide the effect behind L34). Accepted by the integration owner.", [P(608), AREA, ADJ("open questions: back-dated after-lock cost")]),
@@ -1901,9 +2207,15 @@ const WP3 = {
       runDateAfterApproval: { revisionKept: afterLockLeaves("afterApproval", "revisionKept"), revisionDeleted: afterLockLeaves("afterApproval", "revisionDeleted") },
       // The 2026-02-28 read after the back-dated cost (round 3, R3-2): thirteen leaves, one set for both probe branches and both after-lock reads.
       cutoffAfterCost: cutoffAfterCostLeaves(),
-      relockSameSnapshotId: F(true, "bool", "Locking again returns the stored snapshot: same id.", [P(608), H("backend/src/services/earned-value.service.js", "1708-1710")]),
-      relockSameLockedAt: F(true, "bool", "Same lockedAt.", [P(608)]),
-      loadingInLockedPeriod: F("409 REPORTING_PERIOD_LOCKED", "http", "A cost loading in the locked period.", [P(594, 608), H("backend/src/services/earned-value.service.js", "1231-1239")]),
+      relockSameSnapshotId: F(true, "bool", "Locking again returns the stored snapshot: the same snapshotId (reporting.snapshotId, snapshotToReport earned-value.service.js:665). Each relock is sent with no overrideReason (POST .../reports/periods/:periodId/lock with {}; WP3.periods.afterLock.relockProbes: finance on 087-EV's 2026-01, the PM on 087-EV's 2026-02 and on V-A): lockReportingPeriod answers a locked period with its stored snapshot (:1708-1710) before the readiness gate (:1712-1719), so it writes nothing and never meets the blocked gate of 087-EV (after T6) or of V. A relock that reached the gate without a reason on a blocked project would answer 409 REPORTING_READINESS_BLOCKED (:1654-1659): mutation M2b (WP3.mutations.lockedRecomputed).", [P(608), H("backend/src/services/earned-value.service.js", "1708-1710"), PF(647), HF("backend/src/services/earned-value.service.js", "628-694,1642-1679,1704-1719"), HF("backend/src/routes/reports.js", "80-111"), WP3ADJ("Q1, Q10"), PREP3("section 0 fact 5; section 10 G5")], { note: "Changed 2026-10-10 (WP-3 G5): the personas and the empty body named; value unchanged" }),
+      relockSameLockedAt: F(true, "bool", "Same lockedAt: the stored snapshot's (reporting.lockedAt, snapshotToReport earned-value.service.js:666), on the same three relocks with no overrideReason (WP3.periods.afterLock.relockProbes); nothing is written, so the lock time does not move.", [P(608), PF(647), HF("backend/src/services/earned-value.service.js", "628-694,1708-1710"), WP3ADJ("Q1"), PREP3("section 10 G5")], { note: "Changed 2026-10-10 (WP-3 G5): the relocks named; value unchanged" }),
+      relockProbes: F([{ project: "087-EV", period: "2026-01", by: "finance", body: {} }, { project: "087-EV", period: "2026-02", by: "pm", body: {} }, { project: "V", period: V_PERIOD_A.code, by: "pm", body: {} }], "list",
+        "The relocks the proof sends, each with no overrideReason: finance relocks 087-EV's January, which it locked normally (WP3.periods.jan.lock); the PM relocks 087-EV's February and V's V-A, which the PM locked on an override. Each answers 200 with the stored snapshotId and lockedAt and writes nothing at HEAD, so the probes on the live 087-EV can be repeated (WP3ADJ Q1: the non-writing period probes stay on 087-EV). Both personas pass the route's guard, cost:approve with the transition reporting_period.lock (routes/reports.js:80-84; shared/permissions.json: pm, finance).",
+        [PF(647), HF("backend/src/routes/reports.js", "80-111"), HF("shared/permissions.json", "modules.cost.transitions"), HF("backend/src/services/earned-value.service.js", "1708-1710"), WP3ADJ("Q1"), PREP3("section 8; section 10 G5")]),
+      loadingInLockedPeriod: F("409 REPORTING_PERIOD_LOCKED", "http", "A cost loading that names the locked period: POST .../reports/cost-loading with reportingPeriodId = 087-EV's locked 2026-02 (WP3.periods.afterLock.loadingInLockedPeriodRequest) is refused 409 REPORTING_PERIOD_LOCKED before anything is written: createCostLoading checks the named period inside its transaction (earned-value.service.js:1354-1357 -> ensurePeriodInProject :1319-1339 -> ensurePeriodEditable :1231-1239). HEAD keys the rule on reportingPeriodId only: a loading that names no period but is dated inside a locked one is accepted, and its PV moves open reports at that date, never the locked snapshot. WP3ADJ Q11: HEAD's behaviour is the asserted value; a date-based rule would be a rule change, recorded for the owner, not implemented, and not probed on 087-EV (an accepted loading would be a write there).", [P(594, 608), H("backend/src/services/earned-value.service.js", "1231-1239"), PF(633, 647), HF("backend/src/services/earned-value.service.js", "1231-1239,1319-1339,1341-1379"), HF("backend/src/routes/reports.js", "127-151"), WP3ADJ("Q11"), PREP3("section 0 fact 10; section 10 G9")], { note: "Changed 2026-10-10 (WP-3 G9): the loading names the period (HEAD's behaviour, WP3ADJ Q11); value unchanged" }),
+      loadingInLockedPeriodRequest: F({ project: "087-EV", by: "cost (cost_controller)", body: { activity: "A110", reportingPeriodId: "<087-EV's 2026-02 period id>", plannedDate: "2026-02-20", plannedValue: "1,000.00" }, loadingsDelta: 0 }, "text",
+        "The probe's request on the live 087-EV (it writes nothing at HEAD): the cost controller (cost:create; finance cannot create loadings) posts a loading on A110, an active activity with an allocation, naming the locked 2026-02 period, plannedDate 2026-02-20 (inside it), plannedValue 1,000.00; 087-EV's loading count (GET .../reports/cost-loading) is the same before and after. The activity is checked first (earned-value.service.js:1350-1353), so an active activity is needed for the 409 to come from the period.",
+        [PF(647), HF("backend/src/routes/reports.js", "113-151"), HF("backend/src/services/earned-value.service.js", "1283-1357"), HF("shared/permissions.json", "modules.cost.actions.create"), WP3ADJ("Q11"), PREP3("section 2; section 10 G9")]),
     },
     jan: {
       cutoff: F(endOfLocalDay("2026-01-31", "Africa/Cairo"), "instant", "Period 2026-01 cutoff 2026-01-31, Africa/Cairo.", [P(386)]),
@@ -1913,13 +2225,25 @@ const WP3 = {
     futurePeriod: F(futurePeriodFor(RUN), "text",
       `The plan's "one with a future cutoff" (087-EV row), made a function of the run date (builders' adjudication 087-EV item 6): rules.futurePeriodFor(runDate) = the month after the run month (December rolls into January of the next year), start its 1st, end and cutoff its last day. The run date R is the company-local date of the build (Africa/Cairo for 087). The cutoff is >= R + 28 days (the next month's last day is at least 28 days after any day of the run month), so the cutoff instant (the end of that day in the reporting zone) is after every instant of the run date in any zone: the lock is always one "before the cutoff" (L113 / HR-E2, futureCutoffLock). Reference run date ${RUN} -> ${futurePeriodFor(RUN).code} (${futurePeriodFor(RUN).start}..${futurePeriodFor(RUN).end}), the period the book fixed before; a build on 2026-11-05 takes 2026-12, one on 2026-12-03 takes 2027-01. The three periods for a run date: rules.ev087PeriodsFor(runDate) (inputs.ev087.periods = ev087PeriodsFor(${RUN})).`,
       [PF(425, 649), P(386, 610), BADJ("087-EV item 6")]),
-    futureCutoffLock: FA(409, "http", "L113 / HR-E2 (undecided) recommendation: refuse a lock before the cutoff; recorded. Code null until HR-E2 is decided (the plan's row proposes CUTOFF_NOT_REACHED, which exists at HEAD only as a report basis note, not as an error code).", [P(610, 625, 1053), H("backend/src/routes/health.js", "335"), ADJ("open questions: codes for undecided refusals")], { today: 200 }),
-    concurrentLocks: FA({ succeeded: 1, refused: { status: 409, code: null } }, "text", "Observation (plan :627, low): two locks of the same open period sent at once. Expected (assumption): serialised, one wins and the other is refused 409; the code stays null (undecided, never guessed). Recorded, not a gate.", [P(627), ADJ("S2 concurrent activations / period locks")], { today: "not established: no row lock at HEAD; the lock reads the period, then upserts its snapshot by reportingPeriodId (earned-value.service.js:1690-1745); reproduce" }),
+    futureCutoffLock: FA(409, "http", "L113 / HR-E2 (undecided, plan :1092 PF) recommends refusing a lock before the cutoff (409 CUTOFF_NOT_REACHED proposed), with no unlock and an audit of every lock; recorded. Code null until HR-E2 is decided (CUTOFF_NOT_REACHED exists at HEAD only as a report basis note, EV_NOTES, not as an error code). Location (WP3ADJ Q1): V, not 087-EV's live future period, where a lock is one-shot (there is no unlock route) and would add a second OVERRIDDEN event: the proof creates V-F = rules.futurePeriodFor(<the Cairo run date>) on V and the PM locks it with an overrideReason, since V's reporting gate is blocked (WP3.V.reportingGateReady). Today 200: lockReportingPeriod checks no cutoff (earned-value.service.js:1681-1846; a report only notes a cutoff not reached, :909-911), so V-F is locked with a snapshot and one OVERRIDDEN event; once its cutoff passes, the default-period rule would serve that early snapshot (:411-424).", [P(610, 625, 1053), H("backend/src/routes/health.js", "335"), ADJ("open questions: codes for undecided refusals"), PF(649, 664, 1092), HF("backend/src/services/earned-value.service.js", "411-424,909-911,1681-1846"), HF("backend/src/routes/reports.js", "38-111"), BLD("MOMENT-MAP.md", "93"), WP3ADJ("Q1, Q16"), PREP3("section 0 facts 5, 11; section 10 G10")], { today: 200, ref: "HR-E2", note: "Changed 2026-10-10 (WP-3 G10): located on V with the PM's reason (WP3ADJ Q1; MOMENT-MAP row 93 named 087-EV's future period, a deviation the moment map records when the proof lands); ref HR-E2 added; value and today unchanged. P2 proposed (WP3ADJ Q16)" }),
+    concurrentLocks: FA({ succeeded: 1, refused: { status: 409, code: null }, snapshotRows: 1, overriddenAuditEvents: 1 }, "text", "Observation (plan :666 PF, low): two PM locks of the same open period, each with an overrideReason (V's gate is blocked), sent at once on V-B (2026-03-01..2026-03-31, cutoff 2026-03-31; WP3ADJ Q1). Expected (assumption): serialised, one wins and the other is refused 409, the code null (undecided, never guessed): one EvPeriodSnapshot row and one OVERRIDDEN event. Today, derived from the code (WP3ADJ Q12; to be confirmed by the primary run, as WP1-CONC-1 was): lockReportingPeriod reads the period with no row lock (earned-value.service.js:1691-1694), so both transactions see it open, pass the gate with their reasons and upsert the snapshot by its unique reportingPeriodId (:1745-1787; schema.prisma:2166; Prisma 6 issues a native INSERT ... ON CONFLICT for this upsert, so the second waits for the first and updates the same row), the budget snapshot likewise (budget.service.js:904-917); both answer 200, one EvPeriodSnapshot row remains (the last write's), and each writes its OVERRIDDEN event (:1807-1836): two. The sends must overlap: a second answer that is the first's stored snapshot (same snapshotId and lockedAt, one event) shows they did not, a setup error (R-SET), not a verdict. Recorded, not a gate.", [P(627), ADJ("S2 concurrent activations / period locks"), PF(666), HF("backend/src/services/earned-value.service.js", "1681-1846"), HF("backend/src/services/budget.service.js", "904-917"), HF("backend/prisma/schema.prisma", "2166"), WP3ADJ("Q1, Q12, Q16"), PREP3("section 0 fact 14; section 10 G17")], { today: { succeeded: 2, refused: null, snapshotRows: 1, overriddenAuditEvents: 2 }, ref: "CONCURRENT", note: "Changed 2026-10-10 (WP-3 G17, WP3ADJ Q12): the value was { succeeded: 1, refused: { status: 409, code: null } } and gained snapshotRows and overriddenAuditEvents; the today was 'not established: no row lock at HEAD; the lock reads the period, then upserts its snapshot by reportingPeriodId (earned-value.service.js:1690-1745); reproduce'. P3 proposed (WP3ADJ Q16); a register row once confirmed" }),
     defaultPeriod: {
       on20260305: F(defaultPeriod(EV087.periods, "2026-03-05T00:00:00.000Z", "Africa/Cairo"), "state", "Latest period whose cutoff instant has passed: 2026-02 (2026-03 not yet).", [P(609), H("backend/src/services/earned-value.service.js", "411-424")]),
       on20260401: F(defaultPeriod([...EV087.periods.slice(0, 2), { code: "2026-03", cutoff: "2026-03-31" }], "2026-04-01T00:00:00.000Z", "Africa/Cairo"), "state", `With periods 2026-01, 2026-02 and 2026-03 (cutoff 03-31; the in-process fixture of the area map): 2026-03's cutoff ${endOfLocalDay("2026-03-31", "Africa/Cairo")} (Cairo) has passed at 2026-04-01T00:00Z.`, [P(609), AREA]),
       chicagoCaution: F(defaultPeriod([...EV087.periods.slice(0, 2), { code: "2026-03", cutoff: "2026-03-31" }], "2026-04-01T00:00:00.000Z", "America/Chicago"), "state", `For a 052 project (America/Chicago) an injected now of 2026-04-01T00:00Z is still 03-31 locally (cutoff ${endOfLocalDay("2026-03-31", "America/Chicago")}): the default is 2026-02. Inject a now after that instant (e.g. 2026-04-01T12:00Z) to get 2026-03.`, [P(609, 1174)], { company: "052" }),
     },
+    // WP-3 G14 (WP3ADJ Q9): plan section 3.1's half-hour offsets, in process with an injected zone.
+    halfHourZones: Object.fromEntries(Object.entries(HALF_HOUR).map(([key, z]) => [key, {
+      cutoff: F(z.cutoff, "instant",
+        "End of 2026-02-28 in " + z.zone + " (UTC" + z.offset + " all year): the zone's 2026-03-01 00:00 is " + z.nextMidnight + ", so the cutoff is the millisecond before, " + z.cutoff + " (endOfLocalDay, found by bisection on the platform's zone data; the product's resolveReportingCutoff gives the same, utils/reporting-cutoff.js:134-138, :172-194, cross-checked in derive-v.json). Plan section 3.1 (:391 PF): no deep company has a half-hour offset, so +05:30 and +05:45 are tested in process with an injected zone; WP3ADJ Q9 adopts it in WP-3, in the fixed count (DP.halfHour).",
+        [PF(391, 632), HF("backend/src/utils/reporting-cutoff.js", "134-138,172-194"), WP3ADJ("Q9"), PREP3("section 10 G14"), "C:/Temp/octapm-cert/scratch/wp3/derive-v.json cutoff20260228"]),
+      defaultJustBefore: F(z.defaultJustBefore, "state",
+        "pickDefaultReportingPeriod (earned-value.service.js:411-424) over 087-EV's two fixed periods as stored rows (2026-01 cutoff 2026-01-31; 2026-02 cutoff 2026-02-28), the zone injected as " + z.zone + ", now = " + z.justBefore + " (1 ms before the 2026-02-28 cutoff): February's cutoff instant is still ahead and January's has passed: " + z.defaultJustBefore + ".",
+        [PF(391, 648), HF("backend/src/services/earned-value.service.js", "411-424"), WP3ADJ("Q9"), PREP3("section 10 G14")]),
+      defaultAtCutoff: F(z.defaultAtCutoff, "state",
+        "The same with now = the cutoff instant itself, " + z.cutoff + ": a cutoff at or before now has passed (:417 passes over a period only when its cutoff is after now): " + z.defaultAtCutoff + ". The default flips exactly at the end of the local day, off the whole hour by the zone's half (Kolkata) or quarter (Kathmandu) hour.",
+        [PF(391, 648), HF("backend/src/services/earned-value.service.js", "411-424"), WP3ADJ("Q9"), PREP3("section 10 G14")]),
+    }])),
   },
   forecast: (() => {
     const pace = forecastPace({ start: "2026-05-01T00:00:00Z", finish: "2026-05-31T00:00:00Z", asOf: "2026-06-01T00:00:00Z", pct: 20 });
@@ -1931,16 +2255,49 @@ const WP3 = {
         projectedFinish: F(pace.projected, "date", `2026-06-01 + ${pace.addDays} days.`, [P(612)]),
         slipDays: F(pace.slip, "days", `2026-10-03 - 2026-05-31 = ${pace.slip}.`, [P(612), H("backend/src/services/forecast.service.js", "419")]),
       },
-      evBasedFinish: F(forecastEvFinish({ asOf: "2026-06-01T00:00:00Z", plannedFinish: "2026-07-01T00:00:00Z", spi: 0.5 }), "date", "2026-06-01 + 30 / 0.5 = 60 days -> 2026-07-31.", [P(613), H("backend/src/services/forecast.service.js", "564-569")]),
-      L106budgetLines: F(0, "count", "One budget line originalBudget 100,000 with no cost: cost.budgetLines [] (not overrun).", [P(614, 626), H("backend/src/services/forecast.service.js", "527-540")], { today: "1 line {revised: 0, forecast: 100,000, overrun: 100,000.00} (reads line.revised)" }),
-      siteEngineerMoney: F("no money fields", "state", "Levels and counts only.", [P(615)]),
+      evBasedFinish: F(forecastEvFinish({ asOf: "2026-06-01T00:00:00Z", plannedFinish: "2026-07-01T00:00:00Z", spi: 0.5 }), "date", "2026-06-01 + 30 / 0.5 = 60 days -> 2026-07-31. Inputs (WP3.forecast.evBasedFinishInputs): V after V14, in process: forecastService.buildForecast({ orgId, projectId: V, asOf: new Date('2026-06-01T00:00:00.000Z'), access }) answers schedule.evBasedFinish (forecast.service.js:629). Its SPI is the EV report's, which loadContext reads through buildOfficialEvReport with no period and no cutoff (:336): V has no reporting period yet at V15, so the report is the ad hoc one at the real run date (earned-value.service.js:386-395), EV 90,000.00 / PV 180,000.00 = 0.5 (WP3.V.forecastSpi), rounded to 3 places (forecast.service.js:564). plannedFinish is the latest active activity's endDate, X3's 2026-07-01 (:560, :383); with 0 < SPI < 1 the EV-based finish is asOf + (plannedFinish - asOf) / SPI days (:566-570).", [P(613), H("backend/src/services/forecast.service.js", "564-569"), PF(652), HF("backend/src/services/forecast.service.js", "336,383,549-570,629"), HF("backend/src/services/earned-value.service.js", "386-395"), WP3ADJ("Q1, Q2"), PREP3("section 0 fact 9; section 10 G7")], { note: "Changed 2026-10-10 (WP-3 G7): the inputs named (V, in process); value unchanged" }),
+      evBasedFinishInputs: F({ project: "V after V14", asOf: V_EV.forecastAsOf, plannedFinish: V_PLANNED_FINISH, spi: r6(V_FORECAST_SPI), call: "forecastService.buildForecast({ orgId, projectId: <V>, asOf: new Date(asOf), access })", field: "schedule.evBasedFinish" }, "text",
+        "The in-process forecast call on V (WP3-PREP section 5.1 V15): asOf is injected; the SPI is V's run-date SPI (WP3.V.forecastSpi), since loadContext reads the EV report at the real time, not at asOf (forecast.service.js:336); the planned finish is X3's end, the latest of V's activities (WP3.V.inputs). The EV-based finish is worked from these with rules.forecastEvFinish (the book's restatement of forecast.service.js:564-570).",
+        [PF(652), HF("backend/src/services/forecast.service.js", "336,549-570"), WP3ADJ("Q2"), PREP3("section 5.1 V15; section 10 G7")]),
+      L106budgetLines: FA([], "list", "Plan :653 PF: L106's budget lines are expected []. Fixture (WP3.forecast.L106fixture; WP3-PREP V4-V5): on V before any cost, one active budget line on 02-100 with originalBudget 100,000.00 and nothing else; the PM reads GET .../forecast. The budget register serializes the line with revisedBudget 100,000.00 and forecast 100,000.00 (budget.service.js serializeLine :162-191, revisedBudget :177; deriveLine :134-151: revised = original + approved changes + revisions; forecast = max(revised, actual, committed) when none is typed, :146), so its exposure, max(forecast, committed + max(0, actual - committed)) = 100,000.00, does not exceed the revised budget: no overrun, and budgetLineRisks keeps only overruns (forecast.service.js:527-540, the filter :538): cost.budgetLines [] (:654). Today budgetLineRisks reads line.revised (:530), a field the register does not emit (it emits revisedBudget): num(undefined) = 0 (:61-65), so the line's overrun is 100,000.00 - 0 = 100,000.00 > 0, overrunPct null (revised 0) and level 'medium' (revised 0, overrun > 0): one line. Money in integer cents here (the API answers currency units); the check compares these fields (the line's id, name and costType are its own).", [P(614, 626), H("backend/src/services/forecast.service.js", "527-540"), PF(653, 665, 1116), HF("backend/src/services/forecast.service.js", "61-65,527-540,581,652-654"), HF("backend/src/services/budget.service.js", "134-191,257"), WP3ADJ("Q7, Q16"), PREP3("section 5.1 V4-V5; section 10 G8")], { today: [{ costCode: V_EV.l106Line.costCode, revised: 0, committed: 0, actual: 0, forecast: cents(V_EV.l106Line.originalBudget), overrun: cents(V_EV.l106Line.originalBudget), overrunPct: null, level: "medium" }], ref: "L106", note: "Changed 2026-10-10 (WP-3 G8): the value was 0 (unit count, with cost.budgetLines [] said in words) and the today '1 line {revised: 0, forecast: 100,000, overrun: 100,000.00} (reads line.revised)'; now the list itself, HEAD's line as today, ref L106 and assumption true (L106 is a lead with no decided rule; plan :665 'Defect fix', which goes ahead only if it confirms as P1, WP3ADJ Q7). The count is WP3.forecast.L106counts" }),
+      L106counts: FA(0, "count",
+        "cost.counts.lines (forecast.service.js:652) is the number of budget-line risks: 0 with the register's revisedBudget read (no overrun); today 1, HEAD's line of WP3.forecast.L106budgetLines.today.",
+        [PF(653, 665), HF("backend/src/services/forecast.service.js", "527-540,652"), WP3ADJ("Q7"), PREP3("section 10 G8")],
+        { today: 1, ref: "L106" }),
+      L106fixture: FA({ project: "V (WP3.V.inputs)", when: "V5: before any cost on V", budgetLine: { costCode: V_EV.l106Line.costCode, originalBudget: "100,000.00", status: V_EV.l106Line.status, changes: "none", committed: "none", actual: "none", forecast: "none typed" }, reader: "pm", route: "GET /api/v1/projects/<V>/forecast" }, "text",
+        "The L106 fixture on V (WP3-PREP V4-V5): the direct costs are coded 01-100, so the line on 02-100 never takes an actual; read before any cost. The PM reads the BOQ, so the forecast arrives untouched (utils/boq-figures.js:489-491). A line that cannot be made, or a forecast that is not available, is a setup error (R-SET).",
+        [PF(653), HF("backend/src/services/budget.service.js", "433-481"), HF("backend/src/utils/boq-figures.js", "489-491"), WP3ADJ("Q7"), PREP3("section 5.1 V4-V5; section 10 G8")]),
+      siteEngineerMoney: F({ costWithheld: true, costReason: FC_WITHHELD_REASON, costKeysAbsent: ["budget", "bac", "eac", "bottomUp", "projected", "overrun", "overrunPct", "actual", "eacBasis", "topRisks"], budgetLineKeysAbsent: ["revised", "committed", "actual", "forecast", "overrun", "overrunPct"], countsAtRiskAbsent: true, activityCost: { withheld: true, reason: FC_WITHHELD_REASON } }, "state", "Plan :654 PF, 'the site engineer sees no money fields', holds for a site engineer who may read neither the BOQ nor the cost module (WP3ADJ Q6): 087-EXTRAS's T-NOBOQ member on 087-SCH (WP3.forecast.siteEngineerMoneyMember). GET /forecast (schedule:read, routes/forecast.js:29-35) answers withheldForecast(forecast, boqFigureAccess(req)) (:33): access.boq is false (the template sets the BOQ tool to none) and access.budget is false (site_engineer holds no cost:read, shared/permissions.json; utils/boq-figures.js:169-172), so the cost block keeps neither its money (FORECAST_COST_KEYS :400) nor what is read off the mapping (FORECAST_MAPPING_COST_KEYS :416), its counts lose atRisk, each budget line loses its amounts (FORECAST_LINE_KEYS :401), and it says withheld with FORECAST_COST_WITHHELD_REASON (:417, :499-510); every activity's cost, and each schedule top risk's, is { withheld: true, reason } (:418-423, :495-498). Levels, counts and the schedule stay.", [P(615), PF(654), HF("backend/src/routes/forecast.js", "29-35"), HF("backend/src/utils/boq-figures.js", "169-174,400-423,488-513"), HF("shared/permissions.json", "modules.boq, modules.cost"), BLD("087-extras.js", "8-15,79,139-142,179-200"), WP3ADJ("Q6"), PREP3("section 0 fact 8; section 10 G6")], { note: "Changed 2026-10-10 (WP-3 G6, WP3ADJ Q6): the value was 'no money fields' ('Levels and counts only.'); it is now the withheld view of the T-NOBOQ member. A site engineer with boq:read receives the money (WP3.forecast.siteEngineerWithBoqRead)" }),
+      siteEngineerMoneyMember: F({ build: "087-EXTRAS", personaKey: "tariq.okafor.2", role: "site_engineer", template: "T-NOBOQ (internal, site_engineer base, the BOQ tool at none)", project: "087-SCH" }, "text",
+        "The member the check reads as: 087-EXTRAS gives the staff site engineer tariq.okafor.2 the T-NOBOQ template on 087-SCH and asserts its effect (GET /boq answers 403 on 087-SCH), build/087-extras.js:8-15, :79, :139-142, :179-200. A site engineer holds no cost:read, so the member reads neither the BOQ nor cost: the withheld view of WP3.forecast.siteEngineerMoney.",
+        [PF(654), BLD("087-extras.js", "8-15,79,139-142,179-200"), HF("shared/permissions.json", "modules.cost.actions.read"), WP3ADJ("Q6"), PREP3("section 10 G6")]),
+      siteEngineerWithBoqRead: F("the forecast as built: money present", "state",
+        "The 087 site engineer persona on 087-SCH holds boq:read (shared/permissions.json modules.boq.actions.read lists site_engineer), and a BOQ reader receives the forecast exactly as built (utils/boq-figures.js:489-491; routes/forecast.js:33): cost.budget, bac, eac, actual and each activity's cost are present. WP3ADJ Q6: expected behaviour under the permission policy (boq:read grants it; owner decision E1, 2026-09-28); no rule change; reported to the owner in the WP-3 summary for information.",
+        [PF(654), HF("shared/permissions.json", "modules.boq.actions.read"), HF("backend/src/utils/boq-figures.js", "488-494"), HF("backend/src/routes/forecast.js", "29-35"), WP3ADJ("Q6"), PREP3("section 0 fact 8; section 10 G6")],
+        { planValue: "no money fields", note: "The plan's 'the site engineer sees no money fields' read for every site engineer is the planValue; the permission policy (E1) gives a BOQ reader the money" }),
     };
   })(),
+  // WP-3 answer-book leaves (2026-10-10): V (G13), the L34 fix (G12, G21), the zone item (G20).
+  V: WP3_V,
+  L34: WP3_L34,
+  confirmFirst: WP3_CF,
   mutations: {
-    alertBoundary: F("WP3.T4.spi09.spiAlert red", "state", "< 0.9 -> <= 0.9: 0.9 alerts.", [P(617)]),
-    lockedRecomputed: F("WP3.periods.afterLock.periodReport red", "state", "A locked period recomputed shows the back-dated cost.", [P(617)]),
-    readinessSkipped: F("WP3.periods.financeWhileBlocked red", "state", "Lock while blocked succeeds.", [P(617)]),
-    evNonApproved: F("WP3.T7 red", "state", "A submitted figure moves EV.", [P(617)]),
+    alertBoundary: F("T4.spi09.spiAlert red and T4.cpi09.cpiAlert red (M1, the E6 entry: both flags); T4.spi09.spiAlert red (M1a: the SPI flag alone); T4.cpi09.cpiAlert red (M1b: the CPI flag alone)", "state",
+      "The 0.9 alert boundary (plan :656, section 6.2 :1146 PF): '< 0.9' changed to '<= 0.9'. The report's flags are computed in buildOfficialEvReport (earned-value.service.js:953-956: spiAlert :954, cpiAlert :955) and stored with a lock (:1735); the exported computeEvMetrics (:219-245) carries no flag, so T4 reads the report on V's records (WP3ADJ Q2). M1 edits both lines: at read2 SPI and CPI are exactly 0.9 (WP3.T4.inputs.read2), so both flags turn true and T4.spi09.spiAlert (WP3.T4.spi09.spiAlert) and T4.cpi09.cpiAlert (WP3.T4.cpi09.cpiAlert) are red. M1a and M1b (each line alone) are variants, run and not tallied (WP3ADJ Q10). Unchanged under M1: T4.ac100001.cpiAlert (0.899991 alerts either way) and T4.pv0.spiAlert (SPI null). The legacy fallback flags of snapshotToReport (:688-691) are unreachable for any snapshot locked at HEAD (the lock stores alerts) and are not a mutation here.",
+      [P(617), PF(656, 1146), HF("backend/src/services/earned-value.service.js", "219-245,688-691,953-956,1735"), WP3ADJ("Q2, Q10"), PREP3("section 0 fact 2; section 7 M1; section 10 G3")],
+      { note: "Changed 2026-10-10 (WP-3 G3, WP3ADJ Q10): the value was 'WP3.T4.spi09.spiAlert red', the SPI catcher only; the plan's mutation has two anchors" }),
+    lockedRecomputed: F("EVL.febPeriod.hash red and PER.V.afterLock.periodHash red (M2, the E6 entry: the read path); PER.relock.jan, PER.relock.feb and PER.V.relock red (M2b: the relock path)", "state",
+      "A locked period recomputed instead of served from its snapshot (plan :656; section 6.2 :1146 PF). M2: buildOfficialEvReport's 'if (useLockedSnapshot && period.evSnapshot)' (earned-value.service.js:714) made false: GET .../reports/ev?periodId= of a locked period recomputes it, so the back-dated cost and the new approval appear and isSnapshot is false, and the live period-report hashes differ from those taken right after the lock: 087-EV's February (EVL.febPeriod.hash, against the build's checkpoint.afterLock.before) and V-A (PER.V.afterLock.periodHash). A stored moment cannot catch a mutation (WP3-PREP section 0 fact 4), so the stored EVS.afterLock.periodReport is not a catcher. M2b: the relock path's 'if (period.status === LOCKED_PERIOD && period.evSnapshot)' (:1708) made false: each relock without a reason reaches the blocked gate and answers 409 REPORTING_READINESS_BLOCKED, writing nothing (WP3.periods.afterLock.relockProbes); a variant (WP3ADJ Q10).",
+      [P(617), PF(656, 1146), HF("backend/src/services/earned-value.service.js", "712-716,1704-1719,1654-1659"), BLD("087-ev.js", "964,1060-1072"), WP3ADJ("Q1, Q10"), PREP3("section 0 facts 4-5; section 7 M2, M2b; section 10 G4")],
+      { note: "Changed 2026-10-10 (WP-3 G4): the value was 'WP3.periods.afterLock.periodReport red', a stored moment, which no mutation can turn red" }),
+    readinessSkipped: F("PER.V.financeBlocked red (M3, the E6 entry: the gate); PER.V.financeOverride red (M3b: the PM-only override)", "state",
+      "The readiness gate skipped on lock (plan :656; section 6.2 :1146 PF). M3: resolveReportingReadinessOverride's 'if (!gate || gate.ready)' (earned-value.service.js:1650) made 'if (true)': finance's lock of V-A without a reason, V's gate blocked (WP3.V.reportingGateReady), is no longer refused 409 REPORTING_READINESS_BLOCKED but locks V-A, so PER.V.financeBlocked (WP3.periods.financeWhileBlocked) is red and the later V-A checks fail with it (collateral). Only V is written under it: 087-EV's relocks return before the gate. The stored refusal (EVS.feb.financeWhileBlocked) cannot catch it. M3b: the PM-only check normalizeRoleId(userRole) !== 'pm' (:1661) made false: finance's lock with a reason is no longer refused 403 REPORTING_READINESS_OVERRIDE_FORBIDDEN, so PER.V.financeOverride (WP3.periods.financeWithOverride) is red; a variant (WP3ADJ Q10).",
+      [P(617), PF(656, 1146), HF("backend/src/services/earned-value.service.js", "1642-1679"), WP3ADJ("Q1, Q10"), PREP3("section 7 M3, M3b; section 10 G4")],
+      { note: "Changed 2026-10-10 (WP-3 G4): the value was 'WP3.periods.financeWhileBlocked red'; its stored check cannot catch a mutation, the live V check does" }),
+    evNonApproved: F("T7.live.hash red and KA.EVL.runDate wrong (M4, the E6 entry: EV read from every progress submission)", "state",
+      "EV reading non-approved progress (plan :656; section 6.2 :1146 PF). The status filters are equivalent mutants: ActivityProgress rows are written only by the one writer at approval (progress.service.js:2171), so dropping status: APPROVED from the report's include (earned-value.service.js:742) or from selectApprovedProgressForCutoff (:156) changes nothing a check can see; they are recorded with that reason and not run as evidence (WP3ADJ Q10). M4 swaps the read (two edits, accepted by WP3ADJ Q10): the include gains progressSubmissions (:738) and the selection reads activity.progressSubmissions as if approved (:787), so draft, submitted and rejected submissions count. On V the run-date report hash after X2 30% draft, X3 20% submitted and X2 40% rejected differs from the hash before (T7.live.hash, WP3.T7); on 087-EV the run-date EV rises above WP3.periods.afterLock.runDateEv (the build's A310 draft, A320 submitted and A130 rejected submissions count), neither the value nor the today of KA.EVL.runDate: wrong. The stored T7 hashes cannot catch it.",
+      [P(617), PF(643, 656, 1146), HF("backend/src/services/earned-value.service.js", "152-172,737-756,786-789"), HF("backend/src/services/progress.service.js", "2171"), BLD("087-ev.js", "157-162"), WP3ADJ("Q10"), PREP3("section 0 fact 3; section 7 M4; section 10 G2")],
+      { note: "Changed 2026-10-10 (WP-3 G2): the value was 'WP3.T7 red'; the stored T7 cannot catch a mutation, the live V hash and the 087-EV run-date EV do" }),
   },
 };
 
@@ -2037,7 +2394,7 @@ const D2 = {
       ev: F(0, "cents", "Approvals stamped after the cutoff.", [P(403, 600)], { company: "052" }),
       ac: F(M_T3.ac, "cents", "70,000.00 (L34).", [P(403, 600)], { today: M_T3_HEAD.ac, company: "052" }),
     },
-    T4: F("as WP3.T4", "state", "In process, currency- and zone-independent: the same figures.", [P(403, 601)], { company: "052" }),
+    T4: F("as WP3.T4", "state", "In process, currency- and zone-independent: the same figures.", [P(403, 601)], { company: "052", note: "WP-3 G18 (2026-10-10): served by V's T4 in 087 (WP3.T4.fixture, WP3.T4.inputs; WP3ADJ Q2); the reads are currency- and zone-independent, so no separate 052 check runs (MOMENT-MAP row 245)" }),
   },
 };
 
@@ -2066,6 +2423,149 @@ const D3 = {
     timeZoneNote: F(null, "state", ZONE_NOTE_DERIVATION, [H("backend/src/utils/reporting-cutoff.js", "201-205"), H("backend/src/services/earned-value.service.js", "976-978"), BADJ("087-OTH/052/006 item 2; R3-8")], { company: "006" }),
   },
 };
+
+// Load checks for the WP-3 answer-book leaves (2026-10-10, WP3ADJ Q1-Q16): each added or changed leaf agrees with the figures it is built from.
+(() => {
+  const fail = (what) => {
+    throw new Error("schedule answer book: " + what);
+  };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const isLeafNode = (n) => n && typeof n === "object" && !Array.isArray(n) && "value" in n && "unit" in n && "derivation" in n;
+  const at = (root, key) => key.split(".").reduce((node, part) => (node && typeof node === "object" ? node[part] : undefined), root);
+  const METRIC = ["bac", "pv", "ev", "ac", "spi", "spiAlert", "cpi", "cpiAlert", "eac", "eacBasis", "sv", "cv", "etc"];
+  const want6 = (m, k) => (k === "spi" || k === "cpi" ? r6(m[k]) : m[k]);
+  // G1 (Q2): T4's four reads on V give exactly the metric sets the T4 leaves are worked from; HEAD agrees at each (no L34 today in T4)
+  if (V_BAC !== BAC || EVT4.spi09.bac !== V_BAC) fail("V's BAC must be WP3.T1.bac, the BAC of every T4 set (G1)");
+  if (!same(Object.values(V_T4_SERVES).flat().sort(), Object.keys(WP3.T4).filter((k) => k !== "fixture" && k !== "inputs").sort())) fail("the four reads must serve every T4 metric set, each once (G1)");
+  for (const [read, names] of Object.entries(V_T4_SERVES)) {
+    const inp = WP3.T4.inputs[read].value;
+    if (!same(inp, V_T4_INPUTS[read]) || !same(WP3.T4.fixture.value[read].serves, names)) fail("WP3.T4.inputs." + read + " / fixture." + read + " must be the read's inputs and the sets it serves (G1)");
+    if (acHead(V_T4_READS[read].cutoff, V_T4_READS[read].rows) !== inp.ac) fail("WP3.T4.inputs." + read + ": HEAD's cumulative AC must agree with the ledger, so T4 carries no L34 today (G1)");
+    const m = evMetrics(inp);
+    for (const name of names) {
+      if (!same(m, EVT4[name === "cpi09" ? "spi09" : name])) fail("WP3.T4.inputs." + read + " must give the metric set of WP3.T4." + name + " (G1)");
+      for (const [k, leaf] of Object.entries(WP3.T4[name])) if (leaf.value !== want6(m, k)) fail("WP3.T4." + name + "." + k + " must be read " + read + "'s figure (G1)");
+    }
+  }
+  // G13: V's figures (pinned to WP3-PREP's derive-v.json, worked independently with this book's rules)
+  const V = WP3.V;
+  if (V.bac.value !== WP3.T1.bac.value || V.cutoffA.value !== WP3.T3.cutoff.value) fail("WP3.V.bac and cutoffA must be WP3.T1.bac and WP3.T3.cutoff (G13)");
+  if (V.lockA.ac.value !== 12000100 || V.lockA.ac.today !== 10000100 || V.cutoffAfter.ac.value !== 12500100 || V.cutoffAfter.ac.today !== 10500100) fail("WP3.V.lockA.ac 120,001.00 (today 100,001.00) and cutoffAfter.ac 125,001.00 (today 105,001.00) (G13)");
+  if (V.cutoffAfter.ac.value - V.lockA.ac.value !== cents(V_EV.backdatedAfterLock[1]) || V.lockA.ev.value !== 0 || V.lockA.pv.value !== V_T4_INPUTS.read2.pv || V.lockA.bac.value !== V_BAC) fail("WP3.V.lockA / cutoffAfter: the back-dated cost moves AC only; EV 0 and PV the X1 loading at 2026-02-28 (G13)");
+  for (const [name, m, h] of [["lockA", M_VA_LOCK, M_VA_LOCK_HEAD], ["cutoffAfter", M_VA_AFTER, M_VA_AFTER_HEAD]]) {
+    if (!same(Object.keys(V[name]), METRIC)) fail("WP3.V." + name + " must be the thirteen metric leaves (G13)");
+    for (const k of METRIC) {
+      const leaf = V[name][k];
+      if (leaf.value !== want6(m, k)) fail("WP3.V." + name + "." + k + " must be its model's figure (G13)");
+      const differs = L34_TODAY_KEYS.includes(k) && m[k] !== h[k];
+      if (differs !== (leaf.today !== undefined) || (differs && (leaf.ref !== "L34" || !same(leaf.today, want6(h, k))))) fail("WP3.V." + name + "." + k + ": a today exactly where HEAD differs, with ref L34 (G13)");
+    }
+  }
+  if (!same(V.runDateAc.value, { afterT4: 10000100, afterL34Costs: 13000100, afterBackdated: 13500100 }) || acHead(RUN, V_ROWS_AFTER) !== V.runDateAc.value.afterBackdated || V.runDateAc.value.afterT4 !== V_T4_INPUTS.read3.ac) fail("WP3.V.runDateAc: 100,001.00, 130,001.00, 135,001.00, HEAD agreeing at the run date (G13)");
+  if (V.evAfterNewApproval.value !== 10970000 || V.forecastSpi.value !== 0.5 || V.reportingGateReady.value !== false) fail("WP3.V.evAfterNewApproval 109,700.00, forecastSpi 0.5, the gate blocked (G13)");
+  const lb = V.l112.bac.value;
+  if (lb.before !== WP3.T1.bac.value || lb.afterApproval - lb.before !== WP3.T5.budgetRevision.value || lb.afterEdit - lb.before !== cents(V_EV.l112.editAmountTo) || lb.afterDelete !== lb.before) fail("WP3.V.l112.bac must follow WP3.T5's revision (G13)");
+  for (const k of ["edit", "delete"]) if (V.l112[k].value !== WP3.T5.deleteProbe.value || V.l112[k].ref !== "L112" || V.l112[k].today === undefined) fail("WP3.V.l112." + k + " must be refused_or_audited with HEAD's silent answer as today, ref L112 (G13)");
+  if (!V.choreography.value.every((s) => /^(V\d+|end) /.test(s)) || V.choreography.value.length !== 27) fail("WP3.V.choreography must list V0-V25 and the end (G13)");
+  // G2-G4 (Q10): the mutation leaves name their live catchers
+  const mu = WP3.mutations;
+  if (!/T4\.spi09\.spiAlert red and T4\.cpi09\.cpiAlert red/.test(mu.alertBoundary.value) || !/M1a/.test(mu.alertBoundary.value) || !/M1b/.test(mu.alertBoundary.value)) fail("WP3.mutations.alertBoundary must name both T4 catchers and the variants (G3)");
+  if (!/EVL\.febPeriod\.hash red/.test(mu.lockedRecomputed.value) || !/PER\.V\.afterLock\.periodHash red/.test(mu.lockedRecomputed.value) || !/PER\.relock\.jan/.test(mu.lockedRecomputed.value) || !/PER\.V\.relock red/.test(mu.lockedRecomputed.value)) fail("WP3.mutations.lockedRecomputed must name the live period hashes (M2) and the relocks (M2b) (G4)");
+  if (!/PER\.V\.financeBlocked red/.test(mu.readinessSkipped.value) || !/PER\.V\.financeOverride red/.test(mu.readinessSkipped.value)) fail("WP3.mutations.readinessSkipped must name PER.V.financeBlocked (M3) and PER.V.financeOverride (M3b) (G4)");
+  if (!/T7\.live\.hash red/.test(mu.evNonApproved.value) || !/KA\.EVL\.runDate wrong/.test(mu.evNonApproved.value)) fail("WP3.mutations.evNonApproved must name T7.live.hash and KA.EVL.runDate (G2)");
+  // G5: the relocks
+  const al = WP3.periods.afterLock;
+  if (al.relockSameSnapshotId.value !== true || al.relockSameLockedAt.value !== true || !same(al.relockProbes.value.map((p) => p.project + " " + p.period + " " + p.by), ["087-EV 2026-01 finance", "087-EV 2026-02 pm", "V V-A pm"]) || al.relockProbes.value.some((p) => Object.keys(p.body).length !== 0)) fail("WP3.periods.afterLock.relockProbes: finance on January, the PM on February and V-A, each with no overrideReason (G5)");
+  // G6 (Q6): the withheld forecast and the BOQ reader
+  const sm = WP3.forecast.siteEngineerMoney.value;
+  const MONEY = ["budget", "bac", "eac", "bottomUp", "projected", "overrun", "overrunPct", "actual"];
+  const REASON = "Cost figures are not available to you"; // utils/boq-figures.js:417 @f599e67
+  if (sm.costWithheld !== true || sm.costReason !== REASON || !MONEY.every((k) => sm.costKeysAbsent.includes(k)) || !same(sm.activityCost, { withheld: true, reason: REASON }) || WP3.forecast.siteEngineerMoneyMember.value.role !== "site_engineer") fail("WP3.forecast.siteEngineerMoney: the T-NOBOQ member's withheld view (G6)");
+  const sb = WP3.forecast.siteEngineerWithBoqRead;
+  if (sb.planValue !== "no money fields" || !sb.planDisagrees) fail("WP3.forecast.siteEngineerWithBoqRead must keep the plan's 'no money fields' as planValue (G6)");
+  // G7: the EV-based finish on V
+  const fi = WP3.forecast.evBasedFinishInputs.value;
+  if (WP3.forecast.evBasedFinish.value !== V_EV_FINISH || fi.spi !== V.forecastSpi.value || fi.plannedFinish !== V_PLANNED_FINISH || fi.asOf.slice(0, 10) !== "2026-06-01") fail("WP3.forecast.evBasedFinish must be V's: SPI 0.5, planned finish X3's 2026-07-01, asOf 2026-06-01 (G7)");
+  // G8 (Q7): L106
+  const l106 = WP3.forecast.L106budgetLines;
+  const line = Array.isArray(l106.today) && l106.today.length === 1 ? l106.today[0] : null;
+  if (!Array.isArray(l106.value) || l106.value.length !== 0 || !line || line.revised !== 0 || line.forecast !== cents(V_EV.l106Line.originalBudget) || line.overrun !== line.forecast - line.revised || line.overrunPct !== null || line.level !== "medium" || l106.ref !== "L106" || !l106.assumption) fail("WP3.forecast.L106budgetLines: [] with HEAD's one line (revised 0, overrun = forecast, level medium) as today, ref L106 (G8)");
+  if (WP3.forecast.L106counts.value !== l106.value.length || WP3.forecast.L106counts.today !== l106.today.length || WP3.forecast.L106counts.ref !== "L106") fail("WP3.forecast.L106counts must count the lines of the value and of the today (G8)");
+  // G9 (Q11): the loading names the locked period
+  const lr = al.loadingInLockedPeriodRequest.value;
+  const feb = EV087_FIXED_PERIODS[1];
+  if (al.loadingInLockedPeriod.value !== "409 REPORTING_PERIOD_LOCKED" || lr.body.reportingPeriodId.indexOf(feb.code) < 0 || !(lr.body.plannedDate >= feb.start && lr.body.plannedDate <= feb.end) || lr.loadingsDelta !== 0 || ALLOC[lr.body.activity] === undefined) fail("WP3.periods.afterLock.loadingInLockedPeriodRequest must name the locked 2026-02 period, dated inside it, on an allocated activity, writing nothing (G9)");
+  // G10, G11, G16, G17
+  const fl = WP3.periods.futureCutoffLock;
+  if (fl.value !== 409 || fl.today !== 200 || fl.ref !== "HR-E2" || !fl.assumption || !/V-F/.test(fl.derivation)) fail("WP3.periods.futureCutoffLock: value 409 (code null), today 200, ref HR-E2, on V (G10)");
+  const af = WP3.periods.feb.overriddenAuditFilter.value;
+  if (WP3.periods.feb.overriddenAuditEvents.value !== af.count || af.count !== 1 || af.query.entityType !== "project_setup_readiness" || af.query.action !== "overridden" || af.query.source !== "audit") fail("WP3.periods.feb.overriddenAuditFilter: project_setup_readiness, overridden, source audit, one event (G11)");
+  const dp = WP3.T5.deleteProbe;
+  if (dp.value !== "refused_or_audited" || dp.ref !== "L112" || !/The prober is the PM/.test(dp.derivation)) fail("WP3.T5.deleteProbe must name the PM prober and ref L112 (G16)");
+  const cl = WP3.periods.concurrentLocks;
+  if (!same(cl.value, { succeeded: 1, refused: { status: 409, code: null }, snapshotRows: 1, overriddenAuditEvents: 1 }) || !same(cl.today, { succeeded: 2, refused: null, snapshotRows: 1, overriddenAuditEvents: 2 }) || cl.ref !== "CONCURRENT") fail("WP3.periods.concurrentLocks: one wins (code null) / today both 200, one snapshot row, two OVERRIDDEN events (G17)");
+  // G12 (Q3): the STORED-PRE-FIX rule lists exactly the leaves whose L34 today a stored moment or a frozen snapshot shows
+  const pre = WP3.L34.storedPreFix.value;
+  if (pre.verdict !== "STORED-PRE-FIX" || !same(pre.leaves, L34_STORED_LEAVES)) fail("WP3.L34.storedPreFix: verdict STORED-PRE-FIX over L34_STORED_LEAVES (G12)");
+  const PREFIXES = ["WP3.T3.", "WP3.periods.feb.snapshot.", "WP3.periods.jan.snapshot.", "WP3.periods.afterLock.cutoffReportAc", "WP3.periods.afterLock.cutoffAfterCost.", "D2.WP3.T3."];
+  const withToday = [];
+  const walk = (node, key) => {
+    if (isLeafNode(node)) {
+      if (node.today !== undefined && PREFIXES.some((p) => key === p || key.startsWith(p))) withToday.push(key);
+      return;
+    }
+    if (node && typeof node === "object") for (const [k, v] of Object.entries(node)) walk(v, key ? key + "." + k : k);
+  };
+  walk({ WP3, D2 }, "");
+  if (!same([...withToday].sort(), [...pre.leaves].sort())) fail("WP3.L34.storedPreFix.leaves must be exactly the stored and frozen leaves with an L34 today (G12)");
+  for (const key of pre.leaves) {
+    const leaf = at({ WP3, D2 }, key);
+    if (!isLeafNode(leaf) || leaf.today === undefined || same(leaf.today, leaf.value)) fail(key + ": a STORED-PRE-FIX leaf needs a today that differs from its value (G12)");
+  }
+  // G14 (Q9): the half-hour zones (pinned; WP3-PREP derive-v.json, the product's resolveReportingCutoff agreeing)
+  const hh = WP3.periods.halfHourZones;
+  for (const [key, instant, minutes] of [["kolkata", "2026-02-28T18:29:59.999Z", 330], ["kathmandu", "2026-02-28T18:14:59.999Z", 345]]) {
+    const z = hh[key];
+    if (!z || z.cutoff.value !== instant || HALF_HOUR[key].offsetMinutes !== minutes || Date.parse(instant) + 1 !== Date.UTC(2026, 2, 1) - minutes * 60000) fail("WP3.periods.halfHourZones." + key + ".cutoff must be the end of 2026-02-28 at UTC+" + minutes + " minutes (G14)");
+    if (z.defaultJustBefore.value !== "2026-01" || z.defaultAtCutoff.value !== "2026-02") fail("WP3.periods.halfHourZones." + key + ": the default period flips from 2026-01 to 2026-02 at the cutoff (G14)");
+  }
+  // G18: CLAUDE.SPI / CPI / EAC are WP3.T1 / T2's figures (EVS.T1, EVS.T2 assert them); D2.WP3.T4 is V's T4
+  const t1 = WP3.T1;
+  const t2 = WP3.T2;
+  if (CLAUDE.SPI.value.value !== t1.spi.value || CLAUDE.SPI.alert.value !== t1.spiAlert.value || CLAUDE.CPI.noAlert.value !== t1.cpi.value || CLAUDE.CPI.noAlertFlag.value !== t1.cpiAlert.value || CLAUDE.CPI.alert.value !== t2.cpi.value || CLAUDE.CPI.alertFlag.value !== t2.cpiAlert.value || CLAUDE.EAC.value !== t1.eac.value) fail("CLAUDE.SPI / CPI / EAC must be WP3.T1 / WP3.T2's figures (G18)");
+  if (D2.WP3.T4.value !== "as WP3.T4" || !/WP3\.T4\.fixture/.test(D2.WP3.T4.note || "")) fail("D2.WP3.T4 must say it is served by V's T4 (G18)");
+  // G19 (Q15): ev0's EAC and basis name HR-E3, HEAD being the recommendation (no today)
+  for (const k of ["eac", "eacBasis"]) {
+    const leaf = WP3.T4.ev0[k];
+    if (leaf.ref !== "HR-E3" || !leaf.assumption || leaf.today !== undefined) fail("WP3.T4.ev0." + k + " must name HR-E3, an assumption with no today (G19)");
+  }
+  if (WP3.T4.ev0.eac.value !== BAC || WP3.T4.ev0.eacBasis.value !== "budget_cpi_zero") fail("WP3.T4.ev0: EAC = BAC, basis budget_cpi_zero (G19)");
+  // G20 (Q14): the zone precedence
+  if (!same(WP3.confirmFirst.zonePrecedence.value, { timeZone: WP3.setup.timeZone.value, source: WP3.setup.timeZoneSource.value })) fail("WP3.confirmFirst.zonePrecedence must be 087's zone with source project (G20)");
+  // G21 (Q4, Q5): the L34 fix's rule and its pending contract
+  const l34 = WP3.L34;
+  for (const k of ["formulaVersion", "actualCostSource", "basisTexts"]) if (l34[k].value !== L34_PENDING || l34[k].ref !== "L34" || l34[k].today === undefined || !l34[k].assumption) fail("WP3.L34." + k + " must be 'contract pending the L34 plan review' with HEAD's today, ref L34 (G21)");
+  if (l34.formulaVersion.today !== "ev.v2" || l34.actualCostSource.today.actualCostSource !== "cost_record.actual_through_date") fail("WP3.L34: HEAD's formulaVersion ev.v2 and source cost_record.actual_through_date (G21)");
+  if (l34.acRule.assumption || l34.isActiveFilter.assumption || !/isActive true/.test(l34.isActiveFilter.value) || !/incurredOn/.test(l34.acRule.value)) fail("WP3.L34.acRule and isActiveFilter are decided (L34, WP3ADJ Q4) (G21)");
+  // every leaf with a today added or changed here names its ref; under an undecided row it is an assumption
+  const todays = [];
+  const collect = (node, key) => {
+    if (isLeafNode(node)) {
+      if (node.today !== undefined) todays.push([key, node]);
+      return;
+    }
+    if (node && typeof node === "object") for (const [k, v] of Object.entries(node)) collect(v, key + "." + k);
+  };
+  collect(WP3.V, "WP3.V");
+  collect(WP3.L34, "WP3.L34");
+  for (const k of ["L106budgetLines", "L106counts"]) todays.push(["WP3.forecast." + k, WP3.forecast[k]]);
+  for (const k of ["futureCutoffLock", "concurrentLocks"]) todays.push(["WP3.periods." + k, WP3.periods[k]]);
+  todays.push(["WP3.T5.deleteProbe", WP3.T5.deleteProbe]);
+  for (const [key, leaf] of todays) {
+    if (leaf.today === undefined || !leaf.ref) fail(key + " carries a today without its ref");
+    if (leaf.ref !== "L34" && !leaf.assumption) fail(key + ": a today under an undecided row must be an assumption");
+  }
+})();
 
 // ─── tree, flattening, exports ───────────────────────────────────────────────
 

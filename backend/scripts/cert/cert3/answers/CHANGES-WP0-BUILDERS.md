@@ -1041,3 +1041,257 @@ leaves and models each refused at load by its own check; the WP-0 load test (`sc
 path): "OK: leaf contract and cross-checks pass" on the copy before and after; `tools/refusal-test.js`: a repeated
 anchor, a missing anchor and the same input/output path are refused with nothing written. Bytes: book-insert.js and the
 patched copy UTF-8 without BOM, no double-encoding, schedule.js LF; every inserted line ASCII.
+
+# WP-3 answer-book leaves (2026-10-10)
+
+Binding source: `C:\Temp\octapm-cert\scratch\wp3\WP3-ADJUDICATION.md` (Q1-Q16; cited in the book as `WP3ADJ(...)`),
+settling the answer-book gaps G1-G21 of `C:\Temp\octapm-cert\scratch\wp3\WP3-PREP.md` section 10 (cited `PREP3(...)`).
+Applied here: G1-G14 and G16-G21, as the adjudication rules them: G14 `DP.halfHour` adopted (Q9); G9 HEAD's behaviour for
+loadings (Q11); G6 the T-NOBOQ member (Q6); L34's contract-visible leaves (formulaVersion, actualCostSource, the basis
+texts) marked `contract pending the L34 plan review` (Q5); the STORED-PRE-FIX reading of Q3 as a rule leaf (G12). G15
+(plan citations) is a citation convention, applied to the new and changed leaves only (below). Rule A10 applies: every
+leaf below carries its on-paper derivation in the book, worked from the product code at `f599e67` (`HF(file, lines)`;
+`backend/src`, `shared` and `backend/prisma` at HEAD `114e9f1` are identical to `f599e67`), from existing book keys, or
+from the deep-company builders read at `fc29478` (`BLD(file, lines)`; the build scripts are unchanged since, the moment
+map has one appended line). Plan lines are numbered at `f599e67` (`PF(...)`).
+
+Input: `answers/schedule.js` at HEAD `114e9f1`, sha256
+`6ffc7689aa40b5ec1f50f4d47042e770826bcb8c9e2b63e680cc6ea71251e1c0` (the working tree's file is the same). Output of
+`book-insert.js` on a copy: sha256 `f0957af2a9e3d31818c07b17584ba1fbc17aef97e71242b3cd6a72cad7dc40b9`. Only
+`schedule.js` changes: no WP-3 leaf belongs in `commercial.js` or `field-controls.js` (they mention WP3 only in text:
+`commercial.js` D3's assumption note, `field-controls.js` 087-HLT's zone, both unchanged).
+
+Figure count: schedule 900 -> 965 (+65; WP3 256 -> 321). No key was removed. Seventeen existing leaves changed, each as
+the adjudication directs and each recording in its `note` what changed (a changed value keeps its old value there): five
+values (`WP3.forecast.siteEngineerMoney` and the four `WP3.mutations` leaves), one value and `today`
+(`WP3.periods.concurrentLocks`), one value, unit, assumption and `today` (`WP3.forecast.L106budgetLines`), derivations
+and sources of eight (`WP3.T5.deleteProbe`, `WP3.periods.feb.overriddenAuditEvents`,
+`WP3.periods.afterLock.relockSameSnapshotId` / `relockSameLockedAt` / `loadingInLockedPeriod`,
+`WP3.periods.futureCutoffLock`, `WP3.forecast.evBasedFinish`), `ref` and `assumption` of two (`WP3.T4.ev0.eac`,
+`eacBasis`) and one note (`D2.WP3.T4`). Refs added to three existing todays (`T5.deleteProbe` L112, `futureCutoffLock`
+HR-E2, `concurrentLocks` CONCURRENT). planDisagrees 7 -> 8 (`WP3.forecast.siteEngineerWithBoqRead`, planValue "no money
+fields"), assumption 270 -> 285, leaves with a `today` 77 -> 89, with a `ref` 10 -> 28. No other leaf changed (checked
+by a before/after dump of `figures()`: 883 leaves identical in every field; WP0, CLAUDE, WP1, WP2 and D3 identical, D2
+identical but for `D2.WP3.T4`'s note; `inputs`, `rules`, `meta` and the exports identical). No leaf a builder reads
+changed its value or today (`build/087-ev.js` reads `WP3.T5.deleteProbe` value and today: both unchanged; `052-sch-ev.js`
+names `D2.WP3.T4` in a note only).
+
+Leaf contract: as WP-1's and WP-2's. Every new or changed leaf that carries a `today` names its `ref`; under an undecided
+row (HR-E2, L106, L112, CONCURRENT) it is `assumption: true`; under L34 (decided in CERT-3, fixed in WP-3) a figure leaf
+is not an assumption, and the three contract-pending L34 leaves are. Checked at load.
+
+New helpers in schedule.js (data, not leaves): `WP3ADJ`, `PREP3`; `V_EV` (V's records, in currency units) and its models
+`V_ALLOC`, `V_BAC`, `vPvAt`, `V_EV_T4`, `V_T4_READS`, `V_T4_INPUTS`, `V_T4_SERVES`, `V_PERIOD_A`, `V_LOADINGS`,
+`V_ROWS_LOCK`, `V_ROWS_AFTER`, `M_VA_LOCK` / `_HEAD`, `M_VA_AFTER` / `_HEAD`, `V_RUN_AC`, `V_FORECAST_SPI`,
+`V_PLANNED_FINISH`, `V_EV_FINISH`, `V_EV_AFTER_APPROVAL`, `V_L112_BAC`; `HALF_HOUR`; `L34_PENDING`,
+`FC_WITHHELD_REASON`; `refToday`, `vPeriodLeaves`, `V_STEPS`, `L34_TODAY_KEYS`, `l34HeadDiff`, `L34_STORED_LEAVES`;
+the subtrees `WP3_V`, `WP3_L34`, `WP3_CF` (joined to `WP3` as `V`, `L34`, `confirmFirst`); and a block of load checks
+after `D2` that ties every new or changed leaf to the figures it is built from (the book refuses to load otherwise; each
+check was shown to fire by a mutant, 28 in all). Every figure is worked with the book's own rules (`evMetrics`,
+`acLedger`, `acHead`, `endOfLocalDay`, `defaultPeriod`, `forecastEvFinish`); V's key figures are also pinned to
+`C:\Temp\octapm-cert\scratch\wp3\derive-v.json` (worked independently from the same rules, the half-hour cutoffs
+cross-checked there against the product's pure `resolveReportingCutoff`).
+
+## G1. T4 on V, through the report (adjudication Q2)
+
+Derivation: the SPI and CPI alert flags exist only in `buildOfficialEvReport` (earned-value.service.js:953-956) and, for
+legacy snapshots, `snapshotToReport` (:688-691); the exported `computeEvMetrics` (:219-245) has no flag. So T4 reads
+GET .../reports/ev on V's live records through the in-process app. Four reads give exactly the inputs the T4 leaves are
+worked from (`EVT4`, unchanged): the load check runs `evMetrics` on each read and compares every field with `EVT4`, and
+checks that HEAD's cumulative AC equals the ledger at each read (T4 carries no L34 today).
+
+| Key | Old | New |
+|---|---|---|
+| `WP3.T4.fixture` | none | V, steps V6-V13; reader the cost controller; read1-read3 at the Cairo run date, read4 at 2026-01-31; the sets each serves (assumption) |
+| `WP3.T4.inputs.read1` | none | BAC 38,700,000; PV 0; EV 9,000,000; AC 10,000,000 (cents) -> pv0 |
+| `WP3.T4.inputs.read2` | none | PV 10,000,000; EV 9,000,000; AC 10,000,000 -> spi09, cpi09 |
+| `WP3.T4.inputs.read3` | none | AC 10,000,100 -> ac100001 |
+| `WP3.T4.inputs.read4` | none | PV 10,000,000; EV 0; AC 5,000,000 -> ev0 |
+
+## G2-G4. The mutation leaves name their live catchers (adjudication Q10)
+
+No stored moment can catch a mutation (WP3-PREP section 0 fact 4), so each leaf now names the live checks.
+
+| Key | Old | New |
+|---|---|---|
+| `WP3.mutations.alertBoundary` | `WP3.T4.spi09.spiAlert red` | `T4.spi09.spiAlert red and T4.cpi09.cpiAlert red (M1, the E6 entry: both flags); T4.spi09.spiAlert red (M1a); T4.cpi09.cpiAlert red (M1b)` |
+| `WP3.mutations.lockedRecomputed` | `WP3.periods.afterLock.periodReport red` | `EVL.febPeriod.hash red and PER.V.afterLock.periodHash red (M2, the E6 entry: the read path); PER.relock.jan, PER.relock.feb and PER.V.relock red (M2b: the relock path)` |
+| `WP3.mutations.readinessSkipped` | `WP3.periods.financeWhileBlocked red` | `PER.V.financeBlocked red (M3, the E6 entry); PER.V.financeOverride red (M3b)` |
+| `WP3.mutations.evNonApproved` | `WP3.T7 red` | `T7.live.hash red and KA.EVL.runDate wrong (M4, the E6 entry: EV read from every progress submission)`; the status-filter mutants (:742, :156) recorded as equivalent, with the reason, not run as evidence |
+
+## G5. The relocks (adjudication Q1)
+
+| Key | Old | New |
+|---|---|---|
+| `WP3.periods.afterLock.relockSameSnapshotId` / `relockSameLockedAt` | value true; "same id" / "Same lockedAt." | value true unchanged; derivation names the personas, the empty body, the path that returns before the gate (:1708-1710) and M2b's 409 |
+| `WP3.periods.afterLock.relockProbes` | none | finance on 087-EV 2026-01; the PM on 087-EV 2026-02 and on V-A; each body `{}` |
+
+## G6. The site engineer's money (adjudication Q6)
+
+Derivation: GET /forecast answers `withheldForecast(forecast, boqFigureAccess(req))` (routes/forecast.js:33). A member
+with neither `boq:read` (the T-NOBOQ template) nor `cost:read` (site_engineer) gets the cost block without its money and
+mapping keys, budget lines without amounts, counts without atRisk, `withheld: true` with "Cost figures are not available
+to you", and each activity's cost `{ withheld: true, reason }` (utils/boq-figures.js:169-172, :400-423, :488-513). A BOQ
+reader gets the forecast as built (:489-491): owner decision E1, expected behaviour (Q6).
+
+| Key | Old | New |
+|---|---|---|
+| `WP3.forecast.siteEngineerMoney` | `no money fields` | the T-NOBOQ member's withheld view: `{ costWithheld: true, costReason, costKeysAbsent [budget, bac, eac, bottomUp, projected, overrun, overrunPct, actual, eacBasis, topRisks], budgetLineKeysAbsent [...6], countsAtRiskAbsent: true, activityCost: { withheld: true, reason } }` |
+| `WP3.forecast.siteEngineerMoneyMember` | none | 087-EXTRAS, tariq.okafor.2, site_engineer, T-NOBOQ, on 087-SCH |
+| `WP3.forecast.siteEngineerWithBoqRead` | none | `the forecast as built: money present`, planValue `no money fields` |
+
+## G7. The EV-based finish on V (adjudication Q1, Q2)
+
+| Key | Old | New |
+|---|---|---|
+| `WP3.forecast.evBasedFinish` | 2026-07-31 | 2026-07-31 unchanged; derivation: V after V14, `buildForecast({ asOf: 2026-06-01 })` in process, SPI from the EV report at the real run date (loadContext :336; no period on V yet), planned finish X3's 2026-07-01 |
+| `WP3.forecast.evBasedFinishInputs` | none | `{ project: V after V14, asOf 2026-06-01T00:00:00.000Z, plannedFinish 2026-07-01, spi 0.5, call, field schedule.evBasedFinish }` |
+
+## G8. L106 (adjudication Q7)
+
+Derivation: one budget line on 02-100 (originalBudget 100,000.00, nothing else) on V before any cost. The register emits
+`revisedBudget` (budget.service.js:177) and a forecast of 100,000.00 (:146): no overrun, so `cost.budgetLines` is [].
+`budgetLineRisks` reads `line.revised` (forecast.service.js:530): 0, so HEAD reports one line, overrun 100,000.00,
+overrunPct null, level medium. L106 is on the plan's defect-fix list: fixed in WP-3 only if it confirms as P1 (Q7).
+
+| Key | Old | New |
+|---|---|---|
+| `WP3.forecast.L106budgetLines` | 0 (count); today `1 line {revised: 0, forecast: 100,000, overrun: 100,000.00} (reads line.revised)` | `[]` (list); today `[{ costCode 02-100, revised 0, committed 0, actual 0, forecast 10,000,000, overrun 10,000,000, overrunPct null, level medium }]` (cents); ref L106; assumption |
+| `WP3.forecast.L106counts` | none | 0; today 1; ref L106 |
+| `WP3.forecast.L106fixture` | none | V, V5 before any cost; the 02-100 line; the PM's GET /forecast |
+
+## G9. A loading in a locked period (adjudication Q11)
+
+| Key | Old | New |
+|---|---|---|
+| `WP3.periods.afterLock.loadingInLockedPeriod` | `409 REPORTING_PERIOD_LOCKED`, "A cost loading in the locked period." | value unchanged; the loading names the period (`reportingPeriodId`, :1354-1357 -> :1319-1339 -> :1231-1239); a date-only loading is accepted at HEAD; a date rule would be a rule change, recorded for the owner, not probed on 087-EV |
+| `WP3.periods.afterLock.loadingInLockedPeriodRequest` | none | the cost controller, A110, the locked 2026-02, plannedDate 2026-02-20, 1,000.00; loading count unchanged |
+
+## G10. The lock before the cutoff, on V (adjudication Q1)
+
+| Key | Old | New |
+|---|---|---|
+| `WP3.periods.futureCutoffLock` | 409 (code null), today 200 | unchanged; located on V-F = `rules.futurePeriodFor(<Cairo run date>)`, the PM with a reason; ref HR-E2 |
+
+## G11. The February override's audit event
+
+| Key | Old | New |
+|---|---|---|
+| `WP3.periods.feb.overriddenAuditEvents` | 1 | 1 unchanged; the lock's audit write (:1807-1836), the filter, the build's reason |
+| `WP3.periods.feb.overriddenAuditFilter` | none | `{ query: { entityType project_setup_readiness, action overridden, source audit }, match: { summary.periodId, reason }, count: 1 }` |
+
+## G12, G21. L34: the rule, the STORED-PRE-FIX reading, the contract pending its plan review (adjudication Q3, Q4, Q5)
+
+| Key | Old | New |
+|---|---|---|
+| `WP3.L34.acRule` | none | AC to a cutoff = the sum of the project's cost-ledger entries that carry an activity, dated incurredOn on or before the cutoff date (HR-E1; L34 decided in CERT-3) |
+| `WP3.L34.isActiveFilter` | none | kept: active activities only (Q4); HR-S9 unmoved |
+| `WP3.L34.reversals` | none | a reversal counts at the original's incurredOn (cost-ledger.service.js:414) (assumption; L34-M3's leaf) |
+| `WP3.L34.formulaVersion` | none | `contract pending the L34 plan review`; today `ev.v2`; ref L34 (proposed ev.v3) |
+| `WP3.L34.actualCostSource` | none | pending; today `{ actualCostSource: cost_record.actual_through_date, officialSourcePriority: [...] }`; ref L34 |
+| `WP3.L34.basisTexts` | none | pending; today the three HEAD texts (basis.ac, basis.actualCosts, the missing-actuals warning); ref L34 |
+| `WP3.L34.storedPreFix` | none | `{ verdict: STORED-PRE-FIX, appliesTo, judged, strict, leaves: [18 keys] }` |
+
+STORED-PRE-FIX (Q3 (b) + (c)): an observation from a stored build moment or a frozen snapshot whose build predates the
+L34 fix commit is judged against the leaf's today: equal is STORED-PRE-FIX (reported with the register link to L34, not
+a WP-3 failure), the value is value, anything else is wrong. Live and fresh observations (an open report recomputed now,
+a period locked after the fix, every read on V) are strict, and the exit run's rebuild (plan section 7 step 5) judges
+every moment on the value. The 18 leaves: `WP3.T3.ac/cv/etc/acNote`, `WP3.periods.feb.snapshot.ac/cv/etc`,
+`WP3.periods.jan.snapshot.ac/cpi/cpiAlert/eacBasis/cv/etc`, `WP3.periods.afterLock.cutoffReportAc`,
+`WP3.periods.afterLock.cutoffAfterCost.ac/cv/etc`, `D2.WP3.T3.ac` (checked at load to be exactly the stored and frozen
+leaves with an L34 today). Their todays are kept after the fix, since STORED-PRE-FIX compares with them (G21's "today
+cleared once fixed" is not applied: see the open question below).
+
+## G13. V's records and figures (adjudication Q1, Q13)
+
+| Key | Value |
+|---|---|
+| `WP3.V.inputs` | V's records (`V_EV`; assumption) |
+| `WP3.V.choreography` | V0-V25 and the end, 27 steps (assumption) |
+| `WP3.V.reportingGateReady` | false (assumption; the 409 precondition) |
+| `WP3.V.cutoffA` | 2026-02-28T21:59:59.999Z |
+| `WP3.V.bac` | 38,700,000 (= WP3.T1.bac) |
+| `WP3.V.runDateAc` | { afterT4 10,000,100, afterL34Costs 13,000,100, afterBackdated 13,500,100 } |
+| `WP3.V.forecastSpi` | 0.5 |
+| `WP3.V.lockA.*` (13) | V-A at the PM's override lock: BAC 38,700,000, PV 10,000,000, EV 0, AC 12,000,100 (today 10,000,100, L34), SPI 0 alert, CPI 0 alert, EAC = BAC budget_cpi_zero, SV -10,000,000, CV -12,000,100 (today -10,000,100), ETC 26,699,900 (today 28,699,900) |
+| `WP3.V.cutoffAfter.*` (13) | the 2026-02-28 read after X1 5,000.00 dated 02-15: AC 12,500,100 (today 10,500,100), CV -12,500,100 (today -10,500,100), ETC 26,199,900 (today 28,199,900); the rest as lockA |
+| `WP3.V.evAfterNewApproval` | 10,970,000 |
+| `WP3.V.l112.bac` | { before 38,700,000, afterApproval 40,000,000, afterEdit 40,700,000, afterDelete 38,700,000 } |
+| `WP3.V.l112.edit` / `delete` | `refused_or_audited`; today the silent 200s; ref L112 |
+
+## G14. The half-hour zones (adjudication Q9: adopted, in the fixed count)
+
+| Key | Value |
+|---|---|
+| `WP3.periods.halfHourZones.kolkata.cutoff` | 2026-02-28T18:29:59.999Z (UTC+05:30) |
+| `WP3.periods.halfHourZones.kolkata.defaultJustBefore` / `defaultAtCutoff` | 2026-01 / 2026-02 |
+| `WP3.periods.halfHourZones.kathmandu.cutoff` | 2026-02-28T18:14:59.999Z (UTC+05:45) |
+| `WP3.periods.halfHourZones.kathmandu.defaultJustBefore` / `defaultAtCutoff` | 2026-01 / 2026-02 |
+
+The default-period probes inject now = the cutoff minus 1 ms and the cutoff itself, over 087-EV's two fixed periods: the
+flip is exactly at the end of the local day (`pickDefaultReportingPeriod` passes over a period only when its cutoff is
+after now, earned-value.service.js:417).
+
+## G16. The T5 delete probe (adjudication Q8)
+
+| Key | Old | New |
+|---|---|---|
+| `WP3.T5.deleteProbe` | `refused_or_audited`; today `silent delete; BAC back to 387,000.00` | unchanged value and today; the PM is the prober (the cost controller would be refused for approval authority, not L112); a refusal's code null; ref L112 |
+
+## G17. Concurrent locks (adjudication Q12)
+
+| Key | Old | New |
+|---|---|---|
+| `WP3.periods.concurrentLocks` | `{ succeeded: 1, refused: { status: 409, code: null } }`; today "not established ... reproduce" | `{ succeeded: 1, refused: { status: 409, code: null }, snapshotRows: 1, overriddenAuditEvents: 1 }`; today `{ succeeded: 2, refused: null, snapshotRows: 1, overriddenAuditEvents: 2 }` (code-derived, to be confirmed by the primary run); ref CONCURRENT; on V-B; non-overlapping sends are a setup error (R-SET) |
+
+## G18, G19, G20
+
+- G18: `D2.WP3.T4` keeps its value `as WP3.T4`; its note says V's T4 serves it (no separate 052 check, MOMENT-MAP row
+  245). `CLAUDE.SPI/CPI/EAC` are unchanged; a load check ties them to `WP3.T1` / `WP3.T2` (EVS.T1 / EVS.T2 assert them).
+- G19: `WP3.T4.ev0.eac` and `eacBasis` gain `ref: 'HR-E3'` and `assumption: true`, values unchanged (HEAD equals HR-E3's
+  recommendation; owner question Q15; CF.HRE3 reported until decided).
+- G20: `WP3.confirmFirst.zoneChange` (no path changes a company zone after creation; a project keeps its copied zone;
+  WP3-TZ-1 REJECTED, Q14) and `WP3.confirmFirst.zonePrecedence` (`{ timeZone: Africa/Cairo, source: project }`, the pure
+  `resolveReportingTimeZone` with a different organisation zone).
+
+## G15. Plan citations
+
+The new and changed leaves cite PF (plan lines numbered at `f599e67`). The existing WP-3 `P(...)` citations are left as
+they are (refreshing them would change the source of about 250 leaves): book `P(n)` in the WP-3 range is `PF(n + 39)`
+(e.g. `P(598)` = `PF(637)`, T1), and the worktree plan at `114e9f1` is `PF + 1` from :52 on (the owner's HR-X1 scope
+line), so WP3-PREP's "current" lines are `PF + 1` (WP-3 is PF :625-668, current :626-669).
+
+## For the proof and the lists (no change made outside the book)
+
+- `wp3-checks-draft.json` bookKeys: `KA.PER.V.lockAc` reads `WP3.V.lockA.*` (draft: "WP3.V.lockAc"),
+  `PER.V.afterLock.cutoffChanges` reads `WP3.V.cutoffAfter.*`, `S.V.fixture` reads `WP3.V.inputs` / `choreography` /
+  `reportingGateReady` / `bac` / `runDateAc`, `T4.inputs` reads `WP3.T4.inputs.read1-4` and `WP3.T4.fixture`,
+  `DP.halfHour` reads `WP3.periods.halfHourZones.*` and is no longer optional (Q9; the count stays 92 + G.5xx = 93),
+  `FC.siteEngineerMoney` reads `siteEngineerMoney`, `siteEngineerMoneyMember`, `siteEngineerWithBoqRead`, `KA.FC.L106`
+  reads `L106budgetLines` (list, money in cents) and `L106counts`, `FC.evBasedFinish` reads `evBasedFinishInputs`,
+  `CF.L112` reads `WP3.V.l112.*`, `CF.WP3TZ1` reads `WP3.confirmFirst.*`, `CF.L34` reads `WP3.L34.*`, and every stored or
+  frozen L34 check (KA.EVS.T3, KA.EVS.febOpen, KA.EVS.febSnapshot, KA.EVS.janSnapshot, KA.EVS.afterLock.cutoff0228,
+  KA.EVL.febPeriod.figures, KA.EVL.janPeriod.figures, KA.D2.stored.T3) applies `WP3.L34.storedPreFix` once the fix
+  commit exists.
+- `PER.loadingLocked`, `PER.relock.*`, `PER.V.relock`, `PER.overrideAudit.feb` read the new request, probe and filter
+  leaves; `KA.PER.concurrentLocks` compares with the new value/today shape.
+- `wp3-mutations-draft.json`: unchanged; the book's mutation leaves now name the same catchers and variants.
+- The L34 contract leaves are not asserted by any check until the adjudicated fix plan fills them (as WP-2's CONTRACT).
+
+Validation (scratch `C:\Temp\octapm-cert\scratch\wp3\book\`): `book-insert.js` applied to a copy of schedule.js at
+114e9f1 (sha256 6ffc7689...): 24 exact-anchor edits, each counted once before any write, none overlapping, every
+inserted line ASCII with no backtick or template interpolation; `node --check` exit 0 on the script and the patched
+copy; the copy loads (965 figures, the new load checks pass, no DB access); `verify.js`: no key removed, 65 new keys
+exactly the expected list, 17 changed keys each with exactly the expected fields (unit and assumption only where named,
+every changed value's old value in its note), 883 identical, other sections, inputs, rules, meta and exports
+identical, LF only, non-ASCII count unchanged (523: the existing section signs and box-drawing banners), no BOM, no
+double-encoding, the 19 removed lines exactly the replaced ones, a second run refused with nothing written;
+`teeth.js`: 28 mutants of the new leaves and models each refused at load by its own check, the unmutated copy loading;
+the WP-0 load test (`scratch/wp0/load-schedule.js`, adapted path, `tools/run-wp0-load-test.js`): "OK: leaf contract and
+cross-checks pass" before and after; `tools/refusal-test.js`: a repeated anchor, a missing anchor, the same input and
+output path and a CRLF input are refused with nothing written. Bytes: every deliverable UTF-8 without BOM, no
+double-encoding (the checks name the markers as `\u` escapes), LF.
+
+Open question for the integration owner: G21 asks for the L34 todays to be "cleared once fixed", while Q3 (b) judges
+pre-fix moments against HEAD's reading. The book keeps them (STORED-PRE-FIX compares with them); clearing them is a book
+change for after the exit rebuild, when no pre-fix moment remains to read.
