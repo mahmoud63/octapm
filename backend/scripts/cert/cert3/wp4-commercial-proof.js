@@ -98,14 +98,14 @@
  *
  * Expected at HEAD on cert3d (after the book patch, no fix commit set): 150 checks + G.5xx; 11 FAIL (the HR-C1 table
  * above), exit 2, DEFECT_PRESENT; harness provisional classification CONFIRMED (11 of 11 defect checks). Known answers
- * BLOCKED (19): KA.E2.concurrent / pendingDelta / midwayOrphans (CONVERT-ATOMIC; KA.E2.concurrent is racy: a single
+ * BLOCKED (20): KA.E2.concurrent / pendingDelta / midwayOrphans (CONVERT-ATOMIC; KA.E2.concurrent is racy: a single
  * success reads value, a pass), KA.HRC12.secondAccept / archivedCoEvent / dropsBudgetLines (HR-C12), KA.CCO.voidParent
  * / closedParent (CCO-PARENT), KA.C4.sameLine (L108), KA.I3.limits.A130 / patchA130Qty650 (HR-C2),
  * KA.I8.afterReleaseStatus, KA.I11.backToDraft, KA.HRC3.emptyPeriod (HR-C3), KA.P4.payOverNet (C1-TOL),
  * KA.CASH.CF2.advanceInflow (L115), KA.CASH.CF3.period13 (CF-PERIOD), KA.CASH.CF3.deleteSystemRow,
- * KA.CASH.CF4.concurrentRebuilds (L120; racy: a lucky serialisation reads value). KA.I9.statementVsReceivables reads
- * value (a pass): the book's value records the disagreement HEAD shows (WP4.I9.disagreement value = today = 9,750.00,
- * HR-C4: CERT-5 decides, CERT-3 records). CF reported: CF.HRC2, CF.convertAtomic, CF.HRC12, CF.HRC3, CF.HRC4,
+ * KA.CASH.CF4.concurrentRebuilds (L120; racy: a lucky serialisation reads value), KA.I9.statementVsReceivables
+ * (HR-C4: CERT-5 decides, CERT-3 records; integration owner 2026-10-10: BLOCKED on HEAD's 9,750.00 disagreement, never a
+ * value, since a value would pre-judge HR-C4). CF reported: CF.HRC2, CF.convertAtomic, CF.HRC12, CF.HRC3, CF.HRC4,
  * CF.CCOparent, CF.HRC13, CF.L108, CF.CERT5, CF.OVR1, CF.DRAFTS1, CF.C1TOL (CONFIRMED expected).
  * After the HR-C1 fix with FIXES['HR-C1'] set: the 7 live/fresh HR-C1 checks and CF.HRC1 turn green and the 3 stored
  * ones read STORED-PRE-FIX: exit 0 if nothing else moved. After the convert fix (FIXES['CONVERT-ATOMIC'] set): the three
@@ -2209,8 +2209,10 @@ const d2Flow = async () => {
   const I9 = WP4.I9;
   ka('KA.I9.statementVsReceivables', {
     ref: I9.disagreement.ref, value: { '052-COM': { statement: I9.statementInvoiced.value, receivables: I9.receivablesInvoiced.value, difference: I9.disagreement.value }, '087-COM': { statement: I9.on087.statementInvoiced.value, receivables: I9.on087.receivablesInvoiced.value, difference: I9.on087.difference.value } }, today: { '052-COM': I9.disagreement.today, '087-COM': I9.on087.difference.today }, observed: i9,
-    verdict: judge(i9, (x) => sameJson(x['052-COM'], { statement: I9.statementInvoiced.value, receivables: I9.receivablesInvoiced.value, difference: I9.disagreement.value }) && sameJson(x['087-COM'], { statement: I9.on087.statementInvoiced.value, receivables: I9.on087.receivablesInvoiced.value, difference: I9.on087.difference.value }), (x) => x['052-COM'].difference === I9.disagreement.today && x['087-COM'].difference === I9.on087.difference.today),
-    detail: 'the book\'s value records the disagreement HEAD shows (value = today = 9,750.00; expected 0.00 after HR-C4: CERT-5 decides, CERT-3 records): a value at HEAD, not a block',
+    // Integration owner (2026-10-10): HR-C4 is undecided (CERT-5 decides), so this answer has no value yet and reads
+    // BLOCKED on HEAD's figures; a "value" reading here would pre-judge HR-C4. The book's numbers are kept for the record.
+    verdict: judge(i9, () => false, (x) => sameJson(x['052-COM'], { statement: I9.statementInvoiced.value, receivables: I9.receivablesInvoiced.value, difference: I9.disagreement.today }) && sameJson(x['087-COM'], { statement: I9.on087.statementInvoiced.value, receivables: I9.on087.receivablesInvoiced.value, difference: I9.on087.difference.today })),
+    detail: 'HEAD\'s statement and receivables figures, which disagree by the released retention (9,750.00 on each company); HR-C4 undecided (CERT-5 decides, CERT-3 records), so BLOCKED, never a value',
   });
   // P3 on 052-COM's PA-01 ledger; P4's revocation refused; P4's outflow
   const act52 = outOf(st052, 'activities').ids;
