@@ -1,0 +1,78 @@
+{
+  "note": "WP-1 unit side: the same edits as the live lists where an existing pure or mocked suite at f599e67 names the behaviour, run with jest --runTestsByPath (mutate-multi.js list key 'wp1-unit', proof null; no lock, no database; never while a proof or the full suite runs). Mocked-Prisma suites are not certification evidence (plan §1.4); these entries only show that the unit gate also turns red, beside the live catch. Reconciled 2026-10-10 with the final proof (adjudication M1, M3): `live` names the live entry and the proof's catching check ids exactly as the proof records them. Guards with NO unit catcher at HEAD, listed so nobody looks for one, each caught by the live proof alone: C1 'tf <= 0' (cpm.service.test.js asserts earlyStart only, never lateFinish, totalFloat or isCritical; live: T1.pure, REV.activate.cpmInTransaction, T1.row.<12 TF-0 codes>, T1.critical), C2 'the SS backward branch' (live: KA.T3.pure.hrS1), G5 REVISION_NOT_ACTIVATED (no test names the code; live: BL.notActivated), I1 'staged imports do not write' (import-schedule-bounds.test.js counts scheduleRevision.create calls only, and its mocked transaction has no activity model, so I1 would fail it by a TypeError, a crash and not an assertion, not counted; live: IMP.stagedNotApplied). The reverse case is UC4 / UC5: plan :506 'CPM runs inside the activation transaction' has NO live catcher in the final proof (wp1-mutations.cpm.json C4 / C5, expected SURVIVED; run plan §13), and the one existing tripwire is this mocked test, which asserts that activation calls applyCpmToProject with a second (database) argument. It cannot tell the transaction client from the global one (its $transaction mock hands the callback mockPrisma itself), so a move that passes prisma explicitly after the commit survives here too (run plan §13).",
+  "mutations": [
+    {
+      "name": "UG1 the BOQ baseline gate dropped whole (unit side of G1)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "const assertBoqForBaseline = async (projectId, db = prisma) => {",
+      "to": "const assertBoqForBaseline = async (projectId, db = prisma) => { return;",
+      "suite": "src/services/__tests__/schedule.service.test.js",
+      "live": "G1 (wp1-mutations.gates.json): BL.noBoq, BL.zeroRated, BL.allOutOfScope",
+      "expectVerdict": "CAUGHT",
+      "expect": "'refuses the baseline lock of a project with no BOQ item, before any schedule step, and writes nothing' fails, with 'refuses the baseline lock of a project whose bill has no priced row, naming the pricing, before any schedule step, and writes nothing (E2)', '... whose bill has no in-scope value (every priced row not applicable or optional) ... (E2)', 'counts a bill worth one cent as no value, and one whose in-scope rows are worth one cent as out of scope ... (closure review)', '... when the in-scope value is marked out of scope before the lock writes, inside its transaction (E2)', '... when the bill is priced at 0 before the lock writes, inside its transaction (E2)' and '... when the bill is removed before the lock writes, inside its transaction' (7 tests)"
+    },
+    {
+      "name": "UG2 the no-bill refusal dropped (unit side of G2)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "  if (boqItems === 0) {",
+      "to": "  if (false) {",
+      "suite": "src/services/__tests__/schedule.service.test.js",
+      "live": "G2 (wp1-mutations.gates.json): BL.noBoq",
+      "expectVerdict": "CAUGHT",
+      "expect": "'refuses the baseline lock of a project with no BOQ item, before any schedule step, and writes nothing' and 'refuses the baseline lock when the bill is removed before the lock writes, inside its transaction' fail (the code is BOQ_VALUE_REQUIRED_FOR_BASELINE, or the mocked aggregate is missing)"
+    },
+    {
+      "name": "UG3 the no-value refusal dropped (unit side of G3)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "  if (toMoneyNumber(priced?._sum?.amount) <= BOQ_VALUE_EPSILON) {",
+      "to": "  if (false) {",
+      "suite": "src/services/__tests__/schedule.service.test.js",
+      "live": "G3 (wp1-mutations.gates.json): BL.zeroRated",
+      "expectVerdict": "CAUGHT",
+      "expect": "'refuses the baseline lock of a project whose bill has no priced row, naming the pricing, before any schedule step, and writes nothing (E2)', 'counts a bill worth one cent as no value ...' and 'refuses the baseline lock when the bill is priced at 0 before the lock writes, inside its transaction (E2)' fail"
+    },
+    {
+      "name": "UG4 the out-of-scope refusal dropped (unit side of G4)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "  if (toMoneyNumber(inScope?._sum?.amount) <= BOQ_VALUE_EPSILON) {",
+      "to": "  if (false) {",
+      "suite": "src/services/__tests__/schedule.service.test.js",
+      "live": "G4 (wp1-mutations.gates.json): BL.allOutOfScope",
+      "expectVerdict": "CAUGHT",
+      "expect": "'refuses the baseline lock of a project whose bill has no in-scope value (every priced row not applicable or optional), before any schedule step, and writes nothing (E2)', 'counts a bill worth one cent ... whose in-scope rows are worth one cent as out of scope ...' and 'refuses the baseline lock when the in-scope value is marked out of scope before the lock writes, inside its transaction (E2)' fail"
+    },
+    {
+      "name": "UI3 out-of-range figures are staged (unit side of I3)",
+      "file": "backend/src/services/import.service.js",
+      "from": "  assertScheduleFigures(stagedActivities, dependencies);",
+      "to": "  /* (mutant) no range check */",
+      "suite": "src/services/__tests__/import-schedule-bounds.test.js",
+      "live": "I3 (wp1-mutations.imports.json): CONV.range.beyond",
+      "expectVerdict": "CAUGHT",
+      "expect": "'xlsx: a duration or a lag past 36,500 days is refused whole, 400 SCHEDULE_FIGURE_OUT_OF_RANGE naming it' and 'XER: 36,500 days (292,000 hours) is staged; a duration, a float or a lag past it is refused before anything is written' fail"
+    },
+    {
+      "name": "UC4 CPM moved out of the activation transaction, run after the commit (unit side of C4; plan :506, adjudication M3)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "    await applyCpmToProject(project.id, tx);",
+      "to": "    /* (mutant) CPM moved out of the activation transaction: run after the commit, below */",
+      "also": [
+        { "file": "backend/src/services/schedule.service.js", "from": "    activation: result.activationAuditJson,", "to": "    activation: (await applyCpmToProject(project.id), result.activationAuditJson)," }
+      ],
+      "suite": "src/services/__tests__/schedule.service.test.js",
+      "live": "C4 (wp1-mutations.cpm.json): no live catcher (expected SURVIVED; run plan §13)",
+      "expectVerdict": "CAUGHT",
+      "expect": "'activates a staged approved revision without deleting linked operational records' fails: it asserts expect(mockApplyCpm).toHaveBeenCalledWith('project-1', expect.anything()) (schedule.service.test.js:658), and the moved call passes no second argument (expect.anything() does not match undefined; jest.clearAllMocks() runs before each test, so no earlier call can satisfy it)"
+    },
+    {
+      "name": "UC5 CPM dropped from the activation (unit side of C5; plan :506, adjudication M3)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "    await applyCpmToProject(project.id, tx);",
+      "to": "    /* (mutant) no CPM at activation */",
+      "suite": "src/services/__tests__/schedule.service.test.js",
+      "live": "C5 (wp1-mutations.cpm.json): no live catcher (expected SURVIVED; run plan §13)",
+      "expectVerdict": "CAUGHT",
+      "expect": "'activates a staged approved revision without deleting linked operational records' fails: applyCpmToProject is never called, so expect(mockApplyCpm).toHaveBeenCalledWith('project-1', expect.anything()) (schedule.service.test.js:658) fails"
+    }
+  ]
+}

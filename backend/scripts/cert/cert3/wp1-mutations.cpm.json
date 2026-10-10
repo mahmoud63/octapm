@@ -1,0 +1,86 @@
+{
+  "proof": "scripts/cert/cert3/wp1-schedule-proof.js",
+  "guards": "CERT-3 plan §6.2 WP-1: 'TF ≤ 0' and 'the SS backward branch' (plan §4 WP-1 Mutations: 'tf <= 0 changed to < 0; the SS branch of the backward pass dropped'); answer book WP1.mutations.tfLessThanZero and WP1.mutations.dropSsBackward. Plus the complement C3 (adjudication L-Q1) and the plan :506 probes C4 / C5 (adjudication M3).",
+  "reconciled": "2026-10-10 against the final proof (146 fixed checks + the harness's G.5xx; debug runs 1-4, run 4 exit 0). Every id in `catchers` and `collateral` is a check id exactly as the proof records it (its CHECKS table; T1.row.<code> for the 14 F1 codes). Adjudication C:/Temp/octapm-cert/scratch/wp1/author-adjudication.md M1, M3, L-Q1.",
+  "note": "Fields: `catchers` are the checks that must read FAIL in the proof's result file (results/cert3/wp1-schedule-proof.json, observations.checks / checks[]) for the mutation to count as caught by its named check (run plan §7.4); `collateral` are other checks expected red; `expectVerdict` is the runner's expected score (mutate-multi scores any non-zero proof exit CAUGHT); `e6` says whether the entry counts toward plan §6.1 E6. Where the CPM catches are: in process (the proof's pureFlow calls the product's calculateCpm on the generated F1 / F3 / T4 networks: T1.pure, T3.pure, KA.T3.pure.hrS1) and live on the throwaway project W, whose F1 activation and A110 PATCHes run the product's CPM while mutated (C1 only: F1 is FS-only). No deep project runs CPM in this proof: T2, the start-date and calendar probes, the T4 networks and the baseline refusals are on the throwaways W / X (archived by the proof's cleanup); 087-SCH and 087-IMP are read, and 087-IMP's F1float5 approval judges the snapshot and writes nothing. So no CPM mutation leaves a stored defect on 087-SCH, 087-IMP, 052-SCH-EV or 006-LITE, and no restore is needed after this list (run plan §7.6; the census confirms). The C1-C3 answers were verified in process on 2026-10-10 (scratch cpm-mutants.js: each mutated cpm.service.js compiled in memory, never written, and evaluated on the proof's pureFlow inputs); the live W answers of C1 and everything about C4 / C5 are derived from the code as cited.",
+  "mutations": [
+    {
+      "name": "C1 critical only when TF < 0: the §6.2 'TF ≤ 0' guard (tf <= 0 -> tf < 0)",
+      "guard": "§6.2 WP-1 'TF ≤ 0' (plan :507 'TF ≤ 0 means critical', :513-521 T1 'Exactly 12 activities are critical'; cpm.service.js:502)",
+      "e6": "§6.2 WP-1 guard 1 of 5 (TF ≤ 0)",
+      "file": "backend/src/services/cpm.service.js",
+      "from": "      isCritical: tf <= 0,",
+      "to": "      isCritical: tf < 0,",
+      "bookKeys": ["WP1.mutations.tfLessThanZero", "WP1.T1.criticalCount", "WP1.T1.criticalCodes", "WP1.T1.<code>.critical (the 12 TF-0 rows)", "CLAUDE.TF.criticalOf14"],
+      "catchers": ["T1.pure", "REV.activate.cpmInTransaction", "T1.row.A100", "T1.row.A110", "T1.row.A120", "T1.row.A130", "T1.row.A200", "T1.row.A210", "T1.row.A220", "T1.row.A230", "T1.row.A310", "T1.row.A320", "T1.row.A330", "T1.row.M900", "T1.critical"],
+      "collateral": ["T2.restored", "BL.unallocated.live", "BL.covered.live"],
+      "expectVerdict": "CAUGHT (exit 1: the W section stops after BL.covered.live; the catchers are already FAIL, run plan §7.4)",
+      "expect": "In process: T1.pure FAIL (the 12 TF-0 rows of F1 come out isCritical false; 0 flagged; verified). Live on W, F1 activated while mutated: REV.activate.cpmInTransaction FAIL (the stored rows read straight after the activation answer carry isCritical false on A100 A110 A120 A130 A200 A210 A220 A230 A310 A320 A330 M900), T1.row.A100 / A110 / A120 / A130 / A200 / A210 / A220 / A230 / A310 / A320 / A330 / M900 FAIL (isCritical false != true; T1.row.A140 and T1.row.A300 pass), T1.critical FAIL (flagged 0 != 12; its count by float stays 12). Collateral on W: T2.restored FAIL (the restoring PATCH's CPM writes isCritical false again); BL.unallocated.live FAIL (the R1 lock's readiness judges the stored rows of an active revision, schedule.service.js:1031-1060, so critical_path fails beside allocations: failing = [allocations, critical_path]); BL.covered.live FAIL (once covered, the lock is still refused 400 SCHEDULE_NOT_READY on critical_path, 'No critical path activities are marked', :855-870), after which the W section throws ('the baseline was not locked') and every later W check is recorded not run: exit 1. The runner keeps only the first 12 FAIL lines (REV.activate.cpmInTransaction and eleven T1.row ids); the full list is the copied result file. Not catchers: T2.at20 (it counts critical by float), T4.live.FF / T4.live.SF / KA.T4.live.FSlead and T4.pure (they compare floats), KA.T3.pure.hrS1 (the SS network has no TF-0 row under HEAD's HR-S1 answer: 0 critical either way; verified), approvals (the readiness of a staged revision judges the file's flags, not CPM's).",
+      "mutatedAnswer": "every activity isCritical false (TF 0 rows included); floats, dates and ids unchanged; the baseline lock refused 400 SCHEDULE_NOT_READY (critical_path) on any project whose active rows were recalculated while mutated",
+      "storedDefect": "only on the throwaways W and X (isCritical false wherever CPM ran: W's activation and PATCHes, X's activations and hand-built rows), both archived by the proof's cleanup. None on a deep project. No restore; census only."
+    },
+    {
+      "name": "C2 the SS backward branch dropped: an SS successor bounds its predecessor's late finish as an FS successor would",
+      "guard": "§6.2 WP-1 'the SS backward branch' (plan :524 T3; cpm.service.js:472, the backward pass's SS candidate)",
+      "e6": "§6.2 WP-1 guard 2 of 5 (the SS backward branch)",
+      "file": "backend/src/services/cpm.service.js",
+      "from": "          candidate = succLs - link.lagDays + duration;",
+      "to": "          candidate = succLs - link.lagDays;",
+      "bookKeys": ["WP1.mutations.dropSsBackward", "WP1.T3.A.LS", "WP1.T3.A.LF", "WP1.T3.A.TF", "WP1.T3.criticalCount"],
+      "catchers": ["KA.T3.pure.hrS1"],
+      "collateral": [],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "KA.T3.pure.hrS1 FAIL: in process on A(10) SS+2 B(3) the mutated product gives A LS 0, LF 5, TF 0 and 1 critical row, which is neither the book's value (LS 0, LF 10, TF 0, 1 critical: the HR-S1 cap) nor its today (LS 5, LF 15, TF 5, 0 critical), so the known answer is judged 'wrong', a failure whatever HR-S1 decides (verified). It is the only discriminator: T3.pure asserts A ES/EF and B's figures (B 2/5/7/10, TF 5), which C2 leaves alone (verified pass); the trap of wp1-prep.md §5 holds (LS, TF and the critical count under the mutation equal the HR-S1 value set; only LF differs). Nothing live: no network the proof activates or edits while mutated has an SS link (W's F1 / F1b are FS-only; X's T4 networks are FS, FF and SF), and 087-IMP's F3 rows are read, never recalculated, so KA.T3.live.hrS1 stays 'today'. CF.2.lfNotCapped then reads PARTIAL (its in-process item is a gap), which is not a failure under the undecided HR-S1.",
+      "mutatedAnswer": "A LS 0, LF 5, TF 0, critical (1 critical row); B unchanged (ES 2, EF 5, LS 7, LF 10, TF 5); T1, T4 unchanged. The book's prose for WP1.mutations.dropSsBackward ('LS(B) 7 - 2 = 5 -> TF -5') does not match the product's TF 0 (TF = LS - ES); its catcher is unaffected (wording note for the book owner, run plan §13).",
+      "storedDefect": "none (no SS link is calculated live while mutated)"
+    },
+    {
+      "name": "C3 the SS forward branch dropped: an SS successor starts at its predecessor's finish (complement to C2; beyond §6.2)",
+      "guard": "complement to §6.2 'the SS backward branch' (plan :524 B = 2, 5, 7, 10, TF 5; cpm.service.js:431, the forward pass's SS candidate)",
+      "e6": "complement beyond §6.2 (adjudication L-Q1): run with the batch, has a leaf, not tallied in E6",
+      "file": "backend/src/services/cpm.service.js",
+      "from": "        candidate = predEs + link.lagDays;",
+      "to": "        candidate = predEf + link.lagDays;",
+      "bookKeys": ["WP1.T3.B.ES", "WP1.T3.B.EF", "WP1.T3.B.LS", "WP1.T3.B.LF", "WP1.T3.B.TF"],
+      "catchers": ["T3.pure", "KA.T3.pure.hrS1"],
+      "collateral": [],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "T3.pure FAIL (in process: B ES 12, EF 15, LS 12, LF 15, TF 0 against 2 / 5 / 7 / 10 / 5) and KA.T3.pure.hrS1 FAIL ('wrong': A LS 10, LF 20, TF 10, 1 critical, neither value nor today); both verified. A's ES / EF stay 0 / 10; T1, T4 unchanged. Nothing live (no SS link calculated live while mutated).",
+      "mutatedAnswer": "B ES 12, EF 15, LS 12, LF 15, TF 0; project end 15; A LS 10, LF 20, TF 10",
+      "storedDefect": "none (no SS link is calculated live while mutated)"
+    },
+    {
+      "name": "C4 CPM moved out of the activation transaction: run after the commit, still before the answer (plan :506; a limitation probe, expected to survive)",
+      "guard": "plan :506 'Activation. CPM runs inside the activation transaction' (adjudication M3; schedule.service.js activateRevisionSnapshot, the transaction :3257-3531, CPM at :3528 with the transaction client)",
+      "e6": "not a §6.2 guard: recorded for the plan :506 row of the certification report, not tallied in E6",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "    await applyCpmToProject(project.id, tx);",
+      "to": "    /* (mutant) CPM moved out of the activation transaction: run after the commit, below */",
+      "also": [
+        { "file": "backend/src/services/schedule.service.js", "from": "    activation: result.activationAuditJson,", "to": "    activation: (await applyCpmToProject(project.id), result.activationAuditJson)," }
+      ],
+      "bookKeys": ["WP1.T1 (REV.activate.cpmInTransaction's figures)"],
+      "catchers": [],
+      "collateral": [],
+      "expectVerdict": "SURVIVED (expected; TEST GAP recorded in run plan §13: no check of the final proof can tell this mutant apart)",
+      "expect": "No check fails; exit 0. The activation commits the rows, then CPM runs on the global client and commits before the route answers, so every read after the answer (REV.activate.cpmInTransaction's SQL read included) sees what HEAD gives: an equivalent mutant for every API observation. The two behaviours differ only while the activation is in flight (a reader between the two commits) and when CPM throws (HEAD rolls the activation back; the mutant leaves it active with the file's figures), and no API path makes CPM throw inside an activation (the approval's readiness refuses a cycle, predecessors check; the import refuses out-of-range figures). The unit tripwire is UC4 in wp1-mutations.unit.json. A run that reports C4 CAUGHT is not evidence of the rule: read its result file (a setup error or an unrelated red).",
+      "mutatedAnswer": "the same answers and stored figures as HEAD after every activation; the activation and its CPM figures are committed by two transactions",
+      "storedDefect": "none"
+    },
+    {
+      "name": "C5 CPM dropped from the activation: the activated rows keep the file's own figures (plan :506, the stronger form of C4; a limitation probe, expected to survive)",
+      "guard": "plan :506 (adjudication M3): the proof's REV.activate.cpmInTransaction is meant to show the CPM figures are stored when the activation answers",
+      "e6": "not a §6.2 guard: recorded for the plan :506 row of the certification report, not tallied in E6",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "    await applyCpmToProject(project.id, tx);",
+      "to": "    /* (mutant) no CPM at activation */",
+      "bookKeys": ["WP1.T1 (REV.activate.cpmInTransaction's figures)", "WP1.T4.FSlead.A_TF"],
+      "catchers": [],
+      "collateral": [],
+      "expectVerdict": "SURVIVED (expected; TEST GAP recorded in run plan §13: REV.activate.cpmInTransaction cannot see whether CPM ran at activation)",
+      "expect": "No check fails; exit 0. Activation writes each row's ES / EF / LS / LF / TF and isCritical from the staged snapshot (activityDataFromStaged, schedule.service.js:1631-1663; mappedActivityData :1679-1689), which the XER import takes from the file's own dates and float (import.service.js:243-253), and files.programme() writes them from the book's CPM. Verified in process on 2026-10-10 (scratch m3-staged-vs-cpm.js: the product's parser and dateToWorkingDay): for F1 the staged figures equal WP1.T1 and the product's CPM on 14 of 14 rows; for F1b, the T4 FF and the T4 SF networks they equal the product's CPM on every row. So REV.activate.cpmInTransaction, T1.row.*, T1.critical, REV.F1b.live, REV.rollback.live, T4.live.FF and T4.live.SF all pass without CPM at activation. The one visible change: X's FS-lead file is written capped (capLf, A float 0 h), so without CPM A stays TF 0 / LF 10 and KA.T4.live.FSlead reads 'value' (a pass) instead of HEAD's 'today' (TF 5 / LF 15); CF.2.lfNotCapped reads PARTIAL instead of CONFIRMED (a pass under the undecided HR-S1); the tally reads 2 value / 20 today instead of 1 / 21. Those two changes are how the result file shows the mutant was live. The unit tripwire is UC5 in wp1-mutations.unit.json.",
+      "mutatedAnswer": "activated rows carry the file's figures until the next CPM run (an activity PATCH or create, POST import/recalculate-cpm); identical to CPM's on every generated file the proof activates except the capped FS-lead (A TF 0, LF 10 instead of 5, 15)",
+      "storedDefect": "only on the throwaways W and X (the file's figures until the next CPM run there), archived by the proof's cleanup. None on a deep project."
+    }
+  ]
+}

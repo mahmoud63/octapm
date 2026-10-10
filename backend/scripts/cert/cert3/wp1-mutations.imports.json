@@ -1,0 +1,53 @@
+{
+  "proof": "scripts/cert/cert3/wp1-schedule-proof.js",
+  "guards": "CERT-3 plan §6.2 WP-1: 'staged imports do not write' (plan §4 WP-1 Mutations :555: 'a staged import writing activities directly'; rule :504 'Imports are staged, never applied. Out-of-range figures are refused with SCHEDULE_FIGURE_OUT_OF_RANGE'; :533 'An xlsx dry run writes nothing'); answer book WP1.mutations.stagedImportWrites, WP1.imports.xlsxDryRun.*, WP1.conversion.rangeBoundary.*.",
+  "reconciled": "2026-10-10 against the final proof (146 fixed checks + G.5xx; debug run 4 exit 0). Every id in `catchers` and `collateral` is a check id exactly as the proof records it. Adjudication C:/Temp/octapm-cert/scratch/wp1/author-adjudication.md M1, L-Q1, BOOK-7.",
+  "note": "Fields as in wp1-mutations.cpm.json. I1 is the §6.2 guard; its catcher is IMP.stagedNotApplied (book WP1.mutations.stagedImportWrites, corrected by BOOK-7: the xlsx dry run answers before persistImport, import.service.js:587-604, and cannot catch it). I2 and I3 are complements beyond §6.2 (adjudication L-Q1: run with the batch, each has a leaf, not tallied in E6). Where the imports run: the proof stages files only on the throwaway projects W (F1, F1b, the second-import pair, R5) and X (the T4 networks, the range files, the xlsx dry run, F4); it stages nothing on 087-IMP, 087-SCH or the lanes. So each mutation here stores its defect on W / X only, both archived by the proof's cleanup (which runs after a section error too): no cert3d restore is needed after this list, only the census (run plan §7.6). The earlier note's 'the dry run supersedes 087-IMP's F1float5 draft' does not apply to the final proof (the dry run is on X).",
+  "mutations": [
+    {
+      "name": "I1 a staged import writes activities directly: persistImport creates one Activity row per staged activity in its own transaction (the §6.2 'staged imports do not write' guard)",
+      "guard": "§6.2 WP-1 'staged imports do not write' (plan :504; import.service.js persistImport :300-364)",
+      "e6": "§6.2 WP-1 guard 5 of 5 (staged imports do not write)",
+      "file": "backend/src/services/import.service.js",
+      "from": "    revisionId = revision.id;",
+      "to": "    revisionId = revision.id; await tx.activity.createMany({ data: snapshot.activities.map((a) => ({ projectId: project.id, name: a.name, p6ActivityId: a.p6ActivityId, wbsCode: a.wbsCode, duration: a.duration, isActive: true })) });",
+      "bookKeys": ["WP1.mutations.stagedImportWrites"],
+      "catchers": ["IMP.stagedNotApplied"],
+      "collateral": ["REV.activate.unmappedNamed", "REV.mapByCode.live", "REV.activate.full", "REV.activate.cpmInTransaction", "CF.4.activationCode", "CF.6.filePercent", "CF.7.startChange", "CF.10.concurrent"],
+      "expectVerdict": "CAUGHT (exit 1: the W section stops at REV.activate.full; IMP.stagedNotApplied is FAIL on X, run plan §7.4)",
+      "expect": "IMP.stagedNotApplied FAIL on X: the staging import of the T4 FF file adds two active rows (the fingerprint of ids, durations, dates and updatedAt, and the active count, change). Collateral on W, where F1's staging also writes 14 active rows beside the hand-built A100 / A110: REV.activate.unmappedNamed FAIL (15 named, not 1), REV.mapByCode.live FAIL (the written rows are suggested too), REV.activate.full and REV.activate.cpmInTransaction FAIL (the suggested mapping leaves active rows unmapped without a reason: 400 UNMAPPED_REMOVAL_REASON_REQUIRED), then the W section throws ('F1 could not be activated') and every later W check is recorded not run; the confirm-first items that classify from W then read a gap or PARTIAL: CF.4.activationCode (PARTIAL, a fixed rule must read REJECTED), CF.6.filePercent, CF.7.startChange and CF.10.concurrent (TEST GAP). X carries on (each activation retires the written rows with a reason): T4.live.*, CONV.range.*, IMP.dryRun and KA.IMP.twoProjectXer unchanged. The written rows are a valid Activity shape (projectId and name are the only required columns), so the import still answers 201 and the catch is a check, not a 5xx. Unchanged by design: IMP.dryRun (the dry run never reaches persistImport).",
+      "mutatedAnswer": "201 staged as before, plus one active Activity row per staged activity on the project, at every staging import",
+      "storedDefect": "on W and X only (written rows; W's never activated revision), both archived by the cleanup. None on a deep project. No restore; census only."
+    },
+    {
+      "name": "I2 the xlsx dry run stages a revision after reporting: dryRun=true still calls persistImport (rule :533 'an xlsx dry run writes nothing'; complement beyond §6.2)",
+      "guard": "WP-1 rule :533 (import.service.js importScheduleXlsx dryRun branch :587-604); §6.2 lists the dry-run guard under WP-6 for the BOQ",
+      "e6": "complement beyond §6.2 (adjudication L-Q1): run with the batch, has a leaf, not tallied in E6",
+      "file": "backend/src/services/import.service.js",
+      "from": "    const snapshot = buildImportSnapshot(staged);",
+      "to": "    const snapshot = buildImportSnapshot(staged); await persistImport(staged);",
+      "bookKeys": ["WP1.imports.xlsxDryRun.revisionsCreated", "WP1.imports.xlsxDryRun.documentsCreated"],
+      "catchers": ["IMP.dryRun"],
+      "collateral": [],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "IMP.dryRun FAIL on X: revisions after - before = 1, expected 0 (WP1.imports.xlsxDryRun.revisionsCreated). The answer body still says dryRun: true, staged: false and 14 activities, so a check reading the body alone would survive; the proof counts the revisions. Its document count stays 0 (persistImport stores no ProjectDocument). The written draft supersedes X's open draft (the at-max range revision), which no later X check reads (KA.IMP.twoProjectXer counts the revisions around its own upload).",
+      "mutatedAnswer": "200 { dryRun: true, staged: false, ... } with a draft xlsx revision written on the project and its open draft superseded",
+      "storedDefect": "on X only (one draft revision), archived by the cleanup. No restore; census only."
+    },
+    {
+      "name": "I3 out-of-range figures are staged: assertScheduleFigures no longer runs (rule :504 'Out-of-range figures are refused with SCHEDULE_FIGURE_OUT_OF_RANGE'; complement beyond §6.2)",
+      "guard": "WP-1 rule :504 (import.service.js assertScheduleFigures :170-193, called from buildImportSnapshot :287)",
+      "e6": "complement beyond §6.2 (adjudication L-Q1): run with the batch, has a leaf, not tallied in E6",
+      "file": "backend/src/services/import.service.js",
+      "from": "  assertScheduleFigures(stagedActivities, dependencies);",
+      "to": "  /* (mutant) no range check */",
+      "bookKeys": ["WP1.conversion.rangeBoundary.beyondMax", "WP1.conversion.rangeBoundary.beyondMaxInput", "WP1.conversion.rangeBoundary.atMax"],
+      "catchers": ["CONV.range.beyond"],
+      "collateral": [],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "CONV.range.beyond FAIL on X (expected '400 SCHEDULE_FIGURE_OUT_OF_RANGE' and no revision added for the 292,004 h file, WP1.conversion.rangeBoundary.beyondMaxInput; mutated: 201 and one draft revision with a 36,501-day duration). CONV.range.atMax (292,000 h staged) is unchanged; every other import of the run is in range. Unit side: UI3 in wp1-mutations.unit.json.",
+      "mutatedAnswer": "201 staged (a draft revision carrying a 36,501-day duration; it supersedes X's open draft)",
+      "storedDefect": "on X only (one draft revision), archived by the cleanup. No restore; census only."
+    }
+  ]
+}

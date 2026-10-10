@@ -25,11 +25,13 @@
  * stands at HEAD 886c9f1 (read with `git show HEAD:<path>`, never from the
  * working tree, which a mutation run may be rewriting).
  *
- * Leaf shape (the same as answers/field-controls.js):
+ * Leaf shape (the same as answers/field-controls.js, plus `ref`):
  *   { value, unit, derivation, source, assumption, planDisagrees,
- *     planValue?, today?, company?, note? }
+ *     planValue?, today?, ref?, company?, note? }
  *   value        the expected answer (what the proof must assert)
  *   today        what HEAD does now, where the plan or the code shows it differs
+ *   ref          the §5 row (or finding) a `today` waits on, e.g. 'HR-S6'; set
+ *                on the leaves added for the WP-1 proof authoring (2026-10-10)
  *   planValue    the plan's figure, only where this derivation disagrees
  *   assumption   true where the plan marks an assumption or a choice was made here
  *
@@ -78,7 +80,26 @@
  * 2026-02-28 read after the back-dated cost) and WP3.T6.before / WP3.T6.after
  * (the run-date reads around the retirement, one set per probe outcome), so
  * 087-ev.js asserts leaves and computes nothing.
- * Changed keys: answers/CHANGES-WP0-BUILDERS.md (rounds 1-2) and
+ *
+ * The integration owner's adjudication of the WP-1 proof authoring
+ * (2026-10-10, C:\Temp\octapm-cert\scratch\wp1\author-adjudication.md,
+ * BOOK-1..BOOK-7) is applied: WP1.dates.calendarChange (BOOK-1, HR-S6);
+ * WP1.dates.endBeforeStartRefused (BOOK-2) and WP1.dates.zeroDurationCreate
+ * (the other half of the same create check); WP1.revisions.rejectWithoutReason
+ * and WP1.revisions.activate.olderRevision now carry the adjudicated
+ * contracts, the plan's codes kept as planValue (BOOK-3), and
+ * WP1.revisions.notCurrent takes the lifecycle code the older-revision leaf
+ * named before; WP1.revisions.activate.recordTwoHandBuilt (BOOK-4); the
+ * inputs WP1.T4.FSlead.inputs, WP1.mixedCalendar.inputs and
+ * WP1.conversion.rangeBoundary.beyondMaxInput (BOOK-5);
+ * WP1.imports.twoProjectXerStaging, WP1.imports.secondCalendarIds and the
+ * HR-P5 per-surface leaves of WP1.status.A200fileFortyPercent (BOOK-6);
+ * WP1.mutations.stagedImportWrites names its catcher (BOOK-7). Their product
+ * citations are read at f599e67 (HF, `@f599e67`), plan lines PF. No other
+ * existing value or today changed; load checks after WP1 tie the new leaves
+ * to the figures they are built from.
+ * Changed keys: answers/CHANGES-WP0-BUILDERS.md (rounds 1-2, and the section
+ * "WP-1 proof authoring (2026-10-10)") and
  * answers/CHANGES-WP0-BUILDERS-r3-ev-sch-lanes-extras.md (round 3).
  */
 
@@ -93,6 +114,12 @@ const P = (...lines) => `${PLAN}:${lines.join(",")}`;
 /** Plan lines as numbered at product HEAD f599e67 (entries added for the builders' adjudication use this numbering). */
 const PF = (...lines) => `${PLAN}:${lines.join(",")} @f599e67`;
 const H = (file, lines) => `${file}:${lines} @${HEAD}`;
+/** Product lines read at f599e67 (`git show f599e67:<path>`): the WP-1 proof authoring entries (2026-10-10). */
+const HF = (file, lines) => `${file}:${lines} @f599e67`;
+/** The integration owner's binding adjudication of the WP-1 proof authoring (2026-10-10). */
+const WADJ = (item) => `C:/Temp/octapm-cert/scratch/wp1/author-adjudication.md ${item}`;
+/** The WP-1 preparation (read only, 2026-10-09), whose §7 items the adjudication settles. */
+const PREP1 = (item) => `C:/Temp/octapm-cert/scratch/wp1-prep.md ${item}`;
 
 function F(value, unit, derivation, source, opts = {}) {
   const leaf = {
@@ -105,6 +132,7 @@ function F(value, unit, derivation, source, opts = {}) {
   };
   if (opts.planValue !== undefined) leaf.planValue = opts.planValue;
   if (opts.today !== undefined) leaf.today = opts.today;
+  if (opts.ref) leaf.ref = opts.ref;
   if (opts.company) leaf.company = opts.company;
   if (opts.note) leaf.note = opts.note;
   return leaf;
@@ -501,13 +529,35 @@ const F3_FILE = {
 if (F3_FILE_CODES.some((c) => SS_CAP.rows[c].ES !== SS_TODAY.rows[c].ES || SS_CAP.rows[c].EF !== SS_TODAY.rows[c].EF) || JSON.stringify(SS_CAP.rows.B) !== JSON.stringify(SS_TODAY.rows.B) || SS_CAP.end !== SS_TODAY.end) {
   throw new Error("schedule answer book: F3's capped late pass must move only A's late dates and float");
 }
-const FSL_TODAY = cpm([{ id: "A", d: 10 }, { id: "B", d: 3 }], [{ p: "A", s: "B", t: "FS", lag: -8 }]);
-const FSL_CAP = cpm([{ id: "A", d: 10 }, { id: "B", d: 3 }], [{ p: "A", s: "B", t: "FS", lag: -8 }], { capLf: true });
+/**
+ * The FS-lead variant of T3 (plan :525 'FS - 8 variant', WP1.T4.FSlead.inputs): T3's A and B (F3D, plan :524) with
+ * FS -8 in place of SS +2, in working days. A generated file writes them x 8 as P6 hours (A 80 h, B 24 h, lag -64 h).
+ */
+const FSL_IN = { A: F3D.A, B: F3D.B, lag: -8 };
+const FSL_TODAY = cpm([{ id: "A", d: FSL_IN.A }, { id: "B", d: FSL_IN.B }], [{ p: "A", s: "B", t: "FS", lag: FSL_IN.lag }]);
+const FSL_CAP = cpm([{ id: "A", d: FSL_IN.A }, { id: "B", d: FSL_IN.B }], [{ p: "A", s: "B", t: "FS", lag: FSL_IN.lag }], { capLf: true });
 const FF_TODAY = cpm([{ id: "A", d: 10 }, { id: "B", d: 15 }], [{ p: "A", s: "B", t: "FF", lag: 0 }]);
 const FF_CAP = cpm([{ id: "A", d: 10 }, { id: "B", d: 15 }], [{ p: "A", s: "B", t: "FF", lag: 0 }], { capLf: true });
 const SF_TODAY = cpm([{ id: "A", d: 5 }, { id: "B", d: 4 }], [{ p: "A", s: "B", t: "SF", lag: 10 }]);
 const SF_CAP = cpm([{ id: "A", d: 5 }, { id: "B", d: 4 }], [{ p: "A", s: "B", t: "SF", lag: 10 }], { capLf: true });
-const MIXED = cpm([{ id: "A", d: 5 }, { id: "B", d: 2 }], [{ p: "A", s: "B", t: "FS", lag: 0 }]);
+/** The mixed-calendar pair (plan :528, WP1.mixedCalendar.inputs): A five_day 5 d, FS 0, then B seven_day 2 d. */
+const MIXED_IN = { A: { duration: 5, calendar: "five_day" }, B: { duration: 2, calendar: "seven_day" }, link: { type: "FS", lag: 0 } };
+const MIXED = cpm([{ id: "A", d: MIXED_IN.A.duration }, { id: "B", d: MIXED_IN.B.duration }], [{ p: "A", s: "B", t: MIXED_IN.link.type, lag: MIXED_IN.link.lag }]);
+/** The range boundary (plan :504, WP1.conversion.rangeBoundary): SCHEDULE_DAYS_MAX restated (schedule-days.js:18) and the two file inputs in hours. */
+const RANGE_IN = { maxDays: 36_500, atMaxHours: 36_500 * 8, beyondMaxHours: 36_500 * 8 + 4 };
+/** F4's second PROJECT (build/files.js F4() :285-301 @363651a, restated): three tasks in hours, FS B100 -> B110 -> B120. F4's first PROJECT is F1. */
+const F4_FIRST = "CERT3-FIRST";
+const F4_SECOND = { projectId: "CERT3-SECOND", tasks: [["B100", 16], ["B110", 40], ["B120", 0]], links: [["B100", "B110"], ["B110", "B120"]] };
+const F4_ROWS = F1_TASKS.length + F4_SECOND.tasks.length;
+/** F6's calendars (build/files.js :114, :160, F6() :314-326, restated): the default clndr_id '1' on every task but A300 and A330, which carry '2'. */
+const F6_CAL = { default: "1", second: "2", secondName: "6 Day Night Shift", secondOn: ["A300", "A330"] };
+/** A200's file percent (inputs.F1, phys_complete_pct; plan :552) and search's own status rule (search.service.js:223-228 @f599e67). */
+const A200_FILE_PCT = F1_TASKS.find((t) => t[0] === "A200")[5];
+const searchStatusOf = (pct) => (pct >= 100 ? "complete" : pct > 0 ? "in_progress" : "todo");
+/** The hand-built activities of the WP-1 proof's W choreography (adjudication P-Q1, BOOK-4). */
+const W_HAND_BUILT = ["A100", "A110"];
+/** The calendar-change probe (BOOK-1, HR-S6): the project calendar five_day -> seven_day, then back. */
+const CAL_CHANGE = { from: "five_day", to: "seven_day" };
 
 /** 087-SCH progress setup (plan :384). */
 const METHODS_087SCH = {
@@ -734,6 +784,10 @@ const T3 = {
 
 const T4 = {
   FSlead: {
+    inputs: F({ ...FSL_IN }, "working_days",
+      `The FS-lead variant of T3 (plan :525 'FS - 8 variant: B ES 2'): T3's A(${FSL_IN.A}) and B(${FSL_IN.B}) (WP1.T3.inputs: ${F3.A} h / 8 = ${F3D.A}, ${F3.B} h / 8 = ${F3D.B}; plan :524) with FS ${FSL_IN.lag} in place of SS +${F3D.lag}. In working days, as WP1.T4.FF.inputs and WP1.T4.SF.inputs are; a generated file writes each x 8 as P6 hours: A ${FSL_IN.A * 8} h (target_drtn_hr_cnt), B ${FSL_IN.B * 8} h, FS lag ${FSL_IN.lag * 8} h (lag_hr_cnt), which the parser reads back as ${FSL_IN.A * 8} / 8 = ${FSL_IN.A}, ${FSL_IN.B * 8} / 8 = ${FSL_IN.B} (Math.round, clamped at 0) and ${FSL_IN.lag * 8} / 8 = ${FSL_IN.lag} (Math.round, no clamp). The B_ES/B_EF/A_TF leaves below are worked on these figures (B ES = EF(A) ${FSL_IN.A} + lag ${FSL_IN.lag} = ${FSL_TODAY.rows.B.ES}).`,
+      [PF(524, 525), HF("backend/src/parsers/xer-parser.js", "40-50"), WADJ("BOOK-5; L1")],
+      { note: `units: working days; the file's hours are value x 8 (A ${FSL_IN.A * 8} h, B ${FSL_IN.B * 8} h, lag ${FSL_IN.lag * 8} h)` }),
     B_ES: F(FSL_TODAY.rows.B.ES, "working_days", "A(10) FS -8 -> B(3): ES = 10 - 8 = 2.", [P(486)]),
     B_EF: F(FSL_TODAY.rows.B.EF, "working_days", "2 + 3 = 5.", [P(486), AREA]),
     A_TF: FA(FSL_CAP.rows.A.TF, "working_days", `Backward candidate LS(B) 7 - (-8) = 15 -> capped 10, TF 0; today LF 15, TF 5. ${capNote}`, [P(486), AREA], { today: FSL_TODAY.rows.A.TF }),
@@ -766,6 +820,10 @@ const WP1 = {
     selfLink: F("400 INVALID_DEPENDENCY_SELF_LINK", "http", "A -> A is refused as a self link.", [H("backend/src/services/activity-dependency.service.js", "203")]),
   },
   mixedCalendar: {
+    inputs: FA(MIXED_IN, "text",
+      `A ${MIXED_IN.A.duration} working days on ${MIXED_IN.A.calendar}, ${MIXED_IN.link.type} lag ${MIXED_IN.link.lag}, then B ${MIXED_IN.B.duration} working days on ${MIXED_IN.B.calendar}, on a ${MIXED_IN.A.calendar} project starting Monday ${START}. A's ${MIXED_IN.A.duration} days follow from the plan's date (:528 'must start on or after 2026-01-12'): ${MIXED_IN.A.duration} working days on five_day from Monday ${START} end at working day ${MIXED.rows.A.EF} = ${workingDate(START, MIXED.rows.A.EF, MIXED_IN.A.calendar)} (WP1.mixedCalendar.A_finishDate). B's ${MIXED_IN.B.duration} days are a choice (the plan states no duration; any B shows the defect, which is in B's start: offset ${MIXED.rows.B.ES} dated on the seven-day calendar from ${START} = ${workingDate(START, MIXED.rows.B.ES, MIXED_IN.B.calendar)}, a ${weekday(workingDate(START, MIXED.rows.B.ES, MIXED_IN.B.calendar))}). In process: calculateCpm([{ id: 'A', duration: ${MIXED_IN.A.duration}, calendarId: '${MIXED_IN.A.calendar}' }, { id: 'B', duration: ${MIXED_IN.B.duration}, calendarId: '${MIXED_IN.B.calendar}' }], ${MIXED_IN.link.type} ${MIXED_IN.link.lag}) with projectStartDate ${START}, projectCalendar '${MIXED_IN.A.calendar}' (each activity dated on its own calendar, cpm.service.js:354-385).`,
+      [PF(528, 567, 1031), HF("backend/src/services/cpm.service.js", "89-92,125-166,354-385"), WADJ("BOOK-5; L1")],
+      { note: "A's duration is the plan's (through its date); B's is a choice" }),
     A_finishDate: F(workingDate(START, MIXED.rows.A.EF, "five_day"), "date", "A five_day 5 d from 2026-01-05: EF 5 -> 2026-01-12.", [P(489)]),
     B_startNoEarlierThan: FA(workingDate(START, MIXED.rows.A.EF, "five_day"), "date", "B (seven_day 2 d, FS) must start on or after A's finish 2026-01-12. HR-S5 (undecided) recommends refusing a calendar that differs from the project's with 400 until CPM handles calendars; either outcome passes, a date before 2026-01-12 fails.", [P(489, 992)], { today: workingDate(START, MIXED.rows.B.ES, "seven_day") }),
     todayWeekday: F(weekday(workingDate(START, MIXED.rows.B.ES, "seven_day")), "text", "Today B's offset 5 is dated on the seven-day calendar from 2026-01-05: 2026-01-10, a Saturday (the defect reproduced).", [P(489), H("backend/src/services/cpm.service.js", "354-385")]),
@@ -778,6 +836,10 @@ const WP1 = {
     rangeBoundary: {
       atMax: FA(hoursToDays(36_500 * 8), "working_days", "292,000 h / 8 = 36,500 = SCHEDULE_DAYS_MAX: staged.", [P(465), H("backend/src/utils/schedule-days.js", "18"), H("backend/src/services/import.service.js", "170-193")]),
       beyondMax: FA("400 SCHEDULE_FIGURE_OUT_OF_RANGE", "http", "292,004 h / 8 = 36,500.5 -> 36,501 > 36,500: the whole file is refused, nothing staged.", [P(465), H("backend/src/services/import.service.js", "186-191")]),
+      beyondMaxInput: FA(RANGE_IN.beyondMaxHours, "hours",
+        `The beyond-the-bound file's one task: SCHEDULE_DAYS_MAX ${RANGE_IN.maxDays} (schedule-days.js:18) x 8 + 4 = ${RANGE_IN.beyondMaxHours} h (target_drtn_hr_cnt; remain_drtn_hr_cnt the same at 0%). It is the smallest whole-hour figure past the bound after the parser's rounding: ${RANGE_IN.atMaxHours + 1}..${RANGE_IN.atMaxHours + 3} h / 8 = ${(RANGE_IN.atMaxHours + 1) / 8}..${(RANGE_IN.atMaxHours + 3) / 8} round to ${RANGE_IN.maxDays} (staged), while ${RANGE_IN.beyondMaxHours} / 8 = ${RANGE_IN.beyondMaxHours / 8} -> Math.round (half up) -> ${hoursToDays(RANGE_IN.beyondMaxHours)} > ${RANGE_IN.maxDays}, so assertScheduleFigures refuses the whole file before anything is staged (WP1.conversion.rangeBoundary.beyondMax). The at-bound file's input is WP1.conversion.rangeBoundary.atMax x 8 = ${RANGE_IN.atMaxHours} h.`,
+        [PF(504), HF("backend/src/utils/schedule-days.js", "18"), HF("backend/src/parsers/xer-parser.js", "40-44"), HF("backend/src/services/import.service.js", "170-193"), WADJ("BOOK-5; L1")],
+        { note: "a choice (any whole-hour figure from 292,004 h up is refused; 292,004 h is the nearest)" }),
     },
   },
   parity: {
@@ -792,6 +854,23 @@ const WP1 = {
     twoProjectXer: FA("refused_or_project_choice", "state", "F4 (two PROJECT rows): refused, or the user is asked which project (HR-S4 recommendation, undecided).", [P(385, 493, 991)], { today: "merged (TASK rows of both projects staged)" }),
     windows1252: FA("names_decoded", "state", "F5 Windows-1252 names (e.g. 'B\u00e9ton arm\u00e9 \u2013 niveau 1') stage as written (HR-S4: detect Windows-1252).", [P(385, 529, 991)], { today: "read as UTF-8 (replacement characters)" }),
     secondCalendar: FA("recorded (P2)", "state", "F6: a second clndr_id; HR-S4 records calendars as P2.", [P(385, 991)], { today: "an unknown clndr_id falls back to the project calendar five_day (cpm.service.js:80-92)" }),
+    twoProjectXerStaging: FA(
+      { mergedRows: 0, rowsIfChosen: { [F4_FIRST]: F1_TASKS.length, [F4_SECOND.projectId]: F4_SECOND.tasks.length } },
+      "text",
+      `F4 (build/files.js F4() :285-301) is one XER with two PROJECT rows: ${F4_FIRST} = F1 (${F1_TASKS.length} TASK rows, ${NET1.links.length} TASKPRED links; WP1.T1.network) and ${F4_SECOND.projectId} (${F4_SECOND.tasks.map(([c, h]) => `${c} ${h} h`).join(", ")}; ${F4_SECOND.links.length} FS links ${F4_SECOND.links.map(([p, s]) => `${p}->${s}`).join(", ")}): ${F1_TASKS.length} + ${F4_SECOND.tasks.length} = ${F4_ROWS} TASK rows in all. `
+        + `Expected (HR-S4 recommendation 'refuse two-project files without a project choice', undecided; WP1.imports.twoProjectXer): no staged revision merges the two projects, mergedRows 0. Either the file is refused (a 4xx whose status and code the fix chooses; null here, never guessed) and nothing is staged, or the user is asked which project and only that project's rows are staged: ${F4_FIRST} ${F1_TASKS.length} or ${F4_SECOND.projectId} ${F4_SECOND.tasks.length} (rowsIfChosen). `
+        + `HEAD (today): the parser reads every TASK and TASKPRED row whatever its proj_id (xer-parser.js extractActivities :113-152, extractRelationships :154-163; no PROJECT filter) and persistImport stages them as one draft revision (import.service.js:366-393 -> :300-364; activityCount and imported = activities.length :330, :356; status draft :336), answered 201 (routes/import.js:93): ${F1_TASKS.length} + ${F4_SECOND.tasks.length} = ${F4_ROWS} rows merged.`,
+      [PF(424, 532, 568, 1030), HF("backend/src/parsers/xer-parser.js", "113-163"), HF("backend/src/services/import.service.js", "300-364,366-393"), HF("backend/src/routes/import.js", "61-93"), WADJ("BOOK-6; M4")],
+      { today: { http: 201, revisionStatus: "draft", mergedRows: F4_ROWS, imported: F4_ROWS, activityCount: F4_ROWS }, ref: "HR-S4", note: "the figures a fresh F4 staging is judged by; WP1.imports.twoProjectXer (value and its prose today) is unchanged because build/087-imp.js interpolates that today as text" },
+    ),
+    secondCalendarIds: F(
+      Object.fromEntries(CODES.map((c) => [c, F6_CAL.secondOn.includes(c) ? F6_CAL.second : F6_CAL.default])),
+      "text",
+      `F6 (build/files.js F6() :314-326) is F1 with clndr_id '${F6_CAL.second}' ('${F6_CAL.secondName}') on ${F6_CAL.secondOn.join(" and ")} and the default calendar '${F6_CAL.default}' (files.js:114, :160) on the other ${CODES.length - F6_CAL.secondOn.length} tasks; the XER TASK row writes it (files.js:357, :367). The parser reads clndr_id (xer-parser.js:138) and the snapshot keeps the file's id, falling back to the project calendar only when a row names none (import.service.js:222-223), so the staged revision records every id as the file names it. `
+        + `That is HR-S4's value ('calendars recorded as P2'; WP1.imports.secondCalendar, the value branch made explicit, adjudication L9), and HEAD stages the same: the difference HR-S4 records is downstream, after activation, where CPM resolves an id it does not know ('${F6_CAL.default}' and '${F6_CAL.second}' alike) to the project calendar (cpm.service.js:80-92; WP1.imports.secondCalendar's today).`,
+      [PF(424, 568, 1030), HF("backend/src/parsers/xer-parser.js", "105-112,138"), HF("backend/src/services/import.service.js", "218-236"), HF("backend/src/services/cpm.service.js", "80-92"), WADJ("BOOK-6; L9")],
+      { note: "the staged ids are the same under HR-S4's value and today; WP1.imports.secondCalendar keeps the judgement" },
+    ),
     xlsxDryRun: {
       revisionsCreated: F(0, "count", "dryRun=true writes no revision.", [P(494), H("backend/src/services/import.service.js", "563-610")]),
       documentsCreated: F(0, "count", "dryRun=true writes no document.", [P(494)]),
@@ -804,6 +883,8 @@ const WP1 = {
     roles: {
       siteEngineerSubmit: F("403 FORBIDDEN", "http", "schedule:submit is the PM's and the planner's; the site engineer is refused.", [P(470), H("backend/src/middleware/rbac.js", "149-153")]),
       plannerActivate: F("403 FORBIDDEN", "http", "Activation is the PM's (revision.activate).", [P(470), AREA]),
+      siteEngineerActivate: F("403 FORBIDDEN", "http", "POST .../revisions/:revisionId/activate by the site engineer: the route is guarded by requirePermission('schedule', 'approve', { transition: 'revision.activate' }) (routes/schedule.js:242-245); shared/permissions.json gives schedule.approve and the transition revision.activate to the PM only, so the role gate refuses before the service: 403 FORBIDDEN (middleware/rbac.js:149-153). Plan :509 'the site engineer and an outsider are refused'.", [PF(509), HF("backend/src/routes/schedule.js", "242-245"), HF("shared/permissions.json", "modules.schedule"), HF("backend/src/middleware/rbac.js", "149-153"), WADJ("M6 (verifier question 6: dedicated leaves)")]),
+      siteEngineerRollback: F("403 FORBIDDEN", "http", "POST .../revisions/:revisionId/rollback (sent with a reason) by the site engineer: requirePermission('schedule', 'approve', { transition: 'revision.rollback' }) (routes/schedule.js:300-303); schedule.approve and revision.rollback are the PM's only (shared/permissions.json), so 403 FORBIDDEN before the service (middleware/rbac.js:149-153).", [PF(509), HF("backend/src/routes/schedule.js", "300-303"), HF("shared/permissions.json", "modules.schedule"), HF("backend/src/middleware/rbac.js", "149-153"), WADJ("M6 (verifier question 6: dedicated leaves)")]),
       outsider: F("404 PROJECT_NOT_FOUND", "http", "PM of 088 on any revision route.", [P(366, 470)]),
     },
     approve: {
@@ -812,10 +893,18 @@ const WP1 = {
       pm: F("approved", "state", "under_review -> approved. HR-S2 (decided): M900's equal start and finish does not fail date_sanity.", [P(30, 497, 989)], { today: "400 SCHEDULE_NOT_READY (date_sanity: finish_date_before_start_date on M900)" }),
     },
     rejectApproved: F("409 INVALID_REVISION_STATUS", "http", "Reject is allowed from under_review only (sent with a reason, so the status guard answers).", [P(498), H("backend/src/services/schedule.service.js", "1087,3866")]),
-    rejectWithoutReason: F("400 REJECTION_REASON_REQUIRED", "http", "On an under_review revision with no reason.", [P(466, 498), H("backend/src/services/schedule.service.js", "3870")]),
+    rejectWithoutReason: F("400 VALIDATION_ERROR", "http",
+      "POST .../schedule/revisions/:revisionId/reject with no reason, on an under_review revision, by the PM: the route chain reasonRequired('A rejection reason is required.', 'The rejection reason') (routes/schedule.js:107-117, on the reject route :371-392) fails body('reason').isString() and validateWithReasons answers before the service: 400 VALIDATION_ERROR, message 'A rejection reason is required.' (the first failing check's own message), error.details holding an entry whose field is 'reason' (middleware/validate.js:7-12, :34-56; details are sent outside production). The service's REJECTION_REASON_REQUIRED (schedule.service.js:3960-3966, after the status guard :3958) is not reached through the route. "
+        + "HEAD's VALIDATION_ERROR naming the field is the contract (integration owner's adjudication BOOK-3, settling WP-1 prep §7 D1; the WP-0 F1 precedent, answers/field-controls.js header). The plan's revision-state codes (:505) name REJECTION_REASON_REQUIRED, kept as planValue: no request through the API can draw it. Sent again with a reason, the revision reads rejected.",
+      [PF(505, 537), HF("backend/src/routes/schedule.js", "107-117,371-392"), HF("backend/src/middleware/validate.js", "7-12,34-56"), HF("backend/src/services/schedule.service.js", "3944-3967"), WADJ("BOOK-3; L1"), PREP1("§7 D1")],
+      { planValue: "400 REJECTION_REASON_REQUIRED", note: "details.field=reason. Changed 2026-10-10 (BOOK-3): the value was '400 REJECTION_REASON_REQUIRED' (schedule.service.js:3870 @886c9f1), the plan's code, which the route's validator makes unreachable" }),
+    notCurrent: F("409 REVISION_NOT_CURRENT", "http",
+      "A lifecycle step (submit-review here; approve, reject, the baseline lock and readiness by id answer the same) on a revision that is neither the active one nor the latest staged candidate: loadCurrentRevisionForLifecycle (schedule.service.js:965-1012; candidates are inactive draft, under_review, approved or rejected revisions, :942-958) refuses with 409 REVISION_NOT_CURRENT before any status guard (submitRevisionForReview :3778-3790). On W: F1b's revision, superseded when the rollback re-activates F1 (activateRevisionSnapshot marks the previously active revision superseded, :3454-3470), submitted for review by the planner (schedule:submit, routes/schedule.js:322-343). "
+        + "This is the lifecycle code of the plan's list (:505) and the code WP1.revisions.activate.olderRevision named before BOOK-3: activation never reaches this loader (WP1.revisions.activate.olderRevision).",
+      [PF(505, 540), HF("backend/src/services/schedule.service.js", "942-1012,3778-3790"), HF("backend/src/routes/schedule.js", "322-343"), WADJ("BOOK-3; L1")]),
     hrS3Reproduction: {
       file: FA({ basedOn: "F1", totalFloatHours: HR_S3_FLOAT_HOURS }, "text", `F1 with every task's total_float_hr_cnt >= 40 h (5 days): max(TF, 5) x 8 -> the 12 CPM-critical rows 5 x 8 = 40 h, A140 47 x 8 = 376 h, A300 20 x 8 = 160 h. Staged isCritical = round(file TF days) === 0 marks ${HR_S3_STAGED_CRITICAL} rows. Staged as a draft in 087-IMP (the scratch import project; a choice).`, [P(523, 990), H("backend/src/services/import.service.js", "251-253"), ADJ("S2 HR-S3 reproduction")]),
-      approve: FA("approved", "state", `HR-S3 recommendation (undecided): readiness runs CPM on the snapshot, and critical means TF <= 0 for every format. Recomputed, the F1 network has ${CRITICAL1.length} rows at TF 0 (WP1.T1), so critical_path passes and PM approval succeeds (with HR-S2's decided milestone rule for M900's date_sanity).`, [P(523, 990), ADJ("S2 HR-S3 reproduction")], { today: "400 SCHEDULE_NOT_READY, two blocking approval checks fail: critical_path ('No critical path activities are marked.': the file's float marks none; schedule.service.js:397,849-866) and date_sanity (finish_date_before_start_date on M900, whose start equals its finish; schedule.service.js:679-687)" }),
+      approve: FA("approved", "state", `HR-S3 recommendation (undecided): readiness runs CPM on the snapshot, and critical means TF <= 0 for every format. Recomputed, the F1 network has ${CRITICAL1.length} rows at TF 0 (WP1.T1), so critical_path passes and PM approval succeeds (with HR-S2's decided milestone rule for M900's date_sanity).`, [P(523, 990), ADJ("S2 HR-S3 reproduction")], { today: "400 SCHEDULE_NOT_READY, exactly one blocking approval check fails: critical_path ('No critical path activities are marked.': the file's float marks none; schedule.service.js:397,849-866). date_sanity passes since f599e67 (HR-S2 decided and fixed: M900's start = finish is valid when its duration is 0)", ref: "HR-S3", note: "today corrected 2026-10-10 (verifier question 1): it read 'two blocking checks fail: critical_path and date_sanity', true at 886c9f1 before the HR-S2 fix; the WP-1 debug run 4 observed critical_path only" }),
     },
     activate: {
       noMapping: F("400 MAPPING_CONFIRMATION_REQUIRED", "http", "Active activities exist and neither mappings nor removals were sent.", [P(499), H("backend/src/services/schedule.service.js", "3104-3113")]),
@@ -830,7 +919,23 @@ const WP1 = {
       },
       mappedKeepApprovedProgress: F("kept", "state", "Mapped ids keep their ActivityProgress rows and pct.", [P(500)]),
       again: F("409 REVISION_ALREADY_ACTIVE", "http", "Activating the active revision again.", [P(501), H("backend/src/services/schedule.service.js", "3057")]),
-      olderRevision: F("409 REVISION_NOT_CURRENT", "http", "Only the active revision or the latest candidate may move.", [P(501), H("backend/src/services/schedule.service.js", "999")]),
+      olderRevision: F("409 INVALID_REVISION_STATUS", "http",
+        "POST .../schedule/revisions/:revisionId/activate on an older revision (on W: F1b's revision, superseded when the rollback re-activated F1, schedule.service.js:3454-3470), by the PM: activateRevision (schedule.service.js:3539-3564) reads the revision by id and goes straight to activateRevisionSnapshot; it never calls loadCurrentRevisionForLifecycle (:965-1012), the only source of REVISION_NOT_CURRENT. activateRevisionSnapshot (:3106) finds it not active (so not REVISION_ALREADY_ACTIVE, :3120-3128) and its status superseded outside the allowed [approved] (:3130-3137): 409 INVALID_REVISION_STATUS, details { status: 'superseded', allowed: ['approved'] }. "
+          + "The plan's 'An older revision: 409' (:540) holds; the code is the adjudicated contract (BOOK-3, settling WP-1 prep §7 D2). The plan's list (:505) and the previous leaf named REVISION_NOT_CURRENT, kept as planValue: it is what the lifecycle routes answer for the same revision (WP1.revisions.notCurrent).",
+        [PF(505, 540), HF("backend/src/services/schedule.service.js", "965-1012,3106-3137,3539-3564"), HF("backend/src/routes/schedule.js", "241-282"), WADJ("BOOK-3; L1"), PREP1("§7 D2")],
+        { planValue: "409 REVISION_NOT_CURRENT", note: "Changed 2026-10-10 (BOOK-3): the value was '409 REVISION_NOT_CURRENT' (schedule.service.js:999 @886c9f1), which activation never answers; that code now has its own leaf, WP1.revisions.notCurrent" }),
+      recordTwoHandBuilt: (() => {
+        const newCount = CODES.length - W_HAND_BUILT.length;
+        const src = [PF(539, 541), HF("backend/src/services/schedule.service.js", "1518-1629,3257-3303,3337-3362,3478-3492"), WADJ("BOOK-4; P-Q1")];
+        const choreo = `The WP-1 proof's W choreography (adjudication P-Q1, an assumption): ${W_HAND_BUILT.length} hand-built activities, ${W_HAND_BUILT.join(" and ")} (activityCode ${W_HAND_BUILT.join(", ")}; A110 FS after A100), are active when F1 (${CODES.length} rows, WP1.T1.network) is activated with the mapping GET .../mapping suggests`;
+        const pairing = "suggestActivityMappings (schedule.service.js:1518-1629): an XER row states no activityCode, its task_code is staged as its P6 id, so the file-code tier pairs each hand-built activity with the row of its code (matchType activity_code, confidence 1); the other staged rows are new and no active activity is left over";
+        return {
+          updated: FA(W_HAND_BUILT.length, "count", `${choreo}. ${pairing}. The mapped activities are updated in place (activateRevisionSnapshot :3263-3278): updated ${W_HAND_BUILT.length} (${W_HAND_BUILT.join(", ")}).`, src, { note: "the book's other choreography (WP1.revisions.activate.record, 14 hand-built on 087-SCH: 14/0/0) is the 087-SCH build's; this one is the proof's live record on W" }),
+          new: FA(newCount, "count", `${choreo}. The unmapped staged rows are created (:3280-3287): ${CODES.length} staged - ${W_HAND_BUILT.length} mapped = ${newCount}. The mapping GET reads the same split before the activation: suggested ${W_HAND_BUILT.length}, newActivities ${newCount}, unmappedExisting 0.`, src),
+          retired: FA(0, "count", `${choreo}. Every active activity is mapped, so none is retired (:3289-3303): ${W_HAND_BUILT.length} active - ${W_HAND_BUILT.length} mapped = 0.`, src),
+          dependencyCount: F(NET1.links.length, "count", `The activation replaces the project's dependencies (the hand-built A100->A110 included, :3337-3339) with the revision's: F1's ${NET1.links.length} FS links (WP1.T1.network.links), dependencyCount = dependencyRows.length in the activation record (:3340-3362, :3478-3492).`, src),
+        };
+      })(),
       concurrent: FA({ succeeded: 1, refused: { status: 409, code: null } }, "text", "Observation (plan :530, low): two activations of approved revisions sent at once. Expected (assumption): serialised, one wins and the other is refused 409; the code stays null (undecided, never guessed). Recorded, not a gate.", [P(530), ADJ("S2 concurrent activations / period locks")], { today: "not serialised (plan :530); no row or advisory lock in schedule.service.js @886c9f1" }),
     },
     secondImport: {
@@ -857,7 +962,7 @@ const WP1 = {
     },
     rollback: {
       M900_EF: FA(CPM1.rows.M900.EF, "working_days", "Rolling back from F1b to F1 restores A110 = 10 and A140: 81.", [P(461), H("backend/src/services/schedule.service.js", "3517-3600")]),
-      A140id: FA("same id as before the retirement", "state", "Rollback keeps ids (WP-9 :957).", [P(957)]),
+      A140id: FA("same id as before the retirement", "state", "Rollback keeps ids (WP-9 :957).", [P(957)], { today: "a new activity: A140 comes back with a new id, activityCode null and p6ActivityId 'A140'; the retired A140 stays inactive. rollbackRevision (schedule.service.js:3609-3726) re-activates the old revision's snapshot through activateRevisionSnapshot; the retired A140 is not an active activity, so no mapping can pair it and its staged row is created new (:3280-3287, activityDataFromStaged)", ref: "WP1-RB-1", note: "today added 2026-10-10 (verifier question 2): the build observed it on every run (finding WP1-RB-1); the suspect is reproduced and classified in the WP-1 confirm-first sweep" }),
     },
   },
   baseline: {
@@ -884,6 +989,7 @@ const WP1 = {
       totalAllocated: FA(ALLOCATED_FIVE + S006, "cents", `${fmt(ALLOCATED_FIVE)} + ${fmt(S006)} = ${fmt(ALLOCATED_FIVE + S006)}: 087-SCH's EV budget after the baseline step.`, [P(384), ADJ("open questions: S-006")], { note: `plan :546 lists the five WP-2 allocations only; the sixth (S-006 on A220) does not move any WP-2 figure. ${S006_NOTE}` }),
     },
     planner: F("403 FORBIDDEN", "http", "Baseline is the PM's.", [P(470, 505)]),
+    siteEngineer: F("403 FORBIDDEN", "http", "POST .../revisions/:revisionId/baseline by the site engineer: requirePermission('schedule', 'baseline', { transition: 'revision.baseline' }) (routes/schedule.js:396-399; the project-level POST .../schedule/baseline, :421-424, has the same guard); schedule.baseline and revision.baseline are the PM's only (shared/permissions.json), so 403 FORBIDDEN before the BOQ gates (middleware/rbac.js:149-153). Plan :509.", [PF(505, 509), HF("backend/src/routes/schedule.js", "396-399,421-424"), HF("shared/permissions.json", "modules.schedule"), HF("backend/src/middleware/rbac.js", "149-153"), WADJ("M6 (verifier question 6: dedicated leaves)")]),
     handBuilt: FA({ status: null, code: null, rule: "HR-S8: refused with a message that a baseline needs an import or AI generation; status and code chosen by the fix" }, "text", "L124 / HR-S8 reproduction: the baseline lock of a hand-built programme (activities created in the product, no schedule revision) on a project whose priced in-scope BOQ is fully allocated to those activities, so the BOQ gates, checked first (schedule.service.js:3937-3938), pass. Expected (HR-S8 recommendation, undecided, assumption): 'Phase 1: a baseline needs an import or AI generation, and the UI says so; an in-product revision is P2', so the lock is refused with a message that says so. HR-S8 names no status or code, so both stay null (chosen by the fix, never guessed).", [P(525, 995), H("backend/src/services/schedule.service.js", "973-978,3937-3944"), ADJ("S2 L124 / HR-S8")], { today: "404 REVISION_NOT_FOUND ('No schedule revision exists yet: import a P6/MSP schedule or generate one from the BOQ on the Schedule page.')", note: "the integration owner corrects the earlier adjudication (S2 L124 / HR-S8, which recorded a success status): HR-S8's recommendation is a refusal that says a baseline needs an import or AI generation, not a success" }),
     afterA110at20: {
       M900_EF: F(CPM2.rows.M900.EF, "working_days", "CPM moves the finish to 91.", [P(506)]),
@@ -902,6 +1008,41 @@ const WP1 = {
         baselineFinishDate: FA(workingDate(START, CPM1.rows.M900.EF), "date", `HR-S6 recommendation (undecided): the locked baseline does not move. M900's baselineFinish is its early finish at the lock: working day ${CPM1.rows.M900.EF} from Monday ${START} = ${workingDate(START, CPM1.rows.M900.EF)} (WP1.baseline.covered.M900). Today the start change re-dates it: working day ${CPM1.rows.M900.EF} from Monday 2026-01-12 = ${workingDate("2026-01-12", CPM1.rows.M900.EF)}.`, [P(510, 527, 993), ADJ("S2 WP1.dates")], { today: workingDate("2026-01-12", CPM1.rows.M900.EF) }),
       },
     },
+    calendarChange: (() => {
+      const ef = CPM1.rows.M900.EF;
+      const onOld = workingDate(START, ef, CAL_CHANGE.from);
+      const onNew = workingDate(START, ef, CAL_CHANGE.to);
+      const M = (endDate, earlyFinishDate, baselineFinishDate) => (baselineFinishDate === undefined ? { earlyFinish: ef, endDate, earlyFinishDate } : { earlyFinish: ef, endDate, earlyFinishDate, baselineFinishDate });
+      return FA(
+        {
+          change: { ...CAL_CHANGE },
+          beforeBaseline: { http: 200, projectCalendar: CAL_CHANGE.to, M900: M(onNew, onNew) },
+          afterBaseline: { http: 409, code: null, projectCalendar: CAL_CHANGE.from, M900: M(onOld, onOld, onOld) },
+        },
+        "text",
+        `HR-S6 (undecided; plan :566 'a start or calendar change does not recompute CPM, and the baseline moves with it'; recommendation :1032 'recalculate on change; refuse the change after a baseline lock (409) unless re-baselined'). The probe: the PM sends PATCH /projects/:id { projectCalendar: '${CAL_CHANGE.to}' } on W (${CAL_CHANGE.from}, start Monday ${START}, F1 active), then back to '${CAL_CHANGE.from}' (seven_day is a choice; the route accepts five_day, six_day, seven_day and custom, routes/projects.js:39,120; PATCH is the PM's or the planner's, :329-348). `
+          + `Every F1 row carries the file's calendar id '${F6_CAL.default}' (build/files.js:114,160; xer-parser.js:138; kept by the snapshot, import.service.js:222-223; written by the activation on new and mapped rows alike, schedule.service.js:1631-1638,1679-1688), an id the engine does not know, so it resolves to the project calendar (cpm.service.js:80-92). CPM counts working days, so M900's early finish stays working day ${ef} on any calendar; only its date moves: working day ${ef} from ${START} is ${onOld} on ${CAL_CHANGE.from} (WP1.T1.M900earlyFinishDate) and ${onNew} on ${CAL_CHANGE.to} (${ef} calendar days: ${Math.floor(ef / 7)} weeks to ${workingDate(START, Math.floor(ef / 7) * 7, CAL_CHANGE.to)}, then ${ef % 7} more). `
+          + `Expected (value): before any baseline the change recalculates, so M900's stored endDate and its derived earlyFinishDate both read ${onNew}; after a baseline lock the change is refused 409 (code null: HR-S6 names none, never guessed) and nothing moves: ${CAL_CHANGE.from}, endDate = earlyFinishDate = baselineFinishDate = ${onOld} (WP1.baseline.covered.M900). `
+          + `HEAD (today): 200 either way. updateProject writes the project row only and never runs CPM (project.service.js:702-808, the write :776-799), so the stored endDate stays ${onOld}; every derived date is worked out on read from the stored working-day offsets, the project start and the now ${CAL_CHANGE.to} calendar (schedule.service.js:272-321, activity.service.js:138-187): earlyFinishDate ${onNew} and, after the lock, baselineFinishDate ${onNew} too (the baseline offsets copied at the lock, schedule.service.js:4134-4142, re-dated on the new calendar: the locked baseline moves).`,
+        [PF(500, 549, 566, 1032), HF("backend/src/routes/projects.js", "39,120,329-348"), HF("backend/src/services/project.service.js", "702-808"), HF("backend/src/services/schedule.service.js", "272-321,1631-1638,1679-1688,4134-4142"), HF("backend/src/services/activity.service.js", "138-187"), HF("backend/src/services/cpm.service.js", "80-92,125-166"), WADJ("BOOK-1; M2")],
+        {
+          today: {
+            change: { ...CAL_CHANGE },
+            beforeBaseline: { http: 200, projectCalendar: CAL_CHANGE.to, M900: M(onOld, onNew) },
+            afterBaseline: { http: 200, projectCalendar: CAL_CHANGE.to, M900: M(onOld, onNew, onNew) },
+          },
+          ref: "HR-S6",
+          note: `Taken on W after the baseline lock (BL.covered.live), with the start back at ${START} (after the start-date probe), the probe judges afterBaseline; one taken before the lock judges beforeBaseline. Under today the PATCH back to '${CAL_CHANGE.from}' returns every derived date to the ${CAL_CHANGE.from} figures. CF.7 folds this leaf in with WP1.dates.startMovedTo0112.`,
+        },
+      );
+    })(),
+    endBeforeStartRefused: F("400 INVALID_DATES", "http",
+      "HR-S2 (decided; fixed at f599e67): start = end is valid when the duration is 0, and a finish before the start is still refused. assertDates (activity.service.js:329-340) throws 400 INVALID_DATES when end < start, or end = start with a duration above 0. It runs on create before anything is written (createActivity :401-406) and on update on the row as it would become, the payload's dates and duration over the stored ones, before the transaction (updateActivity :502, :549-555), so a refused PATCH leaves the row (and its updatedAt) unchanged. No route validator compares the two dates (routes/activities.js:104-105, :284-285 check each date's form only), so the service answers.",
+      [PF(50, 547, 1028), HF("backend/src/services/activity.service.js", "325-340,401-406,549-555"), HF("backend/src/routes/activities.js", "92-139,271-318"), WADJ("BOOK-2; P-Q5")],
+      { note: "on create (POST .../activities) and on update (PATCH .../activities/:id) alike; the same code before f599e67 (whose check was end <= start)" }),
+    zeroDurationCreate: F(201, "http",
+      "HR-S2's other half on create: POST .../activities with duration 0 (isMilestone true) and startDate = endDate passes assertDates (end = start with duration 0 is valid, activity.service.js:329-340) and is created, 201 (routes/activities.js:139). The duration in the payload runs CPM inside the create transaction (activity.service.js:430-440, :442-487, the call :479-481), which writes the row's early dates as its start and end (toPersistedCpmUpdate, cpm.service.js:654-667), so it reads back with start = end. Before f599e67 the same request was 400 INVALID_DATES (end <= start refused).",
+      [PF(50, 547, 1028), HF("backend/src/services/activity.service.js", "329-340,401-487"), HF("backend/src/routes/activities.js", "92-139"), HF("backend/src/services/cpm.service.js", "654-667"), WADJ("BOOK-2; P-Q5")]),
   },
   status: {
     now: F("2026-06-01T00:00:00.000Z", "instant", "The injected now for the pure boundaries.", [P(511)]),
@@ -913,6 +1054,27 @@ const WP1 = {
     A200fileFortyPercent: {
       pct: F(0, "percent", "Never approved: official pct 0 on every surface (HR-P5 recommendation: approved progress only).", [P(513, 1001)], { today: "lookahead and export show 40; search shows in_progress" }),
       status: FA(deriveStatus(0, workingDate(START, CPM1.rows.A200.EF), `${RUN}T00:00:00.000Z`), "state", `pct 0 and A200's end ${workingDate(START, CPM1.rows.A200.EF)} (EF 38) is before the run date -> delayed.`, [P(513)], { today: "search: in_progress" }),
+      // HR-P5 per surface (BOOK-6): the value is the plan's (:551-552), the today is worked from F1's file percent.
+      ...(() => {
+        const end = workingDate(START, CPM1.rows.A200.EF);
+        const fileRow = `F1's A200 row carries phys_complete_pct ${A200_FILE_PCT} (inputs.F1.tasks, column 6; plan :552), staged and written to Activity.physComplete at activation (xer-parser.js:124-141; import.service.js:242; schedule.service.js:1645), and A200 has no approved progress`;
+        const src = (...extra) => [PF(551, 552, 565, 1040), ...extra, WADJ("BOOK-6; L1")];
+        const opts = (today) => ({ today, ref: "HR-P5" });
+        return {
+          searchStatus: FA(deriveStatus(0, end, `${RUN}T00:00:00.000Z`), "state",
+            `Global search's activity result for A200. Expected (plan :551 'live statuses agree across ... search'; HR-P5 recommendation 'approved progress only, everywhere', undecided): the status /activities derives, approved pct 0 with the end ${end} (EF ${CPM1.rows.A200.EF}) before the run date -> delayed (WP1.status.A200fileFortyPercent.status). HEAD (today): search derives its own status from physComplete alone (search.service.js:223-228: >= 100 complete, > 0 in_progress, else todo; it has no delayed branch); ${fileRow}, so ${A200_FILE_PCT} -> ${searchStatusOf(A200_FILE_PCT)}. (Approved progress read through search's own rule would give ${searchStatusOf(0)}, which still disagrees with /activities.)`,
+            src(HF("backend/src/services/search.service.js", "200-228"), HF("backend/src/utils/activity-status.js", "29-35")), opts(searchStatusOf(A200_FILE_PCT))),
+          lookaheadPct: FA(0, "percent",
+            `The lookahead item's pctComplete for A200. Expected (plan :552; HR-P5): approved progress only, 0. HEAD (today): pct = latest approved progress, else physComplete (lookahead.service.js:266, :273); ${fileRow}, so ${A200_FILE_PCT}.`,
+            src(HF("backend/src/services/lookahead.service.js", "266-273")), opts(A200_FILE_PCT)),
+          exportXerPct: FA(0, "percent",
+            `The schedule export as XER (GET .../export/schedule/xer), A200's TASK phys_complete_pct. Expected (plan :552; HR-P5): 0. HEAD (today): pct = latest approved progress, else physComplete (schedule-export.service.js:140), written as phys_complete_pct (:248, :255); ${fileRow}, so ${A200_FILE_PCT}.`,
+            src(HF("backend/src/services/schedule-export.service.js", "140,248-255")), opts(A200_FILE_PCT)),
+          assistantText: FA(`${0}% complete`, "text",
+            `The assistant's retrieval source text for A200 (retrieval.service.js retrieve, activity source). Expected (plan :551-552; HR-P5): '0% complete'. HEAD (today): the text is \`\${Number(row.physComplete || 0)}% complete\` (retrieval.service.js:43); ${fileRow}, so '${A200_FILE_PCT}% complete'.`,
+            src(HF("backend/src/services/retrieval.service.js", "43")), opts(`${A200_FILE_PCT}% complete`)),
+        };
+      })(),
     },
     unapproved60: F("unchanged", "state", "A submitted (unapproved) 60 on A110 changes neither pct nor status anywhere.", [P(514)]),
     live087SCH: {
@@ -941,9 +1103,61 @@ const WP1 = {
     dropSsBackward: F("WP1.T3 red", "state", "Without the SS branch, A's backward candidate falls to FS: LS(B) 7 - 2 = 5 -> TF -5; T3's A figures fail.", [P(516)]),
     dropBoqGate: F("WP1.baseline.noBoq red", "state", "Baseline without a BOQ no longer refused.", [P(516)]),
     dropRevisionNotActivated: F("WP1.baseline.notActivated red", "state", "A staged approved revision is baselined.", [P(516)]),
-    stagedImportWrites: F("WP1.imports.xlsxDryRun / activeEqualsStaged red", "state", "A staged import writing activities directly changes the active schedule before approval.", [P(516)]),
+    stagedImportWrites: F("IMP.stagedNotApplied red", "state",
+      "The guard 'staged imports do not write' (plan :504, §6.2 :1144). The mutation makes persistImport write activities as it stages: after `revisionId = revision.id;` (import.service.js:350), tx.activity.createMany of the snapshot's activities inside the staging transaction (:319-351), so every import adds active rows before any review. "
+        + "Catcher: the WP-1 proof's IMP.stagedNotApplied (on X: the active activities' ids, durations, dates and updatedAt, and their count, read before and after a staging import of the T4 FF file) sees the added rows: red. The xlsx dry run (WP1.imports.xlsxDryRun) cannot catch it: the dry run answers before persistImport is called (import.service.js:587-604; persistImport at :606). Collateral, not the catch: on W the F1 staging also writes rows, so W's mapping and activation no longer meet the choreography and the W section stops at REV.activate.full (a setup error, exit 1; adjudication M1), before WP1.conversion.activeEqualsStaged is read.",
+      [PF(504, 555, 1144), HF("backend/src/services/import.service.js", "300-364,563-606"), WADJ("BOOK-7; M1"), PREP1("§5, §7 D4")],
+      { note: "Changed 2026-10-10 (BOOK-7): the value was 'WP1.imports.xlsxDryRun / activeEqualsStaged red'; the dry run returns before persistImport and activeEqualsStaged is not reached, so neither can catch the mutation" }),
   },
 };
+
+// Load checks for the WP-1 proof authoring leaves (2026-10-10): each new leaf agrees with the figures it is built from.
+(() => {
+  const fail = (what) => {
+    throw new Error(`schedule answer book: ${what}`);
+  };
+  // BOOK-5 inputs
+  const fsIn = WP1.T4.FSlead.inputs.value;
+  if (fsIn.A !== WP1.T3.inputs.A_duration.value || fsIn.B !== WP1.T3.inputs.B_duration.value || fsIn.A * 8 !== F3.A || fsIn.B * 8 !== F3.B || fsIn.lag * 8 !== -64) fail("WP1.T4.FSlead.inputs must be T3's A and B (80 h, 24 h) with FS -8 (-64 h)");
+  if (fsIn.A + fsIn.lag !== WP1.T4.FSlead.B_ES.value || WP1.T4.FSlead.B_ES.value + fsIn.B !== WP1.T4.FSlead.B_EF.value) fail("WP1.T4.FSlead.B_ES/B_EF must follow from WP1.T4.FSlead.inputs");
+  const mix = WP1.mixedCalendar.inputs.value;
+  if (workingDate(START, mix.A.duration, mix.A.calendar) !== WP1.mixedCalendar.A_finishDate.value) fail("WP1.mixedCalendar.inputs A must finish on WP1.mixedCalendar.A_finishDate");
+  if (workingDate(START, MIXED.rows.B.ES, mix.B.calendar) !== WP1.mixedCalendar.B_startNoEarlierThan.today) fail("WP1.mixedCalendar.inputs B must give WP1.mixedCalendar.B_startNoEarlierThan's today");
+  const range = WP1.conversion.rangeBoundary;
+  if (range.atMax.value !== RANGE_IN.maxDays || hoursToDays(range.atMax.value * 8) !== RANGE_IN.maxDays || hoursToDays(range.beyondMaxInput.value - 1) !== RANGE_IN.maxDays || !(hoursToDays(range.beyondMaxInput.value) > RANGE_IN.maxDays)) fail("WP1.conversion.rangeBoundary.beyondMaxInput must be the first whole hour past the bound");
+  // BOOK-6
+  const tp = WP1.imports.twoProjectXerStaging;
+  const chosen = Object.values(tp.value.rowsIfChosen);
+  if (tp.value.rowsIfChosen[F4_FIRST] !== WP1.T1.network.activities.value || chosen.reduce((s, n) => s + n, 0) !== F4_ROWS || tp.today.mergedRows !== F4_ROWS || tp.today.activityCount !== F4_ROWS || tp.today.imported !== F4_ROWS || tp.value.mergedRows !== 0) fail("WP1.imports.twoProjectXerStaging must count F4's two projects (F1 + the second)");
+  const ids = WP1.imports.secondCalendarIds.value;
+  if (Object.keys(ids).length !== CODES.length || CODES.filter((c) => ids[c] === F6_CAL.second).join() !== F6_CAL.secondOn.join() || CODES.some((c) => ![F6_CAL.default, F6_CAL.second].includes(ids[c]))) fail("WP1.imports.secondCalendarIds must name '2' on A300 and A330 and '1' elsewhere");
+  const a200 = WP1.status.A200fileFortyPercent;
+  if (a200.searchStatus.value !== a200.status.value || a200.lookaheadPct.value !== a200.pct.value || a200.exportXerPct.value !== a200.pct.value || a200.assistantText.value !== `${a200.pct.value}% complete`) fail("the HR-P5 surface leaves must expect WP1.status.A200fileFortyPercent.pct / .status");
+  if (a200.lookaheadPct.today !== A200_FILE_PCT || a200.exportXerPct.today !== A200_FILE_PCT || a200.searchStatus.today !== "in_progress" || a200.assistantText.today !== `${A200_FILE_PCT}% complete` || A200_FILE_PCT !== WP1.T1.stagedSnapshot.A200physComplete.value) fail("the HR-P5 surface leaves' today must be F1's A200 file percent");
+  // BOOK-4
+  const two = WP1.revisions.activate.recordTwoHandBuilt;
+  if (two.updated.value !== W_HAND_BUILT.length || two.updated.value + two.new.value !== WP1.T1.network.activities.value || two.retired.value !== 0 || two.dependencyCount.value !== WP1.T1.network.links.value || two.dependencyCount.value !== WP1.revisions.activate.record.dependencyCount.value) fail("WP1.revisions.activate.recordTwoHandBuilt must split F1's 14 rows over the 2 hand-built activities, with F1's 13 links");
+  // BOOK-3
+  const rw = WP1.revisions.rejectWithoutReason;
+  const older = WP1.revisions.activate.olderRevision;
+  if (rw.value !== "400 VALIDATION_ERROR" || rw.planValue !== "400 REJECTION_REASON_REQUIRED" || !rw.planDisagrees || !/details\.field=reason/.test(rw.note || "")) fail("WP1.revisions.rejectWithoutReason must carry the adjudicated contract, the field, and the plan's code as planValue");
+  if (older.value !== "409 INVALID_REVISION_STATUS" || older.planValue !== WP1.revisions.notCurrent.value || !older.planDisagrees || WP1.revisions.notCurrent.value !== "409 REVISION_NOT_CURRENT") fail("WP1.revisions.activate.olderRevision must carry the adjudicated contract, the plan's code (WP1.revisions.notCurrent) as planValue");
+  // BOOK-1
+  const cc = WP1.dates.calendarChange;
+  const efOld = workingDate(START, WP1.T1.M900.EF.value, CAL_CHANGE.from);
+  const efNew = workingDate(START, WP1.T1.M900.EF.value, CAL_CHANGE.to);
+  if (efOld !== WP1.T1.M900earlyFinishDate.value || efOld !== workingDate(START, WP1.baseline.covered.M900.value[1]) || efNew === efOld) fail("WP1.dates.calendarChange: M900's dates on the two calendars");
+  if (cc.value.afterBaseline.http !== WP1.dates.startMovedTo0112.afterBaseline.http.value || cc.today.afterBaseline.http !== WP1.dates.startMovedTo0112.afterBaseline.http.today || cc.value.afterBaseline.code !== null) fail("WP1.dates.calendarChange.afterBaseline must answer as the start-date change does (HR-S6: 409, code null; today 200)");
+  if (cc.value.afterBaseline.M900.baselineFinishDate !== efOld || cc.today.afterBaseline.M900.baselineFinishDate !== efNew || cc.today.afterBaseline.M900.endDate !== efOld || cc.today.beforeBaseline.M900.endDate !== efOld || cc.value.beforeBaseline.M900.endDate !== efNew || cc.value.beforeBaseline.M900.earlyFinishDate !== efNew || cc.today.beforeBaseline.M900.earlyFinishDate !== efNew) fail("WP1.dates.calendarChange: the value and today figures");
+  // BOOK-2
+  if (WP1.dates.endBeforeStartRefused.value !== WP1.dates.renameM900.today || WP1.dates.zeroDurationCreate.value !== 201) fail("WP1.dates.endBeforeStartRefused / zeroDurationCreate");
+  // BOOK-7
+  if (WP1.mutations.stagedImportWrites.value !== "IMP.stagedNotApplied red") fail("WP1.mutations.stagedImportWrites must name IMP.stagedNotApplied");
+  // every leaf added with a today names the row it waits on
+  for (const [key, leaf] of [["dates.calendarChange", cc], ["imports.twoProjectXerStaging", tp], ...["searchStatus", "lookaheadPct", "exportXerPct", "assistantText"].map((k) => [`status.A200fileFortyPercent.${k}`, a200[k]])]) {
+    if (leaf.today === undefined || !leaf.ref || !leaf.assumption) fail(`WP1.${key} carries a today without its ref, or is not marked an assumption`);
+  }
+})();
 
 // ─── WP-2 Progress ───────────────────────────────────────────────────────────
 
@@ -1625,13 +1839,13 @@ function isLeaf(node) {
   return node && typeof node === "object" && !Array.isArray(node) && "value" in node && "unit" in node && "derivation" in node;
 }
 
-/** Flattens the tree to [{ key, value, unit, derivation, source, assumption, planDisagrees, planValue?, today?, company?, note? }]. */
+/** Flattens the tree to [{ key, value, unit, derivation, source, assumption, planDisagrees, planValue?, today?, ref?, company?, note? }]. */
 function figures() {
   const out = [];
   const walk = (node, path) => {
     if (isLeaf(node)) {
       const row = { key: path.join("."), value: node.value, unit: node.unit, derivation: node.derivation, source: node.source, assumption: node.assumption, planDisagrees: node.planDisagrees };
-      for (const extra of ["planValue", "today", "company", "note"]) if (node[extra] !== undefined) row[extra] = node[extra];
+      for (const extra of ["planValue", "today", "ref", "company", "note"]) if (node[extra] !== undefined) row[extra] = node[extra];
       out.push(row);
       return;
     }

@@ -593,3 +593,180 @@ builder no longer requires `rules.evMetrics`.
   must hold exactly one active member, the guest (a removed member reads 'inactive'), asserted at guest.access
   and guest.hlt and re-read live by both steps' verify on a resume; POST .../members answers `{ id, status }`,
   which the create asserts.
+
+# WP-1 proof authoring (2026-10-10)
+
+Binding source: `C:\Temp\octapm-cert\scratch\wp1\author-adjudication.md`, items BOOK-1..BOOK-7 (cited in the book as
+`WADJ(...)`), with the reviewers' findings in `author-summary.txt` and `C:\Temp\octapm-cert\scratch\wp1-prep.md` §5/§7
+(`PREP1(...)`). Rule A10 applies: every leaf below carries its on-paper derivation in the book (`derivation`), worked from
+the product code at `f599e67` (cited with the new helper `HF(file, lines)`, suffix `@f599e67`; `backend/src` in the
+worktree is identical to `f599e67`), from existing book keys, or from the generators in `build/files.js` (restated in the
+book, which still requires nothing). Plan lines are numbered at `f599e67` (`PF(...)`).
+
+Figure count: schedule 853 -> 870 (+17). No key was removed. Three existing values changed, each as the adjudication
+directs and each recording its old value: `WP1.revisions.rejectWithoutReason` and `WP1.revisions.activate.olderRevision`
+(BOOK-3, the plan's codes kept as `planValue`) and `WP1.mutations.stagedImportWrites` (BOOK-7, old value in `note`). No
+other `value` or `today` changed (checked by a before/after dump of `figures()`: 850 leaves byte-identical; `inputs` and
+`rules` identical).
+
+Leaf contract: leaves may now carry `ref`, the §5 row (or finding) a `today` waits on (`F(..., { ref })`; `figures()`
+copies it). Every new leaf with a `today` names its `ref` and is `assumption: true` (checked at load).
+
+New helpers in schedule.js (data, not leaves): `HF`, `WADJ`, `PREP1`; `FSL_IN` (the FS-lead inputs; `FSL_TODAY` and
+`FSL_CAP` now read it, same figures), `MIXED_IN` (`MIXED` reads it, same figures), `RANGE_IN`, `F4_FIRST`, `F4_SECOND`,
+`F4_ROWS`, `F6_CAL`, `A200_FILE_PCT`, `searchStatusOf`, `W_HAND_BUILT`, `CAL_CHANGE`; and a block of load checks after
+`WP1` that ties every new leaf to the figures it is built from (the book refuses to load otherwise).
+
+## BOOK-1. The project calendar change (HR-S6; adjudication M2)
+
+Derivation: the probe is PATCH /projects/:id `{ projectCalendar: 'seven_day' }` by the PM on W (five_day, start
+2026-01-05, F1 active), then back to five_day. Every F1 row carries the file's calendar id '1' (files.js:114, :160;
+xer-parser.js:138; import.service.js:222-223; activation writes it on new and mapped rows, schedule.service.js:1631-1638,
+1679-1688), an id the engine does not know, so it resolves to the project calendar (cpm.service.js:80-92). CPM counts
+working days, so M900's early finish stays 81; its date is 2026-04-28 on five_day and 2026-03-27 on seven_day (81
+calendar days from 2026-01-05). Value (HR-S6 recommendation, plan :1032): before a baseline the change recalculates
+(stored endDate = derived earlyFinishDate = 2026-03-27); after the lock it is refused 409, code null, and nothing moves
+(five_day; endDate = earlyFinishDate = baselineFinishDate = 2026-04-28). Today: 200 either way; updateProject writes the
+project row only, no CPM (project.service.js:702-808, write :776-799), so endDate stays 2026-04-28 while every derived
+date is re-dated on read on the new calendar (schedule.service.js:272-321, activity.service.js:138-187): earlyFinishDate
+2026-03-27 and, after the lock, baselineFinishDate 2026-03-27 (the locked baseline moves).
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP1.dates.calendarChange` | none | value `{ change: {from: five_day, to: seven_day}, beforeBaseline: {http 200, projectCalendar seven_day, M900 {earlyFinish 81, endDate 2026-03-27, earlyFinishDate 2026-03-27}}, afterBaseline: {http 409, code null, projectCalendar five_day, M900 {earlyFinish 81, endDate 2026-04-28, earlyFinishDate 2026-04-28, baselineFinishDate 2026-04-28}} }`; today `{ beforeBaseline: {http 200, seven_day, M900 endDate 2026-04-28, earlyFinishDate 2026-03-27}, afterBaseline: {http 200, seven_day, M900 endDate 2026-04-28, earlyFinishDate 2026-03-27, baselineFinishDate 2026-03-27} }`; ref HR-S6; assumption |
+
+On W the probe runs after BL.covered.live with the start back at 2026-01-05, so it judges `afterBaseline`; CF.7 folds it
+in with `WP1.dates.startMovedTo0112`.
+
+## BOOK-2. End before start (HR-S2, decided and fixed at f599e67)
+
+Derivation: assertDates (activity.service.js:329-340) throws 400 INVALID_DATES when end < start, or end = start with a
+duration above 0; it runs on create before any write (:401-406) and on update on the row as it would become, before the
+transaction (:549-555), so a refused PATCH leaves the row and its updatedAt unchanged; no route validator compares the two
+dates (routes/activities.js:104-105, :284-285). The create check's other half gets its own leaf: a zero-duration milestone
+with start = end passes assertDates and is created, 201 (routes/activities.js:139); CPM in the create transaction
+(:430-440, :479-481) writes its early dates as start and end (cpm.service.js:654-667), so it reads back start = end.
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP1.dates.endBeforeStartRefused` | none (DATES.endBeforeStart.* cited `WP1.dates.renameM900`) | `400 INVALID_DATES` (create and update) |
+| `WP1.dates.zeroDurationCreate` | none (a literal 201 in DATES.endBeforeStart.create) | `201` |
+
+## BOOK-3. The adjudicated revision contracts (WP-1 prep §7 D1, D2)
+
+Derivation: reject without a reason is answered by the route, not the service: reasonRequired + validateWithReasons
+(routes/schedule.js:107-117, :371-392; middleware/validate.js:7-12, :34-56) give 400 VALIDATION_ERROR, message 'A
+rejection reason is required.', error.details holding field 'reason'; REJECTION_REASON_REQUIRED (schedule.service.js:
+3960-3966) is unreachable through the API. Activating an older revision never reaches loadCurrentRevisionForLifecycle
+(:965-1012): activateRevision (:3539-3564) -> activateRevisionSnapshot (:3106), whose status guard (:3130-3137) answers 409
+INVALID_REVISION_STATUS for the superseded F1b. REVISION_NOT_CURRENT is what the lifecycle routes answer for the same
+revision (submit-review, :3778-3790), so it gets its own leaf, which REV.notCurrent reads (L1).
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP1.revisions.rejectWithoutReason` | `400 REJECTION_REASON_REQUIRED` | `400 VALIDATION_ERROR`, planValue `400 REJECTION_REASON_REQUIRED`, note `details.field=reason` |
+| `WP1.revisions.activate.olderRevision` | `409 REVISION_NOT_CURRENT` | `409 INVALID_REVISION_STATUS`, planValue `409 REVISION_NOT_CURRENT` |
+| `WP1.revisions.notCurrent` | none (REV.notCurrent cited the older-revision leaf) | `409 REVISION_NOT_CURRENT` (submit-review of the superseded F1b) |
+
+## BOOK-4. F1 over two hand-built activities (adjudication P-Q1)
+
+Derivation (assumption: the proof's W choreography): with A100 and A110 hand-built (activityCode A100, A110) active, the
+mapping (suggestActivityMappings, schedule.service.js:1518-1629) pairs each by its file code (an XER row's task_code is
+staged as its P6 id; matchType activity_code, confidence 1); activation updates the 2 mapped rows (:3263-3278), creates
+the 14 - 2 = 12 others (:3280-3287), retires none (:3289-3303) and replaces the dependencies with F1's 13 links
+(:3337-3362; record :3478-3492). The mapping GET reads the same split (suggested 2, newActivities 12, unmappedExisting 0).
+`WP1.revisions.activate.record` (14/0/0, 087-SCH's choreography) is unchanged and stays asserted from the stored build out.
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP1.revisions.activate.recordTwoHandBuilt.updated` / `new` / `retired` | none (literals 2 / 12 / 0 in REV.activate.full) | `2` / `12` / `0` (assumption) |
+| `WP1.revisions.activate.recordTwoHandBuilt.dependencyCount` | none | `13` |
+
+## BOOK-5. Inputs (L1)
+
+Derivation: the FS-lead network is T3's A(10) and B(3) (80 h / 8, 24 h / 8; plan :524) with FS -8 (plan :525), in
+working days like `WP1.T4.FF.inputs` and `WP1.T4.SF.inputs` (the file writes value x 8: 80 h, 24 h, -64 h). The mixed
+pair is A five_day 5 d (from the plan's 2026-01-12: working day 5 from Monday 2026-01-05), FS 0, B seven_day 2 d (a
+choice). The beyond-the-bound input is SCHEDULE_DAYS_MAX 36,500 (schedule-days.js:18) x 8 + 4 = 292,004 h, the first
+whole hour that rounds past the bound (292,001..292,003 h round to 36,500); the at-bound input is
+`WP1.conversion.rangeBoundary.atMax` x 8 = 292,000 h.
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP1.T4.FSlead.inputs` | none (literals 80 / 24 / -64 h and 10 / 3 / -8 in the proof) | `{A: 10, B: 3, lag: -8}` working days (file hours x 8) |
+| `WP1.mixedCalendar.inputs` | none | `{A: {duration 5, calendar five_day}, B: {duration 2, calendar seven_day}, link: {type FS, lag 0}}` (assumption) |
+| `WP1.conversion.rangeBoundary.beyondMaxInput` | none (literal 36_500 * 8 + 4) | `292004` hours (assumption) |
+
+## BOOK-6. Known-answer figures from the generators (M4, L1, L9)
+
+Derivation: F4 (files.js F4() :285-301) = CERT3-FIRST (F1, 14 TASK rows) + CERT3-SECOND (B100 16 h, B110 40 h, B120 0 h,
+3 rows): 17. Value (HR-S4 recommendation): no revision merges them (mergedRows 0): refused (status and code null, chosen
+by the fix) or a project choice staging 14 or 3. Today: the parser reads every TASK and TASKPRED row whatever its proj_id
+(xer-parser.js:113-163) and persistImport stages one draft revision (import.service.js:300-364): 201, activityCount =
+imported = 17. F6 (files.js F6() :314-326) names clndr_id '2' on A300 and A330 and the default '1' elsewhere; the parser
+and snapshot keep the file's id (xer-parser.js:138; import.service.js:222-223), which is HR-S4's value ("recorded") and
+HEAD's staging alike (the fallback to the project calendar is downstream, cpm.service.js:80-92). A200's file percent is
+F1's phys_complete_pct 40 (inputs.F1), written to physComplete at activation (schedule.service.js:1645); search derives
+its status from physComplete alone (search.service.js:223-228: 40 -> in_progress, no delayed branch), lookahead and the
+XER export fall back to physComplete (lookahead.service.js:273; schedule-export.service.js:140, :255), and retrieval
+writes `${physComplete}% complete` (retrieval.service.js:43). The values are the plan's (:551-552): 0 everywhere and the
+status /activities derives (delayed).
+
+`WP1.imports.twoProjectXer` is not changed: build/087-imp.js:438 interpolates its `today` as text, so the machine-readable
+figures live on a new leaf.
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP1.imports.twoProjectXerStaging` | none (literal 17 in KA.IMP.twoProjectXer) | value `{mergedRows: 0, rowsIfChosen: {CERT3-FIRST: 14, CERT3-SECOND: 3}}`; today `{http: 201, revisionStatus: draft, mergedRows: 17, imported: 17, activityCount: 17}`; ref HR-S4; assumption |
+| `WP1.imports.secondCalendarIds` | none (literals '1' / '2' in KA.IMP.secondCalendar) | `{A100..M900: '1', A300: '2', A330: '2'}` (all 14 codes) |
+| `WP1.status.A200fileFortyPercent.searchStatus` | none (literal in_progress) | `delayed` (= `.status`), today `in_progress`; ref HR-P5; assumption |
+| `WP1.status.A200fileFortyPercent.lookaheadPct` | none (literal 40) | `0`, today `40`; ref HR-P5; assumption |
+| `WP1.status.A200fileFortyPercent.exportXerPct` | none (literal 40) | `0`, today `40`; ref HR-P5; assumption |
+| `WP1.status.A200fileFortyPercent.assistantText` | none (literal '40% complete') | `0% complete`, today `40% complete`; ref HR-P5; assumption |
+
+## BOOK-7. The staged-import guard's catcher (M1)
+
+Derivation: the mutation (a tx.activity.createMany after `revisionId = revision.id;`, import.service.js:350, inside
+persistImport's transaction :319-351) makes every staging import write active rows. The WP-1 proof's
+IMP.stagedNotApplied (X: the active activities' fingerprint and count around a staging import) sees them: red. The xlsx dry
+run cannot catch it (it answers at import.service.js:587-604, before persistImport at :606), and on W the run stops at
+REV.activate.full (setup error, exit 1) before activeEqualsStaged is read.
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP1.mutations.stagedImportWrites` | `WP1.imports.xlsxDryRun / activeEqualsStaged red` | `IMP.stagedNotApplied red` (old value in note) |
+
+## For the proof and the lists (no change made outside the book)
+
+- REV.notCurrent reads `WP1.revisions.notCurrent` (its bookKey still names `WP1.revisions.activate.olderRevision`).
+- DATES.endBeforeStart.update/.create read `WP1.dates.endBeforeStartRefused` (and `.zeroDurationCreate` for the 201).
+- KA.IMP.twoProjectXer judges a fresh F4 staging against `WP1.imports.twoProjectXerStaging` (value / today);
+  KA.IMP.secondCalendar's value branch is `WP1.imports.secondCalendarIds`.
+- KA.STATUS.A200.search / lookahead / exportXer / assistant read the four `WP1.status.A200fileFortyPercent.*` surface
+  leaves (value and today). Note: the book's search value is `delayed` (statuses agree, plan :551); the proof's draft also
+  accepted `todo` there.
+- REV.activate.full and REV.mapByCode.live read `WP1.revisions.activate.recordTwoHandBuilt`.
+- T4_FILES.FSlead and the in-process FS lead read `WP1.T4.FSlead.inputs` (x 8 for hours); the mixed-calendar call reads
+  `WP1.mixedCalendar.inputs`; the range files read `WP1.conversion.rangeBoundary.atMax` x 8 and `.beyondMaxInput`.
+- The calendar probe reads `WP1.dates.calendarChange` (its `afterBaseline` branch on W after the lock).
+- Not added (not in BOOK-1..7): leaves for the site engineer's refusals on activate / rollback / baseline (M6) and for
+  "CPM runs inside the activation transaction" (M3).
+
+Validation: `node --check` exit 0; the module loads (870 figures, the new load checks pass, no DB access);
+`scratch/wp0/load-schedule.js`: "OK: leaf contract and cross-checks pass"; a scratch cross-check against `build/files.js`
+(F1, F4, F6, the FS-lead model parsed back with the product's XER parser) and the product's pure `calculateCpm` /
+`workingDayToDate`: every new figure agrees (F4 17 parsed rows; F6 ids; FS lead B ES 2 / EF 5; mixed B 2026-01-10;
+36,500 / 36,501 days; M900 on five_day / seven_day with calendar id '1': 2026-04-28 / 2026-03-27). Bytes: UTF-8 without
+BOM, no double-encoding; schedule.js LF, this file CRLF.
+
+# WP-1 proof verification (2026-10-10, integration owner)
+
+Applied by Claude Main after the read-only verifier of the WP-1 fix round (`C:\Temp\octapm-cert\scratch\wp1\verify\verify-report.md`). 3 leaves added, 2 `today` values added or corrected; no value changed.
+
+| Key | Change | Derivation |
+|---|---|---|
+| WP1.revisions.roles.siteEngineerActivate | new: 403 FORBIDDEN | routes/schedule.js:242-245 `requirePermission('schedule', 'approve', { transition: 'revision.activate' })`; shared/permissions.json gives schedule.approve and revision.activate to the PM only; rbac.js:149-153 answers 403 FORBIDDEN before the service (plan :509). |
+| WP1.revisions.roles.siteEngineerRollback | new: 403 FORBIDDEN | routes/schedule.js:300-303, transition revision.rollback (PM only); same refusal path. |
+| WP1.baseline.siteEngineer | new: 403 FORBIDDEN | routes/schedule.js:396-399 and :421-424, `requirePermission('schedule', 'baseline', { transition: 'revision.baseline' })` (PM only); refused before the BOQ gates. |
+| WP1.revisions.hrS3Reproduction.approve.today | corrected: exactly one blocking check fails, critical_path | The old text named date_sanity as well, true at 886c9f1; since f599e67 (HR-S2 decided and fixed) M900's start = finish passes date_sanity. Observed in WP-1 debug run 4 and 5. ref HR-S3. |
+| WP1.revisions.rollback.A140id.today | new: A140 re-created with a new id, activityCode null, p6ActivityId 'A140'; the retired row stays inactive | rollbackRevision (schedule.service.js:3609-3726) re-activates the old snapshot through activateRevisionSnapshot; the retired A140 is not active, so no mapping pairs it and its staged row is created (:3280-3287). Observed on every build run (finding WP1-RB-1). ref WP1-RB-1. |

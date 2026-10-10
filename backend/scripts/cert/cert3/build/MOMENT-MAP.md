@@ -276,4 +276,8 @@ Known-answer keys are those of `backend/scripts/cert/cert3/answers/*.js` (schedu
 | WP9.export.sheetGate (value; today = HR-K7 known answer) | asserted in build: 087-EXTRAS step export.sheet-gate (BLOCKED HR-K7 while today holds) | 2 |
 | WP8.weather.nonContractualAddsNothing (value 14; today 12 = HR-C11 known answer) | asserted in build: 087-FLD and 052-FLD steps weather.non-contractual | 2 |
 
+## Deviations recorded by the work packages
+
+- **WP-1** (run plan `WP1-RUN-PLAN.md` §5.2, integration owner 2026-10-10): the WP-1 proof runs the T4 networks, the zero-rated and all-out-of-scope baseline refusals, the two-project XER (F4), T2, both start-date probes and both calendar probes on its own throwaway projects W and X in 087, not on 087-IMP or 087-SCH (the rows for WP1.T4.*, WP1.baseline.zeroRated / allOutOfScope and WP1.imports.twoProjectXer above). Fresh records either way; the deep projects keep their end state for re-runs. The proof's only write on a deep project is the F1float5 submit and approval on 087-IMP.
+
 225 entries.

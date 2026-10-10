@@ -767,3 +767,23 @@ E2's "builder exit 0" cannot be met until those land. **WP-0 stays formally open
 **Meanwhile.** The builders, answer books and moment map are committed (this commit). The WP-1 proving run, mutation lists and run plan are being authored write-only and will be debug-run against the partial database; it is discarded by the next `cert2c` restore.
 
 **Next exact action:** at or after Sunday 2026-10-11 19:10 CDT, launch `build-cert3d.ps1` detached again; report the eight items the owner asked for; then the confirm-first sweep and WP-1 on `cert3d`.
+
+## 2026-10-10 — Parallel execution mode; WP-1 proof ready for `cert3d`
+
+**Owner instruction (CERT-3 PARALLEL EXECUTION MODE).** The plan stays authoritative and coverage is not reduced. Claude Main is the only writer: product code, the certification database, migrations, commits and pushes, and mutation runs. Other agents prepare read-only and write only to scratch. While WP-N executes, WP-(N+1) is prepared. Long runs go detached. Reruns are targeted; full runs only at the plan's checkpoints. Codex only for the plan's required reviews. Once `cert3d` exists it is the baseline, restored rather than rebuilt. Manual UX never holds certification.
+
+**Applied at once.** A WP-1 fix workflow whose agents were editing the worktree and debug-running against the database was stopped when the instruction arrived. Its finished work (answer-book leaves BOOK-1..7; the proof fixes H1-H4, M2-M6, L1-L10, R-SET) and the stopped agent's nearly finished list reconciliation were taken over by Claude Main and verified by a read-only verifier: every adjudicated item VERIFIED except the run plan, which a read-only agent redrafted.
+
+**Integration owner's decisions on the verifier's questions** (applied by Claude Main):
+- Three dedicated answer-book leaves for the site engineer's refusals (activate, rollback, baseline: 403 FORBIDDEN, PM-only transitions). The HR-S3 approval's `today` corrected to critical_path only (date_sanity passes since the HR-S2 fix). A `today` leaf for the rollback A140 id (ref WP1-RB-1).
+- Confirm-first checks carry `defect` only for a decided rule or a landed fix (CF.1, CF.4), so the harness's classification line is now correct. A known answer at `today` fails once its rule is decided.
+- Plan :506 "CPM runs inside the activation transaction" is recorded as a TEST GAP (the live check proves the figures are stored when the activation answers; mutations C4/C5 survive live; the mocked unit catchers are not evidence under plan §1.4). The check's description says so.
+- The mutation runner keeps every FAIL line (C1's catchers fell past its cap of 12). The mutation evidence checker is committed as `wp1-mutation-evidence.js`. The WP-1 mutation lists run on `cert3d` only.
+- The `cert3d` primary run doubles as WP-1's part of the confirm-first sweep. The 22 landed-fix mutations are not rerun while their files are unchanged.
+- WP1-CONC-1 registered (concurrent activations not serialised, P3 proposed). Two product-vs-book items recorded: PB-1 (the HR-S3 book text, corrected) and PB-2 (two audit entries per baseline lock in the merged timeline: EXPECTED BEHAVIOUR).
+
+**Evidence (debug only; the partial database is discarded by the next `cert2c` restore).** Debug run 5 on the partial population (`--skip=LANES`, by Claude Main): exit 0, 145/145; 123 plain passes; 21 known answers at `today` (BLOCKED with their refs), 1 at value, 0 wrong; confirm-first CF.1 and CF.4 REJECTED (fixes hold), CF.2, 3, 5-10 CONFIRMED under undecided rules; throwaway projects archived.
+
+**WP-2 prepared read-only** (`C:\Temp\octapm-cert\scratch\wp2\WP2-PREP.md`): test map, routes, existing tests, register rows, fixtures (one throwaway 087 project P), a 164-check proof structure, mutation candidates for every §6.2 WP-2 guard, persona cases, and 23 proposed answer-book leaves. Its open questions are adjudicated before WP-2 authoring.
+
+**Next exact action:** the §3.3 build order run 2 at 2026-10-11 19:12 CDT (scheduled). Then the eight-item report, the WP-1 primary run on `cert3d`, and WP-1 per `WP1-RUN-PLAN.md`.

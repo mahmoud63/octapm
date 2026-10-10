@@ -1,0 +1,83 @@
+{
+  "proof": "scripts/cert/cert3/wp1-schedule-proof.js",
+  "guards": "CERT-3 plan §6.2 WP-1: 'the BOQ baseline gate' and 'REVISION_NOT_ACTIVATED' (plan §4 WP-1 Mutations :555: 'the BOQ baseline gate dropped; REVISION_NOT_ACTIVATED dropped'; rules certified :508: BOQ_REQUIRED_FOR_BASELINE, BOQ_VALUE_…, BOQ_SCOPE_…, REVISION_NOT_ACTIVATED); answer book WP1.mutations.dropBoqGate and WP1.mutations.dropRevisionNotActivated.",
+  "reconciled": "2026-10-10 against the final proof (146 fixed checks + G.5xx; debug run 4 exit 0). Every id in `catchers` and `collateral` is a check id exactly as the proof records it. Adjudication C:/Temp/octapm-cert/scratch/wp1/author-adjudication.md M1, L-Q3.",
+  "note": "Fields as in wp1-mutations.cpm.json (`catchers` must read FAIL in the proof's result file; `expectVerdict` is the runner's expected score; `e6`). Where the refusals are taken: on the throwaway project W, in the plan's order (:543) — BL.noBoq (F1 active, no bill), BL.zeroRated (a zero-rated in-scope row), BL.allOutOfScope (priced rows optional / not applicable), the in-scope W-001 bill uploaded and left unallocated, F1b staged and approved, BL.notActivated (F1b), BL.unallocated.live (R1), then the W-001 allocation, BL.planner, BL.siteEngineer and the lock (BL.covered.live). Not on 087-IMP as MOMENT-MAP line 27 (R1-16) says (adjudication L-Q3; run plan §5.2). BL.noBoq.stored and BL.notActivated.stored read 087-SCH's stored moments and cannot flip. lockBaseline at f599e67 (schedule.service.js:4017-): ensureProject, assertBoqForBaseline (:4030; the gate, :1162-1199), the revision and its status (:4032-4038), REVISION_NOT_ACTIVATED (:4044-4051), the readiness (:4056-4064), NO_ACTIVITIES (:4071-4077), then the transaction with the gate again (:4083). The readiness is a second line of defence for every mutant here: its boq_present check (:741-753, built from the allocation summary's items, which are always listed) refuses a bill with no in-scope value, and its allocations check never passes for a staged revision (coveredByApprovedAllocations requires !staged, :764-770). So every mutated lock below is still refused, only with a different code, and nothing is written in any order: the catch rests on the proof asserting the exact status AND code (harness rule 2; h.is). The book's prose for WP1.mutations.dropBoqGate ('no longer refused') and dropRevisionNotActivated ('a staged approved revision is baselined') predicts writes that do not happen at f599e67; their catchers are right (wording note for the book owner, run plan §13).",
+  "mutations": [
+    {
+      "name": "G1 the BOQ baseline gate dropped whole: assertBoqForBaseline returns at once at all three call sites (the §6.2 'BOQ baseline gate')",
+      "guard": "§6.2 WP-1 'the BOQ baseline gate' (schedule.service.js assertBoqForBaseline :1162-1199, called at :4030, :4083 and in the rollback gate :3672)",
+      "e6": "§6.2 WP-1 guard 3 of 5 (the BOQ baseline gate); G2-G4 prove its three exact codes",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "const assertBoqForBaseline = async (projectId, db = prisma) => {",
+      "to": "const assertBoqForBaseline = async (projectId, db = prisma) => { return;",
+      "bookKeys": ["WP1.mutations.dropBoqGate", "WP1.baseline.noBoq", "WP1.baseline.zeroRated", "WP1.baseline.allOutOfScope"],
+      "catchers": ["BL.noBoq", "BL.zeroRated", "BL.allOutOfScope"],
+      "collateral": [],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "BL.noBoq FAIL (expected '400 BOQ_REQUIRED_FOR_BASELINE'), BL.zeroRated FAIL (expected '400 BOQ_VALUE_REQUIRED_FOR_BASELINE'), BL.allOutOfScope FAIL (expected '400 BOQ_SCOPE_REQUIRED_FOR_BASELINE'): with the gate gone each lock of W's active, approved R1 reaches the readiness, whose boq_present check fails (no bill / no in-scope value), so each answers '400 SCHEDULE_NOT_READY' and nothing is written. Unchanged: BL.notActivated (409 REVISION_NOT_ACTIVATED is answered before the readiness), BL.unallocated.live (the in-scope W-001 bill passes the gate at HEAD too), BL.covered.live / BL.secondBaseline (covered bill), REV.rollback.live (its gate passes on the covered bill), KA.BL.handBuilt on X (its allocated bill passes the gate at HEAD; 404 REVISION_NOT_FOUND either way). The rollback gate's own refusal (no bill at a rollback to a baselined revision) has no WP-1 check (pc-4 suite on :55432, not counted).",
+      "mutatedAnswer": "400 SCHEDULE_NOT_READY on BL.noBoq, BL.zeroRated and BL.allOutOfScope (boq_present); nothing written",
+      "storedDefect": "none"
+    },
+    {
+      "name": "G2 the no-bill refusal dropped: a project with no BOQ row is judged on its empty value instead (exact-code variant of G1)",
+      "guard": "§6.2 WP-1 'the BOQ baseline gate', BOQ_REQUIRED_FOR_BASELINE (schedule.service.js:1166-1172)",
+      "e6": "exact-code variant of guard 3 (the BOQ baseline gate; G1 is its E6 entry)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "  if (boqItems === 0) {",
+      "to": "  if (false) {",
+      "bookKeys": ["WP1.baseline.noBoq"],
+      "catchers": ["BL.noBoq"],
+      "collateral": [],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "BL.noBoq FAIL, and only because the proof asserts the exact code: the mutated answer is the next gate's '400 BOQ_VALUE_REQUIRED_FOR_BASELINE' (an empty bill's priced sum is 0 ≤ BOQ_VALUE_EPSILON). A proof that accepted any 400 would let it survive (harness rule 2: status AND code). Everything else unchanged.",
+      "mutatedAnswer": "400 BOQ_VALUE_REQUIRED_FOR_BASELINE",
+      "storedDefect": "none"
+    },
+    {
+      "name": "G3 the no-value refusal dropped: a bill priced at zero passes to the scope check",
+      "guard": "§6.2 WP-1 'the BOQ baseline gate', BOQ_VALUE_REQUIRED_FOR_BASELINE (schedule.service.js:1174-1184)",
+      "e6": "exact-code variant of guard 3 (the BOQ baseline gate; G1 is its E6 entry)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "  if (toMoneyNumber(priced?._sum?.amount) <= BOQ_VALUE_EPSILON) {",
+      "to": "  if (false) {",
+      "bookKeys": ["WP1.baseline.zeroRated"],
+      "catchers": ["BL.zeroRated"],
+      "collateral": [],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "BL.zeroRated FAIL (expected '400 BOQ_VALUE_REQUIRED_FOR_BASELINE'; mutated: the zero-rated row is in scope but worth 0, so the scope gate answers '400 BOQ_SCOPE_REQUIRED_FOR_BASELINE'). BL.noBoq (refused first by the no-bill branch) and BL.allOutOfScope (priced, so this branch passed anyway) are unchanged.",
+      "mutatedAnswer": "400 BOQ_SCOPE_REQUIRED_FOR_BASELINE",
+      "storedDefect": "none"
+    },
+    {
+      "name": "G4 the out-of-scope refusal dropped: a bill whose every priced row is optional or not applicable passes the gate",
+      "guard": "§6.2 WP-1 'the BOQ baseline gate', BOQ_SCOPE_REQUIRED_FOR_BASELINE (schedule.service.js:1185-1199)",
+      "e6": "exact-code variant of guard 3 (the BOQ baseline gate; G1 is its E6 entry)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "  if (toMoneyNumber(inScope?._sum?.amount) <= BOQ_VALUE_EPSILON) {",
+      "to": "  if (false) {",
+      "bookKeys": ["WP1.baseline.allOutOfScope"],
+      "catchers": ["BL.allOutOfScope"],
+      "collateral": [],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "BL.allOutOfScope FAIL (expected '400 BOQ_SCOPE_REQUIRED_FOR_BASELINE'; mutated: the gate passes, W's R1 is active and approved, and the readiness's boq_present refuses the token bill like no bill: '400 SCHEDULE_NOT_READY'; nothing written). BL.noBoq and BL.zeroRated unchanged (refused by the earlier branches).",
+      "mutatedAnswer": "400 SCHEDULE_NOT_READY (boq_present)",
+      "storedDefect": "none"
+    },
+    {
+      "name": "G5 REVISION_NOT_ACTIVATED dropped: an approved revision still staged is taken to the baseline lock (the §6.2 guard)",
+      "guard": "§6.2 WP-1 'REVISION_NOT_ACTIVATED' (schedule.service.js:4044-4051)",
+      "e6": "§6.2 WP-1 guard 4 of 5 (REVISION_NOT_ACTIVATED)",
+      "file": "backend/src/services/schedule.service.js",
+      "from": "  if (!revision.isActive && getSnapshotActivities(revision, project).length > 0) {",
+      "to": "  if (false) {",
+      "bookKeys": ["WP1.mutations.dropRevisionNotActivated", "WP1.baseline.notActivated"],
+      "catchers": ["BL.notActivated"],
+      "collateral": [],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "BL.notActivated FAIL (expected '409 REVISION_NOT_ACTIVATED'): the lock of W's F1b (approved, staged, the in-scope W-001 bill present and unallocated) passes the gate, skips the mutated branch and reaches the readiness of the staged revision, whose allocations check cannot pass for a staged revision (:764-770), so it answers '400 SCHEDULE_NOT_READY' and writes nothing. That holds in any order, the covering allocation included (the earlier note's 'a write only on a fully covered bill' does not hold at f599e67). BL.notActivated.stored reads 087-SCH's stored moment and cannot flip; every other BL check is unchanged.",
+      "mutatedAnswer": "400 SCHEDULE_NOT_READY (allocations: 'BOQ value is mapped to this revision's activities after it is activated ...'); nothing written",
+      "storedDefect": "none (in any order)"
+    }
+  ]
+}

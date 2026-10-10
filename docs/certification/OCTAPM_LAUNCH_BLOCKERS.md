@@ -292,6 +292,7 @@ Deferred (recorded, not L38):
   | WP5-SVC-1 | A received service PO line becomes a stocked item (`resolveInventoryItem`), so service invoices are capitalised (postedAmount 0). | WP-5 | P2 |
   | WP5-AWD-1 | An award to a bidder who is not the lowest has no "not the lowest" justification; the only override is the prequalification override. | WP-5 | P3 |
   | WP8-TRN-1 | Transmittal create (and correspondence create, same pattern) cannot cite an already-filed document: 404 `FILE_NOT_FOUND` (`recordDocumentRevisions` without a user). | WP-8 | P3 |
+  | WP1-CONC-1 | Two activations of approved revisions sent at once are not serialised: both answer 200 (WP-1 debug runs: 14 active rows, no duplicates). Plan :569 (low) expects one to win and the other to be refused 409; the code stays undecided. Proof check KA.REV.concurrent, confirm-first CF.10. | WP-1 | P3 |
 - **WP1-ACT-2 (P3, from Codex diff round 2; deferred to CERT-7).**
   - **The defect.** `activityCode` accepts internal control characters: the validator trims the ends only. A code such as `A<tab>100`, crossed by hand onto another file row while the row coded `A 100` stays, exports twice as `A 100` in XER `task_code` and P6 XML `Id`, because the exports turn tabs into spaces.
   - **Proposed fix.** Refuse control characters in `activityCode`, or compare identities as the exports write them.
