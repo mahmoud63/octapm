@@ -5,7 +5,7 @@
  *   - the WP-0 stage-table rows stage3:109, stage4:167/:170 and stage5:82-204 (plan 453-455);
  *   - WP-4 change, commitments, IPC, pay applications, cash flow (plan 631-692);
  *   - WP-5 bids, award, PO, goods receipt, inventory, direct costs, three-way match (plan 694-753);
- *   - WP-6 BOQ, allocations, budgets, cost codes (plan 755-795);
+ *   - WP-6 BOQ, allocations, budgets, cost codes (plan 755-795; :795-836 at HEAD 6c5ab54, WP-6 G22);
  *   - WP-7 EOT and the weather 70% rule (plan 797-830);
  *   - the §3.2 contents of 087-COM, 087-COM-B, 087-COM-C and 052-COM (plan 387-389, 404),
  *     plus the D3 retention-default case (plan 409) because owner decision HR-C1 changes it.
@@ -110,6 +110,27 @@
  * WP5.N6.usage50's value is 201, the route's status for a recorded usage (a create); its today is
  * unchanged. No rule is decided. Load checks after WP-5's tie the three leaves to their sources.
  * Changed keys: answers/CHANGES-WP0-BUILDERS.md, "WP-5 integration-owner rulings (2026-10-10)".
+ *
+ * The integration owner's binding adjudication of the WP-6 preparation (2026-10-10,
+ * C:/Temp/octapm-cert/scratch/wp6/WP6-ADJUDICATION.md Q1-Q14, cited WP6ADJ(...); the preparation
+ * C:/Temp/octapm-cert/scratch/wp6/WP6-PREP.md beside it, PREP6(...)) is applied to the answer-book
+ * gaps G1-G26 of WP6-PREP.md section 10: G1 (WP6.B6 and WP6.B6X: the fresh throwaway projects B6,
+ * which carries every writing check and every section 6.2 catcher, and B6X, the 130-row bill of the
+ * AI-job checks, both in 087, Q1, Q11), G2 (WP6.U3's dry run and real upload; the kept rejected
+ * document EXPECTED BEHAVIOUR provisionally, Q5), G3, G10 and G20 (the HR-C14, HR-C17 and L110 known
+ * answers in KA form), G4 as Q4 rules it (L121 on B6Q, a throwaway in company 011 chosen by a stated
+ * rule from the population spec: WP6.U6.company, WP6.B6Q; no plan-limit switch, no SQL fixture), G5-G7
+ * (the AI job on B6X through the recorder stub, Q2; the sections read back; the job after the
+ * baseline), G8 and G9 (the BOQ lock on B6 and on 087-SCH, Q13), G11-G13 and G15 (new leaves), G14
+ * (WP6.B1.costTypes an observation), G16 (C1-TOL, Q14), G17, G18 (WP6.B5 split; L109), G19 (BR-ORDER,
+ * its severity decided at the WP-6 run, Q6), G21 (the mutation leaves name their catchers by check id,
+ * Q9), G23 (WP6.CF: the confirm-first observations), G24 (chunkBoqRows at schedule.service.js:1929-1956,
+ * judged through AI schedule generation, Q3), G25 and G26 (notes). G22: the new and changed leaves cite
+ * PH6 (plan lines at HEAD 6c5ab54, the book's WP-6 P(...) + 40) and HF6 (code at 6c5ab54). No WP-6 rule
+ * is decided and no WP-6 fix has landed: every WP-6 leaf with a today names its ref from WP6_REFS, is an
+ * assumption, and its value never equals its today (the integration owner's KA.I9 ruling). Load checks
+ * after the WP-5 rulings' tie the new and changed leaves to their sources. Changed keys:
+ * answers/CHANGES-WP0-BUILDERS.md, "WP-6 answer-book leaves (2026-10-10)".
  */
 "use strict";
 
@@ -1279,6 +1300,252 @@ const WP5 = {
   },
 };
 
+// --- WP-6 answer-book leaves (2026-10-10): citation helpers, the throwaway projects B6, B6X and B6Q, models ---
+/** The integration owner's binding adjudication of the WP-6 preparation (2026-10-10, Q1-Q14). */
+const WP6ADJ = (item) => "C:/Temp/octapm-cert/scratch/wp6/WP6-ADJUDICATION.md " + item;
+/** The WP-6 preparation (read only, 2026-10-10), whose section 10 answer-book gaps G1-G26 the adjudication settles. */
+const PREP6 = (item) => "C:/Temp/octapm-cert/scratch/wp6/WP6-PREP.md " + item;
+/** Plan lines at HEAD 6c5ab54 (the plan is unchanged since 48db9e9): the book's WP-6 P(...) + 40 (P(763) = PH6(803)). */
+const PH6 = (lines) => PLAN + ":" + lines + " @6c5ab54";
+/** Product code, builders and certification scripts read at HEAD 6c5ab54 (backend/src, shared and backend/prisma are unchanged since f599e67). */
+const HF6 = (file, lines) => file + ":" + lines + " @6c5ab54";
+const DERIVE_B6 = "C:/Temp/octapm-cert/scratch/wp6/derive-b6.json (B6's and B6X's figures worked in cents with this book's arithmetic; 59 cross-checks against its leaves)";
+const SELECT_L121 = "C:/Temp/octapm-cert/scratch/wp6/book/tools/select-l121.js (read only: the population spec scripts/cert/lib/spec.js, C:/Temp/octapm-cert/population.json, state/finalize.json, state/projects.json and logs/regen-cert2c/finalize.log, backend/src/config/plans.js read as text; output work/select-l121-output.json)";
+/**
+ * The refs a WP-6 known answer may carry. No WP-6 rule is decided (HR-C14, HR-C17 and HR-C18 wait for the owner; HR-C15's
+ * baseline half is CERT-5's) and no WP-6 fix has landed (BR-ORDER, the section 5 defect fix 'budget-revision running
+ * totals', :1113 PH6, its severity decided at the WP-6 run, WP6ADJ Q6; C1-TOL, WP-4's, WP6ADJ Q14; the leads L109, L110 and
+ * L111; the register row WP0-BOQ-1, the owner's through HR-A1), so every WP-6 leaf with a today is BLOCKED at it, is an
+ * assumption, and its value never equals its today (the integration owner's KA.I9 ruling: a value equal to HEAD's would
+ * pre-judge the rule).
+ */
+const WP6_REFS = ["HR-C14", "HR-C17", "HR-C18", "BR-ORDER", "C1-TOL", "L109", "L110", "L111", "WP0-BOQ-1"];
+/** The leaves the 11 KA checks of WP6-PREP section 6 read, each with its ref (checked at load). */
+const WP6_KNOWN = [
+  ["WP6.U2.omitB005", "HR-C14"],
+  ["WP6.U6.nonAiImportAtLimit", "HR-C14"],
+  ["WP6.U5.aiJobCalls", "HR-C14"],
+  ["WP6.U5.aiJobCalls087", "HR-C14"],
+  ["WP6.U5.sectionsReadBack", "HR-C14"],
+  ["WP6.U5.aiAfterBaseline", "HR-C14"],
+  ["WP6.A2.resubmitRejected", "HR-C17"],
+  ["WP6.B3.overTransfer", "C1-TOL"],
+  ["WP6.B5.originalLocked", "L109"],
+  ["WP6.B5.afterRepoint", "L109"],
+  ["WP6.B6.BR-B", "BR-ORDER"],
+  ["WP6.B6.BR-A", "BR-ORDER"],
+  ["WP6.B7.archivedActual", "L110"],
+];
+
+/**
+ * B6: the WP-6 proof's own throwaway project in company 087 (WP6ADJ Q1; WP6-PREP section 5.1), created by the PM with
+ * contractValue 2,000,000.00 (the budget-revision register's base) and an explicit defaultRetentionRate 10 (no WP-6 figure
+ * depends on HR-C1), archived by the proof, as WP-1's W, WP-2's P, WP-3's V, WP-4's K and WP-5's J. Every WP-6 writing
+ * check and every section 6.2 catcher runs on it, because the mutation runner runs the whole proof under each mutant.
+ * Records in currency units as sent (the leaves state cents). The bill is the book's BOQ (stage 3); the cost codes are
+ * 087's library codes the 087-COM build found or made (BLD 087-com.js:198-207), selected onto B6, none created (HR-A1).
+ * Budget lines: the seven typed lines of WP6.B1 (410,000.00) and five others: OTH (the eighth type, CF.HRC18), the C1-TOL
+ * pair T1 / T2 (KA.B3.overTransfer) and L109's LA / LB (KA.B5.afterRepoint). The figures agree with derive-b6.json.
+ */
+const B6_BOOK = {
+  project: { name: "CERT3 WP6 BOQ and budget <stamp>", type: "building", contractType: "remeasurement", startDate: "2026-01-05", endDate: "2027-06-30", completionDate: "2027-06-30", projectCalendar: "five_day", currency: "EGP", contractValue: 2000000, defaultRetentionRate: 10 },
+  team: { planner: "planning_eng", qs: "qs", cost: "cost_controller", finance: "finance", site: "site_engineer" },
+  activities: ["A110", "A120", "A130", "A140", "A220", "A230", "A310", "A320"],
+  costCodes: ["01-100", "02-100", "03-100", "09-100", "CERT3-087-COM-EQP", "CERT3-087-COM-OVH", "CERT3-087-COM-CON", "CERT3-087-COM-OTH"],
+  // name: [rows, rate changes, mapping-rule changes, columns left out, who sends it]
+  workbooks: {
+    stage3: [["B-001", "B-002", "B-003", "B-004", "B-005"], {}, {}, [], "planner (dry run, U1), QS (import, U2)"],
+    missingRate: [["B-001", "B-002", "B-003", "B-004", "B-005"], {}, {}, ["rate"], "planner (dry run) and QS (real upload): U3"],
+    rate160: [["B-001", "B-002", "B-003", "B-004", "B-005"], { "B-002": 160 }, { "B-001": "not_applicable" }, [], "PM (U2.rate160, A6.uploadWarning)"],
+    omitB005: [["B-001", "B-002", "B-003", "B-004"], { "B-002": 160 }, {}, [], "QS (KA.U2.omitB005)"],
+    afterLock: [["B-001", "B-002", "B-003", "B-004", "B-005"], {}, {}, [], "QS after the lock (U4.comparisonOnly)"],
+  },
+  // the imported revisions before the lock, in order; the last is the one locked
+  revisionsBeforeLock: ["stage3", "rate160", "omitB005"],
+  // [row, activity, quantity]: the five stage-3 allocations, approved; the rejected one
+  approved: [["B-001", "A110", 5000], ["B-002", "A120", 200], ["B-002", "A130", 600], ["B-004", "A310", 3000], ["B-005", "A320", 4000]],
+  rejected: ["B-003", "A140", 10],
+  // the A1 probes: [row, activity, quantity(, amount)]; a duplicate's quantity does not matter (the duplicate check precedes capacity)
+  probes: { quantityZero: ["B-003", "A220", 0], overCapacity: ["B-001", "A120", 1], amountOverCapacity: ["B-003", "A230", 10, 80000], duplicate: ["B-001", "A110", 1], foreignActivity: ["B-001", "X-A1", 1], notApplicable: ["B-003", "A220", 5] },
+  bulk: [["B-003", "A220", 10], ["B-001", "A130", 1], ["B-001", "A110", 1]],
+  mappingFile: [["B-003", "A140", 5], ["B-003", "A230", 5], ["B-999", "A110", 1], ["B-001", "A120", 1]],
+  // [key, cost code, cost type, original]
+  budgetLines: [
+    ["LAB", "01-100", "labour", 100000],
+    ["MAT", "02-100", "material", 100000],
+    ["EQP", "CERT3-087-COM-EQP", "equipment", 50000],
+    ["SUB", "03-100", "subcontract", 100000],
+    ["IND", "09-100", "indirect", 20000],
+    ["OVH", "CERT3-087-COM-OVH", "overhead", 10000],
+    ["CON", "CERT3-087-COM-CON", "contingency", 30000],
+    ["OTH", "CERT3-087-COM-OTH", "other", 0],
+    ["T1", "01-100", "other", 100000],
+    ["T2", "02-100", "other", 100000],
+    ["LA", "03-100", "other", 100000],
+    ["LB", "09-100", "other", 0],
+  ],
+  // one expense direct cost, made and submitted by the cost controller, approved by finance: [line, amount]
+  directCost: ["expense", [["LAB", 1000], ["MAT", 2000], ["EQP", 3000], ["SUB", 4000], ["IND", 5000], ["OVH", 6000], ["CON", 7000]]],
+  // finance: [from, to, amount]
+  transfers: { plus2: ["LAB", "MAT", 100000.02], move: ["LAB", "MAT", 20000], c1tol: ["T1", "T2", 100000.01], toArchived: ["LAB", "MAT", 1] },
+  // finance: [line, amount]
+  lineRevisions: { plus: ["IND", 5000], zero: ["IND", 0], l111: ["LAB", -999999] },
+  // the cost controller's originalBudget PATCHes: [line, amount]
+  originalPatches: { byLedger: ["OVH", 10001], afterCo: ["LA", 1], afterRepoint: ["LA", 1] },
+  l111Line: ["CERT3-087-COM-EQP", "other", -500],
+  archive: "MAT",
+  // the PM's budget revisions: [ref, amount, effective date in days from the run date], created in this order, both approved
+  register: [["BR-A", 10000, -10], ["BR-B", 5000, -20]],
+  changeOrder: { value: 10000, activity: "A110", line: "LA", repointTo: "LB" },
+};
+const B6_LINE = (key) => B6_BOOK.budgetLines.find((l) => l[0] === key);
+/** B6's workbooks with their totals in cents (files.boqWorkbook from the book's BOQ rows; null where the rate column is left out). */
+const B6_WORKBOOKS = Object.fromEntries(
+  Object.entries(B6_BOOK.workbooks).map(([name, [rows, rates, mappingRules, omit, by]]) => [name, { rows, rates, mappingRules, omit, by, totalCents: omit.includes("rate") ? null : rows.reduce((sum, code) => sum + cents(BOQ[code].qty * (rates[code] === undefined ? BOQ[code].rate : rates[code])), 0) }])
+);
+/** B6's allocations, in cents: the approved five and the coverage they give, the rejected row, the A1 probes, the bulk and the mapping file. */
+const B6_ALLOC = (() => {
+  const amountOf = (row, qty) => cents(qty * BOQ[row].rate);
+  const approved = B6_BOOK.approved.map(([row, activity, qty]) => ({ row, activity, qty, amount: amountOf(row, qty) }));
+  const allocated = approved.reduce((sum, a) => sum + a.amount, 0);
+  const qtyOn = (row) => approved.filter((a) => a.row === row).reduce((sum, a) => sum + a.qty, 0);
+  const complete = Object.keys(BOQ).filter((row) => qtyOn(row) === BOQ[row].qty).length;
+  const [rRow, rActivity, rQty] = B6_BOOK.rejected;
+  // the A1 amount-only probe, sent while no active allocation stands on B-003 (the rejected one is inactive)
+  const [pRow, pActivity, pQty, pAmount] = B6_BOOK.probes.amountOverCapacity;
+  const amountProbe = { row: pRow, activity: pActivity, qty: pQty, amount: cents(pAmount), activeBefore: approved.filter((a) => a.row === pRow).length };
+  // the bulk, row by row: a duplicate first (assertNoDuplicateActiveAllocation precedes the capacity check), then capacity
+  const active = approved.map((a) => ({ row: a.row, activity: a.activity, qty: a.qty }));
+  const codes = [];
+  let created = 0;
+  for (const [row, activity, qty] of B6_BOOK.bulk) {
+    const used = active.filter((a) => a.row === row).reduce((sum, a) => sum + a.qty, 0);
+    if (active.some((a) => a.row === row && a.activity === activity)) codes.push("DUPLICATE_ACTIVE_ALLOCATION");
+    else if (used + qty > BOQ[row].qty) codes.push("ALLOCATION_QUANTITY_EXCEEDED");
+    else {
+      created += 1;
+      active.push({ row, activity, qty });
+    }
+  }
+  const bulk = { createdCount: created, failedCount: codes.length, codes };
+  // the mapping file's dry run, after the bulk's draft (active) row
+  const mapping = { matched: 0, unmatched: 0, existing: 0, breaches: 0, created: 0, totalAmount: 0 };
+  const planned = active.map((a) => ({ ...a }));
+  for (const [row, activity, qty] of B6_BOOK.mappingFile) {
+    if (!BOQ[row]) mapping.unmatched += 1;
+    else if (planned.some((a) => a.row === row && a.activity === activity)) mapping.existing += 1;
+    else if (planned.filter((a) => a.row === row).reduce((sum, a) => sum + a.qty, 0) + qty > BOQ[row].qty) mapping.breaches += 1;
+    else {
+      mapping.matched += 1;
+      mapping.totalAmount += amountOf(row, qty);
+      planned.push({ row, activity, qty });
+    }
+  }
+  return { approved, allocated, unallocated: BOQ_TOTAL - allocated, coveragePct: Math.round((allocated / BOQ_TOTAL) * 100 * 100) / 100, complete, rejected: { row: rRow, activity: rActivity, qty: rQty, amount: amountOf(rRow, rQty) }, amountProbe, bulk, mapping };
+})();
+/** B6's budget, in cents: the lines, the seven-line cost, the transfers, the line revisions, the probes, the register. */
+const B6_BUDGET = (() => {
+  const original = (key) => cents(B6_LINE(key)[3]);
+  const lines = B6_BOOK.budgetLines.map(([key, code, costType, amount]) => ({ key, code, costType, original: cents(amount) }));
+  const dcLines = B6_BOOK.directCost[1].map(([line, amount]) => ({ line, costType: B6_LINE(line)[2], amount: cents(amount) }));
+  const directCost = { type: B6_BOOK.directCost[0], lines: dcLines, total: dcLines.reduce((sum, l) => sum + l.amount, 0) };
+  const t = B6_BOOK.transfers;
+  const transfers = {
+    plus2: { from: t.plus2[0], to: t.plus2[1], amount: cents(t.plus2[2]) },
+    move: { from: t.move[0], to: t.move[1], amount: cents(t.move[2]), fromAfter: original(t.move[0]) - cents(t.move[2]), toAfter: original(t.move[1]) + cents(t.move[2]) },
+    c1tol: { from: t.c1tol[0], to: t.c1tol[1], amount: cents(t.c1tol[2]) },
+    toArchived: { from: t.toArchived[0], to: t.toArchived[1], amount: cents(t.toArchived[2]) },
+  };
+  const r = B6_BOOK.lineRevisions;
+  const lineRevisions = { plus: { line: r.plus[0], amount: cents(r.plus[1]), revisedAfter: original(r.plus[0]) + cents(r.plus[1]) }, zero: { line: r.zero[0], amount: cents(r.zero[1]) }, l111: { line: r.l111[0], amount: cents(r.l111[1]) } };
+  const p = B6_BOOK.originalPatches;
+  const probes = { byLedger: { line: p.byLedger[0], amount: cents(p.byLedger[1]) }, afterCo: { line: p.afterCo[0], amount: cents(p.afterCo[1]) }, afterRepoint: { line: p.afterRepoint[0], amount: cents(p.afterRepoint[1]) }, l111Line: { code: B6_BOOK.l111Line[0], costType: B6_BOOK.l111Line[1], original: cents(B6_BOOK.l111Line[2]) }, archive: B6_BOOK.archive };
+  // the register: the value in effective-date order (budget-revision.service.js:23-38 recomputeCumulative); today as
+  // createBudgetRevision stores it at create (the latest-effective approved row's total, else the contract value, + delta: :125-130, :154)
+  const base = cents(B6_BOOK.project.contractValue);
+  const rows = B6_BOOK.register.map(([ref, amount, offset]) => ({ ref, amount: cents(amount), offset }));
+  const effective = [...rows].sort((a, b) => a.offset - b.offset);
+  const order = effective.map((row) => row.ref);
+  const valueRun = {};
+  let running = base;
+  for (const row of effective) valueRun[row.ref] = running += row.amount;
+  const storedRun = {};
+  rows.forEach((row, i) => {
+    const prior = rows.slice(0, i).sort((a, b) => b.offset - a.offset)[0];
+    storedRun[row.ref] = (prior ? storedRun[prior.ref] : base) + row.amount;
+  });
+  const byOrder = (run) => Object.fromEntries(order.map((ref) => [ref, run[ref]]));
+  // an approved CO generates an approved revision at its approval (the run date, offset 0) and recomputes every row in effective order (change-order.service.js:822-847, 857-931)
+  const afterCo = { ...byOrder(valueRun), CO: running + cents(B6_BOOK.changeOrder.value) };
+  const register = { base, rows, value: byOrder(valueRun), today: byOrder(storedRun), waterfallToday: order.map((ref) => valueRun[ref]), afterCo };
+  return { lines, directCost, transfers, lineRevisions, probes, register };
+})();
+/** B6's run order (WP6-PREP section 5.1 as WP6ADJ settles it): each step names the check ids it serves. */
+const B6_STEPS = [
+  "B0 PM: creates B6 (WP6.B6.project; contractValue 2,000,000.00, the register's base; an explicit defaultRetentionRate 10) and assigns the planner, QS, cost controller, finance and site engineer; B6X's X0 runs before B3 -> S.B6.create",
+  "B1 planner: activities A110 A120 A130 A140 A220 A230 A310 A320 (the site engineer assigned); cost controller: the eight 087 library codes put on B6 by id from GET budget/cost-codes available (one active each; none created, HR-A1) -> S.B6.fixture",
+  "B2 the counters read (B6's BoqItem, BoqRevision, ProjectDocument boq_upload and BackgroundJob boq.parse; 087's aiGenerationsUsed); planner dry run without the rate column -> U3.B6.dryRunMissingColumns; planner dry run of the stage-3 workbook -> U1.B6.dryRun; the counters again -> U1.B6.writes; site engineer real upload -> U7.B6.siteUpload; QS real upload without the rate column -> U3.B6.uploadMissingColumns; QS real upload of the stage-3 workbook -> U2.B6.import",
+  "B3 planner and QS: B-004/A310 approved as a draft -> A2.B6.approveDraft; submitted, PATCH quantity 2,999 -> A2.B6.patchSubmitted; the five stage-3 allocations approved -> A2.B6.approved; B-003/A140 10 t submitted, rejected without a reason -> A2.B6.rejectNoReason; with one -> A2.B6.rejected; submitted again and PATCHed -> KA.A2.resubmitRejected; B-003/A220 quantity 0 -> A1.B6.quantityZero; B-001/A120 quantity 1 -> A1.B6.overCapacity; B-003/A230 10 t at 80,000.00 -> A1.B6.amountOverCapacity; B-001/A110 again -> A1.B6.duplicate; B-001 with B6X's X-A1 -> A1.B6.foreignActivity; B-003 not_applicable, B-003/A220 quantity 5, B-003 back to required -> A1.B6.notApplicable; mapping-rules not_applicable on B-001 -> A6.B6.patchNotApplicableApproved; GET coverage -> A3.B6.coverage; the bulk -> A4.B6.bulk; the mapping file dry run -> A5.B6.dryRun; apply -> A5.B6.apply; QS undo -> A5.B6.undo",
+  "B4 PM re-upload with B-002 at 160 and B-001 not_applicable -> U2.B6.rate160, A6.B6.uploadWarning; the planner's dry run, the QS's import and the PM's re-upload each 200 -> U7.B6.uploaders; QS re-upload without B-005 -> KA.U2.omitB005; L121 is probed on B6Q in company 011, not here (WP6ADJ Q4: no plan-limit switch on 087)",
+  "B5 planner submit, QS approve and PM lock of the current revision (the omit-B005 upload) -> U4.B6.lockFlow; QS upload of the stage-3 workbook -> U4.B6.comparisonOnly; planner submit of that revision -> U4.B6.reviewComparisonOnly; PM lock again -> U4.B6.lockAgain; QS PATCH of B-001 -> U4.B6.patchAfterLock",
+  "B6 cost controller: the twelve lines -> B1.B6.lines; 01-100/labour again -> B2.B6.duplicate; CERT3-087-COM-OVH/labour with actual 5 -> B2.B6.actualDerived; the seven-line expense (cost controller creates and submits, finance approves) -> B1.B6.sevenLineCost; the reconciliation -> B1.B6.balanced; remove 01-100 -> B2.B6.costCodeInUse; finance 100,000.02 LAB to MAT -> B3.B6.overTransferPlus2; 20,000 -> B3.B6.move20000; T1 to T2 100,000.01 -> KA.B3.overTransfer; +5,000 on IND -> B4.B6.revision; 0 -> B4.B6.amountZero; PATCH OVH original 10,001 -> B5.B6.lockedByLedger; PM BR-A then BR-B, the register read before any CO approval -> KA.B6.registerOrder; QS CO 10,000.00 on A110 naming LA (instruction attached, summaries, activity link, submitted), PM approves, PATCH LA original 1 -> B5.B6.lockedAfterCo; the CO re-pointed to LB, PATCH LA original 1 again -> KA.B5.afterRepoint; the register read again after the approval's recompute -> CF.BRorder; the OTH line, summary.byType and ledger.byCostType read -> CF.HRC18; EQP/other at -500 and -999,999 on LAB -> CF.L111; MAT archived (actual 2,000.00) -> KA.B7.archivedActual; finance 1.00 LAB to the archived MAT -> B3.B6.archivedLine",
+  "CF cost controller, site engineer and QS: GET boq/template and GET boq/uploads/<the U2 document> -> CF.WP0BOQ1",
+  "Q11 B6's three queued boq.parse jobs (the U2 import, the rate-160 re-upload and the omit-B005 re-upload; the comparison-only upload records a completed job) run to completion in process through the recorder stub, or cancelled through a product route; the cleanup asserts zero queued jobs on B6 (WP6ADJ Q11)",
+  "end PM: DELETE /projects/B6 (archive), archivedAt read back -> S.B6.archived",
+];
+/** The check ids B6's steps serve (WP6-PREP wp6-checks-draft.json: every check on B6 but KA.U6, which moves to B6Q, and the four classifications computed from known answers); each is named by exactly one step (checked at load). */
+const B6_CHECKS = ["S.B6.create", "S.B6.fixture", "U3.B6.dryRunMissingColumns", "U1.B6.dryRun", "U1.B6.writes", "U7.B6.siteUpload", "U3.B6.uploadMissingColumns", "U2.B6.import", "A2.B6.approveDraft", "A2.B6.patchSubmitted", "A2.B6.approved", "A2.B6.rejectNoReason", "A2.B6.rejected", "KA.A2.resubmitRejected", "A1.B6.quantityZero", "A1.B6.overCapacity", "A1.B6.amountOverCapacity", "A1.B6.duplicate", "A1.B6.foreignActivity", "A1.B6.notApplicable", "A6.B6.patchNotApplicableApproved", "A3.B6.coverage", "A4.B6.bulk", "A5.B6.dryRun", "A5.B6.apply", "A5.B6.undo", "U2.B6.rate160", "A6.B6.uploadWarning", "U7.B6.uploaders", "KA.U2.omitB005", "U4.B6.lockFlow", "U4.B6.comparisonOnly", "U4.B6.reviewComparisonOnly", "U4.B6.lockAgain", "U4.B6.patchAfterLock", "B1.B6.lines", "B2.B6.duplicate", "B2.B6.actualDerived", "B1.B6.sevenLineCost", "B1.B6.balanced", "B2.B6.costCodeInUse", "B3.B6.overTransferPlus2", "B3.B6.move20000", "KA.B3.overTransfer", "B4.B6.revision", "B4.B6.amountZero", "B5.B6.lockedByLedger", "KA.B6.registerOrder", "B5.B6.lockedAfterCo", "KA.B5.afterRepoint", "CF.BRorder", "CF.HRC18", "CF.L111", "KA.B7.archivedActual", "B3.B6.archivedLine", "CF.WP0BOQ1", "S.B6.archived"];
+const B6_SRC = [PH6("427, 795-836, 1150"), WP6ADJ("Q1, Q11"), PREP6("section 5.1; section 10 G1"), DERIVE_B6];
+
+/** B6X: the AI-job throwaway in 087 (WP6ADJ Q1; WP6-PREP section 5.2): 087-COM's 130-row, 50 / 50 / 30 shape, so 087-COM's own queued job is never run. */
+const B6X_BOOK = {
+  project: { name: "CERT3 WP6 AI job <stamp>", type: "building", contractType: "remeasurement", startDate: "2026-01-05", endDate: "2027-06-30", projectCalendar: "five_day", currency: "EGP", defaultRetentionRate: 10, contractValue: "not sent" },
+  team: { planner: "planning_eng", qs: "qs" },
+  activities: ["X-A1"],
+  bill: { generator: "files.boqRows.filler", prefix: "X", seed: "cert3-wp6-b6x", sections: [["Substructure", 50], ["Superstructure", 50], ["Finishes", 30]], columns: ["code", "description", "unit", "quantity", "rate", "amount", "mapping_rule", "section"], mappingRule: "required" },
+  // the recorder stub's answers (WP6ADJ Q2): the job's, and the one naming an activity for X1-001 after the baseline (unit m2: files.js:524, 531)
+  stub: {
+    job: { boqActivities: [] },
+    afterBaseline: { boqActivities: [{ boqCode: "X1-001", activities: [{ activityName: "CERT3 WP6 L130 probe", unit: "m2", quantity: 1, rate: 1, dependencyType: null, predecessorIndex: null, predecessorBoqCode: null, predecessorActivityIndex: null }] }] },
+  },
+};
+const B6X_STEPS = [
+  "X0 PM: creates B6X (WP6.B6X.project; no contract value) and assigns the planner and QS; planner: activity X-A1, before B6's B3 names it -> S.B6X.create",
+  "X1 QS: uploads the 130-row workbook (WP6.B6X.bill): 200 imported; the 130 active rows read back row by row against the workbook; the queued job's id kept -> S.B6X.bill; GET /boq rows and GET coverage?groupBy=section -> KA.U5.B6X.sections",
+  "X2 in process (WP6ADJ Q2): the recorder stub installed in the proof process only, answering WP6.B6X.stub job and making no network call; runBoqActivityJob called directly with B6X's queued job, never claimNextJob, so no other project's queued job (087-COM's included) is touched; the calls and the rows of each recorded; the stub asserted the only AI call path used (recorder calls counted, zero outbound requests) and restored in finally -> KA.U5.B6X.aiJobCalls",
+  "X3 planner submit, QS approve and PM lock of B6X's revision: the bill locked",
+  "X4 in process: the handler run again on the same job with the stub's afterBaseline answer naming one activity for X1-001; GET activities and allocations -> KA.U5.B6X.aiAfterBaseline",
+  "Q11 no queued job left on B6X: its job run to completion through the stub, or cancelled through a product route; the cleanup asserts zero queued jobs on B6X (WP6ADJ Q11)",
+  "end PM: DELETE /projects/B6X (archive), archivedAt read back -> S.B6X.archived",
+];
+const B6X_CHECKS = ["S.B6X.create", "S.B6X.bill", "KA.U5.B6X.sections", "KA.U5.B6X.aiJobCalls", "KA.U5.B6X.aiAfterBaseline", "S.B6X.archived"];
+const B6X_SRC = [PH6("427, 807, 1082"), WP6ADJ("Q1, Q2, Q11"), PREP6("section 5.2; section 10 G1, G5-G7"), DERIVE_B6];
+
+/**
+ * B6Q: the L121 throwaway (WP6ADJ Q4: a population company whose plan has a finite AI quota and whose subscription is
+ * active, chosen by rule, not first row, with a throwaway project there; the in-process plan-limit switch rejected as a
+ * fabricated condition). The company's figures are the population spec's (scripts/cert/lib/spec.js buildPopulation, as
+ * C:/Temp/octapm-cert/population.json holds them) at the finalize moment of the cert2c snapshot that cert3d restores
+ * (2026-10-05 10:37 UTC, logs/regen-cert2c/finalize.log), read by SELECT_L121; the counter is re-read live by the proof.
+ */
+const B6Q_BOOK = {
+  company: { code: "011", name: "Granite Peak Construction (CERT-011)", plan: "individual", status: "active", billingCycle: "annual", currentPeriodEnd: "2027-03-23", aiLimit: 10, aiGenerationsUsed: 3, generationsToLimit: 7, projectLimit: 3, liveProjects: 2, seats: 5, people: 4, personas: ["pm", "site", "qs", "finance"], uploaders: ["pm", "qs"], currency: "INR", timezone: "Asia/Kolkata" },
+  project: { name: "CERT3 WP6 L121 <stamp>", type: "building", contractType: "remeasurement", startDate: "2026-01-05", endDate: "2027-06-30", completionDate: "2027-06-30", projectCalendar: "five_day", currency: "INR", defaultRetentionRate: 10, contractValue: "not sent" },
+  team: { qs: "qs" },
+  // real uploads allowed per hour per project and user (aiGenerationLimiter, rate-limit.js:139-145; the dry run is exempt, routes/boq.js:145-146)
+  aiWindow: 8,
+};
+const B6Q_STEPS = [
+  "Q0 the PM of 011 (owner and company administrator): creates B6Q (WP6.B6Q.project; 011 holds 2 live projects of its plan's 3) and assigns the QS -> S.B6Q.create",
+  "Q1 the PM reads 011's subscription (aiGenerationsUsed: 3 at selection, WP6.U6.company), then the path to the limit, proposed and to be confirmed with the proof (WP6ADJ Q4 rules out a SQL fixture and a plan-limit switch): aiLimit - aiGenerationsUsed real uploads of the stage-3 workbook on B6Q, shared between the PM and the QS inside the AI generation window, each queued boq.parse job run to completion in process through the recorder stub (+1 each: boq.service.js:1660 is the only writer of the counter); the counter read back at aiLimit -> S.B6Q.toLimit",
+  "Q2 at the limit: a real upload of the stage-3 workbook by the QS and a dry run by the PM -> KA.U6.nonAiImportAtLimit",
+  "Q11 zero queued jobs on B6Q: every job of Q1 ran to completion; the refused upload queues none (WP6ADJ Q11)",
+  "end PM: DELETE /projects/B6Q (archive), archivedAt read back -> S.B6Q.archived",
+];
+/** S.B6Q.create, S.B6Q.toLimit and S.B6Q.archived are new setup ids (not in the draft list); KA.U6.nonAiImportAtLimit moves here from B6. */
+const B6Q_CHECKS = ["S.B6Q.create", "S.B6Q.toLimit", "KA.U6.nonAiImportAtLimit", "S.B6Q.archived"];
+const B6Q_SRC = [PH6("44, 374, 395-416, 448, 808, 1082"), WP6ADJ("Q4, Q11"), PREP6("section 0 fact 11; section 10 G4"), SELECT_L121];
+
 // ─── WP-6 BOQ, allocations, budgets (plan 755-795) ────────────────────────────────────────────
 
 const WP6 = {
@@ -1292,29 +1559,40 @@ const WP6 = {
     "B-002.amount": money(cents(800 * 160), "Re-upload with B-002 rate 150 -> 160: 800 x 160 = 128,000.00.", [P(764)]),
     total: money(BOQ_TOTAL - boqAmount("B-002") + cents(800 * 160), "459,000 - 120,000 + 128,000 = 467,000.00.", [P(764)]),
     comparisonUpdated: count(1, "comparison updated 1, still 5 rows.", [AREA]),
-    omitB005: fig({ comparisonRemoved: 1, "B-005.active": true }, "outcome", "Omitting B-005: comparison says removed 1, the row stays active (HR-C14 decides).", [P(764), P(1042)], { assumption: true }),
+    omitB005: fig({ comparisonRemoved: 1, "B-005.active": true, "B-005.flagged": true }, "outcome", "Omitting B-005: comparison says removed 1, the row stays active (HR-C14 decides).", [P(764), P(1042), PH6("804, 1082"), HF6("backend/src/services/boq.service.js", "395-400, 1271-1504"), WP6ADJ("standing rulings"), PREP6("section 4; section 10 G3")], { assumption: true, today: { comparisonRemoved: 1, "B-005.active": true, "B-005.flagged": false }, ref: "HR-C14", note: "WP-6 G3 (2026-10-10): the value was { comparisonRemoved: 1, 'B-005.active': true }, HEAD's own answer under the undecided HR-C14 (the KA.I9 ruling: BLOCKED at today). The value is HR-C14's recommendation, dropped rows flagged, not deactivated (:1082 PH6); the flag's field is the fix's (CONTRACT pending), so an assumption. Today the comparison reports B-005 removed (buildBoqComparison, boq.service.js:395-400) and the persist loop touches incoming rows only, so B-005 stays active with no flag. Probed on B6 by the QS's re-upload without B-005 (WP6.B6.choreography B4)." }),
   },
   U3: {
-    missingColumns: err(400, "BOQ_VALIDATION_FAILED", "Workbook without the rate column; details.errors[0].code MISSING_COLUMNS; nothing written.", [P(765), "backend/src/services/boq/excel-parser.js:6, 139-150 @" + HEAD]),
+    missingColumns: err(400, "BOQ_VALIDATION_FAILED", "Workbook without the rate column; details.errors[0].code MISSING_COLUMNS; nothing written.", [P(765), "backend/src/services/boq/excel-parser.js:6, 139-150 @" + HEAD], { note: "WP-6 G2 (2026-10-10): 'nothing written' holds for the bill. A dry run writes nothing at all (WP6.U3.dryRunWrites); a refused real upload writes no BOQ row, revision, job or allocation and moves no budget figure, but keeps its file as one rejected ProjectDocument (WP6.U3.realUploadWrites), EXPECTED BEHAVIOUR provisionally (WP6ADJ Q5)." }),
     detailCode: fig("MISSING_COLUMNS", "code", "details.errors[0].code.", ["backend/src/services/boq/excel-parser.js:150 @" + HEAD]),
+    dryRunWrites: fig({ boqItems: 0, boqRevisions: 0, projectDocuments: 0, boqParseJobs: 0 }, "outcome", "U3.B6.dryRunMissingColumns: the planner's dry run of the stage-3 workbook without the rate column (WP6.B6.workbooks missingRate) answers 400 BOQ_VALIDATION_FAILED / MISSING_COLUMNS and writes nothing: the route's dry-run branch stores no document (routes/boq.js:163-171) and processBoqUpload refuses in its parse-and-validate step (boq.service.js:1177-1228), before the dry-run return (:1244) and before any write. B6's BoqItem, BoqRevision, ProjectDocument (boq_upload) and BackgroundJob (boq.parse) counts are unchanged.", [PH6("805"), HF6("backend/src/routes/boq.js", "148-195"), HF6("backend/src/services/boq.service.js", "1160-1262"), WP6ADJ("Q5"), PREP6("section 0 fact 12; section 10 G2"), DERIVE_B6], { note: "WP-6 G2 (2026-10-10)." }),
+    realUploadWrites: fig({ boqItems: 0, boqRevisions: 0, boqParseJobs: 0, allocations: 0, budgetSummaryChanged: false, projectDocuments: 1, document: { status: "rejected", linkedEntityType: "BOQ_VALIDATION_FAILED" } }, "outcome", "U3.B6.uploadMissingColumns: the QS's real upload of the same workbook. The route stores the file as a ProjectDocument before parsing (routes/boq.js:173-178); processBoqUpload refuses it 400 BOQ_VALIDATION_FAILED / MISSING_COLUMNS and its catch marks that document rejected with the error code as linkedEntityType (boq.service.js:1217-1228; file-storage.service.js:1013-1023). No BOQ row, revision, boq.parse job or allocation is written and no budget figure moves; one ProjectDocument, status rejected, linkedEntityType BOQ_VALIDATION_FAILED.", [PH6("805"), HF6("backend/src/routes/boq.js", "173-178"), HF6("backend/src/services/boq.service.js", "1217-1228"), HF6("backend/src/services/file-storage.service.js", "1013-1023"), WP6ADJ("Q5"), PREP6("section 0 fact 12; section 4; section 10 G2"), DERIVE_B6], { assumption: true, note: "WP-6 G2 (2026-10-10): EXPECTED BEHAVIOUR provisionally (WP6ADJ Q5): the plan's 'nothing written' (:805 PH6) concerns BOQ rows and allocations, and a rejected upload record is the upload's audit trail. The classification table records the wording deviation; the WP-6 run confirms that no BOQ row, allocation or budget figure is written." }),
   },
   U4: {
     uploadMode: state("comparison_only", "After submit -> approve -> lock, the next upload is comparison_only; live total unchanged.", [P(766), AREA]),
-    patchAfterLock: err(409, "BOQ_BASELINE_LOCKED", "PATCH /boq/items/:id after the lock.", [P(766), S("boq.service.js", "314-316, 1065-1067")]),
+    patchAfterLock: err(409, "BOQ_BASELINE_LOCKED", "PATCH /boq/items/:id after the lock.", [P(766), S("boq.service.js", "314-316, 1065-1067")], { note: "WP-6 G8, G9 (2026-10-10): judged on B6 by the QS's PATCH of B-001 after B6's lock (U4.B6.patchAfterLock) and on 087-SCH, whose bill its schedule baseline locks, by the PM's PATCH of S-001 (U4.live.087SCH.patch; WP6.U4.scheduleBaselineLock): updateBoqItem refuses at assertBoqEditable (boq.service.js:2042-2044, 311-322) before any write, and no WP-6 mutant touches it (WP6ADJ Q13)." }),
+    lockFlow: fig({ submit: "under_review", approve: "approved", lock: "baselined", baselineLocked: true, supersededRevisions: 2, lockedRows: 5, baseline: { locked: true, source: "boq_revision" } }, "outcome", "U4.B6.lockFlow: B6's current revision, the omit-B005 upload (KA.U2.omitB005; WP6.B6.workbooks), is submitted by the planner (under_review, boq.service.js:996-1015), approved by the QS (approved, :1017-1036) and locked by the PM (baselined, baselineLocked, :1052-1137): the two earlier imported revisions, the U2 import and the rate-160 re-upload, are superseded (:1086-1105) and the five active rows locked (:1124-1127; B-005 stays active today and under HR-C14's flag alike), so GET /boq answers baseline { locked: true, source: 'boq_revision' } (getBoqBaselineLock, :271-309).", [PH6("797, 806"), HF6("backend/src/services/boq.service.js", "271-309, 996-1036, 1052-1137"), PREP6("section 2; section 10 G8"), DERIVE_B6], { assumption: true, note: "WP-6 G8 (2026-10-10): read from the code; the counts follow from B6's run order (WP6.B6.choreography B2-B5)." }),
+    liveAfterLock: fig({ rows: 5, total: cents(467000) }, "outcome", "U4.B6.comparisonOnly: after the lock the QS's upload of the stage-3 workbook (B-002 back at 150) is saved comparison_only with a completed job and changes no live row (boq.service.js:1347-1411, 1536-1558): GET /boq still reads five active rows and 467,000.00 (WP6.U2.total, B-002 at 160).", [PH6("806"), HF6("backend/src/services/boq.service.js", "1347-1411, 1536-1558"), PREP6("section 10 G8"), DERIVE_B6], { note: "WP-6 G8 (2026-10-10)." }),
+    reviewComparisonOnly: err(409, "BOQ_REVISION_COMPARISON_ONLY", "U4.B6.reviewComparisonOnly: the planner submits the comparison-only revision that upload made: refuseComparisonOnlyReview refuses it before any write (boq.service.js:918-929), its rows never having been applied.", [PH6("797, 806"), HF6("backend/src/services/boq.service.js", "918-929, 996-1015"), PREP6("section 10 G8")], { note: "WP-6 G8 (2026-10-10)." }),
+    lockAgain: err(409, "BOQ_BASELINE_LOCKED", "U4.B6.lockAgain: the PM locks the baselined revision again: lockBoqBaseline finds a revision already baselineLocked and refuses (boq.service.js:1060-1071); a locked baseline is never unlocked or replaced.", [PH6("797, 806"), HF6("backend/src/services/boq.service.js", "1052-1071"), PREP6("section 10 G8")], { note: "WP-6 G8 (2026-10-10)." }),
+    scheduleBaselineLock: fig({ baseline: { locked: true, source: "schedule_baseline" }, patch: { status: 409, code: "BOQ_BASELINE_LOCKED" } }, "outcome", "087-SCH (built: its bill S-001..S-008 uploaded and allocated, its schedule baselined; state steps boq.upload and baseline): GET /boq answers baseline locked with source schedule_baseline, because a baselined schedule revision locks the bill (getBoqBaselineLock, boq.service.js:285-301); the PM's PATCH of S-001 is refused 409 BOQ_BASELINE_LOCKED by assertBoqEditable (:311-322, :2044) before any write. A deep-project probe (WP6ADJ Q13): read, and one refusal no WP-6 mutant touches.", [PH6("797, 806"), HF6("backend/src/services/boq.service.js", "271-322, 2042-2044"), WP6ADJ("Q13"), PREP6("section 0 fact 2; section 5.3; section 10 G9")], { note: "WP-6 G9 (2026-10-10): read by U4.live.087SCH.lock and U4.live.087SCH.patch." }),
   },
   U5: {
-    chunk130: fig([60, 60, 10], "batch-sizes", "chunkBoqRows(130 rows, no section): one 'General' section sliced 60/60/10.", [P(67), P(767), S("schedule.service.js", "1865-1891")]),
-    chunkSections505030: fig([50, 50, 30], "batch-sizes", "A50/B50/C30: 50+50 > 60 starts a new batch each time.", [P(67), P(767)]),
-    chunkSections7045: fig([60, 55], "batch-sizes", "A70 slices 60 + 10; B45 joins the 10 (10 + 45 = 55 <= 60).", [P(67), P(767)]),
-    chunk60: fig([60], "batch-sizes", "60 rows: one batch (rows.length <= 60).", [P(767)]),
-    chunk61: fig([60, 1], "batch-sizes", "61 rows: 60 + 1.", [P(767)]),
-    aiJobCalls087: count(3, "After the L131 fix the AI job on the recorder stub makes 3 calls of at most 60 rows; on 087-COM's 130 rows in sections 50/50/30 the calls are [50, 50, 30].", [P(767), P(387)], { assumption: true, note: "Uploaded rows carry no section today (excel-parser.js:6 has no section column, HR-C14); without one the batches are [60, 60, 10]." }),
+    chunk130: fig([60, 60, 10], "batch-sizes", "chunkBoqRows(130 rows, no section): one 'General' section sliced 60/60/10.", [P(67), P(767), S("schedule.service.js", "1865-1891"), PH6("88, 807"), HF6("backend/src/services/schedule.service.js", "1929-1956, 2252-2257, 2441-2538"), WP6ADJ("Q2, Q3"), PREP6("section 0 fact 10; section 10 G24")], { note: "WP-6 G24 (2026-10-10): chunkBoqRows is at schedule.service.js:1929-1956 at HEAD 6c5ab54 (it was :1865-1891 @886c9f1; its body is unchanged), its one call site :2257 (generateCpmScheduleChunked); it is not exported. WP6ADJ Q3: judged through the product path, AI schedule generation (runScheduleGenerationJob, exported, :2441-2538) run in process on a throwaway with the recorder stub (WP6ADJ Q2), whose structuring answer supplies the rows (and their sections) and whose activity-generation calls are recorded one per batch; the vm evaluation of the function text only if that path cannot be reached in process, and then labelled a unit-level check, not live evidence." }),
+    chunkSections505030: fig([50, 50, 30], "batch-sizes", "A50/B50/C30: 50+50 > 60 starts a new batch each time.", [P(67), P(767)], { note: "WP-6 (2026-10-10, WP6ADJ Q3): judged as WP6.U5.chunk130 says, the stub's structuring answer supplying 130 rows in sections of 50, 50 and 30; unit-level only on the vm fallback." }),
+    chunkSections7045: fig([60, 55], "batch-sizes", "A70 slices 60 + 10; B45 joins the 10 (10 + 45 = 55 <= 60).", [P(67), P(767)], { note: "WP-6 (2026-10-10, WP6ADJ Q3): judged as WP6.U5.chunk130 says, the stub's structuring answer supplying 115 rows in sections of 70 and 45; unit-level only on the vm fallback." }),
+    chunk60: fig([60], "batch-sizes", "60 rows: one batch (rows.length <= 60).", [P(767)], { note: "WP-6 (2026-10-10, WP6ADJ Q3): judged as WP6.U5.chunk130 says, 60 rows with no section; unit-level only on the vm fallback." }),
+    chunk61: fig([60, 1], "batch-sizes", "61 rows: 60 + 1.", [P(767)], { note: "WP-6 (2026-10-10, WP6ADJ Q3): judged as WP6.U5.chunk130 says, 61 rows with no section; unit-level only on the vm fallback." }),
+    aiJobCalls087: count(3, "After the L131 fix the AI job on the recorder stub makes 3 calls of at most 60 rows; on 087-COM's 130 rows in sections 50/50/30 the calls are [50, 50, 30].", [P(767), P(387), PH6("807, 1082"), HF6("backend/src/services/boq.service.js", "1647-1660"), WP6ADJ("Q1"), PREP6("section 5.3; section 10 G5")], { assumption: true, today: 1, ref: "HR-C14", note: "Uploaded rows carry no section today (excel-parser.js:6 has no section column, HR-C14); without one the batches are [60, 60, 10]. WP-6 G5 (2026-10-10): judged as WP6.U5.aiJobCalls, on B6X's own queued job of the same 130-row 50 / 50 / 30 shape (WP6ADJ Q1: 087-COM's own queued job is never run; the MOMENT-MAP row 159 deviation is recorded by key when the proof lands); this leaf keeps the count. Today 1: runBoqActivityJob sends every row in one prompt (boq.service.js:1647-1653, L131). Ref HR-C14 (undecided: BLOCKED at today), an assumption." }),
+    aiJobCalls: fig({ calls: 3, sizes: [50, 50, 30] }, "outcome", "B6X's 130-row bill in sections Substructure 50, Superstructure 50 and Finishes 30 (WP6.B6X.bill): after HR-C14's 'AI job in batches of at most 60 by section' (:1082 PH6), runBoqActivityJob, called directly in process on B6X's queued job with the recorder stub answering an empty breakdown (WP6.B6X.stub), makes one call per batch: 3 calls of 50, 50 and 30 rows, the chunker's answer for 50 / 50 / 30 (WP6.U5.chunkSections505030).", [PH6("807, 831, 1082"), HF6("backend/src/services/boq.service.js", "1593-1660"), WP6ADJ("Q1, Q2"), PREP6("section 0 fact 10; section 5.2; section 10 G5"), DERIVE_B6], { assumption: true, today: { calls: 1, sizes: [130] }, ref: "HR-C14", note: "WP-6 G5 (2026-10-10): today one prompt of all 130 rows (boq.service.js:1647-1653, max_tokens 8192: L131). The recorder stub (WP6ADJ Q2): the external AI client's call replaced inside the proof process only, no network call made (the certification's do-not list forbids activating AI APIs); the proof calls the job function directly, never claimNextJob, so no other company's queued job is touched, and asserts the stub was the only AI call path used (recorder calls counted, zero outbound requests). A test double for an external service, not fabricated database state. Ref HR-C14 (undecided: BLOCKED at today); the batching's shape is the fix's (CONTRACT pending), so an assumption." }),
+    sectionsReadBack: fig({ B6X: { Substructure: 50, Superstructure: 50, Finishes: 30 }, "087-COM": { "Substructure and frame": 50, "Envelope and services": 50, "Finishes and externals": 30 } }, "outcome", "The bill's rows read back by section (GET /boq rows; GET coverage?groupBy=section): B6X's three workbook sections (WP6.B6X.bill) and 087-COM's (the builder's S1-S3, BLD 087-com.js:87-89, sizes deep.087-COM.boqSections), once HR-C14's optional section column (:1082 PH6) is parsed, written and served.", [PH6("427, 807, 831, 1082"), HF6("backend/src/services/boq/excel-parser.js", "6, 43-48"), HF6("backend/src/services/boq.service.js", "463-483, 697-700, 1967-2012"), HF6("backend/scripts/cert/cert3/build/087-com.js", "87-89, 230-275"), PREP6("section 0 fact 9; section 5.3; section 10 G6, G26"), DERIVE_B6], { assumption: true, today: { B6X: { "(none)": 130 }, "087-COM": { "(none)": 130 } }, ref: "HR-C14", note: "WP-6 G6, G26 (2026-10-10): today no row carries a section: the parser reads none (excel-parser.js:6, 43-48), boqItemData writes none (boq.service.js:463-483) and mapBoqItem serves none (:1967-2012), so coverage by section is one Unassigned group of 130. 087-COM's today is also the stored moment of its build step boq (state out.sections.readBack { '(none)': 130 }, the HR-C14 finding); after the HR-C14 fix that moment is judged STORED-PRE-FIX, strictly at the exit rebuild. deep.087-COM.boqSections keeps the workbook's shape and no today (WP-4's leaf-contract walk of deep.087-COM is not widened). Ref HR-C14, an assumption." }),
+    aiAfterBaseline: fig({ refused: true, activitiesCreated: 0, allocationsCreated: 0 }, "outcome", "B6X's bill locked (submitted, approved, locked: WP6.B6X.choreography X3), the handler run again in process with the stub naming one activity for X1-001: under HR-C14's 'AI job refused after the baseline' (:1082 PH6) nothing is created.", [PH6("831, 1082"), HF6("backend/src/services/boq.service.js", "651-770, 1593-1700"), HF6("backend/src/routes/boq.js", "232-251"), WP6ADJ("Q2"), PREP6("section 0 fact 10; section 4; section 10 G7"), DERIVE_B6], { assumption: true, today: { activitiesCreated: 1, allocationsCreated: 1, allocationStatus: "draft" }, ref: "HR-C14", note: "WP-6 G7 (2026-10-10): today the job checks no BOQ or schedule lock before createOfficialBoqActivityAllocation (boq.service.js:651-770), so one active activity and one draft allocation land on the locked bill (L130); the retry route re-queues the job (routes/boq.js:232-251). How the fix refuses is its choice (CONTRACT pending), so an assumption. Ref HR-C14 (undecided: BLOCKED at today)." }),
   },
   U6: {
-    nonAiImportAtLimit: err(402, "AI_LIMIT_REACHED", "L121: aiGenerationsUsed at the plan limit; a real upload is refused today, a dry run answers 200.", [P(768), S("boq.service.js", "1174"), AREA], { assumption: true, note: "HR-C14 recommends quota only for the AI job; today's answer recorded." }),
+    nonAiImportAtLimit: fig({ upload: { status: 200, mode: "imported" }, dryRun: 200 }, "outcome", "L121 on B6Q, the throwaway in company 011 (WP6.U6.company; WP6ADJ Q4), once 011's aiGenerationsUsed equals its plan's aiLimit 10: under HR-C14's 'quota only for the AI job' (:1082 PH6) the non-AI real upload is accepted (the AI job, not the import, spends quota) and the dry run answers 200.", [P(768), S("boq.service.js", "1174"), AREA, PH6("808, 831, 1082"), HF6("backend/src/services/boq.service.js", "1172-1174"), HF6("backend/src/middleware/subscription-gate.js", "79-101"), HF6("backend/src/routes/boq.js", "145-195"), WP6ADJ("Q4, Q10"), PREP6("section 0 fact 11; section 4; section 10 G4"), SELECT_L121], { assumption: true, today: { upload: { status: 402, code: "AI_LIMIT_REACHED" }, dryRun: 200 }, ref: "HR-C14", note: "HR-C14 recommends quota only for the AI job; today's answer recorded. WP-6 G4 (2026-10-10, as WP6ADJ Q4 rules): the value was { status: 402, code: 'AI_LIMIT_REACHED' } (unit error), HEAD's own answer under the undecided HR-C14 (the KA.I9 ruling: BLOCKED at today); and the limit was to be reached by switching 087's plan limit in process, which Q4 rejects as a fabricated condition. Today processBoqUpload asserts the quota before parsing on every real upload (boq.service.js:1174) and assertAiQuota refuses at aiGenerationsUsed >= aiLimit (subscription-gate.js:79-94); the dry run skips it (:1172-1174). The route stores the file first (routes/boq.js:173-178), so the 402 leaves the document available and unlinked (a lead, P3, WP6ADJ Q10). How the counter reaches the limit is WP6.B6Q.choreography Q1 (proposed, to be confirmed with the proof). The import's shape after the fix is CONTRACT pending, so an assumption." }),
+    company: fig(B6Q_BOOK.company, "outcome", "WP6ADJ Q4: the population company for L121, by a stated rule, read only from the population spec (SELECT_L121). R1 a finite AI quota: plan aiLimit trial 3, individual 10, business 150 (enterprise Infinity is out: plans.js:3-21). R2 a subscription that is active and cannot lapse by date: status active (isExpired dates only a trialing or a canceled row, subscription.service.js:22-32, and the billing checks move only those, billing-scheduler.js:42-80; every trial in the population ends by 2026-10-11 and several lapsed after 2026-10-06). R3 a free project place (live projects < projectLimit, archived ones not counted: subscription-gate.js:42-77). R4 an uploader persona and no more people than seats. R5 not reserved by other certification work (087, 052 and 006, the deep companies; the Phase 21 lifecycle companies; 100), except a reservation for entitlement cases: the plan keeps 011 'for Individual-plan and entitlement cases' (:44, :374, :448 PH6), and the AI quota is one. Order: the fewest AI generations to the limit, then the most uploaders (8 real uploads per hour per project and user), then the most project room, then the lowest number. 54 companies have a finite quota and an active subscription; 29 qualify; 011 Granite Peak Construction comes first by the order and is the plan's own entitlement company: individual, active, annual (period end 2027-03-23), aiLimit 10 with 3 used (7 generations to the limit), 2 live projects of 3, 4 people (PM, site, QS, finance) on 5 seats, INR. Runner-up 001 (individual, annual, 3 of 10, PM only). No population company with an active subscription is at its limit today: the three at it (002, 009, 020) are trials whose trial ended and whose one project place is used.", [PH6("44, 374, 395-416, 448"), HF6("backend/scripts/cert/lib/spec.js", "151-203, 386-433"), HF6("backend/scripts/cert/finalize-population.js", "93-118, 148-215"), HF6("backend/src/config/plans.js", "3-21"), HF6("backend/src/services/subscription.service.js", "10-32"), HF6("backend/src/middleware/subscription-gate.js", "42-101"), HF6("backend/src/jobs/billing-scheduler.js", "42-80"), HF6("backend/src/middleware/rate-limit.js", "139-145"), "C:/Temp/octapm-cert/logs/regen-cert2c/finalize.log (2026-10-05 05:37 CDT)", WP6ADJ("Q4"), SELECT_L121], { assumption: true, note: "WP-6 Q4 (2026-10-10): the spec's figures at the finalize moment of the cert2c snapshot that cert3d restores; the proof re-reads the counter live before Q1 and derives the uploads from it. Residue in 011 (an owner question): B6Q archived (its place freed) and the counter left at its limit 10 (from 3) until a period reset; 011 is one of the 97 companies whose exit fingerprint the plan compares (section 1.2), so its fingerprint moves." }),
   },
   U7: {
-    siteUpload: err(403, "FORBIDDEN", "boq create is pm, planning_eng, qs.", [P(769), "shared/permissions.json modules.boq @" + HEAD]),
+    siteUpload: err(403, "FORBIDDEN", "boq create is pm, planning_eng, qs.", [P(769), "shared/permissions.json modules.boq @" + HEAD], { note: "WP-6 G25 (2026-10-10): the upload route's guard is requireRoles(pm, planning_eng, qs) (routes/boq.js:72), the role, not the template-aware permission guard: a permission template denying boq:create does not stop an upload. E8 rests on the WP-0 probe (WP6ADJ Q12)." }),
     qsPlannerPm: http(200, "QS, planner and PM get 2xx.", [P(769)], { assumption: true, note: "2xx class; 200 for the dry run." }),
   },
   A1: {
@@ -1323,12 +1601,16 @@ const WP6 = {
     duplicate: err(400, "DUPLICATE_ACTIVE_ALLOCATION", "Same item + activity twice.", [S("activity-boq-allocation.service.js", "276")]),
     foreignActivity: err(404, "ACTIVITY_NOT_FOUND", "Activity of another project.", [S("activity-boq-allocation.service.js", "78")]),
     notApplicable: err(409, "MAPPING_NOT_APPLICABLE", "Allocate a not_applicable row.", [S("activity-boq-allocation.service.js", "325")]),
+    amountOverCapacity: err(400, "ALLOCATION_AMOUNT_EXCEEDED", "A1.B6.amountOverCapacity: B-003 (60 t, 72,000.00), with no active allocation on it (B-003/A140 is rejected), allocated 10 t to A230 with amount 80,000.00: 10 t passes the quantity branch of assertAllocationCapacity (activity-boq-allocation.service.js:289) and 80,000.00 > 72,000.00 fails the amount branch (:302), before any write. The plan's probe (B-001 + 1 m3, WP6.A1.overCapacity) is refused by the quantity branch first, so this probe gives the amount branch a catcher of its own.", [PH6("811, 1150"), HF6("backend/src/services/activity-boq-allocation.service.js", "280-314, 1113-1241"), WP6ADJ("Q9"), PREP6("section 0 fact 5; section 10 G11"), DERIVE_B6], { note: "WP-6 G11 (2026-10-10): the catcher of M-CAPa (WP6.mutations.allocationCapacity)." }),
+    amountOverCapacityDetails: fig({ boqAmount: cents(72000), allocatedAmount: cents(80000) }, "outcome", "error.details of the amount refusal: boqAmount 72,000.00 (B-003: 60 t x 1,200.00) and allocatedAmount 80,000.00 (the active total 0.00 + the probe's 80,000.00). In cents here; the answer carries currency units.", [PH6("811"), HF6("backend/src/services/activity-boq-allocation.service.js", "300-314"), PREP6("section 10 G11"), DERIVE_B6], { note: "WP-6 G11 (2026-10-10)." }),
   },
   A2: {
     patchSubmitted: err(400, "ALLOCATION_NOT_EDITABLE", "PATCH a submitted row.", [P(772), S("activity-boq-allocation.service.js", "1294")]),
     approveDraft: err(400, "INVALID_ALLOCATION_STATUS", "Approve a draft.", [S("activity-boq-allocation.service.js", "1502")]),
     rejectNoReason: err(400, "VALIDATION_ERROR", "Route reason notEmpty answers before REJECT_REASON_REQUIRED.", [R("activity-boq-allocations.js", "300-304"), S("activity-boq-allocation.service.js", "1607")], { note: "Area map expected REJECT_REASON_REQUIRED." }),
-    resubmitRejected: err(400, "INVALID_ALLOCATION_STATUS", "Resubmitting a rejected row is refused today (submit accepts drafts only).", [S("activity-boq-allocation.service.js", "1448"), P(1045)], { assumption: true, note: "HR-C17 recommends rejected -> draft -> submit; undecided." }),
+    resubmitRejected: state("submitted", "B-003/A140, 10 t, rejected with a reason (WP6.A2.rejected): under HR-C17's recommendation, rejected -> draft -> submit (:1085 PH6), the planner returns it to draft through the fix's path and submits it again: status submitted, active again only through the duplicate and capacity checks.", [S("activity-boq-allocation.service.js", "1448"), P(1045), PH6("812, 834, 1085"), HF6("backend/src/services/activity-boq-allocation.service.js", "1280-1297, 1440-1492"), PREP6("section 4; section 9; section 10 G10")], { assumption: true, today: { submit: { status: 400, code: "INVALID_ALLOCATION_STATUS" }, patch: { status: 400, code: "ALLOCATION_NOT_EDITABLE" } }, ref: "HR-C17", note: "HR-C17 recommends rejected -> draft -> submit; undecided. WP-6 G10 (2026-10-10): the value was { status: 400, code: 'INVALID_ALLOCATION_STATUS' } (unit error), HEAD's own answer under the undecided HR-C17 (the KA.I9 ruling: BLOCKED at today). The path's route and codes are the fix's (CONTRACT pending), so an assumption. Today submit accepts drafts only (activity-boq-allocation.service.js:1445-1451) and PATCH edits drafts only (:1291-1297)." }),
+    rejected: fig({ status: "rejected", isActive: false }, "outcome", "A2.B6.rejected: the QS rejects B-003/A140 (10 t, 12,000.00, submitted) with a reason: 200, status rejected, isActive false (rejectAllocation, activity-boq-allocation.service.js:1585-1644, :1616), so B-003 carries no active allocation afterwards.", [PH6("812"), HF6("backend/src/services/activity-boq-allocation.service.js", "1585-1644"), PREP6("section 10 G12"), DERIVE_B6], { note: "WP-6 G12 (2026-10-10)." }),
+    approved: fig(B6_ALLOC.approved, "list", "A2.B6.approved: the five stage-3 allocations on B6, created and submitted by the planner, approved by the QS, amounts in cents: quantity x the row's rate, each equal to its stage3:109 allocation leaf (60,000.00, 30,000.00, 90,000.00, 135,000.00 and 72,000.00).", [PH6("812, 813"), ST("stage3-boq-budget.js", "88-95"), ...B6_SRC], { assumption: true, note: "WP-6 G12 (2026-10-10)." }),
   },
   A3: {
     allocated: money(ALLOCATED, "All five stage-3 allocations approved: 387,000.00.", [P(773)]),
@@ -1340,7 +1622,8 @@ const WP6 = {
     bulk: fig({ createdCount: 1, failedCount: 2, codes: ["ALLOCATION_QUANTITY_EXCEEDED", "DUPLICATE_ACTIVE_ALLOCATION"] }, "outcome", "Bulk of 3 (valid, over capacity, duplicate).", [P(774), AREA]),
   },
   A5: {
-    mappingImport: fig({ dryRunWrites: 0, applyCreatesDraftsInOneBatch: true, undoRemovesExactly: true }, "outcome", "Dry run writes nothing; apply creates drafts under one importBatchId; undo removes exactly those.", [P(775), R("activity-boq-allocations.js", "184-221")]),
+    mappingImport: fig({ dryRunWrites: 0, applyCreatesDraftsInOneBatch: true, undoRemovesExactly: true }, "outcome", "Dry run writes nothing; apply creates drafts under one importBatchId; undo removes exactly those.", [P(775), R("activity-boq-allocations.js", "184-221")], { note: "WP-6 G13 (2026-10-10): the concrete report on B6 is WP6.A5.report; the dry run is M-DRYm's and M-CAPi's catcher (WP6.mutations)." }),
+    report: fig({ dryRun: { matched: 2, unmatched: 1, existing: 0, breaches: 1, created: 0, totalAmount: cents(12000) }, apply: { status: 201, created: 2, failed: 0, oneBatch: true, allocationStatus: "draft" }, undo: { rejected: 2, keptApproved: 0 } }, "outcome", "B6's mapping file (WP6.B6.allocations mappingFile), after the bulk's one draft on B-003: B-003/A140 5 t and B-003/A230 5 t are matched (10 + 5 + 5 = 20 t <= 60 t; 2 x 5 x 1,200.00 = 12,000.00), B-999 is on no bill row (unmatched), B-001/A120 1 m3 breaches B-001's full 5,000 m3; the planner's dry run writes nothing (mapping-import.service.js:364-369; planImport :162-331, capacity :281-296); the apply creates the two matched rows as drafts under one importBatchId (:377-422); the QS's undo submits then rejects exactly those two, no approved row kept (:434-522).", [PH6("798, 815"), HF6("backend/src/services/mapping-import.service.js", "162-331, 364-422, 434-522"), HF6("backend/src/routes/activity-boq-allocations.js", "186-221"), PREP6("section 10 G13"), DERIVE_B6], { assumption: true, note: "WP-6 G13 (2026-10-10): holds while B-003/A140 is inactive (HEAD: KA.A2.resubmitRejected is refused). Once HR-C17 lets the resubmit through, B-003/A140 becomes an active row before the import and the file's B-003/A140 line reads existing, not matched: the proof's choice then (an open point for the proof)." }),
   },
   A6: {
     patchNotApplicableApproved: err(409, "MAPPING_RULE_HAS_APPROVED_ALLOCATION", "not_applicable on an item with an approved allocation.", [P(776), S("activity-boq-allocation.service.js", "1717")]),
@@ -1348,9 +1631,10 @@ const WP6 = {
   },
   B1: {
     original: money([100000, 100000, 50000, 100000, 20000, 10000, 30000].map(cents).reduce((a, b) => a + b, 0), "labour 100,000 + material 100,000 + equipment 50,000 + subcontract 100,000 + indirect 20,000 + overhead 10,000 + contingency 30,000 = 410,000.00.", [AREA]),
-    sevenLineTotal: money([1000, 2000, 3000, 4000, 5000, 6000, 7000].map(cents).reduce((a, b) => a + b, 0), "Direct cost with seven typed lines 1,000..7,000: 28,000.00 on the ledger, byCostType exactly those seven.", [P(778)]),
+    sevenLineTotal: money([1000, 2000, 3000, 4000, 5000, 6000, 7000].map(cents).reduce((a, b) => a + b, 0), "Direct cost with seven typed lines 1,000..7,000: 28,000.00 on the ledger, byCostType exactly those seven.", [P(778)], { note: "WP-6 G15 (2026-10-10): the line-to-type mapping is WP6.B1.sevenLines; on B6 one expense direct cost with seven lines, each on one of the seven typed budget lines, takes that line's cost type (direct-cost.service.js:215)." }),
+    sevenLines: fig(Object.fromEntries(B6_BUDGET.directCost.lines.map((l) => [l.costType, l.amount])), "outcome", "B1.B6.sevenLineCost: the seven lines of B6's expense in COST_TYPES order (budget.service.js:22): labour 1,000.00 (LAB), material 2,000.00 (MAT), equipment 3,000.00 (EQP), subcontract 4,000.00 (SUB), indirect 5,000.00 (IND), overhead 6,000.00 (OVH), contingency 7,000.00 (CON); finance's approval posts each to the ledger with its line's cost type, so GET /cost/reconciliation ledger.byCostType holds exactly those seven (cost-reconciliation.service.js:217) and budget.recordedTotal 28,000.00 (:200).", [PH6("818"), HF6("backend/src/services/direct-cost.service.js", "215, 488-516"), HF6("backend/src/services/cost-reconciliation.service.js", "107-237"), PREP6("section 10 G15"), ...B6_SRC], { note: "WP-6 G15 (2026-10-10). In cents." }),
     balanced: fig(true, "boolean", "budget.recordedTotal 28,000.00, balanced true.", [P(778)]),
-    costTypes: count(8, "labour, material, equipment, subcontract, indirect, overhead, contingency, other.", [S("budget.service.js", "22"), P(1046)], { note: "CLAUDE.md says 7 categories; HR-C18 recommends keeping 8 and showing 'other' separately." }),
+    costTypes: count(8, "labour, material, equipment, subcontract, indirect, overhead, contingency, other.", [S("budget.service.js", "22"), P(1046)], { note: "CLAUDE.md says 7 categories; HR-C18 recommends keeping 8 and showing 'other' separately. WP-6 G14 (2026-10-10): not a value check: 8 is HEAD's under the undecided HR-C18 (:1086 PH6), so this leaf is read only as an observation by CF.HRC18 (WP6.CF.HRC18), never judged as a value; deep.087-COM.costTypes stays (plan section 3.2 content, B1.live.087.costTypes)." }),
   },
   B2: {
     duplicate: err(409, "BUDGET_LINE_DUPLICATE", "Same cost code + type.", [P(779), S("budget.service.js", "449, 510")]),
@@ -1358,16 +1642,17 @@ const WP6 = {
     costCodeInUse: err(409, "COST_CODE_IN_USE", "Removing a cost code with an active line.", [S("budget.service.js", "120")]),
   },
   B3: {
-    overTransfer: err(409, "BUDGET_TRANSFER_EXCEEDS", "The plan's probe: transferring 100,000.01 out of 01-100 (revised 100,000.00) is expected refused (plan).", [P(780), S("budget.service.js", "677-678"), ADJ("C1")], {
-      today: { status: 200, from01_100: cents(100000) - cents(100000.01), to02_100: cents(100000) + cents(100000.01), projectRevised: [100000, 100000, 50000, 100000, 20000, 10000, 30000].map(cents).reduce((a, b) => a + b, 0) },
-      note: "today accepted: money() rounds the amount to 100,000.01 (budget.service.js:43-48) and the check is amount > available + TOLERANCE with TOLERANCE 0.01 (:26, :678); 100,000.01 > 100,000.00 + 0.01 is false in doubles, so both transfer rows are written (:679-680) and the route answers 200 (budget.js:97, sendSuccess default). 01-100 reads -0.01 and 02-100 200,000.01; the project revised stays 410,000.00. Confirm-first suspect (adjudication C1): 'money ceilings allow one cent over (0.01 tolerance)'; the tolerance should be < 0.005. Proposed P3, classified after reproduction. At HEAD the lane's 20,000 transfer out of 01-100 (available -0.01) would then answer 409 BUDGET_TRANSFER_EXCEEDS: a HEAD reproduction runs this probe on its own pair of lines (revised 100,000.00 each). Once fixed it writes nothing and its place in the lane does not matter.",
+    overTransfer: err(409, "BUDGET_TRANSFER_EXCEEDS", "The plan's probe: transferring 100,000.01 out of 01-100 (revised 100,000.00) is expected refused (plan).", [P(780), S("budget.service.js", "677-678"), ADJ("C1"), PH6("820"), WP6ADJ("Q14"), PREP6("section 0 fact 6; section 10 G16")], {
+      assumption: true, ref: "C1-TOL",
+      today: { status: 200, T1: cents(100000) - cents(100000.01), T2: cents(100000) + cents(100000.01), pairSum: cents(100000) + cents(100000) },
+      note: "today accepted: money() rounds the amount to 100,000.01 (budget.service.js:43-48) and the check is amount > available + TOLERANCE with TOLERANCE 0.01 (:26, :678); 100,000.01 > 100,000.00 + 0.01 is false in doubles, so both transfer rows are written (:679-680) and the route answers 200 (budget.js:97, sendSuccess default). 01-100 reads -0.01 and 02-100 200,000.01; the project revised stays 410,000.00. Confirm-first suspect (adjudication C1): 'money ceilings allow one cent over (0.01 tolerance)'; the tolerance should be < 0.005. Proposed P3, classified after reproduction. At HEAD the lane's 20,000 transfer out of 01-100 (available -0.01) would then answer 409 BUDGET_TRANSFER_EXCEEDS: a HEAD reproduction runs this probe on its own pair of lines (revised 100,000.00 each). Once fixed it writes nothing and its place in the lane does not matter. WP-6 G16 (2026-10-10): the today was { status: 200, from01_100: -1, to02_100: 20,000,001, projectRevised: 41,000,000 }; it now names B6's dedicated pair (WP6.B6.budgetLines T1 01-100/other and T2 02-100/other, 100,000.00 each): T1 reads -0.01 and T2 200,000.01, the pair's sum unchanged, so the lane's 20,000 transfer out of 01-100/labour still finds 100,000.00 available. Ref C1-TOL, WP-4's statement reused with no new confirm-first item (WP6ADJ Q14): BLOCKED at today, an assumption. The transfer limit's catcher is the +0.02 probe (WP6.B3.overTransferPlus2).",
     }),
     over: money(cents(100000.01), "The plan's probe amount (expected refused; accepted today, see overTransfer).", [P(780)]),
     overTransferPlus2: err(409, "BUDGET_TRANSFER_EXCEEDS", "Second probe (adjudication C1): 100,000.02 > available 100,000.00 + the 0.01 tolerance = 100,000.01, refused at HEAD (budget.service.js:678) and nothing written. It is the catcher for the guard-removal mutation (WP6.mutations.transferLimit).", [P(780), S("budget.service.js", "26, 677-678"), ADJ("C1")]),
     overPlus2: money(cents(100000.02), "The +0.02 probe amount, refused at HEAD.", [P(780), ADJ("C1")]),
     from01_100: money(cents(100000) - cents(20000), "20,000 moves: 01-100 80,000.00.", [P(780)]),
     to02_100: money(cents(100000) + cents(20000), "02-100 120,000.00.", [P(780)]),
-    projectRevised: money([100000, 100000, 50000, 100000, 20000, 10000, 30000].map(cents).reduce((a, b) => a + b, 0), "Project revised unchanged at 410,000.00.", [AREA], { assumption: true, note: "Before any CO approval on that budget." }),
+    projectRevised: money([100000, 100000, 50000, 100000, 20000, 10000, 30000].map(cents).reduce((a, b) => a + b, 0), "The seven typed lines' revised sum after the 20,000 move (01-100/labour 80,000.00 + 02-100/material 120,000.00 + the other five unchanged): 410,000.00.", [AREA, PH6("820"), PREP6("section 10 G17")], { assumption: true, note: "Before any CO approval on that budget. WP-6 G17 (2026-10-10): the derivation was 'Project revised unchanged at 410,000.00.'; B6 carries five more lines (OTH, T1, T2, LA, LB: WP6.B6.budgetLines), so the figure is the seven typed lines' sum, read at B3.B6.move20000, before B4's revision." }),
     archivedLine: err(409, "BUDGET_LINE_ARCHIVED", "Transfer to/from an archived line.", [S("budget.service.js", "676")]),
   },
   B4: {
@@ -1375,24 +1660,70 @@ const WP6 = {
     amountZero: err(400, "BUDGET_REVISION_AMOUNT_INVALID", "Amount 0.", [S("budget.service.js", "691")]),
   },
   B5: {
-    originalLocked: err(409, "BUDGET_ORIGINAL_LOCKED", "L109: approve a CO on line A, PATCH A originalBudget; re-point the CO to B; PATCH A again: still 409.", [P(782), S("budget.service.js", "395-421")], { assumption: true, today: "lead predicts 200 after the re-point" }),
+    originalLocked: err(409, "BUDGET_ORIGINAL_LOCKED", "L109: approve a CO on line A, PATCH A originalBudget; re-point the CO to B; PATCH A again: still 409.", [P(782), S("budget.service.js", "395-421")], { assumption: true, today: "lead predicts 200 after the re-point", ref: "L109", note: "WP-6 G18 (2026-10-10): split into WP6.B5.lockedAfterCo (the first refusal, HARD, M-ORIG's and M-ORIG2's catcher), WP6.B5.afterRepoint (the L109 re-point, ref L109) and WP6.B5.lockedByLedger (condition 4, M-ORIG's and M-ORIG4's catcher); kept, with ref L109, as their common answer." }),
+    lockedByLedger: err(409, "BUDGET_ORIGINAL_LOCKED", "B5.B6.lockedByLedger: the cost controller PATCHes OVH (CERT3-087-COM-OVH/overhead, original 10,000.00) to 10,001.00. B1's expense posted 6,000.00 to it (WP6.B1.sevenLines) and no change row stands on it (no transfer, revision or change order: WP6.B6.transfers, lineRevisions, changeOrder), so condition 4 alone locks it (originalBudgetLocks, budget.service.js:373-378) and the one Original guard refuses (:413-418) before any write; the original unchanged.", [PH6("822, 1150"), HF6("backend/src/services/budget.service.js", "300-418, 483-518"), WP6ADJ("Q9"), PREP6("section 0 fact 7; section 10 G18"), DERIVE_B6], { note: "WP-6 G18 (2026-10-10): an independent catcher of M-ORIG and the catcher of M-ORIG4." }),
+    lockedByLedgerConditions: fig([{ condition: "ledger_posting", number: 4 }], "list", "error.details.conditions of the OVH refusal (originalBudgetLockedError, budget.service.js:391-403; ORIGINAL_LOCK :320-326): condition 4 only, each with its reason text.", [PH6("822"), HF6("backend/src/services/budget.service.js", "320-326, 391-403"), PREP6("section 10 G18")], { note: "WP-6 G18 (2026-10-10): condition and number compared; the reason is free text." }),
+    lockedAfterCo: err(409, "BUDGET_ORIGINAL_LOCKED", "B5.B6.lockedAfterCo: the QS's 10,000.00 CO on A110 naming LA (03-100/other, original 100,000.00) is approved by the PM, which posts its change row on LA (applyChangeOrderToBudgetLines); the cost controller's PATCH of LA's original to 1.00 is refused by condition 2 (budget.service.js:349-351) before any write. LA carries no direct-cost line, so no other condition stands on it.", [PH6("822, 1150"), HF6("backend/src/services/budget.service.js", "300-418, 715-788"), HF6("backend/src/services/change-order.service.js", "857-931"), WP6ADJ("Q9"), PREP6("section 0 fact 7; section 10 G18"), DERIVE_B6], { note: "WP-6 G18 (2026-10-10): the first refusal of the plan's B5, HARD; the catcher of M-ORIG and M-ORIG2." }),
+    lockedAfterCoConditions: fig([{ condition: "approved_change", number: 2 }], "list", "error.details.conditions of the LA refusal: condition 2 only (an approved change order stands on it).", [PH6("822"), HF6("backend/src/services/budget.service.js", "320-326, 349-351, 391-403"), PREP6("section 10 G18")], { note: "WP-6 G18 (2026-10-10)." }),
+    afterRepoint: err(409, "BUDGET_ORIGINAL_LOCKED", "KA.B5.afterRepoint: the cost controller re-points the approved CO from LA to LB (PUT /budget/change-orders/:id/line, 200) and PATCHes LA's original to 1.00 again: the plan's 'still 409' (L109): a line whose Original was locked stays locked.", [P(782), PH6("822, 833"), HF6("backend/src/services/budget.service.js", "338-389, 715-788"), HF6("backend/src/routes/budget.js", "128-133"), "docs/certification/OCTAPM_CERT_LEADS.md:115 @6c5ab54", PREP6("section 0 fact 7; section 4; section 10 G18"), DERIVE_B6], { assumption: true, today: { status: 200, originalBudget: cents(1) }, ref: "L109", note: "WP-6 G18 (2026-10-10): today the lock is derived from current conditions, not latched (originalBudgetLocks, budget.service.js:338-389): setChangeOrderBudgetLine re-applies the approved CO (:777-788, :784) and deletes its old change row on LA (:731), so no condition stands on LA and the PATCH is accepted, LA's original 1.00. Lead L109 (P2 proposed; its severity is an owner question): BLOCKED at today, an assumption." }),
   },
   B6: {
-    "BR-B": money(cents(2000000) + cents(5000), "Contract value 2,000,000; in effective-date order BR-B (+5,000, today-20d) comes first: 2,005,000.00.", [P(783), S("budget-revision.service.js", "23-38")], { today: cents(2000000) + cents(10000) + cents(5000), note: "today BR-B = latest-effective approved (BR-A 2,010,000) + 5,000 = 2,015,000.00 (budget-revision.service.js:125-130)." }),
-    "BR-A": money(cents(2000000) + cents(5000) + cents(10000), "then BR-A (+10,000, today-10d): 2,015,000.00.", [P(783)], { today: cents(2000000) + cents(10000) }),
+    "BR-B": money(cents(2000000) + cents(5000), "Contract value 2,000,000; in effective-date order BR-B (+5,000, today-20d) comes first: 2,005,000.00.", [P(783), S("budget-revision.service.js", "23-38"), PH6("799, 823, 832, 1083, 1113"), HF6("backend/src/services/budget-revision.service.js", "23-38, 59-168"), WP6ADJ("Q6"), PREP6("section 0 fact 8; section 9 F-1; section 10 G19")], { assumption: true, today: cents(2000000) + cents(10000) + cents(5000), ref: "BR-ORDER", note: "today BR-B = latest-effective approved (BR-A 2,010,000) + 5,000 = 2,015,000.00 (budget-revision.service.js:125-130). WP-6 G19 (2026-10-10): ref BR-ORDER, the section 5 defect fix 'budget-revision running totals' (:1113 PH6; HR-C15's first half), not landed: BLOCKED at today, an assumption. Its severity is decided at the WP-6 run from the reproduction (WP6ADJ Q6): P1 if the wrong stored cumulativeBudget reaches any financial calculation, export, report or forecast, P2 if it is display-only and heals on the next edit; if fixed, compute on read is preferred (no stored-data rewrite). The same GET answer's waterfall is already in effective-date order at HEAD (:74-94), and any later write recomputes the register (an approved CO's generated revision, change-order.service.js:822-847, 922-926), so KA.B6.registerOrder reads the register before B6's CO approval (WP6.CF.BRorder). The base is the project's contract value (WP6.B6.project); the register's baseline definition is CERT-5's (HR-C15's second half)." }),
+    "BR-A": money(cents(2000000) + cents(5000) + cents(10000), "then BR-A (+10,000, today-10d): 2,015,000.00.", [P(783), PH6("823, 1113"), WP6ADJ("Q6"), PREP6("section 10 G19")], { assumption: true, today: cents(2000000) + cents(10000), ref: "BR-ORDER", note: "WP-6 G19 (2026-10-10): today BR-A, created first with no other row, stores the contract value + 10,000.00 = 2,010,000.00 (budget-revision.service.js:125-130, 154) and keeps it after BR-B is back-dated before it. Ref BR-ORDER (not landed: BLOCKED at today), an assumption; read with WP6.B6.BR-B." }),
+    // WP-6 answer-book leaves (2026-10-10, WP6ADJ Q1, Q11): the throwaway project B6's records (G1), beside the register leaves.
+    project: fig(B6_BOOK.project, "outcome", "B0: the throwaway's create payload (WP6.B6.choreography): the shape of WP5.J.project with contractValue 2,000,000.00, the budget-revision register's base (WP6.B6.BR-B), and an explicit defaultRetentionRate 10, so no WP-6 figure depends on the HR-C1 fix. Created and archived by the proof (WP6ADJ Q1).", B6_SRC, { assumption: true, note: "WP-6 G1 (2026-10-10): build choices; <stamp> is the run's. The register leaves BR-B and BR-A and these records share WP6.B6 (WP6-PREP section 10 G1); their keys do not overlap." }),
+    team: fig(B6_BOOK.team, "outcome", "B0: the members assigned on B6 and their project roles; each B6 step is driven by the persona the policy names (WP6-PREP section 8; E8 rests on the WP-0 probe, WP6ADJ Q12).", B6_SRC, { assumption: true }),
+    fixture: fig({ activities: B6_BOOK.activities, costCodes: B6_BOOK.costCodes }, "outcome", "B1: the activities (activityCode as named, the site engineer assigned) and the eight 087 library cost codes put on B6, each found once among GET budget/cost-codes available; company codes are the company administrator's (HR-A1), so B6 creates none.", [...B6_SRC, HF6("backend/scripts/cert/cert3/build/087-com.js", "197-207"), HF6("backend/src/services/budget.service.js", "64-124")], { assumption: true }),
+    workbooks: fig(B6_WORKBOOKS, "outcome", "B2-B5: the bill workbooks sent on B6 (files.boqWorkbook from the book's BOQ rows, mapping_rule required on every row unless named), totals in cents: the stage-3 bill 459,000.00 (stage3:109.boqTotal); without the rate column (U3); B-002 at 160 and B-001 not_applicable, 467,000.00 (WP6.U2.total); the same without B-005, 395,000.00 as a workbook (B-005 stays active on the bill today); the stage-3 bill again after the lock.", [...B6_SRC, HF6("backend/scripts/cert/cert3/build/files.js", "543-575")], { assumption: true }),
+    allocations: fig(B6_ALLOC, "outcome", "B3: B6's allocations in cents: the five stage-3 allocations approved (387,000.00, unallocated 72,000.00, coverage 84.31%, four rows complete: WP6.A3), B-003/A140 10 t rejected (WP6.A2.rejected), the A1 amount probe (WP6.A1.amountOverCapacity), the bulk's three rows giving one created and two failed (WP6.A4.bulk), the mapping file's dry run (WP6.A5.report). Modelled with HEAD's order of checks: the duplicate check precedes capacity (activity-boq-allocation.service.js:1113-1241).", [...B6_SRC, HF6("backend/src/services/activity-boq-allocation.service.js", "1113-1278")], { assumption: true }),
+    budgetLines: fig(B6_BUDGET.lines, "list", "B6: the twelve budget lines the cost controller creates on B6, originals in cents: the seven typed lines of WP6.B1 (410,000.00: labour, material, equipment, subcontract, indirect, overhead, contingency on 01-100, 02-100, EQP, 03-100, 09-100, OVH, CON), OTH (the eighth type, 0.00), the C1-TOL pair T1 and T2 (100,000.00 each), L109's LA (100,000.00) and LB (0.00). No two share a code and type (BUDGET_LINE_DUPLICATE, budget.service.js:448-449).", [...B6_SRC, HF6("backend/src/services/budget.service.js", "22, 433-481")], { assumption: true }),
+    directCost: fig(B6_BUDGET.directCost, "outcome", "B6: one expense direct cost with seven lines on the seven typed lines (1,000.00..7,000.00, 28,000.00), made and submitted by the cost controller, approved by finance (direct_cost.approve); each line takes its budget line's cost type (direct-cost.service.js:215) and posts to the ledger (:488-516). In cents.", [...B6_SRC, HF6("backend/src/services/direct-cost.service.js", "215, 330-613")], { assumption: true }),
+    transfers: fig(B6_BUDGET.transfers, "outcome", "B6: finance's transfers, in cents: 100,000.02 LAB to MAT (refused: WP6.B3.overTransferPlus2), 20,000.00 LAB to MAT (LAB 80,000.00, MAT 120,000.00: WP6.B3.from01_100, to02_100), 100,000.01 on the dedicated pair T1 to T2 (KA.B3.overTransfer, C1-TOL), and 1.00 LAB to MAT once MAT is archived (WP6.B3.archivedLine).", [...B6_SRC, HF6("backend/src/services/budget.service.js", "26, 659-686")], { assumption: true }),
+    lineRevisions: fig(B6_BUDGET.lineRevisions, "outcome", "B6: finance's line revisions, in cents: +5,000.00 with a note on IND (revised 25,000.00: WP6.B4.revisionPlus5000), 0.00 on IND (refused: WP6.B4.amountZero), and -999,999.00 on LAB (CF.L111: accepted today).", [...B6_SRC, HF6("backend/src/services/budget.service.js", "688-702")], { assumption: true }),
+    budgetProbes: fig(B6_BUDGET.probes, "outcome", "B6: the cost controller's Original PATCHes (OVH to 10,001.00, WP6.B5.lockedByLedger; LA to 1.00 after the CO, WP6.B5.lockedAfterCo, and again after the re-point, WP6.B5.afterRepoint), the negative line EQP/other at -500.00 (CF.L111) and the archive of MAT, which carries 2,000.00 of actual (KA.B7.archivedActual). In cents.", [...B6_SRC, HF6("backend/src/services/budget.service.js", "433-520")], { assumption: true }),
+    register: fig(B6_BUDGET.register, "outcome", "B6: the PM's two approved budget revisions, BR-A +10,000.00 effective the run date - 10 days, then BR-B +5,000.00 effective the run date - 20 days, on the contract value 2,000,000.00. In cents: the running totals in effective-date order (the value of WP6.B6.BR-B and BR-A), as createBudgetRevision stores them at create (their today), HEAD's waterfall, and the totals once B6's CO approval adds its generated revision at the run date and recomputes the register (CF.BRorder).", [...B6_SRC, HF6("backend/src/services/budget-revision.service.js", "23-38, 59-168"), HF6("backend/src/services/change-order.service.js", "817-931")], { assumption: true }),
+    changeOrder: fig(B6_BOOK.changeOrder, "outcome", "B6: the QS's prime CO of 10,000.00 on A110 naming LA (an instruction attached, its summaries and activity link, submitted), approved by the PM; the cost controller later re-points it to LB (WP6.B5). Currency units as sent.", [...B6_SRC, HF6("backend/src/services/change-order.service.js", "857-931"), HF6("backend/src/services/budget.service.js", "715-788")], { assumption: true }),
+    residue: fig({ archived: ["B6", "B6X", "B6Q"], queuedJobsLeft: { B6: 0, B6X: 0, B6Q: 0 }, aiCounter087: "recorded (WP6ADJ Q11: +2, B6X's two handler runs)", aiCounter011: "left at its limit 10 (from 3)" }, "outcome", "WP6ADJ Q11: no queued AI job may be left behind: the proof runs every job it queues to completion through the recorder stub, or cancels it through a product route, and the cleanup asserts zero queued jobs on each throwaway; B6, B6X and B6Q are archived. 087's AI usage counter moves and is recorded residue.", [...B6_SRC, HF6("backend/src/services/boq.service.js", "1518-1586, 1660"), WP6ADJ("Q4, Q11")], { assumption: true, note: "WP-6 Q11 (2026-10-10): every AI job run through the stub with a parsed answer adds 1 to its organisation's counter (boq.service.js:1660). B6X's two handler runs give Q11's +2 on 087; B6's three queued jobs (WP6.B6.choreography Q11), if run to completion through the stub rather than cancelled, add one each, so 087's counter would move +5 (open: HEAD has no cancel route for a queued boq.parse job, WP6-PREP Q11); 087 is Enterprise, no limit. 011's counter reaches its limit through B6Q (WP6.B6Q.choreography Q1)." }),
+    choreography: fig(B6_STEPS, "list", "B6's run order (WP6-PREP section 5.1, as WP6ADJ settles it): the B6 choreography runs whole whenever one selected check runs on B6, its steps depending on each other; each step names the check ids it serves. Order: B2 before any bill exists on B6; B3 after U2.import and before B4 (A6.uploadWarning needs B-001 approved; mapping rules refuse after the lock); the coverage read after the A2 rejection and before the bulk and the mapping file add drafts; B5's lock after every bill edit; KA.B6.registerOrder before the CO approval; B3.archivedLine after B7's archive; B6X's X-A1 before A1.B6.foreignActivity.", [...B6_SRC, "backend/scripts/cert/cert3/build/MOMENT-MAP.md rows 154, 159"], { assumption: true, note: "WP-6 G1 (2026-10-10)." }),
+  },
+  // WP-6 answer-book leaves (2026-10-10, WP6ADJ Q1, Q2): the AI-job throwaway B6X (G1).
+  B6X: {
+    project: fig(B6X_BOOK.project, "outcome", "X0: the AI-job throwaway's create payload: B6's settings with no contract value. Created and archived by the proof (WP6ADJ Q1).", B6X_SRC, { assumption: true, note: "WP-6 G1 (2026-10-10): <stamp> is the run's." }),
+    team: fig({ ...B6X_BOOK.team, activities: B6X_BOOK.activities }, "outcome", "X0: the planner and QS assigned on B6X; the planner's activity X-A1, which B6's A1.B6.foreignActivity names.", B6X_SRC, { assumption: true }),
+    bill: fig(B6X_BOOK.bill, "outcome", "X1: the 130-row workbook files.boqRows.filler({ prefix: 'X', seed: 'cert3-wp6-b6x', sections }) builds, with the section and mapping_rule columns: Substructure 50, Superstructure 50, Finishes 30, 087-COM's shape (deep.087-COM.boqRows, boqSections); its rows read back one by one against the workbook (the total is the generator's, asserted by identity, not a derived figure).", [...B6X_SRC, HF6("backend/scripts/cert/cert3/build/files.js", "512-575")], { assumption: true }),
+    stub: fig(B6X_BOOK.stub, "outcome", "X2, X4: the recorder stub's answers (WP6ADJ Q2): an empty breakdown for the job's run, and one activity for X1-001 (the first row of section 1, unit m2) for the run after the baseline.", [...B6X_SRC, HF6("backend/src/services/boq.service.js", "1593-1700")], { assumption: true }),
+    choreography: fig(B6X_STEPS, "list", "B6X's run order (WP6-PREP section 5.2, as WP6ADJ settles it), each step naming the check ids it serves; the moment map's row 159 records the deviation (the AI job judged on B6X, not on 087-COM) when the proof lands.", [...B6X_SRC, "backend/scripts/cert/cert3/build/MOMENT-MAP.md row 159"], { assumption: true, note: "WP-6 G1 (2026-10-10)." }),
+  },
+  // WP-6 answer-book leaves (2026-10-10, WP6ADJ Q4): the L121 throwaway B6Q in company 011.
+  B6Q: {
+    project: fig(B6Q_BOOK.project, "outcome", "Q0: the L121 throwaway's create payload in company 011 (WP6.U6.company): 011's currency, an explicit defaultRetentionRate 10, no contract value. Created and archived by the proof; archived projects do not spend the plan's project places (subscription-gate.js:56-65).", [...B6Q_SRC, HF6("backend/src/middleware/subscription-gate.js", "42-77")], { assumption: true, note: "WP-6 Q4 (2026-10-10): <stamp> is the run's." }),
+    team: fig(B6Q_BOOK.team, "outcome", "Q0: the QS of 011 assigned on B6Q, the second uploader beside the PM (boq create is pm, planning_eng, qs: routes/boq.js:72), so the uploads to the limit and the probe fit the AI generation window (8 per hour per project and user).", B6Q_SRC, { assumption: true }),
+    choreography: fig(B6Q_STEPS, "list", "B6Q's run order, each step naming the check ids it serves (S.B6Q.create, S.B6Q.toLimit and S.B6Q.archived are new setup ids). Q1's path to the limit is proposed, to be confirmed with the proof: the counter's only writer is a completed BOQ AI job (boq.service.js:1660), and every real upload asserts the quota first (:1174).", [...B6Q_SRC, HF6("backend/src/services/boq.service.js", "1160-1174, 1660")], { assumption: true, note: "WP-6 Q4 (2026-10-10)." }),
   },
   B7: {
-    archivedActual: money(cents(2000), "L110: archive a line carrying actual 2,000.00; /budget/lines totals.actual must equal /cost/reconciliation budget.recordedTotal.", [P(784), AREA], { assumption: true }),
+    archivedActual: fig({ linesActual: cents(28000), recordedTotal: cents(28000) }, "outcome", "L110: archive a line carrying actual 2,000.00; /budget/lines totals.actual must equal /cost/reconciliation budget.recordedTotal. On B6 the cost controller archives MAT (02-100/material, the 2,000.00 of B1's expense) after B1's 28,000.00 are posted: the lines' summary.totals.actual equals the reconciliation's budget.recordedTotal, 28,000.00 each.", [P(784), AREA, PH6("824, 833"), HF6("backend/src/services/budget.service.js", "226-231, 257-269, 496-499, 520"), HF6("backend/src/services/cost-reconciliation.service.js", "200"), "docs/certification/OCTAPM_CERT_LEADS.md:116 @6c5ab54", PREP6("section 4; section 10 G20"), DERIVE_B6], { assumption: true, today: { linesActual: cents(26000), recordedTotal: cents(28000) }, ref: "L110", note: "WP-6 G20 (2026-10-10): the value was 200000 (cents, unit cents: the archived line's actual), not the comparison the plan asks for. Today GET /budget/lines lists active lines only by default (budget.service.js:226-231), so its actual reads 26,000.00, while the reconciliation sums every line, archived included (cost-reconciliation.service.js:200): 28,000.00; archiving checks nothing (:496-499, :520). Lead L110 (P2 proposed; its severity is an owner question): BLOCKED at today, an assumption." }),
   },
   mutations: {
-    dryRunWrites: fig(["WP6.U1.writes"], "mutation", "Let the dry run write.", [P(786), P(1110)]),
-    allocationCapacity: fig(["WP6.A1.overCapacity", "WP6.A4.bulk"], "mutation", "Remove the capacity check.", [P(786), P(1110)]),
-    transferLimit: fig(["WP6.B3.overTransferPlus2"], "mutation", "Remove BUDGET_TRANSFER_EXCEEDS: the +0.02 probe (100,000.02, refused at HEAD) turns red. The plan's +0.01 probe cannot catch it: with the 0.01 tolerance it is already accepted at HEAD (adjudication C1).", [P(786), P(1110), ADJ("C1")]),
-    originalLock: fig(["WP6.B5.originalLocked"], "mutation", "Remove the Original lock.", [P(786), P(1110)]),
+    dryRunWrites: fig(["U1.B6.writes red and A5.B6.dryRun red (M-DRY, the E6 entry: every dry-run branch removed)", "U1.B6.writes red (M-DRYr: the BOQ upload route's branch, routes/boq.js:163; the dry run takes the real path and writes a document, a revision, five rows and a job)", "U1.B6.writes red (M-DRYs: processBoqUpload's dry-run return, boq.service.js:1244; a revision, five rows and a job)", "A5.B6.dryRun red (M-DRYm: the mapping-import route's branch, routes/activity-boq-allocations.js:200; the dry run creates two drafts)", "none (M-DRYq, the dry run's quota skip at boq.service.js:1174: not a write guard; recorded, not run)"], "mutation", "Plan section 6.2 'dry runs write nothing' (:1150 PH6), held twice for the BOQ upload (the route's branch and the service's return) and once for the mapping import; M-DRY removes all three, each variant one. Every catcher writes only on B6, because the mutation runner runs the whole proof under each mutant.", [P(786), P(1110), PH6("797, 798, 826, 1150"), HF6("backend/src/routes/boq.js", "163"), HF6("backend/src/services/boq.service.js", "1172-1174, 1244"), HF6("backend/src/routes/activity-boq-allocations.js", "200"), WP6ADJ("Q9"), PREP6("section 0 fact 4; section 7; section 10 G21"), "C:/Temp/octapm-cert/scratch/wp6/wp6-mutations-draft.json"], { note: "WP-6 G21 (2026-10-10): catchers named by check id; the value was ['WP6.U1.writes']. M-DRYq: on 087 (Enterprise) assertAiQuota returns before the counter, so it is equivalent there; on B6Q at 011's limit the dry run would answer 402, a collateral of KA.U6 (BLOCKED at HEAD), not a catcher." }),
+    allocationCapacity: fig(["A1.B6.overCapacity red, A1.B6.amountOverCapacity red, A4.B6.bulk red and G.5xx red (M-CAP, the E6 entry: both branches of assertAllocationCapacity removed; the trigger validate_activity_boq_allocation then raises P0001, which no handler maps, so the create answers 500 and writes nothing, and the bulk answers 500 after its valid row; a 500 is never counted as a success)", "A1.B6.overCapacity red and A4.B6.bulk red (M-CAPq: the quantity branch; the amount branch answers 400 ALLOCATION_AMOUNT_EXCEEDED instead)", "A1.B6.amountOverCapacity red and G.5xx red (M-CAPa: the amount branch; the trigger answers 500)", "A5.B6.dryRun red (M-CAPi: the mapping import's own capacity judgement, mapping-import.service.js:281; the B-001/A120 line is planned, then refused at write)"], "mutation", "Plan section 6.2 'allocation capacity' (:1150 PH6): assertAllocationCapacity (activity-boq-allocation.service.js:280-314; quantity :289, amount :302) and the database trigger validate_activity_boq_allocation (migration 20260610090000:138-142), its second holder, which a code mutant cannot remove. Under M-CAP the over-capacity create answers 500 and writes nothing: the catcher is the refusal-code check, which expects the app's 4xx, and G.5xx goes red too (WP6ADJ Q9). The amount-only probe gives each branch its own catcher.", [P(786), P(1110), PH6("798, 811, 814, 815, 826, 1150"), HF6("backend/src/services/activity-boq-allocation.service.js", "280-314, 460, 1255-1278"), HF6("backend/src/services/mapping-import.service.js", "281-296"), "backend/prisma/migrations/20260610090000/migration.sql:138-142 @6c5ab54", WP6ADJ("Q9"), PREP6("section 0 fact 5; section 7; section 10 G21"), "C:/Temp/octapm-cert/scratch/wp6/wp6-mutations-draft.json"], { note: "WP-6 G21 (2026-10-10): catchers named by check id; the value was ['WP6.A1.overCapacity', 'WP6.A4.bulk']." }),
+    transferLimit: fig(["B3.B6.overTransferPlus2 red (M-XFER, the E6 entry: BUDGET_TRANSFER_EXCEEDS removed; 100,000.02 accepted, LAB -0.02 and MAT 200,000.02)", "none (the plan's +0.01 probe, KA.B3.overTransfer: accepted at HEAD under the 0.01 tolerance, C1-TOL)"], "mutation", "Remove BUDGET_TRANSFER_EXCEEDS: the +0.02 probe (100,000.02, refused at HEAD) turns red. The plan's +0.01 probe cannot catch it: with the 0.01 tolerance it is already accepted at HEAD (adjudication C1).", [P(786), P(1110), ADJ("C1"), PH6("799, 820, 826, 1150"), HF6("backend/src/services/budget.service.js", "26, 678"), WP6ADJ("Q14"), PREP6("section 0 fact 6; section 7; section 10 G21")], { note: "WP-6 G21 (2026-10-10): catcher named by check id; the value was ['WP6.B3.overTransferPlus2']." }),
+    originalLock: fig(["B5.B6.lockedByLedger red and B5.B6.lockedAfterCo red (M-ORIG, the E6 entry: the one Original guard's refusal removed, budget.service.js:416)", "B5.B6.lockedAfterCo red (M-ORIG2: condition 2 dropped, :351)", "B5.B6.lockedByLedger red (M-ORIG4: condition 4 dropped, :375 and :377)"], "mutation", "Plan section 6.2 'the Original lock' (:1150 PH6): the one Original Budget guard (assertOriginalBudgetWritable, budget.service.js:413-418) over the derived lock conditions (:338-389). M-ORIG removes the refusal; M-ORIG2 and M-ORIG4 each drop one condition, each with a catcher on B6 (WP6.B5.lockedAfterCo, lockedByLedger). The L109 re-point (KA.B5.afterRepoint) reads today under each, a collateral.", [P(786), P(1110), PH6("799, 822, 826, 1150"), HF6("backend/src/services/budget.service.js", "338-418"), WP6ADJ("Q9"), PREP6("section 0 fact 7; section 7; section 10 G21")], { note: "WP-6 G21 (2026-10-10): catchers named by check id; the value was ['WP6.B5.originalLocked']." }),
   },
   existing: {
     "stage3.budgetLines": count(7, "Seven lines.", [P(788), ST("stage3-boq-budget.js", "170")]),
     "stage3.originalBudget": money([120000, 400000, 250000, 300000, 350000, 180000, 100000].map(cents).reduce((a, b) => a + b, 0), "120,000 + 400,000 + 250,000 + 300,000 + 350,000 + 180,000 + 100,000 = 1,700,000.00.", [P(788), ST("stage3-boq-budget.js", "33-43, 175")]),
+  },
+
+  // WP-6 answer-book leaves (2026-10-10, WP6ADJ Q5-Q14): the confirm-first observations (G23).
+  CF: {
+    HRC14: fig({ L131: { calls: 3, sizes: [50, 50, 30] }, L121: { upload: 200, dryRun: 200 }, L130: { refused: true, activitiesCreated: 0 }, section: { Substructure: 50, Superstructure: 50, Finishes: 30 }, droppedRow: { active: true, flagged: true } }, "outcome", "CF.HRC14, the plan's confirm-first 'L131, L121, L130 and the missing section column -> HR-C14' (:831 PH6) and HR-C14's 'dropped rows stay active' (:1082): its five items as HR-C14's recommendation answers them (the KA leaves' values) and as HEAD does (their todays): one AI call per section of at most 60 rows (WP6.U5.aiJobCalls), a non-AI import at the AI limit accepted (WP6.U6.nonAiImportAtLimit, on B6Q), the AI job refused after the baseline (WP6.U5.aiAfterBaseline), the section column read back (WP6.U5.sectionsReadBack, B6X), the dropped row flagged and still active (WP6.U2.omitB005).", [PH6("831, 1082"), WP6ADJ("Q2, Q4"), PREP6("section 4; section 10 G23")], { assumption: true, today: { L131: { calls: 1, sizes: [130] }, L121: { upload: 402, dryRun: 200 }, L130: { refused: false, activitiesCreated: 1 }, section: { "(none)": 130 }, droppedRow: { active: true, flagged: false } }, ref: "HR-C14", note: "WP-6 G23 (2026-10-10): each item CONFIRMED expected from code reading; the WP-6 run classifies. L121 is a TEST GAP item only if no path to 011's limit is accepted (WP6ADJ Q4); CF.HRC14 then reads PARTIAL. Ref HR-C14 (undecided: BLOCKED at today), an assumption." }),
+    BRorder: fig({ stored: { "BR-B": cents(2005000), "BR-A": cents(2015000) }, storedMatchesWaterfall: true, afterCoApproval: { "BR-B": cents(2005000), "BR-A": cents(2015000), CO: cents(2025000) } }, "outcome", "CF.BRorder, the plan's confirm-first 'running totals out of order' (:832 PH6; fix :1113): B6's stored cumulativeBudget in effective-date order (WP6.B6.register) equals the same answer's waterfall; after B6's 10,000.00 CO approval adds its revision at the run date and recomputes, BR-B 2,005,000.00, BR-A 2,015,000.00 and the CO's row 2,025,000.00.", [PH6("799, 823, 832, 1083, 1113"), HF6("backend/src/services/budget-revision.service.js", "59-168"), HF6("backend/src/services/change-order.service.js", "817-931"), WP6ADJ("Q6"), PREP6("section 0 fact 8; section 9 F-1; section 10 G19, G23")], { assumption: true, today: { stored: { "BR-B": cents(2015000), "BR-A": cents(2010000) }, storedMatchesWaterfall: false, waterfall: [cents(2005000), cents(2015000)], afterCoApproval: { "BR-B": cents(2005000), "BR-A": cents(2015000), CO: cents(2025000) } }, ref: "BR-ORDER", note: "WP-6 G23 (2026-10-10): today the stored totals are out of order (KA.B6.registerOrder) while the waterfall of the same GET answer is right, and the CO approval's recompute heals them; the web register shows the stored column (budget-revisions-panel.tsx:123). CONFIRMED expected; its severity is decided at the WP-6 run from the reproduction (WP6ADJ Q6: P1 if the stored figure reaches any financial calculation, export, report or forecast, P2 if display-only and healed by the next edit). Ref BR-ORDER (not landed: BLOCKED at today), an assumption." }),
+    L109: fig({ lockedAfterCo: 409, lockedAfterRepoint: 409 }, "outcome", "CF.L109 (:833 PH6): LA's Original lock, once refused (WP6.B5.lockedAfterCo), stays after the approved CO is re-pointed to LB (WP6.B5.afterRepoint).", [PH6("833"), "docs/certification/OCTAPM_CERT_LEADS.md:115 @6c5ab54", PREP6("section 4; section 10 G23")], { assumption: true, today: { lockedAfterCo: 409, lockedAfterRepoint: 200, laOriginalAfter: cents(1) }, ref: "L109", note: "WP-6 G23 (2026-10-10): CONFIRMED expected; P2 proposed (an owner question, O6). Ref L109, an assumption." }),
+    L110: fig({ hiddenActual: 0 }, "outcome", "CF.L110 (:833 PH6): archiving a line that carries actual hides none of it from GET /budget/lines (WP6.B7.archivedActual).", [PH6("833"), "docs/certification/OCTAPM_CERT_LEADS.md:116 @6c5ab54", PREP6("section 4; section 10 G23")], { assumption: true, today: { hiddenActual: cents(2000) }, ref: "L110", note: "WP-6 G23 (2026-10-10): today MAT's 2,000.00 is missing from the lines' actual. CONFIRMED expected; P2 proposed (O6). Ref L110, an assumption." }),
+    L111: fig({ negativeOriginal: { status: 400, code: null }, revisionBelowZero: { status: 400, code: null } }, "outcome", "CF.L111 (:833 PH6): a negative budget line (EQP/other at -500.00) and a line revision that takes LAB below zero (-999,999.00 on its 80,000.00) are refused; the codes are the fix's, and whether a negative revision below actual is ever valid is the owner's.", [PH6("833"), HF6("backend/src/routes/budget.js", "23, 186"), HF6("backend/src/services/budget.service.js", "43-49, 688-702"), "docs/certification/OCTAPM_CERT_LEADS.md:117 @6c5ab54", PREP6("section 4; section 9; section 10 G23"), DERIVE_B6], { assumption: true, today: { negativeOriginal: { status: 201, originalBudget: -cents(500) }, revisionBelowZero: { status: 201, revised: cents(80000) - cents(999999) } }, ref: "L111", note: "WP-6 G23 (2026-10-10): today the route accepts money fields down to -1e12 (routes/budget.js:23) and addRevision has no floor (budget.service.js:688-702): the line is created at -500.00 and LAB's revised reads -919,999.00. CONFIRMED expected; P2 proposed (O6). Ref L111, an assumption." }),
+    HRC17: fig({ resubmitted: "submitted" }, "outcome", "CF.HRC17, the plan's confirm-first 'rejected allocations cannot be resubmitted -> HR-C17' (:834 PH6): under HR-C17's recommendation the rejected B-003/A140 is submitted again (WP6.A2.resubmitRejected).", [PH6("834, 1085"), PREP6("section 4; section 10 G23")], { assumption: true, today: { submit: { status: 400, code: "INVALID_ALLOCATION_STATUS" }, patch: { status: 400, code: "ALLOCATION_NOT_EDITABLE" } }, ref: "HR-C17", note: "WP-6 G23 (2026-10-10): CONFIRMED expected; HR-C17 is the owner's (O3). Ref HR-C17, an assumption." }),
+    HRC18: fig({ budgetCostTypes: ["labour", "material", "equipment", "subcontract", "indirect", "overhead", "contingency", "other"], costRecordCategoryFields: ["labour", "material", "equipment", "subcontract", "indirect", "overhead", "contingency"] }, "outcome", "CF.HRC18, the plan's confirm-first 'seven or eight cost categories -> HR-C18' (:835 PH6): an observation of HEAD's two vocabularies, never a value judged under the undecided HR-C18: the budget register and the ledger take eight cost types (budget.service.js:22; cost-ledger.service.js:56-65; read on B6 through the OTH line, summary.byType and ledger.byCostType), the activity cost record seven category fields, 'other' not among them (cost.service.js:503 CATEGORY_FIELDS).", [PH6("835, 1086"), HF6("backend/src/services/budget.service.js", "22"), HF6("backend/src/services/cost-ledger.service.js", "56-65"), HF6("backend/src/services/cost.service.js", "503"), PREP6("section 4; section 10 G14, G23")], { note: "WP-6 G14, G23 (2026-10-10): no today and no ref: the owner says which seven the dashboard reports (O4); the classification reports CONFIRMED (two vocabularies)." }),
+    WP0BOQ1: fig({ template: { cost_controller: 200, site_engineer: 200, qs: 200 }, upload: { cost_controller: 200, site_engineer: 200, qs: "2xx or 302" } }, "outcome", "CF.WP0BOQ1 (register WP0-BOQ-1): GET boq/template and GET boq/uploads/<the U2 document> follow boq:read, which all nine roles hold (shared/permissions.json modules.boq), so the cost controller, the site engineer and the QS are answered.", [HF6("backend/src/routes/boq.js", "72, 122-133, 198-214"), HF6("shared/permissions.json", "modules.boq"), "docs/certification/OCTAPM_LAUNCH_BLOCKERS.md:258, 266 @6c5ab54", PREP6("section 4; section 8; section 10 G23")], { assumption: true, today: { template: { cost_controller: 403, site_engineer: 403, qs: 200 }, upload: { cost_controller: 403, site_engineer: 403, qs: "2xx or 302" } }, ref: "WP0-BOQ-1", note: "WP-6 G23 (2026-10-10): today both routes are requireRoles(pm, planning_eng, qs) (routes/boq.js:72, 122-133, 198-214), narrower than boq:read (confirmed by the WP-0 probe, P3). The owner may instead narrow the policy (O5, through HR-A1), so the value is an assumption. Ref WP0-BOQ-1." }),
   },
 };
 
@@ -1626,7 +1957,7 @@ const deep = {
     advanceRecoveryRate: fig(ADVANCE_RECOVERY_RATE, "percent", "Recovery 10% of gross.", [P(387)], { assumption: true }),
     taxRate: fig(5, "percent", "Plan names no rate; 5% is an assumption (adjudication C7), set on the contract only for I7's certification and put back to 0 before I8 and I10 are certified (see WP4.I7.taxAmount and meta.buildNotes).", [P(387), ADJ("C7")], { assumption: true }),
     boqRows: count(130, "At least 130 rows.", [P(387), P(767)]),
-    boqSections: fig({ count: 3, sizes: [50, 50, 30] }, "outcome", "At least 3 sections; 50/50/30 chosen so the chunker answer is [50, 50, 30].", [P(387), P(767)], { assumption: true }),
+    boqSections: fig({ count: 3, sizes: [50, 50, 30] }, "outcome", "At least 3 sections; 50/50/30 chosen so the chunker answer is [50, 50, 30].", [P(387), P(767)], { assumption: true, note: "WP-6 G26 (2026-10-10): the workbook's shape (asserted in build, MOMENT-MAP row 159); the read-back known answer is WP6.U5.sectionsReadBack ('087-COM': 'Substructure and frame' 50, 'Envelope and services' 50, 'Finishes and externals' 30; today none on 130 rows, ref HR-C14), so that row 159's 'after the HR-C14 fix' has a leaf to be judged against. No today here: WP-4's leaf-contract walk of deep.087-COM is not widened. The builder reads this value (BLD 087-com.js:232); it is unchanged." }),
     costTypes: count(8, "Cost codes and lines for all eight cost types.", [P(387), S("budget.service.js", "22")]),
     ipcPeriodsMin: count(4, "At least four IPC periods (paid with retention released; part-paid; submitted; draft; one PM override; one with materials on site and a deduction).", [P(387)]),
     ldRatePerDay: money(cents(1000), "ldRatePerDay set; 1,000.00 per day from WP-7 T4/T5.", [P(387), AREA], { assumption: true }),
@@ -1816,7 +2147,7 @@ deep["052-COM"].ipc03 = {
 const claudeMd = {
   retentionDefault: fig("configuration required (no silent 5%)", "rule", "CLAUDE.md 'Retention default 5% of certified value per IPC period' is superseded for unconfigured projects by HR-C1; an explicitly configured 5% still gives 40,000 -> 2,000 / 38,000. Its known answer is two checks on the throwaway K (plan section 1.1 retention row, :89 PF4): I1.certifyUnconfigured (unconfigured: refused, WP4.I1.certifyUnconfigured) and I1.afterConfiguration (an explicit 10%: 40,000.00 -> 4,000.00 / 36,000.00, WP4.HRC1.afterConfiguration).", [P(69), P(29), PF4("89, 695"), WP4ADJ("Q10"), PREP4("section 1.2 'CLAUDE.md rule (E4)'; section 10 G28")], { planDisagrees: true, planValue: "40,000 -> retention 2,000, net 38,000", assumption: true, note: HR_C1_NOTE + " WP-4 G28 (2026-10-10): mapped onto I1.certifyUnconfigured and I1.afterConfiguration; whether CLAUDE.md changes is the owner's (WP4ADJ Q10: Claude Main does not edit it without the owner's word)." }),
   weather70: fig({ "13/20": [65, false], "14/20": [70, true] }, "rule", "Warning at >= 70% of the contractual allowance.", [P(70), P(815)]),
-  boqChunk: fig({ 130: [60, 60, 10], "50/50/30": [50, 50, 30], "70/45": [60, 55] }, "rule", "BOQ > 60 rows chunked by section, max 60 per batch (chunkBoqRows).", [P(67), S("schedule.service.js", "1865-1891")]),
+  boqChunk: fig({ 130: [60, 60, 10], "50/50/30": [50, 50, 30], "70/45": [60, 55] }, "rule", "BOQ > 60 rows chunked by section, max 60 per batch (chunkBoqRows).", [P(67), S("schedule.service.js", "1865-1891"), PH6("88, 807"), HF6("backend/src/services/schedule.service.js", "1929-1956, 2257"), WP6ADJ("Q3"), PREP6("section 10 G24")], { note: "WP-6 G24 (2026-10-10): chunkBoqRows is at schedule.service.js:1929-1956 at HEAD 6c5ab54 (it was :1865-1891 @886c9f1; body unchanged), judged through AI schedule generation with the recorder stub (WP6.U5.chunk130, WP6ADJ Q3). The BOQ AI job does not batch at all today (L131: WP6.U5.aiJobCalls)." }),
 };
 
 // Load checks for the WP-4 answer-book leaves (2026-10-10, WP4ADJ Q1-Q14): each added or changed leaf agrees with the figures it is built from.
@@ -2080,6 +2411,153 @@ const claudeMd = {
   const u = WP5.N6.usage50;
   if (u.value !== 201 || u.unit !== "http-status" || !same(u.today, WP5.N6.usage70.value) || u.ref !== "HR-C7" || !u.assumption) fail("WP5.N6.usage50: value 201 (the route's create status), today 409 MATERIAL_USAGE_EXCEEDS_ISSUED_QTY, ref HR-C7 (R5ADJ P1)");
   if (WP5_KNOWN.length !== 25 || new Set(WP5_KNOWN.map(([k]) => k)).size !== WP5_KNOWN.length) fail("WP5_KNOWN: the 25 leaves the 28 known answers read, each once (R5ADJ B2)");
+})();
+
+// Load checks for the WP-6 answer-book leaves (2026-10-10, WP6ADJ Q1-Q14): each added or changed leaf agrees with the figures it is built from.
+(() => {
+  const fail = (what) => {
+    throw new Error("commercial answer book: " + what);
+  };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const leafAt = (key) => key.split(".").reduce((node, part) => (node && typeof node === "object" ? node[part] : undefined), { WP6, deep, claudeMd });
+  const S3 = stages["stage3:109"];
+  const B = WP6.B6;
+  const U5 = WP6.U5;
+  const D087 = deep["087-COM"];
+  // G1: B6's workbooks are the book's bill; B-002 at 160 gives WP6.U2; the omit-B005 workbook lacks B-005 only
+  const wb = B.workbooks.value;
+  if (!same(wb.stage3.rows, Object.keys(BOQ)) || wb.stage3.totalCents !== WP6.U1.dryRunTotal.value || wb.stage3.totalCents !== S3.boqTotal.value || wb.stage3.rows.length !== S3.boqRowCount.value || wb.afterLock.totalCents !== S3.boqTotal.value) fail("WP6.B6.workbooks: the stage-3 bill, 459,000.00 over five rows (G1)");
+  if (wb.rate160.totalCents !== WP6.U2.total.value || cents(BOQ["B-002"].qty * wb.rate160.rates["B-002"]) !== WP6.U2["B-002.amount"].value || wb.rate160.mappingRules["B-001"] !== "not_applicable" || !same(wb.omitB005.rows, Object.keys(BOQ).filter((code) => code !== "B-005")) || wb.omitB005.rates["B-002"] !== wb.rate160.rates["B-002"] || !same(wb.missingRate.omit, ["rate"]) || wb.missingRate.totalCents !== null) fail("WP6.B6.workbooks: B-002 at 160 gives WP6.U2's 467,000.00; the omit-B005 workbook lacks B-005 only; the U3 workbook lacks the rate column (G1)");
+  // G2: the dry run writes nothing; the refused real upload keeps one rejected document named by its code
+  const U3 = WP6.U3;
+  const ru = U3.realUploadWrites.value;
+  if (!same(U3.dryRunWrites.value, { boqItems: 0, boqRevisions: 0, projectDocuments: 0, boqParseJobs: 0 }) || ru.boqItems + ru.boqRevisions + ru.boqParseJobs + ru.allocations !== 0 || ru.budgetSummaryChanged !== false || ru.projectDocuments !== 1 || ru.document.status !== "rejected" || ru.document.linkedEntityType !== U3.missingColumns.value.code) fail("WP6.U3: the dry run writes nothing; the real upload writes no bill row, revision, job or allocation and keeps one rejected document named by its code (G2)");
+  // G8, G9: the lock flow on B6; 087-SCH's schedule-baseline lock
+  const U4 = WP6.U4;
+  const lf = U4.lockFlow.value;
+  const revs = B6_BOOK.revisionsBeforeLock;
+  if (lf.supersededRevisions !== revs.length - 1 || revs[revs.length - 1] !== "omitB005" || lf.lockedRows !== Object.keys(BOQ).length || !same(lf.baseline, { locked: true, source: "boq_revision" }) || U4.liveAfterLock.value.rows !== Object.keys(BOQ).length || U4.liveAfterLock.value.total !== WP6.U2.total.value || !same(U4.lockAgain.value, U4.patchAfterLock.value) || !same(U4.reviewComparisonOnly.value, { status: 409, code: "BOQ_REVISION_COMPARISON_ONLY" })) fail("WP6.U4: the omit-B005 revision locked, two superseded, five rows; then 467,000.00 live; lock again 409 BOQ_BASELINE_LOCKED (G8)");
+  if (!same(U4.scheduleBaselineLock.value.baseline, { locked: true, source: "schedule_baseline" }) || !same(U4.scheduleBaselineLock.value.patch, U4.patchAfterLock.value)) fail("WP6.U4.scheduleBaselineLock: 087-SCH's bill locked by its schedule baseline; the PATCH 409 BOQ_BASELINE_LOCKED (G9)");
+  // G1, G12: the five approved allocations are stage 3's; A3's coverage follows
+  const al = B.allocations.value;
+  const approved = WP6.A2.approved.value;
+  if (!same(al.approved, approved) || approved.length !== 5 || approved.some((a) => !S3["allocation." + a.row + "/" + a.activity] || a.amount !== S3["allocation." + a.row + "/" + a.activity].value) || al.allocated !== S3.allocatedTotal.value || al.allocated !== WP6.A3.allocated.value || al.unallocated !== WP6.A3.unallocated.value || al.coveragePct !== WP6.A3.coveragePct.value || al.complete !== WP6.A3.rowsComplete.value) fail("WP6.A2.approved and WP6.B6.allocations: stage 3's five allocations; coverage 387,000.00 / 72,000.00 / 84.31 / four complete (G1, G12)");
+  if (!same(WP6.A2.rejected.value, { status: "rejected", isActive: false }) || al.rejected.row !== "B-003" || al.approved.some((a) => a.row === al.rejected.row)) fail("WP6.A2.rejected: B-003's row rejected and inactive, B-003 otherwise unallocated (G12)");
+  // G11: the amount-only probe passes the quantity branch and fails the amount branch
+  const ap = al.amountProbe;
+  const det = WP6.A1.amountOverCapacityDetails.value;
+  if (!(ap.qty <= BOQ[ap.row].qty) || !(det.allocatedAmount > det.boqAmount) || det.boqAmount !== boqAmount(ap.row) || det.allocatedAmount !== ap.amount || ap.activeBefore !== 0 || !same(WP6.A1.amountOverCapacity.value, { status: 400, code: "ALLOCATION_AMOUNT_EXCEEDED" })) fail("WP6.A1.amountOverCapacity: B-003 10 t at 80,000.00, within its quantity, over its 72,000.00 (G11)");
+  // A4, G13: the bulk and the mapping file
+  if (!same(al.bulk, WP6.A4.bulk.value)) fail("WP6.B6.allocations: the bulk's rows give WP6.A4.bulk, one created and two failed (G1)");
+  const rp = WP6.A5.report.value;
+  if (!same(al.mapping, rp.dryRun) || rp.apply.created !== rp.dryRun.matched || rp.undo.rejected !== rp.apply.created || rp.undo.keptApproved !== 0 || WP6.A5.mappingImport.value.dryRunWrites !== rp.dryRun.created) fail("WP6.A5.report: the mapping file's dry run (2 matched, 1 unmatched, 1 breach, 12,000.00), apply and undo (G13)");
+  // G1, G15: the budget lines; the seven-line cost
+  const lines = B.budgetLines.value;
+  const typed = lines.slice(0, 7);
+  const lineOf = (key) => lines.find((l) => l.key === key);
+  if (lines.length !== 12 || new Set(lines.map((l) => l.key)).size !== 12 || new Set(lines.map((l) => l.code + "/" + l.costType)).size !== 12 || !same(typed.map((l) => l.costType), ["labour", "material", "equipment", "subcontract", "indirect", "overhead", "contingency"]) || typed.reduce((s, l) => s + l.original, 0) !== WP6.B1.original.value) fail("WP6.B6.budgetLines: twelve lines, the seven typed ones WP6.B1.original's 410,000.00 (G1)");
+  const dc = B.directCost.value;
+  if (dc.lines.length !== 7 || dc.total !== WP6.B1.sevenLineTotal.value || !same(dc.lines.map((l) => l.line), typed.map((l) => l.key)) || !same(Object.keys(WP6.B1.sevenLines.value), typed.map((l) => l.costType)) || !same(Object.values(WP6.B1.sevenLines.value), [1000, 2000, 3000, 4000, 5000, 6000, 7000].map(cents))) fail("WP6.B1.sevenLines: the expense's seven lines on the seven typed lines, 1,000.00..7,000.00, 28,000.00 (G15)");
+  // B3, G16, G17: the transfers; the C1-TOL pair
+  const tr = B.transfers.value;
+  if (tr.plus2.amount !== WP6.B3.overPlus2.value || !(tr.plus2.amount > lineOf(tr.plus2.from).original + cents(0.01)) || tr.move.fromAfter !== WP6.B3.from01_100.value || tr.move.toAfter !== WP6.B3.to02_100.value || lineOf(tr.move.from).code !== "01-100" || lineOf(tr.move.to).code !== "02-100" || typed.reduce((s, l) => s + l.original, 0) !== WP6.B3.projectRevised.value || !WP6.B3.projectRevised.derivation.startsWith("The seven typed lines'")) fail("WP6.B6.transfers: the +0.02 probe over 01-100's 100,000.00; the 20,000 move to 80,000.00 / 120,000.00; the seven typed lines' revised 410,000.00 (G1, G17)");
+  const ot = WP6.B3.overTransfer;
+  if (tr.c1tol.amount !== WP6.B3.over.value || !same(ot.today, { status: 200, T1: lineOf(tr.c1tol.from).original - tr.c1tol.amount, T2: lineOf(tr.c1tol.to).original + tr.c1tol.amount, pairSum: lineOf(tr.c1tol.from).original + lineOf(tr.c1tol.to).original }) || ot.ref !== "C1-TOL" || !same(ot.value, WP6.B3.overTransferPlus2.value)) fail("WP6.B3.overTransfer: today on the dedicated pair T1 / T2 (-0.01 and 200,000.01, the pair's sum unchanged), ref C1-TOL (G16)");
+  if (B.lineRevisions.value.plus.amount !== WP6.B4.revisionPlus5000.value || B.lineRevisions.value.zero.amount !== 0) fail("WP6.B6.lineRevisions: +5,000.00 on IND (WP6.B4.revisionPlus5000) and the 0.00 probe (G1)");
+  // G18: OVH locked by the ledger alone, LA by the change order alone; after the re-point LA is written today
+  const B5 = WP6.B5;
+  const locked = { status: 409, code: "BUDGET_ORIGINAL_LOCKED" };
+  const pr = B.budgetProbes.value;
+  const postedTo = new Set(dc.lines.map((l) => l.line));
+  const changed = new Set([tr.move.from, tr.move.to, tr.c1tol.from, tr.c1tol.to, B.lineRevisions.value.plus.line, B.lineRevisions.value.l111.line, B.changeOrder.value.line, B.changeOrder.value.repointTo]);
+  if (!same(B5.lockedByLedger.value, locked) || !same(B5.lockedAfterCo.value, locked) || !same(B5.afterRepoint.value, locked) || !same(B5.originalLocked.value, locked) || !same(B5.lockedByLedgerConditions.value, [{ condition: "ledger_posting", number: 4 }]) || !same(B5.lockedAfterCoConditions.value, [{ condition: "approved_change", number: 2 }])) fail("WP6.B5: the refusals 409 BUDGET_ORIGINAL_LOCKED, conditions [ledger_posting 4] and [approved_change 2] (G18)");
+  if (!postedTo.has(pr.byLedger.line) || changed.has(pr.byLedger.line) || postedTo.has(pr.afterCo.line) || pr.afterCo.line !== B.changeOrder.value.line || pr.afterRepoint.line !== pr.afterCo.line || B.changeOrder.value.repointTo === pr.afterCo.line || B5.afterRepoint.today.status !== 200 || B5.afterRepoint.today.originalBudget !== pr.afterRepoint.amount || B5.afterRepoint.ref !== "L109" || B5.originalLocked.ref !== "L109") fail("WP6.B5: OVH locked by the ledger alone, LA by the change order alone; after the re-point LA's original written today, ref L109 (G18)");
+  // G19: the register, from the contract value, in effective-date order (today as stored at create)
+  const reg = B.register.value;
+  const brB = B["BR-B"];
+  const brA = B["BR-A"];
+  if (reg.base !== cents(B.project.value.contractValue) || reg.value["BR-B"] !== brB.value || reg.value["BR-A"] !== brA.value || reg.today["BR-B"] !== brB.today || reg.today["BR-A"] !== brA.today || !same(reg.waterfallToday, [brB.value, brA.value]) || brB.ref !== "BR-ORDER" || brA.ref !== "BR-ORDER") fail("WP6.B6.register: from the contract value, BR-B then BR-A in effective-date order (today as stored at create), ref BR-ORDER (G19)");
+  // G20: archiving MAT hides its actual from the lines (today)
+  const b7 = WP6.B7.archivedActual;
+  const archived = dc.lines.find((l) => l.line === pr.archive).amount;
+  if (!same(b7.value, { linesActual: dc.total, recordedTotal: dc.total }) || !same(b7.today, { linesActual: dc.total - archived, recordedTotal: dc.total }) || b7.ref !== "L110") fail("WP6.B7.archivedActual: archiving MAT hides its 2,000.00 from the lines' actual (today 26,000.00 against 28,000.00), ref L110 (G20)");
+  // G23: the confirm-first observations agree with the known answers they classify
+  const CF = WP6.CF;
+  const U6 = WP6.U6.nonAiImportAtLimit;
+  const aa = U5.aiAfterBaseline;
+  const c14 = CF.HRC14;
+  if (!same(c14.value.L131, U5.aiJobCalls.value) || !same(c14.today.L131, U5.aiJobCalls.today) || c14.value.L121.upload !== U6.value.upload.status || c14.today.L121.upload !== U6.today.upload.status || c14.value.L121.dryRun !== U6.value.dryRun || c14.today.L121.dryRun !== U6.today.dryRun || c14.value.L130.refused !== aa.value.refused || c14.today.L130.activitiesCreated !== aa.today.activitiesCreated || !same(c14.value.section, U5.sectionsReadBack.value.B6X) || !same(c14.today.section, U5.sectionsReadBack.today.B6X) || c14.value.droppedRow.flagged !== WP6.U2.omitB005.value["B-005.flagged"] || c14.today.droppedRow.flagged !== WP6.U2.omitB005.today["B-005.flagged"]) fail("WP6.CF.HRC14: its five items are the HR-C14 known answers' values and todays (G23)");
+  if (!same(CF.BRorder.value.stored, reg.value) || !same(CF.BRorder.today.stored, reg.today) || !same(CF.BRorder.today.waterfall, reg.waterfallToday) || !same(CF.BRorder.value.afterCoApproval, reg.afterCo) || !same(CF.BRorder.today.afterCoApproval, reg.afterCo) || reg.afterCo.CO !== reg.value["BR-A"] + cents(B.changeOrder.value.value)) fail("WP6.CF.BRorder: the stored totals (today out of order), HEAD's waterfall, the totals the CO approval's recompute heals (G19, G23)");
+  if (CF.L109.value.lockedAfterCo !== B5.lockedAfterCo.value.status || CF.L109.value.lockedAfterRepoint !== B5.afterRepoint.value.status || CF.L109.today.lockedAfterRepoint !== B5.afterRepoint.today.status || CF.L109.today.laOriginalAfter !== B5.afterRepoint.today.originalBudget) fail("WP6.CF.L109: the re-pointed CO releases LA's lock today (G18, G23)");
+  if (CF.L110.value.hiddenActual !== 0 || CF.L110.today.hiddenActual !== archived) fail("WP6.CF.L110: the archived line's 2,000.00 hidden from the lines' actual today (G20, G23)");
+  if (CF.L111.today.negativeOriginal.originalBudget !== pr.l111Line.original || CF.L111.today.revisionBelowZero.revised !== tr.move.fromAfter + B.lineRevisions.value.l111.amount || B.lineRevisions.value.l111.line !== tr.move.from || !(CF.L111.today.revisionBelowZero.revised < 0)) fail("WP6.CF.L111: EQP/other at -500.00; LAB's 80,000.00 revised by -999,999.00 to -919,999.00 (G23)");
+  if (!same(CF.HRC17.today, WP6.A2.resubmitRejected.today) || CF.HRC17.value.resubmitted !== WP6.A2.resubmitRejected.value) fail("WP6.CF.HRC17: the rejected row resubmitted under the rule, refused today (G10, G23)");
+  const c18 = CF.HRC18;
+  if (c18.today !== undefined || c18.ref !== undefined || c18.value.budgetCostTypes.length !== WP6.B1.costTypes.value || !same(c18.value.costRecordCategoryFields, c18.value.budgetCostTypes.filter((t) => t !== "other")) || WP6.B1.costTypes.today !== undefined || WP6.B1.costTypes.ref !== undefined || D087.costTypes.value !== WP6.B1.costTypes.value) fail("WP6.CF.HRC18 and WP6.B1.costTypes: an observation of the two vocabularies (eight cost types, seven category fields), no value judged under the undecided HR-C18 (G14, G23)");
+  const w0 = CF.WP0BOQ1;
+  if (!same(Object.keys(w0.today.template), ["cost_controller", "site_engineer", "qs"]) || Object.values(w0.value.template).some((s) => s !== 200) || w0.today.template.qs !== 200 || w0.today.template.cost_controller !== 403 || w0.today.template.site_engineer !== 403 || w0.today.upload.cost_controller !== 403 || w0.today.upload.site_engineer !== 403) fail("WP6.CF.WP0BOQ1: the template and the stored upload for the three boq:read roles, today 403 for the cost controller and the site engineer (G23)");
+  // G5-G7, G26: B6X's bill is 087-COM's shape; the AI job's calls; the sections read back; the job after the baseline
+  const X = WP6.B6X;
+  const secs = X.bill.value.sections;
+  const sizes = secs.map((s) => s[1]);
+  if (sizes.reduce((s, n) => s + n, 0) !== D087.boqRows.value || !same(sizes, D087.boqSections.value.sizes) || secs.length !== D087.boqSections.value.count || !same(sizes, U5.chunkSections505030.value) || sizes.some((n) => n > 60)) fail("WP6.B6X.bill: 130 rows in three sections of 50 / 50 / 30, 087-COM's shape and the chunker's answer (G1, G5)");
+  if (!same(U5.aiJobCalls.value, { calls: secs.length, sizes }) || !same(U5.aiJobCalls.today, { calls: 1, sizes: [D087.boqRows.value] }) || U5.aiJobCalls087.value !== U5.aiJobCalls.value.calls || U5.aiJobCalls087.today !== U5.aiJobCalls.today.calls) fail("WP6.U5.aiJobCalls: one call per section on B6X (today one of 130); aiJobCalls087 its count (G5)");
+  const rb = U5.sectionsReadBack;
+  if (!same(rb.value.B6X, Object.fromEntries(secs)) || !same(Object.values(rb.value["087-COM"]), D087.boqSections.value.sizes) || !same(rb.today, { B6X: { "(none)": D087.boqRows.value }, "087-COM": { "(none)": D087.boqRows.value } }) || D087.boqSections.today !== undefined || D087.boqSections.ref !== undefined) fail("WP6.U5.sectionsReadBack: B6X's and 087-COM's sections by name (today none on 130 rows); deep.087-COM.boqSections keeps no today (G6, G26)");
+  const stubRows = X.stub.value.afterBaseline.boqActivities;
+  if (!same(aa.value, { refused: true, activitiesCreated: 0, allocationsCreated: 0 }) || aa.today.activitiesCreated !== stubRows.reduce((s, r) => s + r.activities.length, 0) || aa.today.allocationsCreated !== stubRows.length || aa.today.allocationStatus !== "draft" || stubRows[0].boqCode !== "X1-001" || X.stub.value.job.boqActivities.length !== 0) fail("WP6.U5.aiAfterBaseline: the stub names one activity for X1-001; today one activity and one draft allocation on the locked bill (G7)");
+  // Q4 (G4): the L121 company and B6Q
+  const co = WP6.U6.company.value;
+  const toLimit = co.aiLimit - co.aiGenerationsUsed;
+  if (co.code !== "011" || co.status !== "active" || co.plan !== "individual" || !(co.aiLimit > 0 && co.aiLimit < 1000) || toLimit !== co.generationsToLimit || !(toLimit > 0) || !(co.liveProjects < co.projectLimit) || !(co.people <= co.seats) || toLimit + 1 > B6Q_BOOK.aiWindow * co.uploaders.length || !co.uploaders.every((p) => co.personas.includes(p)) || WP6.B6Q.project.value.currency !== co.currency || !same(Object.keys(WP6.B6Q.team.value), ["qs"])) fail("WP6.U6.company: 011, individual and active, aiLimit 10 with 3 used (7 generations to the limit), a project place free, within its seats; the uploads to the limit and the probe fit its uploaders' AI generation window (Q4)");
+  if (!same(U6.value, { upload: { status: 200, mode: "imported" }, dryRun: 200 }) || !same(U6.today, { upload: { status: 402, code: "AI_LIMIT_REACHED" }, dryRun: 200 }) || U6.ref !== "HR-C14") fail("WP6.U6.nonAiImportAtLimit: on B6Q at 011's limit, the import accepted under HR-C14 (today 402 AI_LIMIT_REACHED), the dry run 200 (G4, Q4)");
+  // Q11: nothing queued left behind; the throwaways archived
+  if (!same(B.residue.value.archived, ["B6", "B6X", "B6Q"]) || !same(B.residue.value.queuedJobsLeft, { B6: 0, B6X: 0, B6Q: 0 })) fail("WP6.B6.residue: the three throwaways archived, no queued job left on any (Q11)");
+  // G21 (Q9): the mutation leaves name their catchers by check id
+  const mu = WP6.mutations;
+  const named = (leaf) => leaf.value.join(" | ");
+  const need = [
+    [mu.dryRunWrites, ["U1.B6.writes red and A5.B6.dryRun red (M-DRY,", "U1.B6.writes red (M-DRYr:", "U1.B6.writes red (M-DRYs:", "A5.B6.dryRun red (M-DRYm:", "(M-DRYq,"]],
+    [mu.allocationCapacity, ["A1.B6.overCapacity red, A1.B6.amountOverCapacity red, A4.B6.bulk red and G.5xx red (M-CAP,", "A1.B6.overCapacity red and A4.B6.bulk red (M-CAPq:", "A1.B6.amountOverCapacity red and G.5xx red (M-CAPa:", "A5.B6.dryRun red (M-CAPi:"]],
+    [mu.transferLimit, ["B3.B6.overTransferPlus2 red (M-XFER,"]],
+    [mu.originalLock, ["B5.B6.lockedByLedger red and B5.B6.lockedAfterCo red (M-ORIG,", "B5.B6.lockedAfterCo red (M-ORIG2:", "B5.B6.lockedByLedger red (M-ORIG4:"]],
+  ];
+  for (const [leaf, texts] of need) for (const t of texts) if (named(leaf).indexOf(t) < 0) fail("WP6.mutations: a leaf must name '" + t + "' (G21, Q9)");
+  // G24: chunkBoqRows's citation at HEAD
+  const citesHead = (source) => source.split("; ").some((c) => c.startsWith("backend/src/services/schedule.service.js:1929-1956") && c.endsWith(" @6c5ab54"));
+  if (!citesHead(U5.chunk130.source) || !citesHead(claudeMd.boqChunk.source)) fail("WP6.U5.chunk130 and claudeMd.boqChunk must cite chunkBoqRows at schedule.service.js:1929-1956 (G24)");
+  // G1, Q4: each choreography lists its steps; every check id is served by exactly one step of the three
+  const b6Steps = B.choreography.value;
+  const b6xSteps = X.choreography.value;
+  const b6qSteps = WP6.B6Q.choreography.value;
+  const heads = (steps) => steps.map((s) => s.split(" ")[0]);
+  if (!same(heads(b6Steps), ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "CF", "Q11", "end"]) || !same(heads(b6xSteps), ["X0", "X1", "X2", "X3", "X4", "Q11", "end"]) || !same(heads(b6qSteps), ["Q0", "Q1", "Q2", "Q11", "end"])) fail("WP6.B6, B6X and B6Q choreographies must list their steps B0-B6, CF; X0-X4; Q0-Q2; then Q11 and the end (G1)");
+  if (B6_CHECKS.length !== 57 || B6X_CHECKS.length !== 6 || B6Q_CHECKS.length !== 4 || new Set([...B6_CHECKS, ...B6X_CHECKS, ...B6Q_CHECKS]).size !== 67) fail("WP6: the 57 B6, 6 B6X and 4 B6Q check ids, each once (G1)");
+  const allSteps = [...b6Steps, ...b6xSteps, ...b6qSteps];
+  for (const id of [...B6_CHECKS, ...B6X_CHECKS, ...B6Q_CHECKS]) {
+    const n = allSteps.filter((s) => s.split(/[ ,;()]+/).includes(id)).length;
+    if (n !== 1) fail("WP6 choreographies: the check " + id + " must be served by exactly one step (G1)");
+  }
+  // the known answers carry their today and ref, as assumptions (the KA.I9 ruling)
+  for (const [key, ref] of WP6_KNOWN) {
+    const leaf = leafAt(key);
+    if (!leaf || leaf.today === undefined || leaf.ref !== ref || !leaf.assumption) fail(key + ": a known answer with its today and ref " + ref + ", an assumption (KA.I9 ruling)");
+  }
+  if (WP6_KNOWN.length !== 13 || new Set(WP6_KNOWN.map(([k]) => k)).size !== WP6_KNOWN.length) fail("WP6_KNOWN: the 13 leaves the 11 known answers read, each once (KA.I9 ruling)");
+  // the leaf contract of the WP-6 leaves: a today names its ref and a ref its today, from WP6_REFS; every such leaf is an
+  // assumption, and its value never equals its today (no WP-6 rule is decided)
+  const walk = (node, key) => {
+    if (node && typeof node === "object" && !Array.isArray(node) && "unit" in node && "derivation" in node) {
+      if (node.today !== undefined && !node.ref) fail(key + " carries a today without its ref");
+      if (node.ref !== undefined && node.today === undefined) fail(key + ": a ref without its today");
+      if (node.ref !== undefined && !WP6_REFS.includes(node.ref)) fail(key + ": unknown ref " + node.ref);
+      if (node.today !== undefined && !node.assumption) fail(key + ": a today under an undecided row must be an assumption");
+      if (node.today !== undefined && same(node.today, node.value)) fail(key + ": a value equal to its today would pre-judge " + node.ref);
+      return;
+    }
+    if (node && typeof node === "object" && !Array.isArray(node)) for (const [k, v] of Object.entries(node)) walk(v, key + "." + k);
+  };
+  walk(WP6, "WP6");
 })();
 
 // ─── the tree and its flattening ──────────────────────────────────────────────────────────────

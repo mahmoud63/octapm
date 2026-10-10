@@ -1997,3 +1997,198 @@ D5 known answer only. See the owner questions below.
 To install: copy `work/commercial.rulings.js` over `answers/commercial.js` and `work/wp5-supply-proof.rulings.js` over
 `wp5-supply-proof.js`, check the sha256 values above, and append this section to `answers/CHANGES-WP0-BUILDERS.md` as
 CRLF. The file starts with the blank line that separates it from the previous section.
+
+# WP-6 answer-book patch (2026-10-10)
+
+Read-only draft for Claude Main. Nothing under the certification worktree, the database or git was written.
+
+- Input: `backend/scripts/cert/cert3/answers/commercial.js` at HEAD 6c5ab54,
+  sha256 `df544c6f9b8d5a79b05d947786a1fcdc423cb48b372ce2cea6556b0da0fe6fb7` (copies: `ref/commercial.df544c6f.js`,
+  `work/commercial.copy.js`).
+- Output: `work/commercial.applied.js`,
+  sha256 `ca7e84edf6ac302bc8557e6870329b429ff1e13c2490f90ba192d0223425651e`. Two runs give the same bytes.
+- Only `commercial.js` changes. No WP-6 key lives in `schedule.js` (f0957af2...) or `field-controls.js`
+  (ebc5c740...). WP-6 also reads two cross-section leaves, `deep.087-COM.boq*` and `claudeMd.boqChunk`, and both
+  are in `commercial.js`.
+- Rulings applied: `C:\Temp\octapm-cert\scratch\wp6\WP6-ADJUDICATION.md` Q1-Q14 and the standing rulings it lists.
+  - There are no SQL fixtures.
+  - A value equal to HEAD's today under an undecided rule reads BLOCKED (the KA.I9 ruling).
+  - Every writing check and every catcher runs on a throwaway.
+  - Concurrency probes use N rounds. WP-6 has none.
+  - Every expected figure is a book leaf (A10).
+- Source: `C:\Temp\octapm-cert\scratch\wp6\WP6-PREP.md` section 10 (G1-G26), with `derive-b6.json`,
+  `wp6-checks-draft.json` and `wp6-mutations-draft.json`.
+
+## How to reproduce
+
+```
+node tools/run-all.js        (from C:\Temp\octapm-cert\scratch\wp6\book)
+```
+
+It runs these steps, writing each step's output to `work/<step>-output.txt`:
+
+1. `tools/select-l121.js`
+2. `book-insert.js`
+3. A second application, which must give the same bytes
+4. `node --check` of the output
+5. `verify.js`
+6. `teeth.js`
+7. The WP-4 teeth and the WP-5 teeth (with the WP-5 rulings' mutants), run through `tools/teeth-run.js` so that their
+   scratch files stay in this folder
+8. `tools/refusal-test.js`
+9. The WP-0 load test before and after (`--wp5 --wp6`)
+10. `tools/diff.js`, which writes `wp6-book.diff`
+11. `tools/bytes-check.js`
+
+The sha256 of every deliverable is in `work/SHA256SUMS.txt`.
+
+To install (Claude Main):
+
+1. Check that `answers/commercial.js` still hashes to df544c6f.
+2. Run `node book-insert.js <that file's copy> <out>`.
+3. Check that `<out>` hashes to ca7e84ed.
+4. Copy `<out>` over the book.
+5. Add a "WP-6 answer-book leaves (2026-10-10)" entry to `answers/CHANGES-WP0-BUILDERS.md` from this file (the header
+   comment already names that entry).
+
+## Results (all from work/*-output.txt)
+
+| Step | Result |
+|---|---|
+| book-insert | 25 edits applied: G22, header, helpers, G3, G2, G8, U5, G4, G25, G11, G10, G13, G15, G14, G16, G16note, G17, G18, G19, G20, G21, G23, G26, G24, loadChecks |
+| determinism | second application byte-identical |
+| load | output loads; the WP-4, WP-5, WP-5 rulings and new WP-6 load checks all pass |
+| verify.js | OK: 52 new keys exactly as expected; 27 changed keys, each with exactly the expected fields; 699 leaves identical; stage*, WP4, WP5, WP7, meta, exports identical; deep and claudeMd identical but `deep.087-COM.boqSections` (note) and `claudeMd.boqChunk` (source, note); every draft book key resolves (all 29 proposed leaves exist); 11 KA checks read leaves with today + ref + assumption; choreography check ids = draft's B6 (57) and B6X (6) sets, B6Q 4; 19 mutation catchers named; builder reads changed: none; derive-b6 42 comparisons, 0 problems; L121 company = select-l121's; WP-0 recomputation 116 / 116 agree; WP-5 load test passes; non-ASCII 446 -> 446; LF only, no BOM; removed lines all inside anchors; second run refused, nothing written |
+| teeth.js (WP-6) | 74 / 74 mutants refused at load by their own check; unmutated copy loads |
+| WP-4 teeth on output | 45 / 45 caught (via tools/teeth-run.js) |
+| WP-5 teeth on output | 61 + 15 rulings = 76 / 76 caught |
+| refusal test | re-application, CR, wrong sha, same in/out path, repeated anchor, missing anchor, non-ASCII, CR insert, backtick, template interpolation, overlap, output equal to input: all refused, nothing written; the real edits plan cleanly |
+| load test (WP-0, adapted) | before (`--wp5`) and after (`--wp5 --wp6`): shape OK |
+| diff | 25 hunks, 42 lines replaced by 520; re-applying the hunks gives the output byte for byte |
+| figures | 726 -> 778 (WP6 65 -> 117); with today 108 -> 124; with ref 101 -> 121; WP6 with today 4 -> 20, with ref 0 -> 20 |
+
+Builder reads: none changed. The builders read only `WP6.B1.original.value`, `deep.087-COM.boqRows.value` and
+`deep.087-COM.boqSections.value` (087-com.js:222, 232, 238), and all three values are unchanged.
+`WP6.U5.aiJobCalls087` is named only in the HR-C14 finding's message text at 087-com.js:268 (a mention, not a
+read).
+
+One collision was found and fixed during the proving run. The B3 options object first put `ref: "C1-TOL",` on its own
+line, which duplicated the anchor of WP-4's "G10 the ref" mutant. It now sits on the line with `assumption: true`, and
+the WP-4 teeth pass 45 / 45.
+
+## The leaf contract added
+
+- `WP6_REFS`: HR-C14, HR-C17, HR-C18, BR-ORDER, C1-TOL, L109, L110, L111, WP0-BOQ-1.
+- Every WP-6 leaf with a today names one of these refs, is an assumption, and has a value that differs from its today.
+- A ref always comes with a today. This is checked by a walk of WP6 at load.
+- `WP6_KNOWN` lists the 13 leaves that the 11 KA checks read, with their refs.
+- `deep.087-COM` gets no today or ref, so WP-4's walk of `deep.087-COM` is not widened. G26's read-back known answer
+  lives in `WP6.U5.sectionsReadBack` instead.
+
+## Changes by item
+
+| Item | Keys | Change |
+|---|---|---|
+| G1 (Q1, Q11) | new `WP6.B6.{project, team, fixture, workbooks, allocations, budgetLines, directCost, transfers, lineRevisions, budgetProbes, register, changeOrder, residue, choreography}`; new `WP6.B6X.{project, team, bill, stub, choreography}` | The throwaways' records, computed from the models `B6_BOOK` / `B6X_BOOK` with the book's arithmetic and equal to derive-b6.json. The B6 choreography serves the draft's 57 B6 checks (KA.U6 moves to B6Q; the classifications CF.HRC14, CF.L109, CF.L110 and CF.HRC17 are computed from known answers). The B6X choreography serves 6. The register leaves BR-B / BR-A and B6's records share `WP6.B6`, as the prep names them; their keys do not overlap. |
+| G2 (Q5) | new `WP6.U3.dryRunWrites`, `WP6.U3.realUploadWrites`; `WP6.U3.missingColumns` note | The refused real upload writes no row, revision, job, allocation or budget figure, and keeps one rejected document whose linkedEntityType is BOQ_VALIDATION_FAILED. Classified EXPECTED BEHAVIOUR provisionally. |
+| G3 | `WP6.U2.omitB005` | KA form, ref HR-C14. Value: removed 1, active, flagged. Today: removed 1, active, not flagged. |
+| G4 as Q4 rules it | `WP6.U6.nonAiImportAtLimit`; new `WP6.U6.company`, `WP6.B6Q.{project, team, choreography}` | Ref HR-C14. Value: upload 200 imported, dry run 200. Today: upload 402 AI_LIMIT_REACHED, dry run 200. The probe runs on B6Q in company 011, not on 087, and there is no plan-limit switch (see "L121" below). |
+| G5 (Q2) | new `WP6.U5.aiJobCalls`; `WP6.U5.aiJobCalls087` today 1, ref HR-C14 | Value: 3 calls of 50 / 50 / 30 on B6X. Today: 1 call of 130. The recorder stub's conditions are recorded. The 087 leaf keeps the count. |
+| G6, G26 | new `WP6.U5.sectionsReadBack`; `deep.087-COM.boqSections` note | Sections by name for B6X and for 087-COM (the builder's S1-S3). Today: `(none)` on 130 rows. 087-COM's stored moment becomes STORED-PRE-FIX after the fix. |
+| G7 | new `WP6.U5.aiAfterBaseline` | Ref HR-C14 (L130). Value: refused, nothing created. Today: 1 activity and 1 draft allocation on the locked bill. |
+| G8 | new `WP6.U4.lockFlow`, `liveAfterLock`, `reviewComparisonOnly`, `lockAgain`; `patchAfterLock` note | Lock flow: under_review -> approved -> baselined, 2 superseded, 5 rows. Afterwards 467,000.00 is live. Submitting the comparison-only revision answers 409 BOQ_REVISION_COMPARISON_ONLY; locking again answers 409 BOQ_BASELINE_LOCKED. |
+| G9 (Q13) | new `WP6.U4.scheduleBaselineLock` | 087-SCH: locked, source schedule_baseline; its PATCH answers 409 BOQ_BASELINE_LOCKED. |
+| G10 | `WP6.A2.resubmitRejected` | KA form, ref HR-C17. Value: submitted. Today: submit 400 INVALID_ALLOCATION_STATUS, PATCH 400 ALLOCATION_NOT_EDITABLE. |
+| G11 | new `WP6.A1.amountOverCapacity`, `amountOverCapacityDetails` | 400 ALLOCATION_AMOUNT_EXCEEDED. Details: boqAmount 72,000.00, allocatedAmount 80,000.00 (B-003 10 t at 80,000.00). |
+| G12 | new `WP6.A2.rejected`, `WP6.A2.approved` | Rejected and inactive; the five approved allocations equal the stage3:109 leaves. |
+| G13 | new `WP6.A5.report`; `mappingImport` note | Dry run: 2 matched, 1 unmatched, 1 breach, 12,000.00. Apply: 2 drafts under one batch. Undo: 2 rejected. |
+| G14 | `WP6.B1.costTypes` note | An observation for CF.HRC18, never judged as a value. |
+| G15 | new `WP6.B1.sevenLines`; `sevenLineTotal` note | labour 1,000.00 .. contingency 7,000.00, in COST_TYPES order. |
+| G16 (Q14) | `WP6.B3.overTransfer` | Ref C1-TOL, assumption. Today is now the dedicated pair: T1 -0.01, T2 200,000.01, the pair's sum 200,000.00. |
+| G17 | `WP6.B3.projectRevised` | Derivation: the seven typed lines' revised sum (the old derivation is kept in the note). |
+| G18 | `WP6.B5.originalLocked` ref L109 + note; new `lockedByLedger`, `lockedByLedgerConditions`, `lockedAfterCo`, `lockedAfterCoConditions`, `afterRepoint` | OVH is locked by condition 4 alone and LA by condition 2 alone. After the re-point the value stays 409; today LA is written as 200 with original 1.00 (L109). |
+| G19 (Q6) | `WP6.B6.BR-B`, `BR-A` | Ref BR-ORDER, assumption. The severity rule from Q6 is recorded. The register is read before the CO approval. |
+| G20 | `WP6.B7.archivedActual` | KA form, ref L110. Value: lines actual = recorded total = 28,000.00. Today: 26,000.00 against 28,000.00. |
+| G21 (Q9) | `WP6.mutations.*` (4) | Catchers named by check id: M-DRY/r/s/m (and M-DRYq recorded, not run), M-CAP/q/a/i (500 through the trigger, G.5xx), M-XFER, M-ORIG/2/4. |
+| G22 | scope line 8; PH6 / HF6 citations | WP-6 is :795-836 at 6c5ab54, which is the book's P(...) + 40. |
+| G23 | new `WP6.CF.{HRC14, BRorder, L109, L110, L111, HRC17, HRC18, WP0BOQ1}` | Each is tied at load to the known answers it classifies. HRC18 is a plain observation with no today or ref. |
+| G24 (Q3) | `WP6.U5.chunk130` source + note; the other four chunk leaves' notes; `claudeMd.boqChunk` source + note | chunkBoqRows is at schedule.service.js:1929-1956. It is judged through AI schedule generation with the stub; the vm evaluation is used only as a labelled unit-level fallback. |
+| G25 | `WP6.U7.siteUpload` note | The guard is requireRoles (the role), not the permission template. |
+
+The complete list of new keys is in `new-key-paths.txt`. The before and after figures are in `figures-before.json` and
+`figures-after.json`.
+
+## L121 (Q4): the company, chosen by a stated rule
+
+The tool is `tools/select-l121.js`, which is read only. It reads these sources:
+
+- the population spec (`scripts/cert/lib/spec.js`, which is pure)
+- `C:\Temp\octapm-cert\population.json` (it agrees with the spec for all 100 companies)
+- `state/finalize.json` and `state/projects.json`
+- `backend/src/config/plans.js`, read as text
+
+The billing rows are those that `finalize-population.js` wrote at 2026-10-05 10:37 UTC (`logs/regen-cert2c/finalize.log`).
+These rows are in the cert2c snapshot, which cert3d restores.
+
+The rule:
+
+- R1. The plan has a finite AI quota: trial 3, individual 10, business 150. Enterprise is unlimited and excluded.
+- R2. The subscription status is `active`. In HEAD, `isExpired` puts a date limit only on trialing and canceled rows,
+  and the billing checks move only those rows. Every trial in the population ends by 2026-10-11, and several lapsed
+  after 2026-10-06.
+- R3. The company has a free project place.
+- R4. It has an uploader persona and no more people than seats.
+- R5. It is not reserved by other certification work (the deep companies 087, 052 and 006, the Phase 21 lifecycle
+  companies, and 100). A reservation for entitlement cases does not count: the plan keeps 011 "for Individual-plan
+  and entitlement cases" (:44, :374, :448), and the AI quota is an entitlement case.
+
+Qualifying companies are ordered by:
+
+1. The fewest AI generations to the limit.
+2. The most uploaders. The AI generation limiter allows 8 real uploads per hour per project and user.
+3. The most project room.
+4. The lowest company number.
+
+The selection:
+
+- 54 companies have a finite quota and an active subscription, and 29 of them qualify.
+- **011 Granite Peak Construction** comes first in that order, and it is also the plan's own entitlement company.
+  - Plan: individual, active, annual; period end 2027-03-23.
+  - AI quota: limit 10 with 3 used, so 7 generations to the limit.
+  - Projects: 2 live of 3.
+  - People: 4 (PM, site, QS, finance) on 5 seats.
+  - Currency and time zone: INR, Asia/Kolkata.
+- The runner-up is 001: individual, annual, 3 of 10 used, and a PM as its only uploader.
+- No population company with an active subscription is at its limit today. The three companies that are at their
+  limit (002, 009, 020) are trials whose trial has ended and whose one project place is used.
+
+This is therefore not a TEST GAP, because a qualifying company exists. The figures are in `WP6.U6.company`.
+
+The one product writer of the counter is a completed BOQ AI job (boq.service.js:1660), and every real upload asserts the
+quota first (:1174). The proposed path, `WP6.B6Q.choreography` Q1, needs confirming with the proof:
+
+1. Make 7 real uploads on B6Q, shared between the PM and the QS. 7 plus the probe is 8, which is within one person's
+   window of 8, so two uploaders leave headroom.
+2. Run each queued job to completion through the recorder stub.
+3. Read the counter back at 10.
+4. Q2: one real upload (today 402) and one dry run (200).
+
+## Open points (for Claude Main and the integration owner; no rule decided here)
+
+1. **L121 path to the limit.** Is the Q1 path (real uploads + stub-run jobs, product code only) acceptable as not "fabricating a condition"? If not, U6 becomes a TEST GAP and CF.HRC14 reads PARTIAL.
+2. **Residue in 011.** The path leaves 011's AI counter at its limit (10, up from 3) until a period reset, and an archived B6Q. 011 is one of the 97 companies whose exit fingerprint the plan compares, and the plan keeps 011 for later entitlement cases. Accept, restore through a product route (a period reset), or choose 006, a deep company outside the 97 that qualifies on R1-R4 but needs 148 generations? This is an owner question.
+3. **Q11 and 087's counter.** Q11 says "+2 on 087's AI usage counter is recorded residue" (B6X's two handler runs). B6's three queued `boq.parse` jobs (the U2 import, the rate-160 re-upload and the omit-B005 re-upload) must also be run to completion or cancelled. Running them through the stub adds 1 each, which makes +5. HEAD has no cancel route for a queued job (WP6-PREP Q11). `WP6.B6.residue` records both counts; the ruling's figure needs confirming.
+4. **Job rows after a direct call.** `runBoqActivityJob` called directly does not itself mark the BackgroundJob row completed; the job worker does that. The cleanup's "zero queued jobs" assertion needs a product way to complete or cancel the row. This is proof design.
+5. **A5 after HR-C17.** `WP6.A5.report` holds while B-003/A140 is inactive. Once HR-C17 lets KA.A2.resubmitRejected through, the mapping file's B-003/A140 line reads `existing`. Recorded in its note.
+6. **New setup ids.** `S.B6Q.create`, `S.B6Q.toLimit` and `S.B6Q.archived` are new setup check ids, not in the draft list.
+7. **U5 product path.** The five U5.pure checks now run through AI schedule generation on a throwaway (Q3). That writes a staged schedule revision on whichever throwaway the proof picks; B6X is proposed in the leaf notes. The chunk checks are kept out of the choreographies.
+8. **MOMENT-MAP.** The row 159 deviation is recorded by key when the proof lands (Q1).
+9. **Owner questions, listed and not answered:**
+   - O1 HR-C14
+   - O2 HR-C15 fix and data treatment
+   - O3 HR-C17
+   - O4 HR-C18
+   - O5 WP0-BOQ-1 / HR-A1
+   - O6 the severities of L109, L110 and L111
+
+**Integration owner (2026-10-10, after drafting):** WP6.B6Q and WP6.U6.company (company 011) are kept for the record only. L121 is a recorded TEST GAP: driving 011's AI counter to its limit would change one of the 97 companies the exit fingerprint compares, on every no-flag run (primary, final and each mutation run), and the plan reserves 011 for entitlement cases. The proof does not run B6Q; CF.HRC14 reads PARTIAL.
