@@ -1815,3 +1815,185 @@ by the command line with nothing written, and a repeated anchor, a missing ancho
 template-interpolation insert and two overlapping edits refused by the planner; the original plans cleanly. Bytes:
 every deliverable UTF-8 without BOM, LF, ASCII; commercial.js LF; every inserted line ASCII. `tools/run-all.js` runs
 the whole chain in one command (outputs in `work/*-output.txt`, summary in `work/run-all-output.txt`).
+
+# WP-5 integration-owner rulings (2026-10-10)
+
+Binding source: `C:\Temp\octapm-cert\scratch\wp5\PREP5-ADJUDICATION.md`, section "WP-5 answer book" B1 and B2 and
+section "WP-5 proof" P1 and P3 (cited in the book and the proof as `R5ADJ(...)`). Applied by
+`C:\Temp\octapm-cert\scratch\wp5\rulings\rulings-apply.js` to `answers/commercial.js` and `wp5-supply-proof.js` as
+installed in `61c2f7d` (sha256 `7d6fc3ee44f3a82e5929d046303ad6b5cc87265c4e9601ceb9ea23acff34b726` and
+`0fb6842ab6714652c63676c6acb63400041bf53d15a27e8507e06a86f50b98d6`; it refuses any other input). Outputs:
+`work/commercial.rulings.js` sha256 `df544c6f9b8d5a79b05d947786a1fcdc423cb48b372ce2cea6556b0da0fe6fb7` and
+`work/wp5-supply-proof.rulings.js` sha256 `72f7c952e802f27a464ff2761edc0fd007f818716c26f1ac7842a94aec51e2b2`. No rule
+is decided: HR-C5, HR-C7 and HR-C8 stay undecided (and HR-P2..P5, HR-Q2..Q5, HR-S9 are untouched); no FIXES entry is
+set. Product code is cited at HEAD `61c2f7d`, whose `backend/src` is identical to `f599e67`.
+
+Figure count unchanged: commercial 726 (no key added or removed). 3 leaves changed, 723 identical in every field;
+`meta` and the exports identical; stage3/4/5, WP4, WP6, WP7 and claudeMd untouched. planDisagrees 2 -> 3, leaves with a
+`today` 107 -> 108, with a `ref` 100 -> 101, assumption 248 -> 248. No value or today a builder reads changed:
+`build/*.js` neither reads nor names `poStatuses`, `ignoredFields` or `usage50`, and no other script under
+`backend/scripts` reads them (`cert/isolation/commercial-2-proof.js` names an API field `ignoredFields`, not the book's).
+
+## B1. deep.087-COM.poStatuses: the build's end state
+
+| Key | Old | New |
+|---|---|---|
+| `deep.087-COM.poStatuses` | value `["partial->closed (short)", "received->closed", "acknowledged", "cancelled", "from award"]`, unit list, "POs in every status as listed." | value `{ C: partial, A: received, ACK: acknowledged, X: cancelled, AWARD: issued }`, computed from `COM087_ORDERS` (the builder's keys), unit outcome; planDisagrees true, planValue the old list; no today and no ref; the old value in the note |
+
+Why: the build attempts the plan's two closes (`build/087-com.js:1895-1913`, steps po.C.close-short and
+po.A.close-received) and HEAD refuses both. `ALLOWED` has no row for partial or received
+(`backend/src/services/purchase-order.service.js:116-125`), so `assertTransition` answers 409 PO_TRANSITION_INVALID
+(`:127-136`), which `closeOrder` (`:628-650`) reaches through `transition` (`:502-504`). PO-C stays partial and PO-A
+received: HEAD's states are the build's real end state. The closes the build attempted are judged only through
+KA.O2.stored.closeShort and KA.O2.stored.closeReceived. The leaf carries no today and no ref, so WP-4's leaf-contract
+walk of deep.087-COM (whose REFS hold no WP-5 ref) is not widened. A load check ties the leaf to `COM087_ORDERS`
+(PO-C partial, PO-A received pinned), to the plan's list as planValue, and to "no today, no ref". The proof's
+O.live.087.statuses now reads `leaf.C`, `leaf.A`, `leaf.ACK`, `leaf.X` and `leaf.AWARD`. Its arrow rule ("before the
+arrow while the stored close is BLOCKED, after it once done") is removed.
+
+## B2. WP5.O7.ignoredFields: a known answer under HR-C7
+
+| Key | Old | New |
+|---|---|---|
+| `WP5.O7.ignoredFields` | value `{ stockIssued: 0, ledgerEntries: 0 }` (HEAD's answer), unit outcome, assumption, no today, no ref | value `{ status: 400, code: null }` (HR-C7's recommendation, plan :1075 "ignored fields are refused (400)"; the code is the fix's; an assumption), unit error; today `{ stockIssued: 0, ledgerEntries: 0 }`; ref HR-C7; old value, unit and derivation in the note |
+| `WP5_KNOWN` (data) | 24 leaves | 25: `["WP5.O7.ignoredFields", "HR-C7"]` added; its comment says 28 KA checks |
+
+Today's answer is HEAD's. The procurement door accepts `issueToActivity` (`backend/src/routes/procurement.js:312`) and
+`lines.*.issuedQty` (`:327`). It hands the whole body to `goodsReceiptService.receiveAgainstOrder` (`:348-358`;
+`backend/src/services/goods-receipt.service.js:378`) and answers 201 (`procurement.js:359`). Neither field is read in
+`goods-receipt.service.js`: in `backend/src`, `issueToActivity` occurs only at `routes/procurement.js:312` and
+`openapi/spec.js:7165`. The debug run of 2026-10-10 observed 201, one receipt movement, no issue, no material_issue entry
+and line issuedQty 0. The value is the recommendation's 400, an assumption that pre-judges nothing (the KA.I9 ruling).
+A load check pins it: value 400 with code null, unit error, today HEAD's answer, ref HR-C7, an assumption, listed once
+in `WP5_KNOWN` (now 25 leaves). In the proof, O7.J.ignoredFields keeps its id. It is now recorded by `ka()` and reads
+BLOCKED. The label counts become HARD 89 -> 88 and KA 27 -> 28, with 142 checks unchanged.
+
+## P1. WP5.N6.usage50: 201
+
+| Key | Old | New |
+|---|---|---|
+| `WP5.N6.usage50` | value 200 | value 201; today `{ status: 409, code: MATERIAL_USAGE_EXCEEDS_ISSUED_QTY }` unchanged; ref HR-C7; sources add `routes/materials.js:129-158`, `material.service.js:391-406`, `procurement.service.js:2159-2175`; the old value in the note |
+
+A recorded usage is a create: one `ActivityMaterialUsage` row (`backend/src/services/procurement.service.js:2159-2175`,
+reached through `material.service.js:391-406`). The route answers it 201 (`backend/src/routes/materials.js:157`). This is
+the API's status convention and decides no HR-C7 question. Today every usage is refused while issuedQty is 0
+(`procurement.service.js:2127-2141`), so KA.N6.usage50 stays BLOCKED under HR-C7. A load check pins value 201, unit
+http-status, ref HR-C7, an assumption, and a today equal to usage70's refusal.
+
+## P3. KA.D5.overInvoicedLedger: decided only when both fixes are recorded (proof only; the book is unchanged)
+
+`WP5.D5.overInvoicedLedger` is byte-identical. It keeps ref HR-C5, value 600.00 and today 0.00, and its derivation
+already says the value rests on two things. The first is that the service line stays a service line: WP5-SVC-1, where
+goods receipt stocks every received line (`goods-receipt.service.js:241-263`, `:711`) and a stocked line's invoice is
+capitalised (`direct-cost.service.js:468-476`, `:491-495`). The second is that HR-C5 refuses the second approval. In the
+proof:
+
+- FIXES gains `'WP5-SVC-1': { commit: null, committedAt: null }` (9 entries). S.state's loop checks it against git once
+  it is set, like the others.
+- A new rule `D5_RULE = 'HR-C5+WP5-SVC-1'` is added to RULES. Its ref names both. Its status is `decided` only when
+  `fixed('HR-C5') && fixed('WP5-SVC-1')` (`D5_FIXED`), and its statement and sources cite both.
+- KA.D5.overInvoicedLedger is now recorded by `ka(..., { ref: D5_RULE, ... })` instead of `kaLeaf` with the leaf's HR-C5,
+  so it reads BLOCKED until both entries are set.
+- Its DECIDED_RED entry moves out of the HR-C5 block into its own block gated on `D5_FIXED`, with rule D5_RULE.
+- `D5_RULE` is exported for the model check.
+
+`RULES['WP5-SVC-1']` stays the register row it was (status proposed), and CF.SVC1 is unchanged: the ruling covers the
+D5 known answer only. See the owner questions below.
+
+## The proof (wp5-supply-proof.js), every change
+
+- Header: BLOCKED 27 -> 28. O7.J.ignoredFields is listed under HR-C7, and KA.D5.overInvoicedLedger under rule
+  HR-C5+WP5-SVC-1. Green: 6 setup + 88 HARD + 4 STORED. A paragraph lists the rulings applied (lines 99-107 of the
+  patched file).
+- A second load guard (patched lines 159-162) refuses a book without the rulings: O7 without ref HR-C7 and a today,
+  usage50 not 201, or poStatuses not an object. The WP-5 book guard still fires first on a book without the WP-5 patch.
+- CHECKS: four descriptions change (O.live.087.statuses, O7.J.ignoredFields, KA.N6.usage50, KA.D5.overInvoicedLedger).
+  Ids, sections, plan references, book keys and places are unchanged: 142 in the same order.
+- `R5ADJ` helper (line 493). FIXES['WP5-SVC-1'] (514). `D5_RULE` and `D5_FIXED` (519-520). `RULES[D5_RULE]` (523).
+  DECIDED_RED: D5 under `D5_FIXED` (582), and `'O7.J.ignoredFields'` under HR-C7 (586).
+- meta.adjudication names the rulings.
+- O7 (line 1325): `rec` becomes `ka`. Value: 400 with nothing issued or posted. Today: HEAD's 201, one receipt movement,
+  `{ stockIssued: 0, ledgerEntries: 0 }`, line issuedQty 0. CF.HRC7 reads it with `kaState` instead of `passed`
+  (line 2230). A BLOCKED record is neither PASS nor FAIL, so `passed` would have made CF.HRC7 PARTIAL.
+- KA.N6.usage50's detail now says 201 (line 1489). Its judgement is unchanged: `statusPart(said) === leaf.value`.
+- KA.D5.overInvoicedLedger (line 2007) is on D5_RULE.
+- O.live.087.statuses (line 2099) reads the leaf by builder key.
+
+## Not applied here; owner questions (none answered)
+
+- O7.J.ignoredFields keeps its id; it is not renamed KA.O7.ignoredFields. The book's J choreography (J6) and `J_CHECKS`
+  name it, and so do the debug results. It is the one known answer without the `KA.` prefix, so a tally by prefix
+  reads 27. The model check and the adapted validation label it KA from its recording site.
+- FIXES['WP5-SVC-1'] only gates D5. Should the WP5-SVC-1 fix also make `RULES['WP5-SVC-1']` fix-backed and turn
+  CF.SVC1 into a defect check that must read REJECTED, as the header says a landed fix does? This is not done: P3
+  rules on KA.D5.overInvoicedLedger only.
+- When HR-C7 is decided as recommended, the O7 receipt is refused (400). O4.J.alreadyPosted, which re-sends that
+  receipt and expects 409 RECEIPT_ALREADY_POSTED, then needs a first receipt of its own. RULES['HR-C7'] also allows "or
+  honours them"; if the owner chooses that, the O7 value changes with the decision. Both belong with the HR-C7 fix, not
+  here.
+- B5 (STORED-PRE-FIX for po.C.close-short and po.A.close-received) is not written: HR-C8 is undecided. Once HR-C8 is
+  implemented and 087-COM rebuilt, deep.087-COM.poStatuses is re-derived too.
+- The proof header's "Q4 the 27 known answers BLOCKED" (WP5ADJ Q4, line 96 of the patched file) is left as the record
+  of that ruling; the new paragraph states 28.
+- MOMENT-MAP.md and the WP-5 mutation lists are not touched.
+
+## Validation (scratch `C:\Temp\octapm-cert\scratch\wp5\rulings\`; `tools/run-all.js` runs it all, outputs `work/*-output.txt`)
+
+- `rulings-apply.js` makes 8 book edits and 24 proof edits. Each is an exact anchor, counted once and checked not to
+  overlap, for both files before any write. A second application is byte-identical.
+- `node --check` passes on both outputs. The patched book loads: 726 figures, and the WP-4, WP-5 and new rulings load
+  checks pass. The WP-0 load test (`scratch/wp5/book/tools/load-commercial.adapted.js --wp5`) reports shape OK.
+- `tools/rulings-verify.js` checks the book:
+  - only the 3 expected leaves changed, each in exactly the expected fields, and 723 are identical;
+  - each changed note names its ruling and keeps the old value;
+  - the D5 leaf is identical, and meta and the exports are identical;
+  - no builder reads a changed leaf;
+  - the WP-0 recomputation agrees on 116 of 116.
+- `tools/rulings-verify.js` checks the proof and the bytes:
+  - the proof's 142 ids, sections, places and book keys are unchanged, and only the 4 expected descriptions moved;
+  - both files are LF only, with no BOM and no double-encoding;
+  - non-ASCII is unchanged (book 446 -> 446, proof 0 -> 0) and every added line is ASCII;
+  - every removed line lies in an edit's anchor (book 4, proof 19);
+  - a second run on the outputs is refused with nothing written.
+- Teeth on the patched book, run from this folder (`tools/teeth-run.js` takes each original MUTANTS array verbatim):
+  - the WP-5 teeth: 61 mutants plus 15 for the rulings (B1 5, the WP-4 walk on deep.087-COM 2, B2 6, P1 2), all
+    refused by their own check;
+  - the WP-4 teeth (`scratch/wp4/book/teeth.js`): 45 of 45 refused;
+  - the unmutated copy loads.
+- The adapted proof validation (`tools/adapted/validate.js`; every change is listed in `tools/adapted/ADAPTATIONS.txt`):
+  - 142 checks, labels SETUP 6, STORED 4, HARD 88, KA 28, CF 16;
+  - every id recorded, and every book key resolves (2 pending in the installed book: O7's ref and today);
+  - the KA leaves carry a ref and a today, and DECIDED_RED is empty at HEAD (27 entries after the fixes);
+  - the catchers agree, the guard holds, and the choreography covers 98 of 98;
+  - the scope lint finds 0 unresolved names and 0 unused top-level names, and the header states 142, 0 FAIL, BLOCKED
+    (28), CF (16) and --skip=D2.
+- The adapted registration check:
+  - the no-flag run registers 142 (the mutation run equals the primary run), and --skip=D2 registers 138;
+  - every filter scenario passes, and the refused scenarios are refused;
+  - the guard refuses the WP-5-unpatched book, and also the installed pre-ruling book (the new guard);
+  - with all fixes set in memory: 9 null FIXES replaced, 27 DECIDED_RED entries all registered as defects, 9 decided
+    rules (D5_RULE among them), and a stored HR-C8 moment reads STORED-PRE-FIX.
+- `tools/model-check.js`:
+  - The labels are read from the recording sites. The installed proof gives 6 / 4 / 89 / 27 / 16 and the patched proof
+    6 / 4 / 88 / 28 / 16; only O7.J.ignoredFields moves, HARD -> KA.
+  - P3, with no FIXES set, only HR-C5 or only WP5-SVC-1: the D5 known answer reads BLOCKED on its today, is no defect
+    check, and its rule is proposed. With only HR-C5, HR-C5's own known answers are decided.
+  - P3, with both set: the D5 rule is decided, the today fails, the value passes, and D5 registers as a defect of
+    HR-C5+WP5-SVC-1. The D5 call site passes `ref: D5_RULE`.
+  - With HR-C7 set, O7.J.ignoredFields is a defect of HR-C7; without it, O7 reads BLOCKED.
+  - Replay of the 2026-10-10 debug run's recorded observations through the patched proof's own predicates: O.live.087.
+    statuses PASS; O7.J.ignoredFields, KA.N6.usage50 and KA.D5.overInvoicedLedger BLOCKED; CF.HRC7 CONFIRMED.
+    Predicted for that run: 138 pass, 0 fail, 28 BLOCKED.
+- `tools/refusal-test.js`:
+  - Command line: re-application (book, proof), CR line endings (book, proof), a wrong sha256 (book, proof), an output
+    that is an input (4 cases, one differing only in case), one output path for both, and missing arguments. All are
+    refused with exit 2 and nothing written.
+  - Planner: a repeated anchor, a missing anchor (book, proof), a non-ASCII insert (book, proof), a CR insert, a
+    backtick or template interpolation in a book insert, and overlapping edits. All are refused.
+  - The installed files plan cleanly.
+- Bytes: every deliverable is UTF-8 without BOM, LF, and ASCII, except the book's own 446 non-ASCII characters
+  (`work/SHA256SUMS.txt`).
+
+To install: copy `work/commercial.rulings.js` over `answers/commercial.js` and `work/wp5-supply-proof.rulings.js` over
+`wp5-supply-proof.js`, check the sha256 values above, and append this section to `answers/CHANGES-WP0-BUILDERS.md` as
+CRLF. The file starts with the blank line that separates it from the previous section.

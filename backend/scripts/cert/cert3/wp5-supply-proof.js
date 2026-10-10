@@ -72,17 +72,18 @@
  * into a defect check that must read REJECTED.
  *
  * Expected at HEAD on cert3d (after the WP-5 book patch with BOOK-G3, no fix commit set): 142 checks + G.5xx; 0 FAIL,
- * exit 0, PASS (harness provisional classification: none, no defect checks). Known answers BLOCKED (27):
+ * exit 0, PASS (harness provisional classification: none, no defect checks). Known answers BLOCKED (28):
  * KA.O2.stored.closeShort, KA.O2.stored.closeReceived, KA.O3.cancelAfterDelivery, KA.O2.forceWithReason,
  * KA.O2.receiveAfterClose (not sent: J-C stays partial), KA.O2.fullyReceivedClose (HR-C8); KA.R4.lineCoding.087,
  * KA.R4.lineCoding.J (AWARD-CODING); KA.R2.concurrentConfirms (AWARD-ATOMIC; racy, a lucky single success reads value, a
  * pass); KA.R3.secondOrder (AWARD-ONE-ORDER); KA.O5.receivableList.087 / .J (RCV-LIST); KA.O6.refCollision (HR-C9);
  * KA.N2.returnNeverIssued / stockAfterRefusal / projectCostAfterRefusal / return30After10 (L36); KA.N3.credit / activity /
- * stock (X-FINANCE-1); KA.N6.issuedQty / usage50 (HR-C7); KA.D4.087, KA.D4.J.invoiceBeforeReceipt (L35);
- * KA.D5.priceVarianceApproval, KA.D5.overInvoicedLedger (BOOK-G3: today 0.00, WP5-SVC-1), KA.D6.invoiceSideVerdict (HR-C5).
+ * stock (X-FINANCE-1); O7.J.ignoredFields, KA.N6.issuedQty / usage50 (HR-C7); KA.D4.087, KA.D4.J.invoiceBeforeReceipt
+ * (L35); KA.D5.priceVarianceApproval, KA.D6.invoiceSideVerdict (HR-C5); KA.D5.overInvoicedLedger (BOOK-G3: today 0.00;
+ * rule HR-C5+WP5-SVC-1, decided only when both fixes are recorded: R5ADJ P3).
  * CF reported (16, CONFIRMED expected): CF.awardAtomic, CF.awardSecondOrder, CF.awardCoding, CF.HRC8,
  * CF.receivableList, CF.HRC9, CF.HRC7, CF.HRC6, CF.L199issue, CF.HRC5, CF.L107, CF.L119, CF.DFUN1delete, CF.SVC1,
- * CF.AWD1, CF.INV1. Green: 6 setup + 89 HARD + 4 STORED, and G.5xx.
+ * CF.AWD1, CF.INV1. Green: 6 setup + 88 HARD + 4 STORED, and G.5xx.
  * Without BOOK-G3 the proof refuses to load (the guard below); applied by hand otherwise, KA.D5.overInvoicedLedger would
  * be the one FAIL (0.00 matches neither 600.00 nor the old today 1,200.00).
  * After HR-C8 is decided as recommended (:1076): the four live HR-C8 KAs turn value checks (receiveAfterClose is then
@@ -95,6 +96,15 @@
  * J; Q3 severities are the journal's, after this run; Q4 the 27 known answers BLOCKED; Q6 the two stamped directory
  * vendors are company-level residue in 087; Q7 the E6 entries (CATCHERS); Q8 N rounds for the direct-cost probe, the
  * award race one shot; Q10 R5.expired keeps its 30 s lapse; Q12 BOOK-G3 applied first.
+ * Integration-owner rulings applied (2026-10-10, C:\Temp\octapm-cert\scratch\wp5\PREP5-ADJUDICATION.md, cited R5ADJ;
+ * the book side by C:\Temp\octapm-cert\scratch\wp5\rulings\rulings-apply.js, which this proof's second load guard asks
+ * for): B1 O.live.087.statuses judges HEAD's states (PO-C partial, PO-A received) against deep.087-COM.poStatuses, which
+ * names the build's end state; the post-HR-C8 closes are judged only by KA.O2.stored.closeShort / closeReceived. B2
+ * O7.J.ignoredFields is a known answer under HR-C7 (value HR-C7's recommended 400, an assumption; today HEAD's 201 with
+ * the fields ignored): BLOCKED; HARD 89 -> 88, KA 27 -> 28, 142 checks unchanged (the id keeps its O7.J. form, which the
+ * book's J choreography and J_CHECKS name). P1 KA.N6.usage50's value is 201, the route's create status
+ * (WP5.N6.usage50.value). P3 KA.D5.overInvoicedLedger rests on the rule HR-C5+WP5-SVC-1 (D5_RULE), decided only when
+ * FIXES['HR-C5'] and FIXES['WP5-SVC-1'] are both set; until then it reads BLOCKED.
  * EXPECTED_CHECKS: WP5-PREP's 142 (wp5-checks-draft.json), fixed; G.5xx on top.
  *
  * Exit 0 pass / 2 a check failed / 1 setup error (harness rules). Results:
@@ -144,6 +154,11 @@ const WP5_PATCH_LEAVES = [
     || WP5.R4.lineCoding.ref !== 'AWARD-CODING' || WP5.O6.refCollision.ref !== 'HR-C9' || WP5.N6.issuedQty.ref !== 'HR-C7') {
     throw new Error('answers/commercial.js carries the pre-WP-5 values of WP5.R2.concurrentConfirms / O2.forceWithReason / mutations.awardLock / R4.lineCoding / O6.refCollision / N6.issuedQty (G4, G12, G18, G19, refs): apply the WP-5 book patch first');
   }
+}
+
+// -- the WP-5 integration-owner rulings must be applied to the book (R5ADJ B1, B2, P1) ------------------------------------
+if (WP5.O7.ignoredFields.ref !== 'HR-C7' || WP5.O7.ignoredFields.today === undefined || WP5.N6.usage50.value !== 201 || !D087.poStatuses.value || typeof D087.poStatuses.value !== 'object' || Array.isArray(D087.poStatuses.value)) {
+  throw new Error('answers/commercial.js carries the pre-ruling WP5.O7.ignoredFields / WP5.N6.usage50 / deep.087-COM.poStatuses: apply the WP-5 integration-owner rulings (C:/Temp/octapm-cert/scratch/wp5/rulings/rulings-apply.js; PREP5-ADJUDICATION B1, B2, P1) first');
 }
 
 const PLAN_DOC = 'docs/certification/OCTAPM_CERT3_PLAN.md';
@@ -207,7 +222,7 @@ const CHECKS = [
   C('O2.stored.052', L(444, 755), 'deep.052-COM.O2.statusAfterPartial', 'stored:052-COM', 'stored step po.O2 done: PO-O2 partial (deep.052-COM.O2.statusAfterPartial), its receipt said 201', 'D2'),
   C('KA.O2.stored.closeShort', L(755, 785, 1076), 'WP5.O2.forceWithReason', 'stored:087-COM', 'stored step po.C.close-short: value done with PO-C closed; today BLOCKED HR-C8 with the observed \'409 PO_TRANSITION_INVALID\' (the leaf\'s today) - HR-C8 (STORED-PRE-FIX after the fix)', 'COM'),
   C('KA.O2.stored.closeReceived', L(755, 785, 1076), 'WP5.O2.fullyReceivedClose', 'stored:087-COM', 'stored step po.A.close-received: value done with PO-A closed; today BLOCKED HR-C8 with the observed \'409 PO_TRANSITION_INVALID\' - HR-C8', 'COM'),
-  C('O.live.087.statuses', L(427, 755), 'deep.087-COM.poStatuses', '087-COM', 'the register now: PO-00001 acknowledged with nothing received, PO-X cancelled, PO-AWARD issued from the award, PO-C partial and PO-A received while their closes are BLOCKED HR-C8 (deep.087-COM.poStatuses: the state before the arrow while the stored close step is BLOCKED, after it once done)', 'COM'),
+  C('O.live.087.statuses', L(427, 755), 'deep.087-COM.poStatuses', '087-COM', 'the register now: PO-00001 acknowledged with nothing received, PO-X cancelled, PO-AWARD issued from the award, PO-C partial and PO-A received: the build\'s end state (deep.087-COM.poStatuses by builder key, PREP5-ADJUDICATION B1); the post-HR-C8 closes are judged only by KA.O2.stored.closeShort / closeReceived', 'COM'),
   C('O6.collision.live', L(428, 759), 'deep.087-COM-B.poRefCollision', '087-COM,087-COM-B', 'both first orders read PO-00001 live (087-COM PO-ACK acknowledged, 087-COM-B PO-1 issued)', 'COMB'),
   C('O2.live.087', L(755), 'WP5.O2.statusAfterPartial', '087-COM', 'PO-C: status partial, warehouseStatus partial, one line 100 ordered / 60 received (WP5.O2.ordered / received), value 1,000.00 (WP5.O2.order1000)', 'COM'),
   C('O2.live.052', L(444, 755), 'deep.052-COM.O2.statusAfterPartial', '052-COM', 'PO-O2: the same (deep.052-COM.O2.*), in USD', 'D2'),
@@ -242,7 +257,7 @@ const CHECKS = [
   C('O4.J.alreadyPosted', L(757), 'WP5.O4.alreadyPosted', 'J', 'J6, the procurement door with J-O7\'s receiptNumber again: \'409 RECEIPT_ALREADY_POSTED\'', 'JO'),
   C('O4.J.acceptedRejected', L(757), 'WP5.O4.acceptedStock', 'J', 'J6, J-O4: 10 accepted + 2 rejected: J-BLK on hand +10 (100.00), line rejectedQty 2 (WP5.O4.rejectedQty), one movement only', 'JO'),
   C('O4.J.matchFlag', L(757), 'WP5.O4.matchFlag', 'J', 'J6, GET match/order J-O4: the line flags rejected_on_delivery (warning)', 'JO'),
-  C('O7.J.ignoredFields', L(760, 788), 'WP5.O7.ignoredFields', 'J', 'J6, the procurement door receipt of J-O7 with issueToActivity true and issuedQty 60: 201, one receipt movement, no issue movement, no material_issue entry, line issuedQty 0 (the leaf\'s value is HEAD\'s; HR-C7 undecided)', 'JO'),
+  C('O7.J.ignoredFields', L(760, 788), 'WP5.O7.ignoredFields', 'J', 'J6, the procurement door receipt of J-O7 with issueToActivity true and issuedQty 60, a known answer (PREP5-ADJUDICATION B2): value refused 400, HR-C7\'s recommendation (the leaf\'s value, an assumption); today 201, one receipt movement, no issue movement, no material_issue entry, line issuedQty 0 (the leaf\'s today) - HR-C7', 'JO'),
   C('KA.O5.receivableList.J', L(758, 786, 1112), 'WP5.O5.onJ', 'J', 'J6, J\'s list scope=receivable read before any close: value J-C, J-O4, J-ISS, J-ACKC, J-STK, J-DEL2; today the drafts J-DEL1, J-DRAFT, J-NS, J-NR listed and J-ACKC missing - RCV-LIST', 'JO'),
 
   C('N.stored.087', L(762), 'WP5.N1.availableAfterReserve', 'stored:087-COM', 'stored steps inventory, transfers, reservation done (the build asserted the cement 90 at 11.00 = WP5.existing.stockOnHand and the cost-code-only issue costPosted false = WP5.N1.costCodeOnly); reservation out onHand 90, reserved 50, available 40', 'COM'),
@@ -270,7 +285,7 @@ const CHECKS = [
   C('N5.J.releaseOverQuarantine', L(766), 'WP5.N5.releaseOverQuarantine', 'J', 'J9, J-CEM3 at J-B02: 5 quarantined, release 6: \'409 INV_INSUFFICIENT_STOCK\'', 'JN'),
   C('N5.J.release5', L(766), 'WP5.N5.release5', 'J', 'J9, release 5: J-B02 back to 10 on hand, 0 quarantined (WP5.N5.release5)', 'JN'),
   C('KA.N6.issuedQty', L(767, 788), 'WP5.N6.issuedQty', 'J', 'J9, J-A130\'s plan row after the issue of 60: issuedQty value 60; today 0 - HR-C7', 'JN'),
-  C('KA.N6.usage50', L(767, 788), 'WP5.N6.usage50', 'J', 'J9, usage 50 on the plan row: value accepted (the leaf\'s 200); today \'409 MATERIAL_USAGE_EXCEEDS_ISSUED_QTY\' - HR-C7', 'JN'),
+  C('KA.N6.usage50', L(767, 788), 'WP5.N6.usage50', 'J', 'J9, usage 50 on the plan row: value accepted (the leaf\'s 201, the route\'s create status: PREP5-ADJUDICATION P1); today \'409 MATERIAL_USAGE_EXCEEDS_ISSUED_QTY\' - HR-C7', 'JN'),
   C('N6.J.usage70', L(767), 'WP5.N6.usage70', 'J', 'J9, usage 70: \'409 MATERIAL_USAGE_EXCEEDS_ISSUED_QTY\' (true today and after HR-C7)', 'JN'),
   C('N7.J.adjustNoNotes', L(768), 'WP5.N7.adjustNoNotes', 'J', 'J9, J-CEM3 adjusted without notes: \'400 INV_ADJUST_REASON\'', 'JN'),
   C('N7.J.damageOverReceipt', L(768), 'WP5.N7.damageOverReceipt', 'J', 'J9, receive 5 J-CEM3 with damagedQty 6: \'400 INV_DAMAGE_EXCEEDS_RECEIPT\', nothing written', 'JN'),
@@ -301,7 +316,7 @@ const CHECKS = [
   C('D5.J.priceVariance', L(774), 'WP5.D5.priceVarianceVerdict', 'J', 'J11, J-VAR on PO-B\' (50 @ 13.00 received, invoiced 50 @ 14.00): match verdict review, price_variance blocking', 'JD'),
   C('D5.J.matched', L(774), "WP5.existing['stage12.invoiceA']", 'J', 'J11, stage 12 on J: J-INVA 100 @ 10.00 = 1,000.00 against PO-A\' verdict matched; J-VAR 700.00 against 650.00 received, variance +50.00; both approved (J-VAR in KA.D5.priceVarianceApproval) and capitalised: ledger delta 0.00 (WP5.existing stage12.*)', 'JD'),
   C('KA.D5.priceVarianceApproval', L(774, 791), 'WP5.D5.priceVarianceApproval', 'J', 'J11, finance approves J-VAR: value refused (4xx) unless an override with a reason; today 200 approved - HR-C5', 'JD'),
-  C('KA.D5.overInvoicedLedger', L(774, 791), 'WP5.D5.overInvoicedLedger', 'J', 'J11, J-SVC (100 hr @ 10.00 received) invoiced 60 + 60, both approved: value 600.00 on the ledger; today 0.00 (BOOK-G3: WP5-SVC-1 capitalises both) - HR-C5', 'JD'),
+  C('KA.D5.overInvoicedLedger', L(774, 791), 'WP5.D5.overInvoicedLedger', 'J', 'J11, J-SVC (100 hr @ 10.00 received) invoiced 60 + 60, both approved: value 600.00 on the ledger; today 0.00 (BOOK-G3: WP5-SVC-1 capitalises both) - HR-C5 and WP5-SVC-1 (rule HR-C5+WP5-SVC-1, decided only when both fixes are recorded: PREP5-ADJUDICATION P3)', 'JD'),
   C('KA.D6.invoiceSideVerdict', L(774, 791), 'WP5.D6.invoiceSideVerdict', 'J', 'J11, J-D6INV: J-D6\'s line at +10% plus a freight line with no poLineId: value review; today check - HR-C5', 'JD'),
   C('D7.J.balanced', L(775), 'WP5.D7.balanced', 'J', 'J11, GET /cost/reconciliation on J after J9 and after J11 (J\'s end state: nothing writes on J after J11 but its archive): balanced true, no budget or activity variance', 'JD'),
 
@@ -474,6 +489,8 @@ const ORDER_KEYS_087 = { ack: 'ACK', a: 'A', b: 'B', c: 'C', o4: 'O4', x: 'X', s
 
 // -- rules, the fix commits and the contracts pending their decisions or plan reviews ----------------------------------
 const ADJ = (item) => `C:/Temp/octapm-cert/scratch/wp4/PREP4-ADJUDICATION.md section D ${item}`;
+/** The integration owner's rulings on the WP-5 book and proof (2026-10-10): "WP-5 answer book" B1-B5, "WP-5 proof" P1-P3. */
+const R5ADJ = (item) => 'C:/Temp/octapm-cert/scratch/wp5/PREP5-ADJUDICATION.md ' + item;
 /**
  * The fix commits: EMPTY until each fix lands (each goes ahead only if it confirms as P1, plan :1107). The integration
  * owner sets both fields from the fix commit (`git show -s --format=%cI <commit>`); the proof checks the time against git
@@ -481,6 +498,9 @@ const ADJ = (item) => `C:/Temp/octapm-cert/scratch/wp4/PREP4-ADJUDICATION.md sec
  * the commit reads STORED-PRE-FIX. The four owner rules (HR-C5, HR-C7, HR-C8, HR-C9) are undecided: their entries are
  * set only by the commit that implements the owner's decision, together with its CONTRACT fields; HR-C8's stored build
  * moments (KA.O2.stored.*) then read STORED-PRE-FIX until the builder changes and the exit rebuild (WP-3 Q3 / WP-4 Q4).
+ * WP5-SVC-1 (register P2: a received service line is stocked, so its invoices are capitalised) is set by its fix commit
+ * (service lines not capitalised): KA.D5.overInvoicedLedger rests on D5_RULE, decided only when FIXES['HR-C5'] and
+ * FIXES['WP5-SVC-1'] are both set, and reads BLOCKED until then (R5ADJ P3).
  */
 const FIXES = Object.freeze({
   'AWARD-ATOMIC': Object.freeze({ commit: null, committedAt: null }),
@@ -491,11 +511,16 @@ const FIXES = Object.freeze({
   'HR-C7': Object.freeze({ commit: null, committedAt: null }),
   'HR-C8': Object.freeze({ commit: null, committedAt: null }),
   'HR-C9': Object.freeze({ commit: null, committedAt: null }),
+  'WP5-SVC-1': Object.freeze({ commit: null, committedAt: null }),
 });
 const fixed = (rule) => Boolean(FIXES[rule]?.commit);
 const fixRule = (rule, statement, sources) => ({ status: fixed(rule) ? 'decided' : 'proposed', statement: `${statement}${fixed(rule) ? `; implemented in ${FIXES[rule].commit}` : '; not yet decided and implemented'}.`, sources });
+/** KA.D5.overInvoicedLedger's rule (R5ADJ P3): its ref names both fixes; decided only when both are recorded. */
+const D5_RULE = 'HR-C5+WP5-SVC-1';
+const D5_FIXED = fixed('HR-C5') && fixed('WP5-SVC-1');
 const RULES = {
   'HR-C5': fixRule('HR-C5', 'The three-way match gates approval: a blocking verdict refuses the invoice unless PM or finance overrides with a reason; an invoice line with no order line does not downgrade a review verdict (the recommendation :1073; undecided)', [`${PLAN_DOC}:744,774,791,1073`]),
+  [D5_RULE]: { status: D5_FIXED ? 'decided' : 'proposed', statement: 'The over-invoicing ledger: of two invoices that together pass a received service line only the first posts to project cost (600.00 of J-SVC\'s 1,200.00): HR-C5 refuses the second approval over its blocking verdict, and the WP5-SVC-1 fix keeps the received service line a service line, so the first is not capitalised; decided only when both fixes are recorded (R5ADJ P3)' + (D5_FIXED ? '; implemented in ' + FIXES['HR-C5'].commit + ' and ' + FIXES['WP5-SVC-1'].commit : '; not yet both decided and implemented') + '.', sources: [PLAN_DOC + ':744,774,791,1073', REGISTER + ':292', R5ADJ('\'WP-5 proof\' P3')] },
   'HR-C6': { status: 'proposed', statement: 'Stocked-material cost: L35 (an invoice approved before its receipt counted once), L36 (returns bounded by what was issued), X-FINANCE-1 (a return credited at the issue cost); CERT-5 decides, CERT-3 records (owner decision, plan section 0.1).', sources: [`${PLAN_DOC}:742,763-764,773,789,1074`] },
   'HR-C7': fixRule('HR-C7', 'Material usage: a stock issue raises the plan row\'s issued quantity, usage is bounded by it, and the procurement door either honours issueToActivity / issuedQty or refuses them (the recommendation :1075; undecided)', [`${PLAN_DOC}:743,760,767,788,1075`]),
   'HR-C8': fixRule('HR-C8', 'A PO after delivery: partial -> closed with force and a reason, received -> closed, cancel after any delivery refused 409 PO_CANCEL_AFTER_DELIVERY, a receipt after a close refused (the recommendation :1076; undecided)', [`${PLAN_DOC}:737,755-756,785,1076`, ADJ('Q2, Q4')]),
@@ -551,11 +576,14 @@ const DECIDED_RED = {
   } : {}),
   ...(fixed('HR-C5') ? {
     'KA.D5.priceVarianceApproval': { rule: 'HR-C5', defect: 'HR-C5 an approval over a blocking variance', stored: false, today: '200 approved' },
-    'KA.D5.overInvoicedLedger': { rule: 'HR-C5', defect: 'HR-C5 over-invoicing approved (also rests on WP5-SVC-1)', stored: false, today: '0 cents posted' },
     'KA.D6.invoiceSideVerdict': { rule: 'HR-C5', defect: 'HR-C5 a line without poLineId downgrades the verdict', stored: false, today: 'check' },
     'CF.HRC5': { rule: 'HR-C5', defect: 'HR-C5 the match is advisory', stored: false, today: 'CONFIRMED' },
   } : {}),
+  ...(D5_FIXED ? {
+    'KA.D5.overInvoicedLedger': { rule: D5_RULE, defect: 'HR-C5 and WP5-SVC-1: over-invoicing approved and the service line capitalised (decided only with both fixes: R5ADJ P3)', stored: false, today: '0 cents posted' },
+  } : {}),
   ...(fixed('HR-C7') ? {
+    'O7.J.ignoredFields': { rule: 'HR-C7', defect: 'HR-C7 the procurement door ignores issueToActivity and issuedQty', stored: false, today: '201, fields ignored' },
     'KA.N6.issuedQty': { rule: 'HR-C7', defect: 'HR-C7 an issue never raises the issued quantity', stored: false, today: '0' },
     'KA.N6.usage50': { rule: 'HR-C7', defect: 'HR-C7 usage within the issued quantity refused', stored: false, today: '409 MATERIAL_USAGE_EXCEEDS_ISSUED_QTY' },
     'CF.HRC7': { rule: 'HR-C7', defect: 'HR-C7 ignored fields, issued quantity never raised', stored: false, today: 'CONFIRMED' },
@@ -641,7 +669,7 @@ const h = harness.createHarness({
   meta: {
     plan: `${PLAN_DOC} section 4 WP-5 (:734-793), section 6.2 WP-5 guards (:1149), section 5 HR-C5..HR-C9 (:1073-1077); plan lines as numbered at 48db9e9`,
     prep: 'C:/Temp/octapm-cert/scratch/wp5/WP5-PREP.md',
-    adjudication: 'C:/Temp/octapm-cert/scratch/wp4/PREP4-ADJUDICATION.md section D (Q1-Q12 applied)',
+    adjudication: 'C:/Temp/octapm-cert/scratch/wp4/PREP4-ADJUDICATION.md section D (Q1-Q12 applied); ' + R5ADJ('B1, B2, P1, P3 applied'),
     momentMap: 'backend/scripts/cert/cert3/build/MOMENT-MAP.md (WP-5 deviations to record when the proof lands: rows 144, 148, 150, 151 per WP5ADJ Q1)',
     answerBook: `backend/scripts/cert/cert3/answers/commercial.js @${COMMERCIAL.meta.head} + the WP-5 book patch (BOOK-G3, G1-G23)`,
     expectedChecks: EXPECTED_CHECKS,
@@ -1291,7 +1319,10 @@ const jReceipts = async () => {
   const boltEntries = (await ledgerEntries('cost', j.P, { activityId: j.acts[o7.lines[0].activity] })).filter((e) => boltMoves.some((x) => x.id === e.sourceId));
   const o7Line = lineFigures(await poOf('procurement', j.P, O['J-O7'].id));
   const o7o = { said: h.said(pr), movements: pr.body?.data?.movements ?? null, stockIssued: boltIssued, ledgerEntries: boltEntries.length, lineIssuedQty: o7Line.issued };
-  rec('O7.J.ignoredFields', o7o.said === '201' && o7o.movements === 1 && sameJson({ stockIssued: o7o.stockIssued, ledgerEntries: o7o.ledgerEntries }, WP5.O7.ignoredFields.value) && o7o.lineIssuedQty === 0, { expected: { said: '201', movements: 1, ...WP5.O7.ignoredFields.value, lineIssuedQty: 0 }, observed: o7o, detail: 'issueToActivity true and lines[0].issuedQty 60 sent through the procurement door (routes/procurement.js:312, :327)' });
+  // O7, a known answer under HR-C7 (R5ADJ B2): the value is HR-C7's recommended refusal (400, the code the fix's), nothing
+  // issued or posted; the today HEAD's 201 with both fields ignored (one receipt movement, no issue, no material_issue entry)
+  const O7L = WP5.O7.ignoredFields;
+  ka('O7.J.ignoredFields', { ref: O7L.ref, value: O7L.value, today: O7L.today, observed: o7o, verdict: judge(o7o, (x) => statusPart(x.said) === O7L.value.status && (O7L.value.code === null || x.said === saidOf(O7L)) && x.stockIssued === 0 && x.ledgerEntries === 0, (x) => x.said === '201' && x.movements === 1 && sameJson({ stockIssued: x.stockIssued, ledgerEntries: x.ledgerEntries }, O7L.today) && x.lineIssuedQty === 0), detail: 'issueToActivity true and lines[0].issuedQty ' + O7_ISSUED_QTY + ' sent through the procurement door (routes/procurement.js:312, :327); value HR-C7\'s 400 (an assumption), today HEAD\'s 201 with the fields ignored (R5ADJ B2)' });
   const again = await receipt('procurement', O['J-O7'], o7body, { door: 'procurement', receiptNumber: grn, extra: { issueToActivity: true } });
   rec('O4.J.alreadyPosted', h.is(again, saidOf(WP5.O4.alreadyPosted)), { expected: saidOf(WP5.O4.alreadyPosted), observed: h.said(again) });
   // O5: the receivable list, read before any close
@@ -1455,7 +1486,7 @@ const jInventory = async () => {
     const u50 = await usage(USAGE.first);
     const U5 = WP5.N6.usage50;
     const u5o = { said: h.said(u50) };
-    ka('KA.N6.usage50', { ref: U5.ref, value: U5.value, today: U5.today, observed: u5o, verdict: judge(u5o, (x) => statusPart(x.said) === U5.value, (x) => x.said === saidOfToday(U5)), detail: `usage ${USAGE.first}; the leaf\'s value reads 200 (the route answers a recorded usage 201: materials.js:157)` });
+    ka('KA.N6.usage50', { ref: U5.ref, value: U5.value, today: U5.today, observed: u5o, verdict: judge(u5o, (x) => statusPart(x.said) === U5.value, (x) => x.said === saidOfToday(U5)), detail: 'usage ' + USAGE.first + '; the leaf\'s value is 201, the route\'s status for a recorded usage (routes/materials.js:157; R5ADJ P1); HR-C7 undecided: BLOCKED at the today' });
     const u70 = await usage(USAGE.second);
     rec('N6.J.usage70', h.is(u70, saidOf(WP5.N6.usage70)), { expected: saidOf(WP5.N6.usage70), observed: { said: h.said(u70), qty: USAGE.second } });
   });
@@ -1971,7 +2002,9 @@ const jDirectCosts = async () => {
     const svcLine = lineFigures(await poOf('procurement', j.P, j.orders[s1.order].id));
     const postedAmounts = [...((await dcOf(sid1)).lines || []), ...((await dcOf(sid2)).lines || [])].map((l) => cents(l.postedAmount));
     obs.svc1 = { approvals: [h.said(sa1), h.said(sa2)], posted, svcLineItem: svcLine.inventoryItemId, postedAmounts };
-    kaLeaf('KA.D5.overInvoicedLedger', WP5.D5.overInvoicedLedger, posted, { detail: `approvals ${h.said(sa1)} / ${h.said(sa2)}; J-SVC's line names an inventory item ${svcLine.inventoryItemId ? 'since its receipt' : 'none'} (WP5-SVC-1); the value needs service lines to stay service lines AND HR-C5 to refuse the second approval` });
+    // R5ADJ P3: decided only when both fixes are recorded (FIXES['HR-C5'] and FIXES['WP5-SVC-1']): the ref names both
+    const D5L = WP5.D5.overInvoicedLedger;
+    ka('KA.D5.overInvoicedLedger', { ref: D5_RULE, value: D5L.value, today: D5L.today, observed: posted, verdict: judge(posted, (x) => sameJson(x, D5L.value), (x) => sameJson(x, D5L.today)), detail: 'approvals ' + h.said(sa1) + ' / ' + h.said(sa2) + '; J-SVC\'s line names an inventory item ' + (svcLine.inventoryItemId ? 'since its receipt' : 'none') + ' (WP5-SVC-1); the value needs service lines to stay service lines AND HR-C5 to refuse the second approval; the book leaf\'s ref is ' + D5L.ref + ', the rule ' + D5_RULE + ' is decided only when both fixes are recorded (R5ADJ P3)' });
     // D6: one order line at +10% plus a freight line with no poLineId
     const d6 = DC('J-D6INV');
     const id6 = await makeDc(d6, { submit: false });
@@ -2058,13 +2091,13 @@ const comFlow = async () => {
   // O: the register, PO-C, its two refusals, the receivable list
   const pos = outOf(st, 'purchase-orders');
   const statusOfPo = async (id) => (await poOf('procurement', P, id)).status;
+  // R5ADJ B1: deep.087-COM.poStatuses names the build's end state by builder key (PO-C partial and PO-A received while
+  // HR-C8 is undecided); the post-HR-C8 closes are judged only by KA.O2.stored.closeShort / closeReceived, never here
   const leaf = D087.poStatuses.value;
-  const closeDone = (step) => st.steps?.[step]?.status === 'done';
-  const fromLeaf = (entry, step) => { const [before, after] = String(entry).split('->'); return closeDone(step) ? String(after).split(' ')[0] : before; };
   const ackOrder = await poOf('procurement', P, pos.ack.id);
   const so = { ack: ackOrder.status, ackReceived: lineFigures(ackOrder).received, x: await statusOfPo(pos.x.id), award: apo.status, c: await statusOfPo(pos.c.id), a: await statusOfPo(pos.a.id) };
-  const se = { ack: leaf[2], ackReceived: 0, x: leaf[3], award: 'issued', c: fromLeaf(leaf[0], 'po.C.close-short'), a: fromLeaf(leaf[1], 'po.A.close-received') };
-  rec('O.live.087.statuses', sameJson(so, se), { expected: se, observed: so, detail: `deep.087-COM.poStatuses ${json(leaf)}: the state before the arrow while the stored close is BLOCKED HR-C8; 'from award' is the issued PO-AWARD` });
+  const se = { ack: leaf.ACK, ackReceived: 0, x: leaf.X, award: leaf.AWARD, c: leaf.C, a: leaf.A };
+  rec('O.live.087.statuses', sameJson(so, se), { expected: se, observed: so, detail: 'deep.087-COM.poStatuses ' + json(leaf) + ': the build\'s end state by builder key (R5ADJ B1); the post-HR-C8 closes are judged only by KA.O2.stored.closeShort and closeReceived' });
   const cOrder = await poOf('procurement', P, pos.c.id);
   const o2o = { status: cOrder.status, warehouseStatus: cOrder.warehouseStatus, ordered: lineFigures(cOrder).ordered, received: lineFigures(cOrder).received, value: cents(cOrder.value) };
   const o2e = { status: WP5.O2.statusAfterPartial.value, warehouseStatus: WP5.O2.statusAfterPartial.value, ordered: WP5.O2.ordered.value, received: WP5.O2.received.value, value: WP5.O2.order1000.value };
@@ -2194,7 +2227,7 @@ const confirmFirstFlow = () => {
   cf('CF.receivableList', { ...split([['J: drafts listed, the acknowledged J-ACKC missing', kaState('KA.O5.receivableList.J')], ['087-COM: the acknowledged PO-00001 missing', kaState('KA.O5.receivableList.087')]]), detail: `${json({ j: obs.receivableJ, com: obs.receivable087 })}; no consumer reads scope=receivable (P3 proposed)` });
   const h9 = obs.hrc9;
   cf('CF.HRC9', { ...split([['the keeper\'s scan of PO-00001 answers one arbitrary order', kaState('KA.O6.refCollision')], ['two live projects of the company hold PO-00001', passed('O6.collision.live')], ['the answered order is on a project the keeper is not on the team of', !h9 || h9.keeperOnTeam === null ? 'gap' : yes(h9.keeperOnTeam === false)]]), detail: `${json(h9)}; HR-C9 undecided (the plan proposes P1); WP0-INV-1 is the same class (WP5ADJ Q3)` });
-  cf('CF.HRC7', { ...split([['the procurement door ignores issueToActivity and issuedQty', passed('O7.J.ignoredFields')], ['a stock issue never raises the plan row\'s issuedQty', kaState('KA.N6.issuedQty')], ['usage within what was issued refused', kaState('KA.N6.usage50')]]), detail: `${json(obs.n6)}; HR-C7 undecided` });
+  cf('CF.HRC7', { ...split([['the procurement door ignores issueToActivity and issuedQty', kaState('O7.J.ignoredFields')], ['a stock issue never raises the plan row\'s issuedQty', kaState('KA.N6.issuedQty')], ['usage within what was issued refused', kaState('KA.N6.usage50')]]), detail: `${json(obs.n6)}; HR-C7 undecided` });
   cf('CF.HRC6', { ...split([['L36: a never-issued return accepted', kaState('KA.N2.returnNeverIssued')], ['L36: a return of 30 after 10 issued accepted', kaState('KA.N2.return30After10')], ['X-FINANCE-1: a return credited at the current average', kaState('KA.N3.credit')], ['L35 on J: an invoice before its receipt counted twice', kaState('KA.D4.J.invoiceBeforeReceipt')], ['L35 on 087-COM', kaState('KA.D4.087')]]), detail: `${json({ n3: obs.n3, d4J: obs.d4J, d4087: obs.d4087 })}; recorded and deferred to CERT-5 (HR-C6)` });
   cf('CF.L199issue', { ...split([['the same issue body twice makes two movements', leafState(WP5.CF.L199issue, obs.l199 ? (obs.l199.movements === 1 ? { movements: 1 } : obs.l199) : null)]]), detail: json(obs.l199) });
   cf('CF.HRC5', { ...split([['J-VAR approved over a blocking variance', kaState('KA.D5.priceVarianceApproval')], ['J-SVC over-invoiced: both approvals accepted', kaState('KA.D5.overInvoicedLedger')], ['J-D6INV: a line without poLineId downgrades review to check', kaState('KA.D6.invoiceSideVerdict')], ['approveDirectCost reads no match (static)', scan.approveReadsMatch === null ? 'gap' : yes(scan.approveReadsMatch === false)]]), detail: `${json({ svc: obs.svc1 })}; HR-C5 undecided` });
@@ -2301,6 +2334,6 @@ const cleanup = async () => {
   return notes;
 };
 
-module.exports = { __wp5: { kaStatus, judge, storedCom087, storedCom052, storedClose, staticScan, CHECKS, EXPECTED_CHECKS, SECTION_PROJECTS, CF_SOURCES, CATCHERS, FIX_CATCHERS, COLLATERAL, DECIDED_RED, CONTRACT, FIXES, RULES, FIXTURE, USAGE, DUE_MIN, O7_ISSUED_QTY, D3_PAID_AT } };
+module.exports = { __wp5: { kaStatus, judge, storedCom087, storedCom052, storedClose, staticScan, CHECKS, EXPECTED_CHECKS, SECTION_PROJECTS, CF_SOURCES, CATCHERS, FIX_CATCHERS, COLLATERAL, DECIDED_RED, CONTRACT, FIXES, RULES, FIXTURE, USAGE, DUE_MIN, O7_ISSUED_QTY, D3_PAID_AT, D5_RULE } };
 
 h.run({ main, cleanup });

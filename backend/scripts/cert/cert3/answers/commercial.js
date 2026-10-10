@@ -97,6 +97,19 @@
  * (the integration owner's KA.I9 ruling, 2026-10-10). G23: the new and changed leaves cite PH5
  * (plan lines at HEAD 48db9e9, the book's WP-5 P(...) + 40). Changed keys:
  * answers/CHANGES-WP0-BUILDERS.md, "WP-5 answer-book leaves (2026-10-10)".
+ *
+ * The integration owner's rulings on the WP-5 book and proof (2026-10-10,
+ * C:/Temp/octapm-cert/scratch/wp5/PREP5-ADJUDICATION.md, cited R5ADJ(...): "WP-5 answer book" B1
+ * and B2, "WP-5 proof" P1) are applied. B1: deep["087-COM"].poStatuses names the build's end
+ * state by builder key (PO-C partial, PO-A received, from COM087_ORDERS): the two closes the build
+ * attempts are refused at HEAD (BLOCKED HR-C8) and are judged only through
+ * KA.O2.stored.closeShort / closeReceived; the plan's list is kept as planValue; the leaf has no
+ * today and no ref, so WP-4's leaf-contract walk of deep.087-COM is not widened. B2:
+ * WP5.O7.ignoredFields is an HR-C7 known answer (the KA.I9 ruling): value HR-C7's recommended 400,
+ * an assumption; today HEAD's { stockIssued: 0, ledgerEntries: 0 }; WP5_KNOWN lists it. P1:
+ * WP5.N6.usage50's value is 201, the route's status for a recorded usage (a create); its today is
+ * unchanged. No rule is decided. Load checks after WP-5's tie the three leaves to their sources.
+ * Changed keys: answers/CHANGES-WP0-BUILDERS.md, "WP-5 integration-owner rulings (2026-10-10)".
  */
 "use strict";
 
@@ -832,6 +845,8 @@ const PREP5 = (item) => "C:/Temp/octapm-cert/scratch/wp5/WP5-PREP.md " + item;
 /** Plan lines as numbered at HEAD 48db9e9 (the plan is unchanged since b75ee67): the book's WP-5 P(...) + 40 (P(709) = PH5(749)), PF4 + 1 from :52 on. */
 const PH5 = (lines) => PLAN + ":" + lines + " @48db9e9";
 const DERIVE_J = "C:/Temp/octapm-cert/scratch/wp5/derive-j.json (J's figures worked with this book's cents(); 46 cross-checks against its leaves)";
+/** The integration owner's rulings on the WP-5 book and proof (2026-10-10): "WP-5 answer book" B1-B5, "WP-5 proof" P1-P3. */
+const R5ADJ = (item) => "C:/Temp/octapm-cert/scratch/wp5/PREP5-ADJUDICATION.md " + item;
 /**
  * The refs a WP-5 known answer may carry. No WP-5 rule is decided (HR-C5, HR-C7, HR-C8, HR-C9; HR-C6, with L35, L36
  * and X-FINANCE-1, is CERT-5's) and no WP-5 fix has landed (AWARD-ATOMIC, AWARD-ONE-ORDER, AWARD-CODING, RCV-LIST; the
@@ -840,7 +855,7 @@ const DERIVE_J = "C:/Temp/octapm-cert/scratch/wp5/derive-j.json (J's figures wor
  * value equal to HEAD's would pre-judge the rule).
  */
 const WP5_REFS = ["HR-C5", "HR-C7", "HR-C8", "HR-C9", "L35", "L36", "X-FINANCE-1", "AWARD-ATOMIC", "AWARD-ONE-ORDER", "AWARD-CODING", "RCV-LIST", "L199", "L107", "L119", "D-FUN-1", "WP0-INV-1"];
-/** The leaves the 27 KA checks of WP5-PREP section 6 read, each with its ref (checked at load). */
+/** The leaves the 28 KA checks read (WP5-PREP section 6's 27 and O7.J.ignoredFields, R5ADJ B2), each with its ref (checked at load). */
 const WP5_KNOWN = [
   ["WP5.R2.concurrentConfirms", "AWARD-ATOMIC"],
   ["WP5.R3.secondOrder", "AWARD-ONE-ORDER"],
@@ -862,6 +877,7 @@ const WP5_KNOWN = [
   ["WP5.N3.stock", "X-FINANCE-1"],
   ["WP5.N6.issuedQty", "HR-C7"],
   ["WP5.N6.usage50", "HR-C7"],
+  ["WP5.O7.ignoredFields", "HR-C7"],
   ["WP5.D4.ledgerInvoiceBeforeReceipt", "L35"],
   ["WP5.D5.priceVarianceApproval", "HR-C5"],
   ["WP5.D5.overInvoicedLedger", "HR-C5"],
@@ -1132,7 +1148,7 @@ const WP5 = {
     refCollision: err(409, null, "087-COM and 087-COM-B both hold PO-00001: the scan answers 409 ambiguous or requires projectId (HR-C9).", [P(719), P(388), P(1037)], { assumption: true, today: "an arbitrary one of the two (goods-receipt.service.js:165-181)", ref: "HR-C9", note: "WP-5 (2026-10-10): ref HR-C9 (undecided, a mobile contract change: BLOCKED at today). Read as the warehouse keeper: GET /inventory/purchase-orders/PO-00001, which findPurchaseOrder answers with an organisation-wide findFirst on ref or id, no orderBy and no project check (goods-receipt.service.js:165-181); which of 087-COM's PO-00001 (acknowledged) and 087-COM-B's (issued) comes back is recorded (KA.O6.refCollision, CF.HRC9)." }),
   },
   O7: {
-    ignoredFields: fig({ stockIssued: 0, ledgerEntries: 0 }, "outcome", "The procurement door with issueToActivity=true, issuedQty 60 issues no stock and posts no ledger entry (fields ignored today; HR-C7 recommends 400).", [P(720), R("procurement.js", "312, 327")], { assumption: true }),
+    ignoredFields: err(400, null, "HR-C7's recommendation (:1075 PH5): 'ignored fields are refused (400)'. The procurement door's receipt of J-O7 (POST purchase-orders/:orderId/receipts, procurement.js:299-360) sent with issueToActivity true and lines[0].issuedQty 60 is refused 400, the code the fix's (an assumption: HR-C7 is undecided). Today the route accepts both fields (procurement.js:312, 327) and hands the whole body to goods receipt (receiveAgainstOrder, goods-receipt.service.js:378; procurement.js:348-358), which reads neither (no read of issueToActivity or issuedQty in goods-receipt.service.js), and answers 201 (procurement.js:359): the receipt is posted, nothing is issued and no material_issue entry is made.", [P(720), R("procurement.js", "312, 327"), PH5("760, 788, 1075"), HF("backend/src/routes/procurement.js", "299-360"), HF("backend/src/services/goods-receipt.service.js", "378"), R5ADJ("'WP-5 answer book' B2")], { assumption: true, today: { stockIssued: 0, ledgerEntries: 0 }, ref: "HR-C7", note: "WP-5 ruling B2 (2026-10-10, R5ADJ): a known answer under HR-C7, per the integration owner's KA.I9 ruling (a value equal to HEAD's would pre-judge the rule): the value was { stockIssued: 0, ledgerEntries: 0 }, HEAD's answer, now the today; the unit was outcome; the derivation was 'The procurement door with issueToActivity=true, issuedQty 60 issues no stock and posts no ledger entry (fields ignored today; HR-C7 recommends 400).' Read by O7.J.ignoredFields on J (J6), now a known answer: BLOCKED at the today while HR-C7 is undecided (HARD 89 -> 88, KA 27 -> 28)." }),
   },
   N1: {
     noTarget: err(400, "INV_NO_COST_TARGET", "Issue with no activity and no cost code.", [P(722), S("inventory.service.js", "1205-1211")]),
@@ -1175,7 +1191,7 @@ const WP5 = {
   },
   N6: {
     issuedQty: fig(60, "bag", "Plan row 100 bags on a PO line, receive 100, issue 60 to the activity: plan row issuedQty 60.", [P(727), P(1035)], { assumption: true, today: 0, ref: "HR-C7", note: "nothing writes ActivityMaterial.issuedQty (HR-C7). WP-5 G14 (2026-10-10): ref HR-C7 (undecided: BLOCKED at today), an assumption. On J (WP5ADJ Q1): the plan row on J-A130 (J4, 100 BAG of J-CEM) linked to the line of PO-A', read after N1's issue of 60 to J-A130 (J9)." }),
-    usage50: http(200, "Usage 50 <= 60 available.", [P(727), S("procurement.service.js", "2127-2141")], { assumption: true, today: { status: 409, code: "MATERIAL_USAGE_EXCEEDS_ISSUED_QTY" }, ref: "HR-C7", note: "WP-5 G14 (2026-10-10): ref HR-C7, an assumption; usage recorded by the site engineer on J's plan row (J9). Today every usage is refused while issuedQty is 0 (procurement.service.js:2130-2141)." }),
+    usage50: http(201, "Usage 50 <= 60 available.", [P(727), S("procurement.service.js", "2127-2141"), HF("backend/src/routes/materials.js", "129-158"), HF("backend/src/services/material.service.js", "391-406"), HF("backend/src/services/procurement.service.js", "2159-2175"), R5ADJ("'WP-5 proof' P1")], { assumption: true, today: { status: 409, code: "MATERIAL_USAGE_EXCEEDS_ISSUED_QTY" }, ref: "HR-C7", note: "WP-5 G14 (2026-10-10): ref HR-C7, an assumption; usage recorded by the site engineer on J's plan row (J9). Today every usage is refused while issuedQty is 0 (procurement.service.js:2130-2141). WP-5 ruling P1 (2026-10-10, R5ADJ): the value was 200. A recorded usage is a create (one ActivityMaterialUsage row, procurement.service.js:2159-2175 @f599e67, reached through material.service.js:391-406) and the route answers it 201 (routes/materials.js:157): the API's status convention, which decides no HR-C7 question. The today is unchanged; the answer stays BLOCKED under HR-C7 until that rule is decided." }),
     usage70: err(409, "MATERIAL_USAGE_EXCEEDS_ISSUED_QTY", "After 50 used, 10 left; 70 > 10.", [P(727), S("procurement.service.js", "2133-2141")], { note: "WP-5 G14 (2026-10-10): on J's plan row (J9). Holds at HEAD too (every usage is refused while issuedQty is 0) and after HR-C7 (10 left), so a HARD check with no today." }),
   },
   N7: {
@@ -1618,7 +1634,7 @@ const deep = {
     bidders: count(3, "Bid package with three bidders, award not lowest on override.", [P(387)]),
     warehouses: count(2, "Two warehouses with bins and a serial item.", [P(387)]),
     o2CementEnd: fig(COM087_CEMENT2, "outcome", "087-COM's O2 cement at the end of the transfers: 60 received into Z-A-B02 (WP5.O2.received), quarantine 5 and release 2 (3 quarantined), 1 damaged, 10 issued to A310 and 4 returned: 50 on hand; the full transfer moves 10 to the yard (the item's total unchanged) and the short one sends 10, of which 7 land, 1 is damaged and 2 are written off short: 47 on hand, 2 damaged in all, 3 quarantined, nothing in transit (BLD 087-com.js:1957-1963, 1973, 2002-2017).", [P(387), PH5("427, 765"), BLD("087-com.js", "1957-1973, 1978-2019"), PREP5("section 10 G8")], { note: "WP-5 G8 (2026-10-10): the builder asserts these as literals (BLD 087-com.js:2017); read live by N.live.087.store." }),
-    poStatuses: fig(["partial->closed (short)", "received->closed", "acknowledged", "cancelled", "from award"], "list", "POs in every status as listed.", [P(387)]),
+    poStatuses: fig(Object.fromEntries(["C", "A", "ACK", "X", "AWARD"].map((key) => [key, COM087_ORDERS.find((o) => o.key === key).state])), "outcome", "087-COM's purchase orders at the end of its build, by the builder's keys (COM087_ORDERS): PO-C part-delivered (partial), PO-A fully received (received), PO-00001 acknowledged before any delivery (acknowledged), PO-X cancelled (cancelled), PO-AWARD raised from the award (issued). The build attempts the plan's two closes (steps po.C.close-short and po.A.close-received, BLD 087-com.js:1895-1913) and HEAD refuses both: no transition leaves partial or received (ALLOWED, purchase-order.service.js:116-125), so assertTransition answers 409 PO_TRANSITION_INVALID (:127-136), which closeOrder (:628-650) reaches through transition (:502-504). The two steps are BLOCKED HR-C8 and PO-C stays partial, PO-A received: the build's end state while HR-C8 is undecided. The closes the build attempted are judged only through KA.O2.stored.closeShort and KA.O2.stored.closeReceived (R5ADJ B1).", [P(387), PH5("427, 755, 785, 1076"), HF("backend/src/services/purchase-order.service.js", "116-136, 502-504, 628-650"), BLD("087-com.js", "1833-1913, 2225-2243, 2332-2338"), R5ADJ("'WP-5 answer book' B1")], { planDisagrees: true, planValue: ["partial->closed (short)", "received->closed", "acknowledged", "cancelled", "from award"], note: "WP-5 ruling B1 (2026-10-10, R5ADJ): the value was the plan's list (now planValue), which names the states after the two HR-C8 closes; the unit was list. HEAD's states are the build's real end state; the closes are what the build attempted and the API refused (BLOCKED HR-C8). No today and no ref: WP-4's leaf-contract walk of deep.087-COM is not widened (its REFS hold no WP-5 ref). Read by O.live.087.statuses (HARD). Once HR-C8 is decided and implemented and 087-COM rebuilt, this leaf is re-derived then (R5ADJ B5: written then, not now)." }),
     stateCoverage: {
       commitmentChangeOrders: fig(["draft", "pending", "approved", "rejected", "void"], "list", "'Commitment COs in every state': CO_STATUS (commitment.service.js:27-28). Reachable: pending <- draft, approved <- pending, rejected <- pending, void <- draft or pending; rejected and void need a reason (:902-904). One CO in each state at the end of the build.", [P(387), S("commitment.service.js", "27-28, 902-904"), ADJ("C8")], { assumption: true, note: "One record per state is this book's minimum reading of 'every state'." }),
       payApplications: fig(["draft", "submitted", "under_review", "approved", "paid", "rejected", "void"], "list", "'Pay applications in every state': STATUS (sub-pay-app.service.js:22). Reachable: submitted <- draft; under_review <- submitted; approved and rejected <- submitted or under_review; draft <- rejected or approved (revocation, a reason when certified); void <- draft, rejected or approved (:761-770); paid by a payment reaching net - 0.01 (:1036-1037). Plus the plan's specials: one revoked and re-certified (certificationRevision 1, WP4.P3), one paid, one final at the closeout gate (WP4.P6).", [P(387), S("sub-pay-app.service.js", "22, 761-771, 1036-1037"), ADJ("C8")], { assumption: true, note: "One record per state is this book's minimum reading of 'every state'." }),
@@ -2044,6 +2060,26 @@ const claudeMd = {
   walk(WP5, "WP5");
   walk(deep["052-COM"].O2, "deep.052-COM.O2");
   walk(deep["087-COM"].o2CementEnd, "deep.087-COM.o2CementEnd");
+})();
+
+// Load checks for the WP-5 integration-owner rulings (2026-10-10, R5ADJ B1, B2, P1): each changed leaf agrees with what it is built from.
+(() => {
+  const fail = (what) => {
+    throw new Error("commercial answer book: " + what);
+  };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // B1: 087-COM's PO statuses are the build's end state (COM087_ORDERS), the plan's list its planValue; no today, no ref
+  const ps = deep["087-COM"].poStatuses;
+  const endOf = (key) => (COM087_ORDERS.find((o) => o.key === key) || {}).state;
+  const keys = ["C", "A", "ACK", "X", "AWARD"];
+  if (!same(Object.keys(ps.value), keys) || keys.some((k) => ps.value[k] !== endOf(k)) || ps.value.C !== "partial" || ps.value.A !== "received" || ps.today !== undefined || ps.ref !== undefined || ps.planDisagrees !== true || !same(ps.planValue, ["partial->closed (short)", "received->closed", "acknowledged", "cancelled", "from award"])) fail("deep.087-COM.poStatuses: the build's end state by builder key from COM087_ORDERS (PO-C partial, PO-A received while HR-C8 is undecided), the plan's list as planValue, no today and no ref (R5ADJ B1)");
+  // B2: O7 is an HR-C7 known answer: value HR-C7's recommended 400 (code the fix's), today HEAD's ignored fields
+  const o7 = WP5.O7.ignoredFields;
+  if (!same(o7.value, { status: 400, code: null }) || o7.unit !== "error" || !same(o7.today, { stockIssued: 0, ledgerEntries: 0 }) || o7.ref !== "HR-C7" || !o7.assumption || !WP5_KNOWN.some(([k, r]) => k === "WP5.O7.ignoredFields" && r === "HR-C7")) fail("WP5.O7.ignoredFields: an HR-C7 known answer, value 400 (code the fix's), today { stockIssued: 0, ledgerEntries: 0 }, an assumption, in WP5_KNOWN (R5ADJ B2)");
+  // P1: a recorded usage is a create, 201; the today unchanged (usage70's refusal)
+  const u = WP5.N6.usage50;
+  if (u.value !== 201 || u.unit !== "http-status" || !same(u.today, WP5.N6.usage70.value) || u.ref !== "HR-C7" || !u.assumption) fail("WP5.N6.usage50: value 201 (the route's create status), today 409 MATERIAL_USAGE_EXCEEDS_ISSUED_QTY, ref HR-C7 (R5ADJ P1)");
+  if (WP5_KNOWN.length !== 25 || new Set(WP5_KNOWN.map(([k]) => k)).size !== WP5_KNOWN.length) fail("WP5_KNOWN: the 25 leaves the 28 known answers read, each once (R5ADJ B2)");
 })();
 
 // ─── the tree and its flattening ──────────────────────────────────────────────────────────────

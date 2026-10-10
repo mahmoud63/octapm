@@ -834,3 +834,37 @@ Run 1 used 087-COM-C's one-shot I5 confirmation. Run 2 took the re-run branch an
 - **Exposure.** The same code writes the approved total and the revised value, so concurrent approvals share the exposure. That case is not yet reproduced.
 - **Book and proof.** The book's known answer now states this lag. The proof judges the register's delta and records the stored lag.
 - **Next.** It is classified at the WP-4 run on `cert3d`.
+
+## 2026-10-10 — WP-4 lists, the L34 repro and WP-5 installed; WP-2 plan review round 2
+
+**Installed by Claude Main** (`61c2f7d` and the commit of this entry):
+- **WP-4 mutation lists.** They are judged by named-catcher flips against a baseline, so the five §6.2 HEAD guards can run right after the primary run, before the HR-C1 fix.
+- **WP-3 L34 live repro.** At HEAD it gave exit 2 with exactly R1, R2, R4, R5 and R7 failing, and every control passing. The draft's R8 was dropped because it wrote through a SQL fixture: proofs write through product routes only.
+- **WP-5.** The answer book (BOOK-G3 and 23 gaps), the supply-chain proof (142 checks on the throwaway J) and the integration owner's rulings:
+  - O7's ignored fields become a known answer under HR-C7;
+  - KA.N6.usage50's value takes the create status 201;
+  - KA.D5 is decided only when both the HR-C5 fix and the WP5-SVC-1 fix land;
+  - the 087-COM order statuses are judged on the build's end state.
+
+The WP-5 debug runs on the partial population, with 052-COM's section skipped:
+
+| Run | Passed | Known answers BLOCKED | Confirm-first |
+|---|---|---|---|
+| 1 | 139 of 139 | 27 | 15 CONFIRMED, HR-C9 PARTIAL (state-dependent) |
+| 2, after the rulings | 138 of 138 | 28 | 15 CONFIRMED, HR-C9 PARTIAL (state-dependent) |
+
+Neither run had a 5xx. Rulings are in `scratch\wp4\PREP4-ADJUDICATION.md` and `scratch\wp5\PREP5-ADJUDICATION.md`.
+
+**Codex plan review round 2** of the WP-2 fix plans (181k tokens) found no CRITICAL and five HIGH:
+- **QP.** PATCH and DELETE can remove a released hold. Several "official progress" readers still select a different row than the plan's definition.
+- **X.** Storage keys embedding a foreign id are still treated as legacy. EOT, weather and sub-valuation skip the reference check. Daily-report submit skips the gate when linked progress exists.
+
+Under r2, five of XDOC-1's ten writes would still be stored. Two read-only verifiers tried to refute each finding against the code. Every finding stands (two PARTIAL), with the severities adjusted. The integration owner's binding dispositions are in `scratch\wp2\codex-plan-review-r2-adjudication.md`:
+- **QP.** Every official-progress reader adopts one ordering; the method reader stays unchanged, being HR-P2-adjacent. The lifecycle re-checks move onto the locked row for PATCH, DELETE, start, sign and Close. Race tests queue behind a blocker connection; there is no test hook in product code.
+- **X.** An embedded foreign id in a key or a product link is refused as a scope-only name; bare text stays legacy. The commercial reference check becomes unconditional on all seven callers. Daily-report submit reads the stored evidence. `xdoc-1-repro.js` becomes a mandatory proof that must exit 0 after the fix.
+
+**New suspects:**
+- **XDOC-1b (P1 if confirmed).** XDOC-1's write class on the 18 `syncWorkflowReferences` call sites outside HR-X1. A live repro is being drafted. If it confirms, the batch's judge moves into the shared helper.
+- **WP3-ALLOC-1 (P2).** The allocation summary does not filter progress by the cutoff. It goes to WP-3's confirm-first and the L34 plan review.
+
+Codex round 3 is the last of the three allowed plan-review rounds. It runs in the next window (session cron 18:57 CDT) on r3, which is being written read-only.
