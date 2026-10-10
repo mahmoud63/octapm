@@ -1,0 +1,598 @@
+{
+  "proof": "scripts/cert/cert3/wp5-supply-proof.js",
+  "guards": "CERT-3 plan section 6.2 WP-5 (:1149): PO close transitions; the award lock; RECEIPT_OVER_ORDER; INV_INSUFFICIENT_AVAILABLE; one posting per direct-cost line. Plan section 4 WP-5 Mutations (:777). Answer book WP5.mutations.poCloseTransitions / awardLock / receiptOverOrder / insufficientAvailable / directCostOnePosting (the WP-5 book patch G5, G16-G18; installed 61c2f7d). Integration-owner adjudication C:/Temp/octapm-cert/scratch/wp4/PREP4-ADJUDICATION.md section D Q7: M-PCL0 is the E6 entry for PO close transitions at HEAD (M-PCL1 once HR-C8 is decided and implemented), M-AWD0 for the award lock (M-AWD1 once the atomic award confirmation lands), M-OVER, M-AVL, and M-DCL with M-DCK for one posting per line; M-DCX is equivalent (equivalent[] below, recorded with the reason, not run). Variants M-PCL0i, M-PCL0k, M-AVLa, M-AVLb are run, not tallied. The HEAD-only complement M-PCLg and its variants are in their own list, wp5-mutations.complements.json (never run once HR-C8 lands).",
+  "reconciled": "Read-only drafting 2026-10-10 against the committed proof scripts/cert/cert3/wp5-supply-proof.js at 6c5ab54 (HEAD 2a2efd2; 142 fixed checks + G.5xx; CATCHERS :621-630, COLLATERAL :632-643, FIX_CATCHERS :648) and the product files at f599e67 (backend/src unchanged since). Every id in catchers, collateral, racy, shifts[].id and unchanged, and every check id an expect names, is a CHECKS id (or G.5xx); catchers equal the proof's CATCHERS table for every entry (mutsyntax-wp5.js, report mutsyntax-wp5-report.json). Collateral and shifts are derived from the proof's J choreography and the product code (WP5-RUN-PLAN.md section 7.5), not observed: nothing was run. Where this list names collateral the proof's descriptive COLLATERAL table does not (M-OVER: KA.O3.cancelAfterDelivery, KA.O2.receiveAfterClose; M-AVLa: N1.J.issue41bin; M-AWD0: KA.R2.concurrentConfirms, racy), the derivation is in collateralWhy.",
+  "runsOn": "HEAD (cert3d after WP-4 closed; before or after any WP-5 fix: no WP-5 fix plan touches these anchors). At HEAD the unmutated proof exits 0 (no decided rule, no fix), so the runner's column (CAUGHT on any non-zero exit) points the right way, but it is not the evidence: a setup error also exits non-zero. Evidence is wp5-mutation-evidence.js: every named catcher PASS in the baseline (the unmutated full run on the same tree: results/cert3/wp5-supply-proof.baseline-head.json) and FAIL (ran and failed) under the mutant, the baseline's decided reds excluded (none at HEAD), named collateral and shifts accepted, anything else flagged (WP5-RUN-PLAN.md section 7.3; the WP-4 design, PREP5-ADJUDICATION L1).",
+  "anchors": "anchors.head: count and line of each edit on the worktree (backend/src identical to f599e67; every file CRLF only, 0 bare LF). anchors.preWp5Sim: the same with the simulated WP-2 batch (r3c) and HR-C1 fix copies overlaid; neither touches a WP-5 file, so the counts and lines are equal. A later edit of the same mutation is located after the earlier ones are applied, as the runner applies them. Re-count on the real tree before each batch (mutsyntax-wp5.js): the runner applies an edit only when its from occurs exactly once.",
+  "note": "Fields as in wp4-mutations.commercial.json: catchers must read FAIL (ran and failed, not \"not run\") under the mutant and PASS in the baseline; collateral are other checks expected (or allowed) to go red, each with collateralWhy; racy names a catcher whose flip depends on timing (reported, not failed, when every deterministic catcher flipped; WP5ADJ Q8); shifts are non-red status changes expected under the mutant (a confirm-first CONFIRMED -> PARTIAL); unchanged names checks the derivation says must stay as at baseline (reported, not judged); expectVerdict is the evidence checker's verdict, not the runner's. Run one id per invocation, quoted and with a trailing comma (\"--only=M-AVL,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-AVL would also run M-AVLa and M-AVLb; M-PCL0 also M-PCL0i and M-PCL0k; M-PCLg also M-PCLga and M-PCLgb), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists. Every mutant writes, if at all, only on the throwaway project J (archived by the proof's cleanup, which also runs after a section error); on 087-COM, 087-COM-B and 052-COM every probe stays a read or a refusal before any write under every mutant of this list (derived per entry in safety).",
+  "equivalent": [
+    {
+      "name": "M-DCX (EQUIVALENT, not run) the ledger key pre-check dropped",
+      "file": "backend/src/services/cost-ledger.service.js",
+      "from": "  let existing = await tx.costLedgerEntry.findFirst({",
+      "to": "  let existing = null && await tx.costLedgerEntry.findFirst({",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 318
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 318
+          }
+        ]
+      },
+      "reason": "post() looks the key up first (cost-ledger.service.js:318-330 at f599e67) only to save a rollback; the unique index on (orgId, sourceKey) (schema.prisma:8778) refuses the same posting and P2002 is read as already_posted (:361). In the WP-5 proof no step posts one key twice except under the approval race, which the approval claim (M-DCL) keeps out, so every proof observation is the same: equivalent for this proof (WP5.mutations.directCostOnePosting; the proof's meta.equivalentMutants; WP5ADJ Q7). NOT equivalent in general: the pre-check also walks a reversed key to its :r2 suffix (CX21-006), and with it gone a re-approval after a reversal collides with the reversed entry (P2002, the transaction aborted); no WP-5 step re-approves a reversed cost. Its only catcher is the mocked UM-DCX (wp5-mutations.unit.json): a TEST GAP of the live proof outside the section 6.2 guard, recorded (WP5-RUN-PLAN.md section 13.1)."
+    }
+  ],
+  "mutations": [
+    {
+      "name": "M-PCL0 the HEAD close transitions dropped (issued -> closed and acknowledged -> closed)",
+      "guard": "section 6.2 WP-5 'PO close transitions' (plan :1149, :737, :755). What exists at HEAD: ALLOWED issued -> closed and acknowledged -> closed (purchase-order.service.js:121-122 at f599e67; closeOrder :628-650 reaches them through transition's assertTransition :504). The partial / received -> closed rows the plan wants are the HR-C8 implementation (M-PCL1).",
+      "e6": "section 6.2 WP-5 guard 1 of 5 (PO close transitions; the HEAD entry, replaced by M-PCL1 once HR-C8 is decided and implemented, WP5ADJ Q7)",
+      "file": "backend/src/services/purchase-order.service.js",
+      "from": "  [STATUS.ISSUED]: [STATUS.ACKNOWLEDGED, STATUS.CLOSED, STATUS.CANCELLED],",
+      "to": "  [STATUS.ISSUED]: [STATUS.ACKNOWLEDGED, STATUS.CANCELLED],",
+      "also": [
+        {
+          "file": "backend/src/services/purchase-order.service.js",
+          "from": "  [STATUS.ACKNOWLEDGED]: [STATUS.CLOSED, STATUS.CANCELLED],",
+          "to": "  [STATUS.ACKNOWLEDGED]: [STATUS.CANCELLED],"
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 121
+          },
+          {
+            "count": 1,
+            "line": 122
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 121
+          },
+          {
+            "count": 1,
+            "line": 122
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP5.mutations.poCloseTransitions",
+        "WP5.closeBeforeDelivery.issuedForceClose",
+        "WP5.closeBeforeDelivery.ackForceClose"
+      ],
+      "catchers": [
+        "O2.J.issued.forceWithReason",
+        "O2.J.ack.forceWithReason"
+      ],
+      "collateral": [
+        "O2.J.issued.receiveAfterClose"
+      ],
+      "collateralWhy": {
+        "O2.J.issued.receiveAfterClose": "J7: J-ISS stays issued after its refused force close, so the keeper's receipt into J-INV1 is accepted (201) instead of 409 PO_NOT_ISSUED (named by the proof's COLLATERAL table)."
+      },
+      "shifts": [],
+      "unchanged": [
+        "O2.J.closeOutstanding",
+        "O2.J.forceNoReason",
+        "KA.O2.forceWithReason",
+        "KA.O2.fullyReceivedClose",
+        "KA.O3.cancelAfterDelivery",
+        "O2.J.issued.closeOutstanding",
+        "O2.J.issued.forceNoReason",
+        "O2.closeOutstanding.087",
+        "O2.forceNoReason.087",
+        "O2.closeOutstanding.052",
+        "O2.forceNoReason.052",
+        "CF.HRC8"
+      ],
+      "unchangedWhy": "J-C (partial) and PO-A' (received) have no closed row at HEAD either: the same 409 PO_TRANSITION_INVALID (today). The no-force and force-without-reason closes are refused by closeOrder before the transition (:633, :642), on J-ISS, J-C and the deep PO-C / PO-O2 alike. J5 drives approve -> issue -> acknowledge, untouched rows.",
+      "expectVerdict": "CAUGHT: O2.J.issued.forceWithReason and O2.J.ack.forceWithReason PASS in the baseline, FAIL under the mutant",
+      "expect": "J7: J-ISS force-closed with a reason answers 409 PO_TRANSITION_INVALID and stays issued: O2.J.issued.forceWithReason FAIL; the keeper's receipt on it then answers 201 (J-INV1 on J): O2.J.issued.receiveAfterClose FAIL (collateral). J-ACKC force-closed with a reason answers 409 PO_TRANSITION_INVALID: O2.J.ack.forceWithReason FAIL. Nothing else red.",
+      "mutatedAnswer": "an issued or acknowledged order cannot be closed before delivery",
+      "storedDefect": "on J only: J-ISS received in full into J-INV1 instead of closed; J-ACKC left acknowledged; J archived by the cleanup",
+      "safety": "Every write on J. The deep close probes (087-COM PO-C, 052-COM PO-O2, both partial) are refused by closeOrder before the transition under this mutant as at HEAD. No deep write."
+    },
+    {
+      "name": "M-PCL0i the issued row only (variant of M-PCL0)",
+      "guard": "section 6.2 WP-5 'PO close transitions', ALLOWED issued -> closed (purchase-order.service.js:121)",
+      "e6": "variant of guard 1 (run, not tallied)",
+      "file": "backend/src/services/purchase-order.service.js",
+      "from": "  [STATUS.ISSUED]: [STATUS.ACKNOWLEDGED, STATUS.CLOSED, STATUS.CANCELLED],",
+      "to": "  [STATUS.ISSUED]: [STATUS.ACKNOWLEDGED, STATUS.CANCELLED],",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 121
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 121
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP5.mutations.poCloseTransitions",
+        "WP5.closeBeforeDelivery.issuedForceClose"
+      ],
+      "catchers": [
+        "O2.J.issued.forceWithReason"
+      ],
+      "collateral": [
+        "O2.J.issued.receiveAfterClose"
+      ],
+      "collateralWhy": {
+        "O2.J.issued.receiveAfterClose": "as M-PCL0: J-ISS still issued, the receipt answers 201 (proof COLLATERAL M-PCL0i)."
+      },
+      "shifts": [],
+      "unchanged": [
+        "O2.J.ack.forceWithReason"
+      ],
+      "unchangedWhy": "acknowledged -> closed kept: J-ACKC closes (200).",
+      "expectVerdict": "CAUGHT: O2.J.issued.forceWithReason PASS in the baseline, FAIL under the mutant",
+      "expect": "J7: J-ISS force close with a reason 409 PO_TRANSITION_INVALID: O2.J.issued.forceWithReason FAIL; the receipt on J-ISS 201: O2.J.issued.receiveAfterClose FAIL (collateral). Nothing else red.",
+      "mutatedAnswer": "an issued order cannot be closed before delivery",
+      "storedDefect": "on J only: J-ISS received into J-INV1",
+      "safety": "as M-PCL0"
+    },
+    {
+      "name": "M-PCL0k the acknowledged row only (variant of M-PCL0)",
+      "guard": "section 6.2 WP-5 'PO close transitions', ALLOWED acknowledged -> closed (purchase-order.service.js:122)",
+      "e6": "variant of guard 1 (run, not tallied)",
+      "file": "backend/src/services/purchase-order.service.js",
+      "from": "  [STATUS.ACKNOWLEDGED]: [STATUS.CLOSED, STATUS.CANCELLED],",
+      "to": "  [STATUS.ACKNOWLEDGED]: [STATUS.CANCELLED],",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 122
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 122
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP5.mutations.poCloseTransitions",
+        "WP5.closeBeforeDelivery.ackForceClose"
+      ],
+      "catchers": [
+        "O2.J.ack.forceWithReason"
+      ],
+      "collateral": [],
+      "shifts": [],
+      "unchanged": [
+        "O2.J.issued.forceWithReason",
+        "O2.J.issued.receiveAfterClose",
+        "O4.J.acknowledgedReceipt"
+      ],
+      "unchangedWhy": "issued -> closed kept: J-ISS closes and the receipt after it answers 409 PO_NOT_ISSUED. J-ACK (acknowledged) is received through the receipt writer, which sets the status directly (goods-receipt.service.js:769-778), not through ALLOWED. Nothing reads J-ACKC after J7.",
+      "expectVerdict": "CAUGHT: O2.J.ack.forceWithReason PASS in the baseline, FAIL under the mutant",
+      "expect": "J7: J-ACKC force close with a reason 409 PO_TRANSITION_INVALID, still acknowledged: O2.J.ack.forceWithReason FAIL. Nothing else red.",
+      "mutatedAnswer": "an acknowledged order cannot be closed before delivery",
+      "storedDefect": "on J only: J-ACKC left acknowledged",
+      "safety": "as M-PCL0"
+    },
+    {
+      "name": "M-AWD0 the award lock dropped (HEAD: the status pre-check)",
+      "guard": "section 6.2 WP-5 'the award lock' (plan :1149, :749). What exists at HEAD: confirmAward's status pre-check (bid.service.js:1035 at f599e67), outside any transaction; the in-transaction claim is the section 5 defect fix (:1110, WP5-PREP section 9 F-1), M-AWD1's once it lands.",
+      "e6": "section 6.2 WP-5 guard 2 of 5 (the award lock; the HEAD entry, replaced by M-AWD1 once the atomic award confirmation lands, WP5ADJ Q7)",
+      "file": "backend/src/services/bid.service.js",
+      "from": "  if (pkg.status === STATUS.AWARDED) throw new HttpError(409, \"BID_PACKAGE_LOCKED\", \"The package is already awarded\");",
+      "to": "  if (false) throw new HttpError(409, \"BID_PACKAGE_LOCKED\", \"The package is already awarded\");",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1035
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 1035
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP5.mutations.awardLock",
+        "WP5.R2.confirmAgain"
+      ],
+      "catchers": [
+        "R2.J.confirmAgain"
+      ],
+      "collateral": [
+        "KA.R2.concurrentConfirms"
+      ],
+      "collateralWhy": {
+        "KA.R2.concurrentConfirms": "allowed, racy: J-BP2's two confirms sent in one tick both pass the (removed) pre-check at HEAD as well, so the race reads today (two 201) as at baseline; only if the two confirms serialise does the second meet the bid lookup (:1037) and answer 400 BID_NOT_FOUND, neither the value (one 409 BID_PACKAGE_LOCKED) nor today: wrong, FAIL. The proof's COLLATERAL table says none (it names the sequential probe only)."
+      },
+      "shifts": [],
+      "unchanged": [
+        "R1.J.confirmNoBid",
+        "R5.J.overLimit",
+        "R5.J.overLimitOverride",
+        "R5.J.expired",
+        "R3.J.firstOrder",
+        "KA.R3.secondOrder",
+        "KA.R4.lineCoding.J",
+        "R1.cancelAwarded",
+        "R1.J.states"
+      ],
+      "unchangedWhy": "The other confirms are on packages that are not awarded (the pre-check never fired for them). The second confirm writes nothing (400 before the vendor transaction :1049), so J-BP1 keeps one commitment and J-PP1's orders are as at baseline. 087-COM's cancel of the awarded package is cancelPackage (:415), untouched. CF.awardAtomic follows KA.R2.concurrentConfirms (CONFIRMED -> PARTIAL only on a serialised race: racy, never a flag).",
+      "expectVerdict": "CAUGHT: R2.J.confirmAgain PASS in the baseline, FAIL under the mutant",
+      "expect": "J10: the same confirm of the awarded J-BP1 again answers 400 BID_NOT_FOUND (the awarded bid is no longer submitted, :1037) instead of 409 BID_PACKAGE_LOCKED; one commitment from J-BP1: R2.J.confirmAgain FAIL on the code. KA.R2.concurrentConfirms stays BLOCKED (today) unless the race serialises (then wrong: allowed collateral). Nothing else red.",
+      "mutatedAnswer": "a second confirm of an awarded package is refused only by the bid lookup (400 BID_NOT_FOUND), with nothing written",
+      "storedDefect": "none: the second confirm writes nothing",
+      "safety": "Every confirm on J (J-BP1, J-BP2, J-BP3). 087-COM's awarded package is only read and its cancel refused by cancelPackage (:415). No deep write."
+    },
+    {
+      "name": "M-OVER RECEIPT_OVER_ORDER dropped",
+      "guard": "section 6.2 WP-5 RECEIPT_OVER_ORDER (plan :1149, :738, :757): the one receipt writer behind both doors (goods-receipt.service.js:633-642, the test at :635 at f599e67; the procurement route reaches the same writer).",
+      "e6": "section 6.2 WP-5 guard 3 of 5 (RECEIPT_OVER_ORDER)",
+      "file": "backend/src/services/goods-receipt.service.js",
+      "from": "      if (alreadyIn + acceptedQty + rejectedQty > ordered + QTY_EPSILON) {",
+      "to": "      if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 635
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 635
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP5.mutations.receiptOverOrder",
+        "WP5.O4.overOrder"
+      ],
+      "catchers": [
+        "O4.J.overOrder"
+      ],
+      "collateral": [
+        "O2.J.closeOutstanding",
+        "O2.J.forceNoReason",
+        "KA.O2.forceWithReason",
+        "KA.O5.receivableList.J",
+        "KA.O3.cancelAfterDelivery",
+        "KA.O2.receiveAfterClose"
+      ],
+      "collateralWhy": {
+        "O2.J.closeOutstanding": "J7: J-C now received in full (101 of 100), so nothing is outstanding and the close reaches the transition: received has no closed row at HEAD, 409 PO_TRANSITION_INVALID instead of 409 PO_CLOSE_OUTSTANDING (proof COLLATERAL).",
+        "O2.J.forceNoReason": "J7: the same, 409 PO_TRANSITION_INVALID instead of 400 PO_CLOSE_REASON_REQUIRED (nothing outstanding, so no reason is asked; proof COLLATERAL).",
+        "KA.O2.forceWithReason": "J7: 409 PO_TRANSITION_INVALID as today, but J-C reads received, not partial: neither value nor today, wrong (proof COLLATERAL).",
+        "KA.O5.receivableList.J": "J6: the list is read after the over-receipt: J-C (received) drops out of {draft, issued, partial}: neither value nor today, wrong (proof COLLATERAL).",
+        "KA.O3.cancelAfterDelivery": "J7: the cancel of J-C answers 409 PO_TRANSITION_INVALID (today's code) but J-C reads received, and the today needs partial (wp5-supply-proof.js:1348): wrong. Not in the proof's COLLATERAL table: derived here.",
+        "KA.O2.receiveAfterClose": "J7: not sent (J-C is not closed); the today needs J-C partial (:1367), it reads received: wrong. Not in the proof's COLLATERAL table: derived here."
+      },
+      "shifts": [
+        {
+          "id": "CF.HRC8",
+          "baseline": "CONFIRMED",
+          "mutant": "PARTIAL",
+          "why": "KA.O2.forceWithReason and KA.O3.cancelAfterDelivery read wrong (gaps); KA.O2.fullyReceivedClose and the two stored closes stay today (present): PARTIAL, a pass for an undecided rule."
+        },
+        {
+          "id": "CF.receivableList",
+          "baseline": "CONFIRMED",
+          "mutant": "PARTIAL",
+          "why": "KA.O5.receivableList.J wrong (a gap), KA.O5.receivableList.087 today (present): PARTIAL, a pass."
+        }
+      ],
+      "unchanged": [
+        "O2.J.partial",
+        "O4.J.duplicateLine",
+        "O4.J.alreadyPosted",
+        "O7.J.ignoredFields",
+        "KA.O2.fullyReceivedClose",
+        "O2.J.issued.closeOutstanding",
+        "O2.J.issued.forceWithReason",
+        "O2.J.ack.forceWithReason",
+        "D7.J.balanced"
+      ],
+      "unchangedWhy": "O2.J.partial is judged before the over-receipt; the duplicate-line refusal (:506) and the receipt-number refusal (:592) come before the over-order test; J-ISS, J-ACKC and PO-A' are other orders. A receipt posts stock, not project cost, so J's reconciliation is unaffected. No later step reads J-C or J-CEM2.",
+      "expectVerdict": "CAUGHT: O4.J.overOrder PASS in the baseline, FAIL under the mutant",
+      "expect": "J6: 41 received against 40 outstanding on J-C answers 201: the line 101 / 100, J-C received, J-CEM2 on hand 101: O4.J.overOrder FAIL. Collateral FAIL: O2.J.closeOutstanding, O2.J.forceNoReason (409 PO_TRANSITION_INVALID), KA.O2.forceWithReason, KA.O3.cancelAfterDelivery, KA.O2.receiveAfterClose, KA.O5.receivableList.J (wrong: J-C received). Shifts CF.HRC8 and CF.receivableList CONFIRMED -> PARTIAL. Nothing else red.",
+      "mutatedAnswer": "a receipt beyond the ordered quantity is accepted",
+      "storedDefect": "on J only: J-C over-received (101 of 100), J-CEM2 101 on hand",
+      "safety": "No deep project receives anything in the proof (the deep reads are GETs); every receipt is on J. No deep write."
+    },
+    {
+      "name": "M-AVL INV_INSUFFICIENT_AVAILABLE dropped at both sites",
+      "guard": "section 6.2 WP-5 INV_INSUFFICIENT_AVAILABLE (plan :1149, :740, :762): drawFromWarehouse for an issue naming no bin (inventory.service.js:1031 at f599e67) and postMovement for an issue naming the bin (:756).",
+      "e6": "section 6.2 WP-5 guard 4 of 5 (INV_INSUFFICIENT_AVAILABLE)",
+      "file": "backend/src/services/inventory.service.js",
+      "from": "  if (available < quantity) {",
+      "to": "  if (false) {",
+      "also": [
+        {
+          "file": "backend/src/services/inventory.service.js",
+          "from": "    if (round(Math.abs(delta)) > availableHere) {",
+          "to": "    if (false) {"
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1031
+          },
+          {
+            "count": 1,
+            "line": 756
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 1031
+          },
+          {
+            "count": 1,
+            "line": 756
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP5.mutations.insufficientAvailable",
+        "WP5.N1.issue41"
+      ],
+      "catchers": [
+        "N1.J.issue41",
+        "N1.J.issue41bin"
+      ],
+      "collateral": [
+        "N1.J.issue40"
+      ],
+      "collateralWhy": {
+        "N1.J.issue40": "J9: after the two issues of 41 (40 drawn from J-B01's available, then 41 from the bin) J-CEM holds 9 under 50 reserved; issue 40 naming no bin draws nothing (every balance's available is negative) and answers 201 with no movement, costPosted false: not 201 / 440.00 / costPosted true / end 50, 50, 0 (proof COLLATERAL)."
+      },
+      "shifts": [],
+      "unchanged": [
+        "N1.J.existing",
+        "N1.J.reserve",
+        "N1.J.release51",
+        "N1.J.noTarget",
+        "N1.J.costCodeOnly",
+        "KA.N6.issuedQty",
+        "KA.N6.usage50",
+        "N6.J.usage70",
+        "CF.HRC7",
+        "N1.live.087",
+        "D7.J.balanced"
+      ],
+      "unchangedWhy": "The issue of 60 and the reserve run before the probes; release 51 meets 50 reserved (409 INV_RESERVATION_NEGATIVE); J-BLK has stock and no reservation. A stock issue never writes the plan row (HR-C7), so KA.N6.* and CF.HRC7 read today as at baseline (proof COLLATERAL \"KA.N6.issuedQty / CF.HRC7 unchanged\"). The extra issues post through the ledger with their projections, so J stays balanced; the D-section totals are read by source ids. 087-COM's cement is read only.",
+      "expectVerdict": "CAUGHT: N1.J.issue41 and N1.J.issue41bin PASS in the baseline, FAIL under the mutant",
+      "expect": "J9: issue 41 naming no bin answers 201 issuing 40 (on hand 50): N1.J.issue41 FAIL; issue 41 naming J-B01 answers 201 issuing 41 (on hand 9 under 50 reserved): N1.J.issue41bin FAIL; issue 40 then answers 201 with no movement: N1.J.issue40 FAIL (collateral). Nothing else red.",
+      "mutatedAnswer": "reserved stock is issued (naming the bin), and an issue naming no bin is silently short",
+      "storedDefect": "on J only: J-CEM issued past its reservation",
+      "safety": "Every issue on J's J-CEM (the 087-COM cement is read only, WP5ADJ Q1). No deep write."
+    },
+    {
+      "name": "M-AVLa the warehouse-level check only (variant of M-AVL)",
+      "guard": "section 6.2 WP-5 INV_INSUFFICIENT_AVAILABLE, drawFromWarehouse (inventory.service.js:1031)",
+      "e6": "variant of guard 4 (run, not tallied)",
+      "file": "backend/src/services/inventory.service.js",
+      "from": "  if (available < quantity) {",
+      "to": "  if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1031
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 1031
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP5.mutations.insufficientAvailable",
+        "WP5.N1.issue41"
+      ],
+      "catchers": [
+        "N1.J.issue41"
+      ],
+      "collateral": [
+        "N1.J.issue41bin",
+        "N1.J.issue40"
+      ],
+      "collateralWhy": {
+        "N1.J.issue41bin": "J9: the bin probe still answers 409 INV_INSUFFICIENT_AVAILABLE (the per-bin check is kept), but the check also needs J-CEM on hand 90 after it (wp5-supply-proof.js:1458) and the first probe already drew 40: on hand 50, FAIL. Not in the proof's COLLATERAL table: derived here.",
+        "N1.J.issue40": "J9: available 0 after the silent draw of 40; issue 40 draws nothing, 201 with no movement (proof COLLATERAL)."
+      },
+      "shifts": [],
+      "unchanged": [
+        "N1.J.release51",
+        "N1.J.noTarget",
+        "N1.J.costCodeOnly",
+        "KA.N6.issuedQty",
+        "CF.HRC7",
+        "D5.J.matched",
+        "CF.L107"
+      ],
+      "unchangedWhy": "J-CEM ends at 50 on hand with 440.00 issued to J-A130, exactly as at baseline (the 40 drawn by issue 41 instead of issue 40), so every later reading of J-CEM and J-A130 is the same.",
+      "expectVerdict": "CAUGHT: N1.J.issue41 PASS in the baseline, FAIL under the mutant",
+      "expect": "J9: issue 41 naming no bin answers 201 issuing 40: N1.J.issue41 FAIL. Collateral FAIL: N1.J.issue41bin (on hand 50, not 90), N1.J.issue40 (201, nothing drawn). Nothing else red.",
+      "mutatedAnswer": "an issue naming no bin is silently short instead of refused",
+      "storedDefect": "on J only: J-CEM 40 issued by the issue-41 probe",
+      "safety": "as M-AVL"
+    },
+    {
+      "name": "M-AVLb the per-bin check only (variant of M-AVL)",
+      "guard": "section 6.2 WP-5 INV_INSUFFICIENT_AVAILABLE, postMovement (inventory.service.js:756)",
+      "e6": "variant of guard 4 (run, not tallied)",
+      "file": "backend/src/services/inventory.service.js",
+      "from": "    if (round(Math.abs(delta)) > availableHere) {",
+      "to": "    if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 756
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 756
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP5.mutations.insufficientAvailable",
+        "WP5.N1.issue41"
+      ],
+      "catchers": [
+        "N1.J.issue41bin"
+      ],
+      "collateral": [
+        "N1.J.issue40"
+      ],
+      "collateralWhy": {
+        "N1.J.issue40": "J9: after the bin probe issued 41, J-CEM holds 49 under 50 reserved; issue 40 naming no bin is refused by the kept warehouse-level check, 409 INV_INSUFFICIENT_AVAILABLE instead of 201 (proof COLLATERAL)."
+      },
+      "shifts": [],
+      "unchanged": [
+        "N1.J.issue41",
+        "N1.J.release51",
+        "KA.N6.issuedQty",
+        "CF.HRC7"
+      ],
+      "unchangedWhy": "the issue naming no bin is refused by drawFromWarehouse (:1031) before any movement: on hand 90. Release 51 meets 50 reserved.",
+      "expectVerdict": "CAUGHT: N1.J.issue41bin PASS in the baseline, FAIL under the mutant",
+      "expect": "J9: issue 41 naming J-B01 answers 201 (on hand 49 under 50 reserved): N1.J.issue41bin FAIL; issue 40 then 409 INV_INSUFFICIENT_AVAILABLE: N1.J.issue40 FAIL (collateral). Nothing else red.",
+      "mutatedAnswer": "an issue naming the bin takes reserved stock",
+      "storedDefect": "on J only: J-CEM 49 on hand under 50 reserved",
+      "safety": "as M-AVL"
+    },
+    {
+      "name": "M-DCL one posting per direct-cost line: the approval claim dropped",
+      "guard": "section 6.2 WP-5 'one posting per direct-cost line' (plan :1149, :744, :771): approveDirectCost's in-transaction claim (direct-cost.service.js:483 at f599e67: FOR UPDATE and the status re-read, lockExpecting :423-428). The pre-check (:480) runs outside the transaction.",
+      "e6": "section 6.2 WP-5 guard 5 of 5 (one posting per direct-cost line; with M-DCK)",
+      "file": "backend/src/services/direct-cost.service.js",
+      "from": "    await lockExpecting(tx, directCostId, [STATUS.PENDING], \"DIRECT_COST_NOT_PENDING\", (status) => `Only pending direct costs can be approved (this one is ${status})`);",
+      "to": "    void lockExpecting; // M-DCL: the approval claim removed",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 483
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 483
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP5.mutations.directCostOnePosting",
+        "WP5.D2.concurrentApprove"
+      ],
+      "catchers": [
+        "D2.J.concurrentApprove",
+        "G.5xx"
+      ],
+      "racy": [
+        "G.5xx"
+      ],
+      "collateral": [],
+      "shifts": [],
+      "unchanged": [
+        "D1.J.approveDraft",
+        "D2.J.ledger",
+        "D2.J.voidMirror",
+        "D3.J.payFull",
+        "KA.D5.priceVarianceApproval",
+        "D7.J.balanced"
+      ],
+      "unchangedWhy": "Every other approval is sequential: the pre-check (:480) refuses a draft (D1.J.approveDraft) and passes a pending cost exactly once. Per round the loser of the race posts nothing new (already_posted, or its transaction aborted by P2002), so one entry per round, the ledger balanced.",
+      "expectVerdict": "CAUGHT: D2.J.concurrentApprove PASS in the baseline, FAIL under the mutant; G.5xx too when a loser answers 500 (racy: reported, not failed, when it stays PASS)",
+      "expect": "J11: in each of FIXTURE.d2Rounds (5) rounds both approvals pass the pre-check (sent in one tick); the loser answers 200 (it read the winner's committed entry: already_posted) or 500 (P2002 inside its transaction aborts it): no 409 in a round, D2.J.concurrentApprove FAIL. A 500 also turns G.5xx FAIL (a named catcher, racy). One ledger entry per round either way (the unique index). A round whose two approvals happen to serialise reads 200 + 409 (green); the probe is green only if every round is (WP5ADJ Q8).",
+      "mutatedAnswer": "two approvals of one pending direct cost both succeed (or one answers 500)",
+      "storedDefect": "on J only: J-DC3 rounds approved twice (one entry each)",
+      "safety": "Every approval on J. The deep projects' direct costs are only read. No deep write."
+    },
+    {
+      "name": "M-DCK one posting per direct-cost line: the line dropped from the ledger key",
+      "guard": "section 6.2 WP-5 'one posting per direct-cost line' (plan :1149, :771): the key carries the line (sourceKeyFor, cost-ledger.service.js:113-114 at f599e67: direct_cost:<id>:<lineId>).",
+      "e6": "section 6.2 WP-5 guard 5 of 5 (one posting per direct-cost line; with M-DCL)",
+      "file": "backend/src/services/cost-ledger.service.js",
+      "from": "  [sourceType, sourceId, sourceLineId || \"header\", suffix].filter(Boolean).join(\":\");",
+      "to": "  [sourceType, sourceId, \"header\", suffix].filter(Boolean).join(\":\");",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 114
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 114
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP5.mutations.directCostOnePosting",
+        "WP5.D2.ledger",
+        "WP5.D2.entryCount"
+      ],
+      "catchers": [
+        "D2.J.ledger"
+      ],
+      "collateral": [
+        "D2.J.voidMirror"
+      ],
+      "collateralWhy": {
+        "D2.J.voidMirror": "J11: J-DC2 has one entry (1,000.00), so its void writes one reversal of -1,000.00, not three of -6,000.00 (proof COLLATERAL)."
+      },
+      "shifts": [],
+      "unchanged": [
+        "D2.J.voidAgain",
+        "D2.J.concurrentApprove",
+        "D3.J.cashOutflow",
+        "KA.D4.J.invoiceBeforeReceipt",
+        "D4.J.controlPath",
+        "KA.D5.overInvoicedLedger",
+        "D7.J.balanced",
+        "CF.L119",
+        "D.live.087.voidedAfterApproval",
+        "N1.J.existing"
+      ],
+      "unchangedWhy": "J-DC2 is the only approved direct cost with more than one line (WP5.J.directCosts: J-DC1, J-DC3, J-DC4, J-STK-INV, J-STK2-INV, J-INVA, J-VAR, J-SVC-INV1/2, J-L119 have one; J-D6INV is never approved). Material issues post with no line (material_issue:<movementId>:header either way). The projections follow the one entry, so J stays balanced. 087-COM's stored entries keep their stored keys (read only).",
+      "expectVerdict": "CAUGHT: D2.J.ledger PASS in the baseline, FAIL under the mutant",
+      "expect": "J11: J-DC2's three lines share one key: line 1 posts 1,000.00, lines 2 and 3 answer already_posted: one entry of 1,000.00 for 6,000.00 in three: D2.J.ledger FAIL; its void reverses one entry: D2.J.voidMirror FAIL (collateral). Nothing else red.",
+      "mutatedAnswer": "a multi-line direct cost posts only its first line",
+      "storedDefect": "on J only: J-DC2 under-posted, then voided",
+      "safety": "Every posting on J; the deep projects' ledgers are read by stored keys. No deep write."
+    }
+  ]
+}

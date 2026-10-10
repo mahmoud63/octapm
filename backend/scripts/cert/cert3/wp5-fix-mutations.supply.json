@@ -1,0 +1,215 @@
+{
+  "proof": "scripts/cert/cert3/wp5-supply-proof.js",
+  "guards": "Plan section 6.2 WP-5 (:1149) after its fixes, and, per plan section 1.4, a mutation that puts each landed WP-5 defect fix back. The section 6.2 entries M-PCL1 (PO close transitions, after HR-C8) and M-AWD1 (the award lock, after the atomic award confirmation) supersede M-PCL0 and M-AWD0 as the E6 entries when they land (WP5ADJ Q7); M-ORD1, M-COD1, M-RCV1 are fix mutations (the proof's FIX_CATCHERS, :648). No WP-5 fix plan or owner decision exists yet: every entry is pending[], not run.",
+  "requires": "its fix (or owner-rule implementation) commit, FIXES[<rule>] set in the proof with its CONTRACT fields from the adjudicated decision or fix plan, the unmutated full run exiting 0 on that code (results/cert3/wp5-supply-proof.baseline.json). From / to are derived from the real fix diff, the entry moved from pending[] into mutations[], and mutsyntax-wp5.js --post-fix run on the fixed worktree.",
+  "pendingCheckIds": [],
+  "catchersTableNote": "The proof's CATCHERS (:621-630) carries M-PCL1 and M-AWD1, its FIX_CATCHERS (:648) M-ORD1, M-COD1 and M-RCV1: the pending entries' catchers equal them (mutsyntax-wp5.js). The book names M-PCL1's and M-AWD1's catchers (WP5.mutations.poCloseTransitions, awardLock; the proof's load guard :651-656). No new check id is expected from a WP-5 fix; if one adds a check, list it in pendingCheckIds with the EXPECTED_CHECKS move.",
+  "notNamed": "The owner rules HR-C5, HR-C7 and HR-C9, and the WP5-SVC-1 fix, have no fix mutation named in the proof (CATCHERS / FIX_CATCHERS) or the book. When one is implemented, its fix mutation is derived from the implementing commit and named in FIX_CATCHERS and here in the same batch (plan section 1.4); no catcher is guessed now. HR-C6 (L35, L36, X-FINANCE-1) is CERT-5's.",
+  "note": "Fields as in wp5-mutations.supply.json; pending entries carry loci (HEAD text the fix will change) instead of from / to. Judged by wp5-mutation-evidence.js --lists=fix against the post-fix baseline. Run one id per invocation, quoted and with a trailing comma (\"--only=M-AVL,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-AVL would also run M-AVLa and M-AVLb; M-PCL0 also M-PCL0i and M-PCL0k; M-PCLg also M-PCLga and M-PCLgb), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists.",
+  "pending": [
+    {
+      "name": "M-PCL1 the HR-C8 close rows removed (post-HR-C8; replaces M-PCL0 as the E6 entry)",
+      "e6": "section 6.2 WP-5 guard 1 of 5 (PO close transitions), once HR-C8 is decided and implemented (WP5ADJ Q7)",
+      "supersedes": "M-PCL0",
+      "requires": "an owner decision on HR-C8 (undecided; plan :1076; WP5-PREP section 9 \"HR-C8 implementation note\") and its fix (or owner-rule implementation) commit, FIXES[<rule>] set in the proof with its CONTRACT fields from the adjudicated decision or fix plan, the unmutated full run exiting 0 on that code (results/cert3/wp5-supply-proof.baseline.json). From / to are derived from the real fix diff, the entry moved from pending[] into mutations[], and mutsyntax-wp5.js --post-fix run on the fixed worktree.",
+      "loci": [
+        {
+          "file": "backend/src/services/purchase-order.service.js",
+          "text": "  [STATUS.CLOSED]: [],",
+          "note": "ALLOWED: the partial / received rows an HR-C8 implementation adds sit beside this one; M-PCL1 removes them on the fix diff",
+          "head": {
+            "count": 1,
+            "line": 123
+          },
+          "preWp5Sim": {
+            "count": 1,
+            "line": 123
+          }
+        },
+        {
+          "file": "backend/src/services/purchase-order.service.js",
+          "text": "    if (to === STATUS.CANCELLED) {",
+          "note": "the cancel-after-delivery check, reachable once partial / received carry a cancelled row",
+          "head": {
+            "count": 1,
+            "line": 551
+          },
+          "preWp5Sim": {
+            "count": 1,
+            "line": 551
+          }
+        }
+      ],
+      "catchers": [
+        "KA.O2.forceWithReason",
+        "KA.O2.receiveAfterClose",
+        "KA.O2.fullyReceivedClose"
+      ],
+      "collateral": [
+        "CF.HRC8"
+      ],
+      "collateralWhy": {
+        "CF.HRC8": "decided once HR-C8 is implemented: it must read REJECTED; with the rows removed its known answers read today again: CONFIRMED / PARTIAL, FAIL."
+      },
+      "expectVerdict": "CAUGHT once HR-C8 is implemented: the three known answers (value checks then) read today (409 PO_TRANSITION_INVALID; the receipt after a close not sent)",
+      "safety": "M-PCL1 removes ALLOWED rows only: the deep close probes stay refused by closeOrder before the transition. The HEAD-only complements (wp5-mutations.complements.json) are never run after HR-C8."
+    },
+    {
+      "name": "M-AWD1 the atomic award claim removed (post-fix; replaces M-AWD0 as the E6 entry)",
+      "e6": "section 6.2 WP-5 guard 2 of 5 (the award lock), once the atomic award confirmation lands (section 5 :1110, if it confirms as P1; WP5ADJ Q3, Q7)",
+      "supersedes": "M-AWD0",
+      "requires": "the AWARD-ATOMIC fix (WP5-PREP section 9 F-1, its Codex plan review) and its fix (or owner-rule implementation) commit, FIXES[<rule>] set in the proof with its CONTRACT fields from the adjudicated decision or fix plan, the unmutated full run exiting 0 on that code (results/cert3/wp5-supply-proof.baseline.json). From / to are derived from the real fix diff, the entry moved from pending[] into mutations[], and mutsyntax-wp5.js --post-fix run on the fixed worktree. CONTRACT['AWARD-ATOMIC'].loserCode from the adjudicated plan.",
+      "loci": [
+        {
+          "file": "backend/src/services/bid.service.js",
+          "text": "const confirmAward = async ({ orgId, projectId, packageId, payload = {}, actor = null }) => {",
+          "note": "confirmAward: the in-transaction claim (F-1 P-A1) goes here; M-AWD1 removes it and keeps the pre-check (P-A3)",
+          "head": {
+            "count": 1,
+            "line": 1033
+          },
+          "preWp5Sim": {
+            "count": 1,
+            "line": 1033
+          }
+        },
+        {
+          "file": "backend/src/services/bid.service.js",
+          "text": "  const vendorCompanyId = await prisma.$transaction((tx) => ensureVendorCompany({ tx, orgId, invitation }));",
+          "note": "the separate vendor transaction F-1 folds into the claim",
+          "head": {
+            "count": 1,
+            "line": 1049
+          },
+          "preWp5Sim": {
+            "count": 1,
+            "line": 1049
+          }
+        },
+        {
+          "file": "backend/src/services/commitment.service.js",
+          "text": "  const created = await prisma.$transaction(async (tx) => {",
+          "note": "createCommitment's own transaction (F-1 P-A2 extracts createCommitmentTx); also edited by the HR-C1 fix: re-count after it lands",
+          "head": {
+            "count": 1,
+            "line": 549
+          },
+          "preWp5Sim": {
+            "count": 1,
+            "line": 557
+          }
+        }
+      ],
+      "catchers": [
+        "KA.R2.concurrentConfirms"
+      ],
+      "racy": [
+        "KA.R2.concurrentConfirms"
+      ],
+      "rerunOnSurvive": 1,
+      "collateral": [
+        "CF.awardAtomic"
+      ],
+      "collateralWhy": {
+        "CF.awardAtomic": "decided once the fix lands: it must read REJECTED; with the claim removed the race reads today (two 201): CONFIRMED, FAIL (racy with its known answer)."
+      },
+      "expectVerdict": "CAUGHT once AWARD-ATOMIC is fixed; racy (two confirms in process): a mutant that survives is rerun once and the rerun recorded as such (WP5ADJ Q8; WP5.mutations.awardLock)",
+      "safety": "J-BP2 on J only."
+    },
+    {
+      "name": "M-ORD1 one order per award removed (fix mutation, plan section 1.4)",
+      "e6": "not a section 6.2 guard (plan section 1.4 fix mutation)",
+      "requires": "the AWARD-ONE-ORDER fix (WP5-PREP section 9 F-2, P-B1: BidPackage.awardedOrderId; only if it confirms as P1, P2 proposed; the owner question whether a cancelled award order may be replaced) and its fix (or owner-rule implementation) commit, FIXES[<rule>] set in the proof with its CONTRACT fields from the adjudicated decision or fix plan, the unmutated full run exiting 0 on that code (results/cert3/wp5-supply-proof.baseline.json). From / to are derived from the real fix diff, the entry moved from pending[] into mutations[], and mutsyntax-wp5.js --post-fix run on the fixed worktree. CONTRACT['AWARD-ONE-ORDER'].refusalStatusCode from the plan.",
+      "loci": [
+        {
+          "file": "backend/src/services/procurement.service.js",
+          "text": "const raiseOrderFromAward = async ({ orgId, projectId, packageId, actor, payload = {} }) => {",
+          "note": "raiseOrderFromAward: the claim F-2 adds",
+          "head": {
+            "count": 1,
+            "line": 1762
+          },
+          "preWp5Sim": {
+            "count": 1,
+            "line": 1762
+          }
+        }
+      ],
+      "catchers": [
+        "KA.R3.secondOrder"
+      ],
+      "collateral": [
+        "CF.awardSecondOrder"
+      ],
+      "collateralWhy": {
+        "CF.awardSecondOrder": "decided once the fix lands: must read REJECTED; the second order is made again: FAIL."
+      },
+      "expectVerdict": "CAUGHT once AWARD-ONE-ORDER is fixed: KA.R3.secondOrder reads today (201, two orders on J-PP1)",
+      "safety": "J-PP1 on J only."
+    },
+    {
+      "name": "M-COD1 award order coding removed (fix mutation, plan section 1.4)",
+      "e6": "not a section 6.2 guard (plan section 1.4 fix mutation)",
+      "requires": "the AWARD-CODING fix (WP5-PREP section 9 F-3; only if it confirms as P1, P2 proposed) and its fix (or owner-rule implementation) commit, FIXES[<rule>] set in the proof with its CONTRACT fields from the adjudicated decision or fix plan, the unmutated full run exiting 0 on that code (results/cert3/wp5-supply-proof.baseline.json). From / to are derived from the real fix diff, the entry moved from pending[] into mutations[], and mutsyntax-wp5.js --post-fix run on the fixed worktree.",
+      "loci": [
+        {
+          "file": "backend/src/services/procurement.service.js",
+          "text": "        unitCost: priced?.rate === null || priced?.rate === undefined ? 0 : Number(priced.rate),",
+          "note": "the award line map (:1805-1819) the fix extends with costCodeId / budgetLineId / boqItemId",
+          "head": {
+            "count": 1,
+            "line": 1815
+          },
+          "preWp5Sim": {
+            "count": 1,
+            "line": 1815
+          }
+        }
+      ],
+      "catchers": [
+        "KA.R4.lineCoding.J"
+      ],
+      "collateral": [
+        "CF.awardCoding"
+      ],
+      "collateralWhy": {
+        "CF.awardCoding": "decided once the fix lands: must read REJECTED; J's award order carries the activity only again: FAIL. KA.R4.lineCoding.087 (a build record) stays STORED-PRE-FIX."
+      },
+      "expectVerdict": "CAUGHT once AWARD-CODING is fixed: KA.R4.lineCoding.J reads today (activityId only)",
+      "safety": "J's award order only."
+    },
+    {
+      "name": "M-RCV1 the receivable list put back (fix mutation, plan section 1.4)",
+      "e6": "not a section 6.2 guard (plan section 1.4 fix mutation)",
+      "requires": "the RCV-LIST fix (WP5-PREP section 9 F-4; P3 proposed: recorded, not fixed, unless rated P1) and its fix (or owner-rule implementation) commit, FIXES[<rule>] set in the proof with its CONTRACT fields from the adjudicated decision or fix plan, the unmutated full run exiting 0 on that code (results/cert3/wp5-supply-proof.baseline.json). From / to are derived from the real fix diff, the entry moved from pending[] into mutations[], and mutsyntax-wp5.js --post-fix run on the fixed worktree.",
+      "loci": [
+        {
+          "file": "backend/src/services/goods-receipt.service.js",
+          "text": "      ? { in: [\"draft\", \"issued\", \"partial\"] }",
+          "note": "scope=receivable (:196-197) against RECEIVABLE_STATUSES (:365)",
+          "head": {
+            "count": 1,
+            "line": 197
+          },
+          "preWp5Sim": {
+            "count": 1,
+            "line": 197
+          }
+        }
+      ],
+      "catchers": [
+        "KA.O5.receivableList.J",
+        "KA.O5.receivableList.087"
+      ],
+      "collateral": [
+        "CF.receivableList"
+      ],
+      "collateralWhy": {
+        "CF.receivableList": "decided once the fix lands: must read REJECTED; both lists read today again: FAIL."
+      },
+      "expectVerdict": "CAUGHT once RCV-LIST is fixed: both known answers read today",
+      "safety": "GET only."
+    }
+  ],
+  "mutations": []
+}

@@ -1,0 +1,32 @@
+{
+  "note": "WP-5 fixes, unit side (mutate-multi.js list key 'wp5fix-unit', proof null). Runs only on a fix tree, against the suites the fix rewrites. Mocked: not evidence (plan section 1.4). No WP-5 fix exists: every entry pending, no from / to, no tests named (the fix writes them). Run one id per invocation, quoted and with a trailing comma (\"--only=M-AVL,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-AVL would also run M-AVLa and M-AVLb; M-PCL0 also M-PCL0i and M-PCL0k; M-PCLg also M-PCLga and M-PCLgb), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists.",
+  "requires": "the fix's unit cases (named in its fix plan), reconciled with the fix diff before the run.",
+  "pending": [
+    {
+      "name": "UM-PCL1 (pending) the HR-C8 close rows removed",
+      "requires": "the HR-C8 implementation and purchase-order.service.test.js:153-166 rewritten on status partial (WP5-PREP section 3, section 9)",
+      "live": "M-PCL1 (pending)"
+    },
+    {
+      "name": "UM-AWD1 (pending) the atomic award claim removed",
+      "requires": "the AWARD-ATOMIC fix and bid.service.test.js:275-297 moved to one transaction (F-1 \"Tests\")",
+      "live": "M-AWD1 (pending)"
+    },
+    {
+      "name": "UM-ORD1 (pending) one order per award removed",
+      "requires": "the AWARD-ONE-ORDER fix and its unit case (F-2)",
+      "live": "M-ORD1 (pending)"
+    },
+    {
+      "name": "UM-COD1 (pending) award order coding removed",
+      "requires": "the AWARD-CODING fix and its unit case (F-3)",
+      "live": "M-COD1 (pending)"
+    },
+    {
+      "name": "UM-RCV1 (pending) the receivable list put back",
+      "requires": "the RCV-LIST fix and its unit case (F-4)",
+      "live": "M-RCV1 (pending)"
+    }
+  ],
+  "mutations": []
+}

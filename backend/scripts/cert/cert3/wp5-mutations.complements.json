@@ -1,0 +1,196 @@
+{
+  "proof": "scripts/cert/cert3/wp5-supply-proof.js",
+  "guards": "Complements of section 6.2 WP-5 'PO close transitions' (plan :1149): closeOrder's own guard, the outstanding-lines refusal (purchase-order.service.js:633) and the short-close reason (:642), which precede the transition (WP5.mutations.poCloseTransitions; WP5ADJ Q7 \"M-PCLg HEAD-only\"). Run, not tallied in E6.",
+  "headOnly": "HR-C8",
+  "runsOn": "HEAD only, before HR-C8 is implemented (FIXES['HR-C8'] empty). At HEAD the deep close probes (087-COM PO-C, 052-COM PO-O2, both partial) reach assertTransition under these mutants and are refused there (no partial -> closed row): nothing written. Once HR-C8 adds partial -> closed, the same probes would close the deep orders: never run then (wp5-mutation-evidence.js refuses to judge them on a baseline whose FIXES['HR-C8'] is set; WP5-RUN-PLAN.md section 14). Kept in a list of its own so that no post-fix invocation of the section 6.2 list can reach them.",
+  "note": "Fields as in wp5-mutations.supply.json. Run one id per invocation, quoted and with a trailing comma (\"--only=M-AVL,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-AVL would also run M-AVLa and M-AVLb; M-PCL0 also M-PCL0i and M-PCL0k; M-PCLg also M-PCLga and M-PCLgb), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists.",
+  "mutations": [
+    {
+      "name": "M-PCLg the close guard dropped (outstanding lines and the short-close reason; HEAD only)",
+      "guard": "closeOrder (purchase-order.service.js:628-650 at f599e67): the outstanding refusal (:633) and the reason refusal (:642)",
+      "e6": "complement of guard 1 (HEAD only; run, not tallied)",
+      "headOnly": "HR-C8",
+      "file": "backend/src/services/purchase-order.service.js",
+      "from": "  if (outstanding.length && !force) {",
+      "to": "  if (false) {",
+      "also": [
+        {
+          "file": "backend/src/services/purchase-order.service.js",
+          "from": "  if (outstanding.length && !trimOrNull(reason)) {",
+          "to": "  if (false) {"
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 633
+          },
+          {
+            "count": 1,
+            "line": 642
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 633
+          },
+          {
+            "count": 1,
+            "line": 642
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP5.mutations.poCloseTransitions",
+        "WP5.O2.closeOutstanding"
+      ],
+      "catchers": [
+        "O2.J.issued.closeOutstanding",
+        "O2.J.closeOutstanding",
+        "O2.closeOutstanding.087",
+        "O2.closeOutstanding.052"
+      ],
+      "collateral": [
+        "O2.J.forceNoReason",
+        "O2.J.issued.forceNoReason",
+        "O2.J.issued.forceWithReason",
+        "O2.forceNoReason.087",
+        "O2.forceNoReason.052"
+      ],
+      "collateralWhy": {
+        "O2.J.forceNoReason": "J7: J-C (partial) force-closed without a reason reaches the transition: 409 PO_TRANSITION_INVALID instead of 400 PO_CLOSE_REASON_REQUIRED.",
+        "O2.J.issued.forceNoReason": "J7: J-ISS was closed by the plain close (200); the force close then meets a closed order: 409 PO_TRANSITION_INVALID (proof COLLATERAL).",
+        "O2.J.issued.forceWithReason": "J7: the same, 409 PO_TRANSITION_INVALID on the closed J-ISS (proof COLLATERAL).",
+        "O2.forceNoReason.087": "087-COM PO-C (partial): 409 PO_TRANSITION_INVALID from assertTransition, nothing written (proof COLLATERAL \"the deep close refusals\").",
+        "O2.forceNoReason.052": "052-COM PO-O2 (partial): the same, nothing written."
+      },
+      "shifts": [],
+      "unchanged": [
+        "O2.J.issued.receiveAfterClose",
+        "O2.J.ack.forceWithReason",
+        "KA.O2.forceWithReason",
+        "KA.O2.fullyReceivedClose",
+        "KA.O3.cancelAfterDelivery",
+        "O2.live.087",
+        "O2.live.052",
+        "CF.HRC8"
+      ],
+      "unchangedWhy": "J-ISS is closed (by the plain close), so the receipt after it is still 409 PO_NOT_ISSUED. J-ACKC's force close with a reason passes either way. J-C's force close with a reason meets the same missing partial row (today). The deep orders stay partial (every close refused by assertTransition).",
+      "expectVerdict": "CAUGHT: the four catchers PASS in the baseline, FAIL under the mutant",
+      "expect": "J7: J-C close without force 409 PO_TRANSITION_INVALID: O2.J.closeOutstanding FAIL; J-ISS close without force 200 closed: O2.J.issued.closeOutstanding FAIL. 087-COM PO-C and 052-COM PO-O2 close without force 409 PO_TRANSITION_INVALID, still partial: O2.closeOutstanding.087 / .052 FAIL. Collateral FAIL: O2.J.forceNoReason, O2.J.issued.forceNoReason, O2.J.issued.forceWithReason, O2.forceNoReason.087 / .052. Nothing else red.",
+      "mutatedAnswer": "an order with deliveries outstanding closes without force or a reason",
+      "storedDefect": "on J only: J-ISS closed by a plain close",
+      "safety": "HEAD only. The deep probes are refused by assertTransition (partial has no closed row at HEAD): nothing written on 087-COM or 052-COM. Never run once HR-C8 is implemented."
+    },
+    {
+      "name": "M-PCLga the outstanding-lines refusal only (variant of M-PCLg; HEAD only)",
+      "guard": "closeOrder's outstanding refusal (purchase-order.service.js:633)",
+      "e6": "complement of guard 1 (HEAD only; run, not tallied)",
+      "headOnly": "HR-C8",
+      "file": "backend/src/services/purchase-order.service.js",
+      "from": "  if (outstanding.length && !force) {",
+      "to": "  if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 633
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 633
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP5.mutations.poCloseTransitions",
+        "WP5.O2.closeOutstanding"
+      ],
+      "catchers": [
+        "O2.J.issued.closeOutstanding"
+      ],
+      "collateral": [
+        "O2.J.closeOutstanding",
+        "O2.closeOutstanding.087",
+        "O2.closeOutstanding.052"
+      ],
+      "collateralWhy": {
+        "O2.J.closeOutstanding": "J7: the kept reason refusal answers first: 400 PO_CLOSE_REASON_REQUIRED instead of 409 PO_CLOSE_OUTSTANDING, nothing written (proof COLLATERAL).",
+        "O2.closeOutstanding.087": "087-COM PO-C: the same 400, nothing written (proof COLLATERAL).",
+        "O2.closeOutstanding.052": "052-COM PO-O2: the same 400, nothing written (proof COLLATERAL)."
+      },
+      "shifts": [],
+      "unchanged": [
+        "O2.J.forceNoReason",
+        "O2.J.issued.forceNoReason",
+        "O2.J.issued.forceWithReason",
+        "O2.forceNoReason.087",
+        "O2.forceNoReason.052"
+      ],
+      "unchangedWhy": "the reason refusal (:642) is kept, so every force close without a reason is still 400 PO_CLOSE_REASON_REQUIRED, and J-ISS (still issued after the refused plain close) closes with a reason (200).",
+      "expectVerdict": "CAUGHT: O2.J.issued.closeOutstanding PASS in the baseline, FAIL under the mutant",
+      "expect": "J7: J-ISS close without force 400 PO_CLOSE_REASON_REQUIRED (not 409 PO_CLOSE_OUTSTANDING), still issued: O2.J.issued.closeOutstanding FAIL. Collateral FAIL: O2.J.closeOutstanding, O2.closeOutstanding.087 / .052 (the same 400). Nothing else red.",
+      "mutatedAnswer": "a close with deliveries outstanding asks for a reason instead of refusing",
+      "storedDefect": "none",
+      "safety": "as M-PCLg (every deep answer a 400 before the transition)"
+    },
+    {
+      "name": "M-PCLgb the short-close reason only (variant of M-PCLg; HEAD only)",
+      "guard": "closeOrder's reason refusal (purchase-order.service.js:642)",
+      "e6": "complement of guard 1 (HEAD only; run, not tallied)",
+      "headOnly": "HR-C8",
+      "file": "backend/src/services/purchase-order.service.js",
+      "from": "  if (outstanding.length && !trimOrNull(reason)) {",
+      "to": "  if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 642
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 642
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP5.mutations.poCloseTransitions",
+        "WP5.O2.forceNoReason"
+      ],
+      "catchers": [
+        "O2.J.issued.forceNoReason",
+        "O2.J.forceNoReason",
+        "O2.forceNoReason.087",
+        "O2.forceNoReason.052"
+      ],
+      "collateral": [
+        "O2.J.issued.forceWithReason"
+      ],
+      "collateralWhy": {
+        "O2.J.issued.forceWithReason": "J7: J-ISS was closed by the force close without a reason (200), so the force close with a reason meets a closed order: 409 PO_TRANSITION_INVALID. Not in the proof's COLLATERAL table (which names only the deep probes for M-PCLgb): derived here from jCloses (wp5-supply-proof.js:1377-1381)."
+      },
+      "shifts": [],
+      "unchanged": [
+        "O2.J.closeOutstanding",
+        "O2.J.issued.closeOutstanding",
+        "O2.closeOutstanding.087",
+        "O2.closeOutstanding.052",
+        "O2.J.issued.receiveAfterClose",
+        "O2.J.ack.forceWithReason"
+      ],
+      "unchangedWhy": "the outstanding refusal (:633) is kept: every close without force is 409 PO_CLOSE_OUTSTANDING. J-ISS is closed either way before its receipt (409 PO_NOT_ISSUED).",
+      "expectVerdict": "CAUGHT: the four catchers PASS in the baseline, FAIL under the mutant",
+      "expect": "J7: J-C force without a reason 409 PO_TRANSITION_INVALID: O2.J.forceNoReason FAIL; J-ISS force without a reason 200 closed: O2.J.issued.forceNoReason FAIL; the deep PO-C / PO-O2 409 PO_TRANSITION_INVALID, still partial: O2.forceNoReason.087 / .052 FAIL. Collateral FAIL: O2.J.issued.forceWithReason. Nothing else red.",
+      "mutatedAnswer": "an order with deliveries outstanding closes short without a reason",
+      "storedDefect": "on J only: J-ISS closed short without a reason",
+      "safety": "as M-PCLg"
+    }
+  ]
+}

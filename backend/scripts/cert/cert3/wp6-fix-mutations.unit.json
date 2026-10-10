@@ -1,0 +1,37 @@
+{
+ "note": "WP-6 fixes, unit side (mutate-multi.js list key 'wp6fix-unit', proof null). Runs only on a fix tree, against the suite the fix adds or rewrites. Mocked: not evidence (plan section 1.4). No WP-6 fix exists at HEAD, so every entry is pending (no from / to, not run). Run one id per invocation, quoted and with a trailing comma (\"--only=M-CAP,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-DRY would also run M-DRYr, M-DRYs and M-DRYm; M-CAP also M-CAPq, M-CAPa and M-CAPi; M-ORIG also M-ORIG2 and M-ORIG4), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists.",
+ "requires": "the fix's own unit case (a fix batch may add unit tests, plan section 0.0); its title reconciled with the fix diff before the run; until then pending.",
+ "mutations": [],
+ "pending": [
+  {
+   "name": "UM-BR1 (pending) the BR-ORDER fix reverted",
+   "requires": "the fix's own unit case (a fix batch may add unit tests, plan section 0.0); its title reconciled with the fix diff before the run; until then pending. Suite: src/services/__tests__/budget-revision.service.test.js.",
+   "live": "M-BR1 (pending): KA.B6.registerOrder"
+  },
+  {
+   "name": "UM-C14s (pending) the section column reverted",
+   "requires": "the fix's own unit case (a fix batch may add unit tests, plan section 0.0); its title reconciled with the fix diff before the run; until then pending. Suites: the parser's and boq.service.test.js.",
+   "live": "M-C14s (pending): KA.U5.B6X.sections"
+  },
+  {
+   "name": "UM-C14b (pending) the batching reverted",
+   "requires": "the fix's own unit case (a fix batch may add unit tests, plan section 0.0); its title reconciled with the fix diff before the run; until then pending. Suite: boq.service.test.js.",
+   "live": "M-C14b (pending): KA.U5.B6X.aiJobCalls"
+  },
+  {
+   "name": "UM-C14l (pending) the after-baseline refusal removed",
+   "requires": "the fix's own unit case (a fix batch may add unit tests, plan section 0.0); its title reconciled with the fix diff before the run; until then pending. Suite: boq.service.test.js.",
+   "live": "M-C14l (pending): KA.U5.B6X.aiAfterBaseline"
+  },
+  {
+   "name": "UM-C14d (pending) the dropped-row flag removed",
+   "requires": "the fix's own unit case (a fix batch may add unit tests, plan section 0.0); its title reconciled with the fix diff before the run; until then pending. Suite: boq.service.test.js.",
+   "live": "M-C14d (pending): KA.U2.omitB005"
+  },
+  {
+   "name": "UM-C17 (pending) the return-to-draft path removed",
+   "requires": "the fix's own unit case (a fix batch may add unit tests, plan section 0.0); its title reconciled with the fix diff before the run; until then pending. Suite: activity-boq-allocation.service.test.js.",
+   "live": "M-C17 (pending): KA.A2.resubmitRejected"
+  }
+ ]
+}

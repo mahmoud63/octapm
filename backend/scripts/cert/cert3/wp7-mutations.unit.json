@@ -1,0 +1,92 @@
+{
+  "note": "WP-7 unit side (mutate-multi.js list key 'wp7-unit', proof null: jest --runTestsByPath the named suite under the proof lock, no database). Mocked-Prisma suites are not certification evidence (plan section 1.4): these entries only show that the unit gate also turns red beside the live catch. Unit catchers exist only for three OPTIONAL rule mutants (M-WF, M-PROOF, M-CUM), all in src/services/__tests__/eot-traceability.test.js (untouched by the HR-X1 batch); the section 6.2 guards M-70 and M-STAT have none (noUnitCatcher). Each entry's tests are the titles that must fail; every title was checked to exist in its suite at HEAD (mutsyntax-wp7.js). The unmutated suite must pass first (WP7-RUN-PLAN.md section 7.4). Run one id per invocation, quoted and with a trailing comma (\"--only=M-STAT,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-70 would also match an M-70b; WP-4's M-LOCK also M-LOCKa and M-LOCKb), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists.",
+  "noUnitCatcher": [
+    "M-70 (the 70% boundary), M-ALLOW, M-NC: no unit suite exercises listWeatherDelays (weather.service.js has no __tests__ suite; project-route-guards.test.js mocks the whole service; the daily-log weather case mocks weatherService). Live catchers W.T7.a20at14 / a30at21 / a10at7 (and the optional ones' W.T7.*) only.",
+    "M-STAT (the approved-EOT lock, status half): no case moves an approved claim. 'submits EOT claims through the workflow endpoint and blocks direct approvals' asks draft -> approved without an action on an existing status draft, which M-STAT leaves guarded; 'approves submitted EOT claims with revised completion recommendation metadata' starts from submitted. Live catchers T1.T7.patchApprovedToDraft / rejectApproved only.",
+    "M-REASON: no case sends a rejection without a reason: eot-traceability.test.js never calls rejectEotClaim; module-action-permissions.test.js mocks eot.service and sends a reason. Live catcher T1.T7.rejectWithoutReason only.",
+    "M-70b, M-REASONsvc: equivalent, not run (their lists' equivalent[])."
+  ],
+  "mutations": [
+    {
+      "name": "UM-WF the workflow guard removed (unit side of the optional M-WF)",
+      "file": "backend/src/services/eot.service.js",
+      "from": "  if (workflowAction && workflowAction === expectedAction) return;",
+      "to": "  return;",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 275
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 275
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/eot-traceability.test.js",
+      "live": "M-WF (wp7-mutations.optional.json): T1.T7.approveDraft, T1.T7.patchStatusDraftOnSubmitted, T1.T7.patchApprovedToDraft, T1.T7.rejectApproved",
+      "tests": [
+        "submits EOT claims through the workflow endpoint and blocks direct approvals"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "The direct updateEotClaim({ status: approved }) with no workflow action (:356-364) no longer rejects: the throw at :277 is unreachable under the mutant, so the .rejects.toMatchObject({ code: EOT_WORKFLOW_ACTION_REQUIRED }) assertion fails whatever the call then does. The other four cases pass their actions or create drafts."
+    },
+    {
+      "name": "UM-PROOF the submission proof removed (unit side of the optional M-PROOF)",
+      "file": "backend/src/services/eot.service.js",
+      "from": "  if (activityCount > 0 && documentCount > 0) return;",
+      "to": "  return;",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 246
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 246
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/eot-traceability.test.js",
+      "live": "M-PROOF (wp7-mutations.optional.json): T1.T7.submitWithoutProof",
+      "tests": [
+        "rejects submitted EOT claims without affected activities and supporting documents"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "createEotClaim with status submitted and no links or documents (:183-200) no longer rejects with EOT_IMPACT_PROOF_REQUIRED (its only thrower, :248, is unreachable) and reaches eotClaim.create: both the .rejects assertion and expect(create).not.toHaveBeenCalled() fail. The other cases carry their proof or stay draft."
+    },
+    {
+      "name": "UM-CUM the cumulative ignores earlier approvals (unit side of the optional M-CUM)",
+      "file": "backend/src/services/eot.service.js",
+      "from": "    priorApprovedDays + (Number(eotDaysGranted) || 0);",
+      "to": "    0 + (Number(eotDaysGranted) || 0);",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 318
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 318
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/eot-traceability.test.js",
+      "live": "M-CUM (wp7-mutations.optional.json): T3.T7.approve",
+      "tests": [
+        "approves submitted EOT claims with revised completion recommendation metadata"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "The mocked prior approval of 3 days (:391) is dropped: the update carries cumulativeApprovedEotDays 2 and 2027-01-02 instead of 5 and 2027-01-05 (:425-426): the toHaveBeenCalledWith assertion fails."
+    }
+  ]
+}

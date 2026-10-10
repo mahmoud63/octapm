@@ -1,0 +1,368 @@
+{
+  "proof": "scripts/cert/cert3/wp7-eot-proof.js",
+  "guards": "Plan section 4 WP-7's rules (:839-842, :859) as OPTIONAL rule mutants: answer book WP7.mutations.ruleMutants (commercial.js :2026); proof OPTIONAL_CATCHERS (:601-608). Integration-owner adjudication C:/Temp/octapm-cert/scratch/wp7/WP7-ADJUDICATION.md Q5: \"Run them, untallied, and record them\". Plan section 0.0 item 5: no widening of section 6.2, so none of these is an E6 entry. M-REASONsvc (the service half of M-REASON alone) is equivalent through the API (equivalent[] below, not run).",
+  "reconciled": "Derived read-only on 2026-10-10 from the installed proof scripts/cert/cert3/wp7-eot-proof.js at bfa6287 (55 fixed checks + G.5xx; CATCHERS :596-599, OPTIONAL_CATCHERS :601-608, COLLATERAL :610-619, FIX_CATCHERS :625-628; the T7 choreography main() :1922-1935: W1-W7 -> E1-E3 -> E4 -> E5 -> P0 -> P1-P4 -> CF) and the product files at HEAD 2a2efd2 (backend/src identical to f599e67). Not observed: nothing was run. Catchers equal the proof's OPTIONAL_CATCHERS. Where this list names collateral the proof's descriptive COLLATERAL table does not (M-WF: T1.T7.rejectWithoutReason; M-PROOF: T1.T7.patchStatusSubmitted), the derivation is in collateralWhy (WP7-RUN-PLAN.md section 13.3).",
+  "runsOn": "HEAD, right after the section 6.2 list, against the same baseline (results/cert3/wp7-eot-proof.baseline-head.json), judged by wp7-mutation-evidence.js --lists=optional. Their verdicts are recorded with the WP-7 proof and in the journal; no E6 count.",
+  "anchors": "anchors.head: count and line of each edit on the worktree (every touched product file CRLF only, 0 bare LF; every anchor is one line, so line endings never enter a from). anchors.postHrx1Sim: the same with the WP-2 HR-X1 r3c simulated copies of eot.service.js and weather.service.js overlaid (LF-only simulation; HRX1-FIX-PLAN.r3c.md): every anchor survives, only lines after the first collapsed syncEvidenceReferences call move. Re-count on the real tree after each WP-2 batch lands and before each run (mutsyntax-wp7.js --tree=<worktree>): the runner applies an edit only when its from occurs exactly once.",
+  "note": "Fields as in wp4-mutations.commercial.json: catchers must read FAIL (ran and failed, not \"not run\") under the mutant and PASS in the baseline; collateral are other checks expected (or allowed) to go red, each with collateralWhy; shifts are non-red status changes expected under the mutant; unchanged names checks the derivation says must stay as at baseline (reported, not judged); expectVerdict is the evidence checker's verdict, not the runner's; catchersAfterFix names catchers a later fix adds (the proof's CATCHERS and this list gain them in that fix's batch, then the entry is re-run against that baseline). Run one id per invocation, quoted and with a trailing comma (\"--only=M-STAT,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-70 would also match an M-70b; WP-4's M-LOCK also M-LOCKa and M-LOCKb), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists. Every mutant writes, if at all, only on the throwaways T7 / T7H; every deep probe stays a read (safety).",
+  "equivalent": [
+    {
+      "name": "M-REASONsvc (EQUIVALENT through the API, not run) the service's reason check alone removed",
+      "file": "backend/src/services/eot.service.js",
+      "from": "  if (!rejectionReason) {",
+      "to": "  if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1103
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 1091
+          }
+        ]
+      },
+      "reason": "rejectEotClaim is reached only through POST /eot/:claimId/reject and /disapprove (routes/eot.js:219-251), both behind rejectEotValidators (:233-237), whose reason notEmpty answers 400 VALIDATION_ERROR first; nothing else calls it (grep: routes/eot.js:221, the OpenAPI operation id only). So the service half alone changes no API answer (book WP7.T1.rejectWithoutReason note: \"The service's APPROVAL_WORKFLOW_REASON_REQUIRED is not reachable through the route\"), and no unit test calls rejectEotClaim (wp7-mutations.unit.json noUnitCatcher). That is why M-REASON mutates both halves."
+    }
+  ],
+  "mutations": [
+    {
+      "name": "M-WF the workflow guard removed: every status change allowed",
+      "guard": "plan :839 \"EOT transitions go only through the workflow actions\" (assertEotWorkflowTransition, eot.service.js:259-286)",
+      "e6": "OPTIONAL rule mutant (WP7ADJ Q5, the WP-3 Q10 precedent): run, recorded, never tallied for E6",
+      "file": "backend/src/services/eot.service.js",
+      "from": "  if (workflowAction && workflowAction === expectedAction) return;",
+      "to": "  return;",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 275
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 275
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP7.mutations.ruleMutants",
+        "WP7.T1.approveDraft",
+        "WP7.T1.patchStatusDraftOnSubmitted",
+        "WP7.T1.patchApprovedToDraft",
+        "WP7.T1.rejectApproved"
+      ],
+      "catchers": [
+        "T1.T7.approveDraft",
+        "T1.T7.patchStatusDraftOnSubmitted",
+        "T1.T7.patchApprovedToDraft",
+        "T1.T7.rejectApproved"
+      ],
+      "collateral": [
+        "T1.T7.rejectWithoutReason"
+      ],
+      "collateralWhy": {
+        "T1.T7.rejectWithoutReason": "E5 order (t7States): T1-B is submitted, then PATCHed {status: draft}, which the mutant lets through (200, T1-B draft: patchStatusDraftOnSubmitted's catch). The PM's reject with {} is still refused by the route (400 VALIDATION_ERROR naming reason), but the check also requires T1-B to stay submitted, and it reads draft: FAIL. Not in the proof's COLLATERAL table (it says \"the T1 claims move\"): derived here from t7States (wp7-eot-proof.js:1453-1463)."
+      },
+      "shifts": [],
+      "unchanged": [
+        "T1.T7.rejectWithReason",
+        "T1.T7.resubmitRejected",
+        "T1.T7.submitWithoutProof",
+        "T1.T7.patchStatusSubmitted",
+        "T1.T7.createApproved",
+        "KA.T2.plannerPatchApproved",
+        "T2.T7.approve",
+        "T3.T7.approve",
+        "CF.HRC10"
+      ],
+      "unchangedWhy": "T1-B (draft under the mutant) is then rejected with a reason: draft -> rejected allowed, 200, rejected, the reason stored, rejectedBy the PM (rejectWithReason green); then resubmitted with SUBMIT (green). The submission proof is checked after the transition and still refuses (submitWithoutProof green); the route's status validators (POST draft|submitted, PATCH draft only) still answer first (createApproved, patchStatusSubmitted green). The approvals run before E5 and use their actions. KA.T2.plannerPatchApproved sends no status.",
+      "expectVerdict": "CAUGHT: the four named catchers PASS in the baseline and FAIL under the mutant; T1.T7.rejectWithoutReason named collateral",
+      "expect": "E3: E-LK1 PATCHed to draft (200) and E-LK2 rejected (200): T1.T7.patchApprovedToDraft and T1.T7.rejectApproved FAIL. E5: T1-B PATCHed submitted -> draft (200): T1.T7.patchStatusDraftOnSubmitted FAIL, and so T1.T7.rejectWithoutReason FAIL (T1-B reads draft, collateral); T1-C approved from draft (200, approved, its cumulative set): T1.T7.approveDraft FAIL. Nothing else red; exit 2.",
+      "mutatedAnswer": "every status change accepted without its workflow action",
+      "storedDefect": "on T7 only: E-LK1 draft, E-LK2 rejected, T1-B draft then rejected then submitted, T1-C approved from draft; T7 archived",
+      "safety": "Every write of the proof is on T7 or T7H (company 087, archived by the proof's cleanup, which also runs after a section error). The deep sections run first and only read: 087-COM (GET /eot, GET /projects, GET /weather-delays, POST /eot/calculate, which writes nothing under any WP-7 mutant: calculateEot reads the project and its activities and returns figures; the proof asserts 087-COM's claims, weather delays and audit events unchanged across it, WP7ADJ Q3), 087-FLD and 052-FLD (GET reads only, WP7ADJ Q7). No deep write."
+    },
+    {
+      "name": "M-PROOF the submission proof removed",
+      "guard": "plan :839 \"Proof is required: at least one affected activity and one document\" (assertSubmissionProof, eot.service.js:214-257)",
+      "e6": "OPTIONAL rule mutant (WP7ADJ Q5, the WP-3 Q10 precedent): run, recorded, never tallied for E6",
+      "file": "backend/src/services/eot.service.js",
+      "from": "  if (activityCount > 0 && documentCount > 0) return;",
+      "to": "  return;",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 246
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 246
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP7.mutations.ruleMutants",
+        "WP7.T1.submitWithoutProof.noDocument",
+        "WP7.T1.submitWithoutProof.noActivity"
+      ],
+      "catchers": [
+        "T1.T7.submitWithoutProof"
+      ],
+      "collateral": [
+        "T1.T7.patchStatusSubmitted"
+      ],
+      "collateralWhy": {
+        "T1.T7.patchStatusSubmitted": "E5 order (t7States): the no-document draft (nd) is submitted first, which the mutant accepts (200, nd submitted: submitWithoutProof's catch). patchStatusSubmitted then PATCHes nd {status: submitted}: the route still refuses (400 VALIDATION_ERROR naming status), but the check also requires nd to stay draft, and it reads submitted: FAIL. Not in the proof's COLLATERAL table (it says \"none\"): derived here from t7States (wp7-eot-proof.js:1437-1452)."
+      },
+      "shifts": [],
+      "unchanged": [
+        "T1.T7.approveDraft",
+        "T1.T7.patchStatusDraftOnSubmitted",
+        "T1.T7.rejectWithoutReason",
+        "T2.T7.approve",
+        "T3.T7.approve",
+        "T1.T7.patchApprovedToDraft",
+        "T1.T7.rejectApproved"
+      ],
+      "unchangedWhy": "Every other submission or approval in the proof carries its activity and its own document (draftWithProof, E-T2 / E-T3 with S.T7.evidence), so the proof check was never what answered them; approveDraft is refused by the transition check (draft -> approved has no action) before the proof is read.",
+      "expectVerdict": "CAUGHT: T1.T7.submitWithoutProof PASS in the baseline, FAIL under the mutant; T1.T7.patchStatusSubmitted named collateral",
+      "expect": "E5: both drafts without proof submit (200, submitted) instead of 400 EOT_IMPACT_PROOF_REQUIRED {1, 0} / {0, 1}: T1.T7.submitWithoutProof FAIL; nd then reads submitted when patchStatusSubmitted expects draft: T1.T7.patchStatusSubmitted FAIL (collateral). Nothing else red; exit 2.",
+      "mutatedAnswer": "a claim submitted with no affected activity or no supporting document",
+      "storedDefect": "on T7 only: two claims submitted without proof; T7 archived",
+      "safety": "Every write of the proof is on T7 or T7H (company 087, archived by the proof's cleanup, which also runs after a section error). The deep sections run first and only read: 087-COM (GET /eot, GET /projects, GET /weather-delays, POST /eot/calculate, which writes nothing under any WP-7 mutant: calculateEot reads the project and its activities and returns figures; the proof asserts 087-COM's claims, weather delays and audit events unchanged across it, WP7ADJ Q3), 087-FLD and 052-FLD (GET reads only, WP7ADJ Q7). No deep write."
+    },
+    {
+      "name": "M-CUM the cumulative ignores earlier approvals",
+      "guard": "plan :841 \"Approval records cumulative approved days\" (buildApprovedCompletionRecommendation, eot.service.js:288-327)",
+      "e6": "OPTIONAL rule mutant (WP7ADJ Q5, the WP-3 Q10 precedent): run, recorded, never tallied for E6",
+      "file": "backend/src/services/eot.service.js",
+      "from": "    priorApprovedDays + (Number(eotDaysGranted) || 0);",
+      "to": "    0 + (Number(eotDaysGranted) || 0);",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 318
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 318
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP7.mutations.ruleMutants",
+        "WP7.T3.cumulativeApprovedEotDays",
+        "WP7.T3.revisedCompletionRecommendation"
+      ],
+      "catchers": [
+        "T3.T7.approve"
+      ],
+      "collateral": [],
+      "shifts": [],
+      "unchanged": [
+        "T2.T7.approve",
+        "KA.T2.plannerPatchApproved",
+        "COM.stored.eotFigures",
+        "COM.live.claims",
+        "CF.HRC10"
+      ],
+      "unchangedWhy": "E-T2 is approved first (0 prior + 10 = 10 either way). KA.T2.plannerPatchApproved's PATCH keeps the status, so no approval recommendation is recomputed (cumulative 10 as at baseline, today). 087-COM's cumulatives are stored by the build and read, never recomputed. CF.HRC10's EOT-REC-2 observation (the approval's 2027-07-15 against the calculation's 2027-07-05) is recorded, never classified.",
+      "expectVerdict": "CAUGHT: T3.T7.approve PASS in the baseline, FAIL under the mutant",
+      "expect": "E1: E-T3 is approved with cumulativeApprovedEotDays 5 and revisedCompletionRecommendation 2027-07-05 instead of 15 / 2027-07-15 (E-T2 still 10 / 2027-07-10): T3.T7.approve FAIL. Nothing else red; exit 2.",
+      "mutatedAnswer": "each approval records only its own days (E-T3: 5, 2027-07-05)",
+      "storedDefect": "on T7 only: E-T3 (and E-LK1 / E-LK2) store their own days as the cumulative; T7 archived",
+      "safety": "Every write of the proof is on T7 or T7H (company 087, archived by the proof's cleanup, which also runs after a section error). The deep sections run first and only read: 087-COM (GET /eot, GET /projects, GET /weather-delays, POST /eot/calculate, which writes nothing under any WP-7 mutant: calculateEot reads the project and its activities and returns figures; the proof asserts 087-COM's claims, weather delays and audit events unchanged across it, WP7ADJ Q3), 087-FLD and 052-FLD (GET reads only, WP7ADJ Q7). No deep write."
+    },
+    {
+      "name": "M-ALLOW the project allowance ignored (always 20)",
+      "guard": "plan :842 \"allowance = weatherAllowanceDays (or 20)\" (listWeatherDelays, weather.service.js:161)",
+      "e6": "OPTIONAL rule mutant (WP7ADJ Q5, the WP-3 Q10 precedent): run, recorded, never tallied for E6",
+      "file": "backend/src/services/weather.service.js",
+      "from": "  const allowance = Number(project.weatherAllowanceDays) || 20;",
+      "to": "  const allowance = 20;",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 161
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 161
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP7.mutations.ruleMutants",
+        "WP7.weather.allowance30.at20.consumedPct",
+        "WP7.weather.allowance30.at21.warning",
+        "WP7.weather.allowance10.at6.warning",
+        "WP7.weather.allowance10.at7.warning"
+      ],
+      "catchers": [
+        "W.T7.a30at20",
+        "W.T7.a30at21",
+        "W.T7.a10at6",
+        "W.T7.a10at7"
+      ],
+      "collateral": [],
+      "shifts": [],
+      "unchanged": [
+        "W.T7.a20at13",
+        "W.T7.a20at14",
+        "W.T7.nonContractual10",
+        "KA.W.T7.allowanceZero",
+        "KA.W.T7H.half28",
+        "COM.live.weatherDefault",
+        "FLD.087.allowance",
+        "KA.FLD.087.live",
+        "KA.FLD.052.live",
+        "CF.HRC11"
+      ],
+      "unchangedWhy": "Every other register the proof reads is at allowance 20 already: T7 W1-W3 and W7, T7H, 087-COM (the column default), 087-FLD and 052-FLD (20 explicit). KA.W.T7.allowanceZero reads allowance 20 today either way (Number(0) || 20; BLOCKED), and CF.HRC11's zero-allowance item reads that allowance (present).",
+      "expectVerdict": "CAUGHT: the four named catchers PASS in the baseline and FAIL under the mutant",
+      "expect": "T7 at allowance 30 (W4, W4b) and 10 (W5, W5b) reads allowance 20: W4 20 of 20 = 100%, warning true, remaining 0; W4b 105%; W5 30%; W5b 35%, warning false: W.T7.a30at20, W.T7.a30at21, W.T7.a10at6 and W.T7.a10at7 FAIL. Nothing else red; exit 2.",
+      "mutatedAnswer": "the register always against 20 days",
+      "storedDefect": "none: computed at read",
+      "safety": "Every write of the proof is on T7 or T7H (company 087, archived by the proof's cleanup, which also runs after a section error). The deep sections run first and only read: 087-COM (GET /eot, GET /projects, GET /weather-delays, POST /eot/calculate, which writes nothing under any WP-7 mutant: calculateEot reads the project and its activities and returns figures; the proof asserts 087-COM's claims, weather delays and audit events unchanged across it, WP7ADJ Q3), 087-FLD and 052-FLD (GET reads only, WP7ADJ Q7). No deep write."
+    },
+    {
+      "name": "M-NC non-contractual days counted",
+      "guard": "plan :859 \"A non-contractual 10 days adds nothing\" (listWeatherDelays, weather.service.js:162-165)",
+      "e6": "OPTIONAL rule mutant (WP7ADJ Q5, the WP-3 Q10 precedent): run, recorded, never tallied for E6",
+      "file": "backend/src/services/weather.service.js",
+      "from": "    if (!row.contractual) return sum;",
+      "to": "    if (false) return sum;",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 163
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 163
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP7.mutations.ruleMutants",
+        "WP7.weather.nonContractual10",
+        "WP7.weather.allowance30.at20.consumedPct",
+        "WP7.weather.allowance30.at21.warning",
+        "WP7.weather.allowance10.at6.warning",
+        "WP7.weather.allowance10.at7.warning"
+      ],
+      "catchers": [
+        "W.T7.nonContractual10",
+        "W.T7.a30at20",
+        "W.T7.a30at21",
+        "W.T7.a10at6",
+        "W.T7.a10at7"
+      ],
+      "collateral": [
+        "KA.W.T7.allowanceZero",
+        "KA.FLD.087.live",
+        "KA.FLD.052.live"
+      ],
+      "collateralWhy": {
+        "KA.W.T7.allowanceZero": "W6 on T7: every row counted, WR-6 6 + WR-7 7 + WR-1 1 + WN-10 10 + WR-6b 6 + WR-1b 1 = 31 of 20 (155%, remaining 0): neither the value (allowance 0, 0%) nor today (20, 7, 35%): wrong, FAIL (named by the proof's COLLATERAL table).",
+        "KA.FLD.087.live": "087-FLD's live register counts its build's non-contractual 10: 22 = 12 + 10 (110%, warning true): neither value nor today: wrong, FAIL (a read; nothing written).",
+        "KA.FLD.052.live": "052-FLD runs 087-FLD's record set: 22, 110%, warning true: wrong, FAIL (the 052 planner's read only)."
+      },
+      "shifts": [],
+      "unchanged": [
+        "W.T7.a20at13",
+        "W.T7.a20at14",
+        "COM.live.weatherDefault",
+        "KA.W.T7H.half28",
+        "PROMO.T7.feeds",
+        "KA.PROMO.T7.race",
+        "KA.F4.T7.sitePromotion",
+        "KA.FLD.087.stored",
+        "KA.FLD.052.stored",
+        "CF.HRC11"
+      ],
+      "unchangedWhy": "W1 and W2 come before WN-10 exists; 087-COM has one contractual row (WD-1); T7H's rows are all contractual; the promotion checks read contractualUsed deltas of contractual rows (+1, +2, +1 as at baseline); the stored moments are build records, not recomputed. CF.HRC11's zero-allowance item reads the allowance only (20: present), so its classification stays CONFIRMED.",
+      "expectVerdict": "CAUGHT: the five named catchers PASS in the baseline and FAIL under the mutant; the three named known answers read wrong (collateral)",
+      "expect": "W3: contractualUsed 24 instead of 14 (the month's nonContractual still 10): W.T7.nonContractual10 FAIL; W4 30 of 30 = 100%, W4b 31 (103.33%), W5 and W5b 31 of 10: W.T7.a30at20, a30at21, a10at6, a10at7 FAIL. Collateral wrong (FAIL): KA.W.T7.allowanceZero (31, 155%), KA.FLD.087.live and KA.FLD.052.live (22, 110%). Nothing else red; exit 2.",
+      "mutatedAnswer": "non-contractual days counted against the allowance",
+      "storedDefect": "none: computed at read",
+      "safety": "Every write of the proof is on T7 or T7H (company 087, archived by the proof's cleanup, which also runs after a section error). The deep sections run first and only read: 087-COM (GET /eot, GET /projects, GET /weather-delays, POST /eot/calculate, which writes nothing under any WP-7 mutant: calculateEot reads the project and its activities and returns figures; the proof asserts 087-COM's claims, weather delays and audit events unchanged across it, WP7ADJ Q3), 087-FLD and 052-FLD (GET reads only, WP7ADJ Q7). No deep write. The two FLD reads go wrong under this mutant but stay reads."
+    },
+    {
+      "name": "M-REASON a rejection without a reason accepted (route and service)",
+      "guard": "plan :840 \"Rejection needs a reason\" (routes/eot.js:233-237 rejectEotValidators; eot.service.js:1102-1109)",
+      "e6": "OPTIONAL rule mutant (WP7ADJ Q5, the WP-3 Q10 precedent): run, recorded, never tallied for E6",
+      "file": "backend/src/routes/eot.js",
+      "from": "  body(\"reason\").isString().trim().notEmpty().isLength({ max: 2000 }),",
+      "to": "  body(\"reason\").optional({ nullable: true }),",
+      "also": [
+        {
+          "file": "backend/src/services/eot.service.js",
+          "from": "  if (!rejectionReason) {",
+          "to": "  if (false) {"
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 235
+          },
+          {
+            "count": 1,
+            "line": 1103
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 235
+          },
+          {
+            "count": 1,
+            "line": 1091
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP7.mutations.ruleMutants",
+        "WP7.T1.rejectWithoutReason"
+      ],
+      "catchers": [
+        "T1.T7.rejectWithoutReason"
+      ],
+      "collateral": [],
+      "shifts": [],
+      "unchanged": [
+        "T1.T7.rejectWithReason",
+        "T1.T7.resubmitRejected",
+        "T1.T7.rejectApproved",
+        "T1.T7.approveDraft"
+      ],
+      "unchangedWhy": "T1-B, rejected without a reason under the mutant, is then rejected again with one: rejected -> rejected returns at :264 (same state), the update stores the reason as rejectionReason (:887-892) and keeps rejectedBy the PM: 200, rejected, the reason, the PM (rejectWithReason green, the proof's COLLATERAL note); resubmitted with SUBMIT (green). rejectApproved sends a reason and is refused by the transition check.",
+      "expectVerdict": "CAUGHT: T1.T7.rejectWithoutReason PASS in the baseline, FAIL under the mutant",
+      "expect": "E5: the PM's reject of T1-B with {} answers 200 (rejected, no reason) instead of 400 VALIDATION_ERROR naming reason with T1-B still submitted: T1.T7.rejectWithoutReason FAIL. Nothing else red (G.5xx stays green: rejectionReason is a nullable column); exit 2.",
+      "mutatedAnswer": "a claim rejected with no reason",
+      "storedDefect": "on T7 only: T1-B rejected without a reason (then with one, then resubmitted); T7 archived",
+      "safety": "Every write of the proof is on T7 or T7H (company 087, archived by the proof's cleanup, which also runs after a section error). The deep sections run first and only read: 087-COM (GET /eot, GET /projects, GET /weather-delays, POST /eot/calculate, which writes nothing under any WP-7 mutant: calculateEot reads the project and its activities and returns figures; the proof asserts 087-COM's claims, weather delays and audit events unchanged across it, WP7ADJ Q3), 087-FLD and 052-FLD (GET reads only, WP7ADJ Q7). No deep write."
+    }
+  ]
+}

@@ -1,0 +1,242 @@
+{
+ "proof": "scripts/cert/cert3/wp6-boq-proof.js",
+ "guards": "Plan section 1.4: a fix is followed by a mutation that puts the defect back. WP-6's fixes are all still to come: BR-ORDER (the section 5 defect fix :1113, only if the primary run rates it P1), HR-C14 and HR-C17 (owner decisions O1, O3). Their mutants are the proof's FIX_CATCHERS (:633-636): M-BR1, M-C14s, M-C14b, M-C14l, M-C14d, M-C17, in pending[] below with their catchers and the HEAD loci their fix would change, never run until the fix lands. M-C14q (HR-C14's quota-only-for-AI change reverted) has no catcher (L121 a TEST GAP by the integration-owner ruling of 2026-10-10): notRun[]. None of these is a section 6.2 (E6) entry.",
+ "requires": "the fix commit of the rule or defect the entry names, its FIXES entry set in the proof, the unmutated full run exiting 0 on that code (results/cert3/wp6-boq-proof.baseline.json; the final baseline, WP6-RUN-PLAN.md section 6.4). Then each entry's from / to are derived from the fix diff, the entry is moved from pending[] into mutations[], and mutsyntax-wp6.js --post-fix must find every from once on the fixed worktree.",
+ "anchors": "No fix exists at HEAD 2a2efd2 and no fix draft exists in the scratch folders (searched 2026-10-10), so no entry carries from / to and no anchors.head of 0 is recorded; each pending entry carries loci: the HEAD text its fix would change, counted once at HEAD (mutsyntax-wp6.js). When a fix draft or simulation exists, its edits go here with anchors.head 0 and their count on the draft copy, the WP-4 HR-C1 precedent.",
+ "note": "Fields as in wp6-mutations.boq.json. Judged by wp6-mutation-evidence.js against the post-fix baseline: a catcher here is a known answer, which must read PASS (its value) in that baseline; at HEAD it reads BLOCKED, so a fix entry judged on the HEAD baseline reads NO EVIDENCE by design. Run one id per invocation, quoted and with a trailing comma (\"--only=M-CAP,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-DRY would also run M-DRYr, M-DRYs and M-DRYm; M-CAP also M-CAPq, M-CAPa and M-CAPi; M-ORIG also M-ORIG2 and M-ORIG4), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists.",
+ "mutations": [],
+ "pending": [
+  {
+   "name": "M-BR1 (pending) the BR-ORDER fix reverted: createBudgetRevision back to the latest-effective running total",
+   "requires": "the BR-ORDER fix (budget-revision running totals, the section 5 defect fix :1113), made only if the WP-6 primary run's reproduction rates it P1 (WP6ADJ Q6: P1 if the stored cumulativeBudget reaches a financial calculation, export, report or forecast; compute on read preferred, so the 97 other companies' fingerprint does not move; any data remediation is owner question O2); its fix commit; FIXES['BR-ORDER'] and CONTRACT['BR-ORDER'].readOrStored set in the proof from the adjudicated fix plan; the unmutated full run exiting 0 on that code (results/cert3/wp6-boq-proof.baseline.json). No fix plan exists: from / to are the fix's, derived from its diff.",
+   "loci": [
+    {
+     "file": "backend/src/services/budget-revision.service.js",
+     "text": "  const baseline = toMoneyNumber(last?.cumulativeBudget ?? project.contractValue);",
+     "note": "createBudgetRevision's running total starts from the latest-effective approved revision (:125-130) and is stored at create (:154); a store-at-create fix recomputes in effective-date order after the create (recomputeCumulative, :23-38, already used on update and delete); M-BR1 removes that call",
+     "head": {
+      "count": 1,
+      "line": 130
+     }
+    },
+    {
+     "file": "backend/src/services/budget-revision.service.js",
+     "text": "      cumulativeBudget: addMoney(baseline, delta),",
+     "note": "the stored figure at create",
+     "head": {
+      "count": 1,
+      "line": 154
+     }
+    },
+    {
+     "file": "backend/src/services/budget-revision.service.js",
+     "text": "const listBudgetRevisions = async ({ orgId, projectId, contractValueReadable = true }) => {",
+     "note": "a compute-on-read fix (preferred, WP6ADJ Q6) derives each row's running total here in effective-date order; M-BR1 then serves the stored figure again",
+     "head": {
+      "count": 1,
+      "line": 59
+     }
+    }
+   ],
+   "catchers": [
+    "KA.B6.registerOrder"
+   ],
+   "collateral": [
+    "CF.BRorder"
+   ],
+   "collateralWhy": {
+    "CF.BRorder": "once BR-ORDER is fixed its confirm-first check is a defect check that must read REJECTED; under the mutant the stored running totals are out of order again: CONFIRMED, FAIL."
+   },
+   "expectVerdict": "CAUGHT once the fix lands: KA.B6.registerOrder reads today (BR-B 2,015,000.00, BR-A 2,010,000.00) where the fixed code reads its value (BR-B 2,005,000.00, BR-A 2,015,000.00)"
+  },
+  {
+   "name": "M-C14s (pending) the HR-C14 section column reverted (parser, row write, served row)",
+   "requires": "an owner decision on HR-C14 (O1; undecided, plan :1082), its implementation and fix commit, FIXES['HR-C14'] and CONTRACT['HR-C14'] (droppedRowFlagField, aiAfterBaselineAnswer, sectionField) set from the decision, the five HR-C14 known answers then value checks (DECIDED_RED), the unmutated full run exiting 0 on that code (results/cert3/wp6-boq-proof.baseline.json). No fix plan exists: from / to are the fix's.",
+   "loci": [
+    {
+     "file": "backend/src/services/boq/excel-parser.js",
+     "text": "const OPTIONAL_HEADERS = {",
+     "note": "the parser's optional columns (mapping_rule only at HEAD, :46-51): the fix adds section",
+     "head": {
+      "count": 1,
+      "line": 46
+     }
+    },
+    {
+     "file": "backend/src/services/boq.service.js",
+     "text": "function boqItemData(projectId, revisionId, item, overrides = {}) {",
+     "note": "the row write (:463-483): the fix writes BoqItem.section",
+     "head": {
+      "count": 1,
+      "line": 463
+     }
+    },
+    {
+     "file": "backend/src/services/boq.service.js",
+     "text": "function mapBoqItem(item, allocationTotals = null) {",
+     "note": "the served row (:1967-2012): the fix serves the section",
+     "head": {
+      "count": 1,
+      "line": 1967
+     }
+    }
+   ],
+   "catchers": [
+    "KA.U5.B6X.sections"
+   ],
+   "collateral": [
+    "CF.HRC14"
+   ],
+   "collateralWhy": {
+    "CF.HRC14": "decided HR-C14: CF.HRC14 must read REJECTED; the section item present again: FAIL."
+   },
+   "expectVerdict": "CAUGHT once HR-C14 is decided and implemented: KA.U5.B6X.sections reads today (one Unassigned group of 130) where the fixed code reads Substructure 50, Superstructure 50, Finishes 30"
+  },
+  {
+   "name": "M-C14b (pending) the HR-C14 batching reverted (runBoqActivityJob back to one prompt)",
+   "requires": "an owner decision on HR-C14 (O1; undecided, plan :1082), its implementation and fix commit, FIXES['HR-C14'] and CONTRACT['HR-C14'] (droppedRowFlagField, aiAfterBaselineAnswer, sectionField) set from the decision, the five HR-C14 known answers then value checks (DECIDED_RED), the unmutated full run exiting 0 on that code (results/cert3/wp6-boq-proof.baseline.json). No fix plan exists: from / to are the fix's.",
+   "loci": [
+    {
+     "file": "backend/src/services/boq.service.js",
+     "text": "    const prompt = buildBoqActivityPrompt(project, items);",
+     "note": "one prompt over every row (:1647); the fix sends batches of at most 60 by section",
+     "head": {
+      "count": 1,
+      "line": 1647
+     }
+    },
+    {
+     "file": "backend/src/services/boq.service.js",
+     "text": "    const message = await client.messages.create({",
+     "note": "the single AI call (:1649)",
+     "head": {
+      "count": 1,
+      "line": 1649
+     }
+    }
+   ],
+   "catchers": [
+    "KA.U5.B6X.aiJobCalls"
+   ],
+   "collateral": [
+    "CF.HRC14"
+   ],
+   "collateralWhy": {
+    "CF.HRC14": "decided HR-C14: the L131 item present again: FAIL."
+   },
+   "expectVerdict": "CAUGHT once HR-C14 is decided and implemented: KA.U5.B6X.aiJobCalls reads today (1 call of 130 rows) where the fixed code makes 3 calls of 50 / 50 / 30"
+  },
+  {
+   "name": "M-C14l (pending) the HR-C14 \"AI job refused after the baseline\" check removed",
+   "requires": "an owner decision on HR-C14 (O1; undecided, plan :1082), its implementation and fix commit, FIXES['HR-C14'] and CONTRACT['HR-C14'] (droppedRowFlagField, aiAfterBaselineAnswer, sectionField) set from the decision, the five HR-C14 known answers then value checks (DECIDED_RED), the unmutated full run exiting 0 on that code (results/cert3/wp6-boq-proof.baseline.json). No fix plan exists: from / to are the fix's.",
+   "loci": [
+    {
+     "file": "backend/src/services/boq.service.js",
+     "text": "async function runBoqActivityJob({ job, payload = {}, updateProgress }) {",
+     "note": "the job reads no baseline at HEAD (:1593-1660): the fix refuses (or skips, CONTRACT['HR-C14'].aiAfterBaselineAnswer) a locked bill before any write",
+     "head": {
+      "count": 1,
+      "line": 1593
+     }
+    },
+    {
+     "file": "backend/src/services/boq.service.js",
+     "text": "    setBoqJob(jobId, { step: 'Saving activities...', progress: 70 });",
+     "note": "where the job starts writing activities and draft allocations (:1662)",
+     "head": {
+      "count": 1,
+      "line": 1662
+     }
+    }
+   ],
+   "catchers": [
+    "KA.U5.B6X.aiAfterBaseline"
+   ],
+   "collateral": [
+    "CF.HRC14"
+   ],
+   "collateralWhy": {
+    "CF.HRC14": "decided HR-C14: the L130 item present again: FAIL."
+   },
+   "expectVerdict": "CAUGHT once HR-C14 is decided and implemented: KA.U5.B6X.aiAfterBaseline reads today (one new activity and one draft allocation on the locked bill) where the fixed code creates nothing"
+  },
+  {
+   "name": "M-C14d (pending) the HR-C14 dropped-row flag removed",
+   "requires": "an owner decision on HR-C14 (O1; undecided, plan :1082), its implementation and fix commit, FIXES['HR-C14'] and CONTRACT['HR-C14'] (droppedRowFlagField, aiAfterBaselineAnswer, sectionField) set from the decision, the five HR-C14 known answers then value checks (DECIDED_RED), the unmutated full run exiting 0 on that code (results/cert3/wp6-boq-proof.baseline.json). No fix plan exists: from / to are the fix's.",
+   "loci": [
+    {
+     "file": "backend/src/services/boq.service.js",
+     "text": "  const removed = existingItems",
+     "note": "the rows an upload leaves out (:395-400); at HEAD they stay active with no flag; the fix sets CONTRACT['HR-C14'].droppedRowFlagField on them",
+     "head": {
+      "count": 1,
+      "line": 395
+     }
+    }
+   ],
+   "catchers": [
+    "KA.U2.omitB005"
+   ],
+   "collateral": [
+    "CF.HRC14"
+   ],
+   "collateralWhy": {
+    "CF.HRC14": "decided HR-C14: the dropped-row item present again: FAIL."
+   },
+   "expectVerdict": "CAUGHT once HR-C14 is decided and implemented: KA.U2.omitB005 reads today (B-005 active, no flag) where the fixed code flags it"
+  },
+  {
+   "name": "M-C17 (pending) the HR-C17 return-to-draft path removed",
+   "requires": "an owner decision on HR-C17 (O3; undecided, plan :1085), its implementation and fix commit, FIXES['HR-C17'] and CONTRACT['HR-C17'].returnToDraftRoute set, the unmutated full run exiting 0 on that code. No fix plan exists: from / to are the fix's.",
+   "loci": [
+    {
+     "file": "backend/src/services/activity-boq-allocation.service.js",
+     "text": "        'Only draft allocations can be submitted',",
+     "note": "submitAllocation refuses every non-draft (:1445-1451): a rejected row cannot be submitted again",
+     "head": {
+      "count": 1,
+      "line": 1449
+     }
+    },
+    {
+     "file": "backend/src/services/activity-boq-allocation.service.js",
+     "text": "        'Only draft allocations can be edited',",
+     "note": "updateAllocation refuses every non-draft (:1291-1296)",
+     "head": {
+      "count": 1,
+      "line": 1295
+     }
+    }
+   ],
+   "catchers": [
+    "KA.A2.resubmitRejected"
+   ],
+   "collateral": [
+    "CF.HRC17"
+   ],
+   "collateralWhy": {
+    "CF.HRC17": "decided HR-C17: CF.HRC17 must read REJECTED; the rejected row stuck again: FAIL."
+   },
+   "expectVerdict": "CAUGHT once HR-C17 is decided and implemented: KA.A2.resubmitRejected reads today (submit 400 INVALID_ALLOCATION_STATUS, PATCH 400 ALLOCATION_NOT_EDITABLE) where the fixed code returns the row to draft and submits it"
+  }
+ ],
+ "notRun": [
+  {
+   "name": "M-C14q (NO CATCHER, not run) the HR-C14 quota-only-for-AI change reverted",
+   "requires": "an owner decision on HR-C14 (O1; undecided, plan :1082), its implementation and fix commit, FIXES['HR-C14'] and CONTRACT['HR-C14'] (droppedRowFlagField, aiAfterBaselineAnswer, sectionField) set from the decision, the five HR-C14 known answers then value checks (DECIDED_RED), the unmutated full run exiting 0 on that code (results/cert3/wp6-boq-proof.baseline.json). No fix plan exists: from / to are the fix's.",
+   "loci": [
+    {
+     "file": "backend/src/services/boq.service.js",
+     "text": "  if (!options.dryRun) await assertAiQuota(project.orgId);",
+     "note": "every real upload asks the AI quota before the file is parsed (:1174); the fix asks it only for the AI job",
+     "head": {
+      "count": 1,
+      "line": 1174
+     }
+    }
+   ],
+   "catchers": [],
+   "reason": "Its only catcher, KA.U6.nonAiImportAtLimit, was removed with the section BQ and the throwaway B6Q by the integration-owner ruling of 2026-10-10 (L121 a TEST GAP: driving company 011's AI counter to its limit would move one of the 97 fingerprinted companies on every no-flag run, and on 087 assertAiQuota returns before the counter). The proof's TEST_GAPS names it; WP-6 does not run it."
+  }
+ ]
+}

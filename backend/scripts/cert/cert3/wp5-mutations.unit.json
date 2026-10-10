@@ -1,0 +1,384 @@
+{
+  "note": "WP-5 unit side (mutate-multi.js list key 'wp5-unit', proof null: jest --runTestsByPath the named suite, no database). Mocked-Prisma suites are not certification evidence (plan section 1.4): these entries only show that the unit gate also turns red beside the live catch. They run on HEAD (no WP-2 batch, HR-C1 fix or WP-5 fix plan rewrites these suites). Each entry's tests are the titles that must fail; every title was checked to exist in its suite at HEAD (mutsyntax-wp5.js). The unmutated suites must pass first (WP5-RUN-PLAN.md section 7.4). Run one id per invocation, quoted and with a trailing comma (\"--only=M-AVL,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-AVL would also run M-AVLa and M-AVLb; M-PCL0 also M-PCL0i and M-PCL0k; M-PCLg also M-PCLga and M-PCLgb), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists.",
+  "noUnitCatcher": [
+    "M-PCL0k (acknowledged -> closed): no case closes an acknowledged order ('walks request -> approval -> issue -> acknowledgement' stops at acknowledged; every close case is issued). Live catcher O2.J.ack.forceWithReason only.",
+    "M-AVLb (the per-bin available check): no case issues from a named bin past its reservation; every unreserved over-issue is refused by postMovement's on-hand check first (inventory.service.js:743). Live catcher N1.J.issue41bin only.",
+    "INV_INSUFFICIENT_AVAILABLE itself: no suite asserts the code. UM-AVL and UM-AVLa reach the mutated branch through its INV_INSUFFICIENT_STOCK leg (reserved 0: the same if, :1031-1039), not through the reservation."
+  ],
+  "mutations": [
+    {
+      "name": "UM-PCL0 the HEAD close transitions dropped (unit side of M-PCL0)",
+      "file": "backend/src/services/purchase-order.service.js",
+      "from": "  [STATUS.ISSUED]: [STATUS.ACKNOWLEDGED, STATUS.CLOSED, STATUS.CANCELLED],",
+      "to": "  [STATUS.ISSUED]: [STATUS.ACKNOWLEDGED, STATUS.CANCELLED],",
+      "also": [
+        {
+          "file": "backend/src/services/purchase-order.service.js",
+          "from": "  [STATUS.ACKNOWLEDGED]: [STATUS.CLOSED, STATUS.CANCELLED],",
+          "to": "  [STATUS.ACKNOWLEDGED]: [STATUS.CANCELLED],"
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 121
+          },
+          {
+            "count": 1,
+            "line": 122
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 121
+          },
+          {
+            "count": 1,
+            "line": 122
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/purchase-order.service.test.js",
+      "live": "M-PCL0 (wp5-mutations.supply.json): O2.J.issued.forceWithReason, O2.J.ack.forceWithReason",
+      "tests": [
+        "close: likewise; issue and acknowledge leave the alerts alone"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "closeOrder of an issued order with every line received (:375-383) reaches transition, whose assertTransition (issued -> closed) now throws 409 PO_TRANSITION_INVALID: the awaited close rejects and the case fails. The other cases do not close an issued order through the transition."
+    },
+    {
+      "name": "UM-PCL0i the issued row only (unit side of M-PCL0i)",
+      "file": "backend/src/services/purchase-order.service.js",
+      "from": "  [STATUS.ISSUED]: [STATUS.ACKNOWLEDGED, STATUS.CLOSED, STATUS.CANCELLED],",
+      "to": "  [STATUS.ISSUED]: [STATUS.ACKNOWLEDGED, STATUS.CANCELLED],",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 121
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 121
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/purchase-order.service.test.js",
+      "live": "M-PCL0i: O2.J.issued.forceWithReason",
+      "tests": [
+        "close: likewise; issue and acknowledge leave the alerts alone"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "as UM-PCL0 (the case closes an issued order)."
+    },
+    {
+      "name": "UM-PCLg the close guard dropped (unit side of M-PCLg)",
+      "file": "backend/src/services/purchase-order.service.js",
+      "from": "  if (outstanding.length && !force) {",
+      "to": "  if (false) {",
+      "also": [
+        {
+          "file": "backend/src/services/purchase-order.service.js",
+          "from": "  if (outstanding.length && !trimOrNull(reason)) {",
+          "to": "  if (false) {"
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 633
+          },
+          {
+            "count": 1,
+            "line": 642
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 633
+          },
+          {
+            "count": 1,
+            "line": 642
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/purchase-order.service.test.js",
+      "live": "M-PCLg (wp5-mutations.complements.json): O2.J.issued.closeOutstanding, O2.J.closeOutstanding, O2.closeOutstanding.087 / .052",
+      "tests": [
+        "refuses to close an order with deliveries outstanding",
+        "closes short only when forced and told why"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "both cases mock an issued order 100 / 40 (:168-190): with both refusals gone the close goes on to the transition (issued -> closed allowed) and resolves or fails on another mock, never with PO_CLOSE_OUTSTANDING / PO_CLOSE_REASON_REQUIRED: both .rejects assertions fail."
+    },
+    {
+      "name": "UM-PCLga the outstanding refusal only (unit side of M-PCLga)",
+      "file": "backend/src/services/purchase-order.service.js",
+      "from": "  if (outstanding.length && !force) {",
+      "to": "  if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 633
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 633
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/purchase-order.service.test.js",
+      "live": "M-PCLga: O2.J.issued.closeOutstanding",
+      "tests": [
+        "refuses to close an order with deliveries outstanding"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "the close without force now meets the reason refusal: PO_CLOSE_REASON_REQUIRED, not PO_CLOSE_OUTSTANDING."
+    },
+    {
+      "name": "UM-PCLgb the short-close reason only (unit side of M-PCLgb)",
+      "file": "backend/src/services/purchase-order.service.js",
+      "from": "  if (outstanding.length && !trimOrNull(reason)) {",
+      "to": "  if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 642
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 642
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/purchase-order.service.test.js",
+      "live": "M-PCLgb: O2.J.issued.forceNoReason, O2.J.forceNoReason, O2.forceNoReason.087 / .052",
+      "tests": [
+        "closes short only when forced and told why"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "the forced close without a reason goes on to the transition (issued -> closed allowed): no PO_CLOSE_REASON_REQUIRED."
+    },
+    {
+      "name": "UM-AWD0 the award lock dropped (unit side of M-AWD0)",
+      "file": "backend/src/services/bid.service.js",
+      "from": "  if (pkg.status === STATUS.AWARDED) throw new HttpError(409, \"BID_PACKAGE_LOCKED\", \"The package is already awarded\");",
+      "to": "  if (false) throw new HttpError(409, \"BID_PACKAGE_LOCKED\", \"The package is already awarded\");",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1035
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 1035
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/bid.service.test.js",
+      "live": "M-AWD0: R2.J.confirmAgain",
+      "tests": [
+        "levels submitted bids with plugs, exports XLSX, soft-awards and creates the commitment SOV on confirmation"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "the last assertion (:297) confirms the awarded package again and expects BID_PACKAGE_LOCKED; with the pre-check gone the soft-awarded bid is no longer submitted (the store marks it awarded) and the call rejects with BID_NOT_FOUND: the toMatchObject fails."
+    },
+    {
+      "name": "UM-OVER RECEIPT_OVER_ORDER dropped (unit side of M-OVER)",
+      "file": "backend/src/services/goods-receipt.service.js",
+      "from": "      if (alreadyIn + acceptedQty + rejectedQty > ordered + QTY_EPSILON) {",
+      "to": "      if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 635
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 635
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/goods-receipt.service.test.js",
+      "live": "M-OVER: O4.J.overOrder",
+      "tests": [
+        "refuses to take more than was ordered"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "200 against 100 outstanding (:407-433) is no longer refused with RECEIPT_OVER_ORDER (the receipt goes on, or fails on another mock), and postMovement may be called: the case fails."
+    },
+    {
+      "name": "UM-AVL the available check dropped at both sites (unit side of M-AVL)",
+      "file": "backend/src/services/inventory.service.js",
+      "from": "  if (available < quantity) {",
+      "to": "  if (false) {",
+      "also": [
+        {
+          "file": "backend/src/services/inventory.service.js",
+          "from": "    if (round(Math.abs(delta)) > availableHere) {",
+          "to": "    if (false) {"
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1031
+          },
+          {
+            "count": 1,
+            "line": 756
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 1031
+          },
+          {
+            "count": 1,
+            "line": 756
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/inventory.service.test.js",
+      "live": "M-AVL: N1.J.issue41, N1.J.issue41bin",
+      "tests": [
+        "counts the whole warehouse before refusing an issue",
+        "refuses to issue stock that is not there"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "both issue more than the warehouse holds naming no bin (50 of 30; 25 of 10, reserved 0): the draw no longer refuses (:1031, its INV_INSUFFICIENT_STOCK leg) and issues what is there; the .rejects assertions fail. Not a test of INV_INSUFFICIENT_AVAILABLE (noUnitCatcher)."
+    },
+    {
+      "name": "UM-AVLa the warehouse-level check only (unit side of M-AVLa)",
+      "file": "backend/src/services/inventory.service.js",
+      "from": "  if (available < quantity) {",
+      "to": "  if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1031
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 1031
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/inventory.service.test.js",
+      "live": "M-AVLa: N1.J.issue41",
+      "tests": [
+        "counts the whole warehouse before refusing an issue",
+        "refuses to issue stock that is not there"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "as UM-AVL: the edit at :1031 alone makes both cases issue short instead of refusing."
+    },
+    {
+      "name": "UM-DCL the approval claim dropped (unit side of M-DCL)",
+      "file": "backend/src/services/direct-cost.service.js",
+      "from": "    await lockExpecting(tx, directCostId, [STATUS.PENDING], \"DIRECT_COST_NOT_PENDING\", (status) => `Only pending direct costs can be approved (this one is ${status})`);",
+      "to": "    void lockExpecting; // M-DCL: the approval claim removed",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 483
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 483
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/direct-cost.service.test.js",
+      "live": "M-DCL: D2.J.concurrentApprove (+ G.5xx)",
+      "tests": [
+        "CX21-204: a submit and an approve each refuse when the status moved under the lock"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "the case flips the cost back to draft only inside the FOR UPDATE read (:402-406); with the claim gone no lock is read, the approval posts and resolves: the .rejects (DIRECT_COST_NOT_PENDING) and the ledger total 0 fail."
+    },
+    {
+      "name": "UM-DCK the line dropped from the ledger key (unit side of M-DCK)",
+      "file": "backend/src/services/cost-ledger.service.js",
+      "from": "  [sourceType, sourceId, sourceLineId || \"header\", suffix].filter(Boolean).join(\":\");",
+      "to": "  [sourceType, sourceId, \"header\", suffix].filter(Boolean).join(\":\");",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 114
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 114
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/cost-ledger.repost.test.js",
+      "live": "M-DCK: D2.J.ledger",
+      "tests": [
+        "posts once, refuses the same event twice, and posts again once the first posting is reversed",
+        "a second reversal frees the second posting for a third"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "the reposted keys read timesheet:ts-1:header:r2 / :r3 instead of timesheet:ts-1:entry-1:r2 / :r3 (:52, :67)."
+    },
+    {
+      "name": "UM-DCX the ledger key pre-check dropped (unit side of the equivalent M-DCX)",
+      "file": "backend/src/services/cost-ledger.service.js",
+      "from": "  let existing = await tx.costLedgerEntry.findFirst({",
+      "to": "  let existing = null && await tx.costLedgerEntry.findFirst({",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 318
+          }
+        ],
+        "preWp5Sim": [
+          {
+            "count": 1,
+            "line": 318
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/cost-ledger.repost.test.js",
+      "live": "M-DCX: none (equivalent for the live proof; its only catcher)",
+      "tests": [
+        "posts once, refuses the same event twice, and posts again once the first posting is reversed",
+        "a second reversal frees the second posting for a third"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "with no pre-check the reposting after a reversal is never moved to its :r2 key: create meets the reversed entry's key (the mock enforces the unique index, P2002) and answers already_posted, so again.posted / third.posted is false where the cases expect true."
+    }
+  ]
+}

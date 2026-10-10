@@ -947,3 +947,15 @@ The setup error in run 1 came from finding **SCHED-RET-1 (P3)**. The job result 
 **Codex windows.** L34 plan review next, at the 20:23 CDT session cron, or by hand if the cron is skipped. Then the HR-C1 plan review.
 
 **XDOC-ISS and XDOC-CP confirmed (16:21 CDT).** `xdoc-1d-repro.js` (087/088, product routes only) exited 2 with exactly the 23 predicted defect checks failing. All 21 revision `issuedBy` writes store another company's user (five records, create and update, entry and record, plus document control), and both contract-profile `documentIds` writes store another company's document. The own, label and random controls, every read check and G.5xx pass. Both are P1 cross-company writes with no exposure. They join the HR-X1 batch through the final plan r3c §15 and §16. The plans are final after review round 3: `scratch\wp2\fixplan\r3c\WP2-FIX-PLAN.r3c.md` and `scratch\wp2\fixplan-hrx1\r3c\HRX1-FIX-PLAN.r3c.md`, with rulings in `scratch\wp2\r3c-rulings.md`.
+
+## 2026-10-10 (evening) — Owner: execution reset, phase 1; Codex loop closed
+
+Recorded in plan §0.1.
+- **Codex loop closed.** The scheduled L34 Codex plan review was cancelled, along with its wake timer, and the HR-C1 Codex plan review will not be run. Claude reviews both plans and every implementation diff. Round 3 of the WP-2 plan review was the last Codex run. It was read once, adjudicated and committed (`14a3db2`, `a93d028`).
+- **Execution rules.** Fix now only P0/P1, corruption, security, financial, blockers, and failed invariants the current work needs; record P2/P3 and move on. Testing is targeted; full runs happen only at the plan's checkpoints or final close. No new frameworks or sweeps.
+- **Current item:** the §3.3 deep build and `cert3d`.
+  - It cannot run before 087's run date is a weekday. 087-EXC fails closed on a Saturday or Sunday run date (run 1's documented stop). The first weekday run date is Monday 00:00 UTC, which is Sunday 19:00 CDT.
+  - The prepared order (`build-cert3d.ps1`) starts at the session cron, Sunday 2026-10-11 19:12 CDT. If background work causes the cron to be skipped, it is started by hand.
+  - Then comes the checkpoint report.
+- **Installed tonight with no new review:** the WP-5, WP-6 and WP-7 mutation lists, evidence checkers and run plans, registered in the runner. Every list is runnable.
+- **Kept as prepared, without further prep rounds:** the WP-8 book and proof drafting already in progress, which is installed and debug-run when it returns, and the WP-9 preparation (`scratch\wp9\WP9-PREP.md`), which is adjudicated when WP-9 is reached.

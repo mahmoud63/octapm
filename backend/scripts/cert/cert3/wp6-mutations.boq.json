@@ -1,0 +1,629 @@
+{
+ "proof": "scripts/cert/cert3/wp6-boq-proof.js",
+ "guards": "CERT-3 plan section 6.2 WP-6 (docs/certification/OCTAPM_CERT3_PLAN.md:1150): dry runs write nothing; allocation capacity; the transfer limit; the Original lock. Plan section 4 WP-6 Mutations (:826). Answer book WP6.mutations.dryRunWrites / allocationCapacity / transferLimit / originalLock (the WP-6 book patch, a80ccef; each names its catchers by check id, G21). Integration-owner adjudication C:/Temp/octapm-cert/scratch/wp6/WP6-ADJUDICATION.md (cited WP6ADJ) Q9: M-DRY, M-CAP, M-XFER and M-ORIG are the four E6 entries; the variants M-DRYr, M-DRYs, M-DRYm, M-CAPq, M-CAPa, M-CAPi, M-ORIG2, M-ORIG4 are run, not tallied (the WP-4 precedent); M-DRYq is EQUIVALENT (equivalent[] below, recorded with the reason, not run). The database trigger validate_activity_boq_allocation is the capacity guard's second holder and cannot be mutated from code (notMutable[] below). No optional (untallied) list: neither the adjudication nor the proof (no OPTIONAL_CATCHERS table) names an optional mutant.",
+ "reconciled": "Read-only drafting 2026-10-10 against the installed proof scripts/cert/cert3/wp6-boq-proof.js at 2a2efd2 (83 fixed checks + G.5xx; CATCHERS :604-610, COLLATERAL :613-626, FIX_CATCHERS :633-636, meta.equivalentMutants :682) and the product files at 2a2efd2 (backend/src unchanged since 6c5ab54, where WP6-PREP counted the anchors). Every id in catchers, collateral, shifts[].id and unchanged, and every check id an expect names, is a CHECKS id or G.5xx; catchers equal the proof's CATCHERS table for all twelve entries (mutsyntax-wp6.js, report mutsyntax-wp6-report.json). Collateral and shifts are the proof's COLLATERAL table made exact against the in-memory model of the proof (C:/Temp/octapm-cert/scratch/wp6/proof-r2/sim-<id>.json and sim-teeth-report.json, 13/13 ok: every model red a catcher or a named collateral): derived, not observed. Nothing was run against the database.",
+ "runsOn": "HEAD, right after the primary run on cert3d. At HEAD the unmutated proof exits 0 (no WP-6 rule is decided and no WP-6 fix has landed: meta.decidedRed is empty), so the runner (mutate-multi.js) scoring a non-zero exit CAUGHT agrees with the evidence in direction only; it never shows WHICH check went red. Evidence is wp6-mutation-evidence.js: every named catcher PASS in the baseline (the unmutated full run on the same tree: results/cert3/wp6-boq-proof.baseline-head.json) and FAIL (ran and failed) under the mutant, named collateral and shifts accepted, anything else flagged (WP6-RUN-PLAN.md section 7.3; the WP-4 L1 ruling, PREP5-ADJUDICATION.md).",
+ "anchors": "anchors.head: count and line of each edit on the worktree at 2a2efd2 (backend/src identical to 6c5ab54; every file a list edits is CRLF only, 0 bare LF; every from here is one line). A later edit of the same mutation is located after the earlier ones are applied, as the runner applies them. Re-count on the real tree before each batch (mutsyntax-wp6.js --tree=<worktree>): the runner applies an edit only when its from occurs exactly once in the text as edited so far. After the WP-2 batches land, re-scan activity-boq-allocation.service.js first (the QP batch edits its :813-818; M-CAP, M-CAPq, M-CAPa and their unit entries anchor at :289 and :302 of that file).",
+ "note": "Fields as in wp4-mutations.commercial.json: catchers must read FAIL (ran and failed, not \"not run\") under the mutant and PASS in the baseline; collateral are other checks expected (or allowed) to go red, each with collateralWhy; shifts are non-red status changes expected under the mutant (a confirm-first classification CONFIRMED -> PARTIAL); unchanged names checks the derivation says must stay as at baseline (reported, not judged); expectVerdict is the evidence checker's verdict, not the runner's. Run one id per invocation, quoted and with a trailing comma (\"--only=M-CAP,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-DRY would also run M-DRYr, M-DRYs and M-DRYm; M-CAP also M-CAPq, M-CAPa and M-CAPi; M-ORIG also M-ORIG2 and M-ORIG4), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists. Every mutant writes, if at all, only on the throwaway B6; on 087-COM and 087-SCH every probe stays a read or a refusal before any write under every mutant of this list (safety, per entry).",
+ "equivalent": [
+  {
+   "name": "M-DRYq (EQUIVALENT on 087, not run) the dry run's quota skip removed (a dry run asserts the AI quota too)",
+   "file": "backend/src/services/boq.service.js",
+   "from": "  if (!options.dryRun) await assertAiQuota(project.orgId);",
+   "to": "  if (true) await assertAiQuota(project.orgId);",
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 1174
+     }
+    ]
+   },
+   "reason": "Not a write guard: the line decides whether a dry run asks assertAiQuota, which only reads. On company 087 (Enterprise, aiLimit Infinity) assertAiQuota returns before it reads the counter (backend/src/middleware/subscription-gate.js:86-87), so no WP-6 observation differs: equivalent for every B6 and B6X probe (WP6ADJ Q9; the proof's meta.equivalentMutants). It would differ only for a company at its AI limit, which is the L121 TEST GAP (no WP-6 check runs there)."
+  }
+ ],
+ "notMutable": [
+  {
+   "name": "capacity-trigger (NOT A CODE MUTANT, recorded) the database trigger validate_activity_boq_allocation",
+   "where": "backend/prisma/migrations/20260610090000_decimal_money_values/migration.sql:138-142 (an AFTER INSERT trigger that RAISEs P0001 when the active allocations of a BOQ row exceed its quantity or amount)",
+   "reason": "The capacity guard's second holder. A code mutant cannot remove it, which is why M-CAP and M-CAPa are caught through the refusal-code checks and G.5xx (the trigger's RAISE reaches no handler: 500 INTERNAL_ERROR, never counted as a success, WP6ADJ Q9) rather than through an over-capacity write. Its isolation under concurrent creates is recorded for the run (WP6ADJ Q10: the concurrent-capacity race, record only), not probed."
+  }
+ ],
+ "mutations": [
+  {
+   "name": "M-DRY every dry-run branch removed (BOQ upload route and service, mapping-import route): the section 6.2 'dry runs write nothing' entry",
+   "guard": "section 6.2 WP-6 'dry runs write nothing' (plan :1150, :826). What exists at HEAD: the BOQ upload route answers a dry run from processBoqUpload's preview before any document is stored (routes/boq.js:163-171); processBoqUpload returns the preview before any write (boq.service.js:1244); the mapping-import route answers dryRunImport (routes/activity-boq-allocations.js:200-202). M-DRY removes all three; each variant one.",
+   "e6": "section 6.2 WP-6 guard 1 of 4 (dry runs write nothing; variants M-DRYr, M-DRYs, M-DRYm run, not tallied)",
+   "file": "backend/src/routes/boq.js",
+   "from": "      if (req.query.dryRun === true) {",
+   "to": "      if (false) {",
+   "also": [
+    {
+     "file": "backend/src/services/boq.service.js",
+     "from": "  if (options.dryRun) {",
+     "to": "  if (false) {"
+    },
+    {
+     "file": "backend/src/routes/activity-boq-allocations.js",
+     "from": "    if (req.query.dryRun === true) {",
+     "to": "    if (false) {"
+    }
+   ],
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 163
+     },
+     {
+      "count": 1,
+      "line": 1244
+     },
+     {
+      "count": 1,
+      "line": 200
+     }
+    ]
+   },
+   "bookKeys": [
+    "WP6.mutations.dryRunWrites",
+    "WP6.U1.writes",
+    "WP6.A5.report"
+   ],
+   "catchers": [
+    "U1.B6.writes",
+    "A5.B6.dryRun"
+   ],
+   "collateral": [
+    "U3.B6.dryRunMissingColumns",
+    "U1.B6.dryRun",
+    "U2.B6.import",
+    "U4.B6.lockFlow",
+    "A5.B6.apply",
+    "A5.B6.undo"
+   ],
+   "collateralWhy": {
+    "U3.B6.dryRunMissingColumns": "B2: the planner's dry run of the workbook without the rate column takes the real route path: the route stores the file as a ProjectDocument before processBoqUpload refuses MISSING_COLUMNS, so B6's boq_upload document count moves by one (the refusal itself, 400 BOQ_VALIDATION_FAILED / MISSING_COLUMNS, is as at HEAD).",
+    "U1.B6.dryRun": "B2: the planner's dry run is answered as a real upload: 200 with mode imported but no dryRun flag, no rowCount, no totalAmount and no comparison preview.",
+    "U2.B6.import": "B2: the bill was already imported by the planner's \"dry run\", so the QS's real upload compares equal: comparison added 0, not 5 (rows 5, 459,000.00, the queued job and the document as at HEAD).",
+    "U4.B6.lockFlow": "B5: the \"dry run\" left one more applied revision, so the PM's lock supersedes three earlier revisions, not two (lockedRows 5 and the baseline as at HEAD).",
+    "A5.B6.apply": "B3: the mapping file's \"dry run\" already created the two drafts under a batch, so the apply finds both pairs existing: 200, created 0, no batch.",
+    "A5.B6.undo": "B3: the apply made no batch, so the QS's undo is not sent: recorded FAIL (rejected null), not a setup error."
+   },
+   "shifts": [],
+   "unchanged": [
+    "U3.B6.uploadMissingColumns",
+    "U7.B6.siteUpload",
+    "U7.B6.uploaders",
+    "U2.B6.rate160",
+    "KA.U2.omitB005",
+    "U4.B6.comparisonOnly",
+    "CF.HRC14"
+   ],
+   "unchangedWhy": "Derived from the proof's B2-B5 code paths and the in-memory model (C:/Temp/octapm-cert/scratch/wp6/proof-r2/sim-<id>.json: not evidence): the real uploads (the QS's refused one, the site engineer's 403, the rate-160 and omit-B005 re-uploads, the comparison-only upload after the lock) take their HEAD path; KA.U2.omitB005 reads today (BLOCKED) either way; CF.HRC14 reads no dry run (PARTIAL as at HEAD).",
+   "expectVerdict": "CAUGHT: U1.B6.writes and A5.B6.dryRun PASS in the baseline, FAIL under the mutant",
+   "expect": "B2: the planner's dry run of the stage-3 workbook takes the real path: B6's BoqItem +5, BoqRevision +1, ProjectDocument boq_upload +1 and boq.parse jobs +1, 087's AI counter unchanged (U1.B6.writes FAIL). B3: the mapping file's dry run answers 201 and creates 2 drafts under a batch id; the allocation list moves (A5.B6.dryRun FAIL). Collateral U3.B6.dryRunMissingColumns, U1.B6.dryRun, U2.B6.import, U4.B6.lockFlow, A5.B6.apply, A5.B6.undo. Exit 2; G.5xx green.",
+   "mutatedAnswer": "bill dry run: 200 (mode imported, no dryRun flag) with a document, a revision, five rows and a queued boq.parse job written; mapping dry run: 201, created 2 drafts under one importBatchId",
+   "storedDefect": "on B6 only: an extra imported revision with its rows and document, an extra boq.parse job (cancelled by Q11), two extra draft allocations; archived with B6",
+   "safety": "Every catcher writes only on the throwaway B6 (archived by the proof's cleanup, which also runs after a section error; its queued boq.parse jobs, an extra one included, are cancelled through POST /projects/:id/jobs/:jobId/cancel and zero queued asserted, WP6ADJ Q11). B6X carries no catcher; its two handler runs add 2 to 087's AI counter on every run (recorded residue). The deep probes are reads of 087-COM and 087-SCH and the 087-SCH PATCH refusal (assertBoqEditable, before any write), which no WP-6 mutant touches. Company 087 only (the L121 ruling).",
+   "unitCatcher": "none (wp6-mutations.unit.json noUnitCatcher: no mocked suite sends a dry run)"
+  },
+  {
+   "name": "M-DRYr variant: the BOQ upload route's dry-run branch removed (the dry run takes the real path)",
+   "guard": "variant of M-DRY: routes/boq.js:163 alone",
+   "e6": "variant of guard 1 (dry runs write nothing; run, not tallied)",
+   "file": "backend/src/routes/boq.js",
+   "from": "      if (req.query.dryRun === true) {",
+   "to": "      if (false) {",
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 163
+     }
+    ]
+   },
+   "bookKeys": [
+    "WP6.mutations.dryRunWrites"
+   ],
+   "catchers": [
+    "U1.B6.writes"
+   ],
+   "collateral": [
+    "U3.B6.dryRunMissingColumns",
+    "U1.B6.dryRun",
+    "U2.B6.import",
+    "U4.B6.lockFlow"
+   ],
+   "collateralWhy": {
+    "U3.B6.dryRunMissingColumns": "B2: the planner's dry run of the workbook without the rate column takes the real route path: the route stores the file as a ProjectDocument before processBoqUpload refuses MISSING_COLUMNS, so B6's boq_upload document count moves by one (the refusal itself, 400 BOQ_VALIDATION_FAILED / MISSING_COLUMNS, is as at HEAD).",
+    "U1.B6.dryRun": "B2: the planner's dry run is answered as a real upload: 200 with mode imported but no dryRun flag, no rowCount, no totalAmount and no comparison preview.",
+    "U2.B6.import": "B2: the bill was already imported by the planner's \"dry run\", so the QS's real upload compares equal: comparison added 0, not 5 (rows 5, 459,000.00, the queued job and the document as at HEAD).",
+    "U4.B6.lockFlow": "B5: the \"dry run\" left one more applied revision, so the PM's lock supersedes three earlier revisions, not two (lockedRows 5 and the baseline as at HEAD)."
+   },
+   "shifts": [],
+   "unchanged": [
+    "A5.B6.dryRun",
+    "A5.B6.apply",
+    "A5.B6.undo",
+    "U3.B6.uploadMissingColumns",
+    "U7.B6.siteUpload",
+    "U7.B6.uploaders",
+    "U2.B6.rate160",
+    "KA.U2.omitB005",
+    "U4.B6.comparisonOnly",
+    "CF.HRC14"
+   ],
+   "unchangedWhy": "The mapping-import route keeps its dry-run branch (A5 as at HEAD). Derived from the proof's B2-B5 code paths and the in-memory model (C:/Temp/octapm-cert/scratch/wp6/proof-r2/sim-<id>.json: not evidence): the real uploads (the QS's refused one, the site engineer's 403, the rate-160 and omit-B005 re-uploads, the comparison-only upload after the lock) take their HEAD path; KA.U2.omitB005 reads today (BLOCKED) either way; CF.HRC14 reads no dry run (PARTIAL as at HEAD).",
+   "expectVerdict": "CAUGHT: U1.B6.writes PASS in the baseline, FAIL under the mutant",
+   "expect": "B2: the planner's dry run is a real upload: document +1, revision +1, rows +5, boq.parse jobs +1 (U1.B6.writes FAIL). Collateral U3.B6.dryRunMissingColumns, U1.B6.dryRun, U2.B6.import, U4.B6.lockFlow. Exit 2.",
+   "mutatedAnswer": "bill dry run: 200 with a document, a revision, five rows and a queued job (mode imported)",
+   "storedDefect": "on B6 only (archived): an extra imported revision, its rows, its document and a cancelled job",
+   "safety": "Every catcher writes only on the throwaway B6 (archived by the proof's cleanup, which also runs after a section error; its queued boq.parse jobs, an extra one included, are cancelled through POST /projects/:id/jobs/:jobId/cancel and zero queued asserted, WP6ADJ Q11). B6X carries no catcher; its two handler runs add 2 to 087's AI counter on every run (recorded residue). The deep probes are reads of 087-COM and 087-SCH and the 087-SCH PATCH refusal (assertBoqEditable, before any write), which no WP-6 mutant touches. Company 087 only (the L121 ruling).",
+   "unitCatcher": "none"
+  },
+  {
+   "name": "M-DRYs variant: processBoqUpload's dry-run return removed (the service writes on a dry run)",
+   "guard": "variant of M-DRY: boq.service.js:1244 alone",
+   "e6": "variant of guard 1 (dry runs write nothing; run, not tallied)",
+   "file": "backend/src/services/boq.service.js",
+   "from": "  if (options.dryRun) {",
+   "to": "  if (false) {",
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 1244
+     }
+    ]
+   },
+   "bookKeys": [
+    "WP6.mutations.dryRunWrites"
+   ],
+   "catchers": [
+    "U1.B6.writes"
+   ],
+   "collateral": [
+    "U1.B6.dryRun",
+    "U2.B6.import",
+    "U4.B6.lockFlow"
+   ],
+   "collateralWhy": {
+    "U1.B6.dryRun": "B2: the route's dry-run branch calls processBoqUpload, which now writes and returns the real upload's answer: 200 without dryRun, rowCount, totalAmount or the comparison preview.",
+    "U2.B6.import": "B2: the bill was already imported by the planner's \"dry run\", so the QS's real upload compares equal: comparison added 0, not 5 (rows 5, 459,000.00, the queued job and the document as at HEAD).",
+    "U4.B6.lockFlow": "B5: the \"dry run\" left one more applied revision, so the PM's lock supersedes three earlier revisions, not two (lockedRows 5 and the baseline as at HEAD)."
+   },
+   "shifts": [],
+   "unchanged": [
+    "U3.B6.dryRunMissingColumns",
+    "A5.B6.dryRun",
+    "A5.B6.apply",
+    "A5.B6.undo",
+    "U3.B6.uploadMissingColumns",
+    "U7.B6.siteUpload",
+    "U7.B6.uploaders",
+    "U2.B6.rate160",
+    "KA.U2.omitB005",
+    "U4.B6.comparisonOnly",
+    "CF.HRC14"
+   ],
+   "unchangedWhy": "U3.B6.dryRunMissingColumns: processBoqUpload refuses MISSING_COLUMNS in its parse-and-validate step (:1177-1228), before the removed return, and the route's dry-run branch stores no document. The mapping import keeps its branch. Derived from the proof's B2-B5 code paths and the in-memory model (C:/Temp/octapm-cert/scratch/wp6/proof-r2/sim-<id>.json: not evidence): the real uploads (the QS's refused one, the site engineer's 403, the rate-160 and omit-B005 re-uploads, the comparison-only upload after the lock) take their HEAD path; KA.U2.omitB005 reads today (BLOCKED) either way; CF.HRC14 reads no dry run (PARTIAL as at HEAD).",
+   "expectVerdict": "CAUGHT: U1.B6.writes PASS in the baseline, FAIL under the mutant",
+   "expect": "B2: the planner's dry run writes a revision, five rows and a boq.parse job, no document (the route's branch stores none) (U1.B6.writes FAIL). Collateral U1.B6.dryRun, U2.B6.import, U4.B6.lockFlow. Exit 2.",
+   "mutatedAnswer": "bill dry run: 200; revision +1, rows +5, jobs +1, documents +0",
+   "storedDefect": "on B6 only (archived): an extra imported revision, its rows and a cancelled job",
+   "safety": "Every catcher writes only on the throwaway B6 (archived by the proof's cleanup, which also runs after a section error; its queued boq.parse jobs, an extra one included, are cancelled through POST /projects/:id/jobs/:jobId/cancel and zero queued asserted, WP6ADJ Q11). B6X carries no catcher; its two handler runs add 2 to 087's AI counter on every run (recorded residue). The deep probes are reads of 087-COM and 087-SCH and the 087-SCH PATCH refusal (assertBoqEditable, before any write), which no WP-6 mutant touches. Company 087 only (the L121 ruling).",
+   "unitCatcher": "none"
+  },
+  {
+   "name": "M-DRYm variant: the mapping-import route's dry-run branch removed",
+   "guard": "variant of M-DRY: routes/activity-boq-allocations.js:200 alone",
+   "e6": "variant of guard 1 (dry runs write nothing; run, not tallied)",
+   "file": "backend/src/routes/activity-boq-allocations.js",
+   "from": "    if (req.query.dryRun === true) {",
+   "to": "    if (false) {",
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 200
+     }
+    ]
+   },
+   "bookKeys": [
+    "WP6.mutations.dryRunWrites",
+    "WP6.A5.report"
+   ],
+   "catchers": [
+    "A5.B6.dryRun"
+   ],
+   "collateral": [
+    "A5.B6.apply",
+    "A5.B6.undo"
+   ],
+   "collateralWhy": {
+    "A5.B6.apply": "B3: the mapping file's \"dry run\" already created the two drafts under a batch, so the apply finds both pairs existing: 200, created 0, no batch.",
+    "A5.B6.undo": "B3: the apply made no batch, so the QS's undo is not sent: recorded FAIL (rejected null), not a setup error."
+   },
+   "shifts": [],
+   "unchanged": [
+    "U1.B6.writes",
+    "U1.B6.dryRun",
+    "U3.B6.dryRunMissingColumns",
+    "U2.B6.import",
+    "U4.B6.lockFlow",
+    "A3.B6.coverage"
+   ],
+   "unchangedWhy": "The BOQ upload keeps both dry-run holders (B2 as at HEAD). A3.B6.coverage counts approved allocations only; the two extra rows are drafts.",
+   "expectVerdict": "CAUGHT: A5.B6.dryRun PASS in the baseline, FAIL under the mutant",
+   "expect": "B3: the planner's mapping-file dry run is applied: 201, created 2 drafts under one importBatchId, the allocation list moves (A5.B6.dryRun FAIL). Collateral A5.B6.apply, A5.B6.undo. Exit 2.",
+   "mutatedAnswer": "mapping dry run: 201, created 2 drafts under a batch id",
+   "storedDefect": "on B6 only (archived): two draft allocations from the \"dry run\"",
+   "safety": "Every catcher writes only on the throwaway B6 (archived by the proof's cleanup, which also runs after a section error; its queued boq.parse jobs, an extra one included, are cancelled through POST /projects/:id/jobs/:jobId/cancel and zero queued asserted, WP6ADJ Q11). B6X carries no catcher; its two handler runs add 2 to 087's AI counter on every run (recorded residue). The deep probes are reads of 087-COM and 087-SCH and the 087-SCH PATCH refusal (assertBoqEditable, before any write), which no WP-6 mutant touches. Company 087 only (the L121 ruling).",
+   "unitCatcher": "none"
+  },
+  {
+   "name": "M-CAP the allocation capacity check removed (both branches of assertAllocationCapacity): the section 6.2 'allocation capacity' entry",
+   "guard": "section 6.2 WP-6 'allocation capacity' (plan :1150, :826). What exists at HEAD: assertAllocationCapacity (activity-boq-allocation.service.js:280-314; quantity :289, amount :302), asked by every create, the bulk create and the mapping import's write; its second holder is the database trigger (notMutable[]).",
+   "e6": "section 6.2 WP-6 guard 2 of 4 (allocation capacity; variants M-CAPq, M-CAPa, M-CAPi run, not tallied)",
+   "file": "backend/src/services/activity-boq-allocation.service.js",
+   "from": "  if (totalQuantity > toNumber(boqItem.qty) + EPSILON) {",
+   "to": "  if (false) {",
+   "also": [
+    {
+     "file": "backend/src/services/activity-boq-allocation.service.js",
+     "from": "  if (totalAmount > toNumber(boqItem.amount) + MONEY_EPSILON) {",
+     "to": "  if (false) {"
+    }
+   ],
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 289
+     },
+     {
+      "count": 1,
+      "line": 302
+     }
+    ]
+   },
+   "bookKeys": [
+    "WP6.mutations.allocationCapacity",
+    "WP6.A1.overCapacity",
+    "WP6.A1.amountOverCapacity",
+    "WP6.A4.bulk"
+   ],
+   "catchers": [
+    "A1.B6.overCapacity",
+    "A1.B6.amountOverCapacity",
+    "A4.B6.bulk",
+    "G.5xx"
+   ],
+   "collateral": [],
+   "shifts": [],
+   "unchanged": [
+    "A1.B6.quantityZero",
+    "A1.B6.duplicate",
+    "A1.B6.notApplicable",
+    "A3.B6.coverage",
+    "A5.B6.dryRun",
+    "A5.B6.apply"
+   ],
+   "unchangedWhy": "A1.B6.quantityZero (validation), A1.B6.duplicate (the duplicate check precedes capacity: HEAD answers DUPLICATE_ACTIVE_ALLOCATION on a fully allocated row) and A1.B6.notApplicable (409 MAPPING_NOT_APPLICABLE first) answer as at HEAD. The trigger refuses every over-capacity row, so nothing over capacity is written and A3.B6.coverage keeps 387,000.00. The bulk's valid row B-003/A220 is created as at HEAD (a draft). The mapping import judges capacity in its own plan (mapping-import.service.js:281, untouched): A5 as at HEAD.",
+   "expectVerdict": "CAUGHT: A1.B6.overCapacity, A1.B6.amountOverCapacity, A4.B6.bulk and G.5xx PASS in the baseline, FAIL under the mutant",
+   "expect": "B3: B-001/A120 +1 m3, B-003/A230 at 80,000.00 and the bulk each reach the trigger, which RAISEs P0001: 500 INTERNAL_ERROR (A1.B6.overCapacity, A1.B6.amountOverCapacity and A4.B6.bulk FAIL on the code; G.5xx FAIL on the three 500s, never counted as a success, WP6ADJ Q9). Nothing over capacity is written. No collateral. Exit 2.",
+   "mutatedAnswer": "over-capacity create: 500 INTERNAL_ERROR (the trigger); the bulk: 500 after its valid row",
+   "storedDefect": "none (the trigger refuses the over-capacity rows); the bulk's valid draft as at HEAD",
+   "safety": "Every catcher writes only on the throwaway B6 (archived by the proof's cleanup, which also runs after a section error; its queued boq.parse jobs, an extra one included, are cancelled through POST /projects/:id/jobs/:jobId/cancel and zero queued asserted, WP6ADJ Q11). B6X carries no catcher; its two handler runs add 2 to 087's AI counter on every run (recorded residue). The deep probes are reads of 087-COM and 087-SCH and the 087-SCH PATCH refusal (assertBoqEditable, before any write), which no WP-6 mutant touches. Company 087 only (the L121 ruling).",
+   "unitCatcher": "UM-CAP (wp6-mutations.unit.json)"
+  },
+  {
+   "name": "M-CAPq variant: the quantity branch removed",
+   "guard": "variant of M-CAP: activity-boq-allocation.service.js:289 alone",
+   "e6": "variant of guard 2 (allocation capacity; run, not tallied)",
+   "file": "backend/src/services/activity-boq-allocation.service.js",
+   "from": "  if (totalQuantity > toNumber(boqItem.qty) + EPSILON) {",
+   "to": "  if (false) {",
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 289
+     }
+    ]
+   },
+   "bookKeys": [
+    "WP6.mutations.allocationCapacity",
+    "WP6.A1.overCapacity",
+    "WP6.A4.bulk"
+   ],
+   "catchers": [
+    "A1.B6.overCapacity",
+    "A4.B6.bulk"
+   ],
+   "collateral": [],
+   "shifts": [],
+   "unchanged": [
+    "A1.B6.amountOverCapacity",
+    "A1.B6.duplicate",
+    "A3.B6.coverage"
+   ],
+   "unchangedWhy": "The amount branch still refuses B-003/A230 (quantity 10 t within 60 t): A1.B6.amountOverCapacity as at HEAD. No 500: every over-quantity row is also over amount at the row's rate, so the app answers 400 before the trigger.",
+   "expectVerdict": "CAUGHT: A1.B6.overCapacity and A4.B6.bulk PASS in the baseline, FAIL under the mutant",
+   "expect": "B3: B-001/A120 +1 m3 reaches the amount branch: 400 ALLOCATION_AMOUNT_EXCEEDED (60,012.00 > 60,000.00), not ALLOCATION_QUANTITY_EXCEEDED (A1.B6.overCapacity FAIL); the bulk's codes [ALLOCATION_AMOUNT_EXCEEDED, DUPLICATE_ACTIVE_ALLOCATION] (A4.B6.bulk FAIL). Exit 2; G.5xx green.",
+   "mutatedAnswer": "B-001 +1 m3: 400 ALLOCATION_AMOUNT_EXCEEDED",
+   "storedDefect": "none",
+   "safety": "Every catcher writes only on the throwaway B6 (archived by the proof's cleanup, which also runs after a section error; its queued boq.parse jobs, an extra one included, are cancelled through POST /projects/:id/jobs/:jobId/cancel and zero queued asserted, WP6ADJ Q11). B6X carries no catcher; its two handler runs add 2 to 087's AI counter on every run (recorded residue). The deep probes are reads of 087-COM and 087-SCH and the 087-SCH PATCH refusal (assertBoqEditable, before any write), which no WP-6 mutant touches. Company 087 only (the L121 ruling).",
+   "unitCatcher": "UM-CAPq"
+  },
+  {
+   "name": "M-CAPa variant: the amount branch removed",
+   "guard": "variant of M-CAP: activity-boq-allocation.service.js:302 alone",
+   "e6": "variant of guard 2 (allocation capacity; run, not tallied)",
+   "file": "backend/src/services/activity-boq-allocation.service.js",
+   "from": "  if (totalAmount > toNumber(boqItem.amount) + MONEY_EPSILON) {",
+   "to": "  if (false) {",
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 302
+     }
+    ]
+   },
+   "bookKeys": [
+    "WP6.mutations.allocationCapacity",
+    "WP6.A1.amountOverCapacity"
+   ],
+   "catchers": [
+    "A1.B6.amountOverCapacity",
+    "G.5xx"
+   ],
+   "collateral": [],
+   "shifts": [],
+   "unchanged": [
+    "A1.B6.overCapacity",
+    "A4.B6.bulk",
+    "A3.B6.coverage"
+   ],
+   "unchangedWhy": "The quantity branch still refuses B-001/A120 and the bulk's over-quantity row with 400 ALLOCATION_QUANTITY_EXCEEDED. Only the amount-only probe (B-003/A230, 10 t at 80,000.00) passes the app check and reaches the trigger.",
+   "expectVerdict": "CAUGHT: A1.B6.amountOverCapacity and G.5xx PASS in the baseline, FAIL under the mutant",
+   "expect": "B3: B-003/A230 10 t at 80,000.00 passes the app check; the trigger answers 500 INTERNAL_ERROR, nothing written (A1.B6.amountOverCapacity FAIL; G.5xx FAIL). Exit 2.",
+   "mutatedAnswer": "B-003/A230 at 80,000.00: 500 (the trigger)",
+   "storedDefect": "none",
+   "safety": "Every catcher writes only on the throwaway B6 (archived by the proof's cleanup, which also runs after a section error; its queued boq.parse jobs, an extra one included, are cancelled through POST /projects/:id/jobs/:jobId/cancel and zero queued asserted, WP6ADJ Q11). B6X carries no catcher; its two handler runs add 2 to 087's AI counter on every run (recorded residue). The deep probes are reads of 087-COM and 087-SCH and the 087-SCH PATCH refusal (assertBoqEditable, before any write), which no WP-6 mutant touches. Company 087 only (the L121 ruling).",
+   "unitCatcher": "UM-CAPa"
+  },
+  {
+   "name": "M-CAPi variant: the mapping-import plan's own capacity judgement removed",
+   "guard": "variant of M-CAP: the import judges capacity in its plan (mapping-import.service.js:281) before createAllocationInTx re-checks it at write",
+   "e6": "variant of guard 2 (allocation capacity; run, not tallied)",
+   "file": "backend/src/services/mapping-import.service.js",
+   "from": "    if (nextQuantity > Number(item.qty) + 0.000001 || nextAmount > toMoneyNumber(item.amount) + 0.01) {",
+   "to": "    if (false) {",
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 281
+     }
+    ]
+   },
+   "bookKeys": [
+    "WP6.mutations.allocationCapacity",
+    "WP6.A5.report"
+   ],
+   "catchers": [
+    "A5.B6.dryRun"
+   ],
+   "collateral": [
+    "A5.B6.apply"
+   ],
+   "collateralWhy": {
+    "A5.B6.apply": "B3: the B-001/A120 line is planned, then refused by assertAllocationCapacity at write: 201, created 2, failed 1 (failed 0 expected)."
+   },
+   "shifts": [],
+   "unchanged": [
+    "A5.B6.undo",
+    "A1.B6.overCapacity",
+    "A4.B6.bulk"
+   ],
+   "unchangedWhy": "A5.B6.undo: the two created drafts are rejected as at HEAD (rejected 2, keptApproved 0). The direct and bulk creates keep assertAllocationCapacity.",
+   "expectVerdict": "CAUGHT: A5.B6.dryRun PASS in the baseline, FAIL under the mutant",
+   "expect": "B3: the mapping-file dry run reports matched 3, breaches 0, totalAmount 12,012.00 (matched 2, breaches 1, 12,000.00 expected) (A5.B6.dryRun FAIL). Collateral A5.B6.apply. Exit 2.",
+   "mutatedAnswer": "mapping dry run: matched 3, breaches 0",
+   "storedDefect": "none (the write path refuses the over-capacity line)",
+   "safety": "Every catcher writes only on the throwaway B6 (archived by the proof's cleanup, which also runs after a section error; its queued boq.parse jobs, an extra one included, are cancelled through POST /projects/:id/jobs/:jobId/cancel and zero queued asserted, WP6ADJ Q11). B6X carries no catcher; its two handler runs add 2 to 087's AI counter on every run (recorded residue). The deep probes are reads of 087-COM and 087-SCH and the 087-SCH PATCH refusal (assertBoqEditable, before any write), which no WP-6 mutant touches. Company 087 only (the L121 ruling).",
+   "unitCatcher": "none (mapping-import.service.js has no suite of its own; identifier-shapes.routes.test.js mocks it whole)"
+  },
+  {
+   "name": "M-XFER BUDGET_TRANSFER_EXCEEDS removed: the section 6.2 'transfer limit' entry",
+   "guard": "section 6.2 WP-6 'transfer limit' (plan :1150, :826). What exists at HEAD: transferBudget refuses an amount over the source line's revised budget plus the 0.01 tolerance (budget.service.js:678), with both lines held FOR NO KEY UPDATE first.",
+   "e6": "section 6.2 WP-6 guard 3 of 4 (transfer limit)",
+   "file": "backend/src/services/budget.service.js",
+   "from": "    if (amount > available + TOLERANCE) throw",
+   "to": "    if (false) throw",
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 678
+     }
+    ]
+   },
+   "bookKeys": [
+    "WP6.mutations.transferLimit",
+    "WP6.B3.overTransferPlus2"
+   ],
+   "catchers": [
+    "B3.B6.overTransferPlus2"
+   ],
+   "collateral": [
+    "B3.B6.move20000"
+   ],
+   "collateralWhy": {
+    "B3.B6.move20000": "B6: LAB is already at -0.02 after the accepted 100,000.02, so the 20,000.00 move leaves LAB -20,000.02 and MAT 220,000.02 (80,000.00 / 120,000.00 expected); the seven typed lines' revised sum stays 410,000.00."
+   },
+   "shifts": [
+    {
+     "id": "CF.L111",
+     "baseline": "CONFIRMED",
+     "mutant": "PARTIAL",
+     "why": "LAB's revised before the -999,999.00 revision is -20,000.02, not 80,000.00, so the revision-below-zero item no longer equals its leaf's today: a gap item, PARTIAL (a pass: L111 undecided). In the model (sim-M-XFER.json)."
+    }
+   ],
+   "unchanged": [
+    "KA.B3.overTransfer",
+    "B3.B6.archivedLine",
+    "B4.B6.revision",
+    "KA.B7.archivedActual"
+   ],
+   "unchangedWhy": "KA.B3.overTransfer runs on the T1/T2 pair, which M-XFER does not move: 100,000.01 accepted at HEAD already (C1-TOL), today, BLOCKED either way. B3.B6.archivedLine is refused by the archived-line check (:676) before the amount. IND's revision and the archived actual read other lines.",
+   "expectVerdict": "CAUGHT: B3.B6.overTransferPlus2 PASS in the baseline, FAIL under the mutant",
+   "expect": "B6: finance's 100,000.02 from LAB to MAT answers 200; LAB -0.02, MAT 200,000.02 (B3.B6.overTransferPlus2 FAIL). Collateral B3.B6.move20000; shift CF.L111 CONFIRMED -> PARTIAL. Exit 2.",
+   "mutatedAnswer": "100,000.02 accepted: 200; LAB -0.02, MAT 200,000.02",
+   "storedDefect": "on B6 only (archived): two transfer rows over the limit",
+   "safety": "Every catcher writes only on the throwaway B6 (archived by the proof's cleanup, which also runs after a section error; its queued boq.parse jobs, an extra one included, are cancelled through POST /projects/:id/jobs/:jobId/cancel and zero queued asserted, WP6ADJ Q11). B6X carries no catcher; its two handler runs add 2 to 087's AI counter on every run (recorded residue). The deep probes are reads of 087-COM and 087-SCH and the 087-SCH PATCH refusal (assertBoqEditable, before any write), which no WP-6 mutant touches. Company 087 only (the L121 ruling). The plan's +0.01 probe (KA.B3.overTransfer) is accepted at HEAD already (C1-TOL), so it cannot catch this mutant (book adjudication C1).",
+   "unitCatcher": "UM-XFER"
+  },
+  {
+   "name": "M-ORIG the Original Budget guard's refusal removed (assertOriginalBudgetWritable): the section 6.2 'the Original lock' entry",
+   "guard": "section 6.2 WP-6 'the Original lock' (plan :1150, :826). What exists at HEAD: the one Original Budget guard (assertOriginalBudgetWritable, budget.service.js:413-418) over the derived lock conditions (originalBudgetLocks :338-389: condition 2 an approved change, 3 an executed commitment, 4 a ledger posting, 5 a locked period's snapshot).",
+   "e6": "section 6.2 WP-6 guard 4 of 4 (the Original lock; variants M-ORIG2, M-ORIG4 run, not tallied)",
+   "file": "backend/src/services/budget.service.js",
+   "from": "  if (reasons.length && refuse) throw originalBudgetLockedError({ line, proposed, reasons });",
+   "to": "  if (false) throw originalBudgetLockedError({ line, proposed, reasons });",
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 416
+     }
+    ]
+   },
+   "bookKeys": [
+    "WP6.mutations.originalLock",
+    "WP6.B5.lockedByLedger",
+    "WP6.B5.lockedAfterCo"
+   ],
+   "catchers": [
+    "B5.B6.lockedByLedger",
+    "B5.B6.lockedAfterCo"
+   ],
+   "collateral": [],
+   "shifts": [
+    {
+     "id": "CF.L109",
+     "baseline": "CONFIRMED",
+     "mutant": "PARTIAL",
+     "why": "CF.L109's first item (\"LA locked by the approved CO first\") reads B5.B6.lockedAfterCo, which fails: absent, so PARTIAL (a pass: L109 undecided). In the model (sim-M-ORIG.json)."
+    }
+   ],
+   "unchanged": [
+    "KA.B5.afterRepoint",
+    "B2.B6.actualDerived",
+    "KA.B6.registerOrder",
+    "KA.B7.archivedActual"
+   ],
+   "unchangedWhy": "KA.B5.afterRepoint: LA already holds 1.00, so the second PATCH to 1.00 is an echo (isOriginalEcho, :405) and answers 200: today, BLOCKED as at HEAD (the proof's COLLATERAL). B2.B6.actualDerived is a different refusal. The register and the archived actual read neither original.",
+   "expectVerdict": "CAUGHT: B5.B6.lockedByLedger and B5.B6.lockedAfterCo PASS in the baseline, FAIL under the mutant",
+   "expect": "B6: the cost controller's PATCH of OVH's original to 10,001.00 answers 200 (B5.B6.lockedByLedger FAIL); after the approved CO, LA's PATCH to 1.00 answers 200 (B5.B6.lockedAfterCo FAIL). No collateral; shift CF.L109 CONFIRMED -> PARTIAL. Exit 2.",
+   "mutatedAnswer": "PATCH originalBudget answers 200 on a locked line: OVH 10,001.00 and LA 1.00 written",
+   "storedDefect": "on B6 only (archived): two locked originals moved",
+   "safety": "Every catcher writes only on the throwaway B6 (archived by the proof's cleanup, which also runs after a section error; its queued boq.parse jobs, an extra one included, are cancelled through POST /projects/:id/jobs/:jobId/cancel and zero queued asserted, WP6ADJ Q11). B6X carries no catcher; its two handler runs add 2 to 087's AI counter on every run (recorded residue). The deep probes are reads of 087-COM and 087-SCH and the 087-SCH PATCH refusal (assertBoqEditable, before any write), which no WP-6 mutant touches. Company 087 only (the L121 ruling). No Original-budget write is ever sent to 087-COM (its originals are locked; under this mutant a PATCH there would write).",
+   "unitCatcher": "none (no mocked test asserts BUDGET_ORIGINAL_LOCKED; noUnitCatcher)"
+  },
+  {
+   "name": "M-ORIG2 variant: lock condition 2 (an approved change stands on the line) dropped",
+   "guard": "variant of M-ORIG: budget.service.js:351 alone",
+   "e6": "variant of guard 4 (the Original lock; run, not tallied)",
+   "file": "backend/src/services/budget.service.js",
+   "from": "  for (const row of changes) add(row.budgetLineId, ORIGINAL_LOCK.APPROVED_CHANGE,",
+   "to": "  for (const row of []) add(row.budgetLineId, ORIGINAL_LOCK.APPROVED_CHANGE,",
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 351
+     }
+    ]
+   },
+   "bookKeys": [
+    "WP6.mutations.originalLock",
+    "WP6.B5.lockedAfterCo"
+   ],
+   "catchers": [
+    "B5.B6.lockedAfterCo"
+   ],
+   "collateral": [],
+   "shifts": [
+    {
+     "id": "CF.L109",
+     "baseline": "CONFIRMED",
+     "mutant": "PARTIAL",
+     "why": "as under M-ORIG: B5.B6.lockedAfterCo fails, the first item absent, PARTIAL (a pass). In the model (sim-M-ORIG2.json)."
+    }
+   ],
+   "unchanged": [
+    "B5.B6.lockedByLedger",
+    "KA.B5.afterRepoint"
+   ],
+   "unchangedWhy": "OVH carries a ledger posting and no change row: condition 4 still locks it. KA.B5.afterRepoint as under M-ORIG (an echo, today).",
+   "expectVerdict": "CAUGHT: B5.B6.lockedAfterCo PASS in the baseline, FAIL under the mutant",
+   "expect": "B6: LA, whose only lock condition is the approved CO's change row, takes the PATCH to 1.00: 200 (B5.B6.lockedAfterCo FAIL); shift CF.L109 CONFIRMED -> PARTIAL. Exit 2.",
+   "mutatedAnswer": "LA PATCH 200",
+   "storedDefect": "on B6 only (archived)",
+   "safety": "Every catcher writes only on the throwaway B6 (archived by the proof's cleanup, which also runs after a section error; its queued boq.parse jobs, an extra one included, are cancelled through POST /projects/:id/jobs/:jobId/cancel and zero queued asserted, WP6ADJ Q11). B6X carries no catcher; its two handler runs add 2 to 087's AI counter on every run (recorded residue). The deep probes are reads of 087-COM and 087-SCH and the 087-SCH PATCH refusal (assertBoqEditable, before any write), which no WP-6 mutant touches. Company 087 only (the L121 ruling). GET budget/lines on 087-COM then reports fewer lock conditions (read only; no check reads them).",
+   "unitCatcher": "none"
+  },
+  {
+   "name": "M-ORIG4 variant: lock condition 4 (the ledger posted to the line) dropped",
+   "guard": "variant of M-ORIG: budget.service.js:375 and :377",
+   "e6": "variant of guard 4 (the Original lock; run, not tallied)",
+   "file": "backend/src/services/budget.service.js",
+   "from": "  for (const row of ledger) add(row.budgetLineId, ORIGINAL_LOCK.LEDGER_POSTING,",
+   "to": "  for (const row of []) add(row.budgetLineId, ORIGINAL_LOCK.LEDGER_POSTING,",
+   "also": [
+    {
+     "file": "backend/src/services/budget.service.js",
+     "from": "    if (toMoneyNumber(line.actual) !== 0) add(line.id, ORIGINAL_LOCK.LEDGER_POSTING,",
+     "to": "    if (false) add(line.id, ORIGINAL_LOCK.LEDGER_POSTING,"
+    }
+   ],
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 375
+     },
+     {
+      "count": 1,
+      "line": 377
+     }
+    ]
+   },
+   "bookKeys": [
+    "WP6.mutations.originalLock",
+    "WP6.B5.lockedByLedger"
+   ],
+   "catchers": [
+    "B5.B6.lockedByLedger"
+   ],
+   "collateral": [],
+   "shifts": [],
+   "unchanged": [
+    "B5.B6.lockedAfterCo",
+    "CF.L109",
+    "KA.B5.afterRepoint"
+   ],
+   "unchangedWhy": "LA carries the approved change row (condition 2): still locked, so CF.L109 stays CONFIRMED.",
+   "expectVerdict": "CAUGHT: B5.B6.lockedByLedger PASS in the baseline, FAIL under the mutant",
+   "expect": "B6: OVH, whose only lock condition is B1's ledger posting, takes the PATCH to 10,001.00: 200 (B5.B6.lockedByLedger FAIL). Exit 2.",
+   "mutatedAnswer": "OVH PATCH 200",
+   "storedDefect": "on B6 only (archived)",
+   "safety": "Every catcher writes only on the throwaway B6 (archived by the proof's cleanup, which also runs after a section error; its queued boq.parse jobs, an extra one included, are cancelled through POST /projects/:id/jobs/:jobId/cancel and zero queued asserted, WP6ADJ Q11). B6X carries no catcher; its two handler runs add 2 to 087's AI counter on every run (recorded residue). The deep probes are reads of 087-COM and 087-SCH and the 087-SCH PATCH refusal (assertBoqEditable, before any write), which no WP-6 mutant touches. Company 087 only (the L121 ruling). GET budget/lines on 087-COM then reports fewer lock conditions (read only).",
+   "unitCatcher": "UM-ORIG4"
+  }
+ ]
+}

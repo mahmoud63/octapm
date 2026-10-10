@@ -1,0 +1,173 @@
+{
+  "proof": "scripts/cert/cert3/wp7-eot-proof.js",
+  "guards": "CERT-3 plan section 6.2 WP-7 (:1151): the 70% boundary; the approved-EOT lock. Plan section 4 WP-7 Mutations (:863): \"`>= 70` changed to `> 70`; the approved-EOT lock\". Answer book WP7.mutations.seventyBoundary / approvedEotLock (commercial.js :2024-2025 after the WP-7 book patch, bfa6287). Integration-owner adjudication C:/Temp/octapm-cert/scratch/wp7/WP7-ADJUDICATION.md Q4: M-STAT (the lock's status half, present at HEAD) is tallied now; the lock's figures half (M-EOTLOCK, the proof's FIX_CATCHERS 'M-LOCK') joins it after the HR-C10 fix (wp7-fix-mutations.contract.json, pending). M-70b is equivalent on this data (equivalent[] below, not run). The six OPTIONAL rule mutants (Q5) are in wp7-mutations.optional.json, run and never tallied.",
+  "reconciled": "Derived read-only on 2026-10-10 from the installed proof scripts/cert/cert3/wp7-eot-proof.js at bfa6287 (55 fixed checks + G.5xx; CATCHERS :596-599, OPTIONAL_CATCHERS :601-608, COLLATERAL :610-619, FIX_CATCHERS :625-628; the T7 choreography main() :1922-1935: W1-W7 -> E1-E3 -> E4 -> E5 -> P0 -> P1-P4 -> CF) and the product files at HEAD 2a2efd2 (backend/src identical to f599e67). Not observed: nothing was run. Every id in catchers, collateral, shifts[].id and unchanged, and every check id an expect names, is a CHECKS id; catchers equal the proof's CATCHERS table (mutsyntax-wp7.js, report mutsyntax-wp7-report.json).",
+  "runsOn": "HEAD, on the code the WP-7 primary run uses (after the WP-2 batches land, WP7ADJ Q13). At HEAD the unmutated proof exits 0 (no WP-7 rule decided, DECIDED_RED empty: 13 known answers BLOCKED, 3 confirm-first reported), so the runner's CAUGHT (any non-zero exit) agrees in direction; still, the evidence is wp7-mutation-evidence.js: every named catcher PASS in the baseline (the unmutated full run on the same tree: results/cert3/wp7-eot-proof.baseline-head.json) and FAIL (ran and failed) under the mutant, named collateral accepted, anything else flagged (the WP-4 L1 ruling, PREP5-ADJUDICATION.md; WP7-RUN-PLAN.md section 7.3).",
+  "anchors": "anchors.head: count and line of each edit on the worktree (every touched product file CRLF only, 0 bare LF; every anchor is one line, so line endings never enter a from). anchors.postHrx1Sim: the same with the WP-2 HR-X1 r3c simulated copies of eot.service.js and weather.service.js overlaid (LF-only simulation; HRX1-FIX-PLAN.r3c.md): every anchor survives, only lines after the first collapsed syncEvidenceReferences call move. Re-count on the real tree after each WP-2 batch lands and before each run (mutsyntax-wp7.js --tree=<worktree>): the runner applies an edit only when its from occurs exactly once.",
+  "note": "Fields as in wp4-mutations.commercial.json: catchers must read FAIL (ran and failed, not \"not run\") under the mutant and PASS in the baseline; collateral are other checks expected (or allowed) to go red, each with collateralWhy; shifts are non-red status changes expected under the mutant; unchanged names checks the derivation says must stay as at baseline (reported, not judged); expectVerdict is the evidence checker's verdict, not the runner's; catchersAfterFix names catchers a later fix adds (the proof's CATCHERS and this list gain them in that fix's batch, then the entry is re-run against that baseline). Run one id per invocation, quoted and with a trailing comma (\"--only=M-STAT,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-70 would also match an M-70b; WP-4's M-LOCK also M-LOCKa and M-LOCKb), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists. Every mutant writes, if at all, only on the throwaways T7 / T7H; every deep probe stays a read (safety).",
+  "equivalent": [
+    {
+      "name": "M-70b (EQUIVALENT to M-70 on this data, not run) the 70% line moved to 70.01",
+      "file": "backend/src/services/weather.service.js",
+      "from": "      warning: consumedPct >= 70,",
+      "to": "      warning: consumedPct >= 70.01,",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 200
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 200
+          }
+        ]
+      },
+      "reason": "The same line and the same catchers as M-70 (book WP7.mutations.seventyBoundary: \"none (M-70b ...): recorded, not run\"). Every percentage the proof reads is 0, 10, 35, 60, 65, 66.67 (66.666...) or exactly 70 (W2, W4b, W5b: 14/20, 21/30, 7/10 x 100 are exactly 70 in doubles), never in (70, 70.01): M-70b and M-70 flip the same three readings and nothing else. Not run (plan section 0.0: no new rounds)."
+    }
+  ],
+  "notRun": [
+    {
+      "name": "M-PROMO2 (NOT RUN: WP-8's guard) the sequential promotion guard removed",
+      "file": "backend/src/services/daily-log.service.js",
+      "from": "  if (entry.weatherDelayId) throw new HttpError(409, \"DAILY_LOG_WEATHER_DELAY_EXISTS\", \"This delay is already on the weather register\");",
+      "to": "  if (false) throw new HttpError(409, \"DAILY_LOG_WEATHER_DELAY_EXISTS\", \"This delay is already on the weather register\");",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1198
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 1198
+          }
+        ]
+      },
+      "reason": "WP-8's guard (\"Promoting twice: 409\", plan :878), not in section 6.2 WP-7 (wp7-mutations-draft.json notRun; book WP7.mutations.fixMutations last item; proof meta.notRunMutants). PROMO.T7.twice would catch it (P1: FEED promoted again would answer 200 and add a second row). Recorded for WP-8, not run here."
+    }
+  ],
+  "mutations": [
+    {
+      "name": "M-70 the 70% line moved: warning only above 70 (the section 6.2 70% boundary)",
+      "guard": "section 6.2 WP-7 'the 70% boundary' (plan :1151, :842, :855-857; CLAUDE.md \"Weather delay warning at 70%+\"). listWeatherDelays sets summary.warning = consumedPct >= 70 (weather.service.js:200), its one writer (the proof's static scan, warningWriters).",
+      "e6": "section 6.2 WP-7 guard 1 of 2 (the 70% boundary; the E6 entry at HEAD and after every WP-7 fix, WP7ADJ Q4)",
+      "file": "backend/src/services/weather.service.js",
+      "from": "      warning: consumedPct >= 70,",
+      "to": "      warning: consumedPct > 70,",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 200
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 200
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP7.mutations.seventyBoundary",
+        "WP7.weather.allowance20.at14.warning",
+        "WP7.weather.allowance30.at21.warning",
+        "WP7.weather.allowance10.at7.warning",
+        "claudeMd.weather70"
+      ],
+      "catchers": [
+        "W.T7.a20at14",
+        "W.T7.a30at21",
+        "W.T7.a10at7"
+      ],
+      "catchersAfterFix": {
+        "HR-C11": [
+          "KA.W.T7H.half28"
+        ],
+        "exit rebuild": [
+          "KA.FLD.087.live",
+          "KA.FLD.052.live"
+        ]
+      },
+      "catchersAfterFixWhy": "Book WP7.mutations.seventyBoundary: once the HR-C11 fix lands, T7H's 28 x 0.5 reads exactly 70 (value: warning true), so M-70 turns KA.W.T7H.half28 wrong (FAIL); once 087-FLD and 052-FLD are rebuilt under the fix (the exit rebuild), their live reads reach 14 / 70% too. At HEAD all three read today (0%, 60%) under the mutant as without it. The proof's CATCHERS['M-70'] and this entry gain KA.W.T7H.half28 in the HR-C11 fix batch (the book already names it, the G15 load guard), and M-70 is re-run against that baseline (weather.service.js changes with the fix: WP7-RUN-PLAN.md section 7.6).",
+      "collateral": [],
+      "shifts": [],
+      "unchanged": [
+        "W.T7.a20at13",
+        "W.T7.a30at20",
+        "W.T7.a10at6",
+        "W.T7.nonContractual10",
+        "KA.W.T7.allowanceZero",
+        "KA.W.T7H.half28",
+        "KA.FLD.087.live",
+        "KA.FLD.052.live",
+        "FLD.087.allowance",
+        "COM.live.weatherDefault",
+        "PROMO.T7.feeds",
+        "CF.HRC11",
+        "CF.PROMOTX"
+      ],
+      "unchangedWhy": "W1 65%, W4 66.67%, W5 60% read false either way; W3 is judged on contractualUsed and the month only (WP7.weather.nonContractual10); KA.W.T7.allowanceZero today 35% (false either way, BLOCKED); KA.W.T7H.half28 today 0% (BLOCKED); KA.FLD.*.live today 60% (BLOCKED); 087-COM 10%; the promotion checks read contractualUsed and rows, never the warning. CF.HRC11 classifies from stored and read days, never from the warning: its observation \"no server code reads the register summary\" reads \"not seen\" under the mutant (the static scan finds no `consumedPct >= 70` writer, so readers + |writers - 1| = 1), an observation beside the classification, never classified; CF.PROMOTX's severity evidence seventyFlagReadsThem reads false likewise (evidence, not a classification item).",
+      "expectVerdict": "CAUGHT: W.T7.a20at14, W.T7.a30at21 and W.T7.a10at7 PASS in the baseline, FAIL under the mutant",
+      "expect": "T7 W2 (14 of 20), W4b (21 of 30) and W5b (7 of 10) each read consumedPct exactly 70 and warning false instead of true (remaining 6, 9, 3 unchanged): W.T7.a20at14, W.T7.a30at21 and W.T7.a10at7 FAIL. No other red; no known answer moves (all read today as at baseline); exit 2.",
+      "mutatedAnswer": "the register warns only above 70%: at exactly 70% summary.warning false",
+      "storedDefect": "none: the warning is computed at read (listWeatherDelays), never stored",
+      "safety": "Every write of the proof is on T7 or T7H (company 087, archived by the proof's cleanup, which also runs after a section error). The deep sections run first and only read: 087-COM (GET /eot, GET /projects, GET /weather-delays, POST /eot/calculate, which writes nothing under any WP-7 mutant: calculateEot reads the project and its activities and returns figures; the proof asserts 087-COM's claims, weather delays and audit events unchanged across it, WP7ADJ Q3), 087-FLD and 052-FLD (GET reads only, WP7ADJ Q7). No deep write."
+    },
+    {
+      "name": "M-STAT the approved state's status lock removed: any status change of an approved claim allowed (the section 6.2 approved-EOT lock, its status half)",
+      "guard": "section 6.2 WP-7 'the approved-EOT lock' (plan :1151, :839). What exists at HEAD: assertEotWorkflowTransition (eot.service.js:259-286) lets a status move only through its workflow action, and no action leaves approved (the map :267-272), so neither a PATCH nor the reject action moves an approved claim. The figures half (a PATCH of an approved claim refused 409) is HR-C10, undecided: M-EOTLOCK joins once its fix lands (WP7ADJ Q4).",
+      "e6": "section 6.2 WP-7 guard 2 of 2 (the approved-EOT lock; its status half, the E6 entry now, WP7ADJ Q4; M-EOTLOCK joins it once the HR-C10 fix lands)",
+      "file": "backend/src/services/eot.service.js",
+      "from": "  if (workflowAction && workflowAction === expectedAction) return;",
+      "to": "  if (existingStatus === 'approved' || (workflowAction && workflowAction === expectedAction)) return;",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 275
+          }
+        ],
+        "postHrx1Sim": [
+          {
+            "count": 1,
+            "line": 275
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP7.mutations.approvedEotLock",
+        "WP7.T1.patchApprovedToDraft",
+        "WP7.T1.rejectApproved"
+      ],
+      "catchers": [
+        "T1.T7.patchApprovedToDraft",
+        "T1.T7.rejectApproved"
+      ],
+      "collateral": [],
+      "shifts": [],
+      "unchanged": [
+        "KA.T2.plannerPatchApproved",
+        "T2.T7.approve",
+        "T3.T7.approve",
+        "T1.T7.patchStatusDraftOnSubmitted",
+        "T1.T7.approveDraft",
+        "T1.T7.rejectWithoutReason",
+        "T1.T7.rejectWithReason",
+        "T1.T7.resubmitRejected",
+        "CF.HRC10"
+      ],
+      "unchangedWhy": "KA.T2.plannerPatchApproved PATCHes {eotDaysGranted: 30} with no status: nextStatus equals the existing approved and the transition check returns at :264, before the mutated line (today, BLOCKED, as at baseline). The approvals E-T2 / E-T3 move submitted -> approved with the APPROVE action, untouched. Every T1 claim other than E-LK1 / E-LK2 starts in draft, submitted or rejected, which the mutant leaves guarded. E-LK1 and E-LK2 are approved last (E3, after every cumulative read) and judged only by the two catchers; CF.HRC10 reads KA.T2.plannerPatchApproved and the impact, not the lock claims (their project-date observation is reported, never classified).",
+      "expectVerdict": "CAUGHT: T1.T7.patchApprovedToDraft and T1.T7.rejectApproved PASS in the baseline, FAIL under the mutant",
+      "expect": "E3: the planner's PATCH {status: draft} on the approved E-LK1 answers 200 and E-LK1 reads draft instead of 400 EOT_WORKFLOW_ACTION_REQUIRED {approved, draft}: T1.T7.patchApprovedToDraft FAIL; the PM's reject of the approved E-LK2 answers 200 and E-LK2 reads rejected instead of 400 EOT_WORKFLOW_ACTION_REQUIRED {approved, rejected}: T1.T7.rejectApproved FAIL. No other red; exit 2.",
+      "mutatedAnswer": "an approved claim PATCHed back to draft (200) and rejected (200)",
+      "storedDefect": "on T7 only: E-LK1 draft, E-LK2 rejected with the probe's reason; T7 archived by the cleanup",
+      "safety": "Every write of the proof is on T7 or T7H (company 087, archived by the proof's cleanup, which also runs after a section error). The deep sections run first and only read: 087-COM (GET /eot, GET /projects, GET /weather-delays, POST /eot/calculate, which writes nothing under any WP-7 mutant: calculateEot reads the project and its activities and returns figures; the proof asserts 087-COM's claims, weather delays and audit events unchanged across it, WP7ADJ Q3), 087-FLD and 052-FLD (GET reads only, WP7ADJ Q7). No deep write."
+    }
+  ]
+}

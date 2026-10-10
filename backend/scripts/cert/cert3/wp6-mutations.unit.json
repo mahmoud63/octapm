@@ -1,0 +1,139 @@
+{
+ "note": "WP-6 unit side (mutate-multi.js list key 'wp6-unit', proof null: jest --runTestsByPath the named suite under the proof lock, no database). Mocked-Prisma suites are not certification evidence (plan section 1.4): these entries only show that the unit gate also turns red beside the live catch. They run on the tree the live list runs on (HEAD). Each entry's edits are its live mutant's, byte for byte (mutsyntax-wp6.js checks it); its tests are the titles that must fail, every one checked to exist in its suite at HEAD (mutsyntax-wp6.js). The unmutated suites must pass first (WP6-RUN-PLAN.md section 7.4). Run one id per invocation, quoted and with a trailing comma (\"--only=M-CAP,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-DRY would also run M-DRYr, M-DRYs and M-DRYm; M-CAP also M-CAPq, M-CAPa and M-CAPi; M-ORIG also M-ORIG2 and M-ORIG4), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists.",
+ "noUnitCatcher": [
+  "M-DRY, M-DRYr, M-DRYs, M-DRYm (dry runs): no mocked suite sends a dry run. boq.service.test.js, routes/__tests__/boq-upload-storage.test.js, routes/__tests__/activity-boq-allocations.test.js and the other boq / allocation / budget suites contain no \"dry\" at all (searched 2026-10-10). Live catchers U1.B6.writes and A5.B6.dryRun only.",
+  "M-CAPi (the mapping import's plan): mapping-import.service.js has no suite of its own; routes/__tests__/identifier-shapes.routes.test.js mocks the whole service. Live catcher A5.B6.dryRun only.",
+  "M-ORIG, M-ORIG2 (the Original lock refusal and condition 2): no test asserts BUDGET_ORIGINAL_LOCKED. The one test that reads the guard, CX21-102 (budget.service.test.js), re-activates a line through createBudgetLine, which asks it with refuse:false (budget.service.js:458) and carries a ledger row but no change row, so neither edit moves it. Live catchers B5.B6.lockedByLedger / B5.B6.lockedAfterCo only.",
+  "M-DRYq: equivalent (wp6-mutations.boq.json equivalent[]); not run."
+ ],
+ "mutations": [
+  {
+   "name": "UM-CAP both capacity branches removed (unit side of M-CAP)",
+   "file": "backend/src/services/activity-boq-allocation.service.js",
+   "from": "  if (totalQuantity > toNumber(boqItem.qty) + EPSILON) {",
+   "to": "  if (false) {",
+   "also": [
+    {
+     "file": "backend/src/services/activity-boq-allocation.service.js",
+     "from": "  if (totalAmount > toNumber(boqItem.amount) + MONEY_EPSILON) {",
+     "to": "  if (false) {"
+    }
+   ],
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 289
+     },
+     {
+      "count": 1,
+      "line": 302
+     }
+    ]
+   },
+   "suite": "src/services/__tests__/activity-boq-allocation.service.test.js",
+   "live": "M-CAP (wp6-mutations.boq.json): A1.B6.overCapacity, A1.B6.amountOverCapacity, A4.B6.bulk, G.5xx",
+   "tests": [
+    "rejects totals above the BOQ quantity",
+    "rejects totals above the BOQ amount"
+   ],
+   "expectVerdict": "CAUGHT",
+   "expect": "assertAllocationCapacity no longer throws: 9 + 2 = 11 m3 against qty 10, and 95 + 10 = 105 against amount 100, each expected toThrow(/quantity/i) and toThrow(/amount/i): both cases fail."
+  },
+  {
+   "name": "UM-CAPq the quantity branch removed (unit side of M-CAPq)",
+   "file": "backend/src/services/activity-boq-allocation.service.js",
+   "from": "  if (totalQuantity > toNumber(boqItem.qty) + EPSILON) {",
+   "to": "  if (false) {",
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 289
+     }
+    ]
+   },
+   "suite": "src/services/__tests__/activity-boq-allocation.service.test.js",
+   "live": "M-CAPq (wp6-mutations.boq.json): A1.B6.overCapacity, A4.B6.bulk",
+   "tests": [
+    "rejects totals above the BOQ quantity"
+   ],
+   "expectVerdict": "CAUGHT",
+   "expect": "The quantity case (11 m3 > 10, amount 60 <= 100) no longer throws: it fails. The amount case still throws /amount/ and passes."
+  },
+  {
+   "name": "UM-CAPa the amount branch removed (unit side of M-CAPa)",
+   "file": "backend/src/services/activity-boq-allocation.service.js",
+   "from": "  if (totalAmount > toNumber(boqItem.amount) + MONEY_EPSILON) {",
+   "to": "  if (false) {",
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 302
+     }
+    ]
+   },
+   "suite": "src/services/__tests__/activity-boq-allocation.service.test.js",
+   "live": "M-CAPa (wp6-mutations.boq.json): A1.B6.amountOverCapacity, G.5xx",
+   "tests": [
+    "rejects totals above the BOQ amount"
+   ],
+   "expectVerdict": "CAUGHT",
+   "expect": "The amount case (6 m3 <= 10, 105 > 100) no longer throws: it fails. The quantity case still throws /quantity/ and passes."
+  },
+  {
+   "name": "UM-XFER BUDGET_TRANSFER_EXCEEDS removed (unit side of M-XFER)",
+   "file": "backend/src/services/budget.service.js",
+   "from": "    if (amount > available + TOLERANCE) throw",
+   "to": "    if (false) throw",
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 678
+     }
+    ]
+   },
+   "suite": "src/services/__tests__/budget.service.test.js",
+   "live": "M-XFER (wp6-mutations.boq.json): B3.B6.overTransferPlus2",
+   "tests": [
+    "transfers only what a line has, writing both ledger rows"
+   ],
+   "expectVerdict": "CAUGHT",
+   "expect": "The 500,000 transfer out of a line revised at 100,000 resolves (both ledger rows written on the mocks) where the test expects rejects.toMatchObject({ code: \"BUDGET_TRANSFER_EXCEEDS\" }): the case fails. CX21-446 (a 1,000 transfer) still passes."
+  },
+  {
+   "name": "UM-ORIG4 lock condition 4 dropped (unit side of M-ORIG4)",
+   "file": "backend/src/services/budget.service.js",
+   "from": "  for (const row of ledger) add(row.budgetLineId, ORIGINAL_LOCK.LEDGER_POSTING,",
+   "to": "  for (const row of []) add(row.budgetLineId, ORIGINAL_LOCK.LEDGER_POSTING,",
+   "also": [
+    {
+     "file": "backend/src/services/budget.service.js",
+     "from": "    if (toMoneyNumber(line.actual) !== 0) add(line.id, ORIGINAL_LOCK.LEDGER_POSTING,",
+     "to": "    if (false) add(line.id, ORIGINAL_LOCK.LEDGER_POSTING,"
+    }
+   ],
+   "anchors": {
+    "head": [
+     {
+      "count": 1,
+      "line": 375
+     },
+     {
+      "count": 1,
+      "line": 377
+     }
+    ]
+   },
+   "suite": "src/services/__tests__/budget.service.test.js",
+   "live": "M-ORIG4 (wp6-mutations.boq.json): B5.B6.lockedByLedger",
+   "tests": [
+    "CX21-102: bringing an archived line back keeps the actual the ledger posted on it \u2014 and its original budget (PC-7a)"
+   ],
+   "expectVerdict": "CAUGHT",
+   "expect": "The re-activated line's mocked ledger row and its actual 15,000 lock nothing: originalBudgetKept reads { locked: false, conditions: [] } where the test expects locked true with [ledger_posting 4]: the case fails."
+  }
+ ]
+}

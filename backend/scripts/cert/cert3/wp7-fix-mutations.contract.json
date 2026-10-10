@@ -1,0 +1,220 @@
+{
+  "proof": "scripts/cert/cert3/wp7-eot-proof.js",
+  "guards": "Plan section 1.4: a mutation that puts each landed WP-7 fix back (answer book WP7.mutations.fixMutations, commercial.js :2027; proof FIX_CATCHERS :625-628), and the figures half of the section 6.2 approved-EOT lock (WP7.mutations.approvedEotLock's M-LOCK, joining M-STAT once the HR-C10 fix lands, WP7ADJ Q4). No WP-7 fix exists at HEAD: every entry is pending[] below, not run.",
+  "requires": "per entry (each fix lands on its own): the fix and its commit, FIXES[<rule>] set in the proof with the commit time git gives (S.state checks it), the CONTRACT fields its decision or fix plan fills, and an unmutated full run exiting 0 on that code (results/cert3/wp7-eot-proof.baseline.json, the post-fix baseline). Re-derive from / to on the real fix diff first.",
+  "pendingCheckIds": [],
+  "pendingCheckIdsNote": "No WP-7 fix adds a check: a landed fix turns its known answers into value checks and its CF into a defect check that must read REJECTED (DECIDED_RED extends itself when FIXES is set). If HR-C11 is decided as \"refuse non-integers\" (CONTRACT fractionalMode 'refuse'), the T7H fixture and KA.W.T7H.* leaves are re-derived first (proof open question), not new ids.",
+  "catchersTableNote": "The proof's FIX_CATCHERS (:625-628) names M-LOCK, M-C10i, M-C11z, M-C11d, M-PTX, M-F4; this list carries them with equal catchers. M-LOCK is listed as M-EOTLOCK (proofKey M-LOCK) because WP-4's registered list wp4-mutations.commercial.json already uses the id M-LOCK (and M-LOCKa / M-LOCKb): the runner keys a run by list and id, but the journal, the result directory (results/cert3/wp7-mutations/<id>.json) and --only prefix matching need unique ids. In the HR-C10 fix batch either rename FIX_CATCHERS['M-LOCK'] to 'M-EOTLOCK' together with the book's WP7.mutations.approvedEotLock text \"(M-LOCK,\" (the proof's G15 load guard requires the book to name every table key), or keep proofKey (WP7-RUN-PLAN.md section 13.3, an open question).",
+  "proofRequirement": "With the HR-C10 fix: CATCHERS gains the lock's figures half for E6 (M-EOTLOCK, joining M-STAT under guard 2). With the HR-C11 fix: CATCHERS['M-70'] gains KA.W.T7H.half28 (wp7-mutations.contract.json catchersAfterFix). With each fix, CONTRACT[<rule>] filled from the decision or the fix plan (HR-C10 lockedAnswer, HR-C11 fractionalMode / refusalAnswer, HR-F4 siteAnswer, PROMO-TX failureCode), so that the fixed answer is judged strictly.",
+  "anchors": "No WP-7 fix is drafted, so no entry has a from / to and none runs (the runner reads mutations[] only, empty here). pending[].loci are the HEAD texts each fix edits (counted once at head, and on the HR-X1 simulation where it touches the file); a fix-list from must occur 0 times at HEAD and once on the fix tree once drafted (mutsyntax-wp7.js; --post-fix on the fixed worktree). No fix plan exists (HR-C10, HR-C11 and HR-F4 wait for the owner, O1-O3; PROMO-TX is fixed in WP-7 only if the primary run confirms it P1, WP7ADJ Q6): from / to are derived from the real fix diff and the entry moved into mutations[] then (mutsyntax-wp7.js --post-fix).",
+  "note": "Judged by wp7-mutation-evidence.js --lists=fix against the post-fix baseline (exit 0, the fix's FIXES set). A fix entry names its rule (fixRule): the checker refuses a baseline whose FIXES[<rule>] is not set (NO EVIDENCE). Collateral names the reds a mutant's own path makes: the rule's CF check, decided after the fix, must read REJECTED and fails whenever one of its known answers reads today or wrong. Run one id per invocation, quoted and with a trailing comma (\"--only=M-STAT,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-70 would also match an M-70b; WP-4's M-LOCK also M-LOCKa and M-LOCKb), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists.",
+  "notRun": [],
+  "pending": [
+    {
+      "name": "M-EOTLOCK the HR-C10 lock on approved claims removed (proof FIX_CATCHERS 'M-LOCK'; the approved-EOT lock's figures half)",
+      "proofKey": "M-LOCK",
+      "e6": "section 6.2 WP-7 guard 2 of 2 (the approved-EOT lock; its figures half, joins M-STAT once HR-C10 is decided and fixed, WP7ADJ Q4)",
+      "joins": "M-STAT",
+      "fixRule": "HR-C10",
+      "requires": "an owner decision on HR-C10 (O1; plan :1078: lock approved claims, 409), its fix and fix commit, FIXES['HR-C10'] set and CONTRACT['HR-C10'].lockedAnswer from it. No fix plan exists (HR-C10, HR-C11 and HR-F4 wait for the owner, O1-O3; PROMO-TX is fixed in WP-7 only if the primary run confirms it P1, WP7ADJ Q6): from / to are derived from the real fix diff and the entry moved into mutations[] then (mutsyntax-wp7.js --post-fix).",
+      "loci": [
+        {
+          "file": "backend/src/services/eot.service.js",
+          "text": "  const recalculate = needsEotRecalculation(payload);",
+          "note": "updateEotClaim reads the existing claim and recalculates with no status check (:805-842): the fix adds the lock here or before it; M-EOTLOCK removes it on the fix diff",
+          "head": {
+            "count": 1,
+            "line": 805
+          },
+          "postHrx1Sim": {
+            "count": 1,
+            "line": 799
+          }
+        }
+      ],
+      "catchers": [
+        "KA.T2.plannerPatchApproved"
+      ],
+      "collateral": [
+        "CF.HRC10"
+      ],
+      "collateralWhy": {
+        "CF.HRC10": "decided after the fix (DECIDED_RED): its \"approved claim stays editable\" item reads present again, so the classification is PARTIAL, not REJECTED: FAIL."
+      },
+      "expectVerdict": "CAUGHT once HR-C10 is decided and fixed: KA.T2.plannerPatchApproved reads today (200, eotDaysGranted 30) where the fixed code reads value (409, 10, cumulative 10)"
+    },
+    {
+      "name": "M-C10i the HR-C10 impact rule reverted (impact summed over the activities again)",
+      "e6": "fix mutation (plan section 1.4), not an E6 entry",
+      "fixRule": "HR-C10",
+      "requires": "HR-C10 decided (O1; plan :1078: impact = delay - the least float along the named activities) and fixed, FIXES['HR-C10'] set. No fix plan exists (HR-C10, HR-C11 and HR-F4 wait for the owner, O1-O3; PROMO-TX is fixed in WP-7 only if the primary run confirms it P1, WP7ADJ Q6): from / to are derived from the real fix diff and the entry moved into mutations[] then (mutsyntax-wp7.js --post-fix).",
+      "loci": [
+        {
+          "file": "backend/src/services/eot.service.js",
+          "text": "  const criticalPathImpactDays = affectedActivities.reduce(",
+          "note": "calculateEot sums the per-activity impact (:404-407); the fix replaces the sum",
+          "head": {
+            "count": 1,
+            "line": 404
+          },
+          "postHrx1Sim": {
+            "count": 1,
+            "line": 404
+          }
+        }
+      ],
+      "catchers": [
+        "KA.T4.T7",
+        "KA.T4.087COM.calculate"
+      ],
+      "collateral": [
+        "CF.HRC10"
+      ],
+      "collateralWhy": {
+        "CF.HRC10": "decided after the fix: both impact items read present again: PARTIAL, FAIL."
+      },
+      "expectVerdict": "CAUGHT once HR-C10 is fixed: both known answers read today (impact 20, LD 10,000.00) where the fixed code reads value (10, 0, 0.00); T5.T7 (one activity) unchanged"
+    },
+    {
+      "name": "M-C11z the HR-C11 zero allowance reverted (0 read as 20 again)",
+      "e6": "fix mutation (plan section 1.4), not an E6 entry",
+      "fixRule": "HR-C11",
+      "requires": "HR-C11 decided (O2; plan :1079: an allowance of 0 means 0) and fixed, FIXES['HR-C11'] set. No fix plan exists (HR-C10, HR-C11 and HR-F4 wait for the owner, O1-O3; PROMO-TX is fixed in WP-7 only if the primary run confirms it P1, WP7ADJ Q6): from / to are derived from the real fix diff and the entry moved into mutations[] then (mutsyntax-wp7.js --post-fix).",
+      "loci": [
+        {
+          "file": "backend/src/services/weather.service.js",
+          "text": "  const allowance = Number(project.weatherAllowanceDays) || 20;",
+          "note": "the read's \"or 20\" (:161), the line M-ALLOW also edits; the fix keeps 20 for null only",
+          "head": {
+            "count": 1,
+            "line": 161
+          },
+          "postHrx1Sim": {
+            "count": 1,
+            "line": 161
+          }
+        }
+      ],
+      "catchers": [
+        "KA.W.T7.allowanceZero"
+      ],
+      "collateral": [
+        "CF.HRC11"
+      ],
+      "collateralWhy": {
+        "CF.HRC11": "decided after the fix: the zero-allowance item reads present again: PARTIAL, FAIL."
+      },
+      "expectVerdict": "CAUGHT once HR-C11 is fixed: KA.W.T7.allowanceZero reads today (allowance 20, 35%) where the fixed code reads value (0, 0%)"
+    },
+    {
+      "name": "M-C11d the HR-C11 decimal days reverted (half-days truncated again, or the refusal removed)",
+      "e6": "fix mutation (plan section 1.4), not an E6 entry",
+      "fixRule": "HR-C11",
+      "requires": "HR-C11 decided (O2: store decimals, or refuse non-integers) and fixed with its reviewed migration (prisma migrate diff, dated after the future-dated migrations), FIXES['HR-C11'] and CONTRACT['HR-C11'].fractionalMode / refusalAnswer set. No fix plan exists (HR-C10, HR-C11 and HR-F4 wait for the owner, O1-O3; PROMO-TX is fixed in WP-7 only if the primary run confirms it P1, WP7ADJ Q6): from / to are derived from the real fix diff and the entry moved into mutations[] then (mutsyntax-wp7.js --post-fix). A schema mutant is not a text edit the runner can apply to a migrated database: under 'decimal' the mutant reverts the service's write (or the route's refusal under 'refuse'), never the column.",
+      "loci": [
+        {
+          "file": "backend/prisma/schema.prisma",
+          "text": "model WeatherDelay {",
+          "note": "delayDays Int (the column the decimal fix changes; :2953)",
+          "head": {
+            "count": 1,
+            "line": 2953
+          }
+        },
+        {
+          "file": "backend/src/services/weather.service.js",
+          "text": "  const contractualUsed = rows.reduce((sum, row) => {",
+          "note": "the register sums Number(row.delayDays) (:162-165): decimals pass through once stored",
+          "head": {
+            "count": 1,
+            "line": 162
+          },
+          "postHrx1Sim": {
+            "count": 1,
+            "line": 162
+          }
+        }
+      ],
+      "catchers": [
+        "KA.W.T7H.half28",
+        "KA.W.T7H.storedOneAndHalf"
+      ],
+      "collateral": [
+        "CF.HRC11"
+      ],
+      "collateralWhy": {
+        "CF.HRC11": "decided after the fix: the T7H and E-HALF items read present again: PARTIAL, FAIL."
+      },
+      "expectVerdict": "CAUGHT once HR-C11 is fixed: KA.W.T7H.half28 and KA.W.T7H.storedOneAndHalf read today (0, 0%; 1) where the fixed code reads value (14, 70%, the warning; 1.5)"
+    },
+    {
+      "name": "M-PTX the two-write weather promotion put back (PROMO-TX)",
+      "e6": "fix mutation (plan section 1.4; the section 5 defect fix :1115), not an E6 entry",
+      "fixRule": "PROMO-TX",
+      "requires": "PROMO-TX classified P1 at the WP-7 primary run (WP7ADJ Q6), its fix plan, Codex plan review and fix commit, FIXES['PROMO-TX'] and CONTRACT['PROMO-TX'].failureCode set. No fix plan exists (HR-C10, HR-C11 and HR-F4 wait for the owner, O1-O3; PROMO-TX is fixed in WP-7 only if the primary run confirms it P1, WP7ADJ Q6): from / to are derived from the real fix diff and the entry moved into mutations[] then (mutsyntax-wp7.js --post-fix).",
+      "loci": [
+        {
+          "file": "backend/src/services/daily-log.service.js",
+          "text": "  const created = await weatherService.createWeatherDelay({",
+          "note": "the weather delay created in its own transaction (:1201)",
+          "head": {
+            "count": 1,
+            "line": 1201
+          }
+        },
+        {
+          "file": "backend/src/services/daily-log.service.js",
+          "text": "  if (entry.weatherDelayId) throw new HttpError(409, \"DAILY_LOG_WEATHER_DELAY_EXISTS\", \"This delay is already on the weather register\");",
+          "note": "the unlocked check (:1198), re-checked under the lock by the fix",
+          "head": {
+            "count": 1,
+            "line": 1198
+          }
+        }
+      ],
+      "catchers": [
+        "KA.PROMO.T7.race",
+        "KA.PROMO.T7.failure"
+      ],
+      "collateral": [
+        "CF.PROMOTX"
+      ],
+      "collateralWhy": {
+        "CF.PROMOTX": "decided after the fix: both items read present again: CONFIRMED, FAIL."
+      },
+      "expectVerdict": "CAUGHT once PROMO-TX is fixed: both known answers read today in every round (two 200s, two rows, one orphan; DELETE 200 then 404 with an orphan) where the fixed code reads value. The blocker queue makes each round deterministic (a barrier that does not form is a setup error), so no catcher is racy."
+    },
+    {
+      "name": "M-F4 the HR-F4 promotion rule reverted (a promotion without eot:create contractual again)",
+      "e6": "fix mutation (plan section 1.4), not an E6 entry",
+      "fixRule": "HR-F4",
+      "requires": "HR-F4 decided (O3; plan :1061) and fixed, FIXES['HR-F4'] and CONTRACT['HR-F4'].siteAnswer set (WP-8 classifies the probe, WP7ADJ Q8). No fix plan exists (HR-C10, HR-C11 and HR-F4 wait for the owner, O1-O3; PROMO-TX is fixed in WP-7 only if the primary run confirms it P1, WP7ADJ Q6): from / to are derived from the real fix diff and the entry moved into mutations[] then (mutsyntax-wp7.js --post-fix).",
+      "loci": [
+        {
+          "file": "backend/src/services/daily-log.service.js",
+          "text": "      contractual: payload.contractual !== undefined ? Boolean(payload.contractual) : true,",
+          "note": "contractual by default (:1209)",
+          "head": {
+            "count": 1,
+            "line": 1209
+          }
+        },
+        {
+          "file": "backend/src/routes/daily-logs.js",
+          "text": "  \"/:date/entries/delays/:entryId/weather-delay\",",
+          "note": "the promotion route (:238-245): progress update, transition daily_log.update",
+          "head": {
+            "count": 1,
+            "line": 239
+          }
+        }
+      ],
+      "catchers": [
+        "KA.F4.T7.sitePromotion"
+      ],
+      "collateral": [],
+      "expectVerdict": "CAUGHT once HR-F4 is fixed: KA.F4.T7.sitePromotion reads today (200, contractual, +1) where the fixed code reads value (non-contractual, +0, or the refusal CONTRACT names)"
+    }
+  ],
+  "mutations": []
+}
