@@ -81,6 +81,9 @@ const AS_OF = (() => {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
 })();
 
+// The EV reads below use today's cutoff (UTC date): AS_OF is the end of the month, in the future.
+const EV_CUTOFF = new Date().toISOString().slice(0, 10);
+
 const CLIENT = "Marina Bay Development Partners";
 const CONSULTANT = "Calder & Vance Architects";
 const CONTRACTOR = "OctaPM Demo Contracting";
@@ -1010,7 +1013,9 @@ async function main() {
     if (!allocated) continue;
     earnedByActivity.set(activity.activityCode, round2((allocated * Number(activity.pctComplete || 0)) / 100));
   }
-  const evNow = await GET(cost, `/projects/${P}/reports/ev`);
+  // Read EV at today's cutoff: the report's default period is the last closed month, whose cutoff
+  // is before today's approvals, so its EV is 0 until the month closes.
+  const evNow = await GET(cost, `/projects/${P}/reports/ev?cutoffDate=${EV_CUTOFF}`);
   const earnedTotal = round2(Number(evNow.ev || 0));
   const earnedHere = [...earnedByActivity.values()].reduce((sum, value) => round2(sum + value), 0);
   if (Math.abs(earnedHere - earnedTotal) > 1) {
@@ -1193,8 +1198,8 @@ async function main() {
   for (const stepRow of readiness.steps) {
     say(`${stepRow.label.padEnd(30)} ${stepRow.status.padEnd(10)}`, stepRow.message);
   }
-  const ev = await GET(cost, `/projects/${P}/reports/ev`);
-  say("reporting period", ev.reporting?.period?.code ?? iso(AS_OF));
+  const ev = await GET(cost, `/projects/${P}/reports/ev?cutoffDate=${EV_CUTOFF}`);
+  say("reporting period", ev.reporting?.period?.code ?? `cutoff ${EV_CUTOFF}`);
   say("BAC", money(ev.totalBudget ?? 0));
   say("PV ", money(ev.pv ?? 0));
   say("EV ", money(ev.ev ?? 0));
