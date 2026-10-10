@@ -787,3 +787,9 @@ E2's "builder exit 0" cannot be met until those land. **WP-0 stays formally open
 **WP-2 prepared read-only** (`C:\Temp\octapm-cert\scratch\wp2\WP2-PREP.md`): test map, routes, existing tests, register rows, fixtures (one throwaway 087 project P), a 164-check proof structure, mutation candidates for every §6.2 WP-2 guard, persona cases, and 23 proposed answer-book leaves. Its open questions are adjudicated before WP-2 authoring.
 
 **Next exact action:** the §3.3 build order run 2 at 2026-10-11 19:12 CDT (scheduled). Then the eight-item report, the WP-1 primary run on `cert3d`, and WP-1 per `WP1-RUN-PLAN.md`.
+
+## 2026-10-10 — Owner decision: HR-X1 scope
+
+**HR-X1: one batch at WP-2, accept both formats.** The canonical evidence reference lands as one coordinated batch at WP-2, covering every evidence surface plan §5's HR-X1 row names (progress, NCR, safety, change orders: L129, L149). During the transition the backend accepts both formats: the current references (file name, URL, text note) and the canonical stored project document, so mobile clients keep working while they move. Recorded in plan §0.1 and in the WP-2 adjudication (Q3).
+
+**Consequence for the sequence.** WP-2 carries three decided-rule fixes: HR-Q1, HR-P1 and HR-X1. Each gets a fix plan, a Codex high-risk plan review and adjudication before any code, then the fix, targeted proofs, mutations and a Codex diff review (plan §6.4). The HR-X1 batch fix plan is drafted read-only alongside the HR-Q1/HR-P1 one.

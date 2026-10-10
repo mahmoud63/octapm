@@ -49,6 +49,7 @@ These are no longer open questions.
   - **HR-C1: no silent 5% fallback.** Retention comes from authoritative contract configuration or an explicitly configured "no retention". Otherwise configuration is required.
   - **HR-S2:** milestones are valid zero-duration elements and must not block approval or baseline by themselves.
   - **HR-X1:** move to canonical OctaPM evidence references through a coordinated backend and client change, without abruptly breaking current mobile behaviour.
+    - **Scope (owner, 2026-10-10):** one batch at WP-2, covering every evidence surface the §5 row names (progress, NCR, safety, change orders: L129, L149). During the transition the backend accepts both formats, the current references (file name, URL, text note) and the canonical stored project document, so mobile clients keep working while they move.
 - **Finance.**
   - **L34** comes into CERT-3 if reproduction confirms that it corrupts actual cost in a locked reporting period.
   - **L35 and L36** stay in CERT-5 unless reproduction proves they corrupt authoritative CERT-3 workflow state.
