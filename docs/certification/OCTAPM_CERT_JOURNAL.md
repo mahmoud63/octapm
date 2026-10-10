@@ -959,3 +959,11 @@ Recorded in plan §0.1.
   - Then comes the checkpoint report.
 - **Installed tonight with no new review:** the WP-5, WP-6 and WP-7 mutation lists, evidence checkers and run plans, registered in the runner. Every list is runnable.
 - **Kept as prepared, without further prep rounds:** the WP-8 book and proof drafting already in progress, which is installed and debug-run when it returns, and the WP-9 preparation (`scratch\wp9\WP9-PREP.md`), which is adjudicated when WP-9 is reached.
+
+## 2026-10-10 (night) — WP-8 installed and debug-run; section 3.3 run date verified
+
+- **WP-8 book.** `field-controls.js` goes from 279 to 333 figures. Every WP-8 leaf with a today names its rule, and the 73 load-check mutants are refused. The plan citations hold: the owner's execution reset was moved to the plan's Appendix A, and the reference plan was checked to be an exact line-for-line prefix of the current plan.
+- **WP-8 proof.** `wp8-field-proof.js` has 112 checks plus G.5xx, on the throwaways F8 and F8V in 087.
+- **Debug run.** With `--skip=F52,CF`, 91 of 91 recorded checks passed. One probe stopped as a setup error, which was a TEST defect: the submittal GET serves its steps as `reviewSteps` (`submittal-workflow.service.js:660`, `:668`), and the proof read `steps`. After the fix, the targeted rerun `--only=SUB` passed 14 of 14. 26 known answers are BLOCKED and there was no 5xx.
+- **Register.** RFI-RESP-1 (provisional P1) and SAFE-ARCH-1 (P2) are on the fix list and settled at the primary run. Leads DL-REPLAY-1, SUB-LINK-1 and MTG-SENT-1 are recorded.
+- **Section 3.3 run date verified for the owner.** The run date is the earlier of the UTC date and the company-zone date (`build/lib.js:879`). For 087, in Africa/Cairo, that is the UTC date. At Sunday 2026-10-11 19:12 CDT it is Monday 2026-10-12 00:12 UTC, a weekday, so 087-EXC's guard (`087-exc.js:71-72`) passes. It stays Monday until 19:00 CDT Monday. The build order keeps its Sunday 19:12 CDT start.

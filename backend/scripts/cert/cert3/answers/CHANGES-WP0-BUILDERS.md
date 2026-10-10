@@ -2386,3 +2386,229 @@ The complete list of new keys is in `new-key-paths.txt`. The before and after fi
    - O3 HR-F4
    - O4 repair of existing duplicate or orphaned weather rows (it changes the 97-company fingerprint)
    - O5 HR-A2 (the weather delete permission, or archive)
+
+# WP-8 answer-book patch (2026-10-10)
+
+Read-only draft for Claude Main. Nothing under the certification worktree, the database or git was written.
+
+- Inputs (HEAD 14a3db2, clean):
+  - `backend/scripts/cert/cert3/answers/field-controls.js`, sha256 `dcdeb343738129a83b6868427c12b5103948c8cf2c80153cefe71c491d1c556c`
+    (copies: `ref/field-controls.dcdeb343.js`, `work/field-controls.copy.js`). The only book WP-8 changes.
+  - `answers/commercial.js`, sha256 `d00954da78f9c709607652e8b8dbf79df568eb3a23113d9c839f26bff94c36b1`, and
+    `answers/schedule.js`, sha256 `f0957af2a9e3d31818c07b17584ba1fbc17aef97e71242b3cd6a72cad7dc40b9`: read, not changed
+    (`ref/commercial.d00954da.js`, `work/commercial.copy.js`, `ref/schedule.f0957af2.js`).
+- Output: `work/field-controls.applied.js`, sha256 `b96dfefeb18b070dca8fedcbb90498c7c18f275c11d495176443a85b5885c787`.
+  Two runs give the same bytes. commercial.js and schedule.js stay d00954da / f0957af2.
+- Rulings applied: `C:\Temp\octapm-cert\scratch\wp8\WP8-ADJUDICATION.md` Q1-Q14 and the standing rulings it lists:
+  product routes only; a value equal to HEAD's today under an undecided rule reads BLOCKED (the KA.I9 ruling); every
+  writing check and every catcher on the throwaway; N-round concurrency probes; every figure a book leaf; company 087
+  only, plus read-only reads of 052. No HR rule is decided here.
+- Source: `C:\Temp\octapm-cert\scratch\wp8\WP8-PREP.md` section 10 (G1-G23), with `derive-f8.json`,
+  `wp8-checks-draft.json`, `wp8-leaves.json`, `leaf-coverage.json` and `wp8-mutations-draft.json`.
+
+## How to reproduce
+
+```
+node tools/run-all.js        (from C:\Temp\octapm-cert\scratch\wp8\book)
+```
+
+It runs these steps, writing each step's output to `work/<step>-output.txt`:
+
+1. The input checks: the copies, the `ref/` copies and the worktree's current three books hash to the expected inputs.
+2. `tools/plan-map.js` (G12: the old plan lines mapped to 14a3db2 by content; `work/plan-map-output.json`).
+3. `book-insert.js` on the copy, then a second application, which must give the same bytes.
+4. `node --check` of the output.
+5. `verify.js`.
+6. `teeth.js` (the new load checks).
+7. Through `tools/teeth-run.js`: the WP-4, WP-5 (with the WP-5 rulings' mutants), WP-6 and WP-7 `MUTANTS` lists on
+   `work/commercial.copy.js` (the patch set's commercial book, unchanged), and WP-7's `FC_MUTANTS` on the patched
+   field-controls copy. Each list is extracted verbatim from its teeth.js; scratch files stay in this folder.
+8. `tools/refusal-test.js`.
+9. The WP-0 load tests (as adapted): field-controls `--wp7` before, `--wp7 --wp8` after; commercial `--wp5 --wp6 --wp7`.
+10. `tools/diff.js`, which writes `wp8-book.diff` and rebuilds the output from its hunks.
+11. `tools/bytes-check.js` over the deliverables, the tools, the outputs and the copies.
+
+The sha256 of every deliverable is in `work/SHA256SUMS.txt`; the run's summary is `work/run-all-output.txt`.
+
+To install (Claude Main):
+
+1. Check that `answers/field-controls.js` still hashes to dcdeb343.
+2. Run `node book-insert.js <field-controls copy> <field-controls output>`. The two paths must differ. The tool refuses
+   and writes nothing otherwise.
+3. Check that the output hashes to b96dfefe.
+4. Copy the output over the book.
+5. Add a "WP-8 answer-book leaves (2026-10-10)" entry to `answers/CHANGES-WP0-BUILDERS.md` from this file. The book's
+   header comment already names that entry.
+6. G23 asks for the builder's comment `build/087-fld.js:1384` ("closed by the WP-8 proof") to be updated: the close now
+   runs on F8. That is a worktree edit, so it is not part of this patch.
+
+## Results (all from work/*-output.txt)
+
+| Step | Result |
+|---|---|
+| inputs | the copies, the refs and the worktree's books are dcdeb343 / d00954da / f0957af2 |
+| book-insert | 117 edits: 45 explicit, plus 72 G12-only lines |
+| determinism | a second application is byte-identical |
+| load | the output loads. Every embedded load check passes: WP-7's and the new WP-8 one. commercial.js (unchanged) loads with its WP-4, WP-5, WP-5 rulings, WP-6 and WP-7 checks |
+| verify.js | OK. 54 new keys exactly as expected. 37 explicitly changed keys and 74 G12-only keys, each with exactly the expected fields; 168 leaves identical. WP0, WP9 and the 17 WP-7-owned weather leaves identical; meta, exports and rules identical. G12 done mechanically on all 111 changed sources (PLAN_MAP equals the content map). Every changed leaf keeps its history in its note. The leaf contract holds over WP8. Every book key of the draft list resolves but one, pending the HR-X1 batch. 27 KA checks each read a known answer with a today, the check's ref and assumption. F8 74 and F8V 6 check ids = the draft's. 50 mutation catchers named by check id. Builder reads changed: none. WP-7 proof reads changed: none. derive-f8: 26 comparisons, 0 problems. 67 cited product, builder, plan and register lines hold their anchors. WP-0 recomputations 26 / 26. Load tests pass. LF only, no BOM, non-ASCII 141 -> 141. Every removed line lies inside an anchor. A second run is refused and writes nothing |
+| teeth.js (WP-8) | 73 / 73 mutants refused at load by their own check; the unmutated copy loads |
+| WP-4 teeth (commercial) | 45 / 45 caught |
+| WP-5 teeth + rulings (commercial) | 61 + 15 = 76 / 76 caught |
+| WP-6 teeth (commercial) | 74 / 74 caught |
+| WP-7 teeth (commercial) | 78 / 78 caught |
+| WP-7 FC teeth (patched field-controls) | 8 / 8 caught, each by WP-7's own check. That check runs before WP-8's, and every one of its anchors survives the patch |
+| refusal test | all refused, nothing written: re-application, CR, wrong sha, an output equal to the input, a wrong argument count (one path; WP-7's four), a repeated anchor, a missing anchor, a non-ASCII insert, a CR insert, a backtick, template interpolation, an overlap, a no-op edit, a repeated G12 anchor, and a G12 list that differs from its pin (a line changed; a line added). The real edits plan cleanly on the original |
+| load test (WP-0, adapted) | before and after: shape OK |
+| diff | 117 edits in 117 hunks (130 lines replaced by 562); the output is rebuilt from its hunks byte for byte |
+| figures | field-controls 279 -> 333 (WP8 135 -> 189). With today 26 -> 52 (WP8 16 -> 42); with ref 2 -> 42 (all WP8); assumptions 74 -> 134 |
+
+Refs on the 42 WP-8 rows: HR-C11 2, HR-F1 2, HR-F2 3, HR-F3 2, HR-F4 4, HR-F5 4, HR-F6 6, HR-Q3 2, HR-Q4 3, HR-Q5 4,
+HR-X1 1, HR-K1 3, SAFE-ARCH-1 3, RFI-RESP-1 3.
+
+Builder reads: none changed. A builder names none of the leaves whose value or today changed. The only such mention is
+a comment, `087-fld.js:757` (approveFromOpen). The builders do read these changed leaves' unchanged fields:
+
+- `WP8["052-FLD"].safetyHealth` value and today (`052-fld.js:106, 641-645`). Its ref, assumption, source and note change;
+  its value 75 and today 70 do not.
+- `WP8["052-FLD"].qualityScore` and `.labour` values.
+- `WP8.quality.dashboard087FLD` value.
+- `dailyLog.promote*`, `manpowerTotal` and `manpowerWorkers`.
+- The timesheet figures.
+- `submittal.submitBy*`.
+- `transmittal.meetingChangeEventReadBack`.
+
+For all of these only the source and note change, or the source alone (G12). The full list is
+`builderReadsUnchangedFields` in `verify-report.json`. No builder reads `ref`, `assumption`, `source` or `note`.
+
+The WP-7 proof (`wp7-eot-proof.js`) reads `WP8.dailyLog.promoteTwice`, `promoteResponseVsStored`, `WP8.weather.*` and
+`WP8["052-FLD"].weather*`. For every one of them value, today, ref, assumption and unit are unchanged. The two
+`dailyLog` leaves change their source only (G12). Its book guard (`withRef(rowsF) >= 2`) still holds, at 42.
+
+## The leaf contract added
+
+- `WP8_REFS`: HR-C11 (WP-7's rule, read by KA.DL.*), HR-F1..F6, HR-Q3, HR-Q4, HR-Q5, HR-X1 (decided; its batch has not
+  landed), HR-K1, SAFE-ARCH-1 (fix list :1116, provisionally P2, Q4) and RFI-RESP-1 (fix list :1114, provisionally P1,
+  Q5).
+- A walk of WP8 checks at load that every WP-8 leaf with a today names a ref from `WP8_REFS`, that a ref always comes
+  with a today, that every such leaf is an assumption, and that its value never equals its today. It also checks that
+  no value restates HEAD as "(recorded)", and that every plan citation carries its HEAD, except on the WP-7-owned
+  weather leaves.
+- `WP8_KNOWN` lists the 28 leaves with a today that the 27 KA checks read in this book, with their refs. The 29th leaf,
+  commercial.js's `WP7.weather["087-FLD.promoted.days"]` (KA.DL.087.promoteStored), already carries HR-C11 there;
+  `verify.js` checks it.
+- The 15 WP-8 leaves that had a today and no ref now all carry one. The 7 "(recorded)" values and the 4 leaves that
+  held HEAD's figure as their value (`severityDowngradeProbe` 33, `legacyItpFailedToPassedProbe` 36,
+  `rateChangeRecorded` 480.00, `overdueHealth`) now hold the section 5 recommendation, and HEAD's figure is their today.
+- A refusal value `{ refused: true, code: null, ... }` reads "not 2xx and nothing changed". Its status and code are the
+  decision's or the fix's `CONTRACT` entry, null until filled (the WP-2 .. WP-7 pattern).
+
+## G12: the plan lines
+
+The book's WP-8 `P(n)` were numbered at b0ec5b0 plus the Q-KEY line at 36, the same base as WP-7's. `tools/plan-map.js`
+maps each one to the plan at 14a3db2 by the line's text. The plan at 14a3db2 is byte-identical to bde300d's, sha
+27bdf03c. All 65 lines match exactly and uniquely: P(71) -> :92 and P(99) -> :120 (+21, section 1); every other line
++40, P(390) -> :430 through P(1076) -> :1116 (`work/plan-map-output.json`). The WP-8 section is :872-939.
+
+- Every WP-8 plan citation is now `PH8(...)` ("docs/certification/OCTAPM_CERT3_PLAN.md:a,b @14a3db2"). On the 74
+  G12-only leaves the source is exactly the old one with each line mapped. On the other changed leaves it starts with
+  that and adds the new citations. `verify.js` recomputes both mechanically.
+- The G12-only lines (72 lines, 74 leaves) are derived from the sha-pinned input. They are pinned again by their count
+  and the sha256 of their join (`G12_LINES_COUNT` 72, `G12_LINES_SHA256` 55212736...), and each is its own exact anchor.
+  Their old and new text is in `wp8-book.diff` (hunks `G12.1` .. `G12.72`).
+- Not changed: the WP-7-owned leaves `WP8.weather.*` (14) and `WP8["052-FLD"].weather*` (3) keep their numbering
+  (choice 2).
+- New product, builder and register citations are `HF8` (@14a3db2). Since 886c9f1, among the WP-8 files only
+  meeting.service.js and task.service.js changed (D-PAGE-1). No existing `H()` citation names either, so the book's
+  @886c9f1 citations hold.
+
+## Changes by item
+
+| Item | Keys | Change |
+|---|---|---|
+| G1 (Q1, Q2, Q10) | new `WP8.F8.{project, team, activities, workers, evidence, days, timesheets, qualityMix, punchMix, safetySet, rfis, submittals, l213Template, residue, choreography}`, `WP8.F8V.{project, team, records, choreography}` | The throwaways' records from the models `F8_BOOK` / `F8V_BOOK`, equal to derive-f8.json. F8's team has the planner, QS, cost controller, site engineer and storeman, plus the quality engineer with no project role (RJ-12). Activities are F8-A1..A4 with the site engineer as engineer. Workers W8-1 / W8-R / W8-I are at 50.00; crew C8 is W8-1 alone (prefill 1 x 8). The run order follows WP8-PREP 5.1 / 5.2 (47 F8 steps, 7 F8V steps); each of the 74 F8 and 6 F8V check ids is served by exactly one step. Residue: F8 and F8V archived, three inactive workers per run and one permission template (Q10), no deep write, and one deep request refused before any write (Q2). |
+| G2 | refs on the 15 todays without one, plus the new known answers | HR-F4 (`approveFromOpen`), HR-Q5 (`evidenceWiped...`, `severityDowngradeProbe`, `ltiEditAfterClosure`), HR-X1 (`textOnlyEvidenceProbe`), HR-Q4 (`hardDeleteProbe`, `legacyItpFailedToPassedProbe`), HR-F3 (`finalApproverBypass`), SAFE-ARCH-1 (`safety.health`, `052-FLD.safetyHealth`), RFI-RESP-1 (`officialResponseAfterClose`), HR-F1, HR-F2 (2), HR-F6 (3), HR-F5 (`rateChangeRecorded`), HR-K1 (`overdueHealth`). Each is an assumption. |
+| G3 | the 7 "(recorded)" values; `actionItemIdentity` | value = the recommendation, today = HEAD. approveFromOpen {refused, day open} / "200 approved". finalApproverBypass {PATCH refused, close 403 PUNCH_FINAL_APPROVER_ONLY} / {200, 200 closed}. ltiEditAfterClosure {refused, lostDays 3} / {200, 5}. pmApprovalWhileStepsPending {409, not approved} / {200, approved, 2 steps undecided}. approveWithoutReview {refused, still uploaded} / {200, approved, latest}. approveOutOfOrder {refused, C stays latest} / {200, B latest, C superseded}. distributeBypass (the meeting's) {refused, still draft} / {200 distributed}. actionItemIdentity "same id across edits" / "a new id". |
+| G4 (Q3) | new `WP8.quality.formItpCounted087FLD`; `formItpFailureNotCounted`; notes on `inputs087FLD`, `dashboard087FLD`, `health087FLD`, `workspace087FLD` | Value 6 (100 - 40 - 24 - 2 x 15: the A120 complete-fail form instance counts), today 21, ref HR-Q3. `formItpFailureNotCounted` is restated as its today: value 6, today 21, ref HR-Q3 (choice 5). The notes say that 087-FLD reads 21 only under HEAD's model; F8 and 052-FLD have no form ITP. |
+| G5 | `rfi.overdueHealth`; new `rfi.overdueHealthF8`, `rfi.overdueWorkspaceF8` | overdueHealth value {RRB true, ANS false} (HR-K1, = overdueWorkspace), today {RRB false, ANS true}. F8's card deltas: value {RRB +1, ANS +0}, today {+0, +1}. Workspace docControl deltas {-10, 0}, HARD (no today). |
+| G6 | `timesheet.rateChangeRecorded`; new `capAcrossSheets`, `inactiveWorker` | Rate: value 40,000 (the rate at submission), today 48,000, ref HR-F5. Cap across sheets: value refused, one sheet; today 201, two sheets, 25 h on the day. Inactive worker: value refused, no sheet; today 201. |
+| G7 | new `dailyLog.approveEmptyDay`, `dailyLog.reopenWithoutReason` | HR-F4. Empty day: value refused, the day open; today 200 approved. Reopen: value 400, the day approved; today 200 open. |
+| G8 | `quality.severityDowngradeProbe`, `legacyItpFailedToPassedProbe`, `evidenceWipedBeforeApprovalProbe`, `hardDeleteProbe` | 33 and 36 become todays ({200, 33}, {200, 36}); the values are {refused, 21} (unit score -> state). evidenceWiped: value {not approved, still submitted}, today {200, closed}. hardDelete: split NCR / legacy ITP, the row read back. |
+| G9 (Q4) | new `WP8.F8.safetySet`; `safety.health` ref; `ltiEditAfterClosure` | F8's set: near miss open, LTI with 3 lost days closed, near miss archived. Health 75, today 70; workspace 75; dashboard 2 / 1, M-ARCH 3 / 2; fatality 0. The LTI probe edits lost days only (a type change is a static observation). |
+| G10 (Q5) | `rfi.officialResponseAfterClose` ref; new `rfi.officialResponsePaths` | The two paths (PATCH responses/:official; PATCH the record { response }): value 409 RFI_ALREADY_CLOSED each, answer unchanged; today 200 each, rewritten, the previous text kept nowhere. The code is an assumption (CONTRACT['RFI-RESP-1'].frozenAnswer). |
+| G11 | `punch.finalApproverBypass` wording; new `punch.reasonRequiredPairs` | The bypass is the site engineer naming the PM, who closes. The derivation is replaced and the old one is recorded in the note. reasonRequiredPairs = 8 (reopen 2, dispute 2, void 4), recomputed at load from PUNCH_TABLE. |
+| G12 | every WP-8 plan citation but the WP-7-owned leaves' | See "G12: the plan lines". |
+| G13 (Q6, Q7) | notes on the 10 `WP8.mutations` leaves; new `optionalMutants`, `fixMutations`, `notRun` | The 8 tallied mutants are named "<catcher> red (M-XX, tallied, E6 ...)": M-QW Q.F8.dashboard21, M-CLAMP Q.F8V.sixMajor, M-MP DL.F8.manpower, M-DT TS.F8.mixed, M-PFA P.F8.closeByNonApprover, M-LAT D.F8.storeman, M-RD SUB.F8.submitBy, M-ARCH SF.F8.dashboard. The optional M-QWh / M-QWw / M-OTF run untallied (Q7). The 13 fix mutations plus WP-7's M-C11d are listed with their catchers. The 3 not-run entries are recorded. Values unchanged. |
+| G14 | new `WP8.CF.{HRF4, HRF5, HRQ5, HRQ4, HRF3, SAFEARCH, RFIRESP, HRK1rfi, HRF1, HRF2, HRF6}` | Each is tied at load to the known answers it classifies (value, today and ref equal). HRF4 carries WP-7's site promotion from its result file (Q8). HRQ4 records the closed-NCR observation; HRF1 records SUB-LINK-1 (P2); HRF6 records MTG-SENT-1 (P2) and the transmittal-acknowledged observation (Q14). |
+| G15 | new `WP8.F8.manpower` | F8's internal carpenter: Steelfixer 40, Carpenter 30, Labourer absent, 70, 8 workers. Computed at load from DA's entries and tied to `dailyLog.manpower*` (86 under M-MP). |
+| G16 | `quality.textOnlyEvidenceProbe` | Ref HR-X1, BLOCKED until `FIXES['HR-X1']`. Value and today are unchanged; the note names the batch's leaf `WP8.quality.hrX1.storedNowhere` (choice 3). |
+| G17 | new `transmittal.createCitesFiled` | WP8-TRN-1 (P3): 404 FILE_NOT_FOUND "Revision source file not found" on transmittal and correspondence, nothing written; unchanged after the batch (IQ-3). An observation, with no today. |
+| G18 (Q12, Q14) | new `WP8.leads.{L213, L146, DVAL1, LDETAILS}` | The observations of WP8-PREP section 4, with no today or ref. LDETAILS lists the seven readers; the register row gains mobile `pay-apps/[id].tsx:68-69`. |
+| G19 | new `WP8.F8.submittalImpact` | SUB-I: need-by R+5, lead 2 weeks; expected = rules.submittalImpactDays over the observed reviewedOn. The three samples (10, 10, 11 for R 2026-10-12) are recomputed at load. |
+| G20 | new `WP8.F8.drawings` | F8-S1 A superseded, B approved latest, C uploaded, X8 filed approved and not latest by the PM: storeman ['B'] (['B', 'X8'] under M-LAT). F8-S2 A / B / C for HR-F2. |
+| G21 | new `WP8.F8.meetings`; new `transmittal.draftDistributed`, `editAfterDistribution` | M8a / M8b / M8c. The two HR-F6 confirm-first items: value refused, today 200 (with distribution rows "sent"). |
+| G22 (Q9) | new `WP8["052-FLD"].reads`; notes on `qualityScore`, `labour`; `safetyHealth` ref | Three live reads by 052's PM and four stored steps, no write. safetyHealth: ref SAFE-ARCH-1; the build's BLOCKED HR-K1 moment reads STORED-PRE-FIX after the fix. |
+| G23 (Q1) | note and source on `quality.closeMajorLeaves` | Closed on F8, not 087-FLD (`087-fld.js:1384`); HARD, an observation for CF.HRQ4. |
+
+The complete list of new keys is in `new-key-paths.txt`. The before and after figures are in `figures-before.json` and
+`figures-after.json`. The changed keys and their fields are in `verify-report.json` (`changed`, `g12Only`).
+
+## Choices made here (for Claude Main to confirm or reverse)
+
+1. **Only field-controls.js changes.** No G item needs commercial.js or schedule.js. WP-8 reads commercial's
+   `WP7.weather["087-FLD.promoted.days"]` (HR-C11, already a ref) and `WP7.promotion.sitePromotion`, and neither is
+   changed. The tool is still multi-file in form (`BOOKS`, `READ_ONLY_BOOKS`; every book is planned before anything is
+   written). Its command line takes the one pair it edits.
+2. **The WP-7-owned weather leaves keep their plan numbering.** These are `WP8.weather.*` and
+   `WP8["052-FLD"].weather*`, which the WP-7 proof judges. WP-7's own patch left their numbering alone. Mapping them
+   would remove the anchor of WP-7's `FC_MUTANTS` "FC a ref without its today", so WP-7's teeth could no longer run
+   verbatim. The WP-8 walk exempts exactly these 17 leaves.
+3. **`WP8.quality.hrX1.storedNowhere` is not added.** G16 says its value comes from the HR-X1 batch's patch, and the
+   batch's plan (`HRX1-FIX-PLAN.r3b.md` section 8) adds that leaf with the whole `WP8.quality.hrX1` set. A second
+   `hrX1` key in the same object literal would silently override this one. `verify.js` lists it as the one pending book
+   key (KA.X1.F8V.textOnly).
+4. **The G12-only lines are derived at run time from the pinned input, not written out in the tool.** They are pinned
+   by their count and sha256 and each is an exact anchor. WP-7 wrote its 27 G16-only lines out; here there are 72.
+5. **`formItpFailureNotCounted` keeps its key.** Its value becomes 6, as G4 says ("restated as its today"), so it now
+   reads the same as `formItpCounted087FLD`. Removing or renaming a key is never done.
+6. **The new F8 / F8V / CF / leads leaves carry no `company`.** They belong to no deep company. The new leaves inside
+   existing subtrees take their siblings' C_FLD or C_052. As a result `byCompany()` grows to 087-FLD 142 and 052-FLD 7;
+   its existing keys are unchanged.
+7. **Lead observations carry no today and no ref.** These are G17 (WP8-TRN-1) and G18 (L213, L146, D-VAL-1,
+   L-DETAILS). `WP8_REFS` holds only the section 5 rows and the two fix-list items. A lead id as a ref would need the
+   owner's expected value, which no ruling gives.
+8. **Some todays are restructured from text to objects**: `evidenceWiped`, `hardDelete`, `finalApproverBypass`,
+   `ltiEditAfterClosure`, `pmApproval...`, `approveWithoutReview`, `approveOutOfOrder`, `distributeBypass`, and
+   `createTaskTasks` ("2 after an edit (recorded)" -> 2). Each old today is quoted in the note. `approveFromOpen` keeps
+   "200 approved".
+9. **New key names the prep did not fix**: `WP8.F8.{timesheets, punchMix, rfis, submittals, l213Template, residue,
+   choreography}`, `WP8.F8V.{team, records, choreography}`, `WP8.mutations.{optionalMutants, fixMutations, notRun}`,
+   `WP8["052-FLD"].reads`, `transmittal.{draftDistributed, editAfterDistribution}`. Every key the draft check list names
+   resolves, except the pending one in choice 3.
+10. **Incident types are written as labels** ("near miss", "LTI"); the build sends the product's codes.
+
+## Open points (for Claude Main and the integration owner; no rule decided here)
+
+1. **The proof's book guard.** `WP8_PATCH_LEAVES` (as `WP7_PATCH_LEAVES`) should list `new-key-paths.txt`. The guard
+   should also check that every WP-8 KA leaf carries its ref and that no "(recorded)" value is left (WP8-PREP
+   section 6).
+2. **The chain.** The field-controls input of any later patch becomes b96dfefe..., and that includes the HR-X1 batch's
+   book patch (choice 3), whose anchors must be taken on this output. commercial.js stays d00954da.
+3. **Anchors after the batches (Q13).** `verify.js` checks its 67 cited lines against the worktree. 11 of the files
+   are ones the WP-2 batches or WP-7's PROMO-TX fix will edit (`rescanAfterBatches`). If those land first, re-run
+   `verify.js` and re-derive the moved lines; the @14a3db2 citations stay true of 14a3db2.
+4. **WP9.health.safetyExpected** (087-HLT, today 70) is the same defect as SAFE-ARCH-1 and still has no ref. It is
+   WP-9's leaf, and no WP-8 check reads it. WP-9's patch should give it SAFE-ARCH-1, or HR-K1 if the fix does not land.
+5. **The moment map (Q1).** The WP-8 deviation is recorded by key when the proof lands (WP8-PREP section 5.4); it is
+   noted on `WP8.F8.choreography`. The builder comment at `087-fld.js:1384` is to be updated (G23).
+6. **Leads, recorded only (Q11, Q14), with the WP-8 proof commit:** DL-REPLAY-1 (P3), SUB-LINK-1 (P2), MTG-SENT-1 (P2).
+   D-ID-3/7/8/9 stay with the identity follow-ups. L-DETAILS's register row gains mobile `pay-apps/[id].tsx:68-69`
+   (WP-4) and the two WP-8 readers.
+7. **Owner questions, listed and not answered:**
+   - O1 HR-F4
+   - O2 HR-F5
+   - O3 HR-Q3
+   - O4 HR-Q4 and HR-Q5
+   - O5 HR-F1, HR-F2, HR-F3, HR-F6
+   - O6 SAFE-ARCH-1 and RFI-RESP-1 (informational: fixed if each confirms as P1)
+   - O7 HR-A2 deletes
+   - O10 (carried from the batch): HR-X1's mode for a reference naming no stored document

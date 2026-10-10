@@ -55,12 +55,6 @@ These are no longer open questions.
   - **L35 and L36** stay in CERT-5 unless reproduction proves they corrupt authoritative CERT-3 workflow state.
 - **The ~174 mapping findings are suspected defects only.** Each one goes through suspect → reproduce → classify → fix or defer. None becomes implementation work automatically.
 - **Q-KEY (2026-10-09, extends Q6): option (a) approved.** A credential event revokes the active API keys the person **created** (`ApiClient.createdBy`), so a session that was stolen cannot leave a working key behind. The credential events are a completed password reset, an administrator's MFA reset, the identity being closed, and a closed identity being reopened. Keys created by other people are untouched. Creating a key or widening one holds the creator's credential epoch in the same transaction, so a key cannot be minted from a session that a reset has just ended. Revoking a key never waits on that and is never refused. A legitimate integration that the person created has to be re-issued after such an event; the admin guide says so.
-- **Execution reset, phase 1 (owner, 2026-10-10). It overrides the Codex gates of §6.4 and §7.**
-  - **Codex loop closed.** No plan, diff or fix is sent to Codex unless the owner asks. Claude is the implementation owner, reviewer, integration owner, test owner and final decision maker. Codex findings already confirmed and implemented stay valid. The pending L34 and HR-C1 plan reviews and every diff review are done by Claude.
-  - **Severity rule.** Fix immediately only P0, P1, data corruption, security or authorisation failures, financial or business-rule failures, direct blockers to the current work, and failed known-answer invariants it needs. P2, P3, minor edge cases and polish are recorded in the register, assigned to a later area, and the work continues.
-  - **Targeted testing.** A changed area runs its unit tests, its proof or reproduction, the mutation its guard needs, and its directly affected workflow regression. Broad or full suites run only when this plan requires them at a checkpoint, when a P0/P1 suggests broad effects, or at the final close of a work item. A run with a few invalid checks is classified (product, test or harness, fixture, expected behaviour, stale expectation); those checks are fixed and re-run alone, and the full checkpoint run happens once at the end.
-  - **No new frameworks, matrices, sweeps or reviewer workflows** unless the current work cannot be completed validly without one. Agents are used only for bounded tasks.
-  - **Finish the work in progress first:** the §3.3 build and cert3d. No new product feature is started.
 
 ---
 
@@ -1222,3 +1216,16 @@ P2/P3 defects are recorded, not fixed, under the scope freeze.
 - **A10** Every expected figure here comes from the area maps and is derived again in the answer book. A disagreement is settled on paper, never by editing the expected value.
 - **A11** The script and proof paths under `scripts/cert/cert3/` are proposals.
 - **A12** The development PostgreSQL on :55432 stays unavailable during CERT-3.
+
+---
+
+## Appendix A. Owner decisions after 2026-10-10
+
+Appended at the end so that the line numbers the answer books and proofs cite stay valid. These decisions are in force alongside §0.1.
+
+- **Execution reset, phase 1 (owner, 2026-10-10). It overrides the Codex gates of §6.4 and §7.**
+  - **Codex loop closed.** No plan, diff or fix is sent to Codex unless the owner asks. Claude is the implementation owner, reviewer, integration owner, test owner and final decision maker. Codex findings already confirmed and implemented stay valid. The pending L34 and HR-C1 plan reviews and every diff review are done by Claude.
+  - **Severity rule.** Fix immediately only P0, P1, data corruption, security or authorisation failures, financial or business-rule failures, direct blockers to the current work, and failed known-answer invariants it needs. P2, P3, minor edge cases and polish are recorded in the register, assigned to a later area, and the work continues.
+  - **Targeted testing.** A changed area runs its unit tests, its proof or reproduction, the mutation its guard needs, and its directly affected workflow regression. Broad or full suites run only when this plan requires them at a checkpoint, when a P0/P1 suggests broad effects, or at the final close of a work item. A run with a few invalid checks is classified (product, test or harness, fixture, expected behaviour, stale expectation); those checks are fixed and re-run alone, and the full checkpoint run happens once at the end.
+  - **No new frameworks, matrices, sweeps or reviewer workflows** unless the current work cannot be completed validly without one. Agents are used only for bounded tasks.
+  - **Finish the work in progress first:** the §3.3 build and cert3d. No new product feature is started.
