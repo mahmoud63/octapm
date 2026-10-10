@@ -1103,7 +1103,12 @@ const main = async () => {
       const bc = await upbCreate(p, 'b', B);
       const bu = await upbUpdate(p, 'b', B);
       const writer = (o) => o.vals.length > 0 && o.vals.every((v) => v === ctx.aPm);
-      const fixedCreate = (o) => (o.res.status === 201 && Boolean(o.id) && o.db.length === 1 && writer(o)) || (is4xx(o.res) && !o.id && o.anywhere === 0 && !o.recordLeft);
+      // Integration owner, r3b IQ-2 (2026-10-10): six create services know no actor (their routes' user is dropped),
+      // so the fixed create stores an empty uploader there. That stores no foreign user and is accepted on those creates;
+      // another company's user never is.
+      const ACTORLESS_CREATE = new Set(['correspondence', 'defect', 'drawing', 'itp', 'mtest', 'transmittal']);
+      const writerOrEmpty = (o) => o.vals.length > 0 && o.vals.every((v) => v === ctx.aPm || (ACTORLESS_CREATE.has(p.key) && v === null));
+      const fixedCreate = (o) => (o.res.status === 201 && Boolean(o.id) && o.db.length === 1 && writerOrEmpty(o)) || (is4xx(o.res) && !o.id && o.anywhere === 0 && !o.recordLeft);
       const fixedUpdate = (o) => (o.res.status === 200 && o.db.length === 1 && writer(o)) || (is4xx(o.res) && o.db.length === 0 && o.found);
       for (const [o, ok] of [[bc, fixedCreate(bc)], [bu, fixedUpdate(bu)]]) {
         const id = `UPB.${p.key}.${o.op}`;
