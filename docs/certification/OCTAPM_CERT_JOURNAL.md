@@ -868,3 +868,36 @@ Under r2, five of XDOC-1's ten writes would still be stored. Two read-only verif
 - **WP3-ALLOC-1 (P2).** The allocation summary does not filter progress by the cutoff. It goes to WP-3's confirm-first and the L34 plan review.
 
 Codex round 3 is the last of the three allowed plan-review rounds. It runs in the next window (session cron 18:57 CDT) on r3, which is being written read-only.
+
+## 2026-10-10 — XDOC-1b and XDOC-1c confirmed; WP-2 r3 plans; WP-6 prepared and debug-run
+
+**XDOC-1b (P1, cross-company write, reads closed).** XDOC-1's class on the 18 other `syncWorkflowReferences` call sites (RFI, submittal, drawing, transmittal, correspondence, defect, ITP, material test and punch).
+- **Repro.** `xdoc-1b-repro.js`, companies 087/088, product routes only.
+- **Result.** Exit 2; exactly the 54 write checks fail: foreign URLs through either route and keys embedding the foreign id, on create and update. All read checks and controls pass.
+- **First run.** It was a setup error: an RFI was sent with status `draft`, while the service defaults a new RFI to `open`.
+
+**XDOC-1c (P1, the revisions door) and XDOC-UPB (P1 on workflow and commercial references).**
+- **Repro.** `xdoc-1c-repro.js`. Exit 2; exactly 72 write checks fail:
+  - 40 revision-door writes;
+  - 12 drawing and transmittal file-field writes;
+  - 20 uploader writes, which store another company's user id as `uploadedBy`.
+- **Photos.** Daily-report and site-diary photos already take the uploader from the document, so XDOC-UPB is narrowed.
+- **Residue.** 63 revision rows naming the foreign file stay in the archived throwaway project, because no product route deletes a revision. The partial database is restored from cert2c on 2026-10-11.
+- **Lead XDOC-L1.** Revisions take `issuedBy` from the request; `ContractProfile.documentIds` is stored as sent.
+
+**WP-2 fix plans r3.** Written read-only under the binding round-2 adjudication.
+- **QP r3.** Every official-progress reader adopts one ordering. Locked re-checks are added for PATCH, DELETE, start, sign and Close. Race tests queue behind a blocker connection.
+- **X r3b.** The judge moves into the shared workflow helper (XDOC-1b). §12b covers the revisions door and §14 a server-stamped uploader. An embedded foreign id is a scope-only name. The commercial check becomes unconditional.
+- **Rulings** on the authors' questions are in `scratch\wp2\r3-rulings.md`. Codex round 3, the last plan-review round, runs at 18:57 CDT.
+
+**WP-6 (BOQ, allocations, budgets, cost codes).** Prepared, adjudicated (`scratch\wp6\WP6-ADJUDICATION.md`), book patch installed (`a80ccef`, 726 to 778 figures), and the proof `wp6-boq-proof.js` installed.
+- **Scope.** Throwaways B6 and B6X in 087; 83 checks plus G.5xx. Company 087 only.
+- **AI jobs.** They run in process through a recorder stub. Outbound requests are refused inside the stub window, and no queued job is left behind (the product's cancel route).
+- **TEST GAP L121.** The quota refusal on a non-AI import is not run live. Driving company 011's AI counter to its limit would change one of the 97 fingerprinted companies on every run.
+
+| WP-6 debug run | Result |
+|---|---|
+| 1 | 78 of 78 recorded checks pass; 10 known answers BLOCKED; confirm-first: 7 CONFIRMED, CF.HRC14 PARTIAL; no 5xx. The five chunker checks stopped as a setup error. |
+| 2 (`--only=PURE`) | The chunker passes through AI schedule generation: [60,60,10], [50,50,30], [60,55], [60], [60,1], which is CLAUDE.md's "max 60 per batch, by section". |
+
+The setup error in run 1 came from finding **SCHED-RET-1 (P3)**. The job result always reports `revisionId: null`, because `stagedRevisionId` is re-declared inside a block (`schedule.service.js:2580`). The staged revision is created, and nothing reads the returned id. The proof now judges completion on the staged revision itself.
