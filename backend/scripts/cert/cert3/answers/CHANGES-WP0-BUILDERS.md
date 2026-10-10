@@ -2192,3 +2192,197 @@ quota first (:1174). The proposed path, `WP6.B6Q.choreography` Q1, needs confirm
    - O6 the severities of L109, L110 and L111
 
 **Integration owner (2026-10-10, after drafting):** WP6.B6Q and WP6.U6.company (company 011) are kept for the record only. L121 is a recorded TEST GAP: driving 011's AI counter to its limit would change one of the 97 companies the exit fingerprint compares, on every no-flag run (primary, final and each mutation run), and the plan reserves 011 for entitlement cases. The proof does not run B6Q; CF.HRC14 reads PARTIAL.
+
+# WP-7 answer-book patch (2026-10-10)
+
+Read-only draft for Claude Main. Nothing under the certification worktree, the database or git was written.
+
+- Inputs (HEAD bde300d, clean):
+  - `backend/scripts/cert/cert3/answers/commercial.js`, sha256 `ca7e84edf6ac302bc8557e6870329b429ff1e13c2490f90ba192d0223425651e`
+    (copies: `ref/commercial.ca7e84ed.js`, `work/commercial.copy.js`).
+  - `backend/scripts/cert/cert3/answers/field-controls.js`, sha256 `ebc5c740850636a63b116d851f33d44d5bfeaa4c13a795f5ab91ebd37a99e73a`
+    (copies: `ref/field-controls.ebc5c740.js`, `work/field-controls.copy.js`).
+- Outputs:
+  - `work/commercial.applied.js`, sha256 `d00954da78f9c709607652e8b8dbf79df568eb3a23113d9c839f26bff94c36b1`.
+  - `work/field-controls.applied.js`, sha256 `dcdeb343738129a83b6868427c12b5103948c8cf2c80153cefe71c491d1c556c`.
+  - Two runs give the same bytes.
+- `schedule.js` (f0957af2...) is not changed. WP-7 cites its F1 network (A110 -> A120, FS) and `WP1.T1.A110.TF` /
+  `A120.TF` (0 each); `verify.js` reads them from `ref/schedule.f0957af2.js`, which hashes to the worktree's file.
+- Rulings applied: `C:\Temp\octapm-cert\scratch\wp7\WP7-ADJUDICATION.md` Q1-Q13 and the standing rulings it lists:
+  product routes only; no SQL fixtures (a pure lock-holder connection is allowed); a value equal to HEAD's today under an
+  undecided rule reads BLOCKED (the KA.I9 ruling); every writing check and every catcher on the throwaway; N-round
+  concurrency probes; every figure a book leaf; company 087 plus the deep read of 052-FLD only.
+- Source: `C:\Temp\octapm-cert\scratch\wp7\WP7-PREP.md` section 10 (G1-G18), with `derive-t7.json`,
+  `wp7-checks-draft.json`, `wp7-leaves.json` and `wp7-mutations-draft.json`.
+
+## How to reproduce
+
+```
+node tools/run-all.js        (from C:\Temp\octapm-cert\scratch\wp7\book)
+```
+
+It runs these steps, writing each step's output to `work/<step>-output.txt`:
+
+1. The input checks: both copies, both `ref/` copies and the worktree's current books hash to the expected inputs.
+2. `tools/plan-map.js` (G16: the old plan lines mapped to bde300d by content; `work/plan-map-output.json`).
+3. `book-insert.js` on both copies, then a second application, which must give the same bytes.
+4. `node --check` of both outputs.
+5. `verify.js`.
+6. `teeth.js` (the new load checks, both books).
+7. The WP-4 teeth, the WP-5 teeth (with the WP-5 rulings' mutants) and the WP-6 teeth on the commercial output, through
+   `tools/teeth-run.js`, which extracts their MUTANTS lists and keeps their scratch files in this folder.
+8. `tools/refusal-test.js`.
+9. The WP-0 load tests (as adapted) before and after: commercial `--wp5 --wp6` then `--wp5 --wp6 --wp7`;
+   field-controls plain then `--wp7`.
+10. `tools/diff.js`, which writes `wp7-book.diff` (both books) and rebuilds each output from its hunks.
+11. `tools/bytes-check.js` over the deliverables, the tools, the outputs and both patched books.
+
+The sha256 of every deliverable is in `work/SHA256SUMS.txt`; the run's summary is `work/run-all-output.txt`.
+
+To install (Claude Main):
+
+1. Check that `answers/commercial.js` still hashes to ca7e84ed and `answers/field-controls.js` to ebc5c740.
+2. Run `node book-insert.js <commercial copy> <commercial out> <field-controls copy> <field-controls out>`
+   (all four paths different; it refuses and writes nothing otherwise).
+3. Check that the outputs hash to d00954da and dcdeb343.
+4. Copy each output over its book.
+5. Add a "WP-7 answer-book leaves (2026-10-10)" entry to `answers/CHANGES-WP0-BUILDERS.md` from this file (both books'
+   header comments already name that entry).
+
+## Results (all from work/*-output.txt)
+
+| Step | Result |
+|---|---|
+| inputs | both copies, both refs and the worktree's books are ca7e84ed / ebc5c740 |
+| book-insert | commercial 39 edits; field-controls 11 edits |
+| determinism | second application byte-identical (both books) |
+| load | both outputs load; every embedded load check passes: WP-4, WP-5, the WP-5 rulings, WP-6 and the new WP-7 ones (commercial), the new one (field-controls) |
+| verify.js | OK: 36 new keys exactly as expected (all in commercial.js); 44 changed commercial keys and 2 changed field-controls keys, each with exactly the expected fields; 734 + 277 leaves identical; stage*, WP4, WP5, WP6 identical; deep and claudeMd identical but the 3 new G17 leaves; G16 done mechanically on all 44 changed WP-7 sources (each old plan line mapped through PLAN_MAP, which equals the content map); every book key of the draft list resolves; 13 KA checks each read a known answer with a today, the check's ref and assumption; T7 36 and T7H 4 check ids = the draft's; 62 mutation catchers named by check id; builder reads changed: none; derive-t7 42 comparisons, 0 problems; 35 cited product / builder / schedule lines hold their anchors; WP-0 recomputations 116 / 116 (commercial) and 7 / 7 (field-controls); load tests pass; LF only, no BOM, non-ASCII 446 -> 446 and 141 -> 141; every removed line inside an anchor; a second run refused for either book, nothing written |
+| teeth.js (WP-7) | 8 field-controls + 78 commercial = 86 / 86 mutants refused at load by their own check; both unmutated copies load |
+| WP-4 teeth on output | 45 / 45 caught |
+| WP-5 teeth on output | 61 + 15 rulings = 76 / 76 caught |
+| WP-6 teeth on output | 74 / 74 caught |
+| refusal test | re-application (each book; the clean other book is not written either), CR (each book), wrong sha (each book), an output equal to an input, two equal outputs, a wrong argument count, repeated anchor (each book), missing anchor (each book), non-ASCII insert, CR insert, backtick (each book), template interpolation, overlap, output equal to input: all refused, nothing written; the real edits plan cleanly on both originals |
+| load test (WP-0, adapted) | before and after, both books: shape OK |
+| diff | commercial 39 edits in 37 hunks (57 lines replaced by 518); field-controls 11 edits in 10 hunks (13 by 52); each output rebuilt from its hunks byte for byte |
+| figures | commercial 778 -> 814 (WP7 47 -> 80); with today 124 -> 136; with ref 121 -> 145; WP7 with today 12 -> 24, with ref 0 -> 24; assumptions 289 -> 323. field-controls 279 -> 279; with ref 0 -> 2; assumptions 73 -> 74 |
+
+Builder reads: none changed. The only changed values or todays are `WP7.T2.plannerPatchApproved` (value),
+`WP7.weather.052-FLD` (a today added) and the two `WP7.mutations` leaves (values); no builder reads them. The builders do
+read these changed leaves' unchanged fields: `WP7.weather["052-FLD"].value` (052-fld.js:62, 107-108),
+`WP7.weather["087-FLD.composition"]` value and today (087-fld.js:111, 052-fld.js:63), `["087-FLD.promoted.days"].value`,
+`["087-FLD.promoted.contractual"].value`, `WP8.weather.nonContractualAddsNothing` value and today (087-fld.js:233,
+052-fld.js:65), and `WP7.T2` / `T3` cumulatives and recommendations (087-com.js:1644-1657). All are unchanged. No builder
+reads `ref`, `assumption`, `source` or `note`.
+
+Installing touches nothing else: no proof pins a book's hash or figure count (the WP-2..WP-6 proofs guard their own
+`*_PATCH_LEAVES` only), and the field-controls row shape gains an optional `ref`, which `schedule.js` already carries.
+
+## The leaf contract added
+
+- `WP7_REFS`: HR-C10, HR-C11, HR-F4, PROMO-TX.
+- Every WP-7 leaf with a today names one of these refs, is an assumption, and has a value that differs from its today. A
+  ref always comes with a today. A walk of WP7 checks this at load, and also that every WP-7 plan citation carries its HEAD
+  (G16).
+- `WP7_KNOWN` lists the 18 leaves with a today that the 13 KA checks read in commercial.js, with their refs. The 14th,
+  field-controls' `WP8.weather.nonContractualAddsNothing` (KA.FLD.087.live), is checked in field-controls.js.
+- The 14 leaves with a today and no ref (WP7-PREP fact 4) now all carry one. Ten of them were not assumptions and now
+  are, nine in commercial.js (`WP7.T4.criticalPathImpactDays`, `ldApplicableDays`, `ldLiability`;
+  `WP7.weather.fractional.28xHalf.consumedPct`, `.warning`; `allowanceZero.allowance`, `allowanceZero.warning`;
+  `087-FLD.promoted.days`, `.total`) and one in field-controls.js (`WP8.weather.nonContractualAddsNothing`). With the 25
+  new assumption leaves that gives commercial's 289 -> 323.
+- `deep.087-COM` gets no today or ref, so WP-4's walk of `deep.087-COM` is not widened.
+
+## G16: the plan lines
+
+The book's WP-7 `P(n)` were numbered at b0ec5b0 plus the Q-KEY line at 36. `tools/plan-map.js` maps each one to the plan at
+bde300d (sha 27bdf03c...) by the line's text; all 22 match exactly and uniquely:
+
+| Old | Now | Old | Now | Old | Now |
+|---|---|---|---|---|---|
+| P(70) | :91 | P(806) | :846 | P(817) | :857 |
+| P(387) | :427 | P(807) | :847 | P(819) | :859 |
+| P(390) | :430 | P(808) | :848 | P(820) | :860 |
+| P(405) | :445 | P(809) | :849 | P(821) | :861 |
+| P(799) | :839 | P(810) | :850 | P(823) | :863 |
+| P(800) | :840 | P(815) | :855 | P(838) | :878 |
+| P(1038) | :1078 | P(816) | :856 | P(1039) | :1079 |
+| P(1111) | :1151 | | | | |
+
+So the trail is 40 lines everywhere but the CLAUDE.md rule table (P(70) = :91, 21 lines). The WP-7 section is :837-870.
+
+- Every WP-7 leaf's plan citation is now `PH7(m)` ("docs/certification/OCTAPM_CERT3_PLAN.md:m @bde300d"). On the 27
+  G16-only leaves the source is exactly the old one with each line mapped; on the other changed leaves it starts with that
+  and adds the new citations. `verify.js` recomputes both mechanically.
+- Not changed: the WP-7 banner line ("plan 797-830") holds non-ASCII box characters, and an insert must be ASCII, so the
+  header's scope line carries the correction instead (as WP-6 G22 did). `deep.087-COM.ldRatePerDay`, `eotApprovedClaims`,
+  `stateCoverage.eotClaims` and `claudeMd.weather70` keep the section-wide numbering: `P(387)` is shared by every
+  `deep.087-COM` leaf of every work package. Their lines at bde300d are :427, :848, :91 and :855.
+- New product and builder citations are `HF7` (@bde300d). Every WP-7 product file is unchanged since 886c9f1, so the
+  book's existing @886c9f1 product citations hold line for line (35 cited lines checked by `verify.js`).
+
+## Changes by item
+
+| Item | Keys | Change |
+|---|---|---|
+| G1 (Q1, Q11) | new `WP7.T7.{project, team, network, claims, weatherSequence, entries, residue, choreography}`, `WP7.T7H.{project, team, half28, choreography}` | The throwaways' records from the models `T7_BOOK` / `T7H_BOOK`, equal to derive-t7.json. T7: completion 2027-06-30, LD 1,000.00, allowance 20 explicit, retention 10; T7-C1 10 d -> T7-C2 5 d (FS), T7-F4 11 d: TF 0 / 0 / 4. The T7 choreography (19 steps) serves 36 check ids, T7H's (4 steps) serves 4; each id once. Residue: T7 and T7H archived, no job, the blocker writes nothing; at HEAD 3 duplicated and 3 orphaned contractual rows on T7 (Q11). |
+| G2 (Q12) | refs on 12 WP7 leaves and on `WP8.dailyLog.promoteResponseVsStored`, `WP8.weather.nonContractualAddsNothing` | HR-C10: `WP7.T2.plannerPatchApproved`, `WP7.T4.*` (3). HR-C11: `WP7.weather.fractional.*` (3), `allowanceZero.*` (2), `087-FLD.composition`, `087-FLD.promoted.days`, `.total`, and the two field-controls leaves. Each an assumption; values and todays unchanged. In field-controls.js `F()` takes `ref` and `figures()` emits it. |
+| G3 | `WP7.T2.plannerPatchApproved` | Value `{ status: 409, code: null, eotDaysGranted: 10, cumulativeApprovedEotDays: 10 }` (was `{ 409, null }`, unit error -> outcome). Today unchanged. Note: the PATCH comes after E-T3's approval; sent first, E-T3 would read 35 / 2027-08-04. |
+| G4 | `WP7.T1.submitWithoutProof` note; new `WP7.T1["submitWithoutProof.noDocument"]`, `["submitWithoutProof.noActivity"]` | 400 EOT_IMPACT_PROOF_REQUIRED with details {activityCount 1, supportingDocumentCount 0} and {0, 1}; the claim stays draft. |
+| G5 | new `WP7.T1.{rejectWithReason, patchApprovedToDraft, rejectApproved, refsNotFound}` | 200 rejected with the reason, by the PM; 400 EOT_WORKFLOW_ACTION_REQUIRED {approved -> draft / rejected}, still approved (M-STAT's catchers); 404 EOT_CLAIM_NOT_FOUND, 400 EOT_ACTIVITY_NOT_FOUND, 400 EOT_WEATHER_DELAY_NOT_FOUND, nothing written. |
+| G6 (Q3) | new `WP7.T4.on087COM`, `WP7.T4.storedFields`, `WP7.T5.storedFields` | /eot/calculate on 087-COM's A110 + A120 (TF 0, one F1 chain): value 10 / 0 / 0.00, today 20 / 10 / 10,000.00, ref HR-C10. The stored fields (claim impact, entitlementSummaryJson.ldApplicableDays, ldLiability in cents, the links' floatDays): T4 the same, links [0, 0]; T5 6 / 6 / 6,000.00, link [4], no today. |
+| G7 | `WP7.weather.allowanceZero.warning` | Value null kept; ref HR-C11, an assumption; an observation recorded by CF.HRC11, never judged. |
+| G8 | new `WP7.T7.weatherSequence` | W1-W7: 20 -> 13 (65%) / 14 (70%, warning); WN-10 non-contractual (still 14, 10 in its month); 30 -> 20 (66.67%) / 21 (70%); 10 -> 6 (60%) / 7 (70%); W6 allowance 0 (the KA); W7 20 again. Each read replayed at load and tied to the WP7.weather boundary leaves. |
+| G9 | new `WP7.weather["allowanceZero.T7"]`; `allowanceZero.allowance` ref + note | Value {allowance 0, consumedPct 0}; today {20, 7, 35, false, 13}. |
+| G10 | new `WP7.T7H.half28`; `fractional.*` refs + notes | 28 x 0.5 on T7H: value {20, 14, 70, true, 6}, today {20, 0, 0, false, 20}; 1.5 value 1.5, today 1 (CONTRACT fractionalMode noted). |
+| G11 (Q9) | new `WP7.weather["087-FLD.read"]`; composition ref + note | At 13 / 14 / live: value 13 / 65 / false / 7, 14 / 70 / true / 6 (+ non-contractual 10); today 11 / 55 / false / 9, 12 / 60 / false / 8. STORED-PRE-FIX after the HR-C11 fix until the exit rebuild. |
+| G12 | `WP7.weather["052-FLD"]` | Today {first [55, false], then [60, false]}, ref HR-C11 (value unchanged). |
+| G13 (Q2, Q6, Q8) | new `WP7.promotion.{barrier, feeds, race, failure, sitePromotion}`; `WP7.T7.entries` | The blocker queue (a separate pg connection, FOR UPDATE, rolled back; pg_blocking_pids; released within 2.5 s of the 5 s window; N=3). Feeds: 8 h -> 1.0 day, one row, +1. Race: value one 200 + one 409, +1; today two 200s, +2, one orphan (ref PROMO-TX). Failure: value DELETE 200, promotion not 2xx, +0; today DELETE 200, 404 NOT_FOUND, one orphan. Site engineer: value non-contractual, +0; today contractual, +1 (ref HR-F4). |
+| G14 | new `WP7.CF.{HRC11, HRC10, PROMOTX}` | Each tied at load to the known answers it classifies. HRC10 records the two recommendations (EOT-REC-2) and the project date as an observation (HEAD keeps it manual, which is HR-C10's own recommendation). PROMOTX carries the severity evidence; severity decided at the run (Q6). |
+| G15 (Q4, Q5) | `WP7.mutations.seventyBoundary`, `approvedEotLock`; new `ruleMutants`, `fixMutations` | Catchers by check id: M-70 (W.T7.a20at14, a30at21, a10at7; KA.W.T7H.half28 after the HR-C11 fix; KA.FLD.087.live after the exit rebuild; M-70b not run); M-STAT now (T1.T7.patchApprovedToDraft, rejectApproved), M-LOCK after HR-C10 (KA.T2.plannerPatchApproved); the six optional rule mutants (run, untallied); the five fix mutations and the not-run sequential promotion guard. |
+| G16 | scope line; every WP-7 plan citation | See "G16: the plan lines". |
+| G17 | new `deep.087-COM.{eotWeatherLink, completion, weatherDefault}` | T2 names WD-1 (2 days); completion 2027-06-30; allowance 20 by the column default, 2 used, 10%, no warning, 18 remaining. No today, no ref. |
+| G18 | `WP7.T3.revisedCompletionRecommendation` note | The calculation's own recommendation for E-T3 at create is 2027-07-05 (this claim's days only); the approval column 2027-07-15 is the figure. |
+
+The complete list of new keys is in `new-key-paths.txt`. The before and after figures of both books are in
+`figures-before.json` and `figures-after.json` (`{ commercial, fieldControls }`).
+
+## Choices made here (for Claude Main to confirm or reverse)
+
+1. T7's team is the planner and the site engineer (WP7-PREP section 5.1 step T7-0 and the draft check S.T7.create).
+   derive-t7.json lists four roles (planning_eng, qs, site_engineer, cost_controller); no WP-7 step uses the QS or the cost
+   controller. `verify.js` checks only that the book's team is within derive-t7's.
+2. `WP8.weather.nonContractualAddsNothing` is made an assumption as well as given ref HR-C11 (Q12 names the ref only). The
+   reason is the leaf contract: a today under an undecided row is an assumption, KA.FLD.087.live reads it, and its value 14
+   holds only under HR-C11's decimal option. Reversing it is one edit, `FC.G2.ncOpts`, plus its teeth mutant.
+3. `WP7.mutations.ruleMutants` and `fixMutations` are new leaves, so that every mutant of wp7-mutations-draft.json has a
+   leaf that names its catchers by check id (Q4, Q5). The prep's G15 named only the two existing leaves.
+4. G16 replaces each WP-7 plan line instead of appending the new one beside the old. The old numbering is in the table
+   above and in `work/plan-map-output.json`.
+5. New key names not fixed by the prep: `WP7.T7.{entries, residue, choreography}`, `WP7.T7H.{team, choreography}`,
+   `WP7.mutations.{ruleMutants, fixMutations}`. Every key the draft check list names resolves.
+6. Two partial anchors share a line three times. The WP-7 T4 impact line and the allowance-0 line have non-ASCII or
+   backtick text in their notes, and field-controls' non-contractual note is a template literal. So each is edited at two
+   ASCII points either side of that text, which stays as it was.
+
+## Open points (for Claude Main and the integration owner; no rule decided here)
+
+1. **The proof's book guard.** `WP7_PATCH_LEAVES` (as `WP6_PATCH_LEAVES`) should list `new-key-paths.txt`. The proof
+   reads the two field-controls refs through the module or `figures()`, which now emits `ref`.
+2. **HR-X1 and the cited lines.** The HR-X1 batch edits `eot.service.js`. The book's `@bde300d` citations stay true of
+   bde300d. But `verify.js`'s cited-line check reads the worktree, so if the lines shift after HR-X1 it reports them, and
+   the WP-7 anchor scan is re-run then anyway (Q13). Install before HR-X1 lands, or re-run `verify.js` and re-derive the
+   moved lines.
+3. **The chain after WP-7.** WP-8's patch chains after this one. Its field-controls input becomes dcdeb343..., and
+   commercial's input becomes d00954da... for any later commercial patch.
+4. **The moment map.** The WP-7 deviation is recorded by key when the proof lands (Q1): rows 177 and 263 move to T7;
+   row 180 is met on T7 and T7H; rows 153, 178, 179, 247 and 248 stand as stored moments plus live reads. It is noted on
+   `WP7.T7.choreography`.
+5. **Leads (Q10), recorded only, with the WP-7 proof commit:** EOT-CONC-1 (P2), DST-1 (P3), EOT-REC-2 (P3, noted on
+   `WP7.T3` and `WP7.CF.HRC10`), WX-DEL-1 (P2), EOT-APPLY-1 (P3).
+6. **Owner questions, listed and not answered:**
+   - O1 HR-C10
+   - O2 HR-C11 (decimals or refuse; allowance 0; the 70% notice; one day against a zero allowance)
+   - O3 HR-F4
+   - O4 repair of existing duplicate or orphaned weather rows (it changes the 97-company fingerprint)
+   - O5 HR-A2 (the weather delete permission, or archive)

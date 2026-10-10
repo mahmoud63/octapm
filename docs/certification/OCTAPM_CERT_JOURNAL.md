@@ -901,3 +901,28 @@ Codex round 3 is the last of the three allowed plan-review rounds. It runs in th
 | 2 (`--only=PURE`) | The chunker passes through AI schedule generation: [60,60,10], [50,50,30], [60,55], [60], [60,1], which is CLAUDE.md's "max 60 per batch, by section". |
 
 The setup error in run 1 came from finding **SCHED-RET-1 (P3)**. The job result always reports `revisionId: null`, because `stagedRevisionId` is re-declared inside a block (`schedule.service.js:2580`). The staged revision is created, and nothing reads the returned id. The proof now judges completion on the staged revision itself.
+
+## 2026-10-10 — WP-7 prepared, installed and debug-run; PROMO-TX reproduced
+
+**WP-7 (contract time: EOT and the weather 70% rule).** Prepared read-only and adjudicated (`scratch\wp7\WP7-ADJUDICATION.md`).
+- **Books.** Commercial 778 to 814 figures, plus two field-controls leaves taking ref HR-C11. Every WP-7 leaf with a today now names its rule. Verified on copies: no builder read changed; the WP-0 recomputations agree; the WP-4 to WP-7 load-check mutants are refused.
+- **Proof.** `wp7-eot-proof.js`: 55 checks plus G.5xx, on throwaways T7 and T7H in 087, with a read-only 052-FLD live read. PROMO-TX is probed through the WP-2 blocker-queue mechanism: a second connection holds FOR UPDATE and writes nothing; each waiter is confirmed through `pg_blocking_pids`; N=3 rounds.
+
+**Debug runs** on the partial population (`--skip=F52,CF`):
+
+| Run | Result |
+|---|---|
+| 1 | Setup error. The proof created activities without the required `engineerIds`; it now assigns T7's site engineer. |
+| 2 | 50 of 50 pass; 11 known answers BLOCKED (HR-C10, HR-C11, PROMO-TX, HR-F4); no 5xx. |
+
+**PROMO-TX reproduced, 3 of 3 rounds each.**
+- **Race.** Two promotions of one daily-log delay entry both answer 200 and leave two contractual weather rows, one orphaned.
+- **Failure.** A promotion racing the entry's DELETE answers 404, yet commits an orphaned contractual row.
+- **Plan.** Weather promotion in one transaction is on the plan's defect-fix list. P1 is proposed; the primary run on cert3d classifies it, and the fix lands in WP-7.
+- **Residue.** Six orphaned rows sit on archived T7, listed by the cleanup.
+
+**Leads registered:** EOT-CONC-1 (P2), WX-DEL-1 (P2), DST-1, EOT-REC-2 and EOT-APPLY-1 (P3).
+
+**Codex scheduling.** Session crons do not fire while background work runs, so the 08:41 and 13:53 Codex crons were skipped.
+- WP-2 plan review round 3, the last round, was started by hand at 15:12 CDT. WP-2 comes first in the sequence.
+- The L34 plan review moves to the next window (session cron 20:23), and the HR-C1 plan review to the window after.

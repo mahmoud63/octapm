@@ -15,9 +15,10 @@
  * 886c9f1 (read with `git show HEAD:<path>`, never from the working tree).
  *
  * Leaf shape: { value, unit, derivation, source, assumption, planDisagrees,
- *               planValue?, today?, company?, note? }
+ *               planValue?, today?, ref?, company?, note? }
  *   value          the expected answer (what the proof must assert)
  *   today          what HEAD does now, where the plan says it differs ("today X")
+ *   ref            the undecided section 5 row a today is BLOCKED under (WP-7 G2)
  *   planValue      the plan's figure, only where this derivation disagrees
  *   assumption     true where the plan marks an assumption or a choice was made here
  *
@@ -55,6 +56,14 @@
  * Entries added for it cite plan lines as numbered at f599e67 (PF); their
  * product citations keep the @886c9f1 tag (every product file they cite is
  * unchanged at f599e67). Changed keys: answers/CHANGES-WP0-BUILDERS.md.
+ *
+ * The WP-7 answer-book patch (2026-10-10; the integration owner's binding adjudication
+ * C:/Temp/octapm-cert/scratch/wp7/WP7-ADJUDICATION.md Q12, from WP7-PREP.md section 10 G2): the two
+ * leaves of this book that WP-7 reads with a today, WP8.dailyLog.promoteResponseVsStored and
+ * WP8.weather.nonContractualAddsNothing, name their ref HR-C11 (WP-7's rule; the KA.I9 ruling: a leaf
+ * with a today names its ref, is an assumption, and its value never equals its today), so F() takes a
+ * ref and figures() emits it. Nothing else changes; WP-8's own patch chains after this one. Changed
+ * keys: answers/CHANGES-WP0-BUILDERS.md, "WP-7 answer-book leaves (2026-10-10)".
  */
 
 const PLAN = "docs/certification/OCTAPM_CERT3_PLAN.md";
@@ -79,6 +88,7 @@ function F(value, unit, derivation, source, opts = {}) {
   };
   if (opts.planValue !== undefined) leaf.planValue = opts.planValue;
   if (opts.today !== undefined) leaf.today = opts.today;
+  if (opts.ref !== undefined) leaf.ref = opts.ref;
   if (opts.company) leaf.company = opts.company;
   if (opts.note) leaf.note = opts.note;
   return leaf;
@@ -454,7 +464,7 @@ const WP8 = {
     promote10h: F(PROMOTED[2].days, "days", "round((10/8)*2)/2 = round(2.5)/2 = 3/2 = 1.5", [P(838), H("backend/src/services/daily-log.service.js", "1200")], { company: C_FLD }),
     promoteResponseVsStored: F("response 0.5 / 1.0 / 1.5", "state",
       "The promotion answer echoes the computed delayDays (daily-log.service.js:1216) while the WeatherDelay row stores Number(delayDays) into an Int column (weather.service.js:217); the read-back of the register row is the figure that must equal 0.5/1.0/1.5 (today 0/1/1 per the 558 driver notes) -> HR-C11.",
-      [P(838, 887, 1039), H("backend/src/services/weather.service.js", "217"), H("backend/src/services/daily-log.service.js", "1200-1216")], { assumption: true, today: "stored 0 / 1 / 1", company: C_FLD }),
+      [P(838, 887, 1039), H("backend/src/services/weather.service.js", "217"), H("backend/src/services/daily-log.service.js", "1200-1216"), PLAN + ":878, 1079 @bde300d", "C:/Temp/octapm-cert/scratch/wp7/WP7-ADJUDICATION.md Q12", "C:/Temp/octapm-cert/scratch/wp7/WP7-PREP.md section 10 G2"], { assumption: true, today: "stored 0 / 1 / 1", ref: "HR-C11", company: C_FLD, note: "WP-7 G2 (2026-10-10, WP7ADJ Q12): ref HR-C11, the undecided row this today is BLOCKED under (the KA.I9 ruling: a leaf with a today names its ref). WP-7 reads the stored rows only as CF.HRC11's evidence (commercial.js WP7.CF.HRC11); WP-8 judges the leaf. Added by WP-7's book patch because HR-C11 is WP-7's rule; WP-8's patch chains after it." }),
     promoteTwice: F("409 DAILY_LOG_WEATHER_DELAY_EXISTS", "http", "A delay entry that already carries weatherDelayId is refused.", [P(838), H("backend/src/services/daily-log.service.js", "1198")], { company: C_FLD }),
     approvedDayPatch: F("409 DAILY_LOG_APPROVED", "http", "PATCH of an approved day: updateLog calls assertEditable, which refuses an approved log.", [P(839), H("backend/src/services/daily-log.service.js", "657-661,684-689")], { company: C_FLD }),
     approvedDayEntryAdd: F("409 DAILY_LOG_APPROVED", "http", "Entry add on an approved day: addEntry calls the same guard.", [P(839), H("backend/src/services/daily-log.service.js", "659,910-921")], { company: C_FLD }),
@@ -487,8 +497,8 @@ const WP8 = {
     atRemaining: F(FLD_WEATHER_AT.remaining, "days", "max(20 - 14, 0) = 6", [P(815), H("backend/src/services/weather.service.js", "198")], { company: C_FLD }),
     nonContractualAddsNothing: F(FLD_WEATHER_AT.used, "days",
       `A contractual:false 10-day delay is skipped in contractualUsed: still 14.0 after it is added. Today ${FLD_WEATHER_AT_TODAY.used} (HR-C11): every row goes to the Int column WeatherDelay.delayDays (weather.service.js:217) and is stored truncated, so the contractual rows read trunc(0.5, 1.0, 1.5, 2.5, 7.5, 1.0) = 0 + 1 + 1 + 2 + 7 + 1 = ${FLD_WEATHER_AT_TODAY.used} (WP8.weather.todayAt: ${FLD_WEATHER_AT_TODAY.used} / 20 = ${pct2(FLD_WEATHER_AT_TODAY.pct)}%), and the non-contractual 10 adds nothing to that either (weather.service.js:162-165 skips contractual false): still ${FLD_WEATHER_AT_TODAY.used} after it is added. The non-contractual invariance holds at HEAD; only the figure it holds at is HR-C11's.`,
-      [P(390, 819), H("backend/src/services/weather.service.js", "162-165,217"), PF(429, 444, 858, 867, 1078), BADJ("Round 2 R2-B (B5)")],
-      { company: C_FLD, today: FLD_WEATHER_AT_TODAY.used, note: `HR-C11 known answer (truncation): observed by the round-1 builds at the 14 point (087-FLD weather.at14: 12, 60%). 052-FLD runs the same record set (plan :444 @f599e67; WP8["052-FLD"].weather* use FLD_WEATHER_*), and the book carries no separate 052-FLD non-contractual figure, so this leaf (value ${FLD_WEATHER_AT.used}, today ${FLD_WEATHER_AT_TODAY.used}) is the one both builders judge against.` }),
+      [P(390, 819), H("backend/src/services/weather.service.js", "162-165,217"), PF(429, 444, 858, 867, 1078), BADJ("Round 2 R2-B (B5)"), PLAN + ":430, 859, 1079 @bde300d", "C:/Temp/octapm-cert/scratch/wp7/WP7-ADJUDICATION.md Q9, Q12", "C:/Temp/octapm-cert/scratch/wp7/WP7-PREP.md section 10 G2"],
+      { company: C_FLD, assumption: true, today: FLD_WEATHER_AT_TODAY.used, ref: "HR-C11", note: `HR-C11 known answer (truncation): observed by the round-1 builds at the 14 point (087-FLD weather.at14: 12, 60%). 052-FLD runs the same record set (plan :444 @f599e67; WP8["052-FLD"].weather* use FLD_WEATHER_*), and the book carries no separate 052-FLD non-contractual figure, so this leaf (value ${FLD_WEATHER_AT.used}, today ${FLD_WEATHER_AT_TODAY.used}) is the one both builders judge against. WP-7 G2 (2026-10-10, WP7ADJ Q12): ref HR-C11, the undecided row this today is BLOCKED under (the KA.I9 ruling), and an assumption: the value 14 holds under HR-C11's decimal days; under a refusal of non-integers the half-day record set itself changes (owner question O2). KA.FLD.087.live reads it (STORED-PRE-FIX after the fix until the exit rebuild, WP7ADJ Q9); the builders read its value and today only (BLD 087-fld.js, 052-fld.js), both unchanged.` }),
     monthlyNonContractual: F(10, "days", "The monthly split books the 10 days under nonContractual of its month.", [P(390, 819), H("backend/src/services/weather.service.js", "178-182")], { assumption: true, company: C_FLD, note: "assumes no other non-contractual delay in that month" }),
     todayBelow: F(pct2(FLD_WEATHER_BELOW_TODAY.pct), "percent",
       "The same records under the Int column: trunc(0.5,1.0,1.5,2.5,7.5) = 0+1+1+2+7 = 11 -> 11/20 x 100 = 55%, no warning (the double is 55.00000000000001; compared at 2 dp the figure is 55, F2). The proof is red at 13 until HR-C11 is decided.",
@@ -938,13 +948,13 @@ function isLeaf(node) {
   return node && typeof node === "object" && !Array.isArray(node) && "value" in node && "unit" in node && "derivation" in node;
 }
 
-/** Flattens the tree to [{ key, value, unit, derivation, source, assumption, planDisagrees, planValue?, today?, company?, note? }]. */
+/** Flattens the tree to [{ key, value, unit, derivation, source, assumption, planDisagrees, planValue?, today?, ref?, company?, note? }]. */
 function figures() {
   const out = [];
   const walk = (node, path) => {
     if (isLeaf(node)) {
       const row = { key: path.join("."), value: node.value, unit: node.unit, derivation: node.derivation, source: node.source, assumption: node.assumption, planDisagrees: node.planDisagrees };
-      for (const extra of ["planValue", "today", "company", "note"]) if (node[extra] !== undefined) row[extra] = node[extra];
+      for (const extra of ["planValue", "today", "ref", "company", "note"]) if (node[extra] !== undefined) row[extra] = node[extra];
       out.push(row);
       return;
     }
@@ -960,6 +970,35 @@ function byCompany() {
   for (const f of figures()) if (f.company) (map[f.company] = map[f.company] || []).push(f.key);
   return map;
 }
+
+// Load check of the WP-7 answer-book patch (2026-10-10, C:/Temp/octapm-cert/scratch/wp7/WP7-ADJUDICATION.md Q12; WP7-PREP.md
+// section 10 G2): the two HR-C11 known answers of this book that WP-7 reads carry their ref; figures() emits it; a ref names its today.
+(() => {
+  const fail = (what) => {
+    throw new Error("field-controls answer book: " + what);
+  };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const known = [
+    ["WP8.dailyLog.promoteResponseVsStored", WP8.dailyLog.promoteResponseVsStored],
+    ["WP8.weather.nonContractualAddsNothing", WP8.weather.nonContractualAddsNothing],
+  ];
+  for (const [key, leaf] of known) {
+    if (!leaf || leaf.ref !== "HR-C11" || leaf.today === undefined || leaf.assumption !== true || same(leaf.today, leaf.value)) fail(key + ": an HR-C11 known answer with its today and ref HR-C11, an assumption, its value never its today (WP-7 G2, KA.I9 ruling)");
+  }
+  // the two leaves are the record set's: the promotions' echo and their truncated rows; the sum at 14 and its truncation
+  const echo = "response " + PROMOTED.map((p) => p.days.toFixed(1)).join(" / ");
+  const storedRows = "stored " + trunc(PROMOTED.map((p) => p.days)).join(" / ");
+  if (WP8.dailyLog.promoteResponseVsStored.value !== echo || WP8.dailyLog.promoteResponseVsStored.today !== storedRows) fail("WP8.dailyLog.promoteResponseVsStored: the promotions' echo and their stored rows (WP-7 G2)");
+  if (WP8.weather.nonContractualAddsNothing.value !== FLD_WEATHER_AT.used || WP8.weather.nonContractualAddsNothing.today !== FLD_WEATHER_AT_TODAY.used) fail("WP8.weather.nonContractualAddsNothing: the contractual sum at 14 and its truncated reading (WP-7 G2)");
+  // figures() emits the ref of both
+  const rows = figures();
+  for (const [key] of known) {
+    const row = rows.find((r) => r.key === key);
+    if (!row || row.ref !== "HR-C11") fail("figures() must emit the ref of " + key + " (WP-7 G2)");
+  }
+  // a ref always names its today (a today without a ref stays this book's convention until its owners add refs)
+  for (const row of rows) if (row.ref !== undefined && (row.today === undefined || typeof row.ref !== "string" || !row.ref)) fail(row.key + ": a ref without its today (WP-7 G2)");
+})();
 
 module.exports = {
   meta: {

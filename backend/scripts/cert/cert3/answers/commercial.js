@@ -6,7 +6,7 @@
  *   - WP-4 change, commitments, IPC, pay applications, cash flow (plan 631-692);
  *   - WP-5 bids, award, PO, goods receipt, inventory, direct costs, three-way match (plan 694-753);
  *   - WP-6 BOQ, allocations, budgets, cost codes (plan 755-795; :795-836 at HEAD 6c5ab54, WP-6 G22);
- *   - WP-7 EOT and the weather 70% rule (plan 797-830);
+ *   - WP-7 EOT and the weather 70% rule (plan 797-830; :837-870 at HEAD bde300d, WP-7 G16);
  *   - the §3.2 contents of 087-COM, 087-COM-B, 087-COM-C and 052-COM (plan 387-389, 404),
  *     plus the D3 retention-default case (plan 409) because owner decision HR-C1 changes it.
  *
@@ -131,6 +131,30 @@
  * assumption, and its value never equals its today (the integration owner's KA.I9 ruling). Load checks
  * after the WP-5 rulings' tie the new and changed leaves to their sources. Changed keys:
  * answers/CHANGES-WP0-BUILDERS.md, "WP-6 answer-book leaves (2026-10-10)".
+ *
+ * The integration owner's binding adjudication of the WP-7 preparation (2026-10-10,
+ * C:/Temp/octapm-cert/scratch/wp7/WP7-ADJUDICATION.md Q1-Q13, cited WP7ADJ(...); the preparation
+ * C:/Temp/octapm-cert/scratch/wp7/WP7-PREP.md beside it, PREP7(...)) is applied to the answer-book gaps
+ * G1-G18 of WP7-PREP.md section 10: G1 (WP7.T7 and WP7.T7H: the fresh throwaway projects T7, which carries
+ * every writing check and every section 6.2 catcher, and T7H, the half-day register, both in 087, Q1, Q11),
+ * G2 (a ref on every WP-7 leaf with a today: HR-C10, HR-C11, HR-F4, PROMO-TX; the two field-controls.js
+ * leaves WP-7 reads with a today, WP8.dailyLog.promoteResponseVsStored and
+ * WP8.weather.nonContractualAddsNothing, take ref HR-C11 in the same patch, Q12), G3
+ * (WP7.T2.plannerPatchApproved: E-T2 unchanged after the refusal; the PATCH sent after E-T3's approval),
+ * G4 and G5 (the T1 codes), G6 (T4 by POST /eot/calculate on 087-COM, a deep read, Q3; the stored fields),
+ * G7 (allowanceZero.warning an observation of CF.HRC11), G8 (WP7.T7.weatherSequence), G9-G12 (the
+ * allowance-0, half-day, 087-FLD and 052-FLD known answers in full; STORED-PRE-FIX after the HR-C11 fix,
+ * Q9), G13 (WP7.promotion: the blocker queue and N=3 race and failure rounds, Q2; the site engineer's
+ * promotion, Q8), G14 (WP7.CF: the confirm-first observations), G15 (the mutation leaves name their
+ * catchers by check id: M-70 and M-STAT tallied now, M-LOCK after HR-C10, Q4; the optional rule mutants
+ * run untallied and recorded, Q5; the fix mutations), G16 (every WP-7 leaf cites the plan at HEAD bde300d,
+ * PH7: the book's WP-7 P(...) trailed it by 40 lines, by 21 on the CLAUDE.md table; each line mapped by
+ * its content), G17 (deep.087-COM's EOT weather link, completion date and default weather allowance) and
+ * G18 (the calculation's own recommendation, a note). No WP-7 rule is decided and no WP-7 fix has landed:
+ * every WP-7 leaf with a today names its ref from WP7_REFS, is an assumption, and its value never equals
+ * its today (the integration owner's KA.I9 ruling). Load checks after the WP-6 ones tie the new and
+ * changed leaves to their sources. Changed keys: answers/CHANGES-WP0-BUILDERS.md, "WP-7 answer-book
+ * leaves (2026-10-10)".
  */
 "use strict";
 
@@ -1739,77 +1763,301 @@ const W = {
   half28: weatherSummary(20, Array(28).fill(0.5)),
 };
 
+// --- WP-7 answer-book leaves (2026-10-10): citation helpers, the throwaway projects T7 and T7H, models ---
+/** The integration owner's binding adjudication of the WP-7 preparation (2026-10-10, Q1-Q13). */
+const WP7ADJ = (item) => "C:/Temp/octapm-cert/scratch/wp7/WP7-ADJUDICATION.md " + item;
+/** The WP-7 preparation (read only, 2026-10-10), whose section 10 answer-book gaps G1-G18 the adjudication settles. */
+const PREP7 = (item) => "C:/Temp/octapm-cert/scratch/wp7/WP7-PREP.md " + item;
+/**
+ * Plan lines at HEAD bde300d (WP-7 G16). The book's WP-7 P(...) were numbered at b0ec5b0 plus the Q-KEY line at 36; at
+ * bde300d the WP-7 section (:837-870), the section 3.2 rows, the section 5 rows and section 6.2 sit 40 lines lower
+ * (P(807) = PH7(847)) and the CLAUDE.md rule table 21 lower (P(70) = PH7(91)). Every WP-7 leaf cites PH7, each line
+ * mapped by its content (C:/Temp/octapm-cert/scratch/wp7/book/tools/plan-map.js).
+ */
+const PH7 = (lines) => PLAN + ":" + lines + " @bde300d";
+/** Product code, shared files and the builders read at HEAD bde300d. Every WP-7 product file is unchanged since 886c9f1 (WP7-PREP preamble), so the book's @886c9f1 product citations hold line for line. */
+const HF7 = (file, lines) => file + ":" + lines + " @bde300d";
+const DERIVE_T7 = "C:/Temp/octapm-cert/scratch/wp7/derive-t7.json (T7's and T7H's figures with independent arithmetic: its own CPM pass, UTC calendar days, the product's order of operations in doubles; 56 cross-checks against this book's leaves)";
+/** Adjudication F2 of the field-controls book: a percentage is compared at 2 dp (20 / 30 x 100 is 66.66666666666666 in doubles: 66.67). */
+const pct2 = (v) => Math.round(v * 100) / 100;
+/** Calendar days in UTC, as the EOT recommendations count them (no WP-7 date crosses a DST change: lead DST-1). */
+const addDaysUtc = (iso, n) => new Date(Date.parse(iso + "T00:00:00.000Z") + n * 86400000).toISOString().slice(0, 10);
+/** A weather register read as listWeatherDelays answers it (weather.service.js:161-200, through weatherSummary), the percentage at 2 dp. */
+const weatherRead = (allowanceDays, contractualDays) => {
+  const s = weatherSummary(allowanceDays, contractualDays);
+  return { allowance: s.allowance, contractualUsed: s.used, consumedPct: pct2(s.consumedPct), warning: s.warning, remaining: s.remaining };
+};
+/**
+ * The refs a WP-7 known answer may carry. No WP-7 rule is decided (HR-C10, HR-C11 and HR-F4 wait for the owner: O1-O3)
+ * and the one WP-7 defect fix, weather promotion in one transaction (PROMO-TX, the plan's fix list :1115 PH7), has neither
+ * been reproduced nor landed (its severity is decided at the run, WP7ADJ Q6), so every WP-7 leaf with a today is BLOCKED
+ * at it, is an assumption, and its value never equals its today (the integration owner's KA.I9 ruling: a value equal to
+ * HEAD's would pre-judge the rule).
+ */
+const WP7_REFS = ["HR-C10", "HR-C11", "HR-F4", "PROMO-TX"];
+/** The leaves with a today that the 13 KA checks of WP7-PREP section 6 read, each with its ref (checked at load). field-controls.js's WP8.weather.nonContractualAddsNothing (HR-C11), which KA.FLD.087.live also reads, is checked in that book. */
+const WP7_KNOWN = [
+  ["WP7.T2.plannerPatchApproved", "HR-C10"],
+  ["WP7.T4.criticalPathImpactDays", "HR-C10"],
+  ["WP7.T4.ldApplicableDays", "HR-C10"],
+  ["WP7.T4.ldLiability", "HR-C10"],
+  ["WP7.T4.storedFields", "HR-C10"],
+  ["WP7.T4.on087COM", "HR-C10"],
+  ["WP7.weather.allowanceZero.allowance", "HR-C11"],
+  ["WP7.weather.allowanceZero.T7", "HR-C11"],
+  ["WP7.weather.fractional.28xHalf.consumedPct", "HR-C11"],
+  ["WP7.weather.fractional.28xHalf.warning", "HR-C11"],
+  ["WP7.T7H.half28", "HR-C11"],
+  ["WP7.weather.fractional.storedOneAndHalf", "HR-C11"],
+  ["WP7.weather.087-FLD.composition", "HR-C11"],
+  ["WP7.weather.087-FLD.read", "HR-C11"],
+  ["WP7.weather.052-FLD", "HR-C11"],
+  ["WP7.promotion.race", "PROMO-TX"],
+  ["WP7.promotion.failure", "PROMO-TX"],
+  ["WP7.promotion.sitePromotion", "HR-F4"],
+];
+
+/**
+ * T7: the WP-7 proof's own throwaway project in company 087 (WP7ADJ Q1; WP7-PREP section 5.1), created by the PM and
+ * archived by the proof, as WP-1's W, WP-2's P, WP-3's V, WP-4's K, WP-5's J and WP-6's B6. Every WP-7 writing check and
+ * every section 6.2 catcher runs on it, because the mutation runner runs the whole proof under each mutant; on the deep
+ * projects the proof only reads, plus POST /eot/calculate on 087-COM, which writes nothing (WP7ADJ Q3). The half-day
+ * register runs on a second throwaway, T7H, so that an HR-C11 fix cannot shift T7's whole-day figures (WP7ADJ Q1). Days
+ * are offsets from 087's run date R = min(today in UTC, today in Africa/Cairo) (build/lib.js:879): every T7 and T7H
+ * transaction is dated R-30 .. R-1, and nothing is placed on the five-day calendar, so a weekend R does not fail WP-7
+ * closed. Records as sent (currency units); the leaves state cents. The figures agree with derive-t7.json.
+ */
+const T7_BOOK = {
+  project: { name: "CERT3 WP7 contract time <stamp>", type: "building", contractType: "remeasurement", startDate: "2026-01-05", endDate: "2027-06-30", completionDate: "2027-06-30", projectCalendar: "five_day", currency: "EGP", ldRatePerDay: 1000, weatherAllowanceDays: 20, defaultRetentionRate: 10 },
+  team: { planning_eng: "planner", site_engineer: "site" },
+  // [code, working days]; the one FS link (lag 0); the CPM the planner reads back, [ES, EF, LS, LF, TF] (cpm.service.js:449-485)
+  activities: [["T7-C1", 10], ["T7-C2", 5], ["T7-F4", 11]],
+  links: [["T7-C1", "T7-C2"]],
+  cpm: { "T7-C1": [0, 10, 0, 10, 0], "T7-C2": [10, 15, 10, 15, 0], "T7-F4": [0, 11, 4, 15, 4] },
+  // the weather rows [key, delayDays, contractual, day] and the steps [step, allowance, posted, PATCHed contractual false,
+  // PATCHed contractual true, the register read]
+  weatherRows: [["WR-6", 6, true, "R-10"], ["WR-7", 7, true, "R-9"], ["WR-1", 1, true, "R-8"], ["WN-10", 10, false, "R-7"], ["WR-6b", 6, true, "R-6"], ["WR-1b", 1, true, "R-5"]],
+  weatherSteps: [
+    ["W1", 20, ["WR-6", "WR-7"], [], [], { allowance: 20, contractualUsed: 13, consumedPct: 65, warning: false, remaining: 7 }],
+    ["W2", 20, ["WR-1"], [], [], { allowance: 20, contractualUsed: 14, consumedPct: 70, warning: true, remaining: 6 }],
+    ["W3", 20, ["WN-10"], [], [], { allowance: 20, contractualUsed: 14, consumedPct: 70, warning: true, remaining: 6, monthlyNonContractual: 10 }],
+    ["W4", 30, ["WR-6b"], [], [], { allowance: 30, contractualUsed: 20, consumedPct: 66.67, warning: false, remaining: 10 }],
+    ["W4b", 30, ["WR-1b"], [], [], { allowance: 30, contractualUsed: 21, consumedPct: 70, warning: true, remaining: 9 }],
+    ["W5", 10, [], ["WR-7", "WR-6b", "WR-1b", "WR-1"], [], { allowance: 10, contractualUsed: 6, consumedPct: 60, warning: false, remaining: 4 }],
+    ["W5b", 10, [], [], ["WR-1"], { allowance: 10, contractualUsed: 7, consumedPct: 70, warning: true, remaining: 3 }],
+    ["W6", 0, [], [], [], "WP7.weather.allowanceZero.T7 (the known answer of KA.W.T7.allowanceZero, HR-C11)"],
+    ["W7", 20, [], [], [], { allowance: 20, contractualUsed: 7, consumedPct: 35, warning: false, remaining: 13 }],
+  ],
+  // the claims [key, delayDays, eotDaysGranted, activities, weather rows linked, end state]
+  claims: [
+    ["E-T2", 10, 10, ["T7-C1"], ["WR-6"], "approved"],
+    ["E-T3", 5, 5, ["T7-C2"], [], "approved"],
+    ["E-LK1", 1, 1, ["T7-C1"], [], "approved, then the planner's PATCH {status: draft} refused"],
+    ["E-LK2", 1, 1, ["T7-C1"], [], "approved, then the PM's reject {reason} refused"],
+    ["E-T4", 10, 10, ["T7-C1", "T7-C2"], [], "draft"],
+    ["E-T5", 10, 0, ["T7-F4"], [], "draft"],
+    ["T1-*", 3, 0, ["T7-C1"], [], "as each T1 probe leaves it; none approved"],
+    ["E-HALF", 1.5, 0, ["T7-C1"], [], "draft"],
+  ],
+  approvalOrder: ["E-T2", "E-T3", "the PATCH of E-T2", "E-LK1", "E-LK2"],
+  approvals: {
+    "E-T2": { cumulativeApprovedEotDays: 10, revisedCompletionRecommendation: "2027-07-10" },
+    "E-T3": { cumulativeApprovedEotDays: 15, revisedCompletionRecommendation: "2027-07-15", calcRecommendationAtCreate: "2027-07-05" },
+  },
+  // the daily-log delay entries [key, day, hoursLost, activity, by, use]
+  entries: [
+    ["BAR", "R-4", 8, "T7-C1", "planner", "the barrier self-test (S.T7.barrier): its notes PATCHed behind the blocker; never promoted"],
+    ["FEED", "R-4", 8, "T7-C1", "planner", "promoted (PROMO.T7.feeds), then promoted again (PROMO.T7.twice)"],
+    ["RACE-1", "R-3", 8, "T7-C1", "planner", "race round 1: two promotions behind the blocker"],
+    ["RACE-2", "R-3", 8, "T7-C1", "planner", "race round 2"],
+    ["RACE-3", "R-3", 8, "T7-C1", "planner", "race round 3"],
+    ["FAIL-1", "R-2", 8, "T7-C1", "planner", "failure round 1 on the open day: its DELETE, then its promotion, behind the blocker"],
+    ["FAIL-2", "R-2", 8, "T7-C1", "planner", "failure round 2"],
+    ["FAIL-3", "R-2", 8, "T7-C1", "planner", "failure round 3"],
+    ["SITE", "R-1", 8, "T7-C1", "site", "promoted by the site engineer (KA.F4.T7.sitePromotion)"],
+  ],
+  // the blocker queue (WP7ADJ Q2): released within 2.5 s, inside Prisma's 5 s interactive-transaction window; N=3 rounds
+  blocker: { releaseWithinMs: 2500, interactiveTxTimeoutMs: 5000, rounds: 3 },
+};
+const T7_PROJECT = { ...T7_BOOK.project, ldRatePerDay: cents(T7_BOOK.project.ldRatePerDay) };
+const T7_NETWORK = {
+  activities: T7_BOOK.activities,
+  links: T7_BOOK.links.map(([from, to]) => [from, to, "FS", 0]),
+  cpm: Object.fromEntries(Object.entries(T7_BOOK.cpm).map(([code, [ES, EF, LS, LF, TF]]) => [code, { ES, EF, LS, LF, TF, critical: TF === 0 }])),
+  end: Math.max(...Object.values(T7_BOOK.cpm).map((row) => row[1])),
+};
+const T7_CLAIMS = {
+  claims: T7_BOOK.claims.map(([key, delayDays, eotDaysGranted, activities, weatherDelays, end]) => ({ key, delayDays, eotDaysGranted, activities, weatherDelays, end })),
+  approvalOrder: T7_BOOK.approvalOrder,
+  approvals: T7_BOOK.approvals,
+  ldRatePerDay: cents(T7_BOOK.project.ldRatePerDay),
+  delayStart: "R-30",
+  evidence: "each claim that needs proof gets its own PDF through POST /projects/T7/attachments (recordType eot, that claim), then PATCH documentIds [that document]: T7's own stored documents only (XDOC-1 is the HR-X1 batch's, never re-tested here)",
+};
+const T7_WEATHER = {
+  rows: T7_BOOK.weatherRows.map(([key, delayDays, contractual, day]) => ({ key, delayDays, contractual, day })),
+  steps: T7_BOOK.weatherSteps.map(([step, allowance, post, contractualFalse, contractualTrue, read]) => ({ step, allowance, post, contractualFalse, contractualTrue, read })),
+};
+const T7_ENTRIES = T7_BOOK.entries.map(([key, day, hoursLost, activity, by, use]) => ({ key, day, hoursLost, activity, by, use, promotedDays: Math.round((hoursLost / 8) * 2) / 2 }));
+const T7_STEPS = [
+  "T7-0 PM: creates T7 (WP7.T7.project: completionDate 2027-06-30, ldRatePerDay 1,000.00, weatherAllowanceDays 20 set explicitly, defaultRetentionRate 10) and assigns the planner and the site engineer (WP7.T7.team) -> S.T7.create",
+  "T7-1 planner: T7-C1 (10 d), T7-C2 (5 d, FS after T7-C1) and T7-F4 (11 d); the product's CPM read back TF 0 / 0 / 4 (WP7.T7.network) -> S.T7.network",
+  "W1-W2 planner: WR-6 (6, contractual, R-10) and WR-7 (7, R-9), the register read -> W.T7.a20at13; WR-1 (1, R-8) -> W.T7.a20at14",
+  "W3 planner: WN-10 (10, contractual false, R-7) -> W.T7.nonContractual10",
+  "W4 PM: allowance 30; planner: WR-6b (6, R-6) -> W.T7.a30at20; WR-1b (1, R-5) -> W.T7.a30at21",
+  "W5 PM: allowance 10; planner: WR-7, WR-6b, WR-1b and WR-1 PATCHed contractual false -> W.T7.a10at6; WR-1 PATCHed contractual true -> W.T7.a10at7",
+  "W6-W7 PM: allowance 0, the project field read back 0, the register read -> KA.W.T7.allowanceZero; the PM's notifications read, none naming weather since W2 -> CF.HRC11; allowance 20 put back before any promotion",
+  "E1 planner and PM: E-T2 (WR-6 linked) and E-T3 drafted, each with its own PDF attached and PATCHed in as documentIds -> S.T7.evidence; E-T2 submitted and approved -> T2.T7.approve; E-T3 likewise -> T3.T7.approve",
+  "E2 planner: PATCH E-T2 {eotDaysGranted: 30} after E-T3's approval (the order trap, WP7.T7.claims) -> KA.T2.plannerPatchApproved",
+  "E3 planner and PM: E-LK1 and E-LK2 approved; the planner's PATCH {status: draft} on E-LK1 -> T1.T7.patchApprovedToDraft; the PM's reject {reason} of E-LK2 -> T1.T7.rejectApproved",
+  "E4 planner: E-T4 drafted and read back, the same body through /eot/calculate -> KA.T4.T7; E-T5 likewise -> T5.T7",
+  "E5 planner and PM: the T1 claims -> T1.T7.createApproved, T1.T7.submitWithoutProof, T1.T7.patchStatusSubmitted, T1.T7.patchStatusDraftOnSubmitted, T1.T7.rejectWithoutReason, T1.T7.rejectWithReason, T1.T7.resubmitRejected, T1.T7.approveDraft, T1.T7.refsNotFound; E-HALF (delayDays 1.5) drafted and read back for the fractional-days evidence",
+  "P0 planner and the blocker connection: the barrier self-test on BAR (R-4, never promoted) -> S.T7.barrier",
+  "P1 planner: FEED, an 8 h weather delay on T7-C1 (R-4), promoted -> PROMO.T7.feeds; promoted again -> PROMO.T7.twice",
+  "P2 planner and the blocker: N=3 race rounds, a fresh 8 h entry each on R-3 -> KA.PROMO.T7.race",
+  "P3 planner and the blocker: N=3 failure rounds, a fresh 8 h entry each on the open day R-2 -> KA.PROMO.T7.failure",
+  "P4 site engineer: SITE, an 8 h delay on R-1, promoted; the planner reads the register -> KA.F4.T7.sitePromotion",
+  "CF PM: GET /projects/T7, revisedCompletionDate read after the approvals -> CF.HRC10",
+  "end PM: DELETE /projects/T7 (archive), archivedAt read back; no queued job left -> S.T7.archived",
+];
+/** The check ids T7's steps serve (WP7-PREP wp7-checks-draft.json: every check on T7 but CF.PROMOTX, which is classified from the race and failure known answers); each is named by exactly one step (checked at load). */
+const T7_CHECKS = ["S.T7.create", "S.T7.network", "W.T7.a20at13", "W.T7.a20at14", "W.T7.nonContractual10", "W.T7.a30at20", "W.T7.a30at21", "W.T7.a10at6", "W.T7.a10at7", "KA.W.T7.allowanceZero", "CF.HRC11", "S.T7.evidence", "T2.T7.approve", "T3.T7.approve", "KA.T2.plannerPatchApproved", "T1.T7.patchApprovedToDraft", "T1.T7.rejectApproved", "KA.T4.T7", "T5.T7", "T1.T7.createApproved", "T1.T7.submitWithoutProof", "T1.T7.patchStatusSubmitted", "T1.T7.patchStatusDraftOnSubmitted", "T1.T7.rejectWithoutReason", "T1.T7.rejectWithReason", "T1.T7.resubmitRejected", "T1.T7.approveDraft", "T1.T7.refsNotFound", "S.T7.barrier", "PROMO.T7.feeds", "PROMO.T7.twice", "KA.PROMO.T7.race", "KA.PROMO.T7.failure", "KA.F4.T7.sitePromotion", "CF.HRC10", "S.T7.archived"];
+const T7_SRC = [PH7("427, 837-870, 1151"), WP7ADJ("Q1, Q11"), PREP7("section 5.1; section 10 G1"), DERIVE_T7];
+
+/** T7H: the half-day register's throwaway in 087 (WP7ADJ Q1; WP7-PREP section 5.2): T7's settings without its LD rate, the planner only. */
+const T7H_BOOK = {
+  project: { name: "CERT3 WP7 half days <stamp>", type: "building", contractType: "remeasurement", startDate: "2026-01-05", endDate: "2027-06-30", completionDate: "2027-06-30", projectCalendar: "five_day", currency: "EGP", weatherAllowanceDays: 20, defaultRetentionRate: 10 },
+  team: { planning_eng: "planner" },
+  half: { rows: 28, delayDays: 0.5, days: "R-12 .. R-6", perDay: 4 },
+  oneAndHalf: { rows: 1, delayDays: 1.5, day: "R-6" },
+};
+const T7H_STEPS = [
+  "H0 PM: creates T7H (WP7.T7H.project: weatherAllowanceDays 20 set explicitly, EGP) and assigns the planner -> S.T7H.create",
+  "H1 planner: 28 contractual delays of 0.5 day, four a day on R-12 .. R-6; the register read -> KA.W.T7H.half28",
+  "H2 planner: one contractual delay of 1.5 days on R-6, its row read back -> KA.W.T7H.storedOneAndHalf",
+  "end PM: DELETE /projects/T7H (archive), archivedAt read back -> S.T7H.archived",
+];
+const T7H_CHECKS = ["S.T7H.create", "KA.W.T7H.half28", "KA.W.T7H.storedOneAndHalf", "S.T7H.archived"];
+const T7H_SRC = [PH7("860, 868, 1079"), WP7ADJ("Q1, Q11"), PREP7("section 5.2; section 10 G1, G10"), DERIVE_T7];
+
 const WP7 = {
   T1: {
-    createApproved: err(400, "VALIDATION_ERROR", "POST with status approved: the route allows draft or submitted only.", [P(806), R("eot.js", "156")]),
-    submitWithoutProof: err(400, "EOT_IMPACT_PROOF_REQUIRED", "Submit with no affected activity or no document.", [P(799), S("eot.service.js", "214-257")]),
+    createApproved: err(400, "VALIDATION_ERROR", "POST with status approved: the route allows draft or submitted only.", [PH7(846), R("eot.js", "156")]),
+    submitWithoutProof: err(400, "EOT_IMPACT_PROOF_REQUIRED", "Submit with no affected activity or no document.", [PH7(839), S("eot.service.js", "214-257")], { note: "WP-7 G4 (2026-10-10): judged as two probes, each with the counts the refusal names (eot.service.js:246-256): WP7.T1 submitWithoutProof.noDocument (T7-C1, no document) and submitWithoutProof.noActivity (a document, no activity)." }),
+    "submitWithoutProof.noDocument": fig({ status: 400, code: "EOT_IMPACT_PROOF_REQUIRED", details: { activityCount: 1, supportingDocumentCount: 0 }, claimStatus: "draft" }, "outcome", "T1.T7.submitWithoutProof, first probe: the planner submits a T7 draft (delay 3, eot 0) naming T7-C1 with no document: the submission proof counts one affected activity and no supporting document and refuses before any write (eot.service.js:214-257, reached from submitEotClaim :1071-1092 through updateEotClaim's proof :925-935); the claim stays draft.", [PH7("839, 846"), HF7("backend/src/services/eot.service.js", "214-257, 925-935, 1071-1092"), PREP7("section 1.2; section 10 G4"), DERIVE_T7]),
+    "submitWithoutProof.noActivity": fig({ status: 400, code: "EOT_IMPACT_PROOF_REQUIRED", details: { activityCount: 0, supportingDocumentCount: 1 }, claimStatus: "draft" }, "outcome", "T1.T7.submitWithoutProof, second probe: a T7 draft with its own document and no affected activity, submitted by the planner: the same refusal with the counts 0 and 1; the claim stays draft.", [PH7("839, 846"), HF7("backend/src/services/eot.service.js", "214-257"), PREP7("section 1.2; section 10 G4"), DERIVE_T7]),
     patchStatusSubmitted: err(400, "VALIDATION_ERROR", "PATCH {status:'submitted'}: the route allows only 'draft'.", [R("eot.js", "261-263")], { note: "Area map expected EOT_WORKFLOW_ACTION_REQUIRED; that code answers PATCH {status:'draft'} on a submitted claim." }),
-    patchStatusDraftOnSubmitted: err(400, "EOT_WORKFLOW_ACTION_REQUIRED", "submitted -> draft has no workflow action.", [P(799), S("eot.service.js", "259-286")]),
-    rejectWithoutReason: err(400, "VALIDATION_ERROR", "Reject route reason notEmpty.", [P(800), R("eot.js", "233-237")], { note: "The service's APPROVAL_WORKFLOW_REASON_REQUIRED is not reachable through the route." }),
+    patchStatusDraftOnSubmitted: err(400, "EOT_WORKFLOW_ACTION_REQUIRED", "submitted -> draft has no workflow action.", [PH7(839), S("eot.service.js", "259-286")]),
+    rejectWithoutReason: err(400, "VALIDATION_ERROR", "Reject route reason notEmpty.", [PH7(840), R("eot.js", "233-237")], { note: "The service's APPROVAL_WORKFLOW_REASON_REQUIRED is not reachable through the route." }),
     resubmitRejected: state("submitted", "rejected -> submitted is allowed.", [S("eot.service.js", "269")]),
     approveDraft: err(400, "EOT_WORKFLOW_ACTION_REQUIRED", "draft -> approved has no workflow action.", [S("eot.service.js", "267-285, 1048-1061")]),
+    rejectWithReason: fig({ status: 200, claimStatus: "rejected", rejectionReason: "the reason sent", rejectedBy: "pm" }, "outcome", "T1.T7.rejectWithReason: the PM rejects a submitted T7 claim with a reason: the route's reason check passes (routes/eot.js:233-237), rejectEotClaim stores it as the rejection reason (eot.service.js:1094-1126) and the claim reads rejected, rejectedBy the PM; the planner's submit then gives submitted (WP7.T1.resubmitRejected).", [PH7("840, 846"), HF7("backend/src/routes/eot.js", "220-251"), HF7("backend/src/services/eot.service.js", "1094-1126"), PREP7("section 1.2; section 10 G5"), DERIVE_T7]),
+    patchApprovedToDraft: fig({ status: 400, code: "EOT_WORKFLOW_ACTION_REQUIRED", details: { fromStatus: "approved", toStatus: "draft" }, claimStatus: "approved" }, "outcome", "T1.T7.patchApprovedToDraft: the planner PATCHes {status: draft} on E-LK1, approved after the PATCH probe: the route allows status draft (routes/eot.js:261-263), and assertEotWorkflowTransition finds no workflow action for approved -> draft (eot.service.js:259-286, called at :825-829) and refuses; the claim stays approved. The status half of the approved-EOT lock: M-STAT's catcher (WP7.mutations.approvedEotLock).", [PH7("839, 846, 1151"), HF7("backend/src/services/eot.service.js", "259-286, 825-829"), HF7("backend/src/routes/eot.js", "253-329"), WP7ADJ("Q4"), PREP7("section 1.2; section 7; section 10 G5"), DERIVE_T7]),
+    rejectApproved: fig({ status: 400, code: "EOT_WORKFLOW_ACTION_REQUIRED", details: { fromStatus: "approved", toStatus: "rejected" }, claimStatus: "approved" }, "outcome", "T1.T7.rejectApproved: the PM rejects E-LK2, a second claim approved last, with a reason: approved -> rejected has no workflow action (the map allows submitted -> rejected only, eot.service.js:267-272) and the transition is refused; the claim stays approved. M-STAT's second catcher, on its own claim so that the two probes never share one.", [PH7("839, 846, 1151"), HF7("backend/src/services/eot.service.js", "259-286, 1094-1126"), WP7ADJ("Q4"), PREP7("section 1.2; section 7; section 10 G5"), DERIVE_T7]),
+    refsNotFound: fig({ unknownClaim: { status: 404, code: "EOT_CLAIM_NOT_FOUND" }, unknownActivity: { status: 400, code: "EOT_ACTIVITY_NOT_FOUND" }, unknownWeatherDelay: { status: 400, code: "EOT_WEATHER_DELAY_NOT_FOUND" }, claimsWritten: 0 }, "outcome", "T1.T7.refsNotFound: PATCH /eot/<a random uuid> answers 404 EOT_CLAIM_NOT_FOUND (eot.service.js:801-803); a POST naming a random activity uuid 400 EOT_ACTIVITY_NOT_FOUND (calculateEot :356-362, before the create); a POST naming a random weather-delay uuid 400 EOT_WEATHER_DELAY_NOT_FOUND (syncWeatherDelayLinks :585-591, inside the create transaction, rolled back): T7's claim count unchanged.", [PH7("846"), HF7("backend/src/services/eot.service.js", "356-362, 569-612, 640-783, 801-803"), PREP7("section 1.2; section 10 G5"), DERIVE_T7]),
   },
   T2: {
-    cumulativeApprovedEotDays: fig(10, "days", "First approved claim, eotDaysGranted 10: 0 prior + 10.", [P(807), S("eot.service.js", "288-327")]),
-    revisedCompletionRecommendation: fig("2027-07-10", "date", "completionDate 2027-06-30 + 10 calendar days (addDays uses setDate) = 2027-07-10.", [P(807), S("eot.service.js", "91-97, 320-326")]),
-    plannerPatchApproved: err(409, null, "A planner PATCH eotDaysGranted 30 on the approved claim is refused (lock, as change orders: CHANGE_ORDER_APPROVED_LOCKED).", [P(807), P(1038)], { assumption: true, today: { status: 200, eotDaysGranted: 30, cumulativeApprovedEotDays: 10 }, note: "Code chosen by the HR-C10 fix." }),
+    cumulativeApprovedEotDays: fig(10, "days", "First approved claim, eotDaysGranted 10: 0 prior + 10.", [PH7(847), S("eot.service.js", "288-327")]),
+    revisedCompletionRecommendation: fig("2027-07-10", "date", "completionDate 2027-06-30 + 10 calendar days (addDays uses setDate) = 2027-07-10.", [PH7(847), S("eot.service.js", "91-97, 320-326")]),
+    plannerPatchApproved: fig({ status: 409, code: null, eotDaysGranted: 10, cumulativeApprovedEotDays: 10 }, "outcome", "A planner PATCH eotDaysGranted 30 on the approved claim is refused (lock, as change orders: CHANGE_ORDER_APPROVED_LOCKED). On T7 the planner PATCHes E-T2 after E-T3's approval (WP7.T7.claims): the refusal leaves E-T2 at eotDaysGranted 10 and cumulativeApprovedEotDays 10.", [PH7(847), PH7(1078), PH7("869"), HF7("backend/src/services/eot.service.js", "288-327, 785-842"), HF7("backend/src/routes/eot.js", "253-329"), WP7ADJ("Q4"), PREP7("section 0 fact 5; section 10 G2, G3"), DERIVE_T7], { assumption: true, today: { status: 200, eotDaysGranted: 30, cumulativeApprovedEotDays: 10 }, ref: "HR-C10", note: "Code chosen by the HR-C10 fix. WP-7 G2, G3 (2026-10-10): the value was { status: 409, code: null } (unit error); it now also states E-T2's figures after the refusal. Ref HR-C10 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption. The probe comes after E-T3's approval: at HEAD the PATCH is accepted (updateEotClaim has no status check, eot.service.js:805-842) and every later approval sums the other approved claims' eotDaysGranted (:303-318), so sent before it E-T3 would read 35 / 2027-08-04 instead of 15 / 2027-07-15; once the lock refuses the PATCH the order no longer matters." }),
   },
   T3: {
-    cumulativeApprovedEotDays: fig(15, "days", "Second claim of 5 approved: 10 + 5 = 15.", [P(808), S("eot.service.js", "313-318")]),
-    revisedCompletionRecommendation: fig("2027-07-15", "date", "2027-06-30 + 15 calendar days.", [P(808)]),
+    cumulativeApprovedEotDays: fig(15, "days", "Second claim of 5 approved: 10 + 5 = 15.", [PH7(848), S("eot.service.js", "313-318")]),
+    revisedCompletionRecommendation: fig("2027-07-15", "date", "2027-06-30 + 15 calendar days.", [PH7(848), HF7("backend/src/services/eot.service.js", "288-327, 426-428"), PREP7("section 0 fact 6; section 10 G18")], { note: "WP-7 G18 (2026-10-10): the figure is the approval's column (completion + the cumulative approved days, buildApprovedCompletionRecommendation, eot.service.js:288-327). The calculation's own revisedCompletionRecommendation (calculateEot :426-428, in entitlementSummaryJson and the /eot/calculate answer) adds this claim's days only to revisedCompletionDate, else completionDate: E-T3 at create reads 2027-07-05; the web EOT panel shows both. Recorded for CF.HRC10 (lead EOT-REC-2, P3, WP7ADJ Q10), never judged as a value." }),
   },
   T4: {
-    ldRatePerDay: money(cents(1000), "ldRatePerDay 1,000.00 (§3.2 says only that it is set; area map T4 uses 1,000).", [P(387), AREA], { assumption: true }),
-    criticalPathImpactDays: fig(10, "days", "Delay 10, two zero-float activities on ONE chain, eot 10: impact = delay - least float on the named activities = 10.", [P(809), P(1038)], { today: 20, note: "today Σ per activity max(0, 10 - 0) = 20 (eot.service.js:404-407)." }),
-    ldApplicableDays: fig(0, "days", "max(0, 10 - 10) = 0.", [P(809)], { today: 10 }),
-    ldLiability: money(0, "0 x 1,000.00 = 0.00.", [P(809)], { today: cents(10000) }),
+    ldRatePerDay: money(cents(1000), "ldRatePerDay 1,000.00 (§3.2 says only that it is set; area map T4 uses 1,000).", [PH7(427), AREA], { assumption: true }),
+    criticalPathImpactDays: fig(10, "days", "Delay 10, two zero-float activities on ONE chain, eot 10: impact = delay - least float on the named activities = 10.", [PH7(849), PH7(1078), HF7("backend/src/services/eot.service.js", "363-413"), PREP7("section 10 G2, G6"), DERIVE_T7], { assumption: true, today: 20, ref: "HR-C10", note: "today Σ per activity max(0, 10 - 0) = 20 (eot.service.js:404-407). WP-7 G2 (2026-10-10): ref HR-C10 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption: HR-C10 recommends impact = delay - the least float along the named activities (:1078 PH7). Judged on T7 (E-T4, WP7.T4.storedFields) and by /eot/calculate on 087-COM (WP7.T4.on087COM)." }),
+    ldApplicableDays: fig(0, "days", "max(0, 10 - 10) = 0.", [PH7(849), PH7("869, 1078"), HF7("backend/src/services/eot.service.js", "404-413"), PREP7("section 10 G2"), DERIVE_T7], { assumption: true, today: 10, ref: "HR-C10", note: "WP-7 G2 (2026-10-10): today the summed impact 20 less eot 10 (eot.service.js:404-412). Ref HR-C10 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption. Judged on T7 (E-T4) and by /eot/calculate on 087-COM (WP7.T4.on087COM)." }),
+    ldLiability: money(0, "0 x 1,000.00 = 0.00.", [PH7(849), PH7("869, 1078"), HF7("backend/src/services/eot.service.js", "390-413"), PREP7("section 10 G2"), DERIVE_T7], { assumption: true, today: cents(10000), ref: "HR-C10", note: "WP-7 G2 (2026-10-10): today 10 LD-applicable days x 1,000.00 = 10,000.00. Ref HR-C10 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption." }),
+    on087COM: fig({ criticalPathImpactDays: 10, ldApplicableDays: 0, ldLiability: 0 }, "outcome", "KA.T4.087COM.calculate: POST /eot/calculate on 087-COM by the planner, which writes nothing (calculateEot reads the project and its activities and returns figures, eot.service.js:329-487; WP7ADJ Q3), with delay 10, eot 10 and 087-COM's LD rate 1,000.00 (deep.087-COM.ldRatePerDay) on A110 and A120: two zero-float activities on one chain (the F1 FS link A110 -> A120, schedule.js F1_TASKS; TF 0 each, WP1.T1.A110.TF and WP1.T1.A120.TF; 087-COM's CPM read them back 0, run-1 state activities.out.floats). Under HR-C10 the impact is the delay less the least float along the named activities: 10, LD-applicable 0, LD 0.00, T4's figures.", [PH7("427, 845, 849, 1078"), HF7("backend/src/services/eot.service.js", "329-487"), HF7("backend/scripts/cert/cert3/answers/schedule.js", "395-410"), WP7ADJ("Q3"), PREP7("section 0 fact 9; section 10 G6"), DERIVE_T7], { assumption: true, today: { criticalPathImpactDays: 20, ldApplicableDays: 10, ldLiability: cents(10000) }, ref: "HR-C10", note: "WP-7 G6 (2026-10-10): today the per-activity impacts are summed (max(0, 10 - 0) twice = 20, eot.service.js:404-407), LD-applicable 20 - 10 = 10, LD 10,000.00. Ref HR-C10 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption. The proof asserts 087-COM's EOT claims, weather delays and audit events unchanged across the call (WP7ADJ Q3)." }),
+    storedFields: fig({ criticalPathImpactDays: 10, ldApplicableDays: 0, ldLiability: 0, linkFloatDays: [0, 0] }, "outcome", "KA.T4.T7: E-T4 drafted on T7 (delay 10, eot 10, T7-C1 and T7-C2: TF 0 each on one chain, WP7.T7.network; T7's LD rate) and read back: the claim's criticalPathImpactDays, entitlementSummaryJson.ldApplicableDays, ldLiability in cents and each activity link's floatDays (eot.service.js:363-413, stored by createEotClaim :652-663); the same body through /eot/calculate gives the same figures. Under HR-C10: 10, 0, 0.00, the links at float 0.", [PH7("849, 869, 1078"), HF7("backend/src/services/eot.service.js", "363-428, 640-783"), PREP7("section 5.1 E4; section 10 G6"), DERIVE_T7], { assumption: true, today: { criticalPathImpactDays: 20, ldApplicableDays: 10, ldLiability: cents(10000), linkFloatDays: [0, 0] }, ref: "HR-C10", note: "WP-7 G6 (2026-10-10): today the claim stores the links' sum, 20, and LD 10,000.00 (1000000 cents). Ref HR-C10, an assumption." }),
   },
   T5: {
-    criticalPathImpactDays: fig(6, "days", "One activity, float 4, delay 10, eot 0: max(0, 10 - 4) = 6.", [P(810), S("eot.service.js", "381, 404-412")]),
-    ldApplicableDays: fig(6, "days", "6 - 0 = 6.", [P(810)]),
-    ldLiability: money(6 * cents(1000), "6 x 1,000.00 = 6,000.00.", [P(810), S("eot.service.js", "413")]),
+    criticalPathImpactDays: fig(6, "days", "One activity, float 4, delay 10, eot 0: max(0, 10 - 4) = 6.", [PH7(850), S("eot.service.js", "381, 404-412")]),
+    ldApplicableDays: fig(6, "days", "6 - 0 = 6.", [PH7(850)]),
+    ldLiability: money(6 * cents(1000), "6 x 1,000.00 = 6,000.00.", [PH7(850), S("eot.service.js", "413")]),
+    storedFields: fig({ criticalPathImpactDays: 6, ldApplicableDays: 6, ldLiability: 6 * cents(1000), linkFloatDays: [4] }, "outcome", "T5.T7: E-T5 drafted on T7 (delay 10, eot 0, T7-F4: TF 4, WP7.T7.network) and read back, and the same body through /eot/calculate: impact max(0, 10 - 4) = 6, LD-applicable 6 - 0 = 6, LD 6 x 1,000.00 = 6,000.00, the link's floatDays 4 (eot.service.js:363-413). One activity: the summed impact and HR-C10's least-float impact agree, so no today.", [PH7("850"), HF7("backend/src/services/eot.service.js", "363-413"), PREP7("section 5.1 E4; section 10 G6"), DERIVE_T7]),
   },
   weather: {
-    "allowance20.at13.consumedPct": fig(W.a20_13.consumedPct, "percent", "Contractual 6 + 7 = 13; 13 / 20 x 100 = 65.", [P(815), P(70), S("weather.service.js", "161-200")]),
-    "allowance20.at13.warning": fig(W.a20_13.warning, "boolean", "65 < 70: no warning.", [P(815)]),
-    "allowance20.at13.remaining": fig(W.a20_13.remaining, "days", "20 - 13 = 7.", [P(815)]),
-    "allowance20.at14.consumedPct": fig(W.a20_14.consumedPct, "percent", "+1 -> 14; 14 / 20 x 100 = 70 (exactly 70 in IEEE doubles).", [P(815), P(70)]),
-    "allowance20.at14.warning": fig(W.a20_14.warning, "boolean", "70 >= 70: warning. Mutation '>= 70' -> '> 70' must turn this red.", [P(815), P(823)]),
-    "allowance20.at14.remaining": fig(W.a20_14.remaining, "days", "20 - 14 = 6.", [P(815)]),
-    "allowance30.at20.consumedPct": fig(66.67, "percent", "20 / 30 x 100 = 66.666...; the API returns 66.66666666666666, compare to 2 dp.", [P(816)]),
-    "allowance30.at20.warning": fig(W.a30_20.warning, "boolean", "No warning.", [P(816)]),
-    "allowance30.at21.consumedPct": fig(W.a30_21.consumedPct, "percent", "21 / 30 x 100 = 70.", [P(816)]),
-    "allowance30.at21.warning": fig(W.a30_21.warning, "boolean", "Warning.", [P(816)]),
-    "allowance10.at6.consumedPct": fig(W.a10_6.consumedPct, "percent", "6 / 10 x 100 = 60.", [P(817)]),
-    "allowance10.at6.warning": fig(W.a10_6.warning, "boolean", "No warning.", [P(817)]),
-    "allowance10.at7.consumedPct": fig(W.a10_7.consumedPct, "percent", "7 / 10 x 100 = 70.", [P(817)]),
-    "allowance10.at7.warning": fig(W.a10_7.warning, "boolean", "Warning.", [P(817)]),
-    nonContractual10: fig({ contractualUsed: 14, monthlyNonContractual: 10 }, "outcome", "A non-contractual 10 days adds nothing to contractualUsed (still 14) and shows as nonContractual 10 in its month.", [P(819), S("weather.service.js", "162-185")]),
-    "fractional.28xHalf.consumedPct": fig(W.half28.consumedPct, "percent", "28 x 0.5 = 14 days; 14 / 20 x 100 = 70.", [P(820)], { today: 0, note: "today each 0.5 is stored 0 (Int column, schema WeatherDelay.delayDays)." }),
-    "fractional.28xHalf.warning": fig(W.half28.warning, "boolean", "70 >= 70.", [P(820)], { today: false }),
-    "fractional.storedOneAndHalf": fig(1.5, "days", "POST delayDays 1.5 reads back 1.5.", [P(820), P(1039)], { assumption: true, today: 1, note: "HR-C11 allows either decimal days or a refusal of non-integers; undecided." }),
-    "allowanceZero.allowance": fig(0, "days", "weatherAllowanceDays 0 means 0.", [P(821), P(1039)], { today: 20, note: "today `Number(0) || 20` (weather.service.js:161)." }),
-    "allowanceZero.warning": fig(null, "boolean", "No expected value (adjudication C6): whether one contractual day against a zero allowance should warn is owner question HR-C11, still open. The check records the answer and does not fail on it.", [P(821), P(1039), AREA, ADJ("C6")], { today: false, note: "today false either way: weatherAllowanceDays 0 is read as Number(0) || 20 = 20 (weather.service.js:161), so 1 / 20 x 100 = 5% < 70; and once 0 means 0, consumedPct = allowance > 0 ? ... : 0 gives 0 when the allowance is 0 (:167), still no warning." }),
-    "087-FLD.allowance": fig(20, "days", "weatherAllowanceDays 20, set explicitly (not the || 20 default).", [P(390)]),
+    "allowance20.at13.consumedPct": fig(W.a20_13.consumedPct, "percent", "Contractual 6 + 7 = 13; 13 / 20 x 100 = 65.", [PH7(855), PH7(91), S("weather.service.js", "161-200")]),
+    "allowance20.at13.warning": fig(W.a20_13.warning, "boolean", "65 < 70: no warning.", [PH7(855)]),
+    "allowance20.at13.remaining": fig(W.a20_13.remaining, "days", "20 - 13 = 7.", [PH7(855)]),
+    "allowance20.at14.consumedPct": fig(W.a20_14.consumedPct, "percent", "+1 -> 14; 14 / 20 x 100 = 70 (exactly 70 in IEEE doubles).", [PH7(855), PH7(91)]),
+    "allowance20.at14.warning": fig(W.a20_14.warning, "boolean", "70 >= 70: warning. Mutation '>= 70' -> '> 70' must turn this red.", [PH7(855), PH7(863)]),
+    "allowance20.at14.remaining": fig(W.a20_14.remaining, "days", "20 - 14 = 6.", [PH7(855)]),
+    "allowance30.at20.consumedPct": fig(66.67, "percent", "20 / 30 x 100 = 66.666...; the API returns 66.66666666666666, compare to 2 dp.", [PH7(856)]),
+    "allowance30.at20.warning": fig(W.a30_20.warning, "boolean", "No warning.", [PH7(856)]),
+    "allowance30.at21.consumedPct": fig(W.a30_21.consumedPct, "percent", "21 / 30 x 100 = 70.", [PH7(856)]),
+    "allowance30.at21.warning": fig(W.a30_21.warning, "boolean", "Warning.", [PH7(856)]),
+    "allowance10.at6.consumedPct": fig(W.a10_6.consumedPct, "percent", "6 / 10 x 100 = 60.", [PH7(857)]),
+    "allowance10.at6.warning": fig(W.a10_6.warning, "boolean", "No warning.", [PH7(857)]),
+    "allowance10.at7.consumedPct": fig(W.a10_7.consumedPct, "percent", "7 / 10 x 100 = 70.", [PH7(857)]),
+    "allowance10.at7.warning": fig(W.a10_7.warning, "boolean", "Warning.", [PH7(857)]),
+    nonContractual10: fig({ contractualUsed: 14, monthlyNonContractual: 10 }, "outcome", "A non-contractual 10 days adds nothing to contractualUsed (still 14) and shows as nonContractual 10 in its month.", [PH7(859), S("weather.service.js", "162-185")]),
+    "fractional.28xHalf.consumedPct": fig(W.half28.consumedPct, "percent", "28 x 0.5 = 14 days; 14 / 20 x 100 = 70.", [PH7(860), PH7("868, 1079"), HF7("backend/prisma/schema.prisma", "2958"), HF7("backend/src/services/weather.service.js", "217"), PREP7("section 10 G2, G10")], { assumption: true, today: 0, ref: "HR-C11", note: "today each 0.5 is stored 0 (Int column, schema WeatherDelay.delayDays). WP-7 G2, G10 (2026-10-10): ref HR-C11 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption; judged on T7H by KA.W.T7H.half28 (WP7.T7H.half28, the 28-row fixture)." }),
+    "fractional.28xHalf.warning": fig(W.half28.warning, "boolean", "70 >= 70.", [PH7(860), PH7("868, 1079"), PREP7("section 10 G2, G10")], { assumption: true, today: false, ref: "HR-C11", note: "WP-7 G2, G10 (2026-10-10): today the 28 rows are stored 0, so 0% and no warning. Ref HR-C11 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption; judged on T7H (WP7.T7H.half28). Once HR-C11 stores half-days this reading is exactly 70 and joins M-70's catchers (WP7.mutations.seventyBoundary)." }),
+    "fractional.storedOneAndHalf": fig(1.5, "days", "POST delayDays 1.5 reads back 1.5.", [PH7(860), PH7(1079), HF7("backend/src/services/weather.service.js", "217, 308-311"), PREP7("section 10 G2, G10")], { assumption: true, today: 1, ref: "HR-C11", note: "HR-C11 allows either decimal days or a refusal of non-integers; undecided. WP-7 G2, G10 (2026-10-10): ref HR-C11, BLOCKED at today (the Int column stores 1). The proof's CONTRACT fractionalMode decides the reading once HR-C11 is decided: decimal, the row reads 1.5 (this value); refusal, the POST is refused with the fix's code and the value becomes that refusal. Judged on T7H after the 28-row read (KA.W.T7H.storedOneAndHalf)." }),
+    "allowanceZero.allowance": fig(0, "days", "weatherAllowanceDays 0 means 0.", [PH7(861), PH7(1079), HF7("backend/src/services/project.service.js", "328-351"), PREP7("section 10 G2, G9")], { assumption: true, today: 20, ref: "HR-C11", note: "today `Number(0) || 20` (weather.service.js:161). WP-7 G2, G9 (2026-10-10): ref HR-C11 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption. The project stores 0 (project.service.js:351); the register reads it as 20. Judged on T7 at W6 (WP7.weather.allowanceZero.T7)." }),
+    "allowanceZero.warning": fig(null, "boolean", "No expected value (adjudication C6): whether one contractual day against a zero allowance should warn is owner question HR-C11, still open. The check records the answer and does not fail on it.", [PH7(861), PH7(1079), AREA, ADJ("C6"), PREP7("section 10 G2, G7")], { assumption: true, today: false, ref: "HR-C11", note: "today false either way: weatherAllowanceDays 0 is read as Number(0) || 20 = 20 (weather.service.js:161), so 1 / 20 x 100 = 5% < 70; and once 0 means 0, consumedPct = allowance > 0 ? ... : 0 gives 0 when the allowance is 0 (:167), still no warning. WP-7 G2, G7 (2026-10-10): never judged as a value: an observation recorded by CF.HRC11 (WP7.CF.HRC11, zeroAllowanceWarning), the leaf kept for the record (as WP-6 G14). Ref HR-C11 (the owner's O2), an assumption." }),
+    "allowanceZero.T7": fig({ allowance: 0, consumedPct: 0 }, "outcome", "KA.W.T7.allowanceZero: at W6 the PM PATCHes T7's weatherAllowanceDays to 0, which the project stores and reads back as 0 (project.service.js:328-351); the register then holds 7 contractual days (WR-6 and WR-1 after W5b, WP7.T7.weatherSequence). Under HR-C11's '0 means 0' (:1079 PH7) the summary's allowance is 0 and consumedPct 0 (allowance > 0 ? ... : 0, weather.service.js:167); whether 7 days against 0 warn is the owner's (WP7.weather.allowanceZero.warning, no expected value). W7 puts 20 back before any promotion.", [PH7("861, 870, 1079"), HF7("backend/src/services/weather.service.js", "161-200"), HF7("backend/src/services/project.service.js", "328-351"), PREP7("section 5.1 W6-W7; section 10 G9"), DERIVE_T7], { assumption: true, today: { allowance: 20, contractualUsed: 7, consumedPct: 35, warning: false, remaining: 13 }, ref: "HR-C11", note: "WP-7 G9 (2026-10-10): today Number(0) || 20 reads 20 (weather.service.js:161): 7 / 20 x 100 = 35%, no warning, 13 remaining. Ref HR-C11 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption." }),
+    "087-FLD.allowance": fig(20, "days", "weatherAllowanceDays 20, set explicitly (not the || 20 default).", [PH7(430)]),
     "087-FLD.composition": fig(
       { promoted: [0.5, 1.0, 1.5], at13Manual: [2.5, 7.5], at14Add: [1.0], nonContractual: [10] },
       "outcome",
       "Adjudication C4: the promoted daily-log delays are contractual by default, 0.5 + 1.0 + 1.5 = 3.0 days. The manual contractual delays therefore sum to 10.0 (2.5 + 7.5, half-days included) so the total reaches 3.0 + 10.0 = 13.0 (13 / 20 x 100 = 65%, no warning, 7 remaining), then + 1.0 manual (manual 11.0) = 14.0 (70%, warning, 6 remaining). The 10-day non-contractual delay stays outside contractualUsed (weather.service.js:162-165): still 14.0.",
-      [P(390), P(815), P(838), S("weather.service.js", "161-200"), "backend/src/services/daily-log.service.js:1200, 1209 @" + HEAD, ADJ("C4")],
+      [PH7(430), PH7(855), PH7(878), S("weather.service.js", "161-200"), "backend/src/services/daily-log.service.js:1200, 1209 @" + HEAD, ADJ("C4"), PH7("868, 1079"), PREP7("section 10 G2, G11")],
       {
         assumption: true,
         today: { promotedStored: [0, 1, 1], manualStored: [2, 7], at13Used: 11, at13Pct: 55, at14Used: 12, at14Pct: 60, warningAt14: false },
-        note: "The manual split 2.5 + 7.5, then 1.0, is a choice; it is the same record set as field-controls.js weather.recordSet (WP-8), so the two books agree. today: every row is written to the Int column WeatherDelay.delayDays (schema.prisma:2958, weather.service.js:217) and stored truncated (558 driver notes: 1.5 -> 1, 0.5 -> 0): promoted 0 + 1 + 1 = 2, manual 2 + 7 = 9, so 11 (55%; the double is 55.00000000000001, compare to 2 dp), then + 1 = 12 (60%), no warning at 14 until HR-C11.",
+        ref: "HR-C11",
+        note: "The manual split 2.5 + 7.5, then 1.0, is a choice; it is the same record set as field-controls.js weather.recordSet (WP-8), so the two books agree. today: every row is written to the Int column WeatherDelay.delayDays (schema.prisma:2958, weather.service.js:217) and stored truncated (558 driver notes: 1.5 -> 1, 0.5 -> 0): promoted 0 + 1 + 1 = 2, manual 2 + 7 = 9, so 11 (55%; the double is 55.00000000000001, compare to 2 dp), then + 1 = 12 (60%), no warning at 14 until HR-C11. WP-7 G2, G11 (2026-10-10): ref HR-C11 (undecided: BLOCKED at today, the KA.I9 ruling); judged at 087-FLD's stored moments and live through WP7.weather['087-FLD.read'], which adds the remaining days.",
       }
     ),
-    "087-FLD.promoted.days": fig([0.5, 1.0, 1.5], "days", "Delay entries of 2 h, 6 h and 10 h promoted to the weather register: delayDays = Math.round((hoursLost / 8) x 2) / 2 = round(0.5)/2, round(1.5)/2, round(2.5)/2 = 0.5, 1.0, 1.5 (JS Math.round rounds halves up).", [P(390), P(838), "backend/src/services/daily-log.service.js:1200 @" + HEAD, ADJ("C8")], { today: [0, 1, 1], note: "today the promotion's answer echoes 0.5 / 1.0 / 1.5 (daily-log.service.js:1216) but the stored WeatherDelay row reads 0 / 1 / 1 (Int column, weather.service.js:217; truncation from the 558 driver notes, not executed here). Same figures as field-controls.js promote2h / promote6h / promote10h and promoteResponseVsStored." }),
-    "087-FLD.promoted.contractual": fig(true, "boolean", "Promotion sends contractual = payload.contractual !== undefined ? Boolean(payload.contractual) : true (daily-log.service.js:1209) and createWeatherDelay keeps it (weather.service.js:218-219), so a promoted delay is contractual by default (adjudication C4).", [P(390), "backend/src/services/daily-log.service.js:1209 @" + HEAD, S("weather.service.js", "218-219"), ADJ("C4")]),
-    "087-FLD.promoted.total": fig(0.5 + 1.0 + 1.5, "days", "0.5 + 1.0 + 1.5 = 3.0 contractual days counted toward the 13 / 14.", [P(390), ADJ("C4"), ADJ("C8")], { today: 0 + 1 + 1, note: "today 0 + 1 + 1 = 2 as stored." }),
-    "052-FLD": fig({ first: [65, false], then: [70, true] }, "outcome", "052-FLD: weather 65% then 70%, same allowance 20 and the same 13 -> 14 steps.", [P(405)], { assumption: true }),
+    "087-FLD.promoted.days": fig([0.5, 1.0, 1.5], "days", "Delay entries of 2 h, 6 h and 10 h promoted to the weather register: delayDays = Math.round((hoursLost / 8) x 2) / 2 = round(0.5)/2, round(1.5)/2, round(2.5)/2 = 0.5, 1.0, 1.5 (JS Math.round rounds halves up).", [PH7(430), PH7(878), "backend/src/services/daily-log.service.js:1200 @" + HEAD, ADJ("C8"), PH7("868, 1079"), PREP7("section 1.3; section 10 G2")], { assumption: true, today: [0, 1, 1], ref: "HR-C11", note: "today the promotion's answer echoes 0.5 / 1.0 / 1.5 (daily-log.service.js:1216) but the stored WeatherDelay row reads 0 / 1 / 1 (Int column, weather.service.js:217; truncation from the 558 driver notes, not executed here). Same figures as field-controls.js promote2h / promote6h / promote10h and promoteResponseVsStored. WP-7 G2 (2026-10-10): ref HR-C11 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption. WP-8's figures (MOMENT-MAP rows 175-176); WP-7 reads the stored values only as CF.HRC11's evidence." }),
+    "087-FLD.promoted.contractual": fig(true, "boolean", "Promotion sends contractual = payload.contractual !== undefined ? Boolean(payload.contractual) : true (daily-log.service.js:1209) and createWeatherDelay keeps it (weather.service.js:218-219), so a promoted delay is contractual by default (adjudication C4).", [PH7(430), "backend/src/services/daily-log.service.js:1209 @" + HEAD, S("weather.service.js", "218-219"), ADJ("C4")]),
+    "087-FLD.promoted.total": fig(0.5 + 1.0 + 1.5, "days", "0.5 + 1.0 + 1.5 = 3.0 contractual days counted toward the 13 / 14.", [PH7(430), ADJ("C4"), ADJ("C8"), PH7("868, 1079"), PREP7("section 1.3; section 10 G2")], { assumption: true, today: 0 + 1 + 1, ref: "HR-C11", note: "today 0 + 1 + 1 = 2 as stored. WP-7 G2 (2026-10-10): ref HR-C11 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption; CF.HRC11's evidence." }),
+    "087-FLD.read": fig({ at13: { contractualUsed: 13, consumedPct: 65, warning: false, remaining: 7 }, at14: { contractualUsed: 14, consumedPct: 70, warning: true, remaining: 6 }, live: { contractualUsed: 14, consumedPct: 70, warning: true, remaining: 6, monthlyNonContractual: 10 } }, "outcome", "KA.FLD.087.stored and KA.FLD.087.live: 087-FLD's register read at the build's two moments (steps weather.at13.read and weather.at14.read, MOMENT-MAP rows 178, 179) and live by the planner, with the 10 non-contractual days in their month, judged against the composition (WP7.weather['087-FLD.composition']) as listWeatherDelays reads it (weather.service.js:161-200): 13.0 -> 65%, no warning, 7 remaining; 14.0 -> 70%, the warning, 6 remaining.", [PH7("430, 845, 855, 859, 868, 1079"), HF7("backend/src/services/weather.service.js", "161-200, 217"), HF7("backend/scripts/cert/cert3/build/MOMENT-MAP.md", "rows 178-180"), WP7ADJ("Q9"), PREP7("section 5.3; section 10 G11"), DERIVE_T7], { assumption: true, today: { at13: { contractualUsed: 11, consumedPct: 55, warning: false, remaining: 9 }, at14: { contractualUsed: 12, consumedPct: 60, warning: false, remaining: 8 }, live: { contractualUsed: 12, consumedPct: 60, warning: false, remaining: 8, monthlyNonContractual: 10 } }, ref: "HR-C11", note: "WP-7 G11 (2026-10-10): today every row is stored truncated (0, 1, 1, 2, 7, then 1): 11 / 55% / 9 remaining, then 12 / 60% / 8, no warning (the composition's today carries no remaining days). Ref HR-C11 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption. After the HR-C11 fix the rows built before it keep their truncated values, so the stored moments and the live read read STORED-PRE-FIX until the exit rebuild and are judged on the value strictly at it (WP7ADJ Q9; MOMENT-MAP row 180)." }),
+    "052-FLD": fig({ first: [65, false], then: [70, true] }, "outcome", "052-FLD: weather 65% then 70%, same allowance 20 and the same 13 -> 14 steps.", [PH7(445), PH7("845, 868, 1079"), PREP7("section 10 G2, G12"), DERIVE_T7], { assumption: true, today: { first: [55, false], then: [60, false] }, ref: "HR-C11", note: "WP-7 G2, G12 (2026-10-10): 052-FLD runs 087-FLD's record set (WP7.weather['087-FLD.composition']): today the rows are stored truncated, 11 then 12 contractual days, 55% then 60%, no warning. Ref HR-C11 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption. Judged at 052-FLD's stored moments (KA.FLD.052.stored; STORED-PRE-FIX after the fix until the exit rebuild, WP7ADJ Q9) and by the 052 planner's live read (KA.FLD.052.live, WP7ADJ Q7). The builders read the value only (BLD 052-fld.js:62, 107-108)." }),
   },
   mutations: {
-    seventyBoundary: fig(["WP7.weather.allowance20.at14.warning", "WP7.weather.allowance30.at21.warning", "WP7.weather.allowance10.at7.warning"], "mutation", "'>= 70' -> '> 70': at exactly 70% the warning turns false (14/20 x 100 = 70 exactly).", [P(823), P(1111)]),
-    approvedEotLock: fig(["WP7.T2.plannerPatchApproved"], "mutation", "Remove the approved-EOT lock once it exists.", [P(823), P(1111)]),
+    seventyBoundary: fig(["W.T7.a20at14 red, W.T7.a30at21 red and W.T7.a10at7 red (M-70, the E6 entry: weather.service.js:200 '>= 70' -> '> 70'; each of the three readings is exactly 70 in doubles)", "KA.W.T7H.half28 red (M-70 once the HR-C11 fix lands: 28 x 0.5 then reads exactly 70)", "KA.FLD.087.live red (M-70 after the exit rebuild, when 087-FLD's rows are rebuilt under the HR-C11 fix)", "none (M-70b, '>= 70.01': the same line and the same catchers; recorded, not run)"], "mutation", "'>= 70' -> '> 70': at exactly 70% the warning turns false (14/20 x 100 = 70 exactly).", [PH7(863), PH7(1151), HF7("backend/src/services/weather.service.js", "200"), WP7ADJ("Q4"), PREP7("section 7; section 10 G15"), "C:/Temp/octapm-cert/scratch/wp7/wp7-mutations-draft.json"], { note: "WP-7 G15 (2026-10-10): catchers named by check id; the value was ['WP7.weather.allowance20.at14.warning', 'WP7.weather.allowance30.at21.warning', 'WP7.weather.allowance10.at7.warning']. Every catcher writes only on T7 (or T7H), because the mutation runner runs the whole proof under each mutant." }),
+    approvedEotLock: fig(["T1.T7.patchApprovedToDraft red and T1.T7.rejectApproved red (M-STAT, the E6 entry now, WP7ADJ Q4: eot.service.js:275 lets an approved claim's status move; the status half of the lock, present at HEAD)", "KA.T2.plannerPatchApproved red (M-LOCK, tallied once the HR-C10 fix lands, WP7ADJ Q4: the figures half, a PATCH of an approved claim refused 409; until then not run)"], "mutation", "Remove the approved-EOT lock once it exists. Its status half exists at HEAD (assertEotWorkflowTransition, eot.service.js:259-286: no workflow action or PATCH moves an approved claim), so M-STAT removes it now; its figures half is HR-C10's lock (M-LOCK), mutated once that fix lands.", [PH7(863), PH7(1151), HF7("backend/src/services/eot.service.js", "259-286, 805-842"), WP7ADJ("Q4"), PREP7("section 7; section 10 G15"), "C:/Temp/octapm-cert/scratch/wp7/wp7-mutations-draft.json"], { note: "WP-7 G15 (2026-10-10): catchers named by check id; the value was ['WP7.T2.plannerPatchApproved'] and the derivation was 'Remove the approved-EOT lock once it exists.' (kept as its start)." }),
+    ruleMutants: fig(["T1.T7.approveDraft red, T1.T7.patchStatusDraftOnSubmitted red, T1.T7.patchApprovedToDraft red and T1.T7.rejectApproved red (M-WF: the workflow guard removed, eot.service.js:275 returns)", "T1.T7.submitWithoutProof red (M-PROOF: the submission proof removed, eot.service.js:246)", "T3.T7.approve red (M-CUM: the cumulative ignores earlier approvals, eot.service.js:318)", "W.T7.a30at20 red, W.T7.a30at21 red, W.T7.a10at6 red and W.T7.a10at7 red (M-ALLOW: the project allowance ignored, weather.service.js:161)", "W.T7.nonContractual10 red, W.T7.a30at20 red, W.T7.a30at21 red, W.T7.a10at6 red and W.T7.a10at7 red (M-NC: non-contractual days counted, weather.service.js:163)", "T1.T7.rejectWithoutReason red (M-REASON: a rejection without a reason accepted, routes/eot.js:235)"], "mutation", "Plan section 4 WP-7's rules (:839-842, :859 PH7) as OPTIONAL rule mutants: run, never tallied, recorded with the WP-7 proof (WP7ADJ Q5, the WP-3 Q10 precedent; plan section 0.0 item 5: no widening of section 6.2). Each runs the whole proof; every catcher writes only on T7.", [PH7("839-842, 859, 1151"), HF7("backend/src/services/eot.service.js", "246, 275, 318"), HF7("backend/src/services/weather.service.js", "161, 163"), HF7("backend/src/routes/eot.js", "235"), WP7ADJ("Q5"), PREP7("section 7; section 10 G15"), "C:/Temp/octapm-cert/scratch/wp7/wp7-mutations-draft.json"], { note: "WP-7 G15, Q5 (2026-10-10)." }),
+    fixMutations: fig(["KA.T4.T7 red and KA.T4.087COM.calculate red (M-C10i: HR-C10's impact rule reverted, once it lands)", "KA.W.T7.allowanceZero red (M-C11z: HR-C11's zero allowance reverted to 'or 20', once it lands)", "KA.W.T7H.half28 red and KA.W.T7H.storedOneAndHalf red (M-C11d: HR-C11's decimal days reverted, once it lands)", "KA.PROMO.T7.race red and KA.PROMO.T7.failure red (M-PTX: the two-write promotion put back, once the PROMO-TX fix lands, if it confirms as P1)", "KA.F4.T7.sitePromotion red (M-F4: HR-F4's contractual-only-with-eot:create reverted, once it lands)", "none (the sequential promotion guard, daily-log.service.js:1198: WP-8's guard 'Promoting twice: 409', not in section 6.2 WP-7; PROMO.T7.twice would catch it; recorded, not run)"], "mutation", "The fix mutations (plan section 1.4): each reverts a fix once it has landed, so that the known answer it turns into a value check has a catcher; none exists at HEAD, so none runs now. M-LOCK is the approved-EOT lock's figures half (WP7.mutations.approvedEotLock).", [PH7("863, 1078, 1079, 1061, 1115"), HF7("backend/src/services/eot.service.js", "404, 805"), HF7("backend/src/services/weather.service.js", "161"), HF7("backend/prisma/schema.prisma", "2953"), HF7("backend/src/services/daily-log.service.js", "1198, 1201, 1209"), WP7ADJ("Q4, Q6"), PREP7("section 7; section 9; section 10 G15"), "C:/Temp/octapm-cert/scratch/wp7/wp7-mutations-draft.json"], { note: "WP-7 G15 (2026-10-10)." }),
+  },
+
+  // WP-7 answer-book leaves (2026-10-10, WP7ADJ Q1, Q11): the throwaway T7 (G1, G8).
+  T7: {
+    project: fig(T7_PROJECT, "outcome", "T7-0: the throwaway's create payload, 087-COM's dates and LD rate: completionDate 2027-06-30 (T2's base, deep.087-COM.completion), ldRatePerDay 1,000.00 (in cents, read back), weatherAllowanceDays 20 set explicitly, an explicit defaultRetentionRate 10 (no WP-7 figure depends on HR-C1). Created and archived by the proof (WP7ADJ Q1).", T7_SRC, { assumption: true, note: "WP-7 G1 (2026-10-10): <stamp> is the run's." }),
+    team: fig(T7_BOOK.team, "outcome", "T7-0: the members assigned on T7 and their project roles: the planner (claims, weather rows, daily logs, the register reads, /eot/calculate) and the site engineer (KA.F4.T7.sitePromotion: daily_log.update without eot:create or eot:read). The PM is 087's company administrator. Each step is driven by the persona the policy names (WP7-PREP section 8; E8 rests on the WP-0 probe: 12 WP7.* entries x 9 personas + 052's finance, 0 failures).", [...T7_SRC, HF7("shared/permissions.json", "modules.eot, modules.progress")], { assumption: true }),
+    network: fig(T7_NETWORK, "outcome", "T7-1: the planner's three activities and one FS link (lag 0); the product's CPM (cpm.service.js:449-485: the backward pass from the latest early finish, 15) reads them back: T7-C1 0-10 and T7-C2 10-15 on one chain, TF 0 each (critical); T7-F4 0-11, LS 4, LF 15, TF 4. Working days; WP-7 places nothing on the calendar.", [...T7_SRC, HF7("backend/src/services/cpm.service.js", "449-485")], { assumption: true }),
+    claims: fig(T7_CLAIMS, "outcome", "E1-E5: T7's EOT claims in currency units as sent (the LD rate stated in cents): E-T2 (WR-6 linked) and E-T3 approved in that order, the PATCH of E-T2 after E-T3's approval, then E-LK1 and E-LK2 approved last, one approved-state probe each; E-T4 and E-T5 drafts; the T1 claims; E-HALF, a draft with delayDays 1.5 read back for CF.HRC11. The approvals count calendar days from the completion date 2027-06-30: E-T2 10 -> 2027-07-10, E-T3 10 + 5 = 15 -> 2027-07-15 (buildApprovedCompletionRecommendation, eot.service.js:288-327); the calculation's own recommendation for E-T3 at create counts its 5 days only, 2027-07-05 (:426-428).", [...T7_SRC, HF7("backend/src/services/eot.service.js", "288-327, 426-428, 640-783")], { assumption: true, note: "WP-7 G1, G3 (2026-10-10): the order trap: at HEAD the PATCH of E-T2 to 30 is accepted and every later approval sums E-T2 at 30, so had the PATCH come first E-T3 would read 35 / 2027-08-04; E-LK1 and E-LK2 then read 36 and 37 at HEAD and 16 and 17 under the lock, and their cumulatives are not judged." }),
+    weatherSequence: fig(T7_WEATHER, "outcome", "W1-W7: T7's weather rows (delay days, contractual, the day as an offset from R) and the steps that move them: each step's register read as listWeatherDelays answers it (weather.service.js:161-200), the percentage compared at 2 dp (the field-controls book's adjudication F2: 20 / 30 x 100 is 66.66666666666666 in doubles, 66.67). W1-W2 the 20 line (13 -> 65%, 14 -> exactly 70%), W3 the non-contractual 10 (still 14; 10 in its month), W4 the 30 line (20 -> 66.67%, 21 -> exactly 70%), W5 the 10 line (WR-7, WR-6b, WR-1b and WR-1 PATCHed non-contractual: 6 -> 60%; WR-1 back: 7 -> exactly 70%), W6 allowance 0 (the known answer WP7.weather.allowanceZero.T7), W7 20 again before any promotion.", [...T7_SRC, HF7("backend/src/services/weather.service.js", "161-200, 274-368"), "backend/scripts/cert/cert3/answers/field-controls.js adjudication F2 @bde300d"], { assumption: true, note: "WP-7 G8 (2026-10-10)." }),
+    entries: fig(T7_ENTRIES, "outcome", "P0-P4: T7's daily-log delay entries, each 8 h on T7-C1, promoted as Math.round((8 / 8) x 2) / 2 = 1.0 day (daily-log.service.js:1200), stored 1 by the Int column, so HR-C11 never confounds a promotion figure: BAR for the barrier self-test (never promoted), FEED promoted twice, three race rounds on R-3, three failure rounds on the open day R-2, SITE promoted by the site engineer on R-1. Each probe judges its own delta, matched by the entry's description and id, never an absolute total.", [...T7_SRC, HF7("backend/src/services/daily-log.service.js", "910-966, 1011-1028, 1194-1217")], { assumption: true }),
+    residue: fig({ archived: ["T7", "T7H"], queuedJobsLeft: { T7: 0, T7H: 0 }, blockerWrites: 0, extraWeatherRowsListedByTheCleanup: true }, "outcome", "WP7ADJ Q11: T7 and T7H are archived with their claims, weather rows, daily logs and EOT notifications; the blocker connection reads and locks only and rolls back; no job is queued; the cleanup lists the weather rows no delay entry names.", [...T7_SRC, WP7ADJ("Q2, Q11")], { assumption: true, note: "WP-7 Q11 (2026-10-10): at HEAD the race and failure rounds leave 3 duplicated and 3 orphaned contractual rows on archived T7, accepted as known residue; none once the PROMO-TX fix lands." }),
+    choreography: fig(T7_STEPS, "list", "T7's run order (WP7-PREP section 5.1, as WP7ADJ settles it): the T7 choreography runs whole whenever one selected check runs on T7, its steps depending on each other; each step names the check ids it serves. Order: the weather sequence W1-W7 before any promotion (promotions add contractual days); WR-6 before E-T2; E-T3 approved before the PATCH probe; E-LK1 and E-LK2 approved after it, each probed once; the T1 claims after every cumulative read (under the optional M-WF a T1 claim can be approved); every promotion entry 8 h.", [...T7_SRC, "backend/scripts/cert/cert3/build/MOMENT-MAP.md rows 153, 177, 180, 263 @bde300d"], { assumption: true, note: "WP-7 G1 (2026-10-10): the moment map's WP-7 deviation is recorded by key when the proof lands (WP7ADJ Q1): rows 177 and 263 move to T7; row 180 is met on T7 and T7H; rows 153, 178, 179, 247 and 248 stand as stored moments plus live reads; T5 runs on T7 only." }),
+  },
+  // WP-7 answer-book leaves (2026-10-10, WP7ADJ Q1): the half-day throwaway T7H (G1, G10).
+  T7H: {
+    project: fig(T7H_BOOK.project, "outcome", "H0: the half-day throwaway's create payload: T7's settings without its LD rate, weatherAllowanceDays 20 set explicitly. Created and archived by the proof (WP7ADJ Q1).", T7H_SRC, { assumption: true, note: "WP-7 G1 (2026-10-10): <stamp> is the run's." }),
+    team: fig(T7H_BOOK.team, "outcome", "H0: the planner assigned on T7H, who posts the rows and reads the register.", T7H_SRC, { assumption: true }),
+    half28: fig(weatherRead(T7H_BOOK.project.weatherAllowanceDays, Array(T7H_BOOK.half.rows).fill(T7H_BOOK.half.delayDays)), "outcome", "KA.W.T7H.half28: on T7H the planner posts 28 contractual delays of 0.5 day, four a day on R-12 .. R-6, and reads the register: 28 x 0.5 = 14 days against 20, exactly 70% in doubles, the warning, 6 remaining (weather.service.js:161-200). The 1.5-day row follows on R-6, after this read (KA.W.T7H.storedOneAndHalf).", [...T7H_SRC, HF7("backend/src/services/weather.service.js", "161-200, 208-272"), HF7("backend/prisma/schema.prisma", "2958")], { assumption: true, today: weatherRead(T7H_BOOK.project.weatherAllowanceDays, Array(T7H_BOOK.half.rows).fill(Math.trunc(T7H_BOOK.half.delayDays))), ref: "HR-C11", note: "WP-7 G10 (2026-10-10): today Number(0.5) goes into the Int column WeatherDelay.delayDays (weather.service.js:217) and each row is stored 0: 0 days, 0%, no warning, 20 remaining. Ref HR-C11 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption. Once HR-C11 stores half-days this read joins M-70's catchers." }),
+    choreography: fig(T7H_STEPS, "list", "T7H's run order (WP7-PREP section 5.2), each step naming the check ids it serves.", T7H_SRC, { assumption: true, note: "WP-7 G1 (2026-10-10)." }),
+  },
+  // WP-7 answer-book leaves (2026-10-10, WP7ADJ Q2, Q6, Q8): weather promotion from the daily log (G13).
+  promotion: {
+    barrier: fig({ connection: "a separate pg connection, not the app's Prisma pool", holds: "BEGIN; SELECT id FROM DailyLogDelay WHERE id = $1 FOR UPDATE; later ROLLBACK: it reads and locks, writes nothing", queuedWhen: "the request's backend's pg_blocking_pids chain reaches the blocker's pid, directly or through a waiter the blocker blocks", releaseWithinMs: T7_BOOK.blocker.releaseWithinMs, interactiveTxTimeoutMs: T7_BOOK.blocker.interactiveTxTimeoutMs, rounds: T7_BOOK.blocker.rounds, notFormed: "R-SET, a setup error, never a verdict", selfTest: "S.T7.barrier: the planner's PATCH of BAR's notes is seen waiting behind the blocker, then answers 200 after the release" }, "outcome", "WP7ADJ Q2: the WP-2 queue-behind-a-blocker mechanism (QP-R2-M3; d-id-1-guards-proof.js): each request is confirmed waiting through pg_blocking_pids before the next is sent; the barrier is released within 2.5 s, inside Prisma's 5 s interactive-transaction window; N=3 rounds for the race and N=3 for the failure, green only if every round is (binding ruling 4); no retry at baseline.", [PH7("843, 1115"), WP7ADJ("Q2"), PREP7("section 0 fact 8; section 5.1.1; section 10 G13"), "backend/scripts/cert/cert3/d-id-1-guards-proof.js:384, 1232 @bde300d"], { assumption: true, note: "WP-7 G13 (2026-10-10): the blocker writes nothing (a pure lock-holder connection, allowed by the standing rulings)." }),
+    feeds: fig({ status: 200, echoDays: 1, storedDays: 1, contractual: true, rowsAdded: 1, contractualUsedDelta: 1, activityLinks: ["T7-C1"], entryNamesTheRow: true }, "outcome", "PROMO.T7.feeds: the planner promotes FEED (8 h on T7-C1, R-4): 200 with weatherDelay { delayDays 1, contractual true } (daily-log.service.js:1200, 1209, 1216); the register gains exactly one row of 1 day, contractual, the entry's description and one activity link to T7-C1; contractualUsed +1; the entry reads weatherDelayId = that row. Promoted again: 409 DAILY_LOG_WEATHER_DELAY_EXISTS, no row (PROMO.T7.twice, field-controls.js WP8.dailyLog.promoteTwice).", [PH7("843, 878"), HF7("backend/src/services/daily-log.service.js", "1194-1217"), HF7("backend/src/services/weather.service.js", "208-272"), PREP7("section 5.1 P1; section 10 G13"), DERIVE_T7]),
+    race: fig({ rounds: T7_BOOK.blocker.rounds, perRound: { promotions: 2, ok: 1, conflict409: 1, conflictCode: "DAILY_LOG_WEATHER_DELAY_EXISTS", rowsAdded: 1, contractualUsedDelta: 1, entryNamesTheRow: true } }, "outcome", "KA.PROMO.T7.race: N=3 rounds, each a fresh 8 h entry on R-3: the blocker holds the entry's row; two planner promotions are sent together and both seen waiting; release. Under the PROMO-TX fix (one transaction, the entry locked or claimed first, plan :1115) the first takes the row and commits, the second re-reads it promoted: one 200 and one 409 DAILY_LOG_WEATHER_DELAY_EXISTS, exactly one row added, contractualUsed +1, the entry naming that row.", [PH7("843, 1115"), HF7("backend/src/services/daily-log.service.js", "1194-1217"), HF7("backend/src/services/weather.service.js", "211-271"), WP7ADJ("Q2, Q6"), PREP7("section 0 fact 8; section 5.1.1; section 9 F-1; section 10 G13"), DERIVE_T7], { assumption: true, today: { rounds: T7_BOOK.blocker.rounds, perRound: { promotions: 2, ok: 2, conflict409: 0, rowsAdded: 2, contractualUsedDelta: 2, activityLinksAdded: 2, orphanRows: 1, entryNamesTheRowWhoseUpdateRanLast: true } }, ref: "PROMO-TX", note: "WP-7 G13 (2026-10-10): today both promotions pass the unlocked check (daily-log.service.js:1197-1198), each commits its WeatherDelay in createWeatherDelay's own transaction and then waits at the entry update (:1213): two 200s, two rows (+2 days, two activity links), the entry naming the row whose update ran last, the other orphaned and counted. Ref PROMO-TX (the defect fix, not yet reproduced: BLOCKED at today, the KA.I9 ruling), an assumption; its severity is decided at the run from the reproduction (WP7ADJ Q6)." }),
+    failure: fig({ rounds: T7_BOOK.blocker.rounds, perRound: { deleteStatus: 200, promotionIs2xx: false, promotionCode: null, rowsAdded: 0, contractualUsedDelta: 0 } }, "outcome", "KA.PROMO.T7.failure: N=3 rounds, each a fresh 8 h entry on the open day R-2: the blocker holds the entry's row; the planner's DELETE of the entry is sent and seen waiting, then its promotion, seen waiting behind the DELETE; release. Under the PROMO-TX fix the promotion's locked read finds the entry gone: the DELETE 200, the promotion not 2xx (the fix's code, 404 DAILY_LOG_ENTRY_NOT_FOUND expected), no row added.", [PH7("843, 1115"), HF7("backend/src/services/daily-log.service.js", "1011-1028, 1194-1217"), HF7("backend/src/middleware/error-handler.js", "246"), WP7ADJ("Q2, Q6"), PREP7("section 0 fact 8; section 5.1.1; section 10 G13"), DERIVE_T7], { assumption: true, today: { rounds: T7_BOOK.blocker.rounds, perRound: { deleteStatus: 200, promotion: { status: 404, code: "NOT_FOUND" }, rowsAdded: 1, contractualUsedDelta: 1, orphanRows: 1 } }, ref: "PROMO-TX", note: "WP-7 G13 (2026-10-10): today the promotion had already committed its WeatherDelay before the DELETE ran, and its entry update finds no row (P2025, mapped to 404 NOT_FOUND by error-handler.js:246): one contractual row with no entry, counted. Ref PROMO-TX, an assumption; the promotion's code after the fix is CONTRACT failureCode, pending." }),
+    sitePromotion: fig({ status: "2xx", contractual: false, contractualUsedDelta: 0 }, "outcome", "KA.F4.T7.sitePromotion (HR-F4; MOMENT-MAP rows 177, 263 moved to T7, WP7ADJ Q1, Q8): the site engineer, who holds daily_log.update but not eot:create (shared/permissions.json progress.transitions; eot create pm, planning_eng, qs), adds SITE (8 h, R-1) and promotes it; the planner reads the register (the site engineer has no eot:read). Under HR-F4's recommendation (:1061 PH7: promotion needs eot:create, otherwise it creates a non-contractual delay) the promotion succeeds non-contractual: contractualUsed +0.", [PH7("843, 1061"), HF7("backend/src/routes/daily-logs.js", "238-245"), HF7("backend/src/services/daily-log.service.js", "1209"), HF7("shared/permissions.json", "modules.progress.transitions, modules.eot"), WP7ADJ("Q8"), PREP7("section 0 fact 12; section 8; section 10 G13"), DERIVE_T7], { assumption: true, today: { status: 200, contractual: true, contractualUsedDelta: 1 }, ref: "HR-F4", note: "WP-7 G13 (2026-10-10): today the route lets the site engineer in (requirePermission progress update, transition daily_log.update) and the promotion is contractual by default (daily-log.service.js:1209): 200, contractual true, +1. Ref HR-F4 (undecided: BLOCKED at today, the KA.I9 ruling), an assumption; WP-7 runs the probe and WP-8's confirm-first (:928 PH7) classifies it (WP7ADJ Q8)." }),
+  },
+  // WP-7 answer-book leaves (2026-10-10, WP7ADJ Q6, Q10): the confirm-first observations (G14).
+  CF: {
+    HRC11: fig({ fractional: { T7Hhalf28Used: 14, oneAndHalf: 1.5, eotDraftDelayDays: 1.5, fld087Stored: [0.5, 1, 1.5, 2.5, 7.5, 1], fld052Stored: [0.5, 1, 1.5, 2.5, 7.5, 1] }, zeroAllowance: { allowance: 0 }, warning: "a flag (HR-C11 keeps it); a notice is the owner's call (O2)", zeroAllowanceWarning: "no expected value (adjudication C6; O2)" }, "outcome", "CF.HRC11, the plan's confirm-first 'fractional days truncated (proposed P1)' and 'allowance 0 treated as 20; the warning is only a flag' (:868, :870 PH7): its items as HR-C11's recommendation answers them (the known answers' values) and as HEAD does (their todays): the T7H half days (WP7.T7H.half28), the 1.5-day row (WP7.weather.fractional.storedOneAndHalf), E-HALF's delayDays 1.5 (EotClaim.delayDays is an Int too, schema.prisma:2867), 087-FLD's and 052-FLD's stored record set (WP7.weather['087-FLD.composition']), the zero allowance (WP7.weather.allowanceZero.T7), the warning only a flag (no notification naming weather after T7 crossed 70%; no server reader of summary.warning: weather.service.js:200 is its only writer, weather-delays-panel.tsx shows it as text), and the zero-allowance warning recorded (WP7.weather.allowanceZero.warning, no expected value).", [PH7("860, 861, 868, 870, 1079"), HF7("backend/src/services/weather.service.js", "161, 200, 217"), HF7("backend/prisma/schema.prisma", "2867-2868, 2958"), PREP7("section 4; section 10 G14"), DERIVE_T7], { assumption: true, today: { fractional: { T7Hhalf28Used: 0, oneAndHalf: 1, eotDraftDelayDays: 1, fld087Stored: [0, 1, 1, 2, 7, 1], fld052Stored: [0, 1, 1, 2, 7, 1] }, zeroAllowance: { allowance: 20 }, warning: { notificationsNamingWeather: 0, serverReadersOfSummaryWarning: 0 }, zeroAllowanceWarning: false }, ref: "HR-C11", note: "WP-7 G14 (2026-10-10): CONFIRMED expected (the run-1 builds already stored 0, 1, 1, 2, 7 on 087-FLD and 052-FLD); truncation P1 proposed (the 70% line is missed: 14 contractual days read 12 = 60%). HR-C11 is the owner's (O2). Ref HR-C11, an assumption." }),
+    HRC10: fig({ approvedClaimPatch: { status: 409, eotDaysGranted: 10 }, impact: { criticalPathImpactDays: 10, ldApplicableDays: 0, ldLiability: 0 }, projectDate: "manual (HR-C10's recommendation): observed, never judged" }, "outcome", "CF.HRC10, the plan's confirm-first 'approved claims stay editable; LD is summed over activities; the project date never moves' (:869 PH7): the approved claim's PATCH (WP7.T2.plannerPatchApproved), the impact rule (WP7.T4, on T7 and by /eot/calculate on 087-COM) and the project date: T7's and 087-COM's revisedCompletionDate after the approvals. HEAD keeps the project date manual, which is HR-C10's own recommendation, so it is an observation, never a known answer (binding ruling 3: a value equal to HEAD's today under an undecided rule).", [PH7("869, 1078"), HF7("backend/src/services/eot.service.js", "288-327, 404-413, 805-842, 893-898"), PREP7("section 0 facts 5-7; section 4; section 10 G14"), DERIVE_T7], { assumption: true, today: { approvedClaimPatch: { status: 200, eotDaysGranted: 30 }, impact: { criticalPathImpactDays: 20, ldApplicableDays: 10, ldLiability: cents(10000) }, projectDate: { T7: null, "087-COM": null } }, ref: "HR-C10", note: "WP-7 G14 (2026-10-10): CONFIRMED expected. Two recommended revised completion dates (lead EOT-REC-2, P3, recorded only, WP7ADJ Q10): the approval stores completion + cumulative on the claim (E-T3 2027-07-15) while the calculation adds this claim's days only (E-T3 at create 2027-07-05). HR-C10 is the owner's (O1). Ref HR-C10, an assumption." }),
+    PROMOTX: fig({ race: { ok: 1, conflict409: 1, rowsAdded: 1 }, failure: { promotionIs2xx: false, rowsAdded: 0 } }, "outcome", "CF.PROMOTX, the plan's fix list 'weather promotion in one transaction' (:1115 PH7): classified from the race and failure rounds' readings (WP7.promotion.race, failure): CONFIRMED when they read today, the duplicates and the orphans counted in contractualUsed and in the activity links the forecast reads.", [PH7("843, 1107, 1115"), HF7("backend/src/services/daily-log.service.js", "1194-1217"), HF7("backend/src/services/contract.service.js", "318"), HF7("backend/src/services/forecast.service.js", "317"), WP7ADJ("Q6"), PREP7("section 4; section 9 F-1; section 10 G14"), DERIVE_T7], { assumption: true, today: { race: { ok: 2, conflict409: 0, rowsAdded: 2, orphanRows: 1 }, failure: { promotion: 404, rowsAdded: 1, orphanRows: 1 }, severityEvidence: { contractualUsedRaised: true, seventyFlagReadsIt: true, noticeMonitor: "contract.service.js:318", forecastLinks: "forecast.service.js:317", heals: false } }, ref: "PROMO-TX", note: "WP-7 G14 (2026-10-10): severity decided at the run from the reproduction (WP7ADJ Q6): P1 if duplicates or orphans reproduce and reach contractual days, the 70% flag, notices or the forecast, then fixed in WP-7 (plan :1115). Repairing existing duplicate or orphaned rows is the owner's (O4). Ref PROMO-TX, an assumption." }),
   },
 };
 
@@ -1962,6 +2210,9 @@ const deep = {
     ipcPeriodsMin: count(4, "At least four IPC periods (paid with retention released; part-paid; submitted; draft; one PM override; one with materials on site and a deduction).", [P(387)]),
     ldRatePerDay: money(cents(1000), "ldRatePerDay set; 1,000.00 per day from WP-7 T4/T5.", [P(387), AREA], { assumption: true }),
     eotApprovedClaims: count(2, "EOT claims in every state, two of them approved (T2 + T3: cumulative 15).", [P(387), P(808)]),
+    eotWeatherLink: fig({ claim: "T2", eventType: "weather", weatherDelayLinks: 1, weatherDelay: "WD-1", weatherDelayDays: 2 }, "outcome", "'One linked to a weather delay' (:427 PH7): the build drafts T2 (eventType weather) naming WD-1, 087-COM's one weather delay (2 contractual days on A310), in weatherDelayIds (BLD 087-com.js:1583-1597, 1600-1611, 1643-1645); COM.live.claims reads T2's weatherDelayLinks 1 naming WD-1 (the build itself does not assert the link).", [PH7("427, 845"), HF7("backend/scripts/cert/cert3/build/087-com.js", "1583-1597, 1600-1611, 1643-1645"), PREP7("section 0 fact 1; section 5.3; section 10 G17")], { assumption: true, note: "WP-7 G17 (2026-10-10): which claim carries the link is the build's choice. No today and no ref: WP-4's leaf-contract walk of deep.087-COM is not widened." }),
+    completion: fig("2027-06-30", "date", "087-COM's completionDate, sent at create and asserted (BLD 087-com.js:143, 149): the base of WP7.T2's and T3's recommendations (2027-07-10, 2027-07-15).", [PH7("427, 847"), HF7("backend/scripts/cert/cert3/build/087-com.js", "134-150"), PREP7("section 10 G17")], { note: "WP-7 G17 (2026-10-10): read live by COM.live.project." }),
+    weatherDefault: fig(weatherRead(20, [2]), "outcome", "087-COM is created without weatherAllowanceDays (BLD 087-com.js:134-150), so the column default 20 applies (schema.prisma:496 @default(20); the read's 'or 20', weather.service.js:161, :842 PH7); its one weather row is WD-1, 2 contractual days (BLD 087-com.js:1583-1597): 2 / 20 x 100 = 10%, no warning, 18 remaining. Read live by COM.live.weatherDefault.", [PH7("427, 842"), HF7("backend/prisma/schema.prisma", "496"), HF7("backend/src/services/weather.service.js", "161-200"), HF7("backend/scripts/cert/cert3/build/087-com.js", "134-150, 1583-1597"), PREP7("section 10 G17"), DERIVE_T7], { assumption: true, note: "WP-7 G17 (2026-10-10): WD-1's 2 days are the build's choice. No today and no ref." }),
     bidders: count(3, "Bid package with three bidders, award not lowest on override.", [P(387)]),
     warehouses: count(2, "Two warehouses with bins and a serial item.", [P(387)]),
     o2CementEnd: fig(COM087_CEMENT2, "outcome", "087-COM's O2 cement at the end of the transfers: 60 received into Z-A-B02 (WP5.O2.received), quarantine 5 and release 2 (3 quarantined), 1 damaged, 10 issued to A310 and 4 returned: 50 on hand; the full transfer moves 10 to the yard (the item's total unchanged) and the short one sends 10, of which 7 land, 1 is damaged and 2 are written off short: 47 on hand, 2 damaged in all, 3 quarantined, nothing in transit (BLD 087-com.js:1957-1963, 1973, 2002-2017).", [P(387), PH5("427, 765"), BLD("087-com.js", "1957-1973, 1978-2019"), PREP5("section 10 G8")], { note: "WP-5 G8 (2026-10-10): the builder asserts these as literals (BLD 087-com.js:2017); read live by N.live.087.store." }),
@@ -2558,6 +2809,216 @@ const claudeMd = {
     if (node && typeof node === "object" && !Array.isArray(node)) for (const [k, v] of Object.entries(node)) walk(v, key + "." + k);
   };
   walk(WP6, "WP6");
+})();
+
+// Load checks for the WP-7 answer-book leaves (2026-10-10, WP7ADJ Q1-Q13): each added or changed leaf agrees with the figures it is built from.
+(() => {
+  const fail = (what) => {
+    throw new Error("commercial answer book: " + what);
+  };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // keys of WP7.T1 and WP7.weather hold dots ("allowance20.at13.consumedPct"): at each level take the longest key that exists
+  const leafAt = (key) => {
+    const parts = key.split(".");
+    let node = { WP7, deep, claudeMd };
+    let i = 0;
+    while (i < parts.length) {
+      let j = parts.length;
+      while (j > i && !(node && typeof node === "object" && Object.prototype.hasOwnProperty.call(node, parts.slice(i, j).join(".")))) j -= 1;
+      if (j === i) return undefined;
+      node = node[parts.slice(i, j).join(".")];
+      i = j;
+    }
+    return node;
+  };
+  const T = WP7.T7;
+  const TH = WP7.T7H;
+  const Wx = WP7.weather;
+  const D087 = deep["087-COM"];
+  // G1, G17: T7's project and team, T7H's
+  const p = T.project.value;
+  if (p.completionDate !== D087.completion.value || p.ldRatePerDay !== WP7.T4.ldRatePerDay.value || p.ldRatePerDay !== D087.ldRatePerDay.value || p.weatherAllowanceDays !== Wx["087-FLD.allowance"].value || p.currency !== D087.currency.value || p.defaultRetentionRate !== 10) fail("WP7.T7.project: 087-COM's completion 2027-06-30 and LD rate 1,000.00, the allowance 20 set explicitly, EGP, retention 10 (G1, G17)");
+  if (!same(T.team.value, { planning_eng: "planner", site_engineer: "site" }) || !same(TH.team.value, { planning_eng: "planner" }) || TH.project.value.weatherAllowanceDays !== p.weatherAllowanceDays || TH.project.value.ldRatePerDay !== undefined) fail("WP7.T7.team and WP7.T7H: the planner and the site engineer on T7; the planner only on T7H, allowance 20, no LD rate (G1)");
+  // G1: an independent CPM pass over the durations and the FS links (lag 0), forward, then backward from the latest early finish
+  const net = T.network.value;
+  const es = {};
+  const ef = {};
+  for (const [code, days] of net.activities) {
+    const preds = net.links.filter((l) => l[1] === code).map((l) => l[0]);
+    es[code] = preds.length ? Math.max(...preds.map((x) => ef[x])) : 0;
+    ef[code] = es[code] + days;
+  }
+  const end = Math.max(...Object.values(ef));
+  const ls = {};
+  const lf = {};
+  for (const [code, days] of [...net.activities].reverse()) {
+    const succs = net.links.filter((l) => l[0] === code).map((l) => l[1]);
+    lf[code] = succs.length ? Math.min(...succs.map((x) => ls[x])) : end;
+    ls[code] = lf[code] - days;
+  }
+  for (const [code] of net.activities) if (!same(net.cpm[code], { ES: es[code], EF: ef[code], LS: ls[code], LF: lf[code], TF: lf[code] - ef[code], critical: lf[code] === ef[code] })) fail("WP7.T7.network: " + code + " must read the CPM of its durations and its FS links (G1)");
+  if (net.end !== end || net.links.some((l) => l[2] !== "FS" || l[3] !== 0)) fail("WP7.T7.network: FS links at lag 0, the project ending at the latest early finish (G1)");
+  const tf = (code) => net.cpm[code].TF;
+  // G1, G3, G18: the claims; the approvals count calendar days from the completion date
+  const cl = T.claims.value;
+  const claim = (key) => cl.claims.find((c) => c.key === key);
+  const t2 = claim("E-T2");
+  const t3 = claim("E-T3");
+  const ap = cl.approvals;
+  if (ap["E-T2"].cumulativeApprovedEotDays !== t2.eotDaysGranted || ap["E-T2"].revisedCompletionRecommendation !== addDaysUtc(p.completionDate, t2.eotDaysGranted) || ap["E-T3"].cumulativeApprovedEotDays !== t2.eotDaysGranted + t3.eotDaysGranted || ap["E-T3"].revisedCompletionRecommendation !== addDaysUtc(p.completionDate, ap["E-T3"].cumulativeApprovedEotDays) || ap["E-T3"].calcRecommendationAtCreate !== addDaysUtc(p.completionDate, t3.eotDaysGranted)) fail("WP7.T7.claims: E-T2's and E-T3's cumulatives and recommendations count calendar days from the completion date; the calculation's own counts E-T3's days only (G1, G18)");
+  if (ap["E-T2"].cumulativeApprovedEotDays !== WP7.T2.cumulativeApprovedEotDays.value || ap["E-T2"].revisedCompletionRecommendation !== WP7.T2.revisedCompletionRecommendation.value || ap["E-T3"].cumulativeApprovedEotDays !== WP7.T3.cumulativeApprovedEotDays.value || ap["E-T3"].revisedCompletionRecommendation !== WP7.T3.revisedCompletionRecommendation.value || !same(t2.weatherDelays, ["WR-6"]) || cl.ldRatePerDay !== p.ldRatePerDay) fail("WP7.T7.claims: E-T2 (linked to WR-6) and E-T3 are WP7.T2 and WP7.T3, at T7's LD rate (G1)");
+  if ((WP7.T3.revisedCompletionRecommendation.note || "").indexOf(ap["E-T3"].calcRecommendationAtCreate) < 0) fail("WP7.T3.revisedCompletionRecommendation's note must record the calculation's own recommendation " + ap["E-T3"].calcRecommendationAtCreate + " (G18)");
+  const pp = WP7.T2.plannerPatchApproved;
+  const order = cl.approvalOrder;
+  if (!same(pp.value, { status: 409, code: null, eotDaysGranted: t2.eotDaysGranted, cumulativeApprovedEotDays: ap["E-T2"].cumulativeApprovedEotDays }) || !same(pp.today, { status: 200, eotDaysGranted: 30, cumulativeApprovedEotDays: ap["E-T2"].cumulativeApprovedEotDays }) || !(order.indexOf("E-T3") < order.indexOf("the PATCH of E-T2")) || !(order.indexOf("the PATCH of E-T2") < order.indexOf("E-LK1"))) fail("WP7.T2.plannerPatchApproved: E-T2 unchanged at 10 / 10 after the refusal (today 200, eot 30, cumulative 10), the PATCH after E-T3's approval and before E-LK1's (G3)");
+  const trapDays = pp.today.eotDaysGranted + t3.eotDaysGranted;
+  const trap = trapDays + " / " + addDaysUtc(p.completionDate, trapDays);
+  if (pp.note.indexOf(trap) < 0 || T.claims.note.indexOf(trap) < 0) fail("WP7.T2.plannerPatchApproved and WP7.T7.claims must record the order trap " + trap + " (G3)");
+  // G6: T4 and T5 from the network's floats: HR-C10's least float against HEAD's sum over the links
+  const rate = p.ldRatePerDay;
+  const figs = (c, impact) => ({ criticalPathImpactDays: impact, ldApplicableDays: Math.max(0, impact - c.eotDaysGranted), ldLiability: Math.max(0, impact - c.eotDaysGranted) * rate });
+  const leastFloat = (c) => figs(c, Math.max(0, c.delayDays - Math.min(...c.activities.map(tf))));
+  const summed = (c) => figs(c, c.activities.reduce((s, a) => s + Math.max(0, c.delayDays - Math.max(0, tf(a))), 0));
+  const t4 = claim("E-T4");
+  const t5 = claim("E-T5");
+  const T4 = WP7.T4;
+  const T5 = WP7.T5;
+  const t4v = leastFloat(t4);
+  const t4t = summed(t4);
+  const t5f = summed(t5);
+  if (T4.criticalPathImpactDays.value !== t4v.criticalPathImpactDays || T4.ldApplicableDays.value !== t4v.ldApplicableDays || T4.ldLiability.value !== t4v.ldLiability || T4.criticalPathImpactDays.today !== t4t.criticalPathImpactDays || T4.ldApplicableDays.today !== t4t.ldApplicableDays || T4.ldLiability.today !== t4t.ldLiability || t4.activities.some((a) => tf(a) !== 0)) fail("WP7.T4: E-T4 on T7-C1 and T7-C2 (TF 0, one chain): impact 10 and LD 0.00 under HR-C10; today 20 and 10,000.00 (G6)");
+  if (!same(leastFloat(t5), t5f) || T5.criticalPathImpactDays.value !== t5f.criticalPathImpactDays || T5.ldApplicableDays.value !== t5f.ldApplicableDays || T5.ldLiability.value !== t5f.ldLiability || tf(t5.activities[0]) !== 4) fail("WP7.T5: E-T5 on T7-F4 (TF 4): impact 6 and LD 6,000.00 under either rule (G6)");
+  const stored = (c, f) => ({ ...f, linkFloatDays: c.activities.map(tf) });
+  if (!same(T4.storedFields.value, stored(t4, t4v)) || !same(T4.storedFields.today, stored(t4, t4t)) || !same(T5.storedFields.value, stored(t5, t5f))) fail("WP7.T4.storedFields and WP7.T5.storedFields: the claim's impact, entitlementSummaryJson.ldApplicableDays, ldLiability in cents and the links' floatDays (G6)");
+  if (!same(T4.on087COM.value, t4v) || !same(T4.on087COM.today, t4t) || D087.ldRatePerDay.value !== rate) fail("WP7.T4.on087COM: /eot/calculate on 087-COM's A110 + A120 (TF 0, one chain) gives T4's figures at 087-COM's LD rate (G6)");
+  // G4, G5: the T1 codes
+  const T1 = WP7.T1;
+  const proof = (activityCount, supportingDocumentCount) => ({ status: 400, code: T1.submitWithoutProof.value.code, details: { activityCount, supportingDocumentCount }, claimStatus: "draft" });
+  if (!same(T1["submitWithoutProof.noDocument"].value, proof(1, 0)) || !same(T1["submitWithoutProof.noActivity"].value, proof(0, 1))) fail("WP7.T1.submitWithoutProof: two probes, no document (1 activity, 0 documents) and no activity (0, 1), each 400 EOT_IMPACT_PROOF_REQUIRED, each still draft (G4)");
+  const fromApproved = (toStatus) => ({ status: 400, code: T1.approveDraft.value.code, details: { fromStatus: "approved", toStatus }, claimStatus: "approved" });
+  if (!same(T1.patchApprovedToDraft.value, fromApproved("draft")) || !same(T1.rejectApproved.value, fromApproved("rejected")) || T1.approveDraft.value.code !== "EOT_WORKFLOW_ACTION_REQUIRED") fail("WP7.T1.patchApprovedToDraft and rejectApproved: 400 EOT_WORKFLOW_ACTION_REQUIRED out of approved, the claim still approved (G5)");
+  if (!same(T1.rejectWithReason.value, { status: 200, claimStatus: "rejected", rejectionReason: "the reason sent", rejectedBy: "pm" }) || T1.resubmitRejected.value !== "submitted") fail("WP7.T1.rejectWithReason: 200 rejected with the reason stored, by the PM, then resubmitted (G5)");
+  if (!same(T1.refsNotFound.value, { unknownClaim: { status: 404, code: "EOT_CLAIM_NOT_FOUND" }, unknownActivity: { status: 400, code: "EOT_ACTIVITY_NOT_FOUND" }, unknownWeatherDelay: { status: 400, code: "EOT_WEATHER_DELAY_NOT_FOUND" }, claimsWritten: 0 })) fail("WP7.T1.refsNotFound: 404 EOT_CLAIM_NOT_FOUND, 400 EOT_ACTIVITY_NOT_FOUND, 400 EOT_WEATHER_DELAY_NOT_FOUND, nothing written (G5)");
+  // G8: replay T7's weather steps (posts, contractual PATCHes, allowance changes) and read each as listWeatherDelays does
+  const seq = T.weatherSequence.value;
+  const rowsNow = new Map();
+  const reads = {};
+  for (const st of seq.steps) {
+    for (const key of st.post) {
+      const row = seq.rows.find((r) => r.key === key);
+      rowsNow.set(key, { days: row.delayDays, contractual: row.contractual });
+    }
+    for (const key of st.contractualFalse) rowsNow.get(key).contractual = false;
+    for (const key of st.contractualTrue) rowsNow.get(key).contractual = true;
+    reads[st.step] = weatherRead(st.allowance, [...rowsNow.values()].filter((r) => r.contractual).map((r) => r.days));
+    if (typeof st.read === "object") {
+      const { monthlyNonContractual, ...plain } = st.read;
+      if (!same(plain, reads[st.step])) fail("WP7.T7.weatherSequence: step " + st.step + " must read what its rows give (G8)");
+      if (monthlyNonContractual !== undefined && monthlyNonContractual !== [...rowsNow.values()].filter((r) => !r.contractual).reduce((s, r) => s + r.days, 0)) fail("WP7.T7.weatherSequence: W3's month books the non-contractual days (G8)");
+    }
+  }
+  const at = (k) => Wx[k].value;
+  if (reads.W1.consumedPct !== at("allowance20.at13.consumedPct") || reads.W1.warning !== at("allowance20.at13.warning") || reads.W1.remaining !== at("allowance20.at13.remaining") || reads.W2.consumedPct !== at("allowance20.at14.consumedPct") || reads.W2.warning !== at("allowance20.at14.warning") || reads.W2.remaining !== at("allowance20.at14.remaining") || reads.W3.contractualUsed !== at("nonContractual10").contractualUsed || seq.steps.find((s) => s.step === "W3").read.monthlyNonContractual !== at("nonContractual10").monthlyNonContractual || reads.W4.consumedPct !== at("allowance30.at20.consumedPct") || reads.W4.warning !== at("allowance30.at20.warning") || reads.W4b.consumedPct !== at("allowance30.at21.consumedPct") || reads.W4b.warning !== at("allowance30.at21.warning") || reads.W5.consumedPct !== at("allowance10.at6.consumedPct") || reads.W5.warning !== at("allowance10.at6.warning") || reads.W5b.consumedPct !== at("allowance10.at7.consumedPct") || reads.W5b.warning !== at("allowance10.at7.warning")) fail("WP7.T7.weatherSequence: W1-W5b read the WP7.weather boundaries at 20, 30 and 10 and the non-contractual 10 (G8)");
+  if (seq.steps[seq.steps.length - 1].allowance !== p.weatherAllowanceDays || seq.rows.find((r) => r.key === t2.weatherDelays[0]).contractual !== true) fail("WP7.T7.weatherSequence: W7 puts the allowance 20 back before any promotion; WR-6, E-T2's weather row, is contractual (G8)");
+  // G7, G9: the zero allowance at W6
+  const z = Wx["allowanceZero.T7"];
+  const w6 = seq.steps.find((s) => s.step === "W6");
+  if (!same(z.today, reads.W6) || w6.allowance !== 0 || typeof w6.read !== "string" || !same(z.value, { allowance: 0, consumedPct: 0 }) || Wx["allowanceZero.allowance"].value !== z.value.allowance || Wx["allowanceZero.allowance"].today !== z.today.allowance || Wx["allowanceZero.warning"].value !== null || Wx["allowanceZero.warning"].today !== z.today.warning) fail("WP7.weather.allowanceZero.T7: at W6 (contractual 7) the allowance 0 reads 0 under HR-C11 and 20 today (35%, no warning, 13 remaining); allowanceZero.warning keeps no expected value (G7, G9)");
+  // G10: T7H's 28 half days and the 1.5-day row
+  const half = TH.half28;
+  const halfRows = Array(T7H_BOOK.half.rows).fill(T7H_BOOK.half.delayDays);
+  if (!same(half.value, weatherRead(TH.project.value.weatherAllowanceDays, halfRows)) || !same(half.today, weatherRead(TH.project.value.weatherAllowanceDays, halfRows.map(Math.trunc))) || T7H_BOOK.half.rows !== 28 || T7H_BOOK.half.delayDays !== 0.5 || at("fractional.28xHalf.consumedPct") !== half.value.consumedPct || Wx["fractional.28xHalf.consumedPct"].today !== half.today.consumedPct || at("fractional.28xHalf.warning") !== half.value.warning || Wx["fractional.28xHalf.warning"].today !== half.today.warning || at("fractional.storedOneAndHalf") !== T7H_BOOK.oneAndHalf.delayDays || Wx["fractional.storedOneAndHalf"].today !== Math.trunc(T7H_BOOK.oneAndHalf.delayDays)) fail("WP7.T7H.half28: 28 x 0.5 reads 14 / 70% / the warning under HR-C11 and 0 / 0% / none today; 1.5 stored 1 today (G10)");
+  // G2, G11, G12: 087-FLD's composition read at 13 and 14, as recorded and truncated; 052-FLD the same record set
+  const comp = Wx["087-FLD.composition"];
+  const allowance = at("087-FLD.allowance");
+  const days13 = [...comp.value.promoted, ...comp.value.at13Manual];
+  const days14 = [...days13, ...comp.value.at14Add];
+  const four = (r) => ({ contractualUsed: r.contractualUsed, consumedPct: r.consumedPct, warning: r.warning, remaining: r.remaining });
+  const v13 = four(weatherRead(allowance, days13));
+  const v14 = four(weatherRead(allowance, days14));
+  const t13 = four(weatherRead(allowance, days13.map(Math.trunc)));
+  const t14 = four(weatherRead(allowance, days14.map(Math.trunc)));
+  const nonContractual = comp.value.nonContractual.reduce((s, d) => s + d, 0);
+  const rd = Wx["087-FLD.read"];
+  if (!same(rd.value, { at13: v13, at14: v14, live: { ...v14, monthlyNonContractual: nonContractual } }) || !same(rd.today, { at13: t13, at14: t14, live: { ...t14, monthlyNonContractual: nonContractual } })) fail("WP7.weather.087-FLD.read: the composition at 13 and 14 under HR-C11 (65%, 7 remaining; 70%, the warning, 6) and truncated today (55%, 9; 60%, 8), live with the non-contractual 10 (G11)");
+  const ct = comp.today;
+  if (ct.at13Used !== t13.contractualUsed || ct.at13Pct !== t13.consumedPct || ct.at14Used !== t14.contractualUsed || ct.at14Pct !== t14.consumedPct || ct.warningAt14 !== t14.warning || !same(ct.promotedStored, comp.value.promoted.map(Math.trunc)) || !same(ct.manualStored, comp.value.at13Manual.map(Math.trunc)) || !same(Wx["087-FLD.promoted.days"].today, ct.promotedStored) || Wx["087-FLD.promoted.total"].today !== ct.promotedStored.reduce((s, d) => s + d, 0) || Wx["087-FLD.promoted.total"].value !== comp.value.promoted.reduce((s, d) => s + d, 0)) fail("WP7.weather.087-FLD.composition: its today is the truncated record set (G2, G11)");
+  const f052 = Wx["052-FLD"];
+  if (!same(f052.value, { first: [v13.consumedPct, v13.warning], then: [v14.consumedPct, v14.warning] }) || !same(f052.today, { first: [t13.consumedPct, t13.warning], then: [t14.consumedPct, t14.warning] })) fail("WP7.weather.052-FLD: 087-FLD's record set: 65 then 70 with the warning under HR-C11; 55 then 60, no warning, today (G12)");
+  // G13: the promotion probes on T7
+  const pr = WP7.promotion;
+  const ent = T.entries.value;
+  const day = Math.round((8 / 8) * 2) / 2;
+  if (ent.some((e) => e.hoursLost !== 8 || e.promotedDays !== day) || pr.feeds.value.echoDays !== day || pr.feeds.value.storedDays !== Math.trunc(day) || pr.feeds.value.contractualUsedDelta !== day || pr.feeds.value.rowsAdded !== 1 || !same(pr.feeds.value.activityLinks, [ent.find((e) => e.key === "FEED").activity])) fail("WP7.promotion.feeds: every promotion entry is 8 h, promoted as 1.0 day and stored 1, one row linked to its activity (G13)");
+  const roundsOf = (kind) => ent.filter((e) => e.key.startsWith(kind + "-")).length;
+  const race = pr.race;
+  const failure = pr.failure;
+  if (race.value.rounds !== roundsOf("RACE") || race.today.rounds !== roundsOf("RACE") || failure.value.rounds !== roundsOf("FAIL") || failure.today.rounds !== roundsOf("FAIL") || roundsOf("RACE") !== pr.barrier.value.rounds || roundsOf("FAIL") !== pr.barrier.value.rounds) fail("WP7.promotion.race and failure: N=3 rounds each, a fresh entry a round (G13)");
+  const rv = race.value.perRound;
+  const rt = race.today.perRound;
+  if (rv.promotions !== 2 || rt.promotions !== 2 || rv.ok + rv.conflict409 !== rv.promotions || rv.ok !== 1 || rv.rowsAdded !== rv.ok || rv.contractualUsedDelta !== rv.rowsAdded * day || rt.ok !== rt.promotions || rt.conflict409 !== 0 || rt.rowsAdded !== rt.ok || rt.contractualUsedDelta !== rt.rowsAdded * day || rt.orphanRows !== rt.rowsAdded - 1 || rt.activityLinksAdded !== rt.rowsAdded) fail("WP7.promotion.race: one 200 and one 409 adding one row under the fix; two 200s, two rows, one orphaned, today (G13)");
+  const fv = failure.value.perRound;
+  const ft = failure.today.perRound;
+  if (fv.deleteStatus !== 200 || ft.deleteStatus !== 200 || fv.promotionIs2xx !== false || fv.rowsAdded !== 0 || fv.contractualUsedDelta !== 0 || ft.rowsAdded !== 1 || ft.orphanRows !== ft.rowsAdded || ft.contractualUsedDelta !== ft.rowsAdded * day || !same(ft.promotion, { status: 404, code: "NOT_FOUND" })) fail("WP7.promotion.failure: the DELETE first; no row under the fix; one orphaned row and 404 NOT_FOUND today (G13)");
+  const site = pr.sitePromotion;
+  if (site.value.contractual !== false || site.value.contractualUsedDelta !== 0 || site.today.contractual !== true || site.today.contractualUsedDelta !== day || ent.find((e) => e.key === "SITE").by !== "site" || T.team.value.site_engineer !== "site") fail("WP7.promotion.sitePromotion: the site engineer's promotion non-contractual under HR-F4 (+0), contractual today (+1) (G13)");
+  const bq = pr.barrier.value;
+  if (!(bq.releaseWithinMs < bq.interactiveTxTimeoutMs) || bq.rounds !== 3 || ent.find((e) => e.key === "BAR").use.indexOf("never promoted") < 0) fail("WP7.promotion.barrier: released inside Prisma's interactive-transaction window, N=3 rounds, its own entry never promoted (G13)");
+  // G14: the confirm-first observations agree with the known answers they classify
+  const CF = WP7.CF;
+  const c11 = CF.HRC11;
+  const recorded = days14;
+  const eHalf = claim("E-HALF");
+  if (c11.value.fractional.T7Hhalf28Used !== half.value.contractualUsed || c11.today.fractional.T7Hhalf28Used !== half.today.contractualUsed || c11.value.fractional.oneAndHalf !== at("fractional.storedOneAndHalf") || c11.today.fractional.oneAndHalf !== Wx["fractional.storedOneAndHalf"].today || !same(c11.value.fractional.fld087Stored, recorded) || !same(c11.today.fractional.fld087Stored, recorded.map(Math.trunc)) || !same(c11.value.fractional.fld052Stored, recorded) || !same(c11.today.fractional.fld052Stored, recorded.map(Math.trunc)) || c11.value.fractional.eotDraftDelayDays !== eHalf.delayDays || c11.today.fractional.eotDraftDelayDays !== Math.trunc(eHalf.delayDays) || c11.value.zeroAllowance.allowance !== z.value.allowance || c11.today.zeroAllowance.allowance !== z.today.allowance || c11.today.zeroAllowanceWarning !== Wx["allowanceZero.warning"].today) fail("WP7.CF.HRC11: its items are the HR-C11 known answers' values and todays (G14)");
+  const c10 = CF.HRC10;
+  if (!same(c10.value.approvedClaimPatch, { status: pp.value.status, eotDaysGranted: pp.value.eotDaysGranted }) || !same(c10.today.approvedClaimPatch, { status: pp.today.status, eotDaysGranted: pp.today.eotDaysGranted }) || !same(c10.value.impact, t4v) || !same(c10.today.impact, t4t) || !same(c10.today.projectDate, { T7: null, "087-COM": null }) || typeof c10.value.projectDate !== "string" || c10.note.indexOf(ap["E-T3"].calcRecommendationAtCreate) < 0) fail("WP7.CF.HRC10: the approved claim's PATCH, the impact rule and the project date from the HR-C10 known answers; the two recommendations noted (G14)");
+  const ptx = CF.PROMOTX;
+  if (!same(ptx.value.race, { ok: rv.ok, conflict409: rv.conflict409, rowsAdded: rv.rowsAdded }) || !same(ptx.today.race, { ok: rt.ok, conflict409: rt.conflict409, rowsAdded: rt.rowsAdded, orphanRows: rt.orphanRows }) || !same(ptx.value.failure, { promotionIs2xx: fv.promotionIs2xx, rowsAdded: fv.rowsAdded }) || !same(ptx.today.failure, { promotion: ft.promotion.status, rowsAdded: ft.rowsAdded, orphanRows: ft.orphanRows })) fail("WP7.CF.PROMOTX: the race and failure rounds' values and todays (G14)");
+  // G15 (Q4, Q5): the mutation leaves name their catchers by check id
+  const mu = WP7.mutations;
+  const named = (leaf) => leaf.value.join(" | ");
+  const need = [
+    [mu.seventyBoundary, ["W.T7.a20at14 red, W.T7.a30at21 red and W.T7.a10at7 red (M-70,", "KA.W.T7H.half28 red (M-70 once", "KA.FLD.087.live red (M-70 after", "(M-70b,"]],
+    [mu.approvedEotLock, ["T1.T7.patchApprovedToDraft red and T1.T7.rejectApproved red (M-STAT,", "KA.T2.plannerPatchApproved red (M-LOCK,"]],
+    [mu.ruleMutants, ["T1.T7.approveDraft red, T1.T7.patchStatusDraftOnSubmitted red, T1.T7.patchApprovedToDraft red and T1.T7.rejectApproved red (M-WF:", "T1.T7.submitWithoutProof red (M-PROOF:", "T3.T7.approve red (M-CUM:", "W.T7.a30at20 red, W.T7.a30at21 red, W.T7.a10at6 red and W.T7.a10at7 red (M-ALLOW:", "W.T7.nonContractual10 red, W.T7.a30at20 red, W.T7.a30at21 red, W.T7.a10at6 red and W.T7.a10at7 red (M-NC:", "T1.T7.rejectWithoutReason red (M-REASON:"]],
+    [mu.fixMutations, ["KA.T4.T7 red and KA.T4.087COM.calculate red (M-C10i:", "KA.W.T7.allowanceZero red (M-C11z:", "KA.W.T7H.half28 red and KA.W.T7H.storedOneAndHalf red (M-C11d:", "KA.PROMO.T7.race red and KA.PROMO.T7.failure red (M-PTX:", "KA.F4.T7.sitePromotion red (M-F4:", "the sequential promotion guard"]],
+  ];
+  for (const [leaf, texts] of need) for (const t of texts) if (named(leaf).indexOf(t) < 0) fail("WP7.mutations: a leaf must name '" + t + "' (G15)");
+  // G17: deep.087-COM's weather link, completion and default allowance, with no today and no ref
+  const link = D087.eotWeatherLink.value;
+  const wd = D087.weatherDefault;
+  if (!same(wd.value, weatherRead(20, [link.weatherDelayDays])) || link.claim !== "T2" || link.weatherDelayLinks !== 1 || link.weatherDelay !== "WD-1" || D087.completion.value !== "2027-06-30" || D087.eotApprovedClaims.value !== 2 || [D087.eotWeatherLink, D087.completion, wd].some((leaf) => leaf.today !== undefined || leaf.ref !== undefined)) fail("deep.087-COM.weatherDefault, eotWeatherLink and completion: WD-1's 2 days against the default 20 (10%, 18 remaining), named by T2; completion 2027-06-30; no today and no ref (G17)");
+  // G1, Q11: the choreographies and the residue
+  const heads = (steps) => steps.map((s) => s.split(" ")[0]);
+  if (!same(heads(T.choreography.value), ["T7-0", "T7-1", "W1-W2", "W3", "W4", "W5", "W6-W7", "E1", "E2", "E3", "E4", "E5", "P0", "P1", "P2", "P3", "P4", "CF", "end"]) || !same(heads(TH.choreography.value), ["H0", "H1", "H2", "end"])) fail("WP7.T7 and WP7.T7H choreographies must list their steps T7-0 .. P4 and CF, H0-H2, then the end (G1)");
+  if (T7_CHECKS.length !== 36 || T7H_CHECKS.length !== 4 || new Set([...T7_CHECKS, ...T7H_CHECKS]).size !== 40) fail("WP7: the 36 T7 and 4 T7H check ids, each once (G1)");
+  const allSteps = [...T.choreography.value, ...TH.choreography.value];
+  for (const id of [...T7_CHECKS, ...T7H_CHECKS]) {
+    const n = allSteps.filter((s) => s.split(/[ ,;()]+/).includes(id)).length;
+    if (n !== 1) fail("WP7 choreographies: the check " + id + " must be served by exactly one step (G1)");
+  }
+  if (!same(T.residue.value.archived, ["T7", "T7H"]) || !same(T.residue.value.queuedJobsLeft, { T7: 0, T7H: 0 }) || T.residue.value.blockerWrites !== 0) fail("WP7.T7.residue: T7 and T7H archived, no queued job left, the blocker writes nothing (Q11)");
+  // the known answers carry their today and ref, as assumptions (the KA.I9 ruling)
+  for (const [key, ref] of WP7_KNOWN) {
+    const leaf = leafAt(key);
+    if (!leaf || leaf.today === undefined || leaf.ref !== ref || !leaf.assumption) fail(key + ": a known answer with its today and ref " + ref + ", an assumption (KA.I9 ruling)");
+  }
+  if (WP7_KNOWN.length !== 18 || new Set(WP7_KNOWN.map(([k]) => k)).size !== WP7_KNOWN.length) fail("WP7_KNOWN: the 18 leaves the 13 known answers read in this book, each once (KA.I9 ruling)");
+  // the leaf contract of the WP-7 leaves: a today names its ref and a ref its today, from WP7_REFS; every such leaf is an
+  // assumption, and its value never equals its today (no WP-7 rule is decided); and every plan citation is at HEAD (G16)
+  const walk = (node, key) => {
+    if (node && typeof node === "object" && !Array.isArray(node) && "unit" in node && "derivation" in node) {
+      if (node.today !== undefined && !node.ref) fail(key + " carries a today without its ref");
+      if (node.ref !== undefined && node.today === undefined) fail(key + ": a ref without its today");
+      if (node.ref !== undefined && !WP7_REFS.includes(node.ref)) fail(key + ": unknown ref " + node.ref);
+      if (node.today !== undefined && !node.assumption) fail(key + ": a today under an undecided row must be an assumption");
+      if (node.today !== undefined && same(node.today, node.value)) fail(key + ": a value equal to its today would pre-judge " + node.ref);
+      if (node.source.split("; ").some((c) => c.startsWith(PLAN + ":") && c.indexOf(" @") < 0)) fail(key + " cites the plan without its HEAD (G16)");
+      return;
+    }
+    if (node && typeof node === "object" && !Array.isArray(node)) for (const [k, v] of Object.entries(node)) walk(v, key + "." + k);
+  };
+  walk(WP7, "WP7");
 })();
 
 // ─── the tree and its flattening ──────────────────────────────────────────────────────────────
