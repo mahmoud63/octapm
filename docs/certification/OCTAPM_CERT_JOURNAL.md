@@ -802,3 +802,35 @@ E2's "builder exit 0" cannot be met until those land. **WP-0 stays formally open
 Both plans were revised read-only (r2). Round 2 runs in the next Codex window (08:41 CDT); the plan allows three rounds.
 
 **XDOC-1 (raised by the review), CONFIRMED P1, write only.** A read-only trace of 19 read paths found every one org- and project-scoped: a stored foreign reference cannot expose another company's file. Legacy data: 0 cross-project rows among 2,925 commercial and 9,009 workflow attachment references. The live reproduction (`scripts/cert/cert3/xdoc-1-repro.js`, by Claude Main on the partial population) confirmed the write gap: change orders and EOT claims store another company's document id as a storage key or in a URL (through either company's route); NCR and safety store such URLs and keys embedding the id. Exit 2, 24/34: the 10 write checks fail; every read check, control and CERT-2 regression passes; no 5xx. On CERT-2's scale a stored reference to another company's record is a P1 cross-company write. It is fixed by the HR-X1 batch in WP-2 (its scope rule refuses exactly these references); the repro's write checks are the batch's live catcher. Whether a key that embeds a foreign id (`<id>.pdf`) is a reference or legacy goes to Codex round 2.
+
+## 2026-10-10 — WP-3 and WP-4 prepared ahead of their runs; WP4-AGG-1 raised
+
+Prepared read-only by agents, then installed, checked and run by Claude Main, the only writer (parallel execution mode).
+
+**WP-3 (earned value).** The proving run and its 65 new book leaves landed in `48db9e9`; its debug run on the partial population exits 2 on the L34 checks only. Now added:
+- four mutation lists (`wp3-mutations.ev.json`, `wp3-mutations.unit.json`, `wp3-fix-mutations.l34.json`, `wp3-fix-mutations.unit.json`), the run plan `WP3-RUN-PLAN.md` and the evidence checker `wp3-mutation-evidence.js`;
+- the lists are registered in the mutation runner. The anchor scan finds every anchor once, and every mutant parses, on HEAD, on the simulated L34 fix and with the WP-2 batch's change simulated.
+
+Every WP-3 list waits for the L34 fix. At HEAD the unmutated proof already exits 2, so a mutant run would prove nothing. The L34 plan's Codex review runs at 13:53 CDT today.
+
+**WP-4 (commercial).** The answer book gains 65 leaves and changes 59 (633 to 698 figures).
+- The patch was applied on a copy, its output hash equals the reviewed draft, and the verifier passes.
+- No changed leaf is read by a builder, and the WP-0 recomputation agrees on all 116 figures.
+- All 45 load-check mutants are refused.
+
+The proving run `wp4-commercial-proof.js` has 150 checks plus G.5xx. Every writing check and every §6.2 catcher runs on the throwaway project K, and I2 runs on a second throwaway K2. The moment map records the deviations.
+
+**WP-4 debug runs** on the partial population, with D2, D3 and CF skipped because 052-COM and 006-LITE are not built:
+
+| Run | Result | Reds |
+|---|---|---|
+| 1 | 100 of 109, exit 2 | the 8 decided HR-C1 checks, plus KA.E2.pendingDelta read "wrong" |
+| 2 | 101 of 109, exit 2 | the 8 decided HR-C1 checks only; 17 known answers BLOCKED, none wrong; no 5xx |
+
+Run 1 used 087-COM-C's one-shot I5 confirmation. Run 2 took the re-run branch and passed it.
+
+**WP4-AGG-1 (suspect, P2 proposed).** On both runs, five concurrent converts of one change event all succeeded. That reproduces the non-atomic convert, CONVERT-ATOMIC. They made five 9,500.00 draft change orders. The contract's stored pending total rose by only 38,000.00 instead of 47,500.00, and the next status change healed it.
+- **Cause.** `recomputeChangeValues` sums the register and writes the totals without a lock, so concurrent recomputes can store a sum that misses a sibling's row.
+- **Exposure.** The same code writes the approved total and the revised value, so concurrent approvals share the exposure. That case is not yet reproduced.
+- **Book and proof.** The book's known answer now states this lag. The proof judges the register's delta and records the stored lag.
+- **Next.** It is classified at the WP-4 run on `cert3d`.

@@ -1,0 +1,468 @@
+{
+  "proof": "scripts/cert/cert3/wp3-ev-proof.js",
+  "guards": "CERT-3 plan section 6.2 WP-3 (:1147): the 0.9 alert boundary; the locked-period snapshot; the readiness gate on lock; EV reads approved progress only. Plan section 4 WP-3 Mutations (:657); answer book WP3.mutations.alertBoundary / lockedRecomputed / readinessSkipped / evNonApproved (after the WP-3 book patch, 48db9e9). Integration-owner adjudication C:/Temp/octapm-cert/scratch/wp3/WP3-ADJUDICATION.md Q10: M1, M2, M3, M4 are the four E6 entries; M1a, M1b, M2b, M3b are variants (run, not tallied); M4 is the accepted two-edit read swap; the status-filter mutants are equivalent (recorded below with the reason, not run as evidence).",
+  "reconciled": "Read-only preparation 2026-10-10 against the committed proof scripts/cert/cert3/wp3-ev-proof.js at 48db9e9 (93 fixed checks + G.5xx). Every id in catchers and collateral, and every check id named in expect, is a CHECKS id (text scan: C:/Temp/octapm-cert/scratch/wp3/lists/mutsyntax-report.json); catchers equal the proof's CATCHERS table (:573-579) for M1, M1a, M1b, M2, M2b, M3, M3b, M4. Collateral derived from the proof's code paths (WP3-RUN-PLAN.md section 7.5), not observed: nothing was run.",
+  "runsOn": "The final code only: the L34-fixed tree with L34_FIX set in the proof, right after the unmutated full run exits 0 on cert3d (WP3-RUN-PLAN.md section 6.3). At HEAD the unmutated proof exits 2 (the 13 L34 checks), which would score every mutant CAUGHT and prove nothing (WP1-RUN-PLAN.md section 7.3 (a)).",
+  "anchors": "anchors.head: count and line of each edit on the working tree at 48db9e9 (earned-value.service.js unchanged since f599e67; CRLF only, so a multi-line from carries \\r\\n). anchors.simFix: the same on the SIMULATED L34 fix copy (C:/Temp/octapm-cert/scratch/wp3/fixplan/work/earned-value.service.fix.js); only line numbers move. A later edit of the same mutation is located after the earlier ones are applied, as the runner applies them (M4's second anchor: 787 on the unedited file, 788 after the first edit). Re-count on the real fix tree before the run (mutsyntax-wp3.js --tree=<worktree>): the runner applies an edit only when its from occurs exactly once. The WP-2 r2 batch changes earned-value.service.js only at the EV prefetch orderBy (:751) and a require; neither touches a WP-3 anchor (checked: mutsyntax-report.json wp2r2).",
+  "note": "Fields as in wp1-mutations.*.json: catchers must read FAIL (ran and failed, not 'not run') in the proof result copied after that mutant's run (WP3-RUN-PLAN.md section 7.4); collateral is expected red as well; unchanged names the checks that must stay as unmutated; expectVerdict is the runner's score; e6 marks the four section 6.2 entries. Run one id per invocation, quoted and with a trailing comma (\"--only=M1,\"): mutate-multi.js matches a value without a comma as a PREFIX (M1 would also run M1a and M1b; L34-M1 would also run L34-M1R), and PowerShell drops an unquoted trailing comma. Every mutant writes, if at all, only on the throwaway project V (archived by the proof's cleanup); on 087-EV the relocks return their snapshot or are refused at the blocked gate (M2b), the loading and the period creates are refused, the rest are reads; 087-SCH, 052-SCH-EV and 006-LITE are only read.",
+  "equivalent": [
+    {
+      "name": "M4eq-include (EQUIVALENT, not run) the status filter of the EV progress include dropped",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "            status: APPROVED,\r\n            OR: [",
+      "to": "            OR: [",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 742
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 756
+          }
+        ]
+      },
+      "reason": "ActivityProgress rows are written only by the single writer at approval, with status approved (progress.service.js:2171; schema.prisma:1827 default approved), so dropping status: APPROVED from the include (earned-value.service.js:742 at HEAD) changes nothing any API observation can see: equivalent for every live check (WP3ADJ Q10; WP3-PREP section 0 fact 3). The mocked unit suite would turn red on it ('ignores draft and rejected progress rows even if they are present in memory' asserts include.progress.where.status) only because it feeds rows the writer never writes: not evidence (plan section 1.4)."
+    },
+    {
+      "name": "M4eq-select (EQUIVALENT, not run) the status test of selectApprovedProgressForCutoff dropped",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "      if (!row || row.status !== APPROVED) return false;",
+      "to": "      if (!row) return false;",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 156
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 158
+          }
+        ]
+      },
+      "reason": "The same reason (earned-value.service.js:156 at HEAD): every row the include returns is approved. The mocked test 'ignores draft and rejected progress rows even if they are present in memory' would catch it on rows that cannot exist in the database: not evidence."
+    }
+  ],
+  "notRun": [
+    {
+      "name": "M1c (not an E6 entry, not run) the legacy snapshot fallback flags in snapshotToReport",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "      spiAlert: snapshot.spi !== null && snapshot.spi < 0.9,",
+      "to": "      spiAlert: snapshot.spi !== null && snapshot.spi <= 0.9,",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 689
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 703
+          }
+        ]
+      },
+      "reason": "Unreachable for any snapshot locked at HEAD or after the fix: the lock always stores basisJson.alerts (earned-value.service.js:1735 at HEAD) and snapshotToReport reads them first (:688). No CERT-3 snapshot lacks them."
+    }
+  ],
+  "mutations": [
+    {
+      "name": "M1 the 0.9 alert boundary made inclusive in the EV report: < 0.9 changed to <= 0.9 for both flags (the section 6.2 guard)",
+      "guard": "section 6.2 WP-3 'the 0.9 alert boundary' (plan :633 'Alerts fire below 0.9 only', :641 T4, :657; buildOfficialEvReport alerts, earned-value.service.js:953-956 at HEAD)",
+      "e6": "section 6.2 WP-3 guard 1 of 4 (the 0.9 alert boundary)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "    spiAlert: metrics.spi !== null && metrics.spi < 0.9,",
+      "to": "    spiAlert: metrics.spi !== null && metrics.spi <= 0.9,",
+      "also": [
+        {
+          "file": "backend/src/services/earned-value.service.js",
+          "from": "    cpiAlert: metrics.cpi !== null && metrics.cpi < 0.9,",
+          "to": "    cpiAlert: metrics.cpi !== null && metrics.cpi <= 0.9,"
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 954
+          },
+          {
+            "count": 1,
+            "line": 955
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 967
+          },
+          {
+            "count": 1,
+            "line": 968
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.mutations.alertBoundary",
+        "WP3.T4.spi09.spiAlert",
+        "WP3.T4.cpi09.cpiAlert",
+        "WP3.T4.inputs.read2"
+      ],
+      "catchers": [
+        "T4.spi09.spiAlert",
+        "T4.cpi09.cpiAlert"
+      ],
+      "collateral": [],
+      "unchanged": [
+        "T4.pv0.spiAlert",
+        "T4.ac100001.cpiAlert",
+        "T4.ev0.cpiAlert",
+        "KA.EVL.runDate",
+        "KA.EVL.cutoff0228",
+        "KA.PER.V.lockAc",
+        "PER.V.pmOverride",
+        "CF.HRE4"
+      ],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "On V (in-process app, WP3ADJ Q2) read2 has SPI and CPI exactly 0.9 (WP3.T4.inputs.read2): T4.spi09.spiAlert FAIL (spiAlert true, expected false) and T4.cpi09.cpiAlert FAIL (cpiAlert true, expected false). Unchanged: T4.pv0.spiAlert (SPI null: false either way), T4.ac100001.cpiAlert (0.899991: true either way), T4.ev0.cpiAlert (CPI 0), KA.EVL.runDate (SPI 0.25969, CPI 0.873913: alerts true either way; BLOCKED HR-S9 as unmutated), KA.EVL.cutoff0228, KA.PER.V.lockAc and PER.V.afterLock.cutoffChanges (SPI 0, CPI 0), PER.V.pmOverride (the open report and the lock both computed under the mutant), every stored check (build moments), KA.EVL.febPeriod.figures and KA.EVL.janPeriod.figures (frozen: served from basisJson.alerts), CF.HRE4 (its scan matches < and <= alike and the flags are still booleans on V's reads).",
+      "mutatedAnswer": "read2 on V: spiAlert true and cpiAlert true at exactly 0.9",
+      "storedDefect": "none on a deep project; V's locks (V-A, V-B, V-F) store the alerts computed under the mutant (V-A and V-B at SPI 0 and CPI 0: true either way); V is archived by the proof's cleanup"
+    },
+    {
+      "name": "M1a the SPI flag alone made inclusive (variant of M1)",
+      "guard": "section 6.2 WP-3 'the 0.9 alert boundary' (earned-value.service.js:954 at HEAD)",
+      "e6": "variant of guard 1 (M1 is its E6 entry; run, not tallied, WP3ADJ Q10)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "    spiAlert: metrics.spi !== null && metrics.spi < 0.9,",
+      "to": "    spiAlert: metrics.spi !== null && metrics.spi <= 0.9,",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 954
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 967
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.mutations.alertBoundary",
+        "WP3.T4.spi09.spiAlert"
+      ],
+      "catchers": [
+        "T4.spi09.spiAlert"
+      ],
+      "collateral": [],
+      "unchanged": [
+        "T4.cpi09.cpiAlert",
+        "T4.pv0.spiAlert"
+      ],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "T4.spi09.spiAlert FAIL (read2 SPI exactly 0.9: spiAlert true). T4.cpi09.cpiAlert passes (its line is not edited). Everything else as under M1.",
+      "mutatedAnswer": "read2 on V: spiAlert true at SPI 0.9; cpiAlert false",
+      "storedDefect": "as M1 (V only)"
+    },
+    {
+      "name": "M1b the CPI flag alone made inclusive (variant of M1)",
+      "guard": "section 6.2 WP-3 'the 0.9 alert boundary' (earned-value.service.js:955 at HEAD)",
+      "e6": "variant of guard 1 (M1 is its E6 entry; run, not tallied, WP3ADJ Q10)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "    cpiAlert: metrics.cpi !== null && metrics.cpi < 0.9,",
+      "to": "    cpiAlert: metrics.cpi !== null && metrics.cpi <= 0.9,",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 955
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 968
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.mutations.alertBoundary",
+        "WP3.T4.cpi09.cpiAlert"
+      ],
+      "catchers": [
+        "T4.cpi09.cpiAlert"
+      ],
+      "collateral": [],
+      "unchanged": [
+        "T4.spi09.spiAlert",
+        "T4.ac100001.cpiAlert"
+      ],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "T4.cpi09.cpiAlert FAIL (read2 CPI exactly 0.9: cpiAlert true). T4.spi09.spiAlert passes. Everything else as under M1.",
+      "mutatedAnswer": "read2 on V: cpiAlert true at CPI 0.9; spiAlert false",
+      "storedDefect": "as M1 (V only)"
+    },
+    {
+      "name": "M2 a locked period recomputed on read instead of served from its snapshot (the read path; the section 6.2 guard)",
+      "guard": "section 6.2 WP-3 'the locked-period snapshot' (plan :634 'A locked period is served from its snapshot and never recomputed', :648; buildOfficialEvReport :712-716 at HEAD)",
+      "e6": "section 6.2 WP-3 guard 2 of 4 (the locked-period snapshot)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "  if (useLockedSnapshot && period.evSnapshot) {",
+      "to": "  if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 714
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 728
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.mutations.lockedRecomputed",
+        "WP3.periods.afterLock.periodReport"
+      ],
+      "catchers": [
+        "EVL.febPeriod.hash",
+        "PER.V.afterLock.periodHash"
+      ],
+      "collateral": [
+        "KA.EVL.febPeriod.figures",
+        "KA.EVL.janPeriod.figures",
+        "PER.V.relock"
+      ],
+      "unchanged": [
+        "KA.PER.V.lockAc",
+        "PER.V.pmOverride",
+        "PER.V.overrideAudit",
+        "PER.relock.jan",
+        "PER.relock.feb",
+        "KA.EVL.cutoff0228",
+        "KA.D2.live.T3",
+        "EVS.afterLock.periodReport"
+      ],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "GET ?periodId=<locked period> is recomputed (isSnapshot false, no snapshotId or lockedAt). Catchers: EVL.febPeriod.hash FAIL (087-EV February: isSnapshot false, snapshotId null, sha256 differs from the build's checkpoint.afterLock.before reference); PER.V.afterLock.periodHash FAIL (V-A read right after the lock and again after V20: both recomputed, no snapshotId, and the back-dated 5,000.00 moves the second read). Collateral: KA.EVL.febPeriod.figures FAIL (wrong: February recomputed now at 2026-02-28 on the fixed code gives AC 75,000.00, neither the snapshot's value 70,000.00 nor its today 20,000.00; storedAt null, so never STORED-PRE-FIX); KA.EVL.janPeriod.figures FAIL (wrong: the check requires isSnapshot true); PER.V.relock FAIL (the stored snapshotId it compares with is taken from the V-A read right after the lock, which is recomputed and carries none: null against the relock's real id). Unchanged: KA.PER.V.lockAc (that same read is recomputed at the same cutoff with nothing changed since the lock: the snapshot's 13 figures, value after the fix), PER.V.pmOverride (the lock answer is built by snapshotToReport), PER.V.overrideAudit, PER.relock.jan and PER.relock.feb (the relock path, :1708, is separate), KA.EVL.cutoff0228 and KA.D2.live.T3 (cutoff-date reads; 052-SCH-EV has no locked period), EVS.afterLock.periodReport (stored).",
+      "mutatedAnswer": "a locked period answers a fresh computation at its cutoff: isSnapshot false, the back-dated cost and the new approval included",
+      "storedDefect": "none (read path)"
+    },
+    {
+      "name": "M2b locking again recomputes instead of returning the stored snapshot (the relock path; variant of M2)",
+      "guard": "section 6.2 WP-3 'the locked-period snapshot' (plan :634 'Locking again returns the stored snapshot', :648; lockReportingPeriod :1704-1710 at HEAD)",
+      "e6": "variant of guard 2 (M2 is its E6 entry; run, not tallied, WP3ADJ Q10)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "    if (period.status === LOCKED_PERIOD && period.evSnapshot) {",
+      "to": "    if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1708
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 1721
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.mutations.lockedRecomputed",
+        "WP3.periods.afterLock.relockProbes",
+        "WP3.periods.afterLock.relockSameSnapshotId",
+        "WP3.periods.afterLock.relockSameLockedAt"
+      ],
+      "catchers": [
+        "PER.relock.jan",
+        "PER.relock.feb",
+        "PER.V.relock"
+      ],
+      "collateral": [],
+      "unchanged": [
+        "EVL.febPeriod.hash",
+        "PER.V.afterLock.periodHash",
+        "KA.PER.concurrentLocks",
+        "KA.PER.futureCutoffLock",
+        "PER.V.pmOverride"
+      ],
+      "precondition": "S.gate087EV PASS with ready false in the same run. The PER.relock probe itself refuses to send any relock while 087-EV's gate is not blocked (wp3-ev-proof.js :1559: a setup error, nothing sent), so no ordering of this mutant can write on 087-EV.",
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "Each relock without an overrideReason reaches resolveReportingReadinessOverride: PER.relock.jan FAIL (finance on 087-EV January: 409 REPORTING_READINESS_BLOCKED, 087-EV's gate blocked), PER.relock.feb FAIL (the PM on February: 409), PER.V.relock FAIL (the PM on V-A: V's gate blocked, 409). Nothing is written: the refusal precedes the report and the upsert. Unchanged: EVL.febPeriod.hash and PER.V.afterLock.periodHash (read path intact); KA.PER.concurrentLocks (two PM locks of V-B with reasons: a second lock that does not overlap now reaches the gate with a reason, is overridden and upserts the same row, so both 200, one row, two OVERRIDDEN events: HEAD's today shape, BLOCKED as unmutated; the no-overlap R-SET cannot fire since it needs one event); KA.PER.futureCutoffLock (one lock); PER.V.pmOverride (V-A still open at V19).",
+      "mutatedAnswer": "409 REPORTING_READINESS_BLOCKED on every relock without a reason; nothing written",
+      "storedDefect": "none on 087-EV (refused before any write); on V at most V-B's second lock upserts V-B's own snapshot again (throwaway)"
+    },
+    {
+      "name": "M3 the readiness gate skipped on lock (the section 6.2 guard)",
+      "guard": "section 6.2 WP-3 'the readiness gate on lock' (plan :634, :647; resolveReportingReadinessOverride :1642-1679 at HEAD)",
+      "e6": "section 6.2 WP-3 guard 3 of 4 (the readiness gate on lock)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "  if (!gate || gate.ready) {",
+      "to": "  if (true) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1650
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 1663
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.mutations.readinessSkipped",
+        "WP3.periods.financeWhileBlocked"
+      ],
+      "catchers": [
+        "PER.V.financeBlocked"
+      ],
+      "collateral": [
+        "PER.V.financeOverride",
+        "PER.V.pmOverride",
+        "PER.V.overrideAudit",
+        "KA.PER.concurrentLocks",
+        "CF.concurrentLocks"
+      ],
+      "unchanged": [
+        "PER.V.planner",
+        "KA.PER.V.lockAc",
+        "PER.V.afterLock.periodHash",
+        "PER.V.relock",
+        "KA.PER.futureCutoffLock",
+        "PER.relock.jan",
+        "PER.relock.feb",
+        "CF.L113",
+        "EVS.feb.financeWhileBlocked"
+      ],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "Every lock returns { gate, override: null } before the reason and role checks. PER.V.financeBlocked FAIL (finance locks V-A without a reason: 200, V-A locked, one snapshot row; expected 409 REPORTING_READINESS_BLOCKED, open, 0 rows). Collateral: PER.V.financeOverride FAIL (V-A is already locked, so the relock path answers 200 with finance's snapshot instead of 403 REPORTING_READINESS_OVERRIDE_FORBIDDEN); PER.V.pmOverride FAIL (the PM's lock is a relock too: readinessOverride null, not the PM's reason); PER.V.overrideAudit FAIL (0 OVERRIDDEN events name V-A); KA.PER.concurrentLocks FAIL (wrong: both PM locks of V-B succeed with no override recorded, 0 events, neither the value nor the today shape); CF.concurrentLocks FAIL (its one source is wrong: TEST GAP). Unchanged: PER.V.planner (403 from the route guard), KA.PER.V.lockAc (finance's snapshot has the same figures: value after the fix), PER.V.afterLock.periodHash, PER.V.relock, KA.PER.futureCutoffLock (200 either way: BLOCKED HR-E2; its events are observed, not judged), PER.relock.jan and PER.relock.feb (the relock path returns before the gate), CF.L113, the stored refusals EVS.feb.financeWhileBlocked and EVS.feb.financeWithOverride (build moments).",
+      "mutatedAnswer": "finance locks V-A while V's gate is blocked: 200, snapshot stored, no override recorded",
+      "storedDefect": "V only: V-A locked by finance without an override, V-B and V-F locked with no OVERRIDDEN event; archived by the proof's cleanup; census"
+    },
+    {
+      "name": "M3b the override restricted to the PM dropped (variant of M3)",
+      "guard": "section 6.2 WP-3 'the readiness gate on lock' (REPORTING_READINESS_OVERRIDE_FORBIDDEN, :1661-1668 at HEAD)",
+      "e6": "variant of guard 3 (M3 is its E6 entry; run, not tallied, WP3ADJ Q10)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "  if (normalizeRoleId(userRole) !== \"pm\") {",
+      "to": "  if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1661
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 1674
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.mutations.readinessSkipped",
+        "WP3.periods.financeWithOverride"
+      ],
+      "catchers": [
+        "PER.V.financeOverride"
+      ],
+      "collateral": [
+        "PER.V.pmOverride",
+        "PER.V.overrideAudit"
+      ],
+      "unchanged": [
+        "PER.V.financeBlocked",
+        "KA.PER.V.lockAc",
+        "KA.PER.concurrentLocks",
+        "KA.PER.futureCutoffLock",
+        "PER.relock.jan",
+        "PER.relock.feb"
+      ],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "PER.V.financeOverride FAIL (finance's lock of V-A with a reason is accepted: 200, V-A locked on finance's override; expected 403 REPORTING_READINESS_OVERRIDE_FORBIDDEN, open). Collateral: PER.V.pmOverride FAIL (the PM's lock is a relock: readinessOverride.reason is finance's, not the PM's); PER.V.overrideAudit FAIL (the one OVERRIDDEN event naming V-A has finance as actor and finance's reason). Unchanged: PER.V.financeBlocked (no reason: 409 before the role check), KA.PER.V.lockAc (same figures), KA.PER.concurrentLocks and KA.PER.futureCutoffLock (the PM locks), PER.relock.jan and PER.relock.feb.",
+      "mutatedAnswer": "finance overrides the blocked gate and locks V-A",
+      "storedDefect": "V only (V-A locked on finance's override); archived; census"
+    },
+    {
+      "name": "M4 EV reads every progress submission, whatever its status (the read swapped from ActivityProgress to ProgressSubmission; the section 6.2 guard)",
+      "guard": "section 6.2 WP-3 'EV reads approved progress only' (plan :631, :644 T7, :657; the report's activity read :737-756 and selection :786-789 at HEAD)",
+      "e6": "section 6.2 WP-3 guard 4 of 4 (EV reads approved progress only; the accepted two-edit read swap, WP3ADJ Q10)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "      where: { projectId, isActive: true },\r\n      include: {\r\n        progress: {",
+      "to": "      where: { projectId, isActive: true },\r\n      include: {\r\n        progressSubmissions: true,\r\n        progress: {",
+      "also": [
+        {
+          "file": "backend/src/services/earned-value.service.js",
+          "from": "      activity.progress,\r\n      resolvedCutoffDate,",
+          "to": "      activity.progressSubmissions.map((s) => ({ ...s, status: \"approved\", approvedAt: null })),\r\n      resolvedCutoffDate,"
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 738
+          },
+          {
+            "count": 1,
+            "line": 788
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 752
+          },
+          {
+            "count": 1,
+            "line": 802
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.mutations.evNonApproved",
+        "WP3.T7",
+        "WP3.T6.after",
+        "WP3.periods.afterLock.runDateEv"
+      ],
+      "catchers": [
+        "T7.live.hash",
+        "KA.EVL.runDate"
+      ],
+      "collateral": [],
+      "unchanged": [
+        "T4.inputs",
+        "FC.evBasedFinish",
+        "KA.PER.V.lockAc",
+        "PER.V.afterLock.cutoffChanges",
+        "KA.EVL.cutoff0228",
+        "KA.D2.live.T3",
+        "EVS.T7",
+        "CF.L118"
+      ],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "The include gains progressSubmissions and the selection reads them as approved, approvedAt null, so a draft, submitted or rejected submission counts by its updatedAt. T7.live.hash FAIL (V16 on V: H0 has X1 100% only, EV 90,000.00; H1 counts X2 40% (the rejected one, the latest by updatedAt) and X3 20%: EV 188,800.00, the hash differs). KA.EVL.runDate FAIL (wrong: 087-EV at the run date counts A130 50% rejected, A310 30% draft and A320 20% submitted: EV 177,900.00 instead of 100,500.00, neither the value nor the today of WP3.T6.after). Unchanged: T4.inputs and the T4 checks (only X1's approved submission exists at V6-V13; at 2026-01-31 its updatedAt is after the cutoff), FC.evBasedFinish (V15 precedes the T7 submissions), every 2026-02-28 read (KA.PER.V.lockAc, PER.V.afterLock.cutoffChanges, KA.EVL.cutoff0228, KA.D2.live.T3: every submission is updated after that cutoff), the stored EVS.T7. Visible traces, not failures: CF.L118 reads PARTIAL (its KA.EVL.runDate source is wrong: a gap) and still passes; the V20 lead reports V's run-date EV 129,700.00 against WP3.V.evAfterNewApproval 109,700.00 (h.lead, not a check).",
+      "mutatedAnswer": "087-EV run-date EV 177,900.00 instead of 100,500.00; V's run-date report changes when non-approved submissions are made",
+      "storedDefect": "none on a deep project; V-F's snapshot (future cutoff) stores an EV that counts V's open submissions; V archived; census"
+    }
+  ]
+}

@@ -1,0 +1,306 @@
+{
+  "proof": "scripts/cert/cert3/wp3-ev-proof.js",
+  "guards": "Plan section 1.4: every fix is followed by a mutation that puts the defect back and must turn the proof red. L34 (decided in CERT-3, plan section 0.1 :53-55; HR-E1 :1092) is fixed in WP-3 (WP3-ADJUDICATION.md, the L34 paragraph). Mutations from C:/Temp/octapm-cert/scratch/wp3/fixplan/L34-FIX-PLAN.md s7 (L34-M1..M5, L34-M1R); the proof's CATCHERS name L34-M1 and L34-M2 (:578). Not section 6.2 rows: not in the E6 tally.",
+  "runsOn": "The final code only: the L34-fixed tree with L34_FIX set in the proof, right after the unmutated full run exits 0 on cert3d (WP3-RUN-PLAN.md section 6.3). At HEAD the unmutated proof exits 2 (the 13 L34 checks), which would score every mutant CAUGHT and prove nothing (WP1-RUN-PLAN.md section 7.3 (a)). The anchors below exist only on the fix tree.",
+  "anchors": "anchors.head: each from occurs 0 times at 48db9e9 (the runner would answer NOT APPLIED). anchors.simFix: once on the SIMULATED fix copy C:/Temp/octapm-cert/scratch/wp3/fixplan/work/earned-value.service.fix.js (L34-FIX-PLAN.md s4.1 applied on paper). The real fix may differ after the Codex plan review (for example the R-4 fallback to findMany): re-derive every from and to on the real fix diff and re-run mutsyntax-wp3.js on the fix tree before the run.",
+  "contract": "L34-M5 is caught only through the proof's contract check (contractProblems, wp3-ev-proof.js :502-517), which judges reporting.formulaVersion only once the answer book's WP3.L34.formulaVersion carries an adjudicated value (the fix plan s11 proposes ev.v3; today the leaf reads 'contract pending the L34 plan review', CONTRACT_L34 null). The proof result shows which applies: observations.l34Fix.contract. While every contract field is null the expected verdict is SURVIVED (a TEST GAP to record), and wp3-mutation-evidence.js judges it so.",
+  "correctionToFixPlan": "L34-M1R narrowed: the fix plan's L34-M1R (s7; its scratch copy L34-M1R.earned-value.service.js) replaces the whole block from the L34 comment, including const LEDGER_AC_SOURCE, with HEAD's body. LEDGER_AC_SOURCE is still read by sourceSummary.ac.officialSourcePriority (s4.1 (f); line 947 of the fix copy), so that mutant passes node --check but throws a ReferenceError in every report at run time: every EV read would answer 500 and the run would be caught by a crash, which is no evidence. Here L34-M1R replaces only the groupBy call and the reduce head with HEAD's costRecord.findMany body and keeps the constant.",
+  "note": "Fields as in wp3-mutations.ev.json. Run one id per invocation, quoted and with a trailing comma (\"--only=M1,\"): mutate-multi.js matches a value without a comma as a PREFIX (M1 would also run M1a and M1b; L34-M1 would also run L34-M1R), and PowerShell drops an unquoted trailing comma. Every mutant here writes wrong figures, if at all, only into V's snapshots (V-A, V-B, V-F); 087-EV and 052-SCH-EV are only read; V is archived by the proof's cleanup; census after the list (WP3-RUN-PLAN.md section 7.6). repro: the expected catchers in the optional reproduction script scripts/cert/cert3/wp3-l34-repro.js (WP3-PREP section 9 R1-R9), if Claude Main writes it; the same file can be registered a second time in mutate-multi.js with that script as its proof.",
+  "mutations": [
+    {
+      "name": "L34-M1 the defect put back: an activity with any ledger posting after the cutoff is dropped whole (HEAD's all-or-nothing reading)",
+      "guard": "the L34 fix (L34-FIX-PLAN.md s4.1 (c), s7 primary)",
+      "e6": "fix mutation (plan section 1.4); not a section 6.2 row",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "      activity: { isActive: true }, // HR-S9 undecided: active activities only (WP3 adjudication Q4)",
+      "to": "      activity: { isActive: true, costLedgerEntries: { none: { incurredOn: { gt: cutoffDate } } } }, // L34 put back",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 512
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.L34.acRule",
+        "WP3.periods.afterLock.cutoffAfterCost",
+        "WP3.V.lockA",
+        "WP3.V.cutoffAfter",
+        "D2.WP3.T3"
+      ],
+      "catchers": [
+        "KA.EVL.cutoff0228",
+        "KA.PER.V.lockAc",
+        "KA.D2.live.T3",
+        "CF.L34"
+      ],
+      "collateral": [
+        "PER.V.afterLock.cutoffChanges"
+      ],
+      "unchanged": [
+        "T4.inputs",
+        "KA.EVL.runDate",
+        "PER.V.pmOverride",
+        "KA.EVS.T3",
+        "KA.EVL.febPeriod.figures",
+        "KA.EVL.janPeriod.figures",
+        "KA.D2.stored.T3"
+      ],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "The none filter (Activity.costLedgerEntries, schema.prisma:1700) drops every activity with a posting after the cutoff and counts the rest whole: HEAD's reading for any record the ledger explains. KA.EVL.cutoff0228 FAIL (087-EV at 2026-02-28: AC 25,000.00, the leaf's today, A110's 50,000.00 dropped by its 2026-09-30 posting: a today under the decided rule fails); KA.PER.V.lockAc FAIL (V-A: AC 100,001.00, X3's 20,000.00 of 02-10 dropped by its 03-10 posting); KA.D2.live.T3 FAIL (052-SCH-EV: AC 20,000.00, or wrong if a later 052 posting falls after the cutoff on another WP-3 activity: a failure either way); CF.L34 FAIL (CONFIRMED, a decided rule). Collateral: PER.V.afterLock.cutoffChanges FAIL (105,001.00, the today; the proof's CATCHERS table does not list it, WP3-RUN-PLAN.md section 13). Unchanged: T4.inputs and the T4 checks (read4 at 2026-01-31: X2's 01-15 posting has none after it, 50,000.00 = WP3.T4.inputs.read4; X1's postings are all after), every run-date read (no posting is dated after the run date: KA.EVL.runDate BLOCKED HR-S9; V's run-date AC needs 130,001.00 and 135,001.00 hold), PER.V.pmOverride (the open read and the lock both under the mutant), the eight stored and frozen L34 checks (STORED-PRE-FIX as unmutated).",
+      "mutatedAnswer": "AC at a past cutoff drops an activity whose ledger has any posting after it, as at HEAD",
+      "storedDefect": "V only: V-A's snapshot stores AC 100,001.00 (V-B and V-F their mutated AC); archived; census",
+      "risk": "L34-FIX-PLAN.md R-4: Prisma 6.19 must accept the nested relation filter inside a groupBy where. If it does not, every EV read answers 500, the probes throw, the catchers read NOT RUN and wp3-mutation-evidence.js reports NO EVIDENCE: then L34-M1R is the put-back of record.",
+      "repro": {
+        "catchers": [
+          "R1",
+          "R2",
+          "R4",
+          "R5"
+        ],
+        "passEither": [
+          "R3",
+          "R8",
+          "R9"
+        ]
+      }
+    },
+    {
+      "name": "L34-M1R the defect put back literally: the ledger aggregate replaced by HEAD's costRecord.findMany body (variant of L34-M1)",
+      "guard": "the L34 fix (L34-FIX-PLAN.md s7 L34-M1R, narrowed: see correctionToFixPlan)",
+      "e6": "fix mutation variant (plan section 1.4)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "  const groups = await tx.costLedgerEntry.groupBy({\r\n    by: [\"activityId\"],\r\n    where: {\r\n      projectId,\r\n      activityId: { not: null },\r\n      incurredOn: { lte: cutoffDate },\r\n      activity: { isActive: true }, // HR-S9 undecided: active activities only (WP3 adjudication Q4)\r\n    },\r\n    _sum: { amount: true },\r\n    _max: { incurredOn: true },\r\n  });\r\n\r\n  return groups.reduce((map, row) => {\r\n    if (row.activityId) {\r\n      map.set(row.activityId, {\r\n        amount: toMoneyNumber(row._sum?.amount),\r\n        source: LEDGER_AC_SOURCE,\r\n        actualThroughDate: row._max?.incurredOn ?? null,",
+      "to": "  const rows = await tx.costRecord.findMany({\r\n    where: {\r\n      projectId,\r\n      actualThroughDate: { not: null, lte: cutoffDate },\r\n      activity: { isActive: true },\r\n    },\r\n    orderBy: [{ actualThroughDate: \"desc\" }, { updatedAt: \"desc\" }],\r\n  });\r\n\r\n  return rows.reduce((map, row) => {\r\n    if (!isOnOrBefore(row.actualThroughDate, cutoffDate)) {\r\n      return map;\r\n    }\r\n\r\n    if (!map.has(row.activityId)) {\r\n      map.set(row.activityId, {\r\n        amount: toMoneyNumber(row.actual),\r\n        source: \"cost_record.actual_through_date\",\r\n        actualThroughDate: row.actualThroughDate,\r\n        updatedAt: row.updatedAt,",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 506
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.L34.acRule",
+        "WP3.periods.afterLock.cutoffAfterCost",
+        "WP3.V.lockA",
+        "D2.WP3.T3"
+      ],
+      "catchers": [
+        "KA.EVL.cutoff0228",
+        "KA.PER.V.lockAc",
+        "KA.D2.live.T3",
+        "CF.L34"
+      ],
+      "collateral": [
+        "PER.V.afterLock.cutoffChanges"
+      ],
+      "unchanged": [
+        "T4.inputs",
+        "KA.EVL.runDate"
+      ],
+      "expectVerdict": "CAUGHT (exit 2)",
+      "expect": "HEAD's reading verbatim (CostRecord.actual whole while actualThroughDate <= the cutoff): KA.EVL.cutoff0228 FAIL (25,000.00, today), KA.PER.V.lockAc FAIL (100,001.00), KA.D2.live.T3 FAIL (20,000.00), CF.L34 FAIL (CONFIRMED); collateral PER.V.afterLock.cutoffChanges FAIL (105,001.00). If the book's actualCostSource contract is adjudicated by then, the rows also carry cost_record.actual_through_date: the same checks, red either way. Unchanged: T4.inputs (read4: X2's record is through 01-15, X1's through 02-03: 50,000.00), the run-date reads.",
+      "mutatedAnswer": "as L34-M1",
+      "storedDefect": "as L34-M1 (V only)",
+      "repro": {
+        "catchers": [
+          "R1",
+          "R2",
+          "R4",
+          "R5"
+        ],
+        "passEither": [
+          "R3",
+          "R8",
+          "R9"
+        ]
+      }
+    },
+    {
+      "name": "L34-M2 the incurredOn bound dropped: every ledger posting counted whatever its date",
+      "guard": "the L34 fix (L34-FIX-PLAN.md s7 primary)",
+      "e6": "fix mutation (plan section 1.4); not a section 6.2 row",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "      incurredOn: { lte: cutoffDate },",
+      "to": "      incurredOn: undefined,",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 511
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.L34.acRule",
+        "WP3.T4.inputs.read4",
+        "WP3.V.lockA",
+        "D2.WP3.T3"
+      ],
+      "catchers": [
+        "KA.EVL.cutoff0228",
+        "KA.PER.V.lockAc",
+        "KA.D2.live.T3",
+        "CF.L34"
+      ],
+      "collateral": [
+        "PER.V.afterLock.cutoffChanges",
+        "T4.inputs"
+      ],
+      "unchanged": [
+        "KA.EVL.runDate",
+        "FC.evBasedFinish",
+        "KA.EVL.febPeriod.figures",
+        "KA.EVL.janPeriod.figures",
+        "CF.HRE3"
+      ],
+      "expectVerdict": "CAUGHT (exit 1: T4.inputs, a setup check, fails and the 14 T4 checks are left not run; the named catchers already read FAIL, WP3-RUN-PLAN.md section 7.4)",
+      "expect": "Run-date reads are unchanged (every posting is on or before the run date), so only past cutoffs catch it. KA.EVL.cutoff0228 FAIL (wrong: 087-EV at 2026-02-28 counts every active posting, 115,000.00); KA.PER.V.lockAc FAIL (wrong: 130,001.00); KA.D2.live.T3 FAIL (wrong: at least the WP-3 rows' 110,000.00); CF.L34 FAIL (all four sources wrong: TEST GAP, and a decided rule needs REJECTED). Collateral: PER.V.afterLock.cutoffChanges FAIL (wrong: 135,001.00); T4.inputs FAIL (read4 at 2026-01-31 gives AC 100,001.00, not 50,000.00), after which T4.pv0.spi .. T4.ev0.eacBasis are not recorded (not run): a setup error, exit 1. The V choreography goes on (no need() reads read4), so the catchers run. Unchanged: KA.EVL.runDate (BLOCKED HR-S9), FC.evBasedFinish, the frozen and stored L34 checks (STORED-PRE-FIX), CF.HRE3 (read4 still has CPI 0 and EAC = BAC).",
+      "mutatedAnswer": "AC at any cutoff = every posting on the activity, future-dated included",
+      "storedDefect": "V only: V-A's snapshot stores AC 130,001.00; archived; census",
+      "repro": {
+        "catchers": [
+          "R1",
+          "R2",
+          "R4",
+          "R5"
+        ],
+        "passEither": [
+          "R3",
+          "R8",
+          "R9"
+        ]
+      }
+    },
+    {
+      "name": "L34-M5 the formula version put back to ev.v2 on the fixed code",
+      "guard": "the L34 fix's contract-visible version (L34-FIX-PLAN.md s4.1 (a), s7 optional; WP3ADJ Q5)",
+      "e6": "fix mutation (optional); contract-dependent",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "const FORMULA_VERSION = \"ev.v3\";",
+      "to": "const FORMULA_VERSION = \"ev.v2\";",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 35
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.L34.formulaVersion"
+      ],
+      "contractDependent": true,
+      "catchers": [
+        "KA.EVL.cutoff0228",
+        "KA.PER.V.lockAc",
+        "PER.V.afterLock.cutoffChanges",
+        "KA.D2.live.T3",
+        "CF.L34"
+      ],
+      "collateral": [],
+      "unchanged": [
+        "EVL.febPeriod.hash",
+        "PER.V.afterLock.periodHash",
+        "T7.live.hash"
+      ],
+      "expectVerdict": "CAUGHT (exit 2) when WP3.L34.formulaVersion carries ev.v3; SURVIVED (exit 0, TEST GAP) while it is still 'contract pending the L34 plan review'",
+      "expect": "With the contract adjudicated: every live or fresh report and the V-A snapshot carry formulaVersion ev.v2, so contractProblems is not empty and KA.EVL.cutoff0228, KA.PER.V.lockAc, PER.V.afterLock.cutoffChanges and KA.D2.live.T3 read wrong (FAIL), and CF.L34 has only gaps (TEST GAP: FAIL). The hashes compare reads of one code version within the run and do not move. L34-M5 is caught only through the proof's contract check (contractProblems, wp3-ev-proof.js :502-517), which judges reporting.formulaVersion only once the answer book's WP3.L34.formulaVersion carries an adjudicated value (the fix plan s11 proposes ev.v3; today the leaf reads 'contract pending the L34 plan review', CONTRACT_L34 null). The proof result shows which applies: observations.l34Fix.contract. While every contract field is null the expected verdict is SURVIVED (a TEST GAP to record), and wp3-mutation-evidence.js judges it so.",
+      "mutatedAnswer": "reports and new snapshots labelled ev.v2 although AC is ledger-based",
+      "storedDefect": "V only (V-A's snapshot labelled ev.v2); archived; census"
+    },
+    {
+      "name": "L34-M3 reversals left out of the ledger sum (optional; a limitation probe for this proof)",
+      "guard": "the L34 fix (a void dated at the original incurredOn nets out at every cutoff; WP3.L34.reversals; L34-FIX-PLAN.md s7 optional)",
+      "e6": "fix mutation (optional); limitation probe, not tallied",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "      activityId: { not: null },",
+      "to": "      activityId: { not: null }, reversalOfId: null,",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 510
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.L34.reversals"
+      ],
+      "catchers": [],
+      "collateral": [],
+      "expectVerdict": "SURVIVED (exit 0, expected): no WP-3 proof step voids a cost (plan section 0.0: no new step) and no build writes a ledger reversal on 087-EV or 052-SCH-EV (no void or reverse of a cost in build/*.js)",
+      "expect": "Every proof check as unmutated. Recorded as a TEST GAP of the WP-3 proof for reversals; the live catcher is the reproduction's R6 (a void dated before the cutoff), if wp3-l34-repro.js is written; the unit catcher is U-3 (wp3-fix-mutations.unit.json UL34-M3).",
+      "mutatedAnswer": "a void no longer nets out: AC keeps the voided amount",
+      "storedDefect": "none (no reversal exists in the population the proof reads)",
+      "repro": {
+        "catchers": [
+          "R6"
+        ]
+      }
+    },
+    {
+      "name": "L34-M4 the per-activity through-date blanked (optional; a limitation probe for this proof)",
+      "guard": "the L34 fix's officialActualThroughDate (L34-FIX-PLAN.md s4.1 (d), s7 optional)",
+      "e6": "fix mutation (optional); limitation probe, not tallied",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "        actualThroughDate: row._max?.incurredOn ?? null,",
+      "to": "        actualThroughDate: null,",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 523
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP3.L34.actualCostSource"
+      ],
+      "catchers": [],
+      "collateral": [],
+      "expectVerdict": "SURVIVED (exit 0, expected): no check of the 93 reads activityBreakdown[].officialActualThroughDate (contractProblems compares actualCostSource and officialSourcePriority only), and the hashes compare reads of one code version",
+      "expect": "Every proof check as unmutated. Caught only by the recommended L34.contract check (L34-FIX-PLAN.md s6.3; it would make the count 94; an owner decision) and by the unit U-2 / U-3 (wp3-fix-mutations.unit.json UL34-M4). Recorded as a TEST GAP unless that check is adopted.",
+      "mutatedAnswer": "every activity row's officialActualThroughDate null",
+      "storedDefect": "V only (V's snapshots store the blank dates in activityBreakdownJson); archived"
+    }
+  ]
+}

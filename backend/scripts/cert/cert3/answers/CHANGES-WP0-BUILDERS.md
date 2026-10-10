@@ -1295,3 +1295,268 @@ double-encoding (the checks name the markers as `\u` escapes), LF.
 Open question for the integration owner: G21 asks for the L34 todays to be "cleared once fixed", while Q3 (b) judges
 pre-fix moments against HEAD's reading. The book keeps them (STORED-PRE-FIX compares with them); clearing them is a book
 change for after the exit rebuild, when no pre-fix moment remains to read.
+
+# WP-4 answer-book leaves (2026-10-10)
+
+Binding source: `C:\Temp\octapm-cert\scratch\wp4\WP4-ADJUDICATION.md` (Q1-Q14; cited in the book as `WP4ADJ(...)`),
+settling the answer-book gaps G1-G29 of `C:\Temp\octapm-cert\scratch\wp4\WP4-PREP.md` section 10 (cited `PREP4(...)`).
+Applied here: G1-G28 as the adjudication rules them: every writing check and every section 6.2 catcher on the fresh
+throwaway K (Q1); I2 certified on a second throwaway K2, 087-COM-B's shape (Q11); the HR-C1 contract-visible fields
+marked `contract pending the HR-C1 plan review` with HEAD's today (Q2, Q3); the STORED-PRE-FIX reading of the stored
+HR-C1 moments as a rule leaf (Q4); I5's one-shot confirmation and its re-run rule (Q7); the E6 catchers named by check
+id, M-VAR0 / M-CONV0 now and M-VAR1 / M-CONV1 / M-RET after their decision or fix (Q8); C1-TOL kept a known answer
+(Q12); '2026-13' under the suspect CF-PERIOD, registered as WP4-CF-1 when confirmed (Q13); CLAUDE.md's 5% left to the
+owner (Q10). G29 (plan citations) is a citation convention, applied to the new and changed leaves only (below). Rule
+A10 applies: every leaf below carries its on-paper derivation in the book, worked from the product code at `f599e67`
+(`HF(file, lines)`; `backend/src`, `shared` and `backend/prisma` at HEAD `48db9e9` are identical to `f599e67`), from
+existing book keys, or from the deep-company builders read at `48db9e9` (`BLD(file, lines)`; the commercial builders
+are unchanged since `363651a`). Plan lines are numbered at `f599e67` (`PF4(...)`).
+
+Inputs (copies proven on, sha256): `answers/commercial.js` at HEAD `48db9e9` (the working tree's file is the same; the
+file is unchanged since `363651a`) `5934973943f7c41d5dec5a4f1bd916458b3b7ce9aa937d47de85605275d45daa`;
+`answers/schedule.js` `f0957af2a9e3d31818c07b17584ba1fbc17aef97e71242b3cd6a72cad7dc40b9` and `answers/field-controls.js`
+`ebc5c740850636a63b116d851f33d44d5bfeaa4c13a795f5ab91ebd37a99e73a` (both unchanged: no WP-4 key lives there, neither
+names WP4); `answers/CHANGES-WP0-BUILDERS.md` `16d1aa714bda897e314d73945ce453c4d9017b25763339ceb72dc9a88d5be033`;
+`WP4-ADJUDICATION.md` `64eb3e8c577aa9698aa0c81c19527c5f557276d4630513527b9910a92edae7e3`; `WP4-PREP.md`
+`b92a311be8ea7f6f2182f2fcb34f064fcfb97d05c552b6972d916e50912b6ed2`; `derive-k.json`
+`8edc4a77fdb3f2c048527b79170c206db2bdb3ab3b96eec97c41ea338b19391f`. Output of `book-insert.js` on the copy: sha256
+`1304ef7ecb7384707c7860cdd9bdeacab04df6e8dd4bcec3baa6d67147c43952` (`work/commercial.applied.js`; the diff is
+`wp4-book.diff`). Only `commercial.js` changes.
+
+Figure count: commercial 633 -> 698 (+65; WP4 185 -> 250). No key was removed; no key was added under `deep` (the
+052-COM mirror does not grow). 59 existing leaves changed, each as the adjudication directs and each recording in its
+`note` what changed where more than a `ref` was added (a changed value keeps its old value there): 40 WP4 leaves, 12
+052-COM mirrors that change with them (`deep.052-COM.E2.*` x3, `I1.*` x2, `I3.*` x3, `I8.afterReleaseStatus`,
+`P4.*` x2, `C1.voidExecuted`: each change is project-independent, a ref, an assumption, HEAD's today or a derivation
+that holds for 052-COM too), 6 deep leaves and `claudeMd.retentionDefault`. Values changed: `WP4.E2.concurrentConverts`
+(five converts), `WP4.P1.noPeriod` (the route's code), the six `WP4.mutations` leaves (catchers by check id). planDisagrees
+5 -> 2 (`WP4.I1.certifyUnconfigured`, its 052-COM mirror and `WP4.C3.noDefaultNoRate`: the plan now agrees, see G3 and
+G2/Q3), assumption 154 -> 207, leaves with a `today` 70 -> 94, with a `ref` 0 -> 66. No other leaf changed (a
+before/after dump of `figures()`: 574 leaves identical in every field; stage3/4/5, WP5, WP6, WP7 identical; deep and
+claudeMd identical but for the listed leaves; `meta` and the exports identical). No value or today a builder reads in
+code changed (`verify.js` scans `build/*.js` for `<leaf>.value` / `<leaf>.today`); three changed leaves are only named
+in builder comments or messages (`WP4.I1.silentContractRate`, its 052-COM mirror, `deep.006-LITE.retentionDefaultCase`),
+and their new todays are what those builders observe.
+
+`figures()` now emits `ref` (as schedule.js and field-controls.js do); no existing commercial leaf had one, so every
+existing row is unchanged by it.
+
+Leaf contract (checked at load): every WP-4 leaf (WP4, deep 087-COM / -B / -C / 006-LITE, the 052-COM mirrors but O2,
+which is WP-5's) that carries a `today` names its `ref`, from HR-C1, HR-C2, HR-C3, HR-C4, HR-C12, CONVERT-ATOMIC,
+CCO-PARENT, L108, L115, L120, C1-TOL, CF-PERIOD, WP4-OVR-1, WP4-DRAFTS-1; under any row but the decided HR-C1 it is
+`assumption: true`. HR-C1 figure leaves are not assumptions; its contract-pending leaves are.
+
+New helpers in commercial.js (data, not leaves), inserted before the WP-0 stage table: `WP4ADJ`, `PREP4`, `PF4` (the
+deep section's `PF` is defined after WP4), `HF`, `BLD`, `DERIVE_K`, `HR_C1_PENDING`, `HR_C1_STORED_LEAVES`; `K_COM` (K's
+records, in currency units) and its models `K_ROWS`, `K_RATE`, `K_BILL_TOTAL`, `K_ALLOCATIONS`, `K_EARNED`,
+`K_NR_GROSS`, `K_D`, `K_DRAFT_CLAIM`, `K_COMMITMENTS`, `K_PAY_APPS`, `K_CHANGE_EVENTS`, `K_STEPS`, `K_CHECKS`; `K2_COM`,
+`K2_STEPS`; `COM087_ALLOCATIONS`, `COM087_INVOICED`, `COM087_STATEMENT`; `K_SRC`, `HRC1_SRC`; the new WP4 subtrees
+`HRC1`, `L114`, `K`, `K2`, `CCO`, `OVR1`, `DRAFTS1`, `HRC3`, `IPC` (inside the WP4 literal after CF5, so not mirrored);
+and a block of load checks after `claudeMd` that ties every new or changed leaf to the figures it is built from (the
+book refuses to load otherwise; each check was shown to fire by a mutant, 45 in all). K's figures are also pinned to
+`derive-k.json` (worked independently with the same arithmetic) by `verify.js`.
+
+## G1, G26. The throwaway K (adjudication Q1)
+
+K is the WP-4 proof's own project in 087, created WITHOUT defaultRetentionRate and contractValue, archived at the end
+(as WP-1's W, WP-2's P, WP-3's V). Rows reuse book shapes: C-001 is I1's row, B-002 stage 3's split row, D-001 stage
+10's 97,500.00 certificate, K-SC1's line P2-P4's 100,000.00 at 50%. Vendors are the 087 directory companies the
+087-COM build made. `K.choreography` is K0-K27 and the end (29 steps); every check id K serves is named by exactly one
+step (checked at load against `K_CHECKS`, 59 ids; `C2.coOnClosed` is served by K18 and K21 and is not in the list).
+
+| Key | New |
+|---|---|
+| `WP4.K.project`, `team` | 087-COM's create payload without ldRatePerDay, no defaultRetentionRate / contractValue; planner, qs, cost_controller, procurement, site_engineer, finance |
+| `WP4.K.budgetLines` | 02-100/material 10,000,000; 03-100/subcontract 50,000,000 |
+| `WP4.K.bill`, `billTotal` | C-001, B-002, D-001, E-001, F-001; 33,750,000 |
+| `WP4.K.allocations`, `progress` | six approved allocations with earned (C-001/K-A220 4,000,000 at 40%; B-002 split 3,000,000 / 9,000,000; D-001 9,750,000; E-001 500,000 at 50%; F-001 1,000,000) |
+| `WP4.K.commitments` | K-SC-NR (no rate), K-SC-C1, K-SC-V, K-PC-CL (PO, rate 0), K-SC1, K-SC3, K-SC5 (each one line; every one but K-SC-NR names its rate) |
+| `WP4.K.payApps` | PA-K1 5,000,000 / 500,000 / 4,500,000; PA-K3a/b/c 1,000,000 / 500,000 / 200,000; PA-K5 1,000,000, paid 900,000 |
+| `WP4.K.changeEvents` | K-E1, K-E2 (E1's lines and quotes), K-E3 (RFQ carries K-SC-V), K-TWO (1,200,000; quotes 1,100,000 / 1,150,000), K-ARC (300,000 quoted 280,000; a choice) |
+| `WP4.K.choreography` | K0-K27, end |
+| `WP4.K.ipcD.*` (G26) | 9,750,000 / 975,000 / 8,775,000, paid 8,000,000, balance 775,000, partially_paid, certified, 2026-09 inflow 8,000,000, ledger delta 0 (= WP4.existing stage10.*, checked at load) |
+
+## G4. I2 on the second throwaway K2 (adjudication Q11)
+
+K2: project defaultRetentionRate 7.5 explicit, contract PATCHed to 10 with its value 2,000,000.00 (087-COM-B's
+contract step), C-001 1,000 m3 @ 100.00 on K2-A110 at 40%, 400 m3 claimed WITHOUT retentionRate. I2 is judged on the
+CERTIFIED certificate (a choice of this book: the draft preview depends on the HR-C1 contract, whether items take the
+contract's rate at creation (P-7) or only at certification (P-10); certification settles 10% either way). The draft's
+item rate is recorded as `WP4.K2.itemRetentionRate`.
+
+| Key | Old | New |
+|---|---|---|
+| `WP4.K2.project`, `choreography` | none | K2's payload; K2-0..K2-4, end |
+| `WP4.K2.itemRetentionRate` | none | 10, today 7.5, ref HR-C1, assumption (= deep.087-COM-B.ipcItemRetention) |
+| `WP4.I2.retention` | derivation on 087-COM-B | + 'Judged on K2 ... certified by the PM'; ref HR-C1; value 400,000 and today 300,000 unchanged |
+| `WP4.I2.net`, `netIfRatesSwapped` | no ref | ref HR-C1 (net's note: K2's certified net) |
+| `deep.087-COM-B.ipcItemRetention` | no ref | ref HR-C1; note: I2 runs on K2, 087-COM-B builds no IPC |
+
+## G2, G24, Q2-Q4. HR-C1, L114
+
+| Key | Old | New |
+|---|---|---|
+| `WP4.HRC1.rule` | none | the decided rule and the book's resolution order (contract rate, else explicit project default, or explicit no retention; else certification refused); HEAD's four silent defaults |
+| `WP4.HRC1.contract.{refusalStep, refusalStatusCode, contractUnconfiguredShape, projectUnconfiguredShape, commitmentRefusal, reresolveAtCertify, itemOverrideKept, explicitNoRetentionInput}` | none | each `contract pending the HR-C1 plan review`, HEAD's today, ref HR-C1, assumption; the proposal (WP4-PREP section 9 P-1..P-12) in its note |
+| `WP4.HRC1.afterConfiguration.{status, retention, net}` | none | certified / 400,000 / 3,600,000 (= I2); today 409 IPC_INVALID_CERTIFICATION_STATE / 0 / 4,000,000; ref HR-C1 |
+| `WP4.HRC1.explicitNoRetention.{gross, retention, net}` | none | K-IPC-NR on F-001: 1,000,000 / 0 / 1,000,000 (HEAD the same) |
+| `WP4.HRC1.storedPreFix` | none | `{ verdict: STORED-PRE-FIX, appliesTo, judged, strict, moments (087-COM, 052-COM, 006-LITE steps), leaves: [7 keys] }` |
+| `WP4.L114.newPeriodItemRate` | none | 10, today 0, ref HR-C1, assumption (P-7 / P-10) |
+| `WP4.L114.routeBound` | none | 400 VALIDATION_ERROR (routes/ipc.js:95; L114's 'no upper bound' REJECTED) |
+| `WP4.I1.silentContractRate` (+ 052 mirror) | no today | today 5, ref HR-C1 |
+| `WP4.C3.noDefaultNoRate` | planDisagrees true, planValue 5; note 'this book's reading, needs the owner's confirmation' | runs on K (K8); ref HR-C1; planDisagrees false (plan C3 :691 now agrees); WP4ADJ Q3: HR-C1 covers commitments, the leaf stays an assumption (owner's decision list); old note kept in the note |
+| `deep.006-LITE.retentionDefaultCase` | no today; note a template literal | today = the BLOCKED step's observation `{ projectDefaultRetentionRate: 5, contractRetentionRate: 5, itemRetentionRateIfCreated: 0, certificateRefused: false }`, ref HR-C1 (Q4) |
+| `deep.006-LITE.ipcAfterConfiguration.retention`, `net` | no ref | ref HR-C1 |
+
+STORED-PRE-FIX (Q4, the WP-3 Q3 (b) precedent): an observation from a stored build moment made before the HR-C1 fix
+commit is judged against the leaf's today: equal is STORED-PRE-FIX (reported with the register link to HR-C1, not a
+WP-4 failure), the value is value, anything else is wrong. Every read on K and K2 is strict; the exit run's rebuild
+(plan section 7 step 5, :1186), with the builders changed by Claude Main with the fix (087-COM and 052-COM assert the
+unconfigured draft's refusal, not a certify; 006-LITE keeps the plan's order), judges every moment on the value. The 7
+leaves: `WP4.I1.certifyUnconfigured`, `WP4.I1.silentContractRate`, `WP4.HRC1.contract.projectUnconfiguredShape`,
+`WP4.L114.newPeriodItemRate`, `deep.052-COM.I1.certifyUnconfigured`, `deep.052-COM.I1.silentContractRate`,
+`deep.006-LITE.retentionDefaultCase` (checked at load: each has an HR-C1 today that differs from its value, and the
+list covers each project's moments). Their todays stay after the fix.
+
+The proof's `CONTRACT['HR-C1']` has eight fields (the preparation's seven plus `explicitNoRetentionInput`, which K9
+depends on).
+
+## G3, G25. I1's refusal and the deep notes
+
+| Key | Old | New |
+|---|---|---|
+| `WP4.I1.certifyUnconfigured` (+ 052 mirror) | planDisagrees true, planValue `{ retention: 200000, net: 3800000 }` | ref HR-C1; planDisagrees false (plan I1 :695 now reads 'refused because configuration is required'); value and today unchanged (087-com.js:679 and 052-com.js:453 read the today); the live refusal runs on K (K7) |
+| `deep.087-COM.contractRetentionRate`, `deep.052-COM.contractRetentionRate` | note | + after the fix the builder's item PATCH becomes an explicit override; the stored L114 findings are STORED-PRE-FIX |
+
+## G5. E2 (adjudication Q1, Q8, Q9)
+
+| Key | Old | New |
+|---|---|---|
+| `WP4.E2.concurrentConverts` (+ 052 mirror) | `{ ok2xx: 1, conflict409: 1, changeOrders: 1 }`, today text | `{ converts: 5, ok2xx: 1, conflict409: 4, changeOrders: 1 }`; today 'k >= 2 of the five succeed ...'; ref CONVERT-ATOMIC, assumption |
+| `WP4.E2.pendingDelta` (+ mirror) | today 1,900,000 | value 950,000 unchanged; today `{ perSuccessfulConvert: 950000, successfulConverts: "k >= 2" }`; ref CONVERT-ATOMIC |
+| `WP4.E2.midwayRefusalOrphans` (+ mirror) | no today | value 0; today `{ status: 409, code: COMMITMENT_LOCKED, orphanPrimeCosPerAttempt: 1, eventStatus: priced }`; the deterministic fixture (an accepted RFQ carrying a commitment voided before the convert) |
+
+052-COM's E2 is left priced and unused (Q6); its mirror carries the same project-independent answers.
+
+## G6-G12, G21, G22
+
+| Key | Old | New |
+|---|---|---|
+| `WP4.E3.archivePendingDelta` | on 087-COM | value unchanged; on K (K15), a moment-map deviation |
+| `WP4.E3.patchApproved` | none | 409 CHANGE_ORDER_APPROVED_LOCKED (change-order.service.js:91-109, 465-483, :1168); M-LOCK(a)'s catcher |
+| `WP4.C1.voidExecuted` (+ mirror) | 'void is allowed only from draft/pending/approved.' | value unchanged; the probe sends a reason (without one, 400 COMMITMENT_VOID_REASON_REQUIRED, commitment.service.js:746-749) |
+| `WP4.P1.noPeriod` | 400 SUB_PAY_APP_PERIOD_REQUIRED | 400 VALIDATION_ERROR (routes/sub-pay-apps.js:41); the plan's P1 names no code, so no planValue |
+| `WP4.P1.reopenWhileOpen` | none | 409 SUB_PAY_APP_OPEN_EXISTS at the back-to-draft site (sub-pay-app.service.js:822-832); M-OPENb's catcher |
+| `WP4.P4.payOverNet` (+ mirror) | no ref | ref C1-TOL, assumption (Q12: BLOCKED while today holds); on K's PA-K1 |
+| `WP4.P4.payOverNetPlus2` (+ mirror) | no note | note: on K's PA-K1, M-CEIL's catcher |
+| `WP4.I5.afterValueEntered` | 'After PATCH /prime-contract originalValue ...' | established by the PM's `{confirmOriginalValue: true}` (the stored 76,000.00 sent back is a save, prime-contract.service.js:392-402) |
+| `WP4.I5.confirmRequest` | none | `{ by: pm, PATCH /prime-contract, body { confirmOriginalValue: true }, 200, 7,600,000, boq_fallback -> contract_entry, audit { contract.manage, originalValueConfirmation: confirmed } }` |
+| `WP4.I5.rerunRule` | none | one-shot; a re-run that finds IPC-01 certified judges its figures and the audit event, skips I5.gateLive (Q7) |
+| `WP4.I3.A130LimitQuantity`, `A130LimitAmount`, `patchA130Qty650` (+ mirrors) | no ref | ref HR-C2, assumption; the limits read on 052-COM, the PATCH on K (K13) |
+| `WP4.C5.closeWithRetentionHeld` | set-up unnamed | on K (K24): K-SC5's final PA-K5 approved on a complianceOverrideReason, paid 9,000.00, then the close |
+| `WP4.C5.outstandingLabel` | none | 'Retention released': error.details.outstanding lists LABELS (closeout.service.js:317-330, 478), not the key retention_released the preparation named |
+| `WP4.P7.rejectedReopen` | 'rejected -> reopen -> draft -> resubmit.' | on K (K23, PA-K3c) |
+
+## G13-G17
+
+| Key | Old | New |
+|---|---|---|
+| `WP4.I9.disagreement` | no ref | ref HR-C4 |
+| `WP4.I9.on087.statementInvoiced`, `receivablesInvoiced`, `difference` | none | 35,663,750 (IPC-02, -03, -05, -06 netPayable) / 36,638,750 / 975,000 (today 975,000, ref HR-C4) |
+| `WP4.I10.gross` | no ref | ref HR-C4, assumption (invoice gross, plan :729) |
+| `WP4.CF1.summary.inflow`, `outflow`, `net` | project summary | read as the 2026-08..2026-09 window on 087-COM; values unchanged |
+| `WP4.CF2.advanceInflow` | no ref | ref L115; 087-COM month 2026-07 |
+| `WP4.CF3.period2026_13` | no ref | ref CF-PERIOD; on K (K27); WP4-CF-1 (P3) when confirmed (Q13) |
+| `WP4.CF3.deleteSystemRow`, `WP4.CF4.concurrentRebuilds` | no ref | ref L120; on K (K27) |
+| `WP4.HRC12.dropsBudgetLines` | none | the CO carries each line's budget line and cost code; today `{ budgetLineId: null, budgetAllocations: [] }`; ref HR-C12 |
+| `WP4.HRC12.secondAcceptOnSameLine`, `archivedCoEvent` | no ref | ref HR-C12 (K19) |
+
+## G18-G20, G24, G27, G28
+
+| Key | Old | New |
+|---|---|---|
+| `WP4.CCO.parentVoid` | none | 409 (code null, the fix's; COMMITMENT_LOCKED proposed); today `{ 200, approved, committedDelta 0 }`; ref CCO-PARENT |
+| `WP4.CCO.parentClosed` | none | 409 (code null); today `{ 200, approved, committedRises: true }`; ref CCO-PARENT |
+| `WP4.CCO.parentClosedCommitted` | none | 500,000; today 600,000; ref CCO-PARENT |
+| `WP4.OVR1.pmWithoutReason`, `financeWithReason`, `review` | none | 400 IPC_PM_OVERRIDE_REASON_REQUIRED; 403 IPC_PM_OVERRIDE_REQUIRED; `{ requiresPmOverride: true, a130OverEarned: { atStepIpc09: 750000, atEndStateToday: 562500 } }`; ref WP4-OVR-1, assumption (observations for CF.OVR1) |
+| `WP4.DRAFTS1.*` (6) | none | earned 500,000; each draft 400,000; both PATCHes 200; the first certify certified; the second 400 IPC_PM_OVERRIDE_REASON_REQUIRED; over by 300,000; ref WP4-DRAFTS-1, assumption |
+| `WP4.HRC3.emptyPeriod` | none | 409 (code null); today `{ 200, certified, 0, 0, retentionStatus released }`; ref HR-C3 |
+| `WP4.IPC.itemsFromAllocations` | none | 11 (087-COM IPC-10, one item per approved allocation) |
+| `claudeMd.retentionDefault` | derivation | value, planValue unchanged; maps onto I1.certifyUnconfigured and I1.afterConfiguration; the CLAUDE.md change is the owner's (Q10) |
+
+G19 correction to the preparation: at the build's step ipc.09 A130 was over earned by 7,500.00, but at 087-COM's end
+state CO-I3 (approved after IPC-10) raises A130's limit to 97,500.00 through HEAD's variation scope (the BOQ-item leg,
+HR-C2), so earned at 25% is 24,375.00 and the live review shows 5,625.00 over (an HR-C2 fix restores 7,500.00).
+requiresPmOverride stays true, which is what CF.OVR1 classifies.
+
+## G23. The mutation leaves name their catchers (adjudication Q8)
+
+| Key | Old | New (catchers by check id) |
+|---|---|---|
+| `retentionDefaultGuard` | `['WP4.I1.certifyUnconfigured']` | I1.certifyUnconfigured (M-RET, post-fix); C3.noDefaultNoRate (M-RET-c); HRC1.contractFirstRead (M-RET-d); L114.newPeriodItemRate and I2.contractRate (M-RET-l) |
+| `variationScopeMatch` | `['WP4.I3.A130LimitQuantity', 'WP4.I3.patchA130Qty650']` | I3.limits.A120 (M-VAR0 at HEAD); KA.I3.limits.A130 and KA.I3.patchA130Qty650 (M-VAR1 after HR-C2) |
+| `convertLock` | `['WP4.E2.concurrentConverts', 'WP4.E2.pendingDelta']` | K.E1.convertAgain (M-CONV0 at HEAD); KA.E2.concurrent, pendingDelta, midwayOrphans (M-CONV1 after the fix) |
+| `oneOpenPayApp` | `['WP4.P1.secondOpen']` | P1.secondOpen and P1.reopenWhileOpen (M-OPEN); M-OPENa; M-OPENb |
+| `payAppPaymentCeiling` | `['WP4.P4.payOverNetPlus2']` | P4.payOverNetPlus2 (M-CEIL); M-CEILa/b equivalent, not run |
+| `approvedCoLock` | `['WP4.E3.archiveApproved']` | E3.patchApproved and E3.archiveApproved (M-LOCK); M-LOCKa; M-LOCKb |
+| `commitmentCoParent` (new) | none | KA.CCO.voidParent and KA.CCO.closedParent (CCO-M1, post-fix; not a section 6.2 guard) |
+
+## G29. Plan citations
+
+The new and changed leaves cite `PF4` (plan lines numbered at `f599e67`). The existing WP-4 `P(...)` trail it by 39
+(P(656) = PF4(695)); the worktree plan is PF4 + 1 from :52 on (the owner's HR-X1 scope line). Existing `P(...)`
+citations are left as they are.
+
+## Not applied here
+
+- No leaf is filled from the HR-C1 fix plan: the eight contract leaves wait for the Codex high-risk plan review and its
+  adjudication (Q2); the proposals P-1..P-12 are only named in their notes.
+- Q5 (the data migration for existing contracts) and Q10 (CLAUDE.md's 5%) are owner questions; Q14 (HR-A3 / L211)
+  keeps `WP4.I12.pmRecordsPayment` as it is.
+- `WP4.I1.explicitNoRetention` keeps its value 4,000,000 (the rule on I1's shape; the WP-0 recomputation reads it); K's
+  own figures are `WP4.HRC1.explicitNoRetention.*` (G2 proposed re-parameterising the old leaf; that would also have
+  moved its 052-COM mirror).
+- `WP4.HRC1.projectDisplay` and `WP4.I1.afterConfiguration` (G2's names) are not separate keys: the project display is
+  the contract leaf `WP4.HRC1.contract.projectUnconfiguredShape`, the after-configuration figures are
+  `WP4.HRC1.afterConfiguration.*` (new I1 leaves would have been mirrored into deep.052-COM.I1, whose IPC-01 stays a
+  draft).
+- MOMENT-MAP.md is not edited (one writer): the WP-4 deviations go in its deviation section when the proof lands.
+
+## For the proof and the lists (no change made outside the book)
+
+- Check -> key changes against `wp4-checks-draft.json`: HRC1.projectDisplay reads
+  `WP4.HRC1.contract.projectUnconfiguredShape`; HRC1.contractFirstRead reads `WP4.I1.silentContractRate` (today 5) and
+  `WP4.HRC1.contract.contractUnconfiguredShape`; I1.explicitNoRetention reads `WP4.HRC1.explicitNoRetention.*`;
+  I1.afterConfiguration reads `WP4.HRC1.afterConfiguration.*`; I2.contractRate runs on K2 and reads `WP4.I2.retention`,
+  `WP4.I2.net` (certified) and `WP4.K2.itemRetentionRate` (the draft read); K.IPC.D, K.cashInflow and IPC.noCost read
+  `WP4.K.ipcD.*`; KA.CCO.closedParent reads `WP4.CCO.parentClosed` and `parentClosedCommitted`; KA.I9 on 087-COM reads
+  `WP4.I9.on087.*`; CF.OVR1 reads `WP4.OVR1.*`; CF.DRAFTS1 reads `WP4.DRAFTS1.*`; IPC.itemsFromAllocations reads
+  `WP4.IPC.itemsFromAllocations`; the mutation lists take their catchers from `WP4.mutations.*`.
+- P1.noPeriod expects 400 VALIDATION_ERROR (it was BOOK-G8; HARD now). C1.voidExecuted sends a reason. C5's refusal is
+  matched by the label 'Retention released' in `error.details.outstanding` (WP4-PREP section 5.1 said the key).
+- KA.E2.concurrent: value only on exactly one 2xx, four 409 CHANGE_EVENT_CONVERTED and one CO; KA.E2.pendingDelta's
+  today is the object `{ perSuccessfulConvert, successfulConverts }` (judge: delta = 9,500.00 -> value; delta = k x
+  9,500.00 with k >= 2 -> today).
+- I5: the PM sends `{confirmOriginalValue: true}`; on a re-run with IPC-01 already certified, judge the certified
+  figures and the contract.manage audit event, skip I5.gateLive (`WP4.I5.rerunRule`).
+- The proof's RULES need the refs the book uses: HR-C1 (decided), HR-C2, HR-C3, HR-C4, HR-C12, CONVERT-ATOMIC,
+  CCO-PARENT, L108, L115, L120, C1-TOL, CF-PERIOD, WP4-OVR-1, WP4-DRAFTS-1; `CONTRACT['HR-C1']` has eight fields.
+- Moment-map deviations to record when the proof lands: rows 110 (I1's refusal), 114 (E3's archive), 115 (E2), 124
+  (I3's PATCH), 136 (P4's probes) per Q1, and row 127 (I2 on 087-COM-B) per Q11.
+- Expected at HEAD from the book side is unchanged from WP4-PREP section 6 (11 HR-C1 checks red), except that
+  P1.noPeriod is green (BOOK-G8 resolved) and I2.contractRate fails on K2's certified certificate (300,000 / 3,700,000)
+  rather than on a draft preview.
+
+Validation (scratch `C:\Temp\octapm-cert\scratch\wp4\book\`): `book-insert.js` applied to a copy of commercial.js at
+48db9e9 (sha256 5934973943f7...): 34 exact-anchor edits, each counted once before any write (rewrites of existing
+leaves derived from their anchors by substitutions each counted once); `node --check` exit 0; the copy loads (698
+figures, the new load checks pass, nothing required of the product); `verify.js`: no key removed, 65 new keys exactly
+the expected list, 59 changed keys each with exactly the expected fields, 574 identical, the other sections, meta and
+exports identical, no value or today a builder reads changed, K's figures equal derive-k.json, the WP-0 recomputation
+(`scratch/wp0/verify-commercial.js`) 116 of 116 agree, LF only, no BOM, no double-encoding, no new non-ASCII character
+(449 -> 446: the three section signs of the rewritten I2 and 006-LITE lines are written \u00a7 and kept at runtime),
+every removed line (49) lies in a replaced range, a second run refused; `teeth.js`: 45 mutants of the new and changed
+leaves and models each refused at load by its own check, the unmutated copy loads; the WP-0 load test adapted to a path
+(`tools/load-commercial.adapted.js`): shape OK before (633) and after (698); `tools/refusal-test.js`: a repeated anchor,
+a missing anchor, CR line endings and the same input/output path are refused with nothing written. Bytes: every
+deliverable UTF-8 without BOM, LF, ASCII; commercial.js LF; every inserted line ASCII.

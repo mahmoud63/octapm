@@ -1,0 +1,133 @@
+{
+  "note": "L34 fix, unit side (mutate-multi.js list key 'wp3fix-unit', proof null). Runs only on the fix tree, against the rewritten earned-value.service.test.js (L34-FIX-PLAN.md s5: mockPrisma gains costLedgerEntry.groupBy and loses costRecord; the groupBy mock honours where.activityId.not, where.incurredOn.lte and where.reversalOfId). Test titles other than the edited HEAD case and U-2 are not fixed by the plan: reconcile every 'expect' with the fix diff before the run. Mocked: not evidence (plan section 1.4). Run one id per invocation, quoted and with a trailing comma (\"--only=M1,\"): mutate-multi.js matches a value without a comma as a PREFIX (M1 would also run M1a and M1b; L34-M1 would also run L34-M1R), and PowerShell drops an unquoted trailing comma.",
+  "noUnitCatcher": [
+    "L34-M1R: costRecord is removed from the suite's mockPrisma, so HEAD's body throws a TypeError (tx.costRecord undefined) inside every report test: a crash, not an assertion, not counted (the WP-1 I1 rule)."
+  ],
+  "mutations": [
+    {
+      "name": "UL34-M1 an activity with a later posting dropped whole (unit side of L34-M1)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "      activity: { isActive: true }, // HR-S9 undecided: active activities only (WP3 adjudication Q4)",
+      "to": "      activity: { isActive: true, costLedgerEntries: { none: { incurredOn: { gt: cutoffDate } } } }, // L34 put back",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 512
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/earned-value.service.test.js",
+      "live": "L34-M1 (wp3-fix-mutations.l34.json)",
+      "requires": "the L34 fix's edit of the case at :203-209 (exact groupBy arguments)",
+      "expectVerdict": "CAUGHT",
+      "expect": "'computes official SPI, CPI, and EAC from approved PV, EV, and AC' fails: it asserts costLedgerEntry.groupBy was called with exactly { by: [\"activityId\"], where: { projectId: \"project-1\", activityId: { not: null }, incurredOn: { lte: 2026-01-31T23:59:59.999Z }, activity: { isActive: true } }, _sum: { amount: true }, _max: { incurredOn: true } } and the mutated where carries costLedgerEntries. The mock ignores the relation filter, so only that exact-argument assertion catches it."
+    },
+    {
+      "name": "UL34-M2 the incurredOn bound dropped (unit side of L34-M2)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "      incurredOn: { lte: cutoffDate },",
+      "to": "      incurredOn: undefined,",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 511
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/earned-value.service.test.js",
+      "live": "L34-M2 (wp3-fix-mutations.l34.json)",
+      "requires": "the L34 fix's edited :203-209 case, U-2 and U-4",
+      "expectVerdict": "CAUGHT",
+      "expect": "The exact-argument case fails (incurredOn undefined); U-2 'official AC is the ledger's postings dated on or before the cutoff date (L34)' fails (the 02-05 posting of 900 counts: ac 1,300, not 400); U-4 (boundary) fails (the 02-01 posting of 50 counts: ac 150, not 100)."
+    },
+    {
+      "name": "UL34-M3 reversals left out (unit side of L34-M3)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "      activityId: { not: null },",
+      "to": "      activityId: { not: null }, reversalOfId: null,",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 510
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/earned-value.service.test.js",
+      "live": "L34-M3 (wp3-fix-mutations.l34.json): no live catcher in the proof (repro R6 only)",
+      "requires": "the L34 fix's edited :203-209 case and U-3",
+      "expectVerdict": "CAUGHT",
+      "expect": "The exact-argument case fails (where gains reversalOfId: null); U-3 (reversal) fails (the -400 reversal is dropped by the mock, which honours where.reversalOfId: ac 650, not 250)."
+    },
+    {
+      "name": "UL34-M4 the per-activity through-date blanked (unit side of L34-M4)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "        actualThroughDate: row._max?.incurredOn ?? null,",
+      "to": "        actualThroughDate: null,",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 523
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/earned-value.service.test.js",
+      "live": "L34-M4 (wp3-fix-mutations.l34.json): no live catcher in the 93-check proof",
+      "requires": "U-2 and U-3 of the L34 fix",
+      "expectVerdict": "CAUGHT",
+      "expect": "U-2 fails (officialActualThroughDate null, not 2026-01-20T00:00:00.000Z); U-3 fails (null, not the 01-25 date)."
+    },
+    {
+      "name": "UL34-M5 the formula version put back to ev.v2 (unit side of L34-M5)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "const FORMULA_VERSION = \"ev.v3\";",
+      "to": "const FORMULA_VERSION = \"ev.v2\";",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 35
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/earned-value.service.test.js",
+      "live": "L34-M5 (wp3-fix-mutations.l34.json): contract-dependent",
+      "requires": "U-7 of the L34 fix (the lock case at :458-501, edited)",
+      "expectVerdict": "CAUGHT",
+      "expect": "U-7 fails: the snapshot upsert's create holds formulaVersion ev.v2, not ev.v3."
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "note": "WP-3 unit side (mutate-multi.js list key 'wp3-unit', proof null: jest --runTestsByPath the named suite under the proof lock, no database). Mocked-Prisma suites are not certification evidence (plan section 1.4): these entries only show that the unit gate also turns red beside the live catch. They run on the same final code as the live lists (the L34-fixed tree), where earned-value.service.test.js has been rewritten by the fix (L34-FIX-PLAN.md s5): titles marked 'requires' exist only after the fix and are reconciled with the fix diff before the run. Run one id per invocation, quoted and with a trailing comma (\"--only=M1,\"): mutate-multi.js matches a value without a comma as a PREFIX (M1 would also run M1a and M1b; L34-M1 would also run L34-M1R), and PowerShell drops an unquoted trailing comma.",
+  "noUnitCatcher": [
+    "M1, M1a, M1b (0.9 boundary): no test builds a report with SPI or CPI exactly 0.9; 'raises EAC when official AC overruns earned value' asserts cpiAlert true at CPI 0.625, true either way. Live catchers T4.spi09.spiAlert / T4.cpi09.cpiAlert only.",
+    "M2b (relock path): no test locks a period that is already locked. Live catchers PER.relock.jan, PER.relock.feb, PER.V.relock only.",
+    "M3b (PM-only override): no test sends an override as a role other than pm. Live catcher PER.V.financeOverride only.",
+    "M4 (read swap): the suite's mocked activities carry progress only, so activity.progressSubmissions.map throws a TypeError in every report test: a crash, not an assertion, not counted (the WP-1 I1 rule). Live catchers T7.live.hash and KA.EVL.runDate only.",
+    "The two status-filter mutants are equivalent live and not run (wp3-mutations.ev.json equivalent[])."
+  ],
+  "mutations": [
+    {
+      "name": "UM3 the readiness gate skipped on lock (unit side of M3)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "  if (!gate || gate.ready) {",
+      "to": "  if (true) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1650
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 1663
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/earned-value.service.test.js",
+      "live": "M3 (wp3-mutations.ev.json): PER.V.financeBlocked",
+      "expectVerdict": "CAUGHT",
+      "expect": "'blocks official snapshot lock when reporting readiness fails without override' fails (the lock resolves and the snapshot upsert runs instead of rejecting with REPORTING_READINESS_BLOCKED) and 'audits a PM readiness override before locking an official snapshot' fails (no override is resolved: auditService.recordEvent is never called and report.readinessOverride is null). 2 tests, both present at HEAD; the fix keeps them (L34-FIX-PLAN.md s5: cases :503-583 unchanged)."
+    },
+    {
+      "name": "UM2 a locked period recomputed on read (unit side of M2; needs the L34 fix's U-6)",
+      "file": "backend/src/services/earned-value.service.js",
+      "from": "  if (useLockedSnapshot && period.evSnapshot) {",
+      "to": "  if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 714
+          }
+        ],
+        "simFix": [
+          {
+            "count": 1,
+            "line": 728
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/earned-value.service.test.js",
+      "live": "M2 (wp3-mutations.ev.json): EVL.febPeriod.hash, PER.V.afterLock.periodHash",
+      "requires": "U-6 'frozen ev.v2 snapshot', added by the L34 fix (L34-FIX-PLAN.md s5); absent at HEAD, where no test reads a period that carries evSnapshot. Without U-6 this entry survives: drop it, do not count it.",
+      "expectVerdict": "CAUGHT",
+      "expect": "U-6 fails: the period carrying evSnapshot (formulaVersion ev.v2, ac 0) is recomputed from the mocked ledger: costLedgerEntry.groupBy is called (U-6 asserts it is not), ac 400 instead of 0, reporting.formulaVersion ev.v3 instead of ev.v2, truth no longer EV_REPORT_TRUTH_LEGACY."
+    }
+  ]
+}
