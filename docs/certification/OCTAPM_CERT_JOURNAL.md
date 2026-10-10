@@ -684,3 +684,86 @@ The plan's severity handling fixes a blocking confirmed P1, and an approved owne
 - Review and adjudication notes: `C:\Temp\octapm-cert\scratch\wp1-fix-*`.
 
 **WP-0 state is unchanged.** E1, E7 and E8 are met. E2 (the deep population) comes next: settle the builder workflow, then the §3.3 build order on this commit.
+
+## 2026-10-09 — WP-0 deep builders: first build, three reviews, adjudication
+
+**The builder workflow** wrote 15 builders in `scripts/cert/cert3/build/` (untracked until the build is final), with:
+- a shared `lib.js`, which guarantees resumable runs with no duplicates and asserts every creation;
+- generated schedule and BOQ files.
+
+Every builder was debug-run against the dirty certification DB, one writer at a time. With the WP-1 fixes, the builders built every step except BLOCKED steps of these kinds:
+- undecided owner rules: HR-C8 (PO closes), HR-C11 (weather half-days), RFI-DRAFT;
+- the decided HR-C1, whose fix is in WP-4;
+- confirmed L34, whose fix is in WP-3;
+- three items that were plan sequencing, not defects, now decided in the adjudication.
+
+**Three adversarial reviews** raised 60 problems. All were adjudicated by the integration owner (`C:\Temp\octapm-cert\scratch\wp0\builders-adjudication.md`). The main decisions:
+- **Moment-bound evidence (G1).** A build that passes through a state a work-package check needs asserts that check at that moment. Checks the built end state makes impossible run in the WP proof on fresh records (plan §7 step 4). Every case is mapped in `build/MOMENT-MAP.md`.
+  - Example: 087-SCH keeps A310's quantity entries, which §3.2 requires. So EV(A310) 67,500 / 81,000 / 85,500 and the bare-percent refusal are asserted in the build, while WP-2's EV-0 set-up checks use fresh records.
+  - Likewise, WP-1 T2 is asserted before the baseline and the tail.
+- **No silent workarounds.** A departure is a BLOCKED step with a register or HR ref and the observed answer, or a persisted `b.finding`. Code comments never carry findings. "PLAN-*" and "ADJ-*" refs are not allowed.
+- **Fixed on paper (A10), with derivations:**
+  - F3 is generated as P6 exports it (the capped late pass). The builder had rewritten the file to get it approved.
+  - The reporting `timeZoneSource` is 'project', with the zone asserted equal to the company's.
+  - 087-HLT's EV "at the cutoff" (an internal plan contradiction with §3.3).
+  - 087-HLT's document-control figure follows the literal §3.2 contents.
+  - IPC-04's net when it is certified last.
+- **Plan items served elsewhere, not dropped:**
+  - Change events raised from an exception: by the WP-9 handling proof, since the build cannot evaluate the engine without consuming WP-9 T2's first evaluation.
+  - The 0.5 overtime multiplier: by the contract refusal (adjudication F1).
+  - 087-OTH's finance officer: invited by D-ID-1, since 087 has no finance staff and assumption A1 does not hold.
+- **API only, by identity, resumable:**
+  - SQL reads removed;
+  - records selected by identity, never by position;
+  - every interruptible create or act gets a live find or verify;
+  - the product's CPM is no longer the oracle for 087-EXC dates;
+  - tokens are redacted from build logs.
+- **Seven product suspects registered** for their work packages' confirm-first lists: WP1-RB-1, WP3-TZ-1, WP4-OVR-1, WP4-DRAFTS-1, WP5-SVC-1, WP5-AWD-1, WP8-TRN-1.
+
+**E2 at this point.** BLOCKED steps remain, each observing its exact known answer:
+- undecided owner rules (HR-C8, HR-C11, RFI-DRAFT), which plan §0 item 3 has waiting for the confirm-first sweep that itself runs on `cert3d`;
+- fixes scheduled in their work packages (HR-C1 in WP-4, L34 in WP-3).
+
+E2's "builder exit 0" cannot be met until those land. **WP-0 stays formally open on that one item.** The confirm-first sweep and WP-1 then run on `cert3d`, as §7 sequences them.
+
+**Next exact action:**
+1. The fix workflow (`wf_b689052f-5e1`) applies the adjudication; two adversarial verifiers check it.
+2. Adjudicate their verdicts.
+3. Run the §3.3 build order on `f599e67` plus the builders: stop the API; restore `cert2c`; migrate deploy; start the API; D-ID-1 proofs; fingerprint before; run-all detached with the watchdog; fingerprint after and compare; snapshot `cert3d`.
+4. Commit the builders.
+
+## 2026-10-09 (late) — Builder adjudication closed after three bounded fix rounds; the build order is ready
+
+**Rounds 2 and 3** (adjudication `C:\Temp\octapm-cert\scratch\wp0\builders-adjudication.md`, results `fix2-result.json`, `fix3-result.json`). Each round applied the integration owner's decisions, reran only the touched builders fresh and uninterrupted on the final bytes, and ended with an adversarial read-only verifier:
+- Round 2 (6 agents): every item verified. It aligned 087-HLT with 052-FLD (health departures BLOCKED under HR-K1 and HR-K2), moved every builder-computed figure into the answer book with a derivation (export sheet gate, IPC-09/10, 087-COM-C, 087-EV run-date reads, the weather invariance), fixed the fabricated adoption in 052-FLD and the missing finds in 006-LITE, made 087-FLD's template edit resumable, replaced the IPC-09 certify probe with a read, and added uniqueness to every identity find.
+- Round 3 (3 agents, resumed after the 16:59 CDT cluster crash, which this session restarted): the last seven A10/G4 leftovers; all verified. One cross-check accepted (087-COM read a pre-final answer book that it does not use); the final build covers it.
+
+**Allowed BLOCKED refs at E2** (each keyed to the answer book's recorded known answer; lib refuses any other): HR-C1, HR-C8, HR-C11, RFI-DRAFT, L34, L112, HR-S9, HR-K1, HR-K2, HR-K7. Every other step must build.
+
+**Artefacts.** `build/MOMENT-MAP.md` (225 entries after round 3); `answers/CHANGES-WP0-BUILDERS.md` (rounds 1-3 merged); the three answer books now carry 633 / 853 / 618 derived figures.
+
+**Incident.** At 16:59 CDT a client backend of the certification cluster was terminated by exception 0x40010004 (as on 2026-10-06) and the cluster, the cert API and the web app went down with the session. Restarted 21:09 CDT; recovery from the 16:38 checkpoint; `octapm_cert` and the `cert2c` snapshot intact. No builder was mid-run.
+
+**Next exact action:** run `C:\Temp\octapm-cert\build-cert3d.ps1` detached (plan §3.3: stop the API, scrub api logs, restore cert2c, migrate deploy, start the API, the six D-ID-1 proofs, fingerprint before, run-all --fresh under the watchdog, stop the API, scrub, fingerprint after, fingerprint97 compare, snapshot cert3d, start the API). Then commit the builders, the answer books and the moment map. The owner is viewing the software on the pre-restore database first; the build starts when that viewing is done.
+
+## 2026-10-09/10 — §3.3 build order, run 1: stopped at 087-EXC on a weekend run date (no product defect)
+
+**Launched** 22:58 CDT 2026-10-09 (`C:\Temp\octapm-cert\build-cert3d.ps1`, detached), on the owner's instruction not to wait for the manual dashboard viewing.
+
+| Step | Result |
+|---|---|
+| scrub api logs (pre) | exit 0 |
+| restore `cert2c` | exit 0 (0.8 min) |
+| migrate deploy | exit 0: `20261006010000_identity_security` applied (cert2c predates it) |
+| D-ID-1 proofs | all exit 0: user-add 48/48, guards 68/68, sessions 67/67, SSO 36/36, owner-recovery 74/74, keys 23/23 (316 checks) |
+| fingerprint before (`cert3-pre`) | exit 0 |
+| run-all --fresh | **exit 1 after 4.5 min**: 087-SCH, 087-IMP, 087-COM-B, 087-COM-C BUILT; 087-EV (L34 ×7, L112, HR-S9), 087-COM (HR-C1, HR-C8 ×2), 087-FLD (HR-C11 ×3, RFI-DRAFT) INCOMPLETE with allowed refs only; **087-EXC FAILED at its first assertion**; nothing after it ran. 0 5xx, 0 failed steps in the builders that ran. |
+| fingerprint after, compare, snapshot | not reached; **no `cert3d`** |
+
+**Cause.** The run reached 087-EXC at 04:26 UTC on Saturday 2026-10-10, so 087's run date (the earlier of the UTC and Cairo dates) was a Saturday. 087-EXC places WP-9 T3's slip of 7 on the answer book's five-day calendar and, by the round-2 adjudication (R2-F), fails closed on a Saturday or Sunday run date rather than borrow the product's own weekend snapping. Working as designed; not a product defect, not a data problem.
+
+**Decision.** Re-run the whole build order fresh (it restores `cert2c` again) when 087's run date is a weekday: the earliest instant is Monday 2026-10-12 00:00 UTC (Sunday 19:00 CDT). Resuming this partial build instead would mix run dates across builders, whose resume checks depend on the run date. A paper rule for weekend run dates would be a builder change needing review; the owner ruled out another builder-review round. Only 087-EXC (through `kit-controls.js`) depends on a weekday; 087-HLT's run-date window (10-06..10-25 for this population) and every other builder are weekday-free.
+
+**Meanwhile.** The builders, answer books and moment map are committed (this commit). The WP-1 proving run, mutation lists and run plan are being authored write-only and will be debug-run against the partial database; it is discarded by the next `cert2c` restore.
+
+**Next exact action:** at or after Sunday 2026-10-11 19:10 CDT, launch `build-cert3d.ps1` detached again; report the eight items the owner asked for; then the confirm-first sweep and WP-1 on `cert3d`.

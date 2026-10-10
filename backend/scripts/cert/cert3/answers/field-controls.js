@@ -41,12 +41,32 @@
  * Owner decision in force for this section: HR-S2 (plan :30) - milestones are
  * valid zero-duration elements; M900 (duration 0) is a critical element of the
  * certified network and counts in every activity/critical total below.
+ *
+ * The integration owner's adjudication of the WP-0 deep-company builders
+ * (2026-10-09, C:\Temp\octapm-cert\scratch\wp0\builders-adjudication.md) is
+ * applied on paper: WP8.timesheet.multiplierHalf* (087-FLD item 1: the plan's
+ * 0.5 crew member is served by the contract refusal), WP8.rfi.overdue* and
+ * WP8.transmittal.meetingChangeEventReadBack (087-FLD item 6), and WP9.health
+ * (087-EXC/HLT items 6, 7 and 8: the EV figures at the cutoff and on the card,
+ * the run-date rule rules.delayedExampleDatesFor, document control 80 / 80).
+ * Its round 2 (R2-B) adds two HEAD readings: WP9.export.sheetGate.today (B1,
+ * the export's answer to a member denied risk:read) and
+ * WP8.weather.nonContractualAddsNothing.today (B5, the truncated 12).
+ * Entries added for it cite plan lines as numbered at f599e67 (PF); their
+ * product citations keep the @886c9f1 tag (every product file they cite is
+ * unchanged at f599e67). Changed keys: answers/CHANGES-WP0-BUILDERS.md.
  */
 
 const PLAN = "docs/certification/OCTAPM_CERT3_PLAN.md";
 const HEAD = "886c9f1";
 const P = (...lines) => `${PLAN}:${lines.join(",")}`;
 const H = (file, lines) => `${file}:${lines} @${HEAD}`;
+/** Plan lines as numbered at product HEAD f599e67 (entries added for the builders' adjudication use this numbering). */
+const PF = (...lines) => `${PLAN}:${lines.join(",")} @f599e67`;
+/** The integration owner's binding adjudication of the WP-0 deep-company builders (2026-10-09). */
+const BADJ = (item) => `C:/Temp/octapm-cert/scratch/wp0/builders-adjudication.md ${item}`;
+/** The WP-0 answer-book adjudication (F1: VALIDATION_ERROR is the contract). */
+const ADJ0 = (item) => `C:/Temp/octapm-cert/scratch/wp0/adjudication.md ${item}`;
 
 function F(value, unit, derivation, source, opts = {}) {
   const leaf = {
@@ -133,6 +153,25 @@ function addWorkingDays(iso, n) {
     if (wd !== 0 && wd !== 6) left -= 1;
   }
   return isoDate(d);
+}
+
+/**
+ * End of a local calendar date in a zone, as a UTC instant (the reporting cutoff,
+ * utils/reporting-cutoff.js): the last millisecond before the zone's clock shows the next
+ * date, found by bisection on the platform's Intl data (the same calculator as
+ * answers/schedule.js rules.endOfLocalDay; restated so this file stays self-contained).
+ */
+function endOfLocalDay(dateKey, timeZone) {
+  const fmtDate = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+  const [y, m, d] = dateKey.split("-").map(Number);
+  let lo = Date.UTC(y, m - 1, d) - 2 * DAY_MS;
+  let hi = Date.UTC(y, m - 1, d) + 3 * DAY_MS;
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (fmtDate.format(new Date(mid)) > dateKey) hi = mid;
+    else lo = mid;
+  }
+  return new Date(hi - 1).toISOString();
 }
 
 // The certified 14-activity network (backend/scripts/phase21/stage2-schedule.js:41-56): FS, lag 0.
@@ -274,10 +313,61 @@ const HLT_DOC_PLAN_READING = {
   rule: docWorkspace({ overdueOpenRrbFirst: 1, overdueSubmittals: 0, pendingSubmittals: 0 }),
 };
 
-// 087-HLT delayed activity: 50 working days from a Monday start (example run date 2026-10-09).
-const HLT_EXAMPLE = { start: "2026-08-10", runDate: "2026-10-09", wd: 50 };
-const HLT_CAL_FINISH = addDays(HLT_EXAMPLE.start, HLT_EXAMPLE.wd);
-const HLT_WD_FINISH = addWorkingDays(HLT_EXAMPLE.start, HLT_EXAMPLE.wd);
+// 087-HLT delayed activity (plan §3.2 087-HLT, :431 @f599e67: "A 50-working-day activity whose
+// calendar-day and working-day finishes fall on either side of today"; past-dated, cutoff
+// 2026-08-31). Settled on paper (builders' adjudication 087-EXC/HLT item 7, R3-10):
+//   - the health card and the workspace date the finish as start + earlyFinish CALENDAR days
+//     (health.js:349-361, workspace-dashboard.service.js:167-185) and count it delayed when that
+//     instant is before now and pct < 100; HR-K2 dates it by the working-day finish, which for a
+//     start on a working day is start + 70 calendar days (50 working days = 10 whole weeks,
+//     exclusive finish), so "either side of today" holds for every today with
+//     start + 50 <= today <= start + 69;
+//   - "today" is the WP-9 proof's read, which comes after the build, so the rule takes the latest
+//     Monday whose calendar finish is already past on the run date in every zone (start + 50 <=
+//     run date - 1): start = the Monday on or before (run date - 51). That leaves the proof
+//     run date .. start + 69, i.e. at least 13 days (run date - 51 a Sunday) and at most 19;
+//   - the plan's cutoff: the activities start on or before 2026-08-31, so their loadings and
+//     costs can be dated between the start and the cutoff (true for run dates up to
+//     HLT_LATEST_RUN_DATE).
+// The book's former fixed example (start 2026-08-10 = run date - 60, the window's midpoint, for
+// run date 2026-10-09) satisfied the window on the run date but came from no stated rule and
+// left the proof only until 2026-10-18; it is replaced by this rule (CHANGES-WP0-BUILDERS.md).
+const HLT_CUTOFF = "2026-08-31";
+const HLT_WD = 50;
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const mondayOnOrBefore = (iso) => addDays(iso, -((new Date(`${iso}T00:00:00.000Z`).getUTCDay() + 6) % 7));
+/** 087-HLT's H50 dates for a run date (the build's company-local date, YYYY-MM-DD). */
+function delayedExampleDatesFor(runDate) {
+  if (!ISO_DAY.test(String(runDate)) || Number.isNaN(Date.parse(`${runDate}T00:00:00.000Z`))) throw new Error(`delayedExampleDatesFor: run date ${runDate} is not YYYY-MM-DD`);
+  const start = mondayOnOrBefore(addDays(runDate, -(HLT_WD + 1)));
+  const calendarFinish = addDays(start, HLT_WD);
+  const workingFinish = addWorkingDays(start, HLT_WD);
+  return {
+    runDate,
+    start,
+    calendarFinish,
+    workingFinish,
+    windowFrom: calendarFinish,
+    windowThrough: addDays(workingFinish, -1),
+    cutoff: HLT_CUTOFF,
+    startOnOrBeforeCutoff: start <= HLT_CUTOFF,
+  };
+}
+const HLT_EXAMPLE = delayedExampleDatesFor("2026-10-09");
+const HLT_CAL_FINISH = HLT_EXAMPLE.calendarFinish;
+const HLT_WD_FINISH = HLT_EXAMPLE.workingFinish;
+/** The last run date whose start is on or before the cutoff (found by walking forward from the reference run date). */
+const HLT_LATEST_RUN_DATE = (() => {
+  let d = HLT_EXAMPLE.runDate;
+  while (delayedExampleDatesFor(addDays(d, 1)).startOnOrBeforeCutoff) d = addDays(d, 1);
+  return d;
+})();
+for (let d = "2026-10-01"; d <= HLT_LATEST_RUN_DATE; d = addDays(d, 1)) {
+  const x = delayedExampleDatesFor(d);
+  if (!(x.calendarFinish <= addDays(d, -1) && x.workingFinish > addDays(d, 12) && addWorkingDays(x.start, HLT_WD) === addDays(x.start, 70))) {
+    throw new Error(`field-controls answer book: the 087-HLT rule fails for run date ${d}`);
+  }
+}
 
 // 087-EXC quantity (plan :391, :918): Q1 100 m3 allocated to X10.
 const Q_LIMIT = 100;
@@ -296,6 +386,37 @@ const TRUTHS = {
   contract: T_CONTRACT + T_APPROVED_CHANGES,
 };
 const cents = (units) => Math.round(units * 100);
+
+// 087-HLT EV "at the cutoff" (builders' adjudication 087-EXC/HLT item 6, R3-4). The plan's
+// "PV 90,000, EV 75,000 and AC 80,000 at the cutoff" contradicts its own §3.3 ("Approvals
+// carry real timestamps. A cutoff before the run date therefore sees no approval"): settled
+// on paper as PV and AC at 2026-08-31, EV 0 at that cutoff, and EV 75,000 on the health
+// card's default basis. Inputs: the record set the build makes (build/087-hlt.js), adopted
+// here; the plan fixes only the three totals.
+const HLT_ZONE = "Africa/Cairo";
+const HLT_RECORDS = [
+  // code, working days from the project start, BOQ allocation (approved, whole row), approved
+  // cost loading dated on or before the cutoff, approved direct cost dated on or before the
+  // cutoff, approved percent (stamped at the build's real time).
+  { code: "H10", workingDays: 10, allocation: 60_000, loading: 60_000, cost: 50_000, pct: 100 },
+  { code: "H50", workingDays: HLT_WD, allocation: 30_000, loading: 30_000, cost: 30_000, pct: 50 },
+];
+const HLT_CUTOFF_INSTANT = endOfLocalDay(HLT_CUTOFF, HLT_ZONE);
+const HLT_PV_CUTOFF = cents(HLT_RECORDS.reduce((s, r) => s + r.loading, 0));
+const HLT_AC_CUTOFF = cents(HLT_RECORDS.reduce((s, r) => s + r.cost, 0));
+const HLT_EV_CUTOFF = 0; // every approval is stamped at the build's run, after HLT_CUTOFF_INSTANT
+const HLT_EV_CARD = HLT_RECORDS.reduce((s, r) => s + Math.round((cents(r.allocation) * r.pct) / 100), 0);
+if (HLT_PV_CUTOFF !== cents(HLT_EV.pv) || HLT_AC_CUTOFF !== cents(HLT_EV.ac) || HLT_EV_CARD !== cents(HLT_EV.ev)) {
+  throw new Error("field-controls answer book: the 087-HLT record set must give the plan's PV 90,000, AC 80,000 and (card) EV 75,000");
+}
+if (!(HLT_RECORDS.find((r) => r.code === "H50").pct < 100)) throw new Error("field-controls answer book: H50 must stay below 100% to count as delayed");
+
+// The project XLSX export at HEAD (builders' adjudication round 2, R2-B B1): the worksheets
+// generateProjectExport adds, unconditionally and in this order (export.service.js:179, 209, 234,
+// 259, 270, 316); the route's only permission check is cost:export (export.js:19).
+const EXPORT_SHEETS_HEAD = ["Master Schedule", "Critical Path", "Risks", "Assumptions", "Long Lead Items", "WBS"];
+const EXPORT_RISK_SHEET_HEAD = "Risks";
+if (!EXPORT_SHEETS_HEAD.includes(EXPORT_RISK_SHEET_HEAD)) throw new Error("field-controls answer book: HEAD's export carries its risk sheet");
 
 // ─── the answer tree ─────────────────────────────────────────────────────────
 
@@ -364,7 +485,10 @@ const WP8 = {
     atConsumedPct: F(pct2(FLD_WEATHER_AT.pct), "percent", "14 / 20 x 100 = 70 (in IEEE doubles (14/20)*100 is exactly 70; compared at 2 dp, F2)",[P(70, 390, 815), H("backend/src/services/weather.service.js", "167")], { company: C_FLD }),
     atWarning: F(FLD_WEATHER_AT.warning, "bool", "70 >= 70 is true", [P(815), H("backend/src/services/weather.service.js", "200")], { company: C_FLD }),
     atRemaining: F(FLD_WEATHER_AT.remaining, "days", "max(20 - 14, 0) = 6", [P(815), H("backend/src/services/weather.service.js", "198")], { company: C_FLD }),
-    nonContractualAddsNothing: F(FLD_WEATHER_AT.used, "days", "A contractual:false 10-day delay is skipped in contractualUsed: still 14.0 after it is added.", [P(390, 819), H("backend/src/services/weather.service.js", "162-165")], { company: C_FLD }),
+    nonContractualAddsNothing: F(FLD_WEATHER_AT.used, "days",
+      `A contractual:false 10-day delay is skipped in contractualUsed: still 14.0 after it is added. Today ${FLD_WEATHER_AT_TODAY.used} (HR-C11): every row goes to the Int column WeatherDelay.delayDays (weather.service.js:217) and is stored truncated, so the contractual rows read trunc(0.5, 1.0, 1.5, 2.5, 7.5, 1.0) = 0 + 1 + 1 + 2 + 7 + 1 = ${FLD_WEATHER_AT_TODAY.used} (WP8.weather.todayAt: ${FLD_WEATHER_AT_TODAY.used} / 20 = ${pct2(FLD_WEATHER_AT_TODAY.pct)}%), and the non-contractual 10 adds nothing to that either (weather.service.js:162-165 skips contractual false): still ${FLD_WEATHER_AT_TODAY.used} after it is added. The non-contractual invariance holds at HEAD; only the figure it holds at is HR-C11's.`,
+      [P(390, 819), H("backend/src/services/weather.service.js", "162-165,217"), PF(429, 444, 858, 867, 1078), BADJ("Round 2 R2-B (B5)")],
+      { company: C_FLD, today: FLD_WEATHER_AT_TODAY.used, note: `HR-C11 known answer (truncation): observed by the round-1 builds at the 14 point (087-FLD weather.at14: 12, 60%). 052-FLD runs the same record set (plan :444 @f599e67; WP8["052-FLD"].weather* use FLD_WEATHER_*), and the book carries no separate 052-FLD non-contractual figure, so this leaf (value ${FLD_WEATHER_AT.used}, today ${FLD_WEATHER_AT_TODAY.used}) is the one both builders judge against.` }),
     monthlyNonContractual: F(10, "days", "The monthly split books the 10 days under nonContractual of its month.", [P(390, 819), H("backend/src/services/weather.service.js", "178-182")], { assumption: true, company: C_FLD, note: "assumes no other non-contractual delay in that month" }),
     todayBelow: F(pct2(FLD_WEATHER_BELOW_TODAY.pct), "percent",
       "The same records under the Int column: trunc(0.5,1.0,1.5,2.5,7.5) = 0+1+1+2+7 = 11 -> 11/20 x 100 = 55%, no warning (the double is 55.00000000000001; compared at 2 dp the figure is 55, F2). The proof is red at 13 until HR-C11 is decided.",
@@ -377,14 +501,14 @@ const WP8 = {
       [P(405, 845), H("backend/src/services/timesheet.service.js", "70,652-655")], { company: C_FLD }),
     mixedDayLedger: F("costType labour, sourceType timesheet", "state", "Approval posts each entry through the cost ledger with sourceType 'timesheet' and costType 'labour'.", [P(845), H("backend/src/services/timesheet.service.js", "669-686")], { company: C_FLD }),
     multiplierHalf: F(2 * RATE * multiplierFor("overtime", 0.5), "cents",
-      "2 h overtime at 50.00 with multiplier 0.5: max(1, 0.5) = 1 -> 2 x 50.00 x 1 = 100.00 (the floor; unfloored it would be 50.00).",
-      [P(390, 846), H("backend/src/services/timesheet.service.js", "70")], { assumption: true, company: C_FLD, note: "rate 50.00 assumed for that worker; the plan gives only the result" }),
+      "2 h overtime at 50.00 with multiplier 0.5: max(1, 0.5) = 1 -> 2 x 50.00 x 1 = 100.00 (the floor; unfloored it would be 50.00). Plan WP-8: 'A multiplier of 0.5 gives 100.00 for 2 h of overtime' (:885 @f599e67). NOT on a built crew: no 0.5 worker can be created through the API (multiplierHalfCreate: 400 VALIDATION_ERROR; multiplierHalfImport: 200 with the row in errors[]; adjudication F1), so 087-FLD holds none and this figure is checked in process, against the service's exported rule multiplierFor('overtime', { overtimeMultiplier: 0.5 }) = 1 (timesheet.service.js:70) and the amount round2(hours x rate x multiplier) (:652-655), never read off a built timesheet.",
+      [P(390, 846), PF(429, 885), H("backend/src/services/timesheet.service.js", "70,652-655"), ADJ0("F1"), BADJ("087-FLD item 1")], { assumption: true, company: C_FLD, note: "rate 50.00 assumed for that worker; the plan gives only the result. In process only (builders' adjudication 087-FLD item 1)." }),
     multiplierHalfCreate: F("400 VALIDATION_ERROR", "http",
-      "POST /workers (and PATCH /workers/:workerId) with overtimeMultiplier 0.5: the route's workerValidators chain body('overtimeMultiplier').isFloat({ min: 1, max: 5 }) refuses it before the service (validate: message 'Validation failed', error.details holds field 'overtimeMultiplier'). HEAD's VALIDATION_ERROR is the contract (adjudication F1); the service's own WORKER_MULTIPLIER_INVALID (:194) is not reached through these routes. So a 0.5 crew member cannot be built through the API (the import refuses the row too: multiplierHalfImport); the 100.00 case needs a guarded DB fixture (plan §1.4 allows guarded fixtures) or must be dropped.",
-      [P(390, 846, 99), H("backend/src/routes/timesheets.js", "32,64,66"), H("backend/src/middleware/validate.js", "7-25"), H("backend/src/services/timesheet.service.js", "193-194")], { planValue: "a crew member with multiplier 0.5 built by the driver (plan :390)", company: C_FLD, note: "details.field=overtimeMultiplier" }),
+      "POST /workers (and PATCH /workers/:workerId) with overtimeMultiplier 0.5: the route's workerValidators chain body('overtimeMultiplier').isFloat({ min: 1, max: 5 }) refuses it before the service (validate: message 'Validation failed', error.details holds field 'overtimeMultiplier'). HEAD's VALIDATION_ERROR is the contract (adjudication F1); the service's own WORKER_MULTIPLIER_INVALID (:194) is not reached through these routes. So a 0.5 crew member cannot be built through the API (the import refuses the row too: multiplierHalfImport). The plan's 'one of them 0.5' crew member (087-FLD row) is SERVED BY THIS CONTRACT REFUSAL (builders' adjudication 087-FLD item 1): the build step that tries it is DONE, not BLOCKED, when it observes 400 VALIDATION_ERROR with an error.details entry whose field is 'overtimeMultiplier' and no worker created; MOMENT-MAP records the plan item as served by the refusal. The 100.00 figure (multiplierHalf) is checked in process.",
+      [P(390, 846, 99), PF(429), H("backend/src/routes/timesheets.js", "32,64,66"), H("backend/src/middleware/validate.js", "7-25"), H("backend/src/services/timesheet.service.js", "193-194"), ADJ0("F1"), BADJ("087-FLD item 1")], { planValue: "a crew member with multiplier 0.5 built by the driver (plan :390; :429 @f599e67)", company: C_FLD, note: "details.field=overtimeMultiplier. Plan item served by the contract refusal (builders' adjudication 087-FLD item 1): the plan's 0.5 crew member does not exist on 087-FLD, by contract." }),
     multiplierHalfImport: F({ status: 200, created: 0, updated: 0, skipped: 0, errors: [{ row: 1, message: "The overtime multiplier must be between 1 and 5" }] }, "state",
-      "POST /workers/import with one row { name, hourlyRate 50, overtimeMultiplier 0.5 }: the import route validates only rows / rows.*.userId / rows.*.companyId, so the request is accepted (200); normalizeWorker refuses the row (WORKER_MULTIPLIER_INVALID) and importWorkers records the refusal's own message against the 1-based row number; no worker is created (adjudication F1: 200 with the row in errors[], the message asserted).",
-      [P(390, 846), H("backend/src/routes/timesheets.js", "65"), H("backend/src/services/timesheet.service.js", "191,194,282-313")], { company: C_FLD, note: "the row carries a name (else WORKER_NAME_REQUIRED's message comes first, :191)" }),
+      "POST /workers/import with one row { name, hourlyRate 50, overtimeMultiplier 0.5 }: the import route validates only rows / rows.*.userId / rows.*.companyId, so the request is accepted (200); normalizeWorker refuses the row (WORKER_MULTIPLIER_INVALID) and importWorkers records the refusal's own message against the 1-based row number; no worker is created (adjudication F1: 200 with the row in errors[], the message asserted). Part of the contract refusal that serves the plan's 0.5 crew member (builders' adjudication 087-FLD item 1).",
+      [P(390, 846), PF(429), H("backend/src/routes/timesheets.js", "65"), H("backend/src/services/timesheet.service.js", "191,194,282-313"), ADJ0("F1"), BADJ("087-FLD item 1")], { company: C_FLD, note: "the row carries a name (else WORKER_NAME_REQUIRED's message comes first, :191)" }),
     reopenTwoThousand: F(TS_FIVE_BY_EIGHT, "cents", "The sheet: 5 workers x 8 h x 50.00 = 2,000.00 (stage 13 shape).", [P(847), "backend/scripts/phase21/stage13-labour.js:30-35"], { company: C_FLD }),
     reopenMirrorCount: F(5, "count", "reopen -> costLedger.reverse writes one negative mirror per un-reversed entry: 5 entries -> 5 mirrors.", [P(847), H("backend/src/services/cost-ledger.service.js", "386-428"), H("backend/src/services/timesheet.service.js", "716-731")], { company: C_FLD }),
     reopenMirrorSum: F(-TS_FIVE_BY_EIGHT, "cents", "5 x -400.00 = -2,000.00, exactly the posting.", [P(847), H("backend/src/services/cost-ledger.service.js", "411")], { company: C_FLD }),
@@ -476,7 +600,15 @@ const WP8 = {
       "POST /:rfiId/reopen without a reason: the route chain body('reason').isString().trim().notEmpty() refuses it before the service (validate: 'Validation failed', error.details holds field 'reason'). HEAD's VALIDATION_ERROR is the contract (adjudication F1); reopenRfi's requireDecisionText (RFI_REOPEN_REASON_REQUIRED, :875) is not reached through the route.",
       [H("backend/src/routes/rfi.js", "435-437"), H("backend/src/middleware/validate.js", "7-25"), H("backend/src/services/rfi.service.js", "873-877")], { company: C_FLD, note: "details.field=reason" }),
     scheduleImpactLink: F(3, "days", "On close, an RFI with scheduleImpactFlag and scheduleImpact 3 upserts a workflow activity link relationType 'schedule_impact' with scheduleImpactDays 3.", [P(867), H("backend/src/services/rfi.service.js", "703-705"), H("backend/src/services/rfi-workflow.service.js", "415-426")], { company: C_FLD }),
-    overdueRecords: F("RFI-RRB: open, responseRequiredBy past, dueDate null; RFI-ANS: answered, dueDate past, responseRequiredBy null", "text", "The two overdue-basis records of 087-FLD.", [P(390, 866)], { assumption: true, company: C_FLD }),
+    overdueRecords: F("RFI-RRB: open, responseRequiredBy past, dueDate null; RFI-ANS: answered, dueDate past, responseRequiredBy null", "text",
+      "The two overdue-basis records of 087-FLD. 'dueDate null' is a fact of the STORED row (the Rfi.dueDate column), not of the API: every RFI answer the API gives is enriched with dueDate = dueDateForRecord(row) = row.dueDate || row.responseRequiredBy || row.targetCloseBy || row.inspectionDate (workflow-support.service.js:840-845, applied at :955 and :1103-1107 by attachWorkflowDetailsToRecords, which listRfis, createRfi and updateRfi call: rfi.service.js:317, :476, :717; and the workflow detail: rfi-workflow.service.js:239). So GET /rfi/:id and the list show RFI-RRB with dueDate = its responseRequiredBy (overdueApiDueDate). The null column is read from the stored row in process, read only (overdueStoredDueDate), which is the basis the health card reads (prisma.rfi.findMany, health.js:174, :462-465). Builders' adjudication 087-FLD item 6.",
+      [P(390, 866), PF(429), H("backend/src/services/workflow-support.service.js", "840-845,955,1103-1107"), H("backend/src/services/rfi.service.js", "317,476,717"), H("backend/src/services/rfi-workflow.service.js", "239"), H("backend/src/routes/health.js", "174,462-465"), BADJ("087-FLD item 6")], { assumption: true, company: C_FLD }),
+    overdueApiDueDate: F({ "RFI-RRB": "its responseRequiredBy (the dueDate column is null)", "RFI-ANS": "its dueDate" }, "state",
+      "What the API presents as dueDate (GET /rfi/:id, the list, and the create / update answers): dueDateForRecord(row) = dueDate || responseRequiredBy || ... (workflow-support.service.js:840-845). RFI-RRB (column null) reads its responseRequiredBy day; RFI-ANS (column set, responseRequiredBy null) reads its own dueDate. Observed on the 087-FLD debug build (the RFI created with dueDate null and responseRequiredBy D read back dueDate = D).",
+      [H("backend/src/services/workflow-support.service.js", "840-845,955,1103-1107"), H("backend/src/services/rfi.service.js", "317,476,717"), BADJ("087-FLD item 6")], { company: C_FLD }),
+    overdueStoredDueDate: F({ "RFI-RRB": null, "RFI-ANS": "its dueDate (past)" }, "state",
+      "The stored Rfi.dueDate column, read in process and read only (e.g. prisma.rfi.findUnique({ where: { id }, select: { dueDate: true, responseRequiredBy: true } }) by the WP-8 proof; never a write, never through the API, which substitutes responseRequiredBy for a null column). RFI-RRB: null (created without a dueDate); RFI-ANS: its past dueDate. This is the column health.js reads for overdueHealth (:462-465).",
+      [H("backend/src/routes/health.js", "174,462-465"), H("backend/src/services/workflow-support.service.js", "840-845"), BADJ("087-FLD item 6")], { company: C_FLD, note: "read only, in process: the one place the 'dueDate null' premise of overdueRecords is observable" }),
     overdueDetail: F({ "RFI-RRB": true, "RFI-ANS": true }, "state", "isOverdue: status in [draft, open, answered] and (responseRequiredBy || dueDate) < now -> both.", [P(866), H("backend/src/services/rfi-workflow.service.js", "19,196-200")], { assumption: true, company: C_FLD }),
     overdueListFilter: F({ "RFI-RRB": true, "RFI-ANS": true }, "state", "?overdue=true: status in [draft, open, answered] and (rrb < now or (rrb null and dueDate < now)) -> both.", [P(866), H("backend/src/services/rfi.service.js", "50,163-169")], { assumption: true, company: C_FLD }),
     overdueHealth: F({ "RFI-RRB": false, "RFI-ANS": true }, "state", "health.js: dueDate < today and status != closed -> only RFI-ANS (rrb ignored, answered counted). HR-K1 recommends the workspace basis.", [P(866, 895, 1056), H("backend/src/routes/health.js", "462-465")], { assumption: true, company: C_FLD }),
@@ -520,9 +652,9 @@ const WP8 = {
       "Adjudication F6. The contractual notice letter (a correspondence created with contractualNotice true) is linked to its weather delay through the delay's correspondenceIds / correspondenceLinks (create or PATCH). The weather delay read back carries correspondenceLinks with exactly 1 entry whose correspondence.id is the letter and correspondence.contractualNotice is true (attachEvidenceToRecords reads the commercial correspondence links with the correspondence's ref, type, subject, contractualNotice, date and status).",
       [P(390), H("backend/src/routes/weather-delays.js", "46-49,80-83"), H("backend/src/services/weather.service.js", "231-237"), H("backend/src/services/commercial-traceability.service.js", "183-255,327-418"), H("backend/src/services/correspondence.service.js", "74")], { assumption: true, company: C_FLD, note: "one notice letter linked to one weather delay" }),
     noticeRegisterCount: F(1, "count", "The correspondence register's summary.notices counts correspondence with contractualNotice true: the one notice letter of 087-FLD.", [P(390), H("backend/src/services/correspondence.service.js", "41-48")], { assumption: true, company: C_FLD, note: "assumes no other contractual notice on 087-FLD" }),
-    meetingChangeEventReadBack: F({ origin: "meeting", meetingActionItemId: "the action item's id", title: "Meeting action: <the action item's title>", activityId: "the action item's activityId (or null)", type: "other", romAmount: 0, scheduleImpactDays: 0 }, "state",
-      "Adjudication F6. A change event raised from a meeting action item (record source meeting_action) reads back with the typed link meetingActionItemId = the action item and origin 'meeting'; its prefill takes the title 'Meeting action: <title>', the item's activity, type 'other', ROM 0 and schedule impact 0. Origin and the typed link are the endpoint's; the raise body may override every field of PREFILL_OVERRIDABLE (:515): title, description, type, notes, activityId, locationId, scheduleImpactDays, ownerChange, romAmount and lines (the comment above it at :512-514 omits ROM and ownerChange, the list includes both). The figures above assume the raise body sends none of them - in particular neither romAmount (else ROM reads the body's figure, not 0) nor ownerChange.",
-      [P(390), H("backend/src/services/change-event.service.js", "40-49,467-471,487-496,503-510,512-520,528-533")], { assumption: true, company: C_FLD, note: "the raise body sends neither romAmount nor ownerChange (nor any other PREFILL_OVERRIDABLE field)" }),
+    meetingChangeEventReadBack: F({ origin: "meeting", sourceRecordType: "meeting_action", sourceRecordId: "the action item's id", sourceLinks: [{ type: "meeting_action", id: "the action item's id" }], title: "Meeting action: <the action item's title>", activityId: "the action item's activityId (or null)", type: "other", romAmount: 0, scheduleImpactDays: 0 }, "state",
+      "Adjudication F6, wording settled by the builders' adjudication (087-FLD item 6). A change event raised from a meeting action item (record source meeting_action, change-event.service.js:467-471) is created with the typed link in its meetingActionItemId column and, because it carries exactly one typed link, the free-text pair sourcePairOf writes from it: sourceRecordType 'meeting_action', sourceRecordId = the action item's id (:88-92, written at :379). The serializer eventOut does NOT expose the meetingActionItemId column; it exposes the pair (sourceRecordType / sourceRecordId, :203-204) and sourceLinks, one entry { type: 'meeting_action', id: the action item's id, path } per typed link (:72-77, :207). So the read-back (GET .../change-events/:changeEventId, getChangeEvent -> eventOut, :355; routes/change-events.js:65) asserts sourceRecordType 'meeting_action', sourceRecordId = the action item and sourceLinks of length 1 with that type and id, plus origin 'meeting' (:490, :531). Its prefill takes the title 'Meeting action: <title>' (:470), the item's activity, type 'other', ROM 0 and schedule impact 0 (:487-496). Origin and the typed link are the endpoint's; the raise body may override every field of PREFILL_OVERRIDABLE (:515): title, description, type, notes, activityId, locationId, scheduleImpactDays, ownerChange, romAmount and lines (the comment above it at :512-514 omits ROM and ownerChange, the list includes both). The figures above assume the raise body sends none of them - in particular neither romAmount (else ROM reads the body's figure, not 0) nor ownerChange.",
+      [P(390), PF(429), H("backend/src/services/change-event.service.js", "40-49,72-77,88-92,191-216,355,369-379,467-471,487-496,503-510,512-520,528-533"), H("backend/src/routes/change-events.js", "65"), BADJ("087-FLD item 6")], { assumption: true, company: C_FLD, note: "the raise body sends neither romAmount nor ownerChange (nor any other PREFILL_OVERRIDABLE field); sourceLinks entries also carry a path (recordWorkspacePath), not asserted here" }),
   },
   existing: {
     snapshotQuality: F(qualityScore({ major: 1, minor: 0, failedItp: 1 }), "score",
@@ -661,10 +793,33 @@ const WP9 = {
       { assumption: true, note: "with in-app off but e-mail on, a row is still written (inAppVisible false): the in-app feed shows 0 but the table does not; the probe switches both off. That QS must not be the creating QS of the commitmentExecuted probe, or that count drops to 2" }),
   },
   health: {
-    spi: F(HLT_SPI, "ratio", "EV / PV = 75,000 / 90,000 = 0.833333", [P(392, 938)], { company: C_HLT }),
+    // EV figures (builders' adjudication 087-EXC/HLT item 6, R3-4): PV and AC at the 2026-08-31 cutoff,
+    // EV 0 at that cutoff (plan §3.3), EV 75,000 on the health card's default basis.
+    evRecords: F(HLT_RECORDS, "text",
+      "The record set the build makes (build/087-hlt.js), adopted here as the inputs of the EV figures; the plan gives only the totals. Two activities from the project start (H10 10 working days, H50 the 50-working-day activity of delayedExampleDates), each with one BOQ row allocated whole and approved (60,000 + 30,000), one approved cost loading and one approved direct cost each, every one dated on or before the cutoff 2026-08-31 and nothing after it (so the cutoff and today read the same PV and AC), and approved progress H10 100% and H50 50% (H50 below 100% so it can count as delayed). Approvals carry the build's real timestamps (plan §3.3).",
+      [P(392), PF(431, 467), BADJ("087-EXC/HLT item 6; R3-4")], { assumption: true, company: C_HLT, note: "money in whole currency units here (EGP); the figures below are cents" }),
+    cutoffInstant: F(HLT_CUTOFF_INSTANT, "instant",
+      `End of ${HLT_CUTOFF} in ${HLT_ZONE}, the project's reporting zone (Project.timezone copied from company 087 at creation; schedule.js WP3.setup.timeZone): Egypt keeps daylight saving from the last Friday of April to the last Thursday of October, so 2026-08-31 is UTC+3 and ends at ${HLT_CUTOFF_INSTANT} (bisection on the platform's Intl data).`,
+      [P(392), PF(431), H("backend/src/utils/reporting-cutoff.js", "1-17,145-156"), BADJ("087-EXC/HLT item 6")], { company: C_HLT }),
+    pvAtCutoff: F(HLT_PV_CUTOFF, "cents",
+      "GET /reports/ev?cutoffDate=2026-08-31: PV = approved cost loadings whose plannedDate is on or before the cutoff date (selected by calendar date: earned-value.service.js:439-451, 724-726, 759): H10 60,000.00 + H50 30,000.00 = 90,000.00.",
+      [P(392), PF(431), H("backend/src/services/earned-value.service.js", "439-451,724-726,759"), BADJ("087-EXC/HLT item 6")], { company: C_HLT }),
+    acAtCutoff: F(HLT_AC_CUTOFF, "cents",
+      "AC at the cutoff = the official actual cost of each activity whose cost record runs through a date on or before 2026-08-31 (earned-value.service.js:486-514, 760): H10 50,000.00 + H50 30,000.00 = 80,000.00. Each activity has one direct cost, dated on or before the cutoff, so HEAD's one-cumulative-record reading (L34) and the ledger reading agree here.",
+      [P(392), PF(431), H("backend/src/services/earned-value.service.js", "486-514,760"), BADJ("087-EXC/HLT item 6")], { company: C_HLT }),
+    evAtCutoff: F(HLT_EV_CUTOFF, "cents",
+      `EV at the cutoff reads progress approved by the cutoff instant (approvedAt <= ${HLT_CUTOFF_INSTANT}; earned-value.service.js:737-753, 786-792). Plan §3.3: 'Approvals carry real timestamps. A cutoff before the run date therefore sees no approval' (:467 @f599e67): the build approves H10 100% and H50 50% at its run (2026-10-09 or later), so no approval counts: EV 0.00. Plan figure correction (builders' adjudication 087-EXC/HLT item 6, a plan execution note, not BLOCKED): the plan's 'EV 75,000 at the cutoff' is the card's default basis (evOnCardBasis), not the cutoff.`,
+      [P(392), PF(431, 467), H("backend/src/services/earned-value.service.js", "737-753,786-792"), BADJ("087-EXC/HLT item 6; R3-4")], { planValue: cents(HLT_EV.ev), company: C_HLT, note: "the plan's own §3.3 rule gives 0 at a past cutoff; WP-3 T3 relies on the same rule" }),
+    cardBasis: F("ad hoc report cut at today (no reporting period on 087-HLT)", "state",
+      "The health card asks evService.buildOfficialEvReport with no period and no cutoff (health.js:316-319). resolveReportingPeriod then takes the latest period whose cutoff has passed (pickDefaultReportingPeriod) and, with none, cuts a virtual period at new Date(), i.e. the end of today's date in the reporting zone (earned-value.service.js:386-395, 398-424). 087-HLT has no reporting period, so the card's basis is today.",
+      [P(392, 938), PF(431, 976), H("backend/src/routes/health.js", "316-327"), H("backend/src/services/earned-value.service.js", "359-424,696-722"), BADJ("087-EXC/HLT item 6")], { assumption: true, company: C_HLT, note: "assumes no reporting period is created on 087-HLT" }),
+    pvOnCardBasis: F(HLT_PV_CUTOFF, "cents", "Every loading is dated on or before 2026-08-31, before today, and none after it: 90,000.00, the same as at the cutoff.", [P(392), PF(431), H("backend/src/services/earned-value.service.js", "439-451"), BADJ("087-EXC/HLT item 6")], { company: C_HLT }),
+    acOnCardBasis: F(HLT_AC_CUTOFF, "cents", "Every direct cost is dated on or before 2026-08-31 and none after it: 80,000.00, the same as at the cutoff.", [P(392), PF(431), H("backend/src/services/earned-value.service.js", "486-514"), BADJ("087-EXC/HLT item 6")], { company: C_HLT }),
+    evOnCardBasis: F(HLT_EV_CARD, "cents", "Every approval is stamped before the card's cutoff (the end of today): EV = 60,000.00 x 100% + 30,000.00 x 50% = 60,000.00 + 15,000.00 = 75,000.00 (allocation x approved percent, earned-value.service.js:786-792). This is the plan's 'EV 75,000'.", [P(392), PF(431), H("backend/src/services/earned-value.service.js", "737-753,786-792"), BADJ("087-EXC/HLT item 6")], { company: C_HLT }),
+    spi: F(HLT_SPI, "ratio", "On the card's default basis (evOnCardBasis / pvOnCardBasis): EV / PV = 75,000 / 90,000 = 0.833333", [P(392, 938), BADJ("087-EXC/HLT item 6")], { company: C_HLT }),
     spiDetail: F(Number(HLT_SPI.toFixed(2)), "ratio", "Card detail rounds to 2 places: 0.83", [H("backend/src/routes/health.js", "498")], { company: C_HLT }),
     scheduleScore: F(scoreByIndex(HLT_SPI), "score", "0.75 <= 0.8333 < 0.9 -> 60", [P(938), H("backend/src/routes/health.js", "85-90,363-364")], { company: C_HLT }),
-    cpi: F(HLT_CPI, "ratio", "EV / AC = 75,000 / 80,000 = 0.9375", [P(392, 938)], { company: C_HLT }),
+    cpi: F(HLT_CPI, "ratio", "On the card's default basis (evOnCardBasis / acOnCardBasis): EV / AC = 75,000 / 80,000 = 0.9375", [P(392, 938), BADJ("087-EXC/HLT item 6")], { company: C_HLT }),
     cpiDetail: F(Number(HLT_CPI.toFixed(2)), "ratio", "0.9375 to 2 places = 0.94", [H("backend/src/routes/health.js", "521")], { company: C_HLT }),
     costScore: F(scoreByIndex(HLT_CPI), "score", "0.9 <= 0.9375 < 1 -> 80", [P(938), H("backend/src/routes/health.js", "365")], { company: C_HLT }),
     commercialCard: F(clampScore(100 - HLT_COS.length * 2 - healthCommercialDays * 0.5), "score", "Card: days = CO1 4 + CO2 (0 + link 6) = 10; 100 - 2x2 - 10x0.5 = 91", [P(939), H("backend/src/routes/health.js", "367-383")], { assumption: true, company: C_HLT, note: "CO2's link carries approvedScheduleImpactDays 6 and CO2.scheduleImpact is 0" }),
@@ -673,21 +828,23 @@ const WP9 = {
     qualityInCode: F(qualityScore({ major: HLT_QUALITY.major, minor: HLT_QUALITY.minor, failedItp: HLT_QUALITY.legacyFailed }), "score", "Legacy register only: 100 - 20 - 8 - 15 = 57 (card, workspace and quality dashboard alike)", [P(940), H("backend/src/routes/health.js", "442-447")], { company: C_HLT }),
     safetyExpected: F(safetyScore({ lti: 1, open: 1 }), "score", "LTI (closed) -20; the open incident -5; the incident archived while open excluded: 75", [P(392, 941)], { today: safetyScore({ lti: 1, open: 2 }), assumption: true, company: C_HLT, note: "the open and the archived incidents are not LTI or fatality" }),
     safetyWorkspace: F(safetyScore({ lti: 1, open: 1 }), "score", "archivedAt: null filter: 75", [H("backend/src/services/workspace-dashboard.service.js", "830,1155-1166")], { assumption: true, company: C_HLT }),
-    docControlRecords: F("open RFI overdue by dueDate and responseRequiredBy; answered RFI with dueDate past; 2 pending submittals not yet due; no drawings", "text", "The literal 087-HLT reading used for docControlExpected / docControlCard.", [P(392)], { assumption: true, company: C_HLT }),
+    docControlRecords: F("open RFI overdue by dueDate and responseRequiredBy; answered RFI with dueDate past; 2 pending submittals not yet due; no drawings", "text",
+      "The literal contents of plan §3.2 087-HLT: 'An overdue open RFI, an overdue answered RFI, pending submittals, and no drawings' (:431 @f599e67), decided by the builders' adjudication (087-EXC/HLT item 8). Made concrete as: the open RFI with its stored dueDate and its responseRequiredBy both past; the answered RFI with its stored dueDate past (responseRequiredBy null); 2 submittals in pending / under_review / resubmit whose dueDate is not past; no drawing record. These are the records docControlExpected / docControlCard are derived on (the plan's 90 / 100 belong to docControlPlanReading's records).",
+      [P(392), PF(431), BADJ("087-EXC/HLT item 8")], { assumption: true, company: C_HLT, note: "two pending submittals is this book's count for 'pending submittals'; each further one moves both scores by -5" }),
     docControlExpected: F(HLT_DOC_LITERAL.rule, "score",
-      "HR-K1 / workspace basis: overdue = open only, rrb first -> 1 (-10); overdue submittals 0; pending 2 (-10); no IFC offset: 100 - 10 - 10 = 80.",
-      [P(941, 1056), H("backend/src/services/workspace-dashboard.service.js", "1168-1190")], { assumption: true, planValue: 90, company: C_HLT, note: "the plan's 90 needs no counted pending submittal (see docControlPlanReading)" }),
+      "Rule basis (HR-K1 recommendation: the workspace definitions, workspace-dashboard.service.js:1168-1190): overdue RFIs = (responseRequiredBy || dueDate) < today and status not in [answered, closed] -> the open RFI only = 1 (-10 x 1); overdue submittals (dueDate past and pending / under_review / resubmit) = 0; pending submittals 2 (-5 x 2 = -10); no IFC offset: clampScore(100 - 10 - 0 - 10) = 80. Plan figure correction (builders' adjudication 087-EXC/HLT item 8): the plan's 'Document control: 90 against 100' (:980 @f599e67) belongs to another record set, docControlPlanReading's (no counted pending submittal, the open RFI overdue only by responseRequiredBy).",
+      [P(941, 1056), PF(431, 980, 1095), H("backend/src/services/workspace-dashboard.service.js", "30,1168-1190"), BADJ("087-EXC/HLT item 8")], { assumption: true, planValue: 90, company: C_HLT, note: "plan figure correction: 90 is docControlPlanReading.rule; on the plan's literal contents the rule gives 80" }),
     docControlCard: F(HLT_DOC_LITERAL.health, "score",
-      "Card today: overdue by dueDate and not closed -> 2 (-20); pending 2 (-10); no drawings -> ifcRatio 1 (+10): 100 - 20 - 10 + 10 = 80. The +10 IFC offset cancels the answered RFI's -10, so the two bases agree on these records.",
-      [P(941), H("backend/src/routes/health.js", "462-478")], { assumption: true, planValue: 100, company: C_HLT }),
+      "Card today, the health service's doc-control formula (health.js:462-478, on the stored rows read at :174-178): overdueRfis = stored dueDate < today and status != closed -> the open RFI and the answered RFI = 2 (-10 x 2 = -20); pendingSubmittals (pending / under_review / resubmit) = 2 (-5 x 2 = -10); ifcRatio = 1 with no drawings (+10 x 1 = +10): clampScore(100 - 20 - 10 + 10) = 80. The +10 IFC offset cancels the answered RFI's -10, so card and rule agree, 80 / 80, on these records. Plan figure correction (builders' adjudication 087-EXC/HLT item 8): the plan's 100 belongs to docControlPlanReading's records.",
+      [P(941), PF(431, 980), H("backend/src/routes/health.js", "174-178,462-478"), BADJ("087-EXC/HLT item 8")], { assumption: true, planValue: 100, company: C_HLT, note: "plan figure correction: 100 is docControlPlanReading.card; on the plan's literal contents the card gives 80" }),
     docControlPlanReading: F({ rule: HLT_DOC_PLAN_READING.rule, card: HLT_DOC_PLAN_READING.health }, "score",
       "Records that reproduce the plan's 90 vs 100: open RFI overdue only by responseRequiredBy (dueDate null), answered RFI overdue by dueDate, and NO submittal in pending/under_review/resubmit: rule 100 - 10 = 90; card 100 - 10 (answered) + 10 (IFC) = 100.",
       [P(392, 941), H("backend/src/routes/health.js", "462-478"), H("backend/src/services/workspace-dashboard.service.js", "1168-1190")], { assumption: true, company: C_HLT }),
     docControlIfcVariant: F(docHealth({ overdueByDueDateNotClosed: 2, pendingSubmittals: 2, drawings: 2, ifc: 1 }), "score", "Variant: 1 IFC of 2 drawings -> ifcRatio 0.5 (+5): 100 - 20 - 10 + 5 = 75 on the card (the rule basis has no offset: 80).", [P(392), H("backend/src/routes/health.js", "471-478")], { assumption: true, company: C_HLT }),
     delayedExpected: F(0, "count", "HR-K2: the 50-working-day activity's working-day finish is after today -> 0 delayed.", [P(941, 966, 1057)], { today: 1, company: C_HLT }),
     delayedExampleDates: F({ start: HLT_EXAMPLE.start, calendarFinish: HLT_CAL_FINISH, workingFinish: HLT_WD_FINISH, runDate: HLT_EXAMPLE.runDate }, "date",
-      "Both card and workspace add earlyFinish 50 as calendar days (2026-08-10 + 50 = 2026-09-29 < today -> delayed 1); 50 working days on the five-day calendar end 2026-10-19 > today -> 0. The start must satisfy start + 50 <= run date < start + 70 (calendar days).",
-      [P(392), H("backend/src/routes/health.js", "349-361"), H("backend/src/services/workspace-dashboard.service.js", "167-185")], { assumption: true, company: C_HLT }),
+      `A function of the run date, rules.delayedExampleDatesFor(runDate) (builders' adjudication 087-EXC/HLT item 7, R3-10); the value is its result for the reference run date ${HLT_EXAMPLE.runDate}. Rule: start = the Monday on or before (run date - 51) = ${HLT_EXAMPLE.start}; H50 (50 working days, ES 0, EF 50 from the project start) has its calendar finish start + 50 = ${HLT_CAL_FINISH} (card and workspace add earlyFinish as calendar days: before today -> delayed 1) and its working-day finish ${HLT_WD_FINISH} (50 working days = 10 whole weeks on the five-day calendar, exclusive finish = start + 70: after today -> 0 under HR-K2). The plan's window: the two finishes fall on either side of today for every today from ${HLT_EXAMPLE.windowFrom} through ${HLT_EXAMPLE.windowThrough} (start + 50 <= today <= start + 69). The rule puts the calendar finish on or before run date - 1, so it is already past at any instant of the run date in any zone, and leaves the WP-9 proof the longest window after the build (13 to 19 days; here ${HLT_EXAMPLE.runDate}..${HLT_EXAMPLE.windowThrough}). The start is on or before the plan's cutoff ${HLT_CUTOFF} (startOnOrBeforeCutoff) for run dates through ${HLT_LATEST_RUN_DATE}. The book's former example (start 2026-08-10, finishes 2026-09-29 / 2026-10-19 = run date - 60, the window's midpoint) agreed with the window inequality but came from no stated rule and left the proof only until 2026-10-18; it is replaced on paper by this rule, which the builder calls instead of its own.`,
+      [P(392), PF(431), H("backend/src/routes/health.js", "349-361"), H("backend/src/services/workspace-dashboard.service.js", "167-185"), H("backend/src/utils/activity-status.js", "29-35"), BADJ("087-EXC/HLT item 7; R3-10")], { assumption: true, company: C_HLT, note: "the WP-9 proof reads the card on a date in [windowFrom, windowThrough] of the build's run date (rules.delayedExampleDatesFor(buildRunDate)); outside it the two readings agree (both 0 before windowFrom, both 1 after windowThrough), so delayedExpected / today would not discriminate" }),
     workspaceScheduleWithOverdueRisk: F(clampScore(scoreByIndex(HLT_SPI) - 1 * 5), "score", "60 - 5 x 1 overdue risk mitigation = 55", [P(941), H("backend/src/services/workspace-dashboard.service.js", "1115-1124")], { assumption: true, company: C_HLT, note: "one risk open/monitoring with dueDate past" }),
     partyGuestTopRisks: F("visible (recorded)", "state", "Recorded: the party guest sees supply-chain topRisks on the health card.", [P(942)], { assumption: true, company: C_HLT, note: "the party guest is defined on 087-EXC (plan :397); the probe needs a party guest on the project whose card is read" }),
     supplyChainRecord: F("one long-lead item, criticality 'critical', linked to an activity, status not_ordered, order-by date (need date - leadWeeks x 7 - bufferDays) passed; no other procurement row on 087-HLT", "text",
@@ -733,7 +890,10 @@ const WP9 = {
     retiredActivityRows: F(0, "count", "A retired activity is excluded (today it appears).", [P(945, 1062)], { today: 1 }),
     archivedRiskRows: F(0, "count", "An archived risk is excluded (today it appears).", [P(945, 1062)], { today: 1 }),
     xerA110: F(80 / 8, "working_days", "80 h / 8 = 10 working days on the round trip.", [P(68, 947)]),
-    sheetGate: F("one permission per sheet", "state", "Each sheet is gated by its own module permission (HR-K7); a member denied risk:read gets no risk sheet.", [P(396, 946, 1062)], { assumption: true }),
+    sheetGate: F("one permission per sheet", "state",
+      `Each sheet is gated by its own module permission (HR-K7); a member denied risk:read gets no risk sheet. For the plan's 087 member with cost:export but denied risk:read (plan :435 @f599e67; 087-EXTRAS gives that member a template on 087-EXC): GET /projects/:projectId/export/xlsx answers 200 with no sheet named "${EXPORT_RISK_SHEET_HEAD}" (R3-9); which other sheets that member receives is the HR-K7 fix's choice of per-sheet gates. Today (HEAD), from the route guard and the export service: the route passes nestedProjectAccess (project access only: param check, validate, requireProjectAccess; projects.js:55-59, mounted at :468), then requirePermission('cost', 'export') (export.js:17-19), its only permission check (rbac.js:138-163 -> hasPermission :50-66; the member's template grants cost|action:export, so it passes). generateProjectExport({ projectId, orgId }) (export.js:21-24) is given no user and checks no permission; it reads the project's risks with no filter (export.service.js:90-93) and adds the same ${EXPORT_SHEETS_HEAD.length} worksheets unconditionally, in this order: ${EXPORT_SHEETS_HEAD.join(", ")} (export.service.js:179, 209, 234, 259, 270, 316; ${EXPORT_SHEETS_HEAD.length} = WP9.export.sheets). So the member denied risk:read gets 200 and all ${EXPORT_SHEETS_HEAD.length} sheets, "${EXPORT_RISK_SHEET_HEAD}" included: HR-K7's known answer, as the round-1 087-EXTRAS build observed (200, 6 sheets, Risks included).`,
+      [P(396, 946, 1062), PF(435, 983, 985, 1008, 1101), H("backend/src/routes/export.js", "15-24,41"), H("backend/src/routes/projects.js", "55-59,468"), H("backend/src/middleware/rbac.js", "50-66,138-163"), H("backend/src/services/export.service.js", "69-93,179,209,234,259,270,316"), BADJ("Round 2 R2-B (B1); R3-9")],
+      { assumption: true, today: { answer: "200", sheets: EXPORT_SHEETS_HEAD }, note: "today is the answer in the 087-EXTRAS step's terms: { answer: said(res) ('200': no error code), sheets: the workbook's sheet names in order }. The proof's value check: answer '200' and no sheet named Risks. Every product file cited here is unchanged at f599e67." }),
   },
   reportBuilder: {
     activities: F(NETWORK.length, "count", "Certified project: 14 activities.", [P(949)]),
@@ -812,7 +972,7 @@ module.exports = {
   WP0,
   WP8,
   WP9,
-  rules: { qualityScore, safetyScore, scoreByIndex, weather, promoteDays, multiplierFor, labourCents, overRatioSeverity, submitBy, submittalImpactDays, addWorkingDays, cpm },
+  rules: { qualityScore, safetyScore, scoreByIndex, weather, promoteDays, multiplierFor, labourCents, overRatioSeverity, submitBy, submittalImpactDays, addWorkingDays, cpm, delayedExampleDatesFor, endOfLocalDay },
   figures,
   byCompany,
 };

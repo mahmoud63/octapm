@@ -59,6 +59,27 @@
  * S2 (the nine added figures) and the drafter's open questions. A refusal
  * whose rule is undecided carries no error code (code null: a bare status in
  * an http leaf, `code: null` in an object); a code is never guessed.
+ *
+ * The integration owner's adjudication of the WP-0 deep-company builders
+ * (2026-10-09, C:\Temp\octapm-cert\scratch\wp0\builders-adjudication.md) is
+ * applied on paper: WP1.T3.file (F3 as P6 exports it, item 5 of
+ * 087-SCH/087-IMP; inputs.F3file), the reporting zone (WP3.setup / D2.WP3 /
+ * D3.WP3 timeZone, timeZoneSource 'project', timeZoneNote; 087-EV item 5,
+ * R1-15, R3-2) and the future period as a function of the run date
+ * (WP3.periods.futurePeriod, rules.futurePeriodFor / ev087PeriodsFor; 087-EV
+ * item 6). Entries added for it cite plan lines as numbered at f599e67 (PF);
+ * their product citations keep the @886c9f1 tag, and every product file they
+ * cite is unchanged at f599e67 except schedule.service.js (critical_path
+ * readiness :849-866 @886c9f1 is :855-872 @f599e67, same code).
+ * Its round 2 (R2-B B4) adds WP3.periods.afterLock.runDateAfterCost and
+ * .runDateAfterApproval: the run-date metric sets after the back-dated cost
+ * and after the new approval, one per outcome of the T5 delete probe.
+ * Its round 3 (R3-2) adds WP3.periods.afterLock.cutoffAfterCost (the
+ * 2026-02-28 read after the back-dated cost) and WP3.T6.before / WP3.T6.after
+ * (the run-date reads around the retirement, one set per probe outcome), so
+ * 087-ev.js asserts leaves and computes nothing.
+ * Changed keys: answers/CHANGES-WP0-BUILDERS.md (rounds 1-2) and
+ * answers/CHANGES-WP0-BUILDERS-r3-ev-sch-lanes-extras.md (round 3).
  */
 
 const PLAN = "docs/certification/OCTAPM_CERT3_PLAN.md";
@@ -66,7 +87,11 @@ const HEAD = "886c9f1";
 const AREA = "C:/Temp/octapm-cert/scratch/cert3-areas.json[0] (schedule area map)";
 /** The integration owner's binding decisions for this section. */
 const ADJ = (item) => `C:/Temp/octapm-cert/scratch/wp0/adjudication.md §A schedule.js ${item}`;
+/** The integration owner's binding adjudication of the WP-0 deep-company builders (2026-10-09). */
+const BADJ = (item) => `C:/Temp/octapm-cert/scratch/wp0/builders-adjudication.md ${item}`;
 const P = (...lines) => `${PLAN}:${lines.join(",")}`;
+/** Plan lines as numbered at product HEAD f599e67 (entries added for the builders' adjudication use this numbering). */
+const PF = (...lines) => `${PLAN}:${lines.join(",")} @f599e67`;
 const H = (file, lines) => `${file}:${lines} @${HEAD}`;
 
 function F(value, unit, derivation, source, opts = {}) {
@@ -349,6 +374,30 @@ if (BOQ_EV_PRICED !== ALLOCATED_FIVE || JSON.stringify(BOQ_EV_ALLOCATED) !== JSO
   throw new Error("schedule answer book: the 087-EV BOQ does not carry the five approved allocations");
 }
 
+/**
+ * 087-EV's future period (builders' adjudication 087-EV item 6): the month
+ * after the run month, so its cutoff is never reached on the run date
+ * whenever the build runs. runDate is the company-local run date
+ * (YYYY-MM-DD); December rolls into January of the next year. The cutoff is
+ * the period's last day, at least 28 days (the shortest month) after the run
+ * date, so no zone offset can bring it within reach on the run date.
+ */
+function futurePeriodFor(runDate) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(runDate));
+  if (!m || Number.isNaN(Date.parse(`${runDate}T00:00:00.000Z`))) throw new Error(`futurePeriodFor: run date ${runDate} is not YYYY-MM-DD`);
+  const year = Number(m[2]) === 12 ? Number(m[1]) + 1 : Number(m[1]);
+  const month = Number(m[2]) === 12 ? 1 : Number(m[2]) + 1;
+  const mm = String(month).padStart(2, "0");
+  const last = String(new Date(Date.UTC(year, month, 0)).getUTCDate()).padStart(2, "0");
+  return { code: `${year}-${mm}`, start: `${year}-${mm}-01`, end: `${year}-${mm}-${last}`, cutoff: `${year}-${mm}-${last}`, lock: "L113 probe (cutoff not reached)" };
+}
+const EV087_FIXED_PERIODS = [
+  { code: "2026-01", start: "2026-01-01", end: "2026-01-31", cutoff: "2026-01-31", lock: "normal (finance, gate ready)" },
+  { code: "2026-02", start: "2026-02-01", end: "2026-02-28", cutoff: "2026-02-28", lock: "PM with a readiness override" },
+];
+/** 087-EV's three reporting periods for a run date: 2026-01, 2026-02 and the future one (futurePeriodFor). */
+const ev087PeriodsFor = (runDate) => [...EV087_FIXED_PERIODS.map((p) => ({ ...p })), futurePeriodFor(runDate)];
+
 /** 087-EV (plan :386; area map workflow "Earned value" setup). */
 const EV087 = {
   boq: BOQ_EV,
@@ -358,11 +407,9 @@ const EV087 = {
   directCosts: [["A110", 50_000, "2026-01-20"], ["A110", 10_000, "2026-09-30"], ["A130", 20_000, "2026-02-10"]],
   t2Cost: ["A120", 30_000, "2026-10-01"],
   budgetRevision: { amount: 13_000, changeType: "addition", effectiveDate: "2026-03-01" },
-  periods: [
-    { code: "2026-01", start: "2026-01-01", end: "2026-01-31", cutoff: "2026-01-31", lock: "normal (finance, gate ready)" },
-    { code: "2026-02", start: "2026-02-01", end: "2026-02-28", cutoff: "2026-02-28", lock: "PM with a readiness override" },
-    { code: "2026-11", start: "2026-11-01", end: "2026-11-30", cutoff: "2026-11-30", lock: "L113 probe (cutoff not reached)" },
-  ],
+  // The reference instance for the reference run date (RUN, 2026-10-09 -> future period 2026-11);
+  // a build or proof takes its own with rules.ev087PeriodsFor(runDate) (builders' adjudication 087-EV item 6).
+  periods: ev087PeriodsFor("2026-10-09"),
   backdatedAfterLock: ["A130", 5_000, "2026-02-15"],
   approvalAfterLock: ["A120", 60],
   a140Cost: ["A140", 5_000, "run date"],
@@ -386,6 +433,7 @@ function acHead(cutoffDate, rows) {
   return [...by.values()].filter((r) => r.through <= cutoffDate).reduce((s, r) => s + r.amount, 0);
 }
 const RUN = "2026-10-09"; // a run date satisfying the run-date assumption; every 087-EV row is dated on or before it
+if (JSON.stringify(EV087.periods) !== JSON.stringify(ev087PeriodsFor(RUN))) throw new Error("schedule answer book: EV087.periods must be ev087PeriodsFor(RUN)");
 const EV_STAGE9 = Object.entries(EV087.progress).reduce((s, [a, p]) => s + evOf(ALLOC[a], p), 0);
 const BAC = ALLOCATED_FIVE;
 const ROWS_T1 = COSTS;
@@ -426,6 +474,33 @@ const F3 = { A: 80, rel: "SS", lagHours: 16, B: 24 };
 const F3D = { A: hoursToDays(F3.A), lag: lagHoursToDays(F3.lagHours), B: hoursToDays(F3.B) };
 const SS_TODAY = cpm([{ id: "A", d: F3D.A }, { id: "B", d: F3D.B }], [{ p: "A", s: "B", t: "SS", lag: F3D.lag }]);
 const SS_CAP = cpm([{ id: "A", d: F3D.A }, { id: "B", d: F3D.B }], [{ p: "A", s: "B", t: "SS", lag: F3D.lag }], { capLf: true });
+/**
+ * F3 as P6 exports it (builders' adjudication 087-SCH/087-IMP item 5, R1-2):
+ * the FILE carries P6's own late pass, which ends every path at the project
+ * finish, so A (whose only successor is SS) gets LF = the finish = EF(A) and
+ * TF 0, i.e. SS_CAP. The early pass and B are the same capped or not. The
+ * product's own CPM after activation is a different thing (HR-S1: no cap
+ * today, WP1.T3.A.*.today); build/files.js F3() writes these figures and
+ * refuses to load if its model differs from them.
+ */
+const F3_FILE_CODES = ["A", "B"];
+const F3_FILE = {
+  basis: "P6 late pass: LF capped at the project finish (a path with no finish successor ends there)",
+  capLf: true,
+  projectFinish: SS_CAP.end,
+  projectFinishDate: workingDate(START, SS_CAP.end),
+  activities: Object.fromEntries(F3_FILE_CODES.map((code) => {
+    const r = SS_CAP.rows[code];
+    return [code, {
+      ES: r.ES, EF: r.EF, LS: r.LS, LF: r.LF, TF: r.TF, totalFloatHours: r.TF * 8, critical: r.critical,
+      earlyStartDate: workingDate(START, r.ES), earlyFinishDate: workingDate(START, r.EF),
+      lateStartDate: workingDate(START, r.LS), lateFinishDate: workingDate(START, r.LF),
+    }];
+  })),
+};
+if (F3_FILE_CODES.some((c) => SS_CAP.rows[c].ES !== SS_TODAY.rows[c].ES || SS_CAP.rows[c].EF !== SS_TODAY.rows[c].EF) || JSON.stringify(SS_CAP.rows.B) !== JSON.stringify(SS_TODAY.rows.B) || SS_CAP.end !== SS_TODAY.end) {
+  throw new Error("schedule answer book: F3's capped late pass must move only A's late dates and float");
+}
 const FSL_TODAY = cpm([{ id: "A", d: 10 }, { id: "B", d: 3 }], [{ p: "A", s: "B", t: "FS", lag: -8 }]);
 const FSL_CAP = cpm([{ id: "A", d: 10 }, { id: "B", d: 3 }], [{ p: "A", s: "B", t: "FS", lag: -8 }], { capLf: true });
 const FF_TODAY = cpm([{ id: "A", d: 10 }, { id: "B", d: 15 }], [{ p: "A", s: "B", t: "FF", lag: 0 }]);
@@ -618,6 +693,43 @@ const T3 = {
     TF: F(SS_TODAY.rows.B.TF, "working_days", "10 - 5 = 5 (same today and capped).", [P(485)]),
   },
   criticalCount: FA(Object.values(SS_CAP.rows).filter((r) => r.critical).length, "count", `Capped: A only. ${capNote}`, [P(485)], { today: Object.values(SS_TODAY.rows).filter((r) => r.critical).length }),
+  /**
+   * The F3 FILE as P6 exports it (builders' adjudication 087-SCH/087-IMP item 5, R1-2):
+   * build/files.js F3() writes exactly these figures. They are the file's
+   * content, not the product's CPM: after activation the product recomputes
+   * without the cap (A TF 5, LF 15 today; HR-S1 recommends A TF 0), which stays
+   * the HR-S1 observation in WP1.T3.A / WP1.T3.criticalCount above.
+   */
+  file: (() => {
+    const fa = F3_FILE.activities;
+    const src = [PF(424), P(385, 485), BADJ("087-SCH/087-IMP item 5; R1-2")];
+    const fileSrc = [...src, H("backend/src/parsers/xer-parser.js", "139-147"), H("backend/src/services/import.service.js", "249-253")];
+    const capped = `P6's late pass ends a path that has no finish successor at the project finish ${SS_CAP.end} (= EF(A)): A's only successor is SS, so its backward candidate LS(B) ${SS_TODAY.rows.B.LS} - lag ${F3D.lag} + d ${F3D.A} = ${SS_TODAY.rows.A.LF} is capped at ${SS_CAP.end}`;
+    const rowLeaves = (code) => {
+      const r = fa[code];
+      return {
+        ES: F(r.ES, "working_days", code === "A" ? "No predecessor: ES 0 (unchanged by the cap)." : `ES = ES(A) 0 + SS lag ${F3D.lag} = ${r.ES} (unchanged by the cap).`, src),
+        EF: F(r.EF, "working_days", `${r.ES} + ${code === "A" ? F3D.A : F3D.B} = ${r.EF} (unchanged by the cap).`, src),
+        LS: F(r.LS, "working_days", code === "A" ? `${capped}; LS = LF ${r.LF} - d ${F3D.A} = ${r.LS}.` : `No successor: LF = project finish ${r.LF}; LS = ${r.LF} - ${F3D.B} = ${r.LS} (the same capped or not).`, src),
+        LF: F(r.LF, "working_days", code === "A" ? `${capped} = A's own EF ${r.EF}.` : `No successor: the project finish ${r.LF}.`, src),
+        totalFloatHours: F(r.totalFloatHours, "hours", code === "A" ? `TF = LF ${r.LF} - EF ${r.EF} = ${r.TF} days -> total_float_hr_cnt ${r.TF} x 8 = ${r.totalFloatHours} h (the uncapped pass would write ${SS_TODAY.rows.A.TF * 8} h, which P6 never exports).` : `TF = ${r.LF} - ${r.EF} = ${r.TF} days -> ${r.TF} x 8 = ${r.totalFloatHours} h (the same capped or not).`, fileSrc),
+        earlyStartDate: F(r.earlyStartDate, "date", `Working day ${r.ES} from Monday ${START} (five_day).`, [...src, DATE_SRC]),
+        earlyFinishDate: F(r.earlyFinishDate, "date", `Working day ${r.EF} from ${START}, exclusive finish (HR-S7).`, [...src, DATE_SRC]),
+        lateStartDate: F(r.lateStartDate, "date", `Working day ${r.LS} from ${START}.`, [...src, DATE_SRC]),
+        lateFinishDate: F(r.lateFinishDate, "date", `Working day ${r.LF} from ${START}, exclusive.`, [...src, DATE_SRC]),
+      };
+    };
+    return {
+      durationHours: F({ A: F3.A, B: F3.B }, "hours", `target_drtn_hr_cnt A ${F3.A} h, B ${F3.B} h (plan §3.2 087-IMP), read as ${F3D.A} and ${F3D.B} working days (WP1.T3.inputs); unchanged by the cap.`, fileSrc),
+      link: F({ pred: "A", succ: "B", type: F3.rel, lagHours: F3.lagHours }, "text", `One TASKPRED row A -> B, PR_SS, lag_hr_cnt ${F3.lagHours} (= ${F3D.lag} working days); unchanged by the cap.`, [...src, H("backend/src/parsers/xer-parser.js", "46-50")]),
+      projectFinish: F(F3_FILE.projectFinish, "working_days", `max EF = EF(A) ${SS_CAP.rows.A.EF}: A drives the finish (B ends at ${SS_CAP.rows.B.EF}).`, src),
+      projectFinishDate: F(F3_FILE.projectFinishDate, "date", `Working day ${F3_FILE.projectFinish} from Monday ${START}, exclusive finish.`, [...src, DATE_SRC]),
+      A: rowLeaves("A"),
+      B: rowLeaves("B"),
+      stagedCriticalCount: F(F3_FILE_CODES.filter((c) => hoursToDays(fa[c].totalFloatHours) === 0).length, "count", `The staged revision is judged on the file's own float (HR-S3; isCritical = round(file TF days) === 0): A ${fa.A.totalFloatHours} h -> ${hoursToDays(fa.A.totalFloatHours)} -> critical; B ${fa.B.totalFloatHours} h -> ${hoursToDays(fa.B.totalFloatHours)} -> not. One critical row, so critical_path passes and F3 can be approved and activated as plan §3.2 asks (with the uncapped ${SS_TODAY.rows.A.TF * 8} h on A it marks none: 400 SCHEDULE_NOT_READY, critical_path).`, [...fileSrc, H("backend/src/services/schedule.service.js", "397,849-866")]),
+      stagedLate: F(Object.fromEntries(F3_FILE_CODES.map((c) => [c, { lateStart: fa[c].LS, lateFinish: fa[c].LF, totalFloat: fa[c].TF }])), "working_days", `The staged snapshot reads the file's late dates as working-day offsets from the project start ${START} and its float as hours / 8: A ${fa.A.LS}/${fa.A.LF}/${fa.A.TF}, B ${fa.B.LS}/${fa.B.LF}/${fa.B.TF} (087-IMP starts ${START}, five_day).`, fileSrc),
+    };
+  })(),
 };
 
 const T4 = {
@@ -1092,6 +1204,163 @@ function metricLeaves(m, src, { headM = null, assumption = false, extra = {} } =
   };
 }
 
+// ─── reporting zone (builders' adjudication 087-EV item 5, 087-OTH/052/006 item 2, R1-15, R3-2) ───
+const zoneSources = (...extra) => [
+  ...extra,
+  H("backend/src/services/project.service.js", "441-459"),
+  H("backend/src/utils/reporting-cutoff.js", "23-27,145-156"),
+  H("backend/src/services/earned-value.service.js", "100-105,966-978,1065"),
+  BADJ("087-EV item 5; 087-OTH/052/006 item 2; R1-15; R3-2"),
+];
+const zoneDerivation = (company, zone) =>
+  `Company ${company}'s workspace zone is ${zone} (plan §3.1; lib DEEP asserts the company's facts before a build). createProject copies the workspace defaultTimezone onto Project.timezone when the creator names none (ENT-6, project.service.js:441-459), and the project API has no timezone field (buildProjectData never sets one; L117/L126), so a build-created project holds Project.timezone = ${zone}. The reporting zone is therefore the project's own, ${zone} (reporting-cutoff.js:145-149, reached through earned-value.service.js:100-105), equal to the company zone: asserted through the API as reporting.timeZone (GET /reports/ev, earned-value.service.js:966-978) and on the period answers.`;
+const sourceDerivation = (company, zone) =>
+  `'project': resolveReportingTimeZone labels a valid Project.timezone TIME_ZONE_SOURCES.PROJECT = 'project' (reporting-cutoff.js:23-27, 145-149), and the EV report and the period answers carry that label as reporting.timeZoneSource (earned-value.service.js:966-978, 1065). The project's zone is the workspace's ${zone} copied at creation (timeZone), so the label is 'project' while the zone is the company's: a proof asserts both, through the API (source 'project' AND timeZone ${zone}). Observed on the builders' debug runs (087-EV, 052-SCH-EV answered 'project').`;
+const A8_NOTE =
+  "Plan premise A8 (:1213 @f599e67: 'a project's own time zone cannot be set ... the reporting zone is the company's and is asserted through reporting.timeZoneSource') is wrong for the label: since ENT-6 a new project holds a copy of the workspace zone, so the source reads 'project' while the figures are the company zone's. Whether a later change of the company zone reaches existing projects is suspect WP3-TZ-1 (WP-3 confirm-first, P3); the creation code says it does not (project.service.js:443-444: 'an existing project is never rewritten when the workspace's defaults change').";
+const ZONE_NOTE_DERIVATION =
+  "reportingTimeZoneNote answers null when the source is 'project' (reporting-cutoff.js:201-202), so reporting.timeZoneNote is null: no 'Project timezone is not configured; the organisation default ... is being used' sentence (that sentence belongs to the 'organisation' source, :203-204).";
+
+// ─── run-date reads after the February lock (builders' adjudication round 2, R2-B B4) ───
+// 087-EV reads the EV report cut at the run date twice after the locks: after the back-dated A130
+// cost (WP3.periods.afterLock.backdatedCost) and after the new approval (A120 50 -> 60%,
+// WP3.periods.afterLock.newApproval). BAC follows the T5 delete probe (WP3.T5.deleteProbe), which
+// runs before them: refused -> the +13,000 revision stays approved (WP3.T5.bac); deleted, with an
+// audit event or (HEAD, L112) silently -> WP3.T1.bac. Each branch is a full metric set; a build or
+// proof takes the branch its probe produced. Every row and loading is dated on or before 2026-10-01,
+// so the figures hold for every run date on or after it (the run-date assumption).
+const AC_AFTER_LOCK = acLedger(RUN, ROWS_LOCK);
+if (AC_AFTER_LOCK !== M_T2.ac + cents(EV087.backdatedAfterLock[1])) throw new Error("schedule answer book: the after-lock run-date AC must be WP3.T2.ac + backdatedCost");
+if (acHead(RUN, ROWS_LOCK) !== AC_AFTER_LOCK) throw new Error("schedule answer book: at the run date HEAD's cumulative AC must agree with the ledger");
+const M_AFTER_LOCK = {
+  afterCost: {
+    revisionKept: evMetrics({ bac: BAC_T5, pv: pvAt(RUN), ev: EV_STAGE9, ac: AC_AFTER_LOCK }),
+    revisionDeleted: evMetrics({ bac: BAC, pv: pvAt(RUN), ev: EV_STAGE9, ac: AC_AFTER_LOCK }),
+  },
+  afterApproval: {
+    revisionKept: evMetrics({ bac: BAC_T5, pv: pvAt(RUN), ev: EV_AFTER_LOCK, ac: AC_AFTER_LOCK }),
+    revisionDeleted: evMetrics({ bac: BAC, pv: pvAt(RUN), ev: EV_AFTER_LOCK, ac: AC_AFTER_LOCK }),
+  },
+};
+const AFTER_LOCK_SRC = [PF(425, 632, 638, 641, 647), P(386, 602, 608), ADJ("S2 WP3.periods.afterLock"), BADJ("Round 2 R2-B (B4); 087-EV item 1; R1-1")];
+const AFTER_LOCK_BRANCH = {
+  revisionKept: "Branch revisionKept: the T5 delete probe was refused (WP3.T5.deleteProbe 'refused'), so the +13,000.00 budget revision stays approved and BAC is WP3.T5.bac.",
+  revisionDeleted: "Branch revisionDeleted: the T5 revision is gone, deleted with an audit event (WP3.T5.deleteProbe 'audited') or, at HEAD, silently (L112: the probe's own BLOCKED today), so BAC is back to WP3.T1.bac. After HEAD's silent delete these are the figures HEAD answers; the L112 departure is recorded at the probe, not at these reads.",
+};
+/** The thirteen metric leaves of one after-lock run-date read (stage afterCost | afterApproval; branch revisionKept | revisionDeleted). */
+function afterLockLeaves(stage, branch) {
+  const m = M_AFTER_LOCK[stage][branch];
+  const leaves = metricLeaves(m, AFTER_LOCK_SRC, { assumption: true, extra: { note: AFTER_LOCK_BRANCH[branch] } });
+  const evDerivation = stage === "afterCost"
+    ? `WP3.T2.ev, unchanged by the back-dated cost (it moves AC only): A110 60,000.00 x 100% + A120 30,000.00 x 50% + A130 90,000.00 x 25% = ${fmt(m.ev)}.`
+    : `WP3.periods.afterLock.runDateEv: ${fmt(EV_STAGE9)} + 30,000.00 x (60% - 50%) = ${fmt(m.ev)}; the approval is stamped at the run date, so the run-date read sees it (the 2026-02-28 read does not: cutoffReportEv 0).`;
+  return {
+    ...leaves,
+    bac: { ...leaves.bac, derivation: branch === "revisionKept" ? `WP3.T5.bac: approved allocations ${fmt(BAC)} + the approved +${fmt(BAC_T5 - BAC)} budget revision = ${fmt(m.bac)}.` : `WP3.T1.bac: approved allocations ${fmt(BAC)}; the +${fmt(BAC_T5 - BAC)} revision was deleted by the T5 probe = ${fmt(m.bac)}.` },
+    pv: { ...leaves.pv, derivation: `WP3.T2.pv: approved loadings with plannedDate on or before the run date (the last is 2026-04-10) = ${fmt(m.pv)}.` },
+    ev: { ...leaves.ev, derivation: evDerivation },
+    ac: { ...leaves.ac, derivation: `WP3.T2.ac ${fmt(M_T2.ac)} + WP3.periods.afterLock.backdatedCost ${fmt(cents(EV087.backdatedAfterLock[1]))} (A130, incurredOn ${EV087.backdatedAfterLock[2]}, on or before the run date) = ${fmt(m.ac)}: ledger postings dated on or before the run date${stage === "afterApproval" ? " (the new approval moves no cost)" : ""}. HEAD agrees, so there is no L34 today at the run date: one cumulative CostRecord per activity, each through-date on or before the run date (A110 60,000.00 through 2026-09-30, A120 30,000.00 through 2026-10-01, A130 25,000.00 through 2026-02-15; earned-value.service.js:486-514).` },
+  };
+}
+
+// ─── the 2026-02-28 read after the back-dated cost, and T6 before / after the retirement (round 3, R3-2) ───
+// Under A10 a builder asserts book leaves and computes no figure: these are the metric sets 087-ev.js used to
+// derive in its own code (rules.evMetrics over book leaves), now derived here, on paper, from the same leaves.
+//
+// (a) GET /reports/ev?cutoffDate=2026-02-28 after the back-dated A130 cost (WP3.periods.afterLock.backdatedCost):
+// 087-EV reads it at checkpoint.afterLock.afterCost and again at checkpoint.afterLock.afterApproval (the new
+// approval is stamped after the cutoff instant, so the read is the same: cutoffReportEv 0). One metric set serves
+// both outcomes of the T5 delete probe: the +13,000.00 revision is effective 2026-03-01, after this cutoff, and the
+// report adjusts BAC only by approved revisions effective on or before the cutoff (earned-value.service.js:428-437),
+// so BAC is WP3.T3.bac whether the revision stayed approved or was deleted.
+const M_CUTOFF_AFTER_COST = evMetrics({ bac: BAC, pv: pvAt("2026-02-28"), ev: 0, ac: acLedger("2026-02-28", ROWS_LOCK) });
+const M_CUTOFF_AFTER_COST_HEAD = evMetrics({ bac: BAC, pv: pvAt("2026-02-28"), ev: 0, ac: acHead("2026-02-28", ROWS_LOCK) });
+if (M_CUTOFF_AFTER_COST.ac !== M_T3.ac + cents(EV087.backdatedAfterLock[1])) throw new Error("schedule answer book: the 2026-02-28 AC after the back-dated cost must be WP3.T3.ac + backdatedCost");
+if (!(EV087.budgetRevision.effectiveDate > "2026-02-28")) throw new Error("schedule answer book: the T5 revision must be effective after the 2026-02-28 cutoff for one cutoffAfterCost set to serve both T5 probe branches");
+const CUTOFF_AFTER_COST_SRC = [PF(425, 632, 639, 647), H("backend/src/services/earned-value.service.js", "428-437,486-514,737-753"), ADJ("S2 WP3.periods.afterLock"), BADJ("Round 3 R3-2; 087-EV item 1; R1-1")];
+/**
+ * HEAD's figures of a metric set `h`, derived on paper, one sentence per metric, under `heading`
+ * (the defect and its leaf): appended to the derivation of every leaf that carries a today.
+ */
+const headTexts = (h, heading, acFormula) => ({
+  ac: `${heading} ${acFormula} = ${fmt(h.ac)}.`,
+  spi: `${heading} ${fmt(h.ev)} / ${fmt(h.pv)} = ${h.spi === null ? "null" : r6(h.spi)}.`,
+  spiAlert: `${heading} SPI ${h.spi === null ? "null" : r6(h.spi)} ${h.spiAlert ? "< 0.9 -> alert" : "-> no alert"}.`,
+  cpi: `${heading} ${fmt(h.ev)} / ${fmt(h.ac)} = ${h.cpi === null ? "null" : r6(h.cpi)}.`,
+  cpiAlert: `${heading} CPI ${h.cpi === null ? "null" : r6(h.cpi)} ${h.cpiAlert ? "< 0.9 -> alert" : "-> no alert"}.`,
+  eac: `${heading} ${h.eacBasis === "budget_over_cpi" ? `BAC / CPI = ${fmt(h.bac)} x ${fmt(h.ac)} / ${fmt(h.ev)} -> ${fmt(h.eac)} (half up)` : `CPI ${h.cpi === null ? "null" : 0} -> EAC = BAC ${fmt(h.bac)}`}.`,
+  eacBasis: `${heading} eacBasisOf(totalBudget, cpi) = ${h.eacBasis}.`,
+  cv: `${heading} EV - AC = ${fmt(h.ev)} - ${fmt(h.ac)} = ${fmt(h.cv)}.`,
+  etc: `${heading} EAC - AC = ${fmt(h.eac)} - ${fmt(h.ac)} = ${fmt(h.etc)}.`,
+});
+/**
+ * Each leaf that carries a today (metricLeaves' headM) gets HEAD's on-paper derivation appended
+ * (texts[key]); a ratio's today is stated to six places, as every ratio leaf states its value.
+ */
+const headDerivations = (leaves, texts) => Object.fromEntries(Object.entries(leaves).map(([key, leaf]) => {
+  if (leaf.today === undefined) return [key, leaf];
+  if (!texts[key]) throw new Error(`schedule answer book: ${key} carries a today with no derivation of it`);
+  return [key, { ...leaf, today: leaf.unit === "ratio" ? r6(leaf.today) : leaf.today, derivation: `${leaf.derivation} ${texts[key]}` }];
+}));
+/** The thirteen metric leaves of the 2026-02-28 read after the back-dated cost (both T5 branches, both after-lock reads). */
+function cutoffAfterCostLeaves() {
+  const m = M_CUTOFF_AFTER_COST;
+  const h = M_CUTOFF_AFTER_COST_HEAD;
+  const note = "One set for both outcomes of the T5 delete probe: the +13,000.00 revision (effective 2026-03-01) is after this cutoff. Read at checkpoint.afterLock.afterCost and at checkpoint.afterLock.afterApproval alike: the new approval is stamped after the cutoff instant, so it changes nothing here.";
+  const leaves = metricLeaves(m, CUTOFF_AFTER_COST_SRC, { headM: h, assumption: true, extra: { note } });
+  const heading = "HEAD (L34, the today of WP3.periods.afterLock.cutoffReportAc):";
+  return headDerivations({
+    ...leaves,
+    bac: { ...leaves.bac, derivation: `WP3.T3.bac: approved allocations ${fmt(BAC)}. The +${fmt(BAC_T5 - BAC)} budget revision of T5 is effective ${EV087.budgetRevision.effectiveDate}, after this cutoff, and only approved revisions effective on or before the cutoff adjust BAC (earned-value.service.js:428-437), so BAC is ${fmt(m.bac)} whether the T5 probe left the revision approved or deleted.` },
+    pv: { ...leaves.pv, derivation: `WP3.T3.pv: approved loadings with plannedDate on or before 2026-02-28 = 60,000.00 (01-23) + 30,000.00 (01-28) + 90,000.00 (02-13) = ${fmt(m.pv)}.` },
+    ev: { ...leaves.ev, derivation: `WP3.periods.afterLock.cutoffReportEv: ${fmt(m.ev)}. EV reads progress approved by the cutoff instant (${CUT_0228_CAIRO}); every approval, the new A120 60% included, is stamped after it.` },
+    ac: { ...leaves.ac, derivation: `WP3.periods.afterLock.cutoffReportAc: WP3.T3.ac ${fmt(M_T3.ac)} (A110 50,000.00 on 01-20 + A130 20,000.00 on 02-10) + the back-dated A130 ${fmt(cents(EV087.backdatedAfterLock[1]))} on ${EV087.backdatedAfterLock[2]} = ${fmt(m.ac)}: ledger postings dated on or before the cutoff.` },
+  }, headTexts(h, heading, `one cumulative CostRecord per activity, counted whole only when its through-date is on or before the cutoff (earned-value.service.js:486-514): A130 25,000.00 through ${EV087.backdatedAfterLock[2]} stays, A110 60,000.00 through 2026-09-30 and A120 30,000.00 through 2026-10-01 drop out`));
+}
+
+// (b) T6: the run-date reads before and after the revision that retires A140 (WP3.T6), one metric set per outcome
+// of the T5 probe (BAC WP3.T5.bac while the revision stays approved, WP3.T1.bac once it is deleted). EV is the
+// run-date EV after the periods step's new approval (WP3.periods.afterLock.runDateEv; A140 holds no allocation,
+// so the retirement moves no EV). AC before the retirement is WP3.T6.acBeforeRetirement and, by HR-S9's
+// recommendation, the same after it (WP3.T6.acAfterRetirement), where HEAD drops A140's 5,000.00 (L118 -> HR-S9,
+// the leaf's today). The after set's cpi equals WP3.T6.cpiAfterRetirement (value and today; checked at load).
+const M_T6 = {
+  value: {
+    revisionKept: evMetrics({ bac: BAC_T5, pv: pvAt(RUN), ev: EV_AFTER_LOCK, ac: AC_T6 }),
+    revisionDeleted: evMetrics({ bac: BAC, pv: pvAt(RUN), ev: EV_AFTER_LOCK, ac: AC_T6 }),
+  },
+  afterHead: {
+    revisionKept: evMetrics({ bac: BAC_T5, pv: pvAt(RUN), ev: EV_AFTER_LOCK, ac: AC_T6_HEAD_RETIRED }),
+    revisionDeleted: evMetrics({ bac: BAC, pv: pvAt(RUN), ev: EV_AFTER_LOCK, ac: AC_T6_HEAD_RETIRED }),
+  },
+};
+if (AC_T6 !== AC_AFTER_LOCK + cents(EV087.a140Cost[1])) throw new Error("schedule answer book: T6's AC before the retirement must be the after-lock run-date AC + the A140 cost");
+if (AC_T6_HEAD_RETIRED !== AC_AFTER_LOCK) throw new Error("schedule answer book: HEAD's AC after the retirement must be the after-lock run-date AC (A140's cost dropped out)");
+const T6_SRC = [PF(425, 632, 642, 662, 1035), ADJ("S2 WP3.periods.afterLock"), BADJ("Round 3 R3-2; 087-EV item 1; R1-1")];
+/** The thirteen metric leaves of one T6 run-date read (stage before | after the retirement; branch revisionKept | revisionDeleted). */
+function t6Leaves(stage, branch) {
+  const m = M_T6.value[branch]; // after the retirement the value is the same set: HR-S9's recommendation keeps A140's AC
+  const h = stage === "after" ? M_T6.afterHead[branch] : null;
+  const note = `${AFTER_LOCK_BRANCH[branch]}${stage === "after" ? " After the retirement HR-S9 is undecided (AC itself is CERT-5): the value keeps A140's AC, its recommendation; the today is HEAD's reading, which drops it (L118)." : ""}`;
+  const leaves = metricLeaves(m, T6_SRC, { headM: h, assumption: true, extra: { note } });
+  const a140 = cents(EV087.a140Cost[1]);
+  const bac = branch === "revisionKept"
+    ? `WP3.T5.bac: approved allocations ${fmt(BAC)} + the approved +${fmt(BAC_T5 - BAC)} budget revision (effective ${EV087.budgetRevision.effectiveDate}, on or before the run date) = ${fmt(m.bac)}; the T5 delete probe was refused, so the revision stays.`
+    : `WP3.T1.bac: approved allocations ${fmt(BAC)}; the +${fmt(BAC_T5 - BAC)} revision was deleted by the T5 probe (with an audit event, or at HEAD silently: L112) = ${fmt(m.bac)}.`;
+  const ac = stage === "after"
+    ? `WP3.T6.acAfterRetirement: ${fmt(m.ac)}, as before the retirement (WP3.T6.acBeforeRetirement). HR-S9's recommendation (undecided; AC itself is CERT-5) keeps a retired activity's AC in the project totals, and A140's ${fmt(a140)} stays in the ledger.`
+    : `WP3.T6.acBeforeRetirement: WP3.T2.ac ${fmt(M_T2.ac)} + the back-dated A130 ${fmt(cents(EV087.backdatedAfterLock[1]))} (WP3.periods.afterLock.backdatedCost) + the A140 ${fmt(a140)} dated the run date (WP3.T6.ledgerDelta) = ${fmt(m.ac)}: ledger postings dated on or before the run date. HEAD agrees: every cumulative CostRecord's through-date is on or before the run date.`;
+  const withValues = {
+    ...leaves,
+    bac: { ...leaves.bac, derivation: bac },
+    pv: { ...leaves.pv, derivation: `WP3.T2.pv: approved loadings with plannedDate on or before the run date (the last is 2026-04-10) = ${fmt(m.pv)}.` },
+    ev: { ...leaves.ev, derivation: `WP3.periods.afterLock.runDateEv: ${fmt(EV_STAGE9)} + 30,000.00 x (60% - 50%) = ${fmt(m.ev)} (A110 60,000.00 + A120 18,000.00 + A130 22,500.00); A140 holds no allocation, so the retirement moves no EV.` },
+    ac: { ...leaves.ac, derivation: ac },
+  };
+  if (!h) return withValues;
+  return headDerivations(withValues, headTexts(h, "HEAD (HR-S9 / L118, the today of WP3.T6.acAfterRetirement: A140's cumulative CostRecord drops out with the retired activity):", `${fmt(m.ac)} - ${fmt(a140)}`));
+}
+
 const WP3 = {
   setup: {
     boq: FA(BOQ_EV, "text", `087-EV's BOQ: five in-scope rows, each allocated whole to one activity (E-001 5,000 m3 x 12 = 60,000 -> A110; E-002 200 m3 x 150 = 30,000 -> A120; E-003 600 m3 x 150 = 90,000 -> A130; E-004 900 m2 x 150 = 135,000 -> A310; E-005 600 m2 x 120 = 72,000 -> A320): priced ${fmt(BOQ_EV_PRICED)}, allocated ${fmt(ALLOCATED_FIVE)}, coverage 100%. Row codes and the one-row-per-activity split are a choice; 052-SCH-EV and D3 carry the same rows.`, [P(386, 409, 546), ADJ("S2 087-EV inputs")]),
@@ -1100,8 +1369,9 @@ const WP3 = {
     loadings: F(EV087.loadings, "text", "Approved cost loadings (activity, amount, plannedDate).", [P(386)]),
     progress: F(EV087.progress, "percent", "Approved progress A110 100, A120 50, A130 25.", [P(386)]),
     directCosts: F(EV087.directCosts, "text", "Approved direct costs (activity, amount, incurredOn); later 30,000 on A120 dated 2026-10-01.", [P(386)]),
-    timeZone: F("Africa/Cairo", "text", "087 reports in its organisation zone (a project zone cannot be set: L117/L126).", [P(361, 1174)]),
-    timeZoneSource: F("organisation", "state", "reporting.timeZoneSource.", [P(1174), H("backend/src/utils/reporting-cutoff.js", "145-156")]),
+    timeZone: F("Africa/Cairo", "text", zoneDerivation("087", "Africa/Cairo"), zoneSources(PF(400), PF(425))),
+    timeZoneSource: F("project", "state", sourceDerivation("087", "Africa/Cairo"), zoneSources(PF(425, 1213)), { planValue: "organisation", note: A8_NOTE }),
+    timeZoneNote: F(null, "state", ZONE_NOTE_DERIVATION, [H("backend/src/utils/reporting-cutoff.js", "201-205"), H("backend/src/services/earned-value.service.js", "976-978"), BADJ("087-EV item 5; R1-15")]),
     order: FA(EV087.order, "list", "Answer-book order (plan :386 'Steps run in answer-book order'); T6 runs last ('Finally').", [P(386)]),
   },
   T1: metricLeaves(M_T1, [P(598)]),
@@ -1152,6 +1422,9 @@ const WP3 = {
     acBeforeRetirement: FA(acLedger(RUN, ROWS_T6), "cents", `T2's 110,000 + the back-dated A130 5,000 (periods step) + A140 5,000 = ${fmt(acLedger(RUN, ROWS_T6))} (HEAD agrees: every through-date is on or before the run date).`, [P(386, 603)]),
     acAfterRetirement: FA(AC_T6, "cents", "HR-S9 recommendation (undecided; AC itself is CERT-5): retired activities keep their AC in project totals.", [P(603, 996)], { today: AC_T6_HEAD_RETIRED }),
     cpiAfterRetirement: FA(r6(EV_AFTER_LOCK / AC_T6), "ratio", `EV at T6 is the run-date EV after the periods step's new approval (A120 50 -> 60%, WP3.periods.afterLock.runDateEv): ${fmt(EV_AFTER_LOCK)}. CPI = ${fmt(EV_AFTER_LOCK)} / ${fmt(AC_T6)} = ${EV_AFTER_LOCK / AC_T6} (A140 carries no EV, so EV is the same before and after the retirement). Today A140's AC drops out: ${fmt(EV_AFTER_LOCK)} / ${fmt(AC_T6_HEAD_RETIRED)} = ${r6(EV_AFTER_LOCK / AC_T6_HEAD_RETIRED)}.`, [P(603), ADJ("S2 WP3.periods.afterLock")], { today: r6(EV_AFTER_LOCK / AC_T6_HEAD_RETIRED) }),
+    // The run-date reads before and after the retirement (round 3, R3-2): thirteen leaves each, by the T5 probe's branch.
+    before: { revisionKept: t6Leaves("before", "revisionKept"), revisionDeleted: t6Leaves("before", "revisionDeleted") },
+    after: { revisionKept: t6Leaves("after", "revisionKept"), revisionDeleted: t6Leaves("after", "revisionDeleted") },
   },
   T7: F("byte_identical", "state", "Draft, submitted and rejected submissions leave the EV report byte-identical (sha of the JSON without asOfDate).", [P(604)]),
   periods: {
@@ -1173,6 +1446,11 @@ const WP3 = {
       cutoffReportAc: FA(acLedger("2026-02-28", ROWS_LOCK), "cents", `?cutoffDate=2026-02-28: ${fmt(M_T3.ac)} + 5,000 = ${fmt(acLedger("2026-02-28", ROWS_LOCK))}.`, [P(608)], { today: acHead("2026-02-28", ROWS_LOCK) }),
       cutoffReportEv: F(0, "cents", `?cutoffDate=2026-02-28: EV stays 0.00. EV reads progress approved by the cutoff instant (${CUT_0228_CAIRO}); the new approval is stamped after it, as every earlier approval is.`, [P(591, 608), H("backend/src/services/earned-value.service.js", "737-753"), ADJ("S2 WP3.periods.afterLock")]),
       runDateEv: FA(EV_AFTER_LOCK, "cents", `Run-date EV after the approval: ${fmt(EV_STAGE9)} + 30,000.00 x (60% - 50%) = ${fmt(EV_STAGE9)} + ${fmt(evOf(ALLOC.A120, LOCK_APPROVAL_PCT) - evOf(ALLOC.A120, EV087.progress.A120))} = ${fmt(EV_AFTER_LOCK)} (A110 60,000.00 + A120 18,000.00 + A130 22,500.00). WP3.T6 runs on it.`, [P(608), ADJ("S2 WP3.periods.afterLock")]),
+      // The run-date reads after the back-dated cost and after the new approval (round 2, R2-B B4), by the T5 probe's branch.
+      runDateAfterCost: { revisionKept: afterLockLeaves("afterCost", "revisionKept"), revisionDeleted: afterLockLeaves("afterCost", "revisionDeleted") },
+      runDateAfterApproval: { revisionKept: afterLockLeaves("afterApproval", "revisionKept"), revisionDeleted: afterLockLeaves("afterApproval", "revisionDeleted") },
+      // The 2026-02-28 read after the back-dated cost (round 3, R3-2): thirteen leaves, one set for both probe branches and both after-lock reads.
+      cutoffAfterCost: cutoffAfterCostLeaves(),
       relockSameSnapshotId: F(true, "bool", "Locking again returns the stored snapshot: same id.", [P(608), H("backend/src/services/earned-value.service.js", "1708-1710")]),
       relockSameLockedAt: F(true, "bool", "Same lockedAt.", [P(608)]),
       loadingInLockedPeriod: F("409 REPORTING_PERIOD_LOCKED", "http", "A cost loading in the locked period.", [P(594, 608), H("backend/src/services/earned-value.service.js", "1231-1239")]),
@@ -1182,6 +1460,9 @@ const WP3 = {
       lock: FA("normal", "state", "Locked without an override, by finance, once 087-EV's reporting gate is ready (the plan says only 'one locked normally').", [P(386)]),
       snapshot: metricLeaves(M_JAN, [P(386)], { headM: M_JAN_HEAD, assumption: true }),
     },
+    futurePeriod: F(futurePeriodFor(RUN), "text",
+      `The plan's "one with a future cutoff" (087-EV row), made a function of the run date (builders' adjudication 087-EV item 6): rules.futurePeriodFor(runDate) = the month after the run month (December rolls into January of the next year), start its 1st, end and cutoff its last day. The run date R is the company-local date of the build (Africa/Cairo for 087). The cutoff is >= R + 28 days (the next month's last day is at least 28 days after any day of the run month), so the cutoff instant (the end of that day in the reporting zone) is after every instant of the run date in any zone: the lock is always one "before the cutoff" (L113 / HR-E2, futureCutoffLock). Reference run date ${RUN} -> ${futurePeriodFor(RUN).code} (${futurePeriodFor(RUN).start}..${futurePeriodFor(RUN).end}), the period the book fixed before; a build on 2026-11-05 takes 2026-12, one on 2026-12-03 takes 2027-01. The three periods for a run date: rules.ev087PeriodsFor(runDate) (inputs.ev087.periods = ev087PeriodsFor(${RUN})).`,
+      [PF(425, 649), P(386, 610), BADJ("087-EV item 6")]),
     futureCutoffLock: FA(409, "http", "L113 / HR-E2 (undecided) recommendation: refuse a lock before the cutoff; recorded. Code null until HR-E2 is decided (the plan's row proposes CUTOFF_NOT_REACHED, which exists at HEAD only as a report basis note, not as an error code).", [P(610, 625, 1053), H("backend/src/routes/health.js", "335"), ADJ("open questions: codes for undecided refusals")], { today: 200 }),
     concurrentLocks: FA({ succeeded: 1, refused: { status: 409, code: null } }, "text", "Observation (plan :627, low): two locks of the same open period sent at once. Expected (assumption): serialised, one wins and the other is refused 409; the code stays null (undecided, never guessed). Recorded, not a gate.", [P(627), ADJ("S2 concurrent activations / period locks")], { today: "not established: no row lock at HEAD; the lock reads the period, then upserts its snapshot by reportingPeriodId (earned-value.service.js:1690-1745); reproduce" }),
     defaultPeriod: {
@@ -1212,6 +1493,25 @@ const WP3 = {
     evNonApproved: F("WP3.T7 red", "state", "A submitted figure moves EV.", [P(617)]),
   },
 };
+
+// Round 3 (R3-2): the added metric sets agree with the leaves they are built from (checked at load).
+for (const branch of ["revisionKept", "revisionDeleted"]) {
+  const before = WP3.T6.before[branch];
+  const after = WP3.T6.after[branch];
+  const bacLeaf = branch === "revisionKept" ? WP3.T5.bac : WP3.T1.bac;
+  if (before.bac.value !== bacLeaf.value || after.bac.value !== bacLeaf.value) throw new Error(`schedule answer book: WP3.T6.before/after.${branch}.bac must be ${branch === "revisionKept" ? "WP3.T5.bac" : "WP3.T1.bac"}`);
+  if (before.pv.value !== WP3.T2.pv.value || before.ev.value !== WP3.periods.afterLock.runDateEv.value) throw new Error(`schedule answer book: WP3.T6.before.${branch} must run on WP3.T2.pv and WP3.periods.afterLock.runDateEv`);
+  if (before.ac.value !== WP3.T6.acBeforeRetirement.value || before.ac.today !== undefined) throw new Error(`schedule answer book: WP3.T6.before.${branch}.ac must be WP3.T6.acBeforeRetirement, with no today`);
+  if (after.ac.value !== WP3.T6.acAfterRetirement.value || after.ac.today !== WP3.T6.acAfterRetirement.today) throw new Error(`schedule answer book: WP3.T6.after.${branch}.ac must be WP3.T6.acAfterRetirement (value and today)`);
+  if (after.cpi.value !== WP3.T6.cpiAfterRetirement.value || after.cpi.today !== WP3.T6.cpiAfterRetirement.today) throw new Error(`schedule answer book: WP3.T6.after.${branch}.cpi must be WP3.T6.cpiAfterRetirement (value and today)`);
+}
+{
+  const cac = WP3.periods.afterLock.cutoffAfterCost;
+  const acLeaf = WP3.periods.afterLock.cutoffReportAc;
+  if (cac.ac.value !== acLeaf.value || cac.ac.today !== acLeaf.today) throw new Error("schedule answer book: WP3.periods.afterLock.cutoffAfterCost.ac must be cutoffReportAc (value and today)");
+  if (cac.ev.value !== WP3.periods.afterLock.cutoffReportEv.value || cac.ev.today !== undefined) throw new Error("schedule answer book: WP3.periods.afterLock.cutoffAfterCost.ev must be cutoffReportEv");
+  if (cac.bac.value !== WP3.T3.bac.value || cac.pv.value !== WP3.T3.pv.value) throw new Error("schedule answer book: WP3.periods.afterLock.cutoffAfterCost runs on WP3.T3.bac and WP3.T3.pv");
+}
 
 // ─── D2: 052-SCH-EV ──────────────────────────────────────────────────────────
 
@@ -1261,8 +1561,9 @@ const D2 = {
       boq: FA(BOQ_EV, "text", "The 087-EV BOQ (WP3.setup.boq): five in-scope rows, each allocated whole; coverage 100%, so F1's baseline passes. E-004's single 900 m2 item keeps WP-2's A310 quantity gates valid.", [P(403), ADJ("S2 087-EV inputs")], { company: "052" }),
       allocations: F(ALLOC, "cents", `The 087-EV allocations (WP3.setup.allocations), in USD: total ${fmt(ALLOCATED_FIVE)} = BAC. 087-EV's loadings and direct costs (WP3.setup.loadings, WP3.setup.directCosts, WP3.T2.addedCost) carry over unchanged, so PV and AC are 087's.`, [P(403, 546, 598), ADJ("S2 087-EV inputs")], { company: "052" }),
     },
-    timeZone: F("America/Chicago", "text", "Reporting zone asserted through reporting.timeZoneSource.", [P(403, 1174)], { company: "052" }),
-    timeZoneSource: F("organisation", "state", "The organisation default (no project zone, L117/L126).", [P(403, 1174)], { company: "052" }),
+    timeZone: F("America/Chicago", "text", zoneDerivation("052", "America/Chicago"), zoneSources(PF(400), PF(442)), { company: "052" }),
+    timeZoneSource: F("project", "state", sourceDerivation("052", "America/Chicago"), zoneSources(PF(442, 1213)), { planValue: "organisation", note: A8_NOTE, company: "052" }),
+    timeZoneNote: F(null, "state", ZONE_NOTE_DERIVATION, [H("backend/src/utils/reporting-cutoff.js", "201-205"), H("backend/src/services/earned-value.service.js", "976-978"), BADJ("087-OTH/052/006 item 2; R3-2")], { company: "052" }),
     T1: {
       ev: F(M_T1.ev, "cents", why052, [P(403, 598), ADJ("S1")], { company: "052" }),
       spi: F(r6(M_T1.spi), "ratio", `EV / PV = ${fmt(M_T1.ev)} / ${fmt(M_T1.pv)} = ${M_T1.spi} -> 0.251938 (6 dp).`, [P(403, 598), ADJ("S1")], { company: "052" }),
@@ -1309,6 +1610,10 @@ const D3 = {
   },
   WP3: {
     T1: metricLeaves(M_T1, [P(409, 598)], { assumption: true, extra: { note: "assumes the D3 lane carries 087-EV's loadings, direct costs and approvals (A110 100, A120 50, A130 25), in the company's two-decimal minor units" } }),
+    // D3 is company 006 Atlas Infrastructure (plan §3.1 'WP-0 choice of D3', :375-378 @f599e67: AED, Asia/Dubai).
+    timeZone: F("Asia/Dubai", "text", zoneDerivation("006", "Asia/Dubai"), zoneSources(PF(375, 378, 447, 448)), { company: "006" }),
+    timeZoneSource: F("project", "state", sourceDerivation("006", "Asia/Dubai"), zoneSources(PF(448, 1213), BADJ("R3-8")), { planValue: "organisation", note: A8_NOTE, company: "006" }),
+    timeZoneNote: F(null, "state", ZONE_NOTE_DERIVATION, [H("backend/src/utils/reporting-cutoff.js", "201-205"), H("backend/src/services/earned-value.service.js", "976-978"), BADJ("087-OTH/052/006 item 2; R3-8")], { company: "006" }),
   },
 };
 
@@ -1356,6 +1661,8 @@ module.exports = {
     tail087SCH: TAIL,
     F2,
     F3,
+    /** F3's file content as P6 exports it (WP1.T3.file; builders' adjudication 087-SCH/087-IMP item 5): build/files.js F3() writes and checks it. */
+    F3file: F3_FILE,
     boq087SCH: BOQ_087SCH,
     methods087SCH: METHODS_087SCH,
     ev087: EV087,
@@ -1368,6 +1675,6 @@ module.exports = {
   WP3,
   D2,
   D3,
-  rules: { hoursToDays, lagHoursToDays, tenthsToDays, mspDurationDays, cpm, workingDate, evOf, qtyEv, evMetrics, endOfLocalDay, defaultPeriod, forecastPace, forecastEvFinish, deriveStatus, acLedger, acHead },
+  rules: { hoursToDays, lagHoursToDays, tenthsToDays, mspDurationDays, cpm, workingDate, evOf, qtyEv, evMetrics, endOfLocalDay, defaultPeriod, forecastPace, forecastEvFinish, deriveStatus, acLedger, acHead, futurePeriodFor, ev087PeriodsFor },
   figures,
 };

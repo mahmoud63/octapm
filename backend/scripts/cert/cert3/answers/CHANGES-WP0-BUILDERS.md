@@ -1,0 +1,595 @@
+# Answer book and F3 generator: changes for the WP-0 builders' adjudication (2026-10-09)
+
+Binding source: `C:\Temp\octapm-cert\scratch\wp0\builders-adjudication.md` (cited below as BADJ).
+Rule A10 applies: every value below changed only with the on-paper derivation written next to it in
+the book (the leaf's `derivation`). Product citations keep the books' `@886c9f1` tag; every product
+file cited by a new entry is unchanged at `f599e67`, except `schedule.service.js` (critical_path
+readiness `:849-866 @886c9f1` is `:855-872 @f599e67`, same code). Plan lines in new entries are
+numbered at `f599e67` (`PF(...)`, suffix `@f599e67`).
+
+Figure counts: schedule 706 -> 736, field-controls 268 -> 279, commercial 580 -> 590. No key was
+removed. Money is integer cents.
+
+## 1. F3 file as P6 exports it (BADJ 087-SCH/087-IMP item 5; R1-2)
+
+Derivation: the network is A 80 h (10 d), SS + 16 h (2 d), B 24 h (3 d); project finish = EF(A) = 10.
+P6's late pass ends a path with no finish successor at the project finish, so A's backward candidate
+LS(B) 7 - 2 + 10 = 15 is capped at 10 = EF(A): A LS 0, LF 10, TF 0 (0 h). B (no successor): LF 10,
+LS 7, TF 5 (40 h). The early pass and the link are the same capped or not. The product's own CPM after
+activation is unchanged as the HR-S1 observation: `WP1.T3.A.*` (value = HR-S1 recommendation A TF 0,
+`today` A TF 5, LF 15) and `WP1.T3.criticalCount` are NOT changed.
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP1.T3.file.durationHours` | none (files.F3 wrote the same hours) | `{A: 80, B: 24}` hours |
+| `WP1.T3.file.link` | none | `{pred: A, succ: B, type: SS, lagHours: 16}` |
+| `WP1.T3.file.projectFinish` / `projectFinishDate` | none | `10` / `2026-01-19` |
+| `WP1.T3.file.A.ES` / `EF` | none | `0` / `10` |
+| `WP1.T3.file.A.LS` / `LF` | none (file wrote LS 5, LF 15) | `0` / `10` |
+| `WP1.T3.file.A.totalFloatHours` | none (file wrote 40 h) | `0` |
+| `WP1.T3.file.A.earlyStartDate` / `earlyFinishDate` | none | `2026-01-05` / `2026-01-19` |
+| `WP1.T3.file.A.lateStartDate` / `lateFinishDate` | none (file wrote 2026-01-12 / 2026-01-26) | `2026-01-05` / `2026-01-19` |
+| `WP1.T3.file.B.ES` / `EF` / `LS` / `LF` | none | `2` / `5` / `7` / `10` |
+| `WP1.T3.file.B.totalFloatHours` | none (file wrote 40 h) | `40` |
+| `WP1.T3.file.B.earlyStartDate` / `earlyFinishDate` / `lateStartDate` / `lateFinishDate` | none | `2026-01-07` / `2026-01-12` / `2026-01-14` / `2026-01-19` |
+| `WP1.T3.file.stagedCriticalCount` | none | `1` (A: round(0 h / 8) = 0 -> critical; import.service.js:253) |
+| `WP1.T3.file.stagedLate` | none | `{A: {lateStart 0, lateFinish 10, totalFloat 0}, B: {7, 10, 5}}` |
+| `inputs.F3file` (data, not a leaf) | none | the same figures; read by `build/files.js` `F3()` |
+
+`build/files.js`: `programme()` takes `capLf` (passed to the book's `rules.cpm`); `F3()` builds with
+`capLf: inputs.F3file.capLf` and refuses to load if any figure differs from `inputs.F3file`;
+`selfCheck()` adds `F3 as P6 exports it (answers WP1.T3.file)`, which reads the XER, P6 XML and MSPDI
+back with the product's parsers and compares them with the book (raw `total_float_hr_cnt` 0 / 40,
+float days 0 / 5, early and late dates, the SS +2 link, staged critical `["A"]`, TotalFloat hours,
+TotalSlack tenths). selfCheck: 24 checks, 0 failed. Teeth: with the cap off `F3()` refuses
+(`A LS 5, the answer book says 0`); the old uncapped file read back differs from the book
+(`A total_float_hr_cnt 40 vs 0`, `late_end_date 2026-01-26 vs 2026-01-19`).
+For the builder: `087-imp.js` `f3AsP6` is to be removed and `files.F3()` staged as is.
+
+## 2. Reporting zone (BADJ 087-EV item 5; 087-OTH/052/006 item 2; R1-15; R3-2; R3-8)
+
+Derivation: `createProject` copies the workspace `defaultTimezone` onto `Project.timezone` when the
+creator names none (ENT-6, project.service.js:441-459) and the project API has no timezone field, so a
+build-created project holds the company zone; `resolveReportingTimeZone` labels a valid project zone
+`'project'` (reporting-cutoff.js:23-27, 145-149) and the EV report and period answers carry it as
+`reporting.timeZoneSource` (earned-value.service.js:966-978, 1065); `timeZoneNote` is null for the
+`'project'` source (reporting-cutoff.js:201-202). A proof asserts both source `'project'` AND zone =
+company zone, through the API. Plan premise A8 (:1213) is wrong for the label (kept as `planValue`);
+the zone-change question is suspect WP3-TZ-1 (the creation comment, project.service.js:443-444, says an
+existing project is never rewritten).
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP3.setup.timeZone` | `Africa/Cairo` ("organisation zone") | `Africa/Cairo` (value unchanged; derivation rewritten) |
+| `WP3.setup.timeZoneSource` | `organisation` | `project` (planValue `organisation`) |
+| `WP3.setup.timeZoneNote` | none | `null` |
+| `D2.WP3.timeZone` | `America/Chicago` | `America/Chicago` (value unchanged; derivation rewritten) |
+| `D2.WP3.timeZoneSource` | `organisation` | `project` (planValue `organisation`) |
+| `D2.WP3.timeZoneNote` | none | `null` |
+| `D3.WP3.timeZone` | none (D3 carried no zone) | `Asia/Dubai` (company 006, plan :375-378) |
+| `D3.WP3.timeZoneSource` | none | `project` (planValue `organisation`) |
+| `D3.WP3.timeZoneNote` | none | `null` |
+
+## 3. 087-EV future period from the run date (BADJ 087-EV item 6)
+
+Derivation: the month after the run month (December rolls into January), start its 1st, end and cutoff
+its last day; the cutoff is >= run date + 28 days, so it is never reached on the run date in any zone.
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP3.periods.futurePeriod` | none (fixed `2026-11` inside `inputs.ev087.periods`) | `rules.futurePeriodFor(RUN)` = `{code 2026-11, 2026-11-01..2026-11-30, cutoff 2026-11-30}` |
+| `inputs.ev087.periods` (data) | fixed list ending `2026-11` | `ev087PeriodsFor("2026-10-09")`: identical for the reference run date |
+| `rules.futurePeriodFor(runDate)`, `rules.ev087PeriodsFor(runDate)` | none | new functions (the builder calls `ev087PeriodsFor(b.today)`) |
+
+## 4. IPC-04 certified last (BADJ 087-COM/-B/-C, 052-COM item 3; R2-2)
+
+Derivation (commercial.js, from the book's own keys): A130 this period = `WP4.I6.claimed` 200 m3 - the
+150 m3 IPC-03 certified inside `WP4.I8`'s gross (22,500.00 = `WP4.I6.earnedCap`) = 50 m3; gross
+50 x 150.00 = 7,500.00 = `WP4.I6.overCertificationAmount`; retention 10% (`deep.087-COM.contractRetentionRate`;
+no cap, `retentionCapRate` only on IPC-02) = 750.00; advance outstanding = `deep.087-COM.advance`
+200,000.00 - IPC-08's `WP4.I7.advanceRecovery` 9,750.00 = 190,250.00; recovery = min(190,250.00,
+`deep.087-COM.advanceRecoveryRate` 10% x 7,500.00) = 750.00; deductions 0; tax 0 (rate back to 0 after
+IPC-05, C7). certificateFinancials (prime-contract.service.js:649-692): 7,500.00 - 750.00 - 750.00 - 0
+= 6,000.00 + 0 = **6,000.00**, as the builder observed. Conditions recorded in the notes: WP4-OVR-1 and
+WP4-DRAFTS-1 persisted as findings.
+
+| Key (commercial.js) | Old | New |
+|---|---|---|
+| `deep.087-COM.ipc04.order` | none | `{certifies: last, after IPC-08; override: PM with a reason; recoveredBefore [IPC-08]; notCertifiedBefore [IPC-09, IPC-10]}` |
+| `deep.087-COM.ipc04.quantity` | none | `50` m3 |
+| `deep.087-COM.ipc04.gross` | none | `750000` |
+| `deep.087-COM.ipc04.overCertificationAmount` | none | `750000` |
+| `deep.087-COM.ipc04.retention` | none | `75000` |
+| `deep.087-COM.ipc04.advanceOutstandingBefore` | none | `19025000` |
+| `deep.087-COM.ipc04.advanceRecovery` | none | `75000` |
+| `deep.087-COM.ipc04.deductions` | none | `0` |
+| `deep.087-COM.ipc04.taxAmount` | none | `0` |
+| `deep.087-COM.ipc04.net` | none | `600000` |
+
+## 5. 087-FLD wording (BADJ 087-FLD item 6)
+
+| Key (field-controls.js) | Old | New | Derivation |
+|---|---|---|---|
+| `WP8.transmittal.meetingChangeEventReadBack` | `{origin meeting, meetingActionItemId, title, activityId, type other, romAmount 0, scheduleImpactDays 0}` | `{origin meeting, sourceRecordType 'meeting_action', sourceRecordId <item id>, sourceLinks [{type 'meeting_action', id <item id>}], title, activityId, type other, romAmount 0, scheduleImpactDays 0}` | the serializer `eventOut` exposes the typed link only as the pair and `sourceLinks` (change-event.service.js:72-77, 88-92, 191-216, 379); the `meetingActionItemId` column is not exposed |
+| `WP8.rfi.overdueRecords` | text unchanged | text unchanged; derivation rewritten | "dueDate null" is a stored-row fact: the API presents `dueDate = dueDateForRecord(row) = dueDate \|\| responseRequiredBy \|\| ...` (workflow-support.service.js:840-845, 955, 1103-1107; rfi.service.js:317, 476, 717) |
+| `WP8.rfi.overdueApiDueDate` | none | `{RFI-RRB: its responseRequiredBy, RFI-ANS: its dueDate}` | as above |
+| `WP8.rfi.overdueStoredDueDate` | none | `{RFI-RRB: null, RFI-ANS: its past dueDate}` | read in process, read only; the column health.js reads (:174, :462-465) |
+
+## 6. 087-HLT delayed activity, run-date rule (BADJ 087-EXC/HLT item 7; R3-10)
+
+The book's former window inequality (start + 50 <= run date < start + 70) agrees with the plan's window
+(:431); its fixed start 2026-08-10 came from no stated selection rule (it is run date - 60, the window's
+midpoint) and left the WP-9 proof only until 2026-10-18. Settled on paper: "today" is the WP-9 proof's
+read, after the build, so start = the Monday on or before (run date - 51), the latest Monday whose
+calendar finish is already past on the run date in every zone; the window (calendar finish <= today <=
+working finish - 1) then lasts 13 to 19 days from the run date, and start <= the cutoff 2026-08-31 for
+run dates through 2026-10-27 (the book checks the rule for every run date 2026-10-01..2026-10-27).
+This coincides with the builder's rule; the builder now calls the book's function.
+
+| Key (field-controls.js) | Old | New |
+|---|---|---|
+| `WP9.health.delayedExampleDates` | `{start 2026-08-10, calendarFinish 2026-09-29, workingFinish 2026-10-19, runDate 2026-10-09}` | `{start 2026-08-17, calendarFinish 2026-10-06, workingFinish 2026-10-26, runDate 2026-10-09}` |
+| `rules.delayedExampleDatesFor(runDate)` | none | new: `{runDate, start, calendarFinish, workingFinish, windowFrom, windowThrough, cutoff, startOnOrBeforeCutoff}` |
+
+`WP9.health.delayedExpected` (0, today 1) is unchanged.
+
+## 7. 087-HLT document control (BADJ 087-EXC/HLT item 8)
+
+Values unchanged (80 / 80); derivations rewritten on the literal contents and the plan's 90 / 100
+recorded as a plan figure correction (they belong to `docControlPlanReading`'s record set).
+
+| Key (field-controls.js) | Old | New |
+|---|---|---|
+| `WP9.health.docControlRecords` | text (unchanged) | derivation: the literal §3.2 contents, decided by BADJ item 8 |
+| `WP9.health.docControlCard` | `80` (planValue 100) | `80` (planValue 100): health.js:462-478 = 100 - 2x10 - 2x5 + 1x10 |
+| `WP9.health.docControlExpected` | `80` (planValue 90) | `80` (planValue 90): workspace-dashboard.service.js:1168-1190 = 100 - 1x10 - 0x10 - 2x5 |
+
+## 8. 087-HLT EV at the cutoff and on the card (BADJ 087-EXC/HLT item 6; R3-4)
+
+Inputs: the build's record set (H10 60,000 @ 100%, H50 30,000 @ 50%; loadings 60,000 + 30,000 and
+costs 50,000 + 30,000 all dated on or before 2026-08-31), adopted as `WP9.health.evRecords`. PV and AC
+at the cutoff by date (earned-value.service.js:439-451, 486-514); EV at the cutoff reads approvals by
+the cutoff instant (:737-753) and plan §3.3 (:467) stamps approvals at real time, so 0; the card's
+default basis is an ad hoc report at today because 087-HLT has no reporting period
+(earned-value.service.js:386-395; health.js:316-319).
+
+| Key (field-controls.js) | Old | New |
+|---|---|---|
+| `WP9.health.evRecords` | none | the record set above |
+| `WP9.health.cutoffInstant` | none | `2026-08-31T20:59:59.999Z` (Africa/Cairo, UTC+3) |
+| `WP9.health.pvAtCutoff` | none | `9000000` |
+| `WP9.health.acAtCutoff` | none | `8000000` |
+| `WP9.health.evAtCutoff` | none | `0` (planValue `7500000`: plan figure correction) |
+| `WP9.health.cardBasis` | none | `ad hoc report cut at today (no reporting period on 087-HLT)` |
+| `WP9.health.pvOnCardBasis` / `acOnCardBasis` / `evOnCardBasis` | none | `9000000` / `8000000` / `7500000` |
+| `WP9.health.spi` / `cpi` | 0.833333 / 0.9375 | unchanged; derivation names the card basis |
+| `rules.endOfLocalDay` (field-controls) | none | new (same calculator as schedule.js) |
+
+## 9. Timesheet multiplier 0.5 (BADJ 087-FLD item 1; adjudication F1)
+
+Values unchanged; the plan's "one of them 0.5" crew member is marked as served by the contract refusal
+(the build step is DONE on 400 VALIDATION_ERROR with `error.details` field `overtimeMultiplier`; the
+import answers 200 with the row in `errors[]`). The 100.00 figure is checked in process with the
+service's exported `multiplierFor` (timesheet.service.js:70), never on a built crew.
+
+| Key (field-controls.js) | Old | New |
+|---|---|---|
+| `WP8.timesheet.multiplierHalf` | `10000` ("needs a guarded fixture or dropped" in the create leaf) | `10000`, in process only |
+| `WP8.timesheet.multiplierHalfCreate` | `400 VALIDATION_ERROR`, planValue "...(plan :390)" | `400 VALIDATION_ERROR`, planValue "...(plan :390; :429 @f599e67)"; served by the contract refusal |
+| `WP8.timesheet.multiplierHalfImport` | `{status 200, created 0, ..., errors [row 1]}` | unchanged; derivation names BADJ 087-FLD item 1 |
+
+## 10. Round 2: leaves for the verifiers' figures (BADJ "Round 2", R2-B B1-B5) and lib pickId (R2-G)
+
+Binding source: BADJ's final section "Round 2: adjudication of the two verifiers". Under R2-B the
+builders assert these keys and compute no figure themselves (A10). Every product file cited is
+unchanged between `886c9f1` and `f599e67`: `git diff 886c9f1 f599e67` is empty for export.js,
+projects.js, rbac.js, export.service.js, ipc.service.js, prime-contract.service.js,
+earned-value.service.js, weather.service.js and schema.prisma. Plan lines are `PF(...)` (`@f599e67`).
+
+Figure counts after round 2:
+- schedule 736 -> 788 (+52);
+- field-controls 279 -> 279 (two `today` readings added to existing figures);
+- commercial 590 -> 618 (+28).
+
+No key was removed and no `value` changed. The three load tests (`scratch/wp0/load-schedule.js`,
+`load-commercial.js`, `load-field-controls.js`) pass, and every leaf has a derivation and a source.
+
+### B1. `WP9.export.sheetGate` today (field-controls.js)
+
+Derivation from the route guard and the export service:
+- GET /projects/:projectId/export/xlsx passes `nestedProjectAccess`, which checks project access
+  only (projects.js:55-59, mounted at :468).
+- It then passes `requirePermission('cost', 'export')` (export.js:17-19), its only permission check
+  (rbac.js:138-163 -> `hasPermission` :50-66). The 087-EXTRAS member's template grants
+  `cost|action:export`.
+- `generateProjectExport({ projectId, orgId })` (export.js:21-24) is given no user and checks no
+  permission. It reads the risks unfiltered (export.service.js:90-93) and adds six worksheets
+  unconditionally, in this order: Master Schedule, Critical Path, Risks, Assumptions, Long Lead
+  Items, WBS (:179, 209, 234, 259, 270, 316; 6 = `WP9.export.sheets`).
+
+So the member denied `risk:read` gets 200 and all six sheets, Risks included. That is HR-K7's known
+answer, and it equals the round-1 087-EXTRAS observation (BLOCKED HR-K7: '200', the same six names
+in the same order).
+
+| Key (field-controls.js) | Old | New |
+|---|---|---|
+| `WP9.export.sheetGate` (value) | `one permission per sheet` | unchanged; the derivation states the proof's value check: answer '200' and no sheet named Risks (R3-9) |
+| `WP9.export.sheetGate.today` | none | `{ answer: '200', sheets: ['Master Schedule', 'Critical Path', 'Risks', 'Assumptions', 'Long Lead Items', 'WBS'] }`, the 087-EXTRAS step's `{ answer: said(res), sheets }` shape |
+| `EXPORT_SHEETS_HEAD`, `EXPORT_RISK_SHEET_HEAD` (data, not leaves) | none | the six names; `'Risks'` |
+
+### B2. IPC-09 and IPC-10 on 087-COM (commercial.js `deep["087-COM"]`)
+
+Derivation from book keys (`IPC0910`). Totals are computed by `recomputeCertificateTotals`
+(ipc.service.js:108-175) through `certificateFinancials` (prime-contract.service.js:649-692).
+
+Advance outstanding before both certificates:
+- `ipc04.advanceOutstandingBefore` 190,250.00 - `ipc04.advanceRecovery` 750.00 = 189,500.00.
+- Recovery locks only at certification (prime-contract.service.js:694-732), so IPC-09, which is
+  submitted, does not reduce IPC-10's outstanding.
+
+IPC-09:
+- gross: 500 m2 x 45.00 (`BOQ["B-004"]`) = 22,500.00;
+- within earned: `B-004/A310` 135,000.00 at A310's 50% (the basis of `WP4.P2.progressCap`) =
+  67,500.00;
+- retention: 10% (`contractRetentionRate`; no cap, which is IPC-02's only) = 2,250.00;
+- recovery: min(189,500.00, 10% x 22,500.00) = 2,250.00;
+- deduction: 1,000.00 (the amount `WP4.I7.deductionWithoutNote` names; BADJ 087-COM item 2);
+- tax: 0 (C7);
+- net: 22,500.00 - 2,250.00 - 2,250.00 - 1,000.00 = 17,000.00.
+
+IPC-10:
+- gross: 1,000 m2 x 18.00 (`BOQ["B-005"]`) = 18,000.00;
+- within earned at A320's 100% (a build choice; 25% or more is enough);
+- retention: 1,800.00;
+- recovery: 1,800.00;
+- deduction: none;
+- net: 14,400.00.
+
+My derivation agrees with the builder's literals (087-com.js ~949-990). It also agrees with the
+round-1 state (`ipc.09` netPayable 17,000, `ipc.10` 14,400). No difference to report.
+
+| Key (commercial.js) | Old | New |
+|---|---|---|
+| `deep.087-COM.ipc09.status` / `quantity` | none | `submitted` / `500` m2 |
+| `deep.087-COM.ipc09.gross` / `retention` | none | `2250000` / `225000` |
+| `deep.087-COM.ipc09.advanceOutstandingBefore` / `advanceRecovery` | none | `18950000` / `225000` |
+| `deep.087-COM.ipc09.deductions` / `taxAmount` / `net` | none | `100000` / `0` / `1700000` |
+| `deep.087-COM.ipc10.status` / `quantity` | none | `draft` / `1000` m2 |
+| `deep.087-COM.ipc10.gross` / `retention` | none | `1800000` / `180000` |
+| `deep.087-COM.ipc10.advanceOutstandingBefore` / `advanceRecovery` | none | `18950000` / `180000` |
+| `deep.087-COM.ipc10.deductions` / `taxAmount` / `net` | none | `0` / `0` / `1440000` |
+
+### B3. 087-COM-C bill and IPC-01 (commercial.js `deep["087-COM-C"]`)
+
+Derivation (`COMC`):
+- B-001 is the book's row (5,000 m3 x 12.00).
+- B-006 is the builder's optional, unallocated disposal row (2,000 m3 x 8.00).
+- The bill is 60,000.00 + 16,000.00 = 76,000.00. This is the contract's originalValue on the
+  fallback: with no contractValue, the first read after the upload takes the aggregate of the
+  active BOQ amounts, with source `boq_fallback` (prime-contract.service.js:201-220).
+
+IPC-01:
+- its one item is the whole `B-001/A110` allocation: 5,000 m3 x 12.00 = 60,000.00 (A110 at 100%);
+- retention 10% (the project's explicit defaultRetentionRate, HR-C1), taken by the items
+  (ipc.service.js:51-54, 779, 872, 934-938) and by the contract (prime-contract.service.js:264-266) =
+  6,000.00;
+- no cap, advance or tax: the schema defaults are `retentionCapRate` null, `advancePaidAmount` 0 and
+  `taxRate` 0 (schema.prisma:2535, 2538, 2544);
+- net 54,000.00.
+
+This agrees with 087-com-c.js:72,106 and the round-1 state (bill 7,600,000 cents, originalValue
+76,000, IPC-01 net 54,000).
+
+| Key (commercial.js) | Old | New |
+|---|---|---|
+| `deep.087-COM-C.billRows` | none | the two rows above (list) |
+| `deep.087-COM-C.billTotal` | none | `7600000` |
+| `deep.087-COM-C.ipc01.quantity` / `gross` / `retentionRate` | none | `5000` m3 / `6000000` / `10` |
+| `deep.087-COM-C.ipc01.retention` / `advanceRecovery` | none | `600000` / `0` |
+| `deep.087-COM-C.ipc01.deductions` / `taxAmount` / `net` | none | `0` / `0` / `5400000` |
+
+### B4. 087-EV run-date reads after the locks (schedule.js `WP3.periods.afterLock`)
+
+Derivation inputs:
+- AC = `WP3.T2.ac` 110,000.00 + `backdatedCost` 5,000.00 = 115,000.00 (`acLedger(RUN, ROWS_LOCK)`).
+  HEAD's `acHead` agrees at the run date, and the book checks this at load, so there is no L34
+  today.
+- PV = `WP3.T2.pv` 387,000.00.
+- EV = `WP3.T2.ev` 97,500.00 after the cost, and `runDateEv` 100,500.00 after the approval.
+- BAC follows the T5 delete probe:
+  - `revisionKept` (the probe was refused): `WP3.T5.bac` 400,000.00;
+  - `revisionDeleted` (an audited delete, or HEAD's silent L112 delete): `WP3.T1.bac` 387,000.00.
+
+Figures (`rules.evMetrics`):
+
+| Metric | afterCost kept | afterCost deleted | afterApproval kept | afterApproval deleted |
+|---|---|---|---|---|
+| BAC | 400,000.00 | 387,000.00 | 400,000.00 | 387,000.00 |
+| PV | 387,000.00 | 387,000.00 | 387,000.00 | 387,000.00 |
+| EV | 97,500.00 | 97,500.00 | 100,500.00 | 100,500.00 |
+| AC | 115,000.00 | 115,000.00 | 115,000.00 | 115,000.00 |
+| SPI (alert) | 0.251938 (yes) | 0.251938 (yes) | 0.259690 (yes) | 0.259690 (yes) |
+| CPI (alert) | 0.847826 (yes) | 0.847826 (yes) | 0.873913 (yes) | 0.873913 (yes) |
+| EAC (budget_over_cpi) | 471,794.87 | 456,461.54 | 457,711.44 | 442,835.82 |
+| SV | -289,500.00 | -289,500.00 | -286,500.00 | -286,500.00 |
+| CV | -17,500.00 | -17,500.00 | -14,500.00 | -14,500.00 |
+| ETC | 356,794.87 | 341,461.54 | 342,711.44 | 327,835.82 |
+
+The `revisionDeleted` columns equal what the round-1 087-EV build read after its L112 BLOCKED probe
+(EAC 456,461.54 / 442,835.82; ETC 341,461.54 / 327,835.82; every verdict 'value').
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP3.periods.afterLock.runDateAfterCost.{revisionKept,revisionDeleted}.{bac,pv,ev,ac,spi,spiAlert,cpi,cpiAlert,eac,eacBasis,sv,cv,etc}` | none (087-ev.js computed them) | the afterCost columns above (26 leaves, assumption, no `today`) |
+| `WP3.periods.afterLock.runDateAfterApproval.{revisionKept,revisionDeleted}.{...same 13}` | none | the afterApproval columns above (26 leaves) |
+
+For the builder:
+`metricsFrom('periods.afterLock.runDateAfterCost.' + (revisionKept() ? 'revisionKept' : 'revisionDeleted'))`,
+and likewise for `runDateAfterApproval`.
+
+### B5. `WP8.weather.nonContractualAddsNothing` today (field-controls.js)
+
+- The value stays 14.
+- today is 12. Every row is stored in the Int column (weather.service.js:217), so the contractual
+  rows read trunc(0.5, 1.0, 1.5, 2.5, 7.5, 1.0) = 0 + 1 + 1 + 2 + 7 + 1 = 12
+  (`FLD_WEATHER_AT_TODAY.used`, the same reading as `WP8.weather.todayAt` 60%).
+- The non-contractual 10 adds nothing (weather.service.js:162-165), so the reading is still 12.
+- This is HR-C11's known answer (truncation).
+
+The 052-FLD (D2) twin: the book carries none. `WP8["052-FLD"]` has only `weatherBelowPct`,
+`weatherAtPct` and `weatherAtWarning`, and commercial.js `WP7.weather["052-FLD"]` has only 65% / 70%.
+052-FLD runs the same record set, so both builders judge against this one leaf; no twin was added.
+
+| Key (field-controls.js) | Old | New |
+|---|---|---|
+| `WP8.weather.nonContractualAddsNothing` (value) | `14` | unchanged |
+| `WP8.weather.nonContractualAddsNothing.today` | none | `12` (HR-C11) |
+
+### R2-G. lib.js `pickId`
+
+- When the payload is not a bare array, `data.items` is searched first.
+- When `items` does not hold the id, every other top-level array property is searched in key
+  order. For an IPC certificate (GET /ipc/:period) these are `invoices`, `payments` and
+  `retentionReleases`.
+- Bare arrays, `data.id`, `data.item.id`, and an id found in `items` behave as before.
+
+Proof: a scratch script extracts `pickId` from lib.js's text and runs it on a synthetic IPC
+certificate payload (17 cases pass). The pre-change `pickId` finds none of the invoice, payment or
+release ids there. `node --check` passes for lib.js and every builder.
+
+<!-- merged from CHANGES-WP0-BUILDERS-r3-com.md (round 3) -->
+
+# Answer book: changes for the WP-0 builders' adjudication, round 3, group com (2026-10-09)
+
+Binding source: `C:\Temp\octapm-cert\scratch\wp0\builders-adjudication.md`, section "Round 3: adjudication
+of the round-2 verifier" (cited below as BADJ R3), items R3-1 and R3-3. Rule A10 applies: every value below
+is a leaf whose on-paper derivation is written next to it in the book (the leaf's `derivation`), from the
+book's own keys; the builders assert the leaves and compute no figure themselves. Product citations keep
+the book's `@886c9f1` tag: `git diff --stat 886c9f1 f599e67` is empty for prime-contract.service.js,
+ipc.service.js, change-order.service.js and schema.prisma, the files the new entries cite, and
+`backend/src` is clean in the working tree. Plan lines are the working-tree plan's (`P(...)`).
+
+Figure counts: commercial 618 -> 633 (+15: six under `deep.087-COM.contractEnd`, nine under
+`deep.052-COM.ipc03`). No key was removed and no existing `value` changed. The load test
+(`scratch/wp0/load-commercial.js`) passes: 633 figures, shape OK, every leaf with a derivation and a source.
+Money is integer cents of the project currency (087 EGP, 052 USD).
+
+## 1. 052-COM's IPC-03 (BADJ R3-1; commercial.js `deep["052-COM"].ipc03`)
+
+Derivation (`COM052_IPC03`, computed in the book from its keys, in integer USD cents):
+- the row is `BOQ["B-001"]` (5,000 m3 x 12.00), allocated whole to A110
+  (`stage3:109.allocation.B-001/A110` = 60,000.00); the claim is 1,000 m3, a build choice (plan §3.2 fixes
+  only "a submitted certificate" among the I4 states);
+- gross: 1,000 x 12.00 = 12,000.00 = totalCert = grossThisPeriod; within earned at A110's 100% approved
+  (60,000.00), and no earlier 052-COM certificate claims B-001/A110 (IPC-01 is on C-001/A220, IPC-02 on
+  D-001/A200);
+- retention: `deep["052-COM"].contractRetentionRate` 10%, explicit on the prime contract after the I1 case
+  (at HEAD reached through the item PATCH, finding L114) = 1,200.00; no cap (`retentionCapRate` null by
+  default, schema.prisma:2535, never configured on 052-COM);
+- advance recovery 0: `advancePaidAmount` 0 by default (schema.prisma:2538), outstanding 0
+  (prime-contract.service.js:539-540);
+- deductions 0 (the plan's deduction is 087-COM IPC-09's); tax 0 (`taxRate` 0 by default, schema.prisma:2544,
+  and set to 0 explicitly with the retention rate, step contract.retention);
+- net: certificateFinancials (prime-contract.service.js:649-692) 12,000.00 - 1,200.00 - 0 - 0 = 10,800.00
+  + tax 0 = 10,800.00, on the draft and on the submitted certificate (totals are recomputed on draft item
+  edits, ipc.service.js:108-175, 908-914, 1024, and not moved by the submit).
+
+My derivation agrees with the builder's former literals (052-com.js `ipc.I4-submitted`: 1000 x 12,
+gross x RATE / 100, gross - retention). No difference to report.
+
+| Key (commercial.js) | Old | New |
+|---|---|---|
+| `deep.052-COM.ipc03.status` | none | `submitted` |
+| `deep.052-COM.ipc03.quantity` | none | `1000` m3 |
+| `deep.052-COM.ipc03.gross` | none | `1200000` |
+| `deep.052-COM.ipc03.retentionRate` | none | `10` percent |
+| `deep.052-COM.ipc03.retention` | none | `120000` |
+| `deep.052-COM.ipc03.advanceRecovery` | none | `0` |
+| `deep.052-COM.ipc03.deductions` | none | `0` |
+| `deep.052-COM.ipc03.taxAmount` | none | `0` |
+| `deep.052-COM.ipc03.net` | none | `1080000` |
+| `COM052_IPC03`, `COM052_IPC03_SRC`, `COM052_IPC03_NOTE` (data, not leaves) | none | the derivation above; a load check throws unless net = 10,800.00 |
+
+For the builder (052-com.js `ipc.I4-submitted`): the claim sends `ipc03.quantity` and `ipc03.retentionRate`
+(the item's rate asserted on the PATCH answer); `bookTotals(ipc03)` (status, totalCert, grossThisPeriod,
+totalRet, advanceRecovery, deductions, taxAmount, netPayable, as 087-COM's helper) is asserted on the draft
+(status draft) and again on the submitted certificate; the A110 item's qty is asserted against
+`ipc03.quantity`. The step's place is unchanged (after ipc.I8).
+
+## 2. 087-COM's contract after every prime CO (BADJ R3-3; commercial.js `deep["087-COM"].contractEnd`)
+
+Derivation (`CONTRACT_END`, computed in the book from its CO leaves): GET /prime-contract aggregates
+`approvedChangesValue` as the SUM of value over the project's COs with status in
+APPROVED_CHANGE_STATUSES = ['approved'] and archivedAt null, `pendingChangesValue` the same over
+PENDING_CHANGE_STATUSES = ['draft', 'pending'] (a draft counts as pending, `WP4.E2.pendingDelta`), and
+`revisedValue` = originalValue + approvedChangesValue (prime-contract.service.js:35-37, 236-263, 286-307).
+A rejected CO is in neither set; an archived one (status 'archived' and archivedAt set,
+change-order.service.js:1687-1688) fails archivedAt null (`WP4.E3.archivePendingDelta`).
+
+The CO set at the moment of the builder's step contract.after-cos (after co.RFI's approval and ce.E1's
+convert; CO-SPLIT and CO-I3 approved after IPC-10, so `WP4.E5.revisedValue` 2,125,000.00 still held for
+IPC-02's cap, `WP4.I7.retentionCap`):
+
+| CO (builder key) | status | amount | from |
+|---|---|---|---|
+| CO-125 | approved | 125,000.00 | `WP4.E5.approvedChangesValue` |
+| CO-SPLIT | approved | 10,000.00 | `WP4.E4.revisedDelta` (= `split01_100` 6,000.00 + `split02_100` 4,000.00, checked at load) |
+| CO-I3 | approved | 7,500.00 | `WP4.I3.A120LimitAmount` 37,500.00 - `stage3:109.allocation.B-002/A120` 30,000.00 (checked at load) |
+| CO-RFI | approved | 4,500.00 | `WP4.rfiCo.value` (approved: `WP4.rfiCo.revisedDeltaOnApproval`) |
+| CO-40 | pending | 40,000.00 | `WP4.E5.pendingChangesValue` |
+| CO-E1 | draft | 9,500.00 | `WP4.E1.convertedValue` (`WP4.E1.coStatus` draft) |
+| CO-REJ | rejected | 15,000.00 | build choice; in neither aggregate |
+| CO-ARC | archived | 3,000.00 | build choice; in neither aggregate |
+
+- approvedChangesValue = 125,000.00 + 10,000.00 + 7,500.00 + 4,500.00 = **147,000.00**;
+- pendingChangesValue = 40,000.00 + 9,500.00 = **49,500.00** (`WP4.E5.pendingChangesValue` 40,000.00 holds
+  at its own moment only, before E1 is converted: its note; asserted at contract.after-CO-125);
+- revisedValue = `deep.087-COM.contractOriginal` 2,000,000.00 + 147,000.00 = **2,147,000.00**.
+
+My derivation agrees with the builder's literals (087-com.js `contract.after-cos`: 147,000 / 49,500 /
+2,147,000) and with the round-2 state. No difference to report. CO-I3's value was itself computed in the
+builder (`WP4.I3.A120LimitAmount` minus the stage-3 allocation); it is now the book's `approvedChanges`
+entry for CO-I3, derived from those two keys with a load check (7,500.00).
+
+| Key (commercial.js) | Old | New |
+|---|---|---|
+| `deep.087-COM.contractEnd.approvedChanges` | none | list `[{co, status, amount, from}]`: CO-125, CO-SPLIT, CO-I3, CO-RFI as above |
+| `deep.087-COM.contractEnd.pendingChanges` | none | list: CO-40 (pending), CO-E1 (draft) as above |
+| `deep.087-COM.contractEnd.notCounted` | none | list `[{co, status, amount, why}]`: CO-REJ (rejected), CO-ARC (archived); amounts are build choices (assumption, noted) |
+| `deep.087-COM.contractEnd.approvedChangesValue` | none | `14700000` |
+| `deep.087-COM.contractEnd.pendingChangesValue` | none | `4950000` |
+| `deep.087-COM.contractEnd.revisedValue` | none | `214700000` |
+| `CONTRACT_END`, `CONTRACT_END_SRC`, `CONTRACT_END_NOTE` (data, not leaves) | none | the derivation above; a load check throws unless 147,000.00 / 49,500.00 / 2,147,000.00 follow from the leaves |
+
+For the builder (087-com.js): `coI3Value` reads the book's CO-I3 entry (`contractEndCo('CO-I3')`); step
+`contract.after-cos` asserts the three aggregates against the leaves, then reads the register live and
+asserts each listed CO (by the id this build recorded for it: `co.<key>` outputs, `co.RFI.changeOrderId`,
+`ce.E1.changeOrderId`) in the book's status and at the book's amount, archived only for CO-ARC, and that the
+register's approved and draft/pending rows with archivedAt null are exactly the book's two lists (nothing
+else counted). Its `needs` now name every composing CO step. The step's place is unchanged (after co.RFI).
+
+
+<!-- merged from CHANGES-WP0-BUILDERS-r3-ev-sch-lanes-extras.md (round 3) -->
+
+# Answer book: round-3 changes of group `ev-sch-lanes-extras` (2026-10-09)
+
+Binding source: `C:\Temp\octapm-cert\scratch\wp0\builders-adjudication.md`, section "Round 3: adjudication of
+the round-2 verifier" (cited below as BADJ Round 3). Only R3-2 (A10) touches the answer book; R3-4, R3-5, R3-6
+and R3-7 (G4) are builder-only and are listed at the end for the record. Rule A10 applies: every leaf below
+carries its on-paper derivation in the book (`derivation`), and the builder asserts leaves, computing no figure.
+Product citations keep the `@886c9f1` tag; every product file cited is unchanged at `f599e67`
+(`earned-value.service.js`, `eac-basis.js`). Plan lines in the new entries are numbered at `f599e67` (`PF(...)`).
+
+Figure count: schedule 788 -> 853 (+65: one set of 13 and four sets of 13). No key was removed and no existing
+`value` or `today` changed. The three load tests (`scratch/wp0/load-schedule.js`: "OK: leaf contract and
+cross-checks pass") and the book's own load checks (below) pass; every leaf has a derivation and a source.
+
+## 1. The 2026-02-28 read after the back-dated cost (BADJ Round 3 R3-2 (a))
+
+087-ev.js derived this set in builder code (`derivedMetrics` -> `rules.evMetrics` over `WP3.T3.bac`,
+`WP3.T3.pv`, `WP3.periods.afterLock.cutoffReportEv` and `.cutoffReportAc`). The set is now the book's.
+
+Derivation (from the book's own leaves):
+- BAC = `WP3.T3.bac` 387,000.00. The +13,000.00 revision of T5 is effective 2026-03-01, after this cutoff, and
+  the report adjusts BAC only by approved revisions effective on or before the cutoff
+  (earned-value.service.js:428-437), so one set serves both outcomes of the T5 delete probe (checked at load:
+  `inputs.ev087.budgetRevision.effectiveDate > 2026-02-28`).
+- PV = `WP3.T3.pv` 180,000.00 (loadings planned on or before 02-28: 60,000 + 30,000 + 90,000).
+- EV = `WP3.periods.afterLock.cutoffReportEv` 0 (every approval, the new A120 60% included, is stamped after
+  the cutoff instant 2026-02-28T21:59:59.999Z), so the read is the same at checkpoint.afterLock.afterCost and at
+  checkpoint.afterLock.afterApproval: one set serves both reads.
+- AC = `WP3.periods.afterLock.cutoffReportAc`: `WP3.T3.ac` 70,000.00 + the back-dated A130 5,000.00 on
+  2026-02-15 = 75,000.00; today 25,000.00 (L34: A130's cumulative 25,000.00 through 02-15 stays, A110 through
+  09-30 and A120 through 10-01 drop out).
+- SPI 0 / alert, CPI 0 / alert (EV 0), EAC = BAC (basis `budget_cpi_zero`), SV -180,000.00,
+  CV -75,000.00 (today -25,000.00), ETC 312,000.00 (today 362,000.00). HEAD's figures (`today`) are derived
+  beside each value, sentence by sentence ("HEAD (L34, ...): ... = ...").
+
+| Key (schedule.js) | Old | New |
+|---|---|---|
+| `WP3.periods.afterLock.cutoffAfterCost.bac` | none (087-ev.js computed) | `38700000` |
+| `WP3.periods.afterLock.cutoffAfterCost.pv` | none | `18000000` |
+| `WP3.periods.afterLock.cutoffAfterCost.ev` | none | `0` |
+| `WP3.periods.afterLock.cutoffAfterCost.ac` | none | `7500000`, today `2500000` (L34) |
+| `WP3.periods.afterLock.cutoffAfterCost.spi` / `spiAlert` | none | `0` / `true` |
+| `WP3.periods.afterLock.cutoffAfterCost.cpi` / `cpiAlert` | none | `0` / `true` |
+| `WP3.periods.afterLock.cutoffAfterCost.eac` / `eacBasis` | none | `38700000` / `budget_cpi_zero` |
+| `WP3.periods.afterLock.cutoffAfterCost.sv` | none | `-18000000` |
+| `WP3.periods.afterLock.cutoffAfterCost.cv` | none | `-7500000`, today `-2500000` (L34) |
+| `WP3.periods.afterLock.cutoffAfterCost.etc` | none | `31200000`, today `36200000` (L34) |
+
+The `today` columns equal what the round-2 087-EV build observed at both after-lock reads (BLOCKED L34: AC
+2,500,000, CV -2,500,000, ETC 36,200,000 cents), which the builder then cited as `rules.evMetrics(...)`; it now
+cites these leaves.
+
+## 2. T6 before and after the retirement (BADJ Round 3 R3-2 (b))
+
+087-ev.js derived both T6 checkpoints in builder code (`derivedMetrics` over `bacNow()`, `WP3.T2.pv`,
+`WP3.periods.afterLock.runDateEv` and `WP3.T6.acBeforeRetirement` / `.acAfterRetirement`, overriding cpi with
+`WP3.T6.cpiAfterRetirement`). Both are now full sets in the book, one per outcome of the T5 delete probe (the
+same branching as `WP3.periods.afterLock.runDateAfterCost`): `revisionKept` (the probe refused, BAC
+`WP3.T5.bac` 400,000.00) and `revisionDeleted` (an audited delete, or HEAD's silent L112 delete, BAC
+`WP3.T1.bac` 387,000.00).
+
+Derivation (from the book's own leaves):
+- PV = `WP3.T2.pv` 387,000.00; EV = `WP3.periods.afterLock.runDateEv` 100,500.00 (A140 holds no allocation,
+  so the retirement moves no EV).
+- AC before = `WP3.T6.acBeforeRetirement`: `WP3.T2.ac` 110,000.00 + the back-dated A130 5,000.00 + the A140
+  5,000.00 dated the run date (`WP3.T6.ledgerDelta`) = 120,000.00; HEAD agrees (no today).
+- AC after = `WP3.T6.acAfterRetirement`: the same 120,000.00 by HR-S9's recommendation (retired activities keep
+  their AC; undecided, AC itself is CERT-5); today 115,000.00 (HR-S9 / L118: A140's cumulative CostRecord drops
+  out with the retired activity). Every figure that follows from AC carries its HEAD today, derived beside the
+  value; cpi's today is stated to six places, as `WP3.T6.cpiAfterRetirement.today` is.
+- The after set's `cpi` equals `WP3.T6.cpiAfterRetirement` (value 0.8375, today 0.873913) and its `ac` equals
+  `WP3.T6.acAfterRetirement` (value and today): checked at load, with the before set's inputs.
+
+| Key (schedule.js) | revisionKept | revisionDeleted |
+|---|---|---|
+| `WP3.T6.before.<branch>.bac` | `40000000` | `38700000` |
+| `WP3.T6.before.<branch>.pv` / `ev` / `ac` | `38700000` / `10050000` / `12000000` | the same |
+| `WP3.T6.before.<branch>.spi` / `spiAlert` | `0.25969` / `true` | the same |
+| `WP3.T6.before.<branch>.cpi` / `cpiAlert` | `0.8375` / `true` | the same |
+| `WP3.T6.before.<branch>.eac` / `eacBasis` | `47761194` / `budget_over_cpi` | `46208955` / `budget_over_cpi` |
+| `WP3.T6.before.<branch>.sv` / `cv` | `-28650000` / `-1950000` | the same |
+| `WP3.T6.before.<branch>.etc` | `35761194` | `34208955` |
+| `WP3.T6.after.<branch>.bac` / `pv` / `ev` | as before | as before |
+| `WP3.T6.after.<branch>.ac` | `12000000`, today `11500000` (HR-S9) | the same |
+| `WP3.T6.after.<branch>.spi` / `spiAlert` | `0.25969` / `true` | the same |
+| `WP3.T6.after.<branch>.cpi` | `0.8375`, today `0.873913` (HR-S9) | the same |
+| `WP3.T6.after.<branch>.cpiAlert` | `true` | the same |
+| `WP3.T6.after.<branch>.eac` | `47761194`, today `45771144` (HR-S9) | `46208955`, today `44283582` (HR-S9) |
+| `WP3.T6.after.<branch>.eacBasis` | `budget_over_cpi` | the same |
+| `WP3.T6.after.<branch>.sv` | `-28650000` | the same |
+| `WP3.T6.after.<branch>.cv` | `-1950000`, today `-1450000` (HR-S9) | the same |
+| `WP3.T6.after.<branch>.etc` | `35761194`, today `34271144` (HR-S9) | `34208955`, today `32783582` (HR-S9) |
+
+The `revisionDeleted` after column equals what the round-2 087-EV build observed (BLOCKED HR-S9: AC
+11,500,000, CPI 0.873913, EAC 44,283,582, CV -1,450,000, ETC 32,783,582 cents), which it cited as
+`rules.evMetrics(...)`; it now cites these leaves. All 52 T6 leaves and the 13 cutoffAfterCost leaves are
+`assumption: true` (they rest on the back-dated cost's activity choice, the T5 probe's branch and the undecided
+HR-S9), none `planDisagrees`.
+
+New helpers in schedule.js (data, not leaves): `M_CUTOFF_AFTER_COST`, `M_CUTOFF_AFTER_COST_HEAD`, `M_T6`,
+`headTexts`, `headDerivations`, `cutoffAfterCostLeaves()`, `t6Leaves(stage, branch)`, and the load checks after
+`WP3` (the new sets agree with the leaves they are built from). The header comment names round 3.
+
+For the builder (087-ev.js): `cutoffAfterCost = () => metricsFrom('periods.afterLock.cutoffAfterCost', ...)`;
+`t6State = (stage) => metricsFrom(\`T6.${stage}.${probeBranch()}\`, ...)` for checkpoint.T6.before and
+checkpoint.T6.after (the latter with ref HR-S9); `derivedMetrics`, `bacNow` and `runDateEv` are removed, and the
+builder no longer requires `rules.evMetrics`.
+
+## 3. Builder-only items of this group (no book change)
+
+- R3-5 (087-ev.js `importProgramme`): the adoption find returns the live revision's `activityCount`, its
+  `snapshotJson.dependencies` length and `staged = status 'draft' and not active`, as 087-imp.js does.
+- R3-6 (lanes.js `boqEv`): the adoption find is the live BOQ revision of this build's label from GET /boq
+  `revisions` (atMostOne); the fields accept the upload's answer (revisionId, mode 'imported',
+  baselineLocked false) or the adopted row (id, label, baselineLocked), as the commercial builders assert it.
+- R3-7 (087-sch.js `staging` and `boq.upload`, 087-ev.js `importProgramme`, lanes.js `scheduleF1` and
+  `boqEv`): after an upload record is done, the revision id falls back to the record's id
+  (`data.revisionId ?? rec?.id`), as 087-imp.js `stage()` does, and is asserted present before any GET.
+- R3-4 (087-extras.js): the guest's member row is read as the API gives it (company-party.service.js
+  `sanitizeMember`: id, userId, role, status) with no default; each consultant party (087-EXC's and 087-HLT's)
+  must hold exactly one active member, the guest (a removed member reads 'inactive'), asserted at guest.access
+  and guest.hlt and re-read live by both steps' verify on a resume; POST .../members answers `{ id, status }`,
+  which the create asserts.

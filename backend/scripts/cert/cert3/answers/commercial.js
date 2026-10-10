@@ -36,6 +36,23 @@
  * from authoritative contract configuration (the contract rate, else an explicitly configured
  * project default) or an explicitly configured "no retention"; otherwise configuration is
  * required. Where the plan still states a 5% answer, it is kept as planValue.
+ *
+ * The integration owner's adjudication of the WP-0 deep-company builders (2026-10-09,
+ * C:\Temp\octapm-cert\scratch\wp0\builders-adjudication.md, 087-COM item 3) adds
+ * deep["087-COM"].ipc04: IPC-04 certified last, net 6,000.00 including 750.00 of advance
+ * recovery, derived from this book's I6 / I8 figures and 087-COM's advance terms. Its plan
+ * lines are numbered at f599e67 (PF); its product citations (prime-contract.service.js,
+ * ipc.service.js) are unchanged at f599e67. Changed keys: answers/CHANGES-WP0-BUILDERS.md.
+ * Its round 2 (R2-B) adds deep["087-COM"].ipc09 / .ipc10 (B2: IPC-09 submitted with the
+ * deduction, IPC-10 a draft) and deep["087-COM-C"].billRows / billTotal / ipc01 (B3), each
+ * derived from this book's keys; every product file they cite (schema.prisma included) is
+ * unchanged at f599e67.
+ * Its round 3 adds deep["052-COM"].ipc03 (R3-1: the submitted IPC-03 on the B-001 row,
+ * 12,000.00 / 1,200.00 / 10,800.00) and deep["087-COM"].contractEnd (R3-3: the prime
+ * contract's approved 147,000.00 / pending 49,500.00 / revised 2,147,000.00 once every prime
+ * CO exists, with the CO list that composes each), again from this book's keys; the product
+ * files they cite are unchanged at f599e67 (git diff 886c9f1 f599e67 is empty for them).
+ * Changed keys: answers/CHANGES-WP0-BUILDERS-r3-com.md.
  */
 "use strict";
 
@@ -862,6 +879,135 @@ const WP7 = {
 
 // ─── §3.2 deep-company contents (plan 387-389, 404, 409) ──────────────────────────────────────
 
+// The integration owner's adjudication of the WP-0 deep-company builders (2026-10-09) and plan
+// lines as numbered at product HEAD f599e67 (used by the entries added for it).
+const BADJ = (item) => `C:/Temp/octapm-cert/scratch/wp0/builders-adjudication.md ${item}`;
+const PF = (lines) => `${PLAN}:${lines} @f599e67`;
+
+// IPC-04 certified last (builders' adjudication 087-COM item 3): I6's over-earned claim on A130,
+// certified on a PM override after IPC-08, so the advance recovery is in force. Derived from the
+// book's own I6 and I8 figures and 087-COM's advance terms; certificateFinancials
+// (prime-contract.service.js:649-692) in integer cents.
+const IPC04 = (() => {
+  const rate = 150; // A130's BOQ rate (WP4.I6.claimed: qty 200 x 150.00)
+  const claimedQty = 200; // WP4.I6.claimed: cumulative A130 claim 200 m3
+  const ipc03Qty = 150; // WP4.I8 (IPC-03): A130 150 m3 x 150 = 22,500.00 inside GROSS 97,500
+  const earned = pctOf(cents(90000), 25); // WP4.I6.earnedCap 22,500.00
+  if (cents(ipc03Qty * rate) !== earned) throw new Error("commercial answer book: IPC-03's A130 must equal I6's earned cap");
+  const qty = claimedQty - ipc03Qty; // 50 m3 this period
+  const gross = cents(qty * rate); // 7,500.00 = WP4.I6.overCertificationAmount
+  const over = cents(claimedQty * rate) - earned;
+  if (gross !== over) throw new Error("commercial answer book: IPC-04's gross must be I6's overage");
+  const retention = pctOf(gross, 10); // deep.087-COM.contractRetentionRate 10 (items at 10%, L114 PATCH at HEAD), no cap
+  const outstanding = ADVANCE - RECOVERY; // 200,000 - IPC-08's 9,750 (WP4.I7.advanceRecovery) = 190,250
+  const recovery = Math.min(outstanding, pctOf(gross, ADVANCE_RECOVERY_RATE)); // min(190,250, 750)
+  const deductions = 0;
+  const beforeTax = gross - retention - recovery - deductions;
+  const taxAmount = pctOf(beforeTax, 0); // taxRate back to 0 after IPC-05 (C7)
+  return { rate, claimedQty, ipc03Qty, earned, qty, gross, over, retention, outstanding, recovery, deductions, beforeTax, taxAmount, net: beforeTax + taxAmount };
+})();
+const IPC04_SRC = [PF("426, 700, 701"), P(661), P(662), S("prime-contract.service.js", "649-692"), BADJ("087-COM/-B/-C, 052-COM item 3; R2-2")];
+const IPC04_NOTE = "Build choice the plan leaves open, accepted by the integration owner (builders' adjudication 087-COM item 3) on two conditions met by the build: WP4-OVR-1 persisted as a finding with the observed 400 IPC_PM_OVERRIDE_REASON_REQUIRED (once A130 is over-certified every later certificate needs a PM override, ipc.service.js:556, :579-582), and the two-draft set-up (IPC-03 150 m3 and IPC-04 50 m3 on A130, drafted together) persisted with ref WP4-DRAFTS-1.";
+
+// IPC-09 (submitted, carrying the plan's deduction) and IPC-10 (a draft), both opened after IPC-04 is
+// certified (builders' adjudication round 2, R2-B B2). From the book's own keys: the B-004 / B-005
+// rates and allocations (BOQ / ALLOC, stage3:109), deep.087-COM.contractRetentionRate 10 (no cap:
+// the cap is IPC-02's only, deep.087-COM.ipc04.retention), the advance (deep.087-COM.advance and
+// advanceRecoveryRate) less what certified certificates recovered before them (IPC-08's
+// WP4.I7.advanceRecovery and IPC-04's deep.087-COM.ipc04.advanceRecovery), taxRate back to 0
+// (adjudication C7). A draft's or a submitted certificate's totals are recomputeCertificateTotals'
+// (ipc.service.js:108-175, run on every draft item edit and draft/submitted adjustment) through
+// certificateFinancials (prime-contract.service.js:649-692), here in integer cents.
+const IPC0910 = (() => {
+  // Recovery is locked only at certification (prime-contract.service.js:694-732); IPC-09 (submitted)
+  // locks nothing, so IPC-10 sees the same outstanding as IPC-09.
+  const outstanding = IPC04.outstanding - IPC04.recovery; // 190,250.00 - 750.00 = 189,500.00
+  const certificate = ({ boq, activity, qty, approvedPct, deductions }) => {
+    const rate = BOQ[boq].rate;
+    const gross = cents(qty * rate);
+    const allocation = ALLOC[`${boq}/${activity}`];
+    const earned = pctOf(allocation, approvedPct);
+    // Within earned, or the item PATCH refuses (IPC_APPROVED_PROGRESS_EXCEEDED, WP4.I6.setupObstacle).
+    if (!(gross <= earned)) throw new Error(`commercial answer book: the ${boq}/${activity} claim must sit within earned`);
+    const retention = pctOf(gross, 10); // deep.087-COM.contractRetentionRate, no cap
+    const recovery = Math.min(outstanding, pctOf(gross, ADVANCE_RECOVERY_RATE));
+    if (recovery !== pctOf(gross, ADVANCE_RECOVERY_RATE)) throw new Error("commercial answer book: the advance outstanding must not bind IPC-09 / IPC-10");
+    const beforeTax = gross - retention - recovery - deductions;
+    const taxAmount = pctOf(beforeTax, 0); // taxRate 0 after IPC-05 (C7)
+    return { boq, activity, qty, rate, gross, allocation, approvedPct, earned, retention, outstanding, recovery, deductions, beforeTax, taxAmount, net: beforeTax + taxAmount };
+  };
+  return {
+    // A310 at 50% approved (WP4.P2.progressCap's basis): earned 67,500.00; nothing else on 087-COM claims A310.
+    ipc09: certificate({ boq: "B-004", activity: "A310", qty: 500, approvedPct: 50, deductions: cents(1000) }),
+    // A320 at 100% approved on 087-COM (build choice: SC-004's PA-02 claims 60% of its line): earned 72,000.00.
+    ipc10: certificate({ boq: "B-005", activity: "A320", qty: 1000, approvedPct: 100, deductions: 0 }),
+  };
+})();
+if (IPC0910.ipc09.net !== cents(17000) || IPC0910.ipc10.net !== cents(14400)) throw new Error("commercial answer book: IPC-09 / IPC-10 nets must follow from their keys");
+const IPC0910_SRC = [PF("426, 701, 704"), P(662), P(665), S("ipc.service.js", "108-175, 1064-1145"), S("prime-contract.service.js", "539-540, 649-692, 694-732"), BADJ("Round 2 R2-B (B2); 087-COM/-B/-C, 052-COM items 2 and 3")];
+const IPC0910_NOTE = "The quantities (500 m2 on A310, 1,000 m2 on A320) are build choices: plan §3.2 fixes only a submitted and a draft certificate and a deduction. WP4-OVR-1 (persisted on IPC-09) does not move these totals: the override review gates certification only.";
+
+// 087-COM-C (builders' adjudication round 2, R2-B B3): the bill the BOQ fallback takes and the one
+// certificate left at the certify gate. The B-006 row is the builder's (an optional, unallocated
+// disposal row, so the bill total differs from the one allocation); B-001 is the book's (BOQ).
+const COMC = (() => {
+  const rows = [
+    { code: "B-001", description: "Bulk excavation to reduced level", quantity: BOQ["B-001"].qty, unit: BOQ["B-001"].unit, rate: BOQ["B-001"].rate, mappingRule: "required" },
+    { code: "B-006", description: "Disposal of surplus material off site", quantity: 2000, unit: "m3", rate: 8, mappingRule: "optional" },
+  ];
+  const billTotal = rows.reduce((sum, row) => sum + cents(row.quantity * row.rate), 0); // 60,000.00 + 16,000.00
+  const allocation = ALLOC["B-001/A110"]; // the whole B-001 row on A110, 5,000 m3 = 60,000.00
+  const qty = BOQ["B-001"].qty;
+  const gross = cents(qty * BOQ["B-001"].rate);
+  if (gross !== pctOf(allocation, 100)) throw new Error("commercial answer book: 087-COM-C's IPC-01 claims the whole B-001/A110 allocation at A110 100%");
+  const retentionRate = 10; // the project's explicit defaultRetentionRate (HR-C1), taken by the items and the contract
+  const retention = pctOf(gross, retentionRate);
+  const recovery = 0; // no advance received: advancePaidAmount 0, outstanding 0
+  const deductions = 0;
+  const beforeTax = gross - retention - recovery - deductions;
+  const taxAmount = pctOf(beforeTax, 0); // taxRate default 0
+  return { rows, billTotal, allocation, qty, gross, retentionRate, retention, recovery, deductions, beforeTax, taxAmount, net: beforeTax + taxAmount };
+})();
+if (COMC.billTotal !== cents(76000) || COMC.net !== cents(54000)) throw new Error("commercial answer book: 087-COM-C's bill and IPC must follow from their rows");
+const COMC_SRC = [PF("428, 699"), P(389), P(660), BADJ("Round 2 R2-B (B3)")];
+
+// 087-COM's prime contract once every prime CO the build makes exists (builders' adjudication
+// round 3, R3-3): what GET /prime-contract aggregates at the end of the prime-CO lane (after the
+// RFI CO is approved, with E1 converted; before any WP-4 proof moves a CO). From the book's own
+// CO leaves: approvedChangesValue sums the approved, unarchived COs (APPROVED_CHANGE_STATUSES =
+// ['approved']), pendingChangesValue the draft and pending ones (PENDING_CHANGE_STATUSES =
+// ['draft', 'pending']: a draft counts as pending, WP4.E2.pendingDelta), an archived row is in
+// neither (archivedAt null is required, WP4.E3.archivePendingDelta) and so is a rejected one;
+// revisedValue = originalValue + approvedChangesValue (prime-contract.service.js:35-37, 236-263,
+// 286-307). Integer cents.
+const CONTRACT_END = (() => {
+  // CO-I3's value is not a leaf of its own: WP4.I3.A120LimitAmount 37,500.00 is the A120 allocation
+  // 30,000.00 (stage3:109.allocation.B-002/A120) plus the CO, so the CO is 7,500.00.
+  const coI3 = WP4.I3.A120LimitAmount.value - stages["stage3:109"]["allocation.B-002/A120"].value;
+  if (coI3 !== cents(7500)) throw new Error("commercial answer book: CO-I3 must be WP4.I3.A120LimitAmount less the B-002/A120 allocation, 7,500.00");
+  if (WP4.E4.split01_100.value + WP4.E4.split02_100.value !== WP4.E4.revisedDelta.value) throw new Error("commercial answer book: the E4 split must sum to its CO");
+  const approved = [
+    { co: "CO-125", status: "approved", amount: WP4.E5.approvedChangesValue.value, from: "WP4.E5.approvedChangesValue" },
+    { co: "CO-SPLIT", status: "approved", amount: WP4.E4.revisedDelta.value, from: "WP4.E4.revisedDelta (split01_100 6,000.00 + split02_100 4,000.00)" },
+    { co: "CO-I3", status: "approved", amount: coI3, from: "WP4.I3.A120LimitAmount - stage3:109.allocation.B-002/A120" },
+    { co: "CO-RFI", status: "approved", amount: WP4.rfiCo.value.value, from: "WP4.rfiCo.value (approved: WP4.rfiCo.revisedDeltaOnApproval)" },
+  ];
+  const pending = [
+    { co: "CO-40", status: "pending", amount: WP4.E5.pendingChangesValue.value, from: "WP4.E5.pendingChangesValue" },
+    { co: "CO-E1", status: "draft", amount: WP4.E1.convertedValue.value, from: "WP4.E1.convertedValue (WP4.E1.coStatus draft; WP4.E2.pendingDelta)" },
+  ];
+  // Build choices (plan §3.2 asks for a prime CO in every state, no amounts): neither enters an aggregate.
+  const notCounted = [
+    { co: "CO-REJ", status: "rejected", amount: cents(15000), why: "rejected is in neither status set" },
+    { co: "CO-ARC", status: "archived", amount: cents(3000), why: "archived: status 'archived' and archivedAt set (change-order.service.js:1687-1688), excluded by archivedAt null" },
+  ];
+  const sum = (rows) => rows.reduce((acc, row) => acc + row.amount, 0);
+  return { approved, pending, notCounted, approvedValue: sum(approved), pendingValue: sum(pending), revisedValue: CONTRACT_ORIGINAL + sum(approved) };
+})();
+if (CONTRACT_END.approvedValue !== cents(147000) || CONTRACT_END.pendingValue !== cents(49500) || CONTRACT_END.revisedValue !== cents(2147000)) throw new Error("commercial answer book: 087-COM's contract end figures must follow from the CO leaves");
+const CONTRACT_END_SRC = [P(387), P(643), P(646), P(647), P(658), S("prime-contract.service.js", "35-37, 236-263, 286-307"), S("change-order.service.js", "1651-1699"), BADJ("Round 3 R3-3")];
+const CONTRACT_END_NOTE = "The moment is the builder's step contract.after-cos: after co.RFI's approval and ce.E1's convert, with CO-SPLIT and CO-I3 approved after IPC-10 (so WP4.E5.revisedValue 2,125,000.00 still held for IPC-02's cap, WP4.I7.retentionCap), and before any WP-4 proof moves a CO (E3's archive of CO-40, E1's convertAgain probes). The CO set is the builder's reading of plan §3.2 'prime COs in every state' plus the E1, E4, I3 and RFI specials; the figures follow from it.";
+
 const deep = {
   "087-COM": {
     currency: fig("EGP", "ref", "Company 087 bills in EGP.", [P(361)]),
@@ -902,6 +1048,52 @@ const deep = {
       entries: count(2, "The original posting and its mirror both stay on the ledger (mirrors are written, never deleted).", [S("cost-ledger.service.js", "373-376"), ADJ("C8")], { assumption: true }),
       sourceNet: money(0, "+1,000.00 - 1,000.00 = 0.00 net for the invoice; a second void answers 409 DIRECT_COST_LOCKED (:548) and reversing twice writes nothing (:393-397).", [S("direct-cost.service.js", "548"), S("cost-ledger.service.js", "393-397"), ADJ("C8")], { assumption: true }),
     },
+    // IPC-04, certified last (after IPC-08): I6's overage on a PM override with the advance recovery in force.
+    ipc04: {
+      order: fig({ certifies: "last, after IPC-08", override: "PM with a reason (WP4.I6.pmWithReason)", recoveredBefore: ["IPC-08"], notCertifiedBefore: ["IPC-09 (submitted)", "IPC-10 (draft)"] }, "outcome", "IPC-04 carries I6 (WP4.I6) and is certified last, after IPC-08, the first certificate with the advance recovery on: a PM override with a reason, the other I6 answers (400 without a reason, 403 for finance) asserted before it.", IPC04_SRC, { assumption: true, note: IPC04_NOTE }),
+      quantity: fig(IPC04.qty, "m3", `A130 this period: the cumulative claim of WP4.I6.claimed (${IPC04.claimedQty} m3) less the ${IPC04.ipc03Qty} m3 IPC-03 certified inside WP4.I8's gross (A130 ${IPC04.ipc03Qty} m3 x 150.00 = 22,500.00 = WP4.I6.earnedCap) = ${IPC04.claimedQty} - ${IPC04.ipc03Qty} = ${IPC04.qty} m3.`, IPC04_SRC, { assumption: true }),
+      gross: money(IPC04.gross, `${IPC04.qty} m3 x ${IPC04.rate}.00 = 7,500.00, the certificate's only item (no materials on site: those are IPC-07's). The whole of it is over earned: cumulative 30,000.00 (WP4.I6.claimed) - earned 22,500.00 (WP4.I6.earnedCap) = 7,500.00 = WP4.I6.overCertificationAmount.`, IPC04_SRC, { assumption: true }),
+      overCertificationAmount: money(IPC04.over, "max(over approved limit 0, over earned 30,000.00 - 22,500.00) = 7,500.00, stored on IPC-04 at certification (WP4.I6.overCertificationAmount).", [...IPC04_SRC, S("ipc.service.js", "543-583, 1434-1437")], { assumption: true }),
+      retention: money(IPC04.retention, "10% x 7,500.00 = 750.00: 087-COM's items hold 10% (deep.087-COM.contractRetentionRate; at HEAD through the item PATCH, finding L114), and no cap applies because retentionCapRate is configured only for IPC-02 (I7's cap): with the cap still on, the room after IPC-02 is 8,500.00 - retention already certified <= 0, retention 0.00 and the net would be 6,750.00.", [...IPC04_SRC, S("prime-contract.service.js", "659-667")], { assumption: true }),
+      advanceOutstandingBefore: money(IPC04.outstanding, "Advance 200,000.00 (deep.087-COM.advance) less what certified certificates have recovered before IPC-04: IPC-08's 9,750.00 (WP4.I7.advanceRecovery, 10% x 97,500.00); IPC-09 (submitted) and IPC-10 (draft) lock nothing (recovery is written at certification, prime-contract.service.js:694-701) = 190,250.00 (as WP4.I10.preconditions has it).", [...IPC04_SRC, S("prime-contract.service.js", "669-674, 694-701")], { assumption: true }),
+      advanceRecovery: money(IPC04.recovery, "min(outstanding 190,250.00, 10% (deep.087-COM.advanceRecoveryRate) x gross 7,500.00 = 750.00) = 750.00.", [...IPC04_SRC, S("prime-contract.service.js", "669-674")], { assumption: true }),
+      deductions: money(IPC04.deductions, "None on IPC-04 (the 1,000.00 deduction is IPC-09's).", IPC04_SRC, { assumption: true }),
+      taxAmount: money(IPC04.taxAmount, "taxRate is back to 0 after IPC-05 (I7's 5%, adjudication C7; deep.087-COM.taxRate): 0% x 6,000.00 = 0.00.", [...IPC04_SRC, ADJ("C7")], { assumption: true }),
+      net: money(IPC04.net, "certificateFinancials: gross 7,500.00 - retention 750.00 - advance recovery 750.00 - deductions 0.00 = beforeTax 6,000.00; + tax 0.00 = netPayable 6,000.00, which includes the 750.00 recovery.", IPC04_SRC, { assumption: true, note: IPC04_NOTE }),
+    },
+    // IPC-09, submitted, with the deduction (builders' adjudication round 2, R2-B B2; 087-COM item 2).
+    ipc09: {
+      status: state("submitted", "Left submitted (plan §3.2 'submitted'; deep.087-COM.ipc04.order.notCertifiedBefore 'IPC-09 (submitted)'): the QS submits it after the deduction; nobody certifies it in the build (WP4-OVR-1 is observed without certifying).", IPC0910_SRC, { assumption: true }),
+      quantity: fig(IPC0910.ipc09.qty, "m2", `B-004 on A310 this period: ${IPC0910.ipc09.qty} m2, the certificate's only claimed item (a build choice). Within earned: allocation B-004/A310 135,000.00 (stage3:109.allocation.B-004/A310) at A310's 50% approved (the basis of WP4.P2.progressCap) = 67,500.00 >= 22,500.00, and no earlier 087-COM certificate claims A310.`, IPC0910_SRC, { assumption: true, note: IPC0910_NOTE }),
+      gross: money(IPC0910.ipc09.gross, `${IPC0910.ipc09.qty} m2 x ${IPC0910.ipc09.rate}.00 (B-004's rate) = 22,500.00 = totalCert = grossThisPeriod (no materials on site: those are IPC-07's, WP4.I10).`, IPC0910_SRC, { assumption: true }),
+      retention: money(IPC0910.ipc09.retention, "10% x 22,500.00 = 2,250.00: the item at deep.087-COM.contractRetentionRate 10 (at HEAD through the item PATCH, finding L114); no cap, because retentionCapRate is set for IPC-02 only (deep.087-COM.ipc04.retention), so certificateFinancials keeps the item retention.", [...IPC0910_SRC, S("prime-contract.service.js", "659-667")], { assumption: true }),
+      advanceOutstandingBefore: money(IPC0910.ipc09.outstanding, "deep.087-COM.ipc04.advanceOutstandingBefore 190,250.00 less IPC-04's deep.087-COM.ipc04.advanceRecovery 750.00 = 189,500.00 = advancePaidAmount - advanceRecoveredAmount (prime-contract.service.js:539-540): advance 200,000.00 (deep.087-COM.advance) less the recoveries locked by the two certificates certified before it (IPC-08 9,750.00, WP4.I7.advanceRecovery; IPC-04 750.00).", [...IPC0910_SRC, S("prime-contract.service.js", "539-540, 669-674")], { assumption: true }),
+      advanceRecovery: money(IPC0910.ipc09.recovery, "min(outstanding 189,500.00, 10% (deep.087-COM.advanceRecoveryRate) x gross 22,500.00 = 2,250.00) = 2,250.00.", [...IPC0910_SRC, S("prime-contract.service.js", "669-674")], { assumption: true }),
+      deductions: money(IPC0910.ipc09.deductions, "1,000.00 with a note (a deduction without one is refused: WP4.I7.deductionWithoutNote, the same 1,000.00): the plan's 'materials on site with a deduction' puts the deduction on IPC-09, kept off IPC-07 by WP4.I10.preconditions (builders' adjudication 087-COM item 2).", [...IPC0910_SRC, S("ipc.service.js", "1119-1135")], { assumption: true }),
+      taxAmount: money(IPC0910.ipc09.taxAmount, "taxRate back to 0 after IPC-05 (adjudication C7; deep.087-COM.taxRate): 0% x 17,000.00 = 0.00.", [...IPC0910_SRC, ADJ("C7")], { assumption: true }),
+      net: money(IPC0910.ipc09.net, "certificateFinancials: gross 22,500.00 - retention 2,250.00 - advance recovery 2,250.00 - deductions 1,000.00 = beforeTax 17,000.00; + tax 0.00 = netPayable 17,000.00 (the figure the submitted certificate shows; recomputed at certification, ipc.service.js:1417).", IPC0910_SRC, { assumption: true, note: IPC0910_NOTE }),
+    },
+    // IPC-10, a draft (builders' adjudication round 2, R2-B B2).
+    ipc10: {
+      status: state("draft", "Left a draft (plan §3.2 'draft'; deep.087-COM.ipc04.order.notCertifiedBefore 'IPC-10 (draft)'): its figures are the draft preview.", IPC0910_SRC, { assumption: true }),
+      quantity: fig(IPC0910.ipc10.qty, "m2", `B-005 on A320 this period: ${IPC0910.ipc10.qty} m2, the only claimed item (a build choice). Within earned: allocation B-005/A320 72,000.00 (stage3:109.allocation.B-005/A320) at A320's approved progress (100% on 087-COM, a build choice that SC-004's PA-02 needs; any approval of 25% or more keeps 18,000.00 within earned), and no earlier 087-COM certificate claims A320.`, IPC0910_SRC, { assumption: true, note: IPC0910_NOTE }),
+      gross: money(IPC0910.ipc10.gross, `${IPC0910.ipc10.qty} m2 x ${IPC0910.ipc10.rate}.00 (B-005's rate) = 18,000.00 = totalCert = grossThisPeriod (no materials on site).`, IPC0910_SRC, { assumption: true }),
+      retention: money(IPC0910.ipc10.retention, "10% x 18,000.00 = 1,800.00 (deep.087-COM.contractRetentionRate; no cap, as for IPC-09).", [...IPC0910_SRC, S("prime-contract.service.js", "659-667")], { assumption: true }),
+      advanceOutstandingBefore: money(IPC0910.ipc10.outstanding, "189,500.00, the same as IPC-09's (deep.087-COM.ipc09.advanceOutstandingBefore): IPC-09 is submitted, not certified, and recovery is locked only at certification (prime-contract.service.js:694-732), so it takes nothing off the advance.", [...IPC0910_SRC, S("prime-contract.service.js", "539-540, 694-732")], { assumption: true }),
+      advanceRecovery: money(IPC0910.ipc10.recovery, "min(outstanding 189,500.00, 10% x gross 18,000.00 = 1,800.00) = 1,800.00.", [...IPC0910_SRC, S("prime-contract.service.js", "669-674")], { assumption: true }),
+      deductions: money(IPC0910.ipc10.deductions, "None on IPC-10 (the deduction is IPC-09's).", IPC0910_SRC, { assumption: true }),
+      taxAmount: money(IPC0910.ipc10.taxAmount, "taxRate 0 (adjudication C7): 0% x 14,400.00 = 0.00.", [...IPC0910_SRC, ADJ("C7")], { assumption: true }),
+      net: money(IPC0910.ipc10.net, "certificateFinancials: gross 18,000.00 - retention 1,800.00 - advance recovery 1,800.00 - deductions 0.00 = beforeTax 14,400.00; + tax 0.00 = netPayable 14,400.00 (the draft preview).", IPC0910_SRC, { assumption: true, note: IPC0910_NOTE }),
+    },
+    // The prime contract at the end of the prime-CO lane (builders' adjudication round 3, R3-3).
+    contractEnd: {
+      approvedChanges: fig(CONTRACT_END.approved, "list", "The approved, unarchived prime COs on 087-COM once the lane is complete, each at the book's amount: CO-125 125,000.00 (WP4.E5.approvedChangesValue), CO-SPLIT 10,000.00 (WP4.E4.revisedDelta = split01_100 6,000.00 + split02_100 4,000.00), CO-I3 7,500.00 (WP4.I3.A120LimitAmount 37,500.00 less the B-002/A120 allocation 30,000.00, stage3:109.allocation.B-002/A120) and CO-RFI 4,500.00 (WP4.rfiCo.value, approved). APPROVED_CHANGE_STATUSES is ['approved'] and the aggregate takes archivedAt null rows only (prime-contract.service.js:35, 290); nothing else on 087-COM is approved.", CONTRACT_END_SRC, { assumption: true, note: CONTRACT_END_NOTE }),
+      pendingChanges: fig(CONTRACT_END.pending, "list", "The draft and pending prime COs: CO-40 40,000.00, pending (WP4.E5.pendingChangesValue), and E1's convert, created as a draft of 9,500.00 (WP4.E1.convertedValue; WP4.E1.coStatus draft). PENDING_CHANGE_STATUSES is ['draft', 'pending'] (prime-contract.service.js:37, 294; WP4.E2.pendingDelta: a draft counts as pending); nothing else on 087-COM is a draft or pending.", CONTRACT_END_SRC, { assumption: true, note: CONTRACT_END_NOTE }),
+      notCounted: fig(CONTRACT_END.notCounted, "list", "CO-REJ (rejected) and CO-ARC (archived: status 'archived' with archivedAt set, change-order.service.js:1687-1688) are in neither aggregate: rejected is in neither status set, and an archived row fails the archivedAt null condition (prime-contract.service.js:290, 294; WP4.E3.archivePendingDelta). Their amounts, 15,000.00 and 3,000.00, are the builder's: plan §3.2 asks only for a prime CO in every state.", CONTRACT_END_SRC, { assumption: true, note: "The two amounts are build choices, carried so the row set is named in full; they enter no aggregate." }),
+      approvedChangesValue: money(CONTRACT_END.approvedValue, "Sum of approvedChanges: 125,000.00 + 10,000.00 + 7,500.00 + 4,500.00 = 147,000.00 (the SUM of value over status approved and archivedAt null, prime-contract.service.js:288-291, 299).", CONTRACT_END_SRC, { assumption: true, note: CONTRACT_END_NOTE }),
+      pendingChangesValue: money(CONTRACT_END.pendingValue, "Sum of pendingChanges: 40,000.00 + 9,500.00 = 49,500.00 (the SUM of value over status draft or pending and archivedAt null, prime-contract.service.js:292-295, 300). WP4.E5.pendingChangesValue (40,000.00) holds at its own moment only, before E1 is converted (its note; the builder asserts it at contract.after-CO-125).", CONTRACT_END_SRC, { assumption: true, note: CONTRACT_END_NOTE }),
+      revisedValue: money(CONTRACT_END.revisedValue, "originalValue 2,000,000.00 (deep.087-COM.contractOriginal) + approvedChangesValue 147,000.00 = 2,147,000.00 (addMoney(originalValue, approvedChangesValue), prime-contract.service.js:263, 307). It supersedes WP4.E5.revisedValue 2,125,000.00, which holds from CO-125's approval until CO-SPLIT, CO-I3 and CO-RFI are approved (after IPC-10), so IPC-02's cap (WP4.I7.retentionCap, 0.4% x 2,125,000.00) is unaffected.", CONTRACT_END_SRC, { assumption: true, note: CONTRACT_END_NOTE }),
+    },
   },
   "087-COM-B": {
     projectRetention: fig(7.5, "percent", "Project defaultRetentionRate 7.5% (adjudication C3), so a commitment without a rate takes 7.5 (WP4.C3.projectDefault).", [P(388), P(652), ADJ("C3")], { note: "Corrected in the plan in WP-0: the first draft of §3.2 had the cell swapped ('Project retention 10%, prime contract 7.5%'); the working-tree plan now reads 'Project retention 7.5% and prime contract 10%', as the integration owner decided (adjudication C3), so the plan and this book agree." }),
@@ -912,6 +1104,19 @@ const deep = {
   "087-COM-C": {
     valueSource: state("boq_fallback", "Contract value only from the BOQ fallback.", [P(389), S("prime-contract.service.js", "215-220")]),
     certifyGate: err(409, "CONTRACT_VALUE_NOT_ESTABLISHED", "Certify is refused until the value is entered or confirmed.", [P(389), P(660), S("ipc.service.js", "1288")]),
+    // The bill the fallback takes and IPC-01 left at the gate (builders' adjudication round 2, R2-B B3).
+    billRows: fig(COMC.rows, "list", "Two rows: B-001 as the book's bill (BOQ['B-001']: 5,000 m3 x 12.00, required, allocated whole to A110 as stage3:109.allocation.B-001/A110) and B-006, an optional disposal row the builder adds and leaves unallocated, so the bill total (the fallback value) differs from the one allocation. Plan §3.2 gives 087-COM-C no bill; the rows are build choices.", COMC_SRC, { assumption: true }),
+    billTotal: money(COMC.billTotal, "Sum of the active rows' amounts: 5,000 x 12.00 + 2,000 x 8.00 = 60,000.00 + 16,000.00 = 76,000.00. It is the contract's originalValue on the BOQ fallback: the project carries no contractValue, so the prime contract's first read (after the bill is uploaded) records originalValue = the aggregate of the active BOQ items' amount = 76,000.00 with originalValueSource boq_fallback (prime-contract.service.js:201-220; deep.087-COM-C.valueSource).", [...COMC_SRC, S("prime-contract.service.js", "201-220")], { assumption: true }),
+    ipc01: {
+      quantity: fig(COMC.qty, "m3", "IPC-01's only item is the one approved allocation, B-001/A110 (5,000 m3, 60,000.00); A110 approved at 100% (build choice), so the whole 5,000 m3 is within earned. B-006 is unallocated and gives no item.", COMC_SRC, { assumption: true }),
+      gross: money(COMC.gross, "5,000 m3 x 12.00 = 60,000.00 = totalCert (no materials on site).", COMC_SRC, { assumption: true }),
+      retentionRate: fig(COMC.retentionRate, "percent", "The project is created with an explicit defaultRetentionRate 10 (HR-C1: no silent rate; 10% as on 087-COM). The items take the project default (ipc.service.js:51-54, 779, 872) and so does the contract created on the first read (prime-contract.service.js:264-266): 10 on both, so HEAD needs no item PATCH here (no L114 gap).", [...COMC_SRC, P(29), S("ipc.service.js", "51-54, 779, 872, 934-938"), S("prime-contract.service.js", "264-266")], { assumption: true }),
+      retention: money(COMC.retention, "10% x 60,000.00 = 6,000.00 (no cap: retentionCapRate null by default, schema.prisma:2535).", [...COMC_SRC, S("ipc.service.js", "934-938"), S("prime-contract.service.js", "659-667"), "backend/prisma/schema.prisma:2535 @" + HEAD], { assumption: true }),
+      advanceRecovery: money(COMC.recovery, "No advance: advancePaidAmount 0 by default (schema.prisma:2538), outstanding 0 (prime-contract.service.js:539-540), so recovery = min(0, ...) = 0.00.", [...COMC_SRC, S("prime-contract.service.js", "539-540, 669-674"), "backend/prisma/schema.prisma:2538, 2540 @" + HEAD], { assumption: true }),
+      deductions: money(COMC.deductions, "None.", COMC_SRC, { assumption: true }),
+      taxAmount: money(COMC.taxAmount, "taxRate 0 by default (schema.prisma:2544): 0.00.", [...COMC_SRC, "backend/prisma/schema.prisma:2544 @" + HEAD], { assumption: true }),
+      net: money(COMC.net, "certificateFinancials: 60,000.00 - 6,000.00 - 0.00 - 0.00 = 54,000.00 + tax 0.00 = 54,000.00 on the draft and on the submitted certificate; the certify gate then refuses it (deep.087-COM-C.certifyGate) and it stays submitted for the I5 proof.", [...COMC_SRC, S("prime-contract.service.js", "649-692")], { assumption: true }),
+    },
   },
   // D3 is company 006 Atlas Infrastructure (plan §3.1 'WP-0 choice of D3', §3.2 'D3, company 006';
   // adjudication E). The key is a label only: it was "D3-LITE" here, and the plan's lane was
@@ -957,6 +1162,48 @@ deep["052-COM"] = {
   C1: mirrorFigures(WP4.C1, USD),
   C2: mirrorFigures(WP4.C2, USD),
   O2: mirrorFigures(WP5.O2, USD),
+};
+
+// 052-COM's IPC-03, left submitted for the I4 refusals (builders' adjudication round 3, R3-1): the
+// third certificate (IPC-01 the I1 draft, IPC-02 the I8 certificate, paid). From the book's own keys:
+// the B-001 row (BOQ: 5,000 m3 x 12.00) allocated whole to A110 (ALLOC, stage3:109.allocation.B-001/A110,
+// 60,000.00), the explicit contract rate (deep["052-COM"].contractRetentionRate 10, at HEAD reached
+// through the item PATCH, finding L114), and no cap, advance, deduction or tax on 052-COM. Totals are
+// recomputeCertificateTotals' (ipc.service.js:108-175) through certificateFinancials
+// (prime-contract.service.js:649-692), here in integer USD cents.
+const COM052_IPC03 = (() => {
+  const boq = "B-001";
+  const activity = "A110";
+  const qty = 1000; // 1,000 of the row's 5,000 m3: a build choice, plan §3.2 fixes only a submitted certificate
+  const rate = BOQ[boq].rate; // 12.00
+  const gross = cents(qty * rate); // 12,000.00
+  const allocation = ALLOC[`${boq}/${activity}`]; // the whole row, 60,000.00
+  const approvedPct = 100; // 052-COM approves A110 at 100% (as WP-3 T1's A110 on 087-COM)
+  const earned = pctOf(allocation, approvedPct);
+  // Within earned, or the item PATCH refuses (IPC_APPROVED_PROGRESS_EXCEEDED, WP4.I6.setupObstacle); no
+  // earlier 052-COM certificate claims B-001/A110 (IPC-01 is on C-001/A220, IPC-02 on D-001/A200).
+  if (!(gross <= earned)) throw new Error("commercial answer book: 052-COM's IPC-03 claim must sit within earned");
+  const retentionRate = deep["052-COM"].contractRetentionRate.value; // 10
+  const retention = pctOf(gross, retentionRate); // 1,200.00
+  const recovery = 0; // no advance on 052-COM: advancePaidAmount 0 by default, outstanding 0
+  const deductions = 0;
+  const beforeTax = gross - retention - recovery - deductions;
+  const taxAmount = pctOf(beforeTax, 0); // taxRate 0 (default, and set explicitly with the retention rate)
+  return { boq, activity, qty, rate, gross, allocation, approvedPct, earned, retentionRate, retention, recovery, deductions, beforeTax, taxAmount, net: beforeTax + taxAmount };
+})();
+if (COM052_IPC03.net !== cents(10800)) throw new Error("commercial answer book: 052-COM's IPC-03 net must follow from its keys");
+const COM052_IPC03_SRC = [P(404), P(659), S("ipc.service.js", "108-175, 934-938"), S("prime-contract.service.js", "649-692"), "backend/prisma/schema.prisma:2535, 2538, 2544 @" + HEAD, BADJ("Round 3 R3-1")];
+const COM052_IPC03_NOTE = "The quantity (1,000 m3 of B-001 on A110) is a build choice: plan §3.2 fixes only that 052-COM carries the I4 refusal states (IPC-01 draft, IPC-02 paid, IPC-03 submitted). The figures follow from it and the book's rate, allocation and contract terms.";
+deep["052-COM"].ipc03 = {
+  status: state("submitted", "Left submitted by the QS, never certified: the state WP4.I4's submitTwice, patchAfterSubmit and invoiceBeforeCertify are probed on (with IPC-01 a draft for certifyDraft and IPC-02 paid).", COM052_IPC03_SRC, { assumption: true, note: COM052_IPC03_NOTE }),
+  quantity: fig(COM052_IPC03.qty, "m3", `B-001 on A110 this period: ${COM052_IPC03.qty} m3, the certificate's only claimed item. Within earned: allocation B-001/A110 60,000.00 (stage3:109.allocation.B-001/A110, the whole row) at A110's 100% approved = 60,000.00 >= 12,000.00, and no earlier 052-COM certificate claims B-001/A110.`, COM052_IPC03_SRC, { assumption: true, note: COM052_IPC03_NOTE }),
+  gross: money(COM052_IPC03.gross, `${COM052_IPC03.qty} m3 x ${COM052_IPC03.rate}.00 (B-001's rate, BOQ) = 12,000.00 = totalCert = grossThisPeriod (no materials on site). USD.`, COM052_IPC03_SRC, { assumption: true }),
+  retentionRate: fig(COM052_IPC03.retentionRate, "percent", "deep[\"052-COM\"].contractRetentionRate 10, configured explicitly on the prime contract after the I1 case (step contract.retention). At HEAD the item is created at the project default (unset -> 0: ipc.service.js:51-54, 779, 872) and reaches 10 only through the item PATCH (retentionRate kept by :934-935; finding L114), as every configured 052-COM claim does.", [...COM052_IPC03_SRC, P(29), S("ipc.service.js", "51-54, 779, 872, 934-938")], { assumption: true }),
+  retention: money(COM052_IPC03.retention, "10% x 12,000.00 = 1,200.00 (item retention = currentCert x rate / 100, ipc.service.js:938); no cap: retentionCapRate is null by default (schema.prisma:2535) and 052-COM never configures one, so certificateFinancials keeps the item retention (prime-contract.service.js:659-667).", [...COM052_IPC03_SRC, S("prime-contract.service.js", "659-667")], { assumption: true }),
+  advanceRecovery: money(COM052_IPC03.recovery, "No advance on 052-COM: advancePaidAmount 0 by default (schema.prisma:2538), outstanding 0 (prime-contract.service.js:539-540), so recovery = min(0, 10% x 12,000.00) = 0.00.", [...COM052_IPC03_SRC, S("prime-contract.service.js", "539-540, 669-674")], { assumption: true }),
+  deductions: money(COM052_IPC03.deductions, "None on IPC-03 (052-COM carries no deduction; the plan's deduction is 087-COM IPC-09's).", COM052_IPC03_SRC, { assumption: true }),
+  taxAmount: money(COM052_IPC03.taxAmount, "taxRate 0: the schema default (schema.prisma:2544), and set to 0 explicitly with the retention rate (step contract.retention); 0% x 10,800.00 = 0.00.", [...COM052_IPC03_SRC, S("prime-contract.service.js", "676-690")], { assumption: true }),
+  net: money(COM052_IPC03.net, "certificateFinancials: gross 12,000.00 - retention 1,200.00 - advance recovery 0.00 - deductions 0.00 = beforeTax 10,800.00; + tax 0.00 = netPayable 10,800.00, on the draft and on the submitted certificate (totals are recomputed on every draft item edit, ipc.service.js:908-914, 1024, and are not moved by the submit).", COM052_IPC03_SRC, { assumption: true, note: COM052_IPC03_NOTE }),
 };
 
 // CLAUDE.md rules in this section's scope (plan 61-72)

@@ -281,6 +281,17 @@ Deferred (recorded, not L38):
   - **Live repro** `scripts/cert/cert3/wp1-activation-code-repro.js`: 12/12 on the fix.
   - **Reviews.** A Codex plan review, then Codex diff rounds 1 and 2 (R-H1, R-M1, G1, G2 and the round-2 test gap confirmed and closed).
   - **Mutations.** 22/22 caught, each by its named check (`wp1-fix-mutations.*.json`).
+- **CERT-3 WP-0 builder suspects (2026-10-09).** Raised while building the deep companies; recorded, not fixed. Each is reproduced and classified in its work package's confirm-first list (plan §4). Source: the builder adjudication, `C:\Temp\octapm-cert\scratch\wp0\builders-adjudication.md`.
+
+  | Id | Suspect | WP | Proposed |
+  |---|---|---|---|
+  | WP1-RB-1 | Rolling back a revision re-creates a retired activity with a new id, and its engineer assignment is lost. Answer book: same id (an assumption); plan WP-9 "activation and rollback keep ids". | WP-1 | P2 |
+  | WP3-TZ-1 | `createProject` copies the workspace time zone onto the project (ENT-6), so reporting answers `timeZoneSource: 'project'`. The figures are right; premise A8 was wrong for the label. Open: does a later change of the company zone reach existing projects? | WP-3 | P3 |
+  | WP4-OVR-1 | After one allocation is over-certified on a PM override, every later IPC needs a PM override, even one claiming nothing on that allocation (`ipc.service` :556, :579-582). Finance can then no longer certify on the project. | WP-4 | P2 |
+  | WP4-DRAFTS-1 | The IPC item progress check ignores other uncertified drafts, so two drafts can claim past earned. The certify gate still catches it (possibly expected behaviour). | WP-4 | P3 |
+  | WP5-SVC-1 | A received service PO line becomes a stocked item (`resolveInventoryItem`), so service invoices are capitalised (postedAmount 0). | WP-5 | P2 |
+  | WP5-AWD-1 | An award to a bidder who is not the lowest has no "not the lowest" justification; the only override is the prequalification override. | WP-5 | P3 |
+  | WP8-TRN-1 | Transmittal create (and correspondence create, same pattern) cannot cite an already-filed document: 404 `FILE_NOT_FOUND` (`recordDocumentRevisions` without a user). | WP-8 | P3 |
 - **WP1-ACT-2 (P3, from Codex diff round 2; deferred to CERT-7).**
   - **The defect.** `activityCode` accepts internal control characters: the validator trims the ends only. A code such as `A<tab>100`, crossed by hand onto another file row while the row coded `A 100` stays, exports twice as `A 100` in XER `task_code` and P6 XML `Id`, because the exports turn tabs into spaces.
   - **Proposed fix.** Refuse control characters in `activityCode`, or compare identities as the exports write them.
