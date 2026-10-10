@@ -1560,3 +1560,258 @@ leaves and models each refused at load by its own check, the unmutated copy load
 (`tools/load-commercial.adapted.js`): shape OK before (633) and after (698); `tools/refusal-test.js`: a repeated anchor,
 a missing anchor, CR line endings and the same input/output path are refused with nothing written. Bytes: every
 deliverable UTF-8 without BOM, LF, ASCII; commercial.js LF; every inserted line ASCII.
+
+# WP-5 answer-book leaves (2026-10-10)
+
+Binding source: `C:\Temp\octapm-cert\scratch\wp4\PREP4-ADJUDICATION.md` section D (Q1-Q12; cited in the book as
+`WP5ADJ(...)`), settling the answer-book gaps G1-G23 of `C:\Temp\octapm-cert\scratch\wp5\WP5-PREP.md` section 10
+(cited `PREP5(...)`), with book correction BOOK-G3 applied first (Q12). Applied here: every writing check and every
+section 6.2 catcher on the fresh throwaway J in 087 (Q1); 052-COM keeps a read and two close refusals, its O2 closes
+are judged on J (Q2); HR-C5, HR-C7, HR-C8 and HR-C9 undecided, so the 27 known answers stay BLOCKED at their todays
+(Q4); the two stamped directory vendors accepted as company-level residue (Q6); the E6 catchers named by check id,
+M-PCL0 / M-AWD0 now and M-PCL1 / M-AWD1 after HR-C8 / the atomic-award fix, M-DCX recorded as equivalent (Q7); N rounds
+for the direct-cost concurrency probe, one recorded rerun for the award race (Q8); R5.expired kept with its 30 s lapse
+(Q10). No WP-5 rule is decided and no WP-5 fix has landed, so every WP-5 leaf with a `today` is BLOCKED at it, is an
+assumption, and its value never equals its today (the integration owner's KA.I9 ruling, 2026-10-10). G23 (plan
+citations) is a citation convention, applied to the new and changed leaves only. Rule A10 applies: every leaf below
+carries its on-paper derivation in the book, worked from the product code at `f599e67` (`HF(file, lines)`;
+`backend/src`, `shared` and `backend/prisma` at HEAD `999dc9c` are identical to `f599e67`), from existing book keys,
+or from the deep-company builders read at `48db9e9` (`BLD(file, lines)`; the builders' `.js` files are unchanged
+since, only `MOMENT-MAP.md` moved). Plan lines are numbered at HEAD (`PH5(...)`, the plan is unchanged since
+`b75ee67`; the book's WP-5 `P(...)` + 40, PF4 + 1 from :52 on).
+
+Inputs (copies proven on, sha256): `answers/commercial.js` at HEAD `999dc9c` (the working tree's file is the same:
+after the WP-4 patch and the integration owner's two edits)
+`69a2b6f40973dd33d81aa8bb04ac45ff4bd08b31e937274e3bebe1f8fdd629be`; `answers/schedule.js`
+`f0957af2a9e3d31818c07b17584ba1fbc17aef97e71242b3cd6a72cad7dc40b9` and `answers/field-controls.js`
+`ebc5c740850636a63b116d851f33d44d5bfeaa4c13a795f5ab91ebd37a99e73a` (both unchanged: no WP-5 key lives there, neither
+names WP5); `answers/CHANGES-WP0-BUILDERS.md` `c8073984ef7a8708a61b39972d6f9d5a0cb08785a3e2d7f9223dcdde300fa807`;
+`PREP4-ADJUDICATION.md` `85b11548132665e8851d8adadf66e606c5f71fdbbf32aa2cbf3e5dbe52fe839f`; `WP5-PREP.md`
+`441eef5094e1df5ff709691a155e1f84348952e1e576833bfafbc659db9502af`; `derive-j.json`
+`c5c4f0b0785724618aab0d5501c1670b11189fcb2cf009934a32cc11b9b00e44`; `wp5-checks-draft.json`
+`a6c6fea319fec46b56b7478269f3467997605770a86b8da46fb12085d1f7215f`; `wp5-mutations-draft.json`
+`cf5e8c44f0c9fc1c8a2851a112a5553772fed1da995e8de8cc5a743a63f407a4`. Output of `book-insert.js` on the copy: sha256
+`7d6fc3ee44f3a82e5929d046303ad6b5cc87265c4e9601ceb9ea23acff34b726` (`work/commercial.applied.js`; the diff is
+`wp5-book.diff`). Only `commercial.js` changes.
+
+Figure count: commercial 698 -> 726 (+28; WP5 110 -> 137, deep.087-COM 62 -> 63). No key was removed; no key was added
+under `deep.052-COM` (its O2 mirror does not grow: the J-only closes live in a new subtree). 51 existing leaves
+changed, each as the adjudication directs and each recording in its `note` what changed where more than a `ref` was
+added (a changed value keeps its old value there, a changed today its old today): 46 WP5 leaves and the 5 052-COM
+mirrors of WP5.O2 that change with them (`deep.052-COM.O2.*`: each change is project-independent, a ref, an
+assumption, a note or a today that holds for 052-COM too). Values changed: `WP5.R2.concurrentConfirms` (the two sends
+counted) and the five `WP5.mutations` leaves (catchers by check id). Todays changed: `WP5.D5.overInvoicedLedger`
+1,200.00 -> 0.00 (BOOK-G3); todays added to `WP5.O2.receiveAfterClose` (+ mirror), `WP5.N2.stockAfterRefusal`,
+`WP5.N2.return30After10`, `WP5.N3.secondReturnActivity`, `WP5.N3.secondReturnStock`. planDisagrees 2 -> 2, assumption
+207 -> 248, leaves with a `today` 94 -> 107 (WP5 19 -> 31), with a `ref` 66 -> 100 (WP5 0 -> 31). No other leaf
+changed (a before/after dump of `figures()`: 647 leaves identical in every field; stage3/4/5, WP4, WP6, WP7 and claudeMd
+identical; deep identical but for the listed leaves; `meta` and the exports identical). No value or today a builder
+reads in code changed (`verify.js` scans `build/*.js` for `<leaf>.value`, `<leaf>.today` and a leaf handed to
+`asCents`, `major`, `saidOf` or `money`); one changed leaf, `WP5.D5.overInvoicedLedger`, is only named in builder
+comments (087-com.js:1853, :2305) and a finding's message text (:2317), and its new today is what that finding
+observes (SINV-OVER1 approved with postedAmount 0.00).
+
+Leaf contract (checked at load): every WP-5 leaf (WP5 and 052-COM's O2 mirror; the new `deep.087-COM.o2CementEnd`
+carries no today, so WP-4's walk of deep.087-COM is untouched) that carries a `today` names its `ref` and every `ref`
+has its `today`, from `WP5_REFS`: HR-C5, HR-C7, HR-C8, HR-C9, L35, L36, X-FINANCE-1, AWARD-ATOMIC, AWARD-ONE-ORDER,
+AWARD-CODING, RCV-LIST, L199, L107, L119, D-FUN-1, WP0-INV-1; every such leaf is an assumption and its value never
+equals its today. `WP5_KNOWN` names the 24 leaves the 27 KA checks read, each with its ref.
+
+New helpers in commercial.js (data, not leaves), inserted before the WP-5 section: `WP5ADJ`, `PREP5`, `PH5`,
+`DERIVE_J`, `WP5_REFS`, `WP5_KNOWN`, `RCV_STATUSES`, `COM087_ORDERS`, `COM087_CEMENT2`; `J_SUP` (J's records, in
+currency units) and its models `J_ORDERS`, `J_ORDER`, `J_BIDS`, `J_BID`, `J_DIRECT_COSTS`, `J_WA`, `J_STOCK`, `J_STEPS`,
+`J_CHECKS`, `J_SRC`; the new WP5 subtrees `closeBeforeDelivery`, `CF` and `J` (inside the WP5 literal after `existing`,
+so not mirrored); and a block of load checks after WP-4's that ties every new or changed leaf to the figures it is
+built from (the book refuses to load otherwise; each check was shown to fire by a mutant, 61 in all). J's figures are
+also pinned to `derive-j.json` (worked independently with the same arithmetic) by `verify.js`.
+
+## G3 (BOOK-G3, first: adjudication Q12). The over-invoicing ledger
+
+| Key | Old | New |
+|---|---|---|
+| `WP5.D5.overInvoicedLedger` | value 60,000; today 120,000 (1,200.00); derivation premised on 'no stock item' | value 60,000 unchanged; today 0 (WP5-SVC-1: goods receipt resolves an inventory item for every received PO line, goods-receipt.service.js:241-263, :711, so both approved invoices are capitalised, direct-cost.service.js:468-476, 491-495); ref HR-C5; the derivation keeps its text and adds that the value rests on two things, service lines staying service lines AND HR-C5 refusing the second approval; judged on J's J-SVC; the old today kept in the note |
+
+Without it KA.D5.overInvoicedLedger fails at HEAD (observed 0.00 matches neither 600.00 nor 1,200.00); with it the
+check reads BLOCKED (HR-C5). WP5-SVC-1 is classified at the WP-5 run (CF.SVC1) with this leaf.
+
+## G1. The throwaway J (adjudication Q1, Q6, Q8, Q10)
+
+J is the WP-5 proof's own project in 087, created with an explicit defaultRetentionRate 10 (every award confirm sends
+retentionRate 0, so WP-5 never depends on HR-C1), archived at the end (as WP-1's W, WP-2's P, WP-3's V, WP-4's K).
+Shapes reuse the book's: PO-A' and PO-B' are stage 4's PO-A and PO-B, J-C is WP5.O2's order, J-B003 is B-003's row,
+J-SAND / J-PIPE / J-CEM3 are WP5.N2 / N3 / N4's items. `J.choreography` is J0-J11 and the end (13 steps); every check
+id J serves is named by exactly one step (checked at load against `J_CHECKS`, 98 ids: every check of
+`wp5-checks-draft.json` on J but the eight confirm-first classifications computed from known answers, CF.awardAtomic,
+CF.awardSecondOrder, CF.awardCoding, CF.HRC5, CF.HRC6, CF.HRC7, CF.HRC8, CF.receivableList).
+
+| Key | New |
+|---|---|
+| `WP5.J.project`, `team` | K's create payload with defaultRetentionRate 10; planner, qs, cost_controller, procurement, site_engineer, finance; the warehouse keeper added only after J3 (CF.INV1) |
+| `WP5.J.fixture` | activities J-A110 .. J-A-KEEP; 02-100, 09-100, 05-100 with budget lines 02-100/material and 09-100/indirect (none for 05-100); J-B003 60 t @ 1,200.00; J-SUP; J-SITE (J-B01, J-B02, J-Q) and J-YARD (J-Y1); 13 items; the plan row on J-A130 linked to PO-A' |
+| `WP5.J.vendors` | J-QUAL approved, valid to 2028-01-01, singleAwardLimit 250,000.00; J-EXP approved, insurance expiring 30 s after the decision (A-3) |
+| `WP5.J.orders` | 18 orders with lines and values in cents and their status when the receivable list is read (stateAtJ6): PO-A' 100,000, PO-B' 65,000, J-C 100,000, J-O4 100,000, J-ISS 100,000, J-ACKC 20,000, J-ACK 10,000, J-O7 10,000, J-SVC 100,000, J-STK and J-STK2 100,000, J-D6 20,000, J-DEL2 40,000, J-DEL1 30,000, J-DRAFT / J-NS / J-NR / J-PEND 10,000 |
+| `WP5.J.bids` | J-BP1 J-QUAL 25,200,000 / J-WD 25,500,000 / J-ADHOC 25,800,000; J-BP2 J-QUAL 24,000,000; J-BP3 J-EXP 6,000,000 |
+| `WP5.J.awardOrder` | 25,200,000, planned, J-QUAL, one line 60 t @ 420,000 on J-A130 (R3.J.firstOrder) |
+| `WP5.J.stock` | the J3 / J9 movements and the figures they give (J_STOCK): J-CEM WA 1,100, 66,000 issued, 90 / 99,000, 40 available, 44,000; J-SAND 100 / 100,000; J-GRAVEL 6,000; J-PIPE 5,000 / 5,000 / 15 & 19,000 (today 7,000 / 3,000 / 15 & 21,000); J-CEM3 11,000 = 7,700 + 3,300; J-INV1's issue 1,000 |
+| `WP5.J.directCosts` | J-DC1 .. J-DC4, the membrane invoices, J-INVA, J-VAR, J-SVC-INV1 / 2, J-D6INV, J-L119 with lines and totals in cents |
+| `WP5.J.choreography` | J0-J11, end |
+
+## G2, G4, G18. The award (adjudication Q3, Q7, Q8)
+
+| Key | Old | New |
+|---|---|---|
+| `WP5.R2.awardCommitment` | none | 087-COM's award commitment: draft, purchase_order, original 7,440,000, retentionRate 0, Emirates (the vendor company made for the ad-hoc winner), one SOV line carrying B-003, 02-100, 02-100/material, A130, 60 t @ 124,000 |
+| `WP5.R2.concurrentConfirms` | `{ commitments: 1, conflict409: 1 }`, today text | `{ confirms: 2, ok2xx: 1, conflict409: 1, commitments: 1 }` on J-BP2 (in process); today `{ ok2xx: 2, conflict409: 0, commitments: 2, commitmentStatus: draft }`; ref AWARD-ATOMIC, assumption; value judged only on exactly one 2xx; a lucky single success at HEAD is recorded, not retried (PREP4-ADJUDICATION B5 precedent) |
+| `WP5.R2.confirmAgain` | none | 409 BID_PACKAGE_LOCKED on the awarded J-BP1 (= WP5.R1.cancelAwarded); under M-AWD0 400 BID_NOT_FOUND: M-AWD0's catcher |
+| `WP5.R3.secondOrder` | no ref | ref AWARD-ONE-ORDER; on J-PP1 |
+| `WP5.R4.lineCoding` | no ref | ref AWARD-CODING, assumption; source BidPackageLine (schema.prisma:8352-8361); judged on 087-COM PO-AWARD and J's award order |
+
+## G13. R5 split (adjudication Q10)
+
+| Key | Old | New |
+|---|---|---|
+| `WP5.R5.overLimitOrExpired` | note none | value unchanged; note: split, kept as the common answer |
+| `WP5.R5.overLimit`, `overLimitDetails` | none | 409 PREQUAL_AWARD_BLOCKED; details `{ status: approved, singleAwardLimit: 25,000,000, amount: 25,200,000 }` (in cents; the answer carries currency units) |
+| `WP5.R5.overLimitOverride` | none | `{ status: 201, packageStatus: awarded, commitmentStatus: draft, commitmentOriginal: 25,200,000, auditReason }` |
+| `WP5.R5.expired`, `expiredDetails` | none | 409 PREQUAL_AWARD_BLOCKED; details.status 'expired' (assumption A-3, the 30 s lapse kept: Q10) |
+
+## G5, G6, G12, G15. Purchase orders (adjudication Q1, Q2, Q4)
+
+| Key | Old | New |
+|---|---|---|
+| `WP5.O1.submitNoLines` | 'Submit with no lines.' | value unchanged; the only live path is the activity-delete cascade (D-FUN-1): J-DEL1 after J-A-DEL is deleted |
+| `WP5.O2.closeOutstanding`, `forceNoReason` (+ mirrors) | no note | probed on 087-COM PO-C, 052-COM PO-O2 (before any write) and J's J-C, J-ISS; M-PCLg / M-PCLgb catchers |
+| `WP5.O2.forceWithReason`, `fullyReceivedClose` (+ mirrors) | today, no ref | ref HR-C8, assumption; judged on J (J-C, PO-A'); the stored moments po.C.close-short / po.A.close-received observed the today; 052-COM's PO-O2 never closed. Value and today unchanged (087-com.js:1897-1912 reads both) |
+| `WP5.O2.receiveAfterClose` (+ mirror) | no today | today 'not sent: the force close is refused ... J-C stays partial', ref HR-C8; the code shown at HEAD on J-ISS (WP5.closeBeforeDelivery.receiveAfterClose) |
+| `WP5.O3.cancelAfterDelivery` | today, no ref | ref HR-C8, assumption; the code is unreachable live at HEAD; the unit test mocks a state that never exists |
+| `WP5.closeBeforeDelivery.issuedForceClose`, `ackForceClose` | none (G5's `WP5.O2.issuedForceClose` / `ackForceClose`) | 'closed': HEAD's issued -> closed and acknowledged -> closed with force and a reason (purchase-order.service.js:121-122, 628-648); M-PCL0 / M-PCL0i / M-PCL0k catchers |
+| `WP5.closeBeforeDelivery.receiveAfterClose` | none | 409 PO_NOT_ISSUED on J-ISS once closed (read by O2.J.issued.receiveAfterClose) |
+
+G5's two leaves are under `WP5.closeBeforeDelivery`, not `WP5.O2`: WP5.O2 is mirrored into deep.052-COM.O2, which
+would have grown two J-only leaves (the WP-4 precedent for I1).
+
+## G9. The receivable list
+
+| Key | Old | New |
+|---|---|---|
+| `WP5.O5.receivableList` | today, no ref | ref RCV-LIST, assumption (statuses tied to `RCV_STATUSES` at load) |
+| `WP5.O5.on087` | none | `[ACK, C, O4, SVC2, AWARD]` (ACK is PO-00001), today `[C, O4, SVC2, AWARD]`: 087-COM holds no draft, so today only lacks the acknowledged PO-00001; ref RCV-LIST |
+| `WP5.O5.onJ` | none | `[J-C, J-O4, J-ISS, J-ACKC, J-STK, J-DEL2]`, today `[J-C, J-O4, J-ISS, J-STK, J-DEL2, J-DEL1, J-DRAFT, J-NS, J-NR]`; ref RCV-LIST |
+
+## G7, G11, G14, G17, G20, G21. Inventory and direct costs; the refs of the known answers
+
+| Key | Old | New |
+|---|---|---|
+| `WP5.N1.availableAfterReserve`, `issue41`, `issue40Cost`, `release51` | location 087-COM | notes: on J's J-CEM; the 087-COM cement read only; issue41's two sites (N1.J.issue41, N1.J.issue41bin). Values unchanged (087-com.js reads availableAfterReserve) |
+| `WP5.N2.returnNeverIssued`, `projectCostAfterRefusal` | no ref | ref L36, assumption; on J's J-SAND, project and cost code only |
+| `WP5.N2.stockAfterRefusal` | no today | today `{ qty: 150, valueCents: 150000 }`, ref L36 |
+| `WP5.N2.return30After10` | no today | today `{ status: 201 }`, ref L36; project only, no activity (no CostRecord below zero) |
+| `WP5.N3.credit`, `activity`, `stock` | today, no ref | ref X-FINANCE-1, assumption; on J's J-PIPE |
+| `WP5.N3.secondReturnActivity`, `secondReturnStock` | no today | today 'not sent', ref X-FINANCE-1 (G7: the CostRecord CHECK risk, CERT-5); not judged |
+| `WP5.N6.issuedQty`, `usage50` | today, no ref | ref HR-C7, assumption; on J's plan row |
+| `WP5.N6.usage70` | no note | holds at HEAD and after HR-C7: HARD, no today |
+| `WP5.D2.concurrentApprove` | no note | value per round; N rounds on fresh J-DC3s, the same N at baseline and under M-DCL (Q8); a 500 under M-DCL counts through G.5xx |
+| `WP5.D4.ledgerInvoiceBeforeReceipt` | today, no ref | ref L35, assumption; 087-COM read and J's J-STK |
+| `WP5.D5.priceVarianceApproval`, `WP5.D6.invoiceSideVerdict` | today, no ref | ref HR-C5 (assumption); J-VAR, J-D6INV |
+| `WP5.O6.refCollision` | today, no ref | ref HR-C9; the keeper's scan of PO-00001 |
+| `WP5.existing.*` (6) | no note | re-derived on J (N1.J.existing, D5.J.matched); values unchanged (087-com.js reads stockOnHand, stockValue) |
+
+## G8. 087-COM's O2 cement
+
+| Key | Old | New |
+|---|---|---|
+| `deep.087-COM.o2CementEnd` | none (literals in 087-com.js:2017) | `{ onHand: 47, damaged: 2, quarantined: 3, inTransit: 0 }`, computed in `COM087_CEMENT2` from the builder's movements (60 in, quarantine 5, release 2, damage 1, issue 10, return 4; FULL 10, SHORT 10 = 7 + 1 damaged + 2 short); no today or ref |
+
+## G10. The confirm-first observations
+
+| Key | New (value; today; ref) |
+|---|---|
+| `WP5.CF.L199issue` | `{ movements: 1 }`; `{ statuses: [201, 201], movements: 2 }`; L199 |
+| `WP5.CF.L107` | 5,000 (the 50.00 variance recognised once); 0; L107 |
+| `WP5.CF.L119` | `{ budgetActualDeltaEqualsLedgerDelta: true }`; `{ ledgerDelta: 75000, budgetActualDelta: 0 }`; L119 |
+| `WP5.CF.DFUN1delete` | 10,000 (J-DEL2 recomputed from its kept line); 40,000; D-FUN-1 |
+| `WP5.CF.INV1` | `{ statusIn: [403, 404], codeIn: [PROJECT_ACCESS_DENIED, PROJECT_NOT_FOUND] }`; `{ receive: 201, issue: 201, issueCostOnJ: 1000, return: 201, ordersOf087ComB: 200 }`; WP0-INV-1 |
+
+## G16-G18, Q7. The mutation leaves name their catchers
+
+| Key | Old | New (catchers by check id) |
+|---|---|---|
+| `poCloseTransitions` | `['WP5.O2.forceWithReason', 'WP5.O2.fullyReceivedClose']` | O2.J.issued.forceWithReason and O2.J.ack.forceWithReason (M-PCL0 at HEAD; M-PCL0i, M-PCL0k); KA.O2.forceWithReason, receiveAfterClose, fullyReceivedClose (M-PCL1 after HR-C8); the close-guard complement M-PCLg / M-PCLga / M-PCLgb, HEAD only |
+| `awardLock` | `['WP5.R2.concurrentConfirms']` | R2.J.confirmAgain (M-AWD0 at HEAD); KA.R2.concurrentConfirms (M-AWD1 after the fix; one recorded rerun, Q8) |
+| `receiptOverOrder` | `['WP5.O4.overOrder']` | O4.J.overOrder (M-OVER) |
+| `insufficientAvailable` | `['WP5.N1.issue41']` | N1.J.issue41 and N1.J.issue41bin (M-AVL); M-AVLa; M-AVLb |
+| `directCostOnePosting` | `['WP5.D2.concurrentApprove', 'WP5.D2.ledger']` | D2.J.concurrentApprove (M-DCL); D2.J.ledger (M-DCK); M-DCX equivalent, recorded, not run |
+
+`verify.js` checks every catcher of `wp5-mutations-draft.json` (26, G.5xx included) against these leaves and the check
+list.
+
+## G19, G22, G23
+
+| Key | Old | New |
+|---|---|---|
+| `WP5.R1.inviteOnDraft` | 'Invitation on a draft package.' | the RESEND on a draft (bid.service.js:609); inviting on a draft is allowed (:603; the 087-COM build does it); value unchanged |
+| `WP5.R4.lineCoding` | see G2 above | (G19) |
+| new and changed leaves | P(...) | PH5(...) (plan at HEAD; the book's WP-5 P(...) + 40) |
+
+## Not applied here
+
+- `deep.087-COM.poStatuses` is unchanged: it lists the post-HR-C8 states ('partial->closed (short)',
+  'received->closed') while O.live.087.statuses (HARD) reads PO-C partial and PO-A received at HEAD. A today with ref
+  HR-C8 under deep.087-COM would trip WP-4's leaf-contract walk, whose REFS list has no WP-5 ref (owner question).
+- `WP5.O7.ignoredFields` is unchanged: its value is HEAD's answer ({ stockIssued: 0, ledgerEntries: 0 }) under the
+  undecided HR-C7, whose recommendation is a 400 (owner question, by the KA.I9 ruling).
+- No STORED-PRE-FIX rule leaf for the two stored HR-C8 moments (WP-4 Q4 precedent): HR-C8 is undecided.
+- The 052-COM O2 mirrors of forceWithReason, receiveAfterClose and fullyReceivedClose carry the refs by construction
+  but are not judged on 052-COM (Q2).
+- stage4:167 / stage4:170 leaves are unchanged; J's PO-A' and PO-B' are tied to them at load (G20).
+- F-2 (may a cancelled award order be replaced?) is an owner question (Q4) and is not encoded.
+- WP5-SVC-1 and WP5-AWD-1 have no CF leaf of their own: CF.SVC1 reads the corrected D5 leaf and J's direct costs,
+  CF.AWD1 the stored finding and a static route read.
+- MOMENT-MAP.md is not edited (one writer): the WP-5 deviations, rows 144, 148, 150, 151, go in when the proof lands.
+
+## For the proof and the lists (no change made outside the book)
+
+- Check -> key changes against `wp5-checks-draft.json`: R1.live.commitment reads `WP5.R2.awardCommitment` (BOOK-G2);
+  R2.J.confirmAgain reads `WP5.R2.confirmAgain`; R3.J.firstOrder reads `WP5.J.awardOrder` (the draft named
+  `WP5.R4.awardPoValue`, 087-COM's 74,400.00); R5.J.overLimit reads `WP5.R5.overLimit` and `overLimitDetails`,
+  R5.J.overLimitOverride `WP5.R5.overLimitOverride`, R5.J.expired `WP5.R5.expired` and `expiredDetails`;
+  O2.J.issued.forceWithReason and O2.J.ack.forceWithReason read `WP5.closeBeforeDelivery.issuedForceClose` and
+  `ackForceClose` (BOOK-G5); O2.J.issued.receiveAfterClose reads `WP5.closeBeforeDelivery.receiveAfterClose` (no
+  longer `WP5.O2.receiveAfterClose`, now an HR-C8 known answer); KA.O5.receivableList.087 reads `WP5.O5.on087`
+  (BOOK-G9) and KA.O5.receivableList.J `WP5.O5.onJ`; N.live.087.store reads `deep.087-COM.o2CementEnd` (BOOK-G8);
+  CF.L199issue, CF.L107, CF.L119, CF.DFUN1delete and CF.INV1 read `WP5.CF.*` (BOOK-G10); the mutation lists take
+  their catchers from `WP5.mutations.*`.
+- KA.D5.overInvoicedLedger reads BLOCKED (today 0.00) at HEAD: 0 FAIL once this patch is in (WP5-PREP section 6).
+- KA.O2.receiveAfterClose: the receipt is sent only once J-C reads closed; at HEAD the leaf's today is the string
+  'not sent: ...', so the proof records BLOCKED with it.
+- KA.N2.stockAfterRefusal and KA.N2.return30After10 judge structured todays (`{ qty, valueCents }`, `{ status }`).
+- KA.R2.concurrentConfirms: value only on exactly one 2xx, one 409 BID_PACKAGE_LOCKED and one commitment; today on
+  two 201 and two draft commitments; no retry at baseline. D2.J.concurrentApprove: N rounds (the proof's N), each
+  round green.
+- O1.J.submitNoLines (BOOK-G6), R1.J.inviteOnDraft (BOOK-G22) and KA.N3.stock's unsent second return (BOOK-G7) need no
+  further book change.
+- The proof's RULES need the refs the book uses: `WP5_REFS` (16).
+- Moment-map deviations to record when the proof lands: rows 144 (the O2 closes), 148 (N1's issues), 150 (N6) and 151
+  (the D5 approvals) per Q1.
+- Expected at HEAD from the book side: WP5-PREP section 6 with the section 10 corrections in: 0 FAIL, 27 BLOCKED, 16
+  CF reported, 99 green and G.5xx.
+
+Validation (scratch `C:\Temp\octapm-cert\scratch\wp5\book\`): `book-insert.js` applied to a copy of commercial.js at
+999dc9c (sha256 69a2b6f40973...; it refuses any other input sha): 24 exact-anchor edits, each counted once and checked
+not to overlap before any write; deterministic (two applications byte-identical); `node --check` exit 0; the copy
+loads (726 figures, the WP-4 and the new WP-5 load checks pass, nothing required of the product); `verify.js`: no key
+removed, 28 new keys exactly the expected list, 51 changed keys each with exactly the expected fields (old notes kept
+as the start of the new, old values and todays recorded), 647 identical, the other sections, meta and exports
+identical, every new key resolves to a cited leaf, every WP5 today under a WP-5 ref and an assumption and unequal to
+its value, the 27 KA checks read leaves with today and ref, the 98 J check ids equal the draft list's J checks but the
+eight classifications, the 26 catchers of the mutation draft named and real, no value or today a builder reads
+changed, J's figures equal derive-j.json (29 comparisons), the WP-0 recomputation (`scratch/wp0/verify-commercial.js`)
+116 of 116 agree, LF only, no BOM, no double-encoding, no non-ASCII character added or removed (446 -> 446), every
+removed line (46) lies in an edit's anchor, a second run refused; `teeth.js`: 61 mutants of the new and changed
+leaves and models each refused at load by its own check, the unmutated copy loads; the WP-0 load test adapted to a
+path (`tools/load-commercial.adapted.js`): shape OK before (698) and after (726, with WP-5 spot checks);
+`tools/refusal-test.js`: re-application, CR line endings, a wrong input sha256 and the same input/output path refused
+by the command line with nothing written, and a repeated anchor, a missing anchor, a non-ASCII, CR, backtick or
+template-interpolation insert and two overlapping edits refused by the planner; the original plans cleanly. Bytes:
+every deliverable UTF-8 without BOM, LF, ASCII; commercial.js LF; every inserted line ASCII. `tools/run-all.js` runs
+the whole chain in one command (outputs in `work/*-output.txt`, summary in `work/run-all-output.txt`).

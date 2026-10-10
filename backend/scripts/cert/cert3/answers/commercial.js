@@ -80,6 +80,23 @@
  * today names its ref, and figures() now emits ref. A changed value keeps its old value in its
  * note; load checks after claudeMd tie the new and changed leaves to the figures they are built
  * from. Changed keys: answers/CHANGES-WP0-BUILDERS.md, "WP-4 answer-book leaves (2026-10-10)".
+ *
+ * The integration owner's binding adjudication of the WP-5 preparation (2026-10-10,
+ * C:/Temp/octapm-cert/scratch/wp4/PREP4-ADJUDICATION.md section D, Q1-Q12, cited WP5ADJ(...);
+ * the preparation C:/Temp/octapm-cert/scratch/wp5/WP5-PREP.md, PREP5(...)) is applied to the
+ * answer-book gaps G1-G23 of WP5-PREP.md section 10, book correction BOOK-G3 first (Q12): G3
+ * (the over-invoicing ledger's today 0.00, because goods receipt stocks the received service
+ * line: WP5-SVC-1), G1 (WP5.J: the fresh throwaway project J in 087 that carries every writing
+ * check and every section 6.2 catcher, Q1), G2 (WP5.R2.awardCommitment), G4 and G18 (two
+ * confirms at once, the confirm again), G5 (WP5.closeBeforeDelivery), G6, G11, G12, G14, G15
+ * and G19-G22 (paths, places and wording), G7 (N3's second return not sent), G8
+ * (deep.087-COM.o2CementEnd), G9 (WP5.O5.on087 and onJ), G10 (WP5.CF: the confirm-first
+ * observations), G13 (WP5.R5 split), G16-G18 (the mutation leaves name their catchers by check
+ * id, Q7). No WP-5 rule is decided and no WP-5 fix has landed (Q4): every WP-5 leaf with a
+ * today names its ref from WP5_REFS, is an assumption, and its value never equals its today
+ * (the integration owner's KA.I9 ruling, 2026-10-10). G23: the new and changed leaves cite PH5
+ * (plan lines at HEAD 48db9e9, the book's WP-5 P(...) + 40). Changed keys:
+ * answers/CHANGES-WP0-BUILDERS.md, "WP-5 answer-book leaves (2026-10-10)".
  */
 "use strict";
 
@@ -807,6 +824,233 @@ const WP4 = {
   },
 };
 
+// --- WP-5 answer-book leaves (2026-10-10): citation helpers, the throwaway project J, models ---
+/** The integration owner's binding adjudication of the WP-5 preparation (2026-10-10, section D: Q1-Q12). */
+const WP5ADJ = (item) => "C:/Temp/octapm-cert/scratch/wp4/PREP4-ADJUDICATION.md section D " + item;
+/** The WP-5 preparation (read only, 2026-10-10), whose section 10 answer-book gaps G1-G23 the adjudication settles (BOOK-G3 first, Q12). */
+const PREP5 = (item) => "C:/Temp/octapm-cert/scratch/wp5/WP5-PREP.md " + item;
+/** Plan lines as numbered at HEAD 48db9e9 (the plan is unchanged since b75ee67): the book's WP-5 P(...) + 40 (P(709) = PH5(749)), PF4 + 1 from :52 on. */
+const PH5 = (lines) => PLAN + ":" + lines + " @48db9e9";
+const DERIVE_J = "C:/Temp/octapm-cert/scratch/wp5/derive-j.json (J's figures worked with this book's cents(); 46 cross-checks against its leaves)";
+/**
+ * The refs a WP-5 known answer may carry. No WP-5 rule is decided (HR-C5, HR-C7, HR-C8, HR-C9; HR-C6, with L35, L36
+ * and X-FINANCE-1, is CERT-5's) and no WP-5 fix has landed (AWARD-ATOMIC, AWARD-ONE-ORDER, AWARD-CODING, RCV-LIST; the
+ * register and lead rows L199, L107, L119, D-FUN-1, WP0-INV-1), so every WP-5 leaf with a today is BLOCKED at it, is an
+ * assumption, and its value never equals its today (WP5ADJ Q4; the integration owner's KA.I9 ruling, 2026-10-10: a
+ * value equal to HEAD's would pre-judge the rule).
+ */
+const WP5_REFS = ["HR-C5", "HR-C7", "HR-C8", "HR-C9", "L35", "L36", "X-FINANCE-1", "AWARD-ATOMIC", "AWARD-ONE-ORDER", "AWARD-CODING", "RCV-LIST", "L199", "L107", "L119", "D-FUN-1", "WP0-INV-1"];
+/** The leaves the 27 KA checks of WP5-PREP section 6 read, each with its ref (checked at load). */
+const WP5_KNOWN = [
+  ["WP5.R2.concurrentConfirms", "AWARD-ATOMIC"],
+  ["WP5.R3.secondOrder", "AWARD-ONE-ORDER"],
+  ["WP5.R4.lineCoding", "AWARD-CODING"],
+  ["WP5.O2.forceWithReason", "HR-C8"],
+  ["WP5.O2.receiveAfterClose", "HR-C8"],
+  ["WP5.O2.fullyReceivedClose", "HR-C8"],
+  ["WP5.O3.cancelAfterDelivery", "HR-C8"],
+  ["WP5.O5.receivableList", "RCV-LIST"],
+  ["WP5.O5.on087", "RCV-LIST"],
+  ["WP5.O5.onJ", "RCV-LIST"],
+  ["WP5.O6.refCollision", "HR-C9"],
+  ["WP5.N2.returnNeverIssued", "L36"],
+  ["WP5.N2.stockAfterRefusal", "L36"],
+  ["WP5.N2.projectCostAfterRefusal", "L36"],
+  ["WP5.N2.return30After10", "L36"],
+  ["WP5.N3.credit", "X-FINANCE-1"],
+  ["WP5.N3.activity", "X-FINANCE-1"],
+  ["WP5.N3.stock", "X-FINANCE-1"],
+  ["WP5.N6.issuedQty", "HR-C7"],
+  ["WP5.N6.usage50", "HR-C7"],
+  ["WP5.D4.ledgerInvoiceBeforeReceipt", "L35"],
+  ["WP5.D5.priceVarianceApproval", "HR-C5"],
+  ["WP5.D5.overInvoicedLedger", "HR-C5"],
+  ["WP5.D6.invoiceSideVerdict", "HR-C5"],
+];
+/** The receivable list's statuses: the plan's (O5, what a receipt accepts that still expects a delivery) and HEAD's (goods-receipt.service.js:196-197); tied to WP5.O5.receivableList at load. */
+const RCV_STATUSES = { value: ["issued", "acknowledged", "partial"], today: ["draft", "issued", "partial"] };
+/** 087-COM's purchase orders at the end of its build, by the builder's key (BLD 087-com.js:1833-1913, 2225-2243, 2332-2338): ACK is PO-00001; A's and C's closes are BLOCKED HR-C8. */
+const COM087_ORDERS = [
+  { key: "ACK", ref: "PO-00001", state: "acknowledged" },
+  { key: "A", ref: null, state: "received" },
+  { key: "B", ref: null, state: "received" },
+  { key: "C", ref: null, state: "partial" },
+  { key: "O4", ref: null, state: "partial" },
+  { key: "X", ref: null, state: "cancelled" },
+  { key: "SVC", ref: null, state: "received" },
+  { key: "SVC2", ref: null, state: "issued" },
+  { key: "STK", ref: null, state: "received" },
+  { key: "AWARD", ref: null, state: "issued" },
+];
+/** 087-COM's O2 cement (BLD 087-com.js:1957-1963, 1973, 2002-2017): its movements and the figures they leave. */
+const COM087_CEMENT2 = (() => {
+  const received = 60; // WP5.O2.received, into Z-A-B02 (step receipts)
+  const quarantine = 5;
+  const release = 2;
+  const damagedInStore = 1;
+  const issued = 10; // to A310
+  const returned = 4; // from A310
+  const onHandBeforeTransfers = received - quarantine + release - damagedInStore - issued + returned; // 50
+  const full = 10; // to the yard: the item's total is unchanged
+  const short = { sent: 10, received: 7, damaged: 1 };
+  const shortWrittenOff = short.sent - short.received - short.damaged; // 2
+  if (full + short.sent > onHandBeforeTransfers) throw new Error("commercial answer book: 087-COM's O2 cement cannot send more than it holds");
+  return { onHand: onHandBeforeTransfers - short.damaged - shortWrittenOff, damaged: damagedInStore + short.damaged, quarantined: quarantine - release, inTransit: 0 };
+})();
+
+/**
+ * J: the WP-5 proof's own throwaway project in company 087 (WP5ADJ Q1; WP5-PREP section 5.1, J0-J11), created with an
+ * explicit defaultRetentionRate 10 (every award confirm on J sends retentionRate 0, so no WP-5 figure depends on the
+ * HR-C1 fix) and archived by the proof, as WP-1's W, WP-2's P, WP-3's V and WP-4's K. Records in currency units (the
+ * leaves state cents). Shapes reuse the book's: PO-A' and PO-B' are stage 4's PO-A and PO-B, J-C is WP5.O2's order,
+ * J-B003 is B-003's 60 t row, J-SAND, J-PIPE and J-CEM3 are WP5.N2's, N3's and N4's items; the rest are choices made
+ * for the figures the WP-5 checks need. The figures agree with DERIVE_J, worked independently with the same arithmetic.
+ */
+const J_SUP = {
+  project: { name: "CERT3 WP5 Supply <stamp>", type: "building", contractType: "remeasurement", startDate: "2026-01-05", endDate: "2027-06-30", completionDate: "2027-06-30", projectCalendar: "five_day", currency: "EGP", defaultRetentionRate: 10 },
+  team: { planner: "planning_eng", qs: "qs", cost: "cost_controller", procurement: "procurement", site: "site_engineer", finance: "finance", warehouse: "warehouse, added by the PM only after J3 (CF.INV1)" },
+  fixture: {
+    activities: ["J-A110", "J-A130", "J-A220", "J-A310", "J-A320", "J-A-DEL", "J-A-KEEP"],
+    costCodes: ["02-100", "09-100", "05-100"],
+    budgetLines: ["02-100/material", "09-100/indirect"],
+    boqRow: { code: "J-B003", qty: 60, unit: "t", rate: 1200 },
+    supplier: "J-SUP (a ProcurementSupplier; the invoices name 087-COM's directory supplier company, state directory.out.ids.supplier)",
+    warehouses: { "J-SITE": ["J-B01", "J-B02", "J-Q"], "J-YARD": ["J-Y1"] },
+    items: ["J-CEM", "J-CEM2", "J-CEM3", "J-BLK", "J-NAIL", "J-TIE", "J-SAND", "J-GRAVEL", "J-PIPE", "J-MEM", "J-MEM2", "J-BOLT", "J-INV1"],
+    planRow: { activity: "J-A130", item: "J-CEM", qty: 100, unit: "BAG", orderLine: "PO-A'" },
+  },
+  vendors: {
+    "J-QUAL": { decision: "approved", criteria: "nine scored", validUntil: "2028-01-01", singleAwardLimit: 250000 },
+    "J-EXP": { decision: "approved", criteria: "nine scored", validUntil: "2028-01-01", singleAwardLimit: null, insuranceExpiresAt: "the decision + 30 s (assumption A-3: the criterion takes an ISO instant)" },
+  },
+  // [ref, lines [item (null: none), what, qty, unit, unit cost, activity], status when the receivable list is read (J6), what it serves]
+  orders: [
+    ["PO-A'", [["J-CEM", "cement", 100, "bag", 10, "J-A130"]], "received", "stage 4's PO-A; the plan row's line; N1; KA.O2.fullyReceivedClose; J-INVA"],
+    ["PO-B'", [["J-CEM", "cement", 50, "bag", 13, "J-A130"]], "received", "stage 4's PO-B; J-VAR (D5, L107)"],
+    ["J-C", [["J-CEM2", "cement", 100, "bag", 10, "J-A310"]], "partial", "WP5.O2 (60 received); O3; O4.overOrder and duplicateLine"],
+    ["J-O4", [["J-BLK", "concrete block", 100, "pcs", 10, "J-A310"]], "partial", "WP5.O4 (10 accepted, 2 rejected); N1.noTarget and costCodeOnly"],
+    ["J-ISS", [[null, "formwork plywood", 40, "sheet", 25, "J-A110"]], "issued", "closed with force and a reason before any delivery, then a receipt (WP5.closeBeforeDelivery)"],
+    ["J-ACKC", [[null, "formwork ties", 20, "pcs", 10, "J-A110"]], "acknowledged", "closed with force and a reason before any delivery (WP5.closeBeforeDelivery)"],
+    ["J-ACK", [["J-NAIL", "nails", 20, "kg", 5, "J-A110"]], "received", "WP5.O4.acknowledgedReceipt"],
+    ["J-O7", [["J-BOLT", "anchor bolts", 100, "pcs", 1, "J-A110"]], "received", "WP5.O7 (the procurement door); WP5.O4.alreadyPosted"],
+    ["J-SVC", [[null, "mobile crane hire", 100, "hr", 10, "J-A110"]], "received", "WP5.D5.overInvoicedLedger; WP5-SVC-1"],
+    ["J-STK", [["J-MEM", "waterproofing membrane", 10, "roll", 100, "J-A130"]], "issued", "WP5.D4 (L35): invoiced and approved before its receipt (J11)"],
+    ["J-STK2", [["J-MEM2", "waterproofing membrane", 10, "roll", 100, "J-A130"]], "received", "WP5.D4.controlPath"],
+    ["J-D6", [["J-TIE", "tie wire", 100, "kg", 2, "J-A110"]], "received", "WP5.D6 (+10% and a freight line)"],
+    ["J-DEL2", [[null, "kerb stones", 10, "pcs", 30, "J-A-DEL"], [null, "kerb stones", 5, "pcs", 20, "J-A-KEEP"]], "issued", "D-FUN-1: its line on J-A-DEL goes with the activity (WP5.CF.DFUN1delete)"],
+    ["J-DEL1", [[null, "kerb stones", 10, "pcs", 30, "J-A-DEL"]], "draft", "D-FUN-1: no line left after J8 (WP5.O1.submitNoLines)"],
+    ["J-DRAFT", [[null, "sand", 10, "t", 10, "J-A110"]], "draft", "WP5.O4.draftReceipt"],
+    ["J-NS", [[null, "sand", 10, "t", 10, "J-A110"]], "draft", "WP5.O1.submitNoSupplier (raised with no supplier)"],
+    ["J-NR", [[null, "sand", 10, "t", 10, "J-A110"]], "draft", "WP5.O1.submitNoRequiredBy (raised with no requiredBy)"],
+    ["J-PEND", [[null, "sand", 10, "t", 10, "J-A110"]], "pending_approval", "WP5.O1.rejectNoReason and issuePending"],
+  ],
+  // [package, how it is made, bids [bidder, rate per t, what happens], end]
+  bids: [
+    ["J-BP1", "POST /procurement/packages/J-PP1/quotes (J-PP1 on J-A130), dueAt 30 min ahead", [["J-QUAL", 4200, "the directory vendor (vendorCompanyId); soft-awarded; the confirm refused over its limit, then made on the override"], ["J-WD", 4250, "ad hoc; submitted, withdrawn and submitted again"], ["J-ADHOC", 4300, "ad hoc"]], "awarded; the order raised from J-PP1 twice"],
+    ["J-BP2", "POST /bids", [["J-QUAL", 4000, "soft-awarded; two confirms at once"]], "awarded"],
+    ["J-BP3", "POST /bids with a past dueAt", [["J-EXP", 1000, "invited with a prequalOverrideReason; soft-awarded; the confirm refused once its cover lapsed"]], "cancelled from closed"],
+  ],
+  // the stock movements of J3 and J9, unit costs in currency units as sent
+  stock: {
+    inv1: { item: "J-INV1", receipt: [10, 5], issued: 2, returned: 1, by: "the warehouse keeper before joining J's team (J3)" },
+    cement: { item: "J-CEM", receipts: [[100, 10], [50, 13]], issue: 60, reserve: 50, issue41: 41, issue40: 40, release: 51 },
+    blocks: { item: "J-BLK", noTargetProbe: 1, toCostCodeOnly: 2 },
+    sand: { item: "J-SAND", receipt: [100, 10], returned: 50 },
+    gravel: { item: "J-GRAVEL", receipt: [20, 10], issued: 10, returned: 4, returnedMore: 30, duplicateIssue: 1 },
+    pipe: { item: "J-PIPE", receipts: [[10, 10], [10, 14]], issued: 10, returned: 5 },
+    cem3: { item: "J-CEM3", receipt: [20, 11], transfer: 10, received: 7, damaged: 1, short: 2, overProbe: [9, 2], quarantine: 5, releaseProbe: 6, damageProbe: [5, 6] },
+  },
+  // [ref, type, order (null: none), lines [what, qty, unit, unit cost, cost code, activity, on the order's line], what it serves]
+  directCosts: [
+    ["J-DC1", "expense", null, [["site supervision", 1, "ls", 100, "09-100", "J-A320", false]], "D1: submitted empty, then with an uncoded line, then coded; the approve-draft, return, delete-pending and patch-approved probes; approved"],
+    ["J-DC2", "expense", null, [["temporary works, part 1", 1, "ls", 1000, "09-100", "J-A320", false], ["temporary works, part 2", 1, "ls", 2000, "09-100", "J-A320", false], ["temporary works, part 3", 1, "ls", 3000, "09-100", "J-A320", false]], "D2: approved (+6,000.00 in three keyed entries), voided, voided again"],
+    ["J-DC3", "expense", null, [["site security", 1, "ls", 500, "09-100", "J-A320", false]], "D2: two approvals at once, a fresh J-DC3 per round (WP5ADJ Q8)"],
+    ["J-DC4", "expense", null, [["site hoarding", 1, "ls", 6000, "09-100", "J-A320", false]], "D3: approved; 6,000.01 refused; paid 6,000.00 on 2026-09-20; its void refused"],
+    ["J-STK-INV", "invoice", "J-STK", [["waterproofing membrane", 10, "roll", 100, "02-100", "J-A130", true]], "D4 (L35): approved before J-STK's receipt"],
+    ["J-STK2-INV", "invoice", "J-STK2", [["waterproofing membrane", 10, "roll", 100, "02-100", "J-A130", true]], "D4's control path: approved after J-STK2's receipt"],
+    ["J-INVA", "invoice", "PO-A'", [["cement", 100, "bag", 10, "02-100", "J-A130", true]], "D5: matched (stage 12's invoice A)"],
+    ["J-VAR", "invoice", "PO-B'", [["cement", 50, "bag", 14, "02-100", "J-A130", true]], "D5: the price variance (stage 12's invoice B); L107"],
+    ["J-SVC-INV1", "invoice", "J-SVC", [["mobile crane hire", 60, "hr", 10, "02-100", "J-A110", true]], "D5: the first 60 hours"],
+    ["J-SVC-INV2", "invoice", "J-SVC", [["mobile crane hire", 60, "hr", 10, "02-100", "J-A110", true]], "D5: another 60 hours (120 invoiced against 100 received)"],
+    ["J-D6INV", "invoice", "J-D6", [["tie wire", 100, "kg", 2.2, "02-100", "J-A110", true], ["freight", 1, "ls", 50, "02-100", "J-A110", false]], "D6: +10% on the order's line and a freight line without poLineId"],
+    ["J-L119", "expense", null, [["survey equipment hire", 1, "ls", 750, "05-100", "J-A320", false]], "L119: coded to 05-100, which has no budget line on J"],
+  ],
+};
+const J_ORDERS = J_SUP.orders.map(([ref, lines, stateAtJ6, serves]) => {
+  const rows = lines.map(([item, what, qty, unit, unitCost, activity]) => ({ item, what, qty, unit, unitCost: cents(unitCost), amount: cents(qty * unitCost), activity, costCode: "02-100", budgetLine: "02-100/material" }));
+  return { ref, lines: rows, value: rows.reduce((sum, row) => sum + row.amount, 0), stateAtJ6, serves };
+});
+const J_ORDER = (ref) => J_ORDERS.find((order) => order.ref === ref);
+const J_BIDS = J_SUP.bids.map(([pkg, madeBy, bids, end]) => ({
+  pkg,
+  madeBy,
+  line: { boqRow: J_SUP.fixture.boqRow.code, qty: J_SUP.fixture.boqRow.qty, unit: J_SUP.fixture.boqRow.unit, activity: "J-A130", costCode: "02-100", budgetLine: "02-100/material" },
+  bids: bids.map(([bidder, rate, what]) => ({ bidder, rate: cents(rate), total: cents(J_SUP.fixture.boqRow.qty * rate), what })),
+  end,
+}));
+const J_BID = (pkg, bidder) => J_BIDS.find((p) => p.pkg === pkg).bids.find((b) => b.bidder === bidder);
+const J_DIRECT_COSTS = J_SUP.directCosts.map(([ref, type, order, lines, serves]) => {
+  const rows = lines.map(([what, qty, unit, unitCost, costCode, activity, onOrderLine]) => ({ what, qty, unit, unitCost: cents(unitCost), amount: cents(qty * unitCost), costCode, activity, onOrderLine }));
+  return { ref, type, order, lines: rows, total: rows.reduce((sum, row) => sum + row.amount, 0), serves };
+});
+/** The weighted average of J-CEM after PO-A' and PO-B': stage 4's arithmetic on J (1,100 cents a bag). */
+const J_WA = (J_ORDER("PO-A'").value + J_ORDER("PO-B'").value) / (J_ORDER("PO-A'").lines[0].qty + J_ORDER("PO-B'").lines[0].qty);
+/** The figures J's stock movements give, in cents (WP5.J.stock). */
+const J_STOCK = (() => {
+  const s = J_SUP.stock;
+  const cemIn = s.cement.receipts.reduce((q, [qty]) => q + qty, 0);
+  const cemValue = s.cement.receipts.reduce((v, [qty, cost]) => v + cents(qty * cost), 0);
+  const average = cemValue / cemIn;
+  const afterIssue = { onHand: cemIn - s.cement.issue, value: (cemIn - s.cement.issue) * average };
+  const cement = {
+    received: cemIn,
+    average,
+    issue60Cost: s.cement.issue * average,
+    afterIssue,
+    availableAfterReserve: afterIssue.onHand - s.cement.reserve,
+    issue40Cost: s.cement.issue40 * average,
+    end: { onHand: afterIssue.onHand - s.cement.issue40, reserved: s.cement.reserve, available: afterIssue.onHand - s.cement.issue40 - s.cement.reserve },
+  };
+  const [sandQty, sandCost] = s.sand.receipt;
+  const sand = { value: { qty: sandQty, valueCents: cents(sandQty * sandCost) }, today: { qty: sandQty + s.sand.returned, valueCents: cents((sandQty + s.sand.returned) * sandCost) }, projectCostToday: -cents(s.sand.returned * sandCost) };
+  const [, gravelCost] = s.gravel.receipt;
+  const gravel = { activityAfterReturn4: cents(s.gravel.issued * gravelCost) - cents(s.gravel.returned * gravelCost) };
+  const [[, p1Cost], [p2Qty, p2Cost]] = s.pipe.receipts;
+  const issueCost = cents(s.pipe.issued * p1Cost);
+  const pipe = {
+    credit: cents(s.pipe.returned * p1Cost),
+    creditToday: cents(s.pipe.returned * p2Cost),
+    activity: issueCost - cents(s.pipe.returned * p1Cost),
+    activityToday: issueCost - cents(s.pipe.returned * p2Cost),
+    stock: { qty: p2Qty + s.pipe.returned, valueCents: cents(p2Qty * p2Cost) + cents(s.pipe.returned * p1Cost) },
+    stockToday: { qty: p2Qty + s.pipe.returned, valueCents: cents(p2Qty * p2Cost) + cents(s.pipe.returned * p2Cost) },
+  };
+  const [, c3Cost] = s.cem3.receipt;
+  const cem3 = { sent: cents(s.cem3.transfer * c3Cost), received: cents(s.cem3.received * c3Cost), damaged: cents(s.cem3.damaged * c3Cost), short: cents(s.cem3.short * c3Cost), writtenOff: cents((s.cem3.damaged + s.cem3.short) * c3Cost) };
+  const [i1Qty, i1Cost] = s.inv1.receipt;
+  const inv1 = { received: i1Qty, issueCostOnJ: cents(s.inv1.issued * i1Cost) };
+  return { cement, sand, gravel, pipe, cem3, inv1 };
+})();
+/** J's steps (WP5-PREP section 5.1, as the adjudication settles it); each names the check ids it serves. */
+const J_STEPS = [
+  "J0 PM: POST /projects 'CERT3 WP5 Supply <stamp>' (WP5.J.project) with defaultRetentionRate 10; the team (WP5.J.team) without the warehouse keeper -> S.J.create",
+  "J1 planner, PM, QS: activities J-A110, J-A130, J-A220, J-A310, J-A320, J-A-DEL, J-A-KEEP (site engineer assigned); cost codes 02-100, 09-100 and 05-100; budget lines 02-100/material and 09-100/indirect, none for 05-100; the QS adds the BOQ row J-B003 60 t @ 1,200.00 (POST /boq/items)",
+  "J2 procurement, PM: the supplier J-SUP; warehouses J-SITE (bins J-B01, J-B02, J-Q) and J-YARD (bin J-Y1); the items of WP5.J.fixture; the PM (company admin) makes the directory vendors J-QUAL and J-EXP, scores the nine criteria and approves each (WP5.J.vendors: J-EXP's insurance expires 30 s later) -> S.J.fixture",
+  "J3 warehouse keeper, not on J's team: stock/receive J-INV1 10 @ 5.00 into J-SITE naming J; stock/issue 2 to J-A110; stock/return 1 from J-A110; GET /inventory/purchase-orders?projectId=<087-COM-B>; then the PM adds the keeper to J's team -> CF.INV1",
+  "J4 planner: the plan row on J-A130, J-CEM 100 BAG (WP5.N6)",
+  "J5 procurement, PM: the orders of WP5.J.orders, raised as drafts; all but J-DRAFT, J-DEL1, J-NS, J-NR and J-PEND submitted, approved by the PM and issued (J-ACKC and J-ACK then acknowledged); J-PEND submitted; J-NS submit -> O1.J.submitNoSupplier; J-NR submit -> O1.J.submitNoRequiredBy; the PM rejects J-PEND without a reason -> O1.J.rejectNoReason; procurement issues J-PEND -> O1.J.issuePending; PATCH PO-A' -> O1.J.patchIssued",
+  "J6 warehouse keeper, procurement: inventory door, PO-A' 100 and PO-B' 50 into J-B01; J-C 60 into J-B02 -> O2.J.partial; J-O4 10 accepted and 2 rejected -> O4.J.acceptedRejected; GET match/order J-O4 -> O4.J.matchFlag; J-ACK 20 -> O4.J.acknowledgedReceipt; J-SVC 100; J-STK2 10; J-D6 100; refused probes, each naming an existing inventoryItemId: J-DRAFT -> O4.J.draftReceipt; J-C with one poLineId twice -> O4.J.duplicateLine; J-C 41 against 40 outstanding -> O4.J.overOrder; procurement door, J-O7 with receiptNumber J-GRN-O7, issueToActivity true and issuedQty 60 -> O7.J.ignoredFields; the same receipt again -> O4.J.alreadyPosted; GET /inventory/purchase-orders?projectId=J&scope=receivable before any close -> KA.O5.receivableList.J",
+  "J7 procurement, warehouse keeper: J-C cancel with a reason -> KA.O3.cancelAfterDelivery; close -> O2.J.closeOutstanding; force without a reason -> O2.J.forceNoReason; force with a reason -> KA.O2.forceWithReason; only if J-C then reads closed, a receipt of 40 -> KA.O2.receiveAfterClose; PO-A' close without force -> KA.O2.fullyReceivedClose; J-ISS close -> O2.J.issued.closeOutstanding; force without a reason -> O2.J.issued.forceNoReason; force with a reason -> O2.J.issued.forceWithReason; the keeper's receipt on J-ISS -> O2.J.issued.receiveAfterClose; J-ACKC force with a reason -> O2.J.ack.forceWithReason",
+  "J8 PM, procurement: DELETE /activities/J-A-DEL; J-DEL1, left with no line, submitted -> O1.J.submitNoLines; J-DEL2 read, one line left and its value kept -> CF.DFUN1delete",
+  "J9 site engineer, warehouse keeper: issue 60 J-CEM to J-A130 -> N1.J.existing; reserve 50 -> N1.J.reserve; issue 41 naming no bin -> N1.J.issue41; issue 41 naming J-B01 -> N1.J.issue41bin; issue 40 -> N1.J.issue40; release 51 -> N1.J.release51; J-BLK issue with no activity and no cost code -> N1.J.noTarget; J-BLK 2 to 02-100 only -> N1.J.costCodeOnly; the plan row read -> KA.N6.issuedQty; usage 50 -> KA.N6.usage50; usage 70 -> N6.J.usage70; J-SAND 100 @ 10.00 in, return 50 naming the project and 02-100 -> KA.N2.returnNeverIssued, KA.N2.stockAfterRefusal, KA.N2.projectCostAfterRefusal; J-GRAVEL 20 @ 10.00 in, issue 10 to J-A310, return 4 to J-A310 -> N2.J.activityAfterReturn4; return 30 naming the project and 02-100 only -> KA.N2.return30After10; J-PIPE 10 @ 10.00 in, issue 10 to J-A220, 10 @ 14.00 in, return 5 to J-A220 -> KA.N3.credit, KA.N3.activity, KA.N3.stock (the second return is not sent); J-CEM3 20 @ 11.00 into J-B02, transfer J-T1 of 10 to J-YARD dispatched, received 9 + 2 damaged -> N4.J.overReceipt; received 7 + 1 damaged -> N4.J.values; received again -> N4.J.receiveAgain; J-CEM3 at J-B02: quarantine 5, release 6 -> N5.J.releaseOverQuarantine; release 5 -> N5.J.release5; adjust without notes -> N7.J.adjustNoNotes; receive 5 with damagedQty 6 -> N7.J.damageOverReceipt; J-GRAVEL issue 1 to J-A310 with reference J-DUP, sent twice -> CF.L199issue; GET /cost/reconciliation (a D7 checkpoint)",
+  "J10 procurement, PM, vendor portal: J-PP1 (a procurement package on J-A130) and its quotes J-BP1, due in 30 min, its line from J-B003 coded J-A130, 02-100 and 02-100/material; invitations J-QUAL (vendorCompanyId), J-WD and J-ADHOC (ad hoc); publish; J-QUAL 4,200.00 submits; J-WD 4,250.00 submits, withdraws and submits again -> R1.J.withdrawResubmit; J-ADHOC 4,300.00 submits; close; the PM soft-awards J-QUAL; confirm without a reason -> R5.J.overLimit; with one -> R5.J.overLimitOverride; the same confirm again -> R2.J.confirmAgain; procurement orders from J-PP1 -> R3.J.firstOrder, KA.R4.lineCoding.J; orders again -> KA.R3.secondOrder; J-BP2 (POST /bids, one J-B003 line coded): invite J-QUAL, publish, 4,000.00 submits, close, soft-award, two confirms at once -> KA.R2.concurrentConfirms; J-BP3 (POST /bids with a past dueAt, one J-B003 line): invite J-EXP with a prequalOverrideReason; publish -> R1.J.publishPastDue; resend J-EXP's invitation -> R1.J.inviteOnDraft; PATCH dueAt to 30 min ahead, publish, J-EXP 1,000.00 submits, close; confirm with no soft award -> R1.J.confirmNoBid; soft-award J-EXP and, once its cover has lapsed, confirm -> R5.J.expired; cancel J-BP3; J-BP1 read back draft, open, closed, awarded and J-BP3 cancelled -> R1.J.states",
+  "J11 cost controller, finance, warehouse keeper, site engineer: J-DC1 submitted with no line -> D1.J.emptySubmit; with an uncoded line -> D1.J.uncodedSubmit; finance approves it as a draft -> D1.J.approveDraft; submitted and returned without a reason -> D1.J.returnNoReason; returned with one, edited, resubmitted -> D1.J.returnedState; DELETE while pending -> D1.J.deletePending; approved; PATCH -> D1.J.patchApproved; J-DC2 approved -> D2.J.ledger; J-DC3, two approvals at once, N rounds -> D2.J.concurrentApprove; J-DC2 voided with a reason -> D2.J.voidMirror; voided again -> D2.J.voidAgain; J-DC4 approved, paid 6,000.01 -> D3.J.payOver; paid 6,000.00 dated 2026-09-20 -> D3.J.payFull; voided -> D3.J.voidPaid; GET /cash-flow with no rebuild -> D3.J.cashOutflow; J-STK-INV approved before J-STK's receipt, then the keeper receives 10 and the site engineer issues 10 to J-A130 -> KA.D4.J.invoiceBeforeReceipt; J-STK2-INV approved, J-STK2's 10 issued to J-A130 -> D4.J.controlPath; J-INVA and J-VAR made on PO-A' and PO-B', J-INVA approved, their match read -> D5.J.matched, D5.J.priceVariance; finance approves J-VAR -> KA.D5.priceVarianceApproval, CF.L107; J-SVC-INV1 and J-SVC-INV2 approved -> KA.D5.overInvoicedLedger, CF.SVC1; J-D6INV's match read -> KA.D6.invoiceSideVerdict; J-L119 approved -> CF.L119; GET /cost/reconciliation -> D7.J.balanced",
+  "end PM: DELETE /projects/J (archive), archivedAt read back -> S.J.archived",
+];
+/** The check ids J's steps serve (WP5-PREP wp5-checks-draft.json, every check on J but the eight confirm-first classifications computed from known answers); each is named by exactly one step (checked at load). */
+const J_CHECKS = ["S.J.create", "S.J.fixture", "CF.INV1", "O1.J.submitNoSupplier", "O1.J.submitNoRequiredBy", "O1.J.rejectNoReason", "O1.J.issuePending", "O1.J.patchIssued", "O2.J.partial", "O4.J.acceptedRejected", "O4.J.matchFlag", "O4.J.acknowledgedReceipt", "O4.J.draftReceipt", "O4.J.duplicateLine", "O4.J.overOrder", "O7.J.ignoredFields", "O4.J.alreadyPosted", "KA.O5.receivableList.J", "KA.O3.cancelAfterDelivery", "O2.J.closeOutstanding", "O2.J.forceNoReason", "KA.O2.forceWithReason", "KA.O2.receiveAfterClose", "KA.O2.fullyReceivedClose", "O2.J.issued.closeOutstanding", "O2.J.issued.forceNoReason", "O2.J.issued.forceWithReason", "O2.J.issued.receiveAfterClose", "O2.J.ack.forceWithReason", "O1.J.submitNoLines", "CF.DFUN1delete", "N1.J.existing", "N1.J.reserve", "N1.J.issue41", "N1.J.issue41bin", "N1.J.issue40", "N1.J.release51", "N1.J.noTarget", "N1.J.costCodeOnly", "KA.N6.issuedQty", "KA.N6.usage50", "N6.J.usage70", "KA.N2.returnNeverIssued", "KA.N2.stockAfterRefusal", "KA.N2.projectCostAfterRefusal", "N2.J.activityAfterReturn4", "KA.N2.return30After10", "KA.N3.credit", "KA.N3.activity", "KA.N3.stock", "N4.J.overReceipt", "N4.J.values", "N4.J.receiveAgain", "N5.J.releaseOverQuarantine", "N5.J.release5", "N7.J.adjustNoNotes", "N7.J.damageOverReceipt", "CF.L199issue", "R1.J.withdrawResubmit", "R5.J.overLimit", "R5.J.overLimitOverride", "R2.J.confirmAgain", "R3.J.firstOrder", "KA.R4.lineCoding.J", "KA.R3.secondOrder", "KA.R2.concurrentConfirms", "R1.J.publishPastDue", "R1.J.inviteOnDraft", "R1.J.confirmNoBid", "R5.J.expired", "R1.J.states", "D1.J.emptySubmit", "D1.J.uncodedSubmit", "D1.J.approveDraft", "D1.J.returnNoReason", "D1.J.returnedState", "D1.J.deletePending", "D1.J.patchApproved", "D2.J.ledger", "D2.J.concurrentApprove", "D2.J.voidMirror", "D2.J.voidAgain", "D3.J.payOver", "D3.J.payFull", "D3.J.voidPaid", "D3.J.cashOutflow", "KA.D4.J.invoiceBeforeReceipt", "D4.J.controlPath", "D5.J.matched", "D5.J.priceVariance", "KA.D5.priceVarianceApproval", "CF.L107", "KA.D5.overInvoicedLedger", "CF.SVC1", "KA.D6.invoiceSideVerdict", "CF.L119", "D7.J.balanced", "S.J.archived"];
+const J_SRC = [PH5("427, 734-793"), WP5ADJ("Q1"), PREP5("section 5.1; section 10 G1"), DERIVE_J];
+
 // ─── WP-5 supply chain (plan 694-753) ─────────────────────────────────────────────────────────
 
 const WP5 = {
@@ -821,27 +1065,34 @@ const WP5 = {
     packageStates: fig(["draft", "open", "closed", "awarded"], "list", "draft -> open (publish needs a future dueAt) -> closed -> awarded (or cancelled).", [P(696), AREA]),
     submitAfterDue: err(409, "BID_PAST_DUE", "Late bid: submit after dueAt.", [P(708), S("bid.service.js", "816")]),
     publishPastDue: err(400, "BID_DUE_DATE_REQUIRED", "Publish with a past dueAt.", [S("bid.service.js", "637")]),
-    inviteOnDraft: err(409, "BID_PACKAGE_NOT_OPEN", "Invitation on a draft package.", [S("bid.service.js", "609")]),
+    inviteOnDraft: err(409, "BID_PACKAGE_NOT_OPEN", "Invitation on a draft package: the RESEND of an invitation (POST /bids/:id/invitations/:invId/resend) while the package is a draft. resendInvitation refuses any package that is not open (bid.service.js:606-616, the test at :609) and writes nothing. Inviting on a draft is allowed: inviteBidders adds the invitations and only withholds each portal token until the package is open (:550-604, :603), as the 087-COM build does on its draft package (BLD 087-com.js:2094-2106). Probed on J's J-BP3 while it is a draft (WP5.J.choreography J10).", [S("bid.service.js", "609"), PH5("748"), HF("backend/src/services/bid.service.js", "550-616"), BLD("087-com.js", "2094-2106"), WP5ADJ("Q1"), PREP5("section 0 fact 15; section 10 G22")], { note: "WP-5 G22 (2026-10-10): the wording corrected to the resend; the derivation was 'Invitation on a draft package.'; value unchanged." }),
     cancelAwarded: err(409, "BID_PACKAGE_LOCKED", "An awarded package cannot be cancelled.", [S("bid.service.js", "395, 415")]),
     confirmNoBid: err(400, "BID_NOT_FOUND", "Confirm with no submitted winning bid (the confirm path answers 400; the soft award answers 404 for the same lookup).", [S("bid.service.js", "988, 1038")]),
     withdrawResubmit: state("submitted", "A withdrawn bid may be resubmitted while the package is open.", [P(696), S("bid.service.js", "843-869")]),
   },
   R2: {
-    concurrentConfirms: fig({ commitments: 1, conflict409: 1 }, "outcome", "Two concurrent POST /bids/:id/award/confirm: one commitment (awardedCommitmentId), one 409 BID_PACKAGE_LOCKED.", [P(709), S("bid.service.js", "1035")], { today: "status check outside a transaction (bid.service.js:1034-1035): two commitments possible" }),
+    concurrentConfirms: fig({ confirms: 2, ok2xx: 1, conflict409: 1, commitments: 1 }, "outcome", "Two concurrent POST /bids/:id/award/confirm: one commitment (awardedCommitmentId), one 409 BID_PACKAGE_LOCKED. Sent by the PM together, in process, on J's J-BP2 (J-QUAL's 240,000.00, within its 250,000.00 limit, so the race is on the lock alone; WP5.J.choreography J10), the package's commitments then counted. confirmAward decides on reads taken outside any transaction, the status pre-check (bid.service.js:1035) and the winning bid still 'submitted' (:1037), then writes the commitment in its own transaction (commitment.service.js:549, status draft) and the package in a third with no status condition (bid.service.js:1075-1079): two confirms that both pass :1035 and :1037 make two draft commitments, and the package names the later one.", [P(709), S("bid.service.js", "1035"), PH5("749, 782, 1110"), HF("backend/src/services/bid.service.js", "1033-1106"), HF("backend/src/services/commitment.service.js", "543-561"), WP5ADJ("Q3, Q8"), PREP5("section 0 fact 6; section 9 F-1; section 10 G4")], { assumption: true, today: { ok2xx: 2, conflict409: 0, commitments: 2, commitmentStatus: "draft" }, ref: "AWARD-ATOMIC", note: "WP-5 G4 (2026-10-10): the value was { commitments: 1, conflict409: 1 } and the today 'status check outside a transaction (bid.service.js:1034-1035): two commitments possible'. Judged value only on exactly one 2xx, one 409 BID_PACKAGE_LOCKED and one commitment; two 201 and two draft commitments is today, BLOCKED under AWARD-ATOMIC (the section 5 defect fix 'atomic award confirmation', :1110 PH5, made in WP-5 if it confirms as P1; the integration owner keeps it P1 until the reproduction shows what the duplicate drafts can reach, WP5ADJ Q3). Racy: a single success at HEAD by timing reads value and is recorded, not retried (the WP-4 precedent, PREP4-ADJUDICATION B5). The sequential refusal is WP5.R2.confirmAgain." }),
+    confirmAgain: err(409, "BID_PACKAGE_LOCKED", "J-BP1, awarded on its override (WP5.R5.overLimitOverride): the same confirm sent again is refused by the status pre-check (bid.service.js:1035) before anything is written, so J-BP1 keeps one commitment. Without that check (M-AWD0) the second confirm still writes nothing but answers 400 BID_NOT_FOUND, because the awarded bid is no longer 'submitted' (:1037, :1076): the probe catches the mutant on the code.", [PH5("749, 777, 1149"), HF("backend/src/services/bid.service.js", "1033-1038, 1075-1079"), WP5ADJ("Q7"), PREP5("section 0 fact 6; section 7; section 10 G4")], { note: "WP-5 G4, G18 (2026-10-10): the HEAD catcher of the award lock (M-AWD0, WP5.mutations.awardLock); the same answer as WP5.R1.cancelAwarded." }),
+    awardCommitment: fig({ status: "draft", type: "purchase_order", original: BID.emirates, retentionRate: 0, vendor: "Emirates Rebar Trading, the directory company ensureVendorCompany makes for the ad-hoc winner", sovLines: [{ boqItem: "B-003", costCode: "02-100", budgetLine: "02-100/material", activity: "A130", qty: 60, unit: "t", rate: cents(1240), amount: BID.emirates }] }, "outcome", "087-COM's award commitment (state bids.out.commitmentId), read live: confirmAward creates it through createCommitment as a draft (commitment.service.js:543-561) of the package's commitmentType, purchase_order for an enquiry raised from a procurement package (procurement.service.js:2468), with the confirm's retentionRate 0 (BLD 087-com.js:2198; bid.service.js:1067) and the vendor company made for the ad-hoc winner (:1049). Its one SOV line is the winning bid's priced line on the package line: 60 t x 1,240.00 = 74,400.00 (WP5.R1's bid.emirates.total), carrying the package line's BOQ item B-003, cost code 02-100, budget line 02-100/material and activity A130 (bid.service.js:1041-1046; the builder codes the package line, BLD 087-com.js:2083-2089).", [PH5("427, 736, 748, 749"), HF("backend/src/services/bid.service.js", "1041-1072"), HF("backend/src/services/commitment.service.js", "543-561"), HF("backend/src/services/procurement.service.js", "2468"), BLD("087-com.js", "2083-2089, 2198-2222"), PREP5("section 10 G2")], { assumption: true, note: "WP-5 G2 (2026-10-10): read by R1.live.commitment. The vendor carries the build's stamped label, so the proof matches it through the awarded bid's invitation, not by text; the title is the build's." }),
   },
   R3: {
-    secondOrder: err(409, null, "Ordering twice from one award must refuse (one order per award).", [P(710)], { assumption: true, today: "201, a second identical PO (procurement.service.js:1762-1840 has no already-ordered check)" }),
+    secondOrder: err(409, null, "Ordering twice from one award must refuse (one order per award).", [P(710)], { assumption: true, today: "201, a second identical PO (procurement.service.js:1762-1840 has no already-ordered check)", ref: "AWARD-ONE-ORDER", note: "WP-5 (2026-10-10): ref AWARD-ONE-ORDER, the section 5 defect fix 'one order per award' (:1110 PH5), made in WP-5 only if it confirms as P1 (P2 proposed, WP5ADJ Q3): BLOCKED at today; the code is the fix's (409 PROCUREMENT_AWARD_ALREADY_ORDERED proposed, WP5-PREP section 9 F-2). Probed on J: procurement raises the order from J-PP1 twice (WP5.J.choreography J10); the first is R3.J.firstOrder (WP5.J.awardOrder)." }),
   },
   R4: {
-    lineCoding: fig(["costCodeId", "budgetLineId", "boqItemId", "activityId"], "list", "The order raised from the award carries the package lines' cost code, budget line and BOQ item, not only the activity.", [P(711), S("procurement.service.js", "1762-1840")], { today: ["activityId"] }),
+    lineCoding: fig(["costCodeId", "budgetLineId", "boqItemId", "activityId"], "list", "The order raised from the award carries the package lines' cost code, budget line and BOQ item, not only the activity.", [P(711), S("procurement.service.js", "1762-1840"), PH5("751, 784, 1110"), HF("backend/prisma/schema.prisma", "8347-8361"), HF("backend/src/services/procurement.service.js", "1762-1859"), PREP5("section 9 F-3; section 10 G19")], { assumption: true, today: ["activityId"], ref: "AWARD-CODING", note: "WP-5 G19 (2026-10-10): the coding's source is the BidPackageLine's costCodeId, budgetLineId and boqItemId (schema.prisma:8352-8361), which the award's own commitment SOV already carries (bid.service.js:1045; WP5.R2.awardCommitment); raiseOrderFromAward's line map copies activity, description, unit, quantity, rate and package only (procurement.service.js:1805-1819). Judged on 087-COM's PO-AWARD, built before any fix (KA.R4.lineCoding.087), and on J's award order (KA.R4.lineCoding.J). Ref AWARD-CODING, the section 5 defect fix 'award orders keep their coding' (:1110 PH5): BLOCKED at today, an assumption." }),
     awardPoValue: money(BID.emirates, "60 x 1,240.00 = 74,400.00 (stage11:347).", [ST("stage11-rfq.js", "347")], { assumption: true }),
   },
   R5: {
     singleAwardLimit: money(cents(250000), "The directory vendor's prequalification singleAwardLimit (stage11:156).", [ST("stage11-rfq.js", "156")], { assumption: true }),
-    overLimitOrExpired: err(409, "PREQUAL_AWARD_BLOCKED", "An award above 250,000.00 or with an expired prequalification is refused unless the PM overrides with a reason.", [P(712), AREA]),
+    overLimitOrExpired: err(409, "PREQUAL_AWARD_BLOCKED", "An award above 250,000.00 or with an expired prequalification is refused unless the PM overrides with a reason.", [P(712), AREA], { note: "WP-5 G13 (2026-10-10): split into WP5.R5.overLimit (with overLimitDetails and overLimitOverride) and WP5.R5.expired (with expiredDetails), the two cases R5.J.overLimit, R5.J.overLimitOverride and R5.J.expired probe on J; kept, unchanged, as their common answer." }),
+    overLimit: err(409, "PREQUAL_AWARD_BLOCKED", "J-BP1 soft-awarded to J-QUAL, its lowest bid: 60 t x 4,200.00 = 252,000.00 (WP5.J.bids), above J-QUAL's singleAwardLimit 250,000.00 (WP5.R5.singleAwardLimit; WP5.J.vendors). The PM confirms without prequalOverrideReason: assertAwardable finds J-QUAL qualified but the award over its limit (vendor-prequalification.service.js:671-695, the limit at :678-682) and refuses after ensureVendorCompany (bid.service.js:1049; J-QUAL is a directory company already) and before the commitment (:1050-1057): no commitment, J-BP1 still closed.", [PH5("736, 752"), HF("backend/src/services/vendor-prequalification.service.js", "671-695"), HF("backend/src/services/bid.service.js", "1049-1057"), WP5ADJ("Q1"), PREP5("section 5.1 J10; section 10 G13"), DERIVE_J], { note: "WP-5 G13 (2026-10-10)." }),
+    overLimitDetails: fig({ status: "approved", singleAwardLimit: cents(250000), amount: cents(252000) }, "outcome", "error.details of the over-limit refusal (vendor-prequalification.service.js:686-693): status 'approved', the effective status statesFor answers for J-QUAL's decision, valid until 2028-01-01 (:568-604, :253); singleAwardLimit 250,000.00 and amount 252,000.00, with reasons naming the limit. In cents here; the answer carries currency units.", [PH5("752"), HF("backend/src/services/vendor-prequalification.service.js", "247-276, 568-604, 671-695"), PREP5("section 10 G13")], { note: "WP-5 G13 (2026-10-10)." }),
+    overLimitOverride: fig({ status: 201, packageStatus: "awarded", commitmentStatus: "draft", commitmentOriginal: cents(252000), auditReason: "the prequalOverrideReason sent" }, "outcome", "The same confirm with prequalOverrideReason: assertAwardable returns on the override (vendor-prequalification.service.js:684), the commitment is created as a draft of 252,000.00 (commitment.service.js:549-555), the package is awarded (bid.service.js:1075-1079) and the award's audit event carries the reason (:1080-1097). The route answers 201 (routes/bids.js:152-157).", [PH5("749, 752"), HF("backend/src/services/vendor-prequalification.service.js", "684"), HF("backend/src/services/bid.service.js", "1057-1097"), HF("backend/src/routes/bids.js", "152-157"), PREP5("section 10 G13")], { note: "WP-5 G13 (2026-10-10)." }),
+    expired: err(409, "PREQUAL_AWARD_BLOCKED", "J-BP3 soft-awarded to J-EXP (60 t x 1,000.00 = 60,000.00; no limit set): J-EXP was approved in J2 with its insurance criterion expiring 30 s later, so by the confirm its effective status is 'expired', derived from the criteria's expiry and never stored (vendor-prequalification.service.js:23-29, 186-192, 251-253), and it is no longer qualified: the confirm without a reason is refused (:677, :686-693) before any commitment.", [PH5("736, 752"), HF("backend/src/services/vendor-prequalification.service.js", "23-29, 186-192, 247-276, 671-695"), WP5ADJ("Q10"), PREP5("section 5.1 J2, J10; section 10 G13")], { assumption: true, note: "WP-5 G13 (2026-10-10): kept with its 30 s lapse (WP5ADJ Q10). Assumption A-3: the criterion's expiresAt takes an ISO instant, so a cover can lapse within the run." }),
+    expiredDetails: fig({ status: "expired" }, "outcome", "error.details.status of the expired refusal: 'expired', the effective status (vendor-prequalification.service.js:251-253, :689); the reasons name the lapsed cover (describe, :607-613).", [PH5("752"), HF("backend/src/services/vendor-prequalification.service.js", "251-253, 607-613, 686-693"), PREP5("section 10 G13")], { assumption: true, note: "WP-5 G13 (2026-10-10): assumption A-3, as WP5.R5.expired." }),
   },
   O1: {
-    submitNoLines: err(400, "PO_NO_LINES", "Submit with no lines.", [P(714), S("purchase-order.service.js", "515-518")]),
+    submitNoLines: err(400, "PO_NO_LINES", "Submit with no lines. The only live path to an order with no line is the activity-delete cascade (D-FUN-1): creation refuses an empty order (the route's lines min 1 and PO_LINES_REQUIRED, procurement.service.js:1881-1887), while deleting an activity cascades its PO lines (schema.prisma:3206, onDelete Cascade; activity.service.js:687-702). So on J the PM deletes J-A-DEL, J-DEL1 (a draft whose one line is on J-A-DEL) is left with no line, and its submit is refused at purchase-order.service.js:515-518 with nothing written (WP5.J.choreography J8).", [P(714), S("purchase-order.service.js", "515-518"), PH5("754, 793"), HF("backend/src/services/procurement.service.js", "1881-1887"), HF("backend/src/services/activity.service.js", "657-716"), HF("backend/prisma/schema.prisma", "3206"), PREP5("section 0 fact 11; section 10 G6")], { note: "WP-5 G6 (2026-10-10): the path named; value unchanged." }),
     submitNoSupplier: err(400, "PO_SUPPLIER_REQUIRED", "No supplier.", [S("purchase-order.service.js", "521-523")]),
     submitNoRequiredBy: err(400, "PO_REQUIRED_DATE", "No requiredBy.", [S("purchase-order.service.js", "524-526")]),
     rejectNoReason: err(400, "PO_REJECT_REASON_REQUIRED", "Reject without a reason (route reason optional).", [S("purchase-order.service.js", "601-606"), R("purchase-orders.js", "33")]),
@@ -852,15 +1103,15 @@ const WP5 = {
     ordered: fig(100, "bag", "PO 100 bags @ 10 issued.", [P(715)]),
     received: fig(60, "bag", "Receipt of 60.", [P(715)]),
     statusAfterPartial: state("partial", "Goods receipt writes status partial / warehouseStatus partial.", [P(715), S("goods-receipt.service.js", "769-778")]),
-    closeOutstanding: err(409, "PO_CLOSE_OUTSTANDING", "details.lines [1].", [P(715), S("purchase-order.service.js", "628-641")]),
-    forceNoReason: err(400, "PO_CLOSE_REASON_REQUIRED", "force:true, no reason.", [P(715), S("purchase-order.service.js", "642-648")]),
-    forceWithReason: state("closed", "With a reason: 200, closed.", [P(715), P(1036)], { today: { status: 409, code: "PO_TRANSITION_INVALID" }, note: "ALLOWED has no row for partial (purchase-order.service.js:116-125)." }),
-    receiveAfterClose: err(409, "PO_NOT_ISSUED", "Receiving 40 more after the close.", [P(715), S("goods-receipt.service.js", "365, 471-483")]),
-    fullyReceivedClose: state("closed", "A fully received PO closes without force.", [P(715)], { today: { status: 409, code: "PO_TRANSITION_INVALID" } }),
+    closeOutstanding: err(409, "PO_CLOSE_OUTSTANDING", "details.lines [1].", [P(715), S("purchase-order.service.js", "628-641")], { note: "WP-5 G12 (2026-10-10): probed before any write on 087-COM's PO-C and 052-COM's PO-O2, both partial 100 / 60 (closeOrder refuses before the transition, purchase-order.service.js:633-641; WP5ADJ Q2), and on J's J-C and J-ISS (WP5.J.choreography J7). On J-ISS, issued with nothing received, it is M-PCLg's catcher (WP5.mutations.poCloseTransitions)." }),
+    forceNoReason: err(400, "PO_CLOSE_REASON_REQUIRED", "force:true, no reason.", [P(715), S("purchase-order.service.js", "642-648")], { note: "WP-5 G12 (2026-10-10): probed before any write on 087-COM's PO-C and 052-COM's PO-O2 (WP5ADJ Q2) and on J's J-C and J-ISS (WP5.J.choreography J7); M-PCLgb's catcher." }),
+    forceWithReason: state("closed", "With a reason: 200, closed.", [P(715), P(1036)], { assumption: true, today: { status: 409, code: "PO_TRANSITION_INVALID" }, ref: "HR-C8", note: "ALLOWED has no row for partial (purchase-order.service.js:116-125). WP-5 G12 (2026-10-10): ref HR-C8 (undecided: BLOCKED at today), so an assumption. Judged live on J's J-C, partial 100 / 60 (WP5.J.choreography J7; WP5ADJ Q1, Q2); 087-COM's stored moment po.C.close-short observed this today (BLOCKED HR-C8). 052-COM's PO-O2 is never closed: the 052-COM mirror of this leaf is not judged there." }),
+    receiveAfterClose: err(409, "PO_NOT_ISSUED", "Receiving 40 more after the close.", [P(715), S("goods-receipt.service.js", "365, 471-483")], { assumption: true, today: "not sent: the force close is refused (WP5.O2.forceWithReason's today), so J-C stays partial, an order a receipt still accepts (goods-receipt.service.js:365)", ref: "HR-C8", note: "WP-5 G12 (2026-10-10): the plan's case, a receipt after the short close of a part-delivered order, waits on HR-C8 (BLOCKED at today) and is sent on J's J-C only once it reads closed. The code itself is shown at HEAD on an order closed before any delivery, J's J-ISS (WP5.closeBeforeDelivery.receiveAfterClose)." }),
+    fullyReceivedClose: state("closed", "A fully received PO closes without force.", [P(715)], { assumption: true, today: { status: 409, code: "PO_TRANSITION_INVALID" }, ref: "HR-C8", note: "WP-5 G12 (2026-10-10): ref HR-C8 (undecided: BLOCKED at today), so an assumption. Judged live on J's PO-A', received in full (WP5.J.choreography J7); 087-COM's stored moment po.A.close-received observed this today (BLOCKED HR-C8)." }),
     order1000: money(cents(100 * 10), "100 x 10.00 = 1,000.00.", [AREA]),
   },
   O3: {
-    cancelAfterDelivery: err(409, "PO_CANCEL_AFTER_DELIVERY", "Cancel after a partial delivery.", [P(716), S("purchase-order.service.js", "551-558")], { today: { status: 409, code: "PO_TRANSITION_INVALID" }, note: "assertTransition runs first and partial has no ALLOWED row." }),
+    cancelAfterDelivery: err(409, "PO_CANCEL_AFTER_DELIVERY", "Cancel after a partial delivery.", [P(716), S("purchase-order.service.js", "551-558")], { assumption: true, today: { status: 409, code: "PO_TRANSITION_INVALID" }, ref: "HR-C8", note: "assertTransition runs first and partial has no ALLOWED row. WP-5 G15 (2026-10-10): ref HR-C8 (undecided: BLOCKED at today), so an assumption. The code is unreachable live at HEAD: a receipt sets the status partial or received (goods-receipt.service.js:769-778) and ALLOWED has no row for either (purchase-order.service.js:116-125), so assertTransition answers 409 PO_TRANSITION_INVALID before the delivery check (:551-558); the only test of that code (purchase-order.service.test.js:153-166) mocks status issued with warehouseStatus partial, a state that never exists live (mocked Prisma: a lead, not evidence). Probed with a reason on J's J-C (WP5.J.choreography J7)." }),
   },
   O4: {
     draftReceipt: err(409, "PO_NOT_ISSUED", "Receipt on a draft PO.", [P(717), S("goods-receipt.service.js", "471-483")]),
@@ -873,10 +1124,12 @@ const WP5 = {
     matchFlag: state("rejected_on_delivery", "Match flag (warning).", [S("goods-receipt.service.js", "886-892")]),
   },
   O5: {
-    receivableList: fig(["issued", "acknowledged", "partial"], "list", "Only orders a receipt accepts.", [P(718), S("goods-receipt.service.js", "365")], { today: ["draft", "issued", "partial"], note: "goods-receipt.service.js:196-197." }),
+    receivableList: fig(["issued", "acknowledged", "partial"], "list", "Only orders a receipt accepts.", [P(718), S("goods-receipt.service.js", "365")], { assumption: true, today: ["draft", "issued", "partial"], ref: "RCV-LIST", note: "goods-receipt.service.js:196-197. WP-5 G9 (2026-10-10): ref RCV-LIST, the section 5 defect fix 'the receivable PO list' (:1112 PH5), made only if it confirms as P1 (P3 proposed: no client consumes the list, WP5ADJ Q3): BLOCKED at today, an assumption. Read as GET /inventory/purchase-orders?projectId&scope=receivable on 087-COM (WP5.O5.on087) and on J before any close (WP5.O5.onJ)." }),
+    on087: fig(COM087_ORDERS.filter((o) => RCV_STATUSES.value.includes(o.state)).map((o) => o.key), "list", "087-COM's orders at the end of its build, by the builder's keys (COM087_ORDERS): ACK (PO-00001) acknowledged before any delivery; A, B, SVC and STK received; C and O4 partial (C's short close BLOCKED HR-C8); X cancelled; SVC2 and AWARD issued. The receivable list's value takes the issued, acknowledged and partial ones: ACK, C, O4, SVC2, AWARD. HEAD's list (draft, issued, partial: goods-receipt.service.js:196-197) leaves out the acknowledged ACK, and 087-COM holds no draft.", [PH5("427, 758, 786"), HF("backend/src/services/goods-receipt.service.js", "194-211, 365"), BLD("087-com.js", "1833-1913, 2225-2243, 2332-2338"), PREP5("section 10 G9")], { assumption: true, today: COM087_ORDERS.filter((o) => RCV_STATUSES.today.includes(o.state)).map((o) => o.key), ref: "RCV-LIST", note: "WP-5 G9 (2026-10-10): today shows only what is missing, the acknowledged PO-00001; the proof maps the keys to ids through the state's purchase-orders and po.from-award steps." }),
+    onJ: fig(J_ORDERS.filter((o) => RCV_STATUSES.value.includes(o.stateAtJ6)).map((o) => o.ref), "list", "J's orders whose status, when the list is read after J6's receipts and before J7's closes (WP5.J.orders stateAtJ6), is issued, acknowledged or partial: J-ISS, J-STK and J-DEL2 issued, J-ACKC acknowledged, J-C and J-O4 partial.", [PH5("758, 786"), HF("backend/src/services/goods-receipt.service.js", "194-211, 365"), ...J_SRC], { assumption: true, today: J_ORDERS.filter((o) => RCV_STATUSES.today.includes(o.stateAtJ6)).map((o) => o.ref), ref: "RCV-LIST", note: "WP-5 G9 (2026-10-10): today HEAD lists the drafts J-DEL1, J-DRAFT, J-NS and J-NR and leaves out the acknowledged J-ACKC (J-PEND, pending approval, is in neither)." }),
   },
   O6: {
-    refCollision: err(409, null, "087-COM and 087-COM-B both hold PO-00001: the scan answers 409 ambiguous or requires projectId (HR-C9).", [P(719), P(388), P(1037)], { assumption: true, today: "an arbitrary one of the two (goods-receipt.service.js:165-181)" }),
+    refCollision: err(409, null, "087-COM and 087-COM-B both hold PO-00001: the scan answers 409 ambiguous or requires projectId (HR-C9).", [P(719), P(388), P(1037)], { assumption: true, today: "an arbitrary one of the two (goods-receipt.service.js:165-181)", ref: "HR-C9", note: "WP-5 (2026-10-10): ref HR-C9 (undecided, a mobile contract change: BLOCKED at today). Read as the warehouse keeper: GET /inventory/purchase-orders/PO-00001, which findPurchaseOrder answers with an organisation-wide findFirst on ref or id, no orderBy and no project check (goods-receipt.service.js:165-181); which of 087-COM's PO-00001 (acknowledged) and 087-COM-B's (issued) comes back is recorded (KA.O6.refCollision, CF.HRC9)." }),
   },
   O7: {
     ignoredFields: fig({ stockIssued: 0, ledgerEntries: 0 }, "outcome", "The procurement door with issueToActivity=true, issuedQty 60 issues no stock and posts no ledger entry (fields ignored today; HR-C7 recommends 400).", [P(720), R("procurement.js", "312, 327")], { assumption: true }),
@@ -884,27 +1137,29 @@ const WP5 = {
   N1: {
     noTarget: err(400, "INV_NO_COST_TARGET", "Issue with no activity and no cost code.", [P(722), S("inventory.service.js", "1205-1211")]),
     costCodeOnly: fig(false, "boolean", "A cost-code-only issue answers costPosted false with costNote.", [S("inventory.service.js", "1240-1253")]),
-    availableAfterReserve: fig(90 - 50, "bag", "On hand 90, reserve 50: available 40.", [P(722)], { assumption: true, note: "Stock 90 @ 11 as stage 4 leaves it (snapshot 990.00)." }),
-    issue41: err(409, "INV_INSUFFICIENT_AVAILABLE", "41 > 40 available (reserved > 0).", [P(722), S("inventory.service.js", "1031-1040")]),
-    issue40Cost: money(40 * WA, "40 accepted at 11.00 = 440.00 material_issue.", [P(722)], { assumption: true }),
-    release51: err(409, "INV_RESERVATION_NEGATIVE", "Reserved is still 50 after issuing 40 of the free stock; releasing 51 > 50.", [S("inventory.service.js", "1369-1375")]),
+    availableAfterReserve: fig(90 - 50, "bag", "On hand 90, reserve 50: available 40.", [P(722)], { assumption: true, note: "Stock 90 @ 11 as stage 4 leaves it (snapshot 990.00). WP-5 G11 (2026-10-10): judged on J's J-CEM (PO-A' 100 @ 10.00 and PO-B' 50 @ 13.00 received, 60 issued to J-A130, 50 reserved: WP5.J.choreography J9; WP5ADJ Q1) and read on 087-COM's cement, whose reservation the build made (step reservation: 90 / 50 / 40); nothing is moved on 087-COM." }),
+    issue41: err(409, "INV_INSUFFICIENT_AVAILABLE", "41 > 40 available (reserved > 0).", [P(722), S("inventory.service.js", "1031-1040")], { note: "WP-5 G11, G17 (2026-10-10): on J only (J9): the 087-COM cement is read, never issued (the issue of 40 is one-shot, and under M-AVL a probe of 41 would write). The rule is held twice, each site with its own catcher: the warehouse-level draw (inventory.service.js:1031-1040) for an issue naming no bin (N1.J.issue41), and the per-balance check in postMovement (:754-763) for an issue naming the bin J-B01 (N1.J.issue41bin); both answer this code (WP5.mutations.insufficientAvailable)." }),
+    issue40Cost: money(40 * WA, "40 accepted at 11.00 = 440.00 material_issue.", [P(722)], { assumption: true, note: "WP-5 G11 (2026-10-10): on J's J-CEM (J9): 201, costPosted true; then 50 on hand, 50 reserved, 0 available." }),
+    release51: err(409, "INV_RESERVATION_NEGATIVE", "Reserved is still 50 after issuing 40 of the free stock; releasing 51 > 50.", [S("inventory.service.js", "1369-1375")], { note: "WP-5 G11 (2026-10-10): on J's J-CEM (J9)." }),
   },
   N2: {
-    returnNeverIssued: err(400, null, "L36: receive 100 @ 10, return 50 never issued: expected 4xx.", [P(723)], { assumption: true, today: "accepted" }),
-    stockAfterRefusal: fig({ qty: 100, valueCents: cents(1000) }, "stock", "Stock stays 100 / 1,000.00 and project cost 0.00.", [P(723)]),
+    returnNeverIssued: err(400, null, "L36: receive 100 @ 10, return 50 never issued: expected 4xx.", [P(723)], { assumption: true, today: "accepted", ref: "L36", note: "WP-5 (2026-10-10): ref L36 (HR-C6, CERT-5 by the owner's decision: a recorded known answer, BLOCKED at today). On J's J-SAND (100 @ 10.00 received through stock/receive), the return of 50 names the project and cost code 02-100 and no activity (WP5.J.choreography J9): the proof never sends a return that takes an activity's cost record below zero (L36 predicts a 500 from the CostRecord CHECK there)." }),
+    stockAfterRefusal: fig({ qty: 100, valueCents: cents(1000) }, "stock", "Stock stays 100 / 1,000.00 and project cost 0.00.", [P(723)], { assumption: true, today: { qty: 150, valueCents: cents(1500) }, ref: "L36", note: "WP-5 (2026-10-10): today added (the return is accepted and stocks 50 more at the average 10.00: 150 / 1,500.00, as WP5.N2.projectCostAfterRefusal's note says), ref L36, an assumption. On J's J-SAND." }),
     projectCostAfterRefusal: money(0, "Nothing was issued, so the refused return of 50 leaves the project cost from this item at 0.00 (no material_issue entry).", [P(723), ADJ("C8")], {
+      assumption: true,
       today: -(50 * cents(10)),
-      note: "today the return is accepted (L36) and gives back cost that was never charged: a return must name the activity or project (inventory.service.js:1428-1436) and posts sign -1 x value through the ledger as material_issue (:933, 958-985), value = 50 x the item average 10.00 = 500.00 (:770, :891), so the project cost reads -500.00 (stock 150 / 1,500.00).",
+      ref: "L36",
+      note: "today the return is accepted (L36) and gives back cost that was never charged: a return must name the activity or project (inventory.service.js:1428-1436) and posts sign -1 x value through the ledger as material_issue (:933, 958-985), value = 50 x the item average 10.00 = 500.00 (:770, :891), so the project cost reads -500.00 (stock 150 / 1,500.00). WP-5 (2026-10-10): ref L36, an assumption; read on J's ledger for J-SAND.",
     }),
-    return30After10: err(400, null, "Issue 10 (100.00), then return 30 > 10 issued: refused.", [AREA], { assumption: true }),
+    return30After10: err(400, null, "Issue 10 (100.00), then return 30 > 10 issued: refused.", [AREA], { assumption: true, today: { status: 201 }, ref: "L36", note: "WP-5 (2026-10-10): today and ref L36 added. On J's J-GRAVEL (20 @ 10.00 in, 10 issued to J-A310, 4 returned to it: WP5.N2.activityAfterReturn4): the return of 30 names the project and cost code 02-100 only, no activity, so no cost record goes below zero (with the activity L36 predicts a 500); HEAD accepts it (201). The refusal's code is CERT-5's." }),
     activityAfterReturn4: money(cents(100) - 4 * cents(10), "Return 4 accepted: activity 100.00 - 40.00 = 60.00.", [AREA]),
   },
   N3: {
-    credit: money(5 * cents(10), "X-FINANCE-1: receive 10 @ 10, issue 10 (100.00), receive 10 @ 14, return 5 valued at the ISSUE cost 10: credit 50.00.", [P(724)], { today: 5 * cents(14), note: "today valued at the current average 14: credit 70.00." }),
-    activity: money(cents(100) - 5 * cents(10), "100.00 - 50.00 = 50.00.", [P(724)], { today: cents(100) - 5 * cents(14) }),
-    stock: fig({ qty: 15, valueCents: cents(140) + 5 * cents(10) }, "stock", "10 @ 14 = 140.00 on hand + 5 returned @ 10 = 15 / 190.00.", [P(724)], { today: { qty: 15, valueCents: cents(140) + 5 * cents(14) } }),
-    secondReturnActivity: money(0, "Return 5 more: activity 50.00 - 50.00 = 0.00.", [AREA]),
-    secondReturnStock: fig({ qty: 20, valueCents: cents(190) + 5 * cents(10) }, "stock", "20 / 240.00.", [AREA]),
+    credit: money(5 * cents(10), "X-FINANCE-1: receive 10 @ 10, issue 10 (100.00), receive 10 @ 14, return 5 valued at the ISSUE cost 10: credit 50.00.", [P(724)], { assumption: true, today: 5 * cents(14), ref: "X-FINANCE-1", note: "today valued at the current average 14: credit 70.00. WP-5 (2026-10-10): ref X-FINANCE-1 (HR-C6, CERT-5: BLOCKED at today), an assumption. On J's J-PIPE (WP5.J.choreography J9): 10 @ 10.00 in, 10 issued to J-A220, 10 @ 14.00 in, 5 returned to J-A220." }),
+    activity: money(cents(100) - 5 * cents(10), "100.00 - 50.00 = 50.00.", [P(724)], { assumption: true, today: cents(100) - 5 * cents(14), ref: "X-FINANCE-1", note: "WP-5 (2026-10-10): ref X-FINANCE-1, an assumption; J-A220's cost after the return (today 100.00 - 70.00 = 30.00)." }),
+    stock: fig({ qty: 15, valueCents: cents(140) + 5 * cents(10) }, "stock", "10 @ 14 = 140.00 on hand + 5 returned @ 10 = 15 / 190.00.", [P(724)], { assumption: true, today: { qty: 15, valueCents: cents(140) + 5 * cents(14) }, ref: "X-FINANCE-1", note: "WP-5 (2026-10-10): ref X-FINANCE-1, an assumption; J-PIPE after the return (today 10 @ 14.00 + 5 @ 14.00 = 15 / 210.00)." }),
+    secondReturnActivity: money(0, "Return 5 more: activity 50.00 - 50.00 = 0.00.", [AREA], { assumption: true, today: "not sent", ref: "X-FINANCE-1", note: "WP-5 G7 (2026-10-10): not sent at HEAD: the second return of 5 would credit 5 x 14.00 = 70.00 against the 30.00 left on J-A220, taking its cost record to -40.00, which the CostRecord CHECK may answer with a 500 (L36 / X-FINANCE-1, CERT-5). Not judged in WP-5." }),
+    secondReturnStock: fig({ qty: 20, valueCents: cents(190) + 5 * cents(10) }, "stock", "20 / 240.00.", [AREA], { assumption: true, today: "not sent", ref: "X-FINANCE-1", note: "WP-5 G7 (2026-10-10): not sent at HEAD (WP5.N3.secondReturnActivity); HEAD's average would make it 20 / 280.00. Not judged in WP-5." }),
   },
   N4: {
     sentValue: money(10 * WA, "Send 10 at WA 11 = 110.00.", [P(725)]),
@@ -919,9 +1174,9 @@ const WP5 = {
     release5: fig("on hand restored", "state", "Release 5 brings the 5 back.", [P(726)]),
   },
   N6: {
-    issuedQty: fig(60, "bag", "Plan row 100 bags on a PO line, receive 100, issue 60 to the activity: plan row issuedQty 60.", [P(727), P(1035)], { today: 0, note: "nothing writes ActivityMaterial.issuedQty (HR-C7)." }),
-    usage50: http(200, "Usage 50 <= 60 available.", [P(727), S("procurement.service.js", "2127-2141")], { today: { status: 409, code: "MATERIAL_USAGE_EXCEEDS_ISSUED_QTY" } }),
-    usage70: err(409, "MATERIAL_USAGE_EXCEEDS_ISSUED_QTY", "After 50 used, 10 left; 70 > 10.", [P(727), S("procurement.service.js", "2133-2141")]),
+    issuedQty: fig(60, "bag", "Plan row 100 bags on a PO line, receive 100, issue 60 to the activity: plan row issuedQty 60.", [P(727), P(1035)], { assumption: true, today: 0, ref: "HR-C7", note: "nothing writes ActivityMaterial.issuedQty (HR-C7). WP-5 G14 (2026-10-10): ref HR-C7 (undecided: BLOCKED at today), an assumption. On J (WP5ADJ Q1): the plan row on J-A130 (J4, 100 BAG of J-CEM) linked to the line of PO-A', read after N1's issue of 60 to J-A130 (J9)." }),
+    usage50: http(200, "Usage 50 <= 60 available.", [P(727), S("procurement.service.js", "2127-2141")], { assumption: true, today: { status: 409, code: "MATERIAL_USAGE_EXCEEDS_ISSUED_QTY" }, ref: "HR-C7", note: "WP-5 G14 (2026-10-10): ref HR-C7, an assumption; usage recorded by the site engineer on J's plan row (J9). Today every usage is refused while issuedQty is 0 (procurement.service.js:2130-2141)." }),
+    usage70: err(409, "MATERIAL_USAGE_EXCEEDS_ISSUED_QTY", "After 50 used, 10 left; 70 > 10.", [P(727), S("procurement.service.js", "2133-2141")], { note: "WP-5 G14 (2026-10-10): on J's plan row (J9). Holds at HEAD too (every usage is refused while issuedQty is 0) and after HR-C7 (10 left), so a HARD check with no today." }),
   },
   N7: {
     adjustNoNotes: err(400, "INV_ADJUST_REASON", "Adjust without notes.", [P(728), S("inventory.service.js", "1422-1425")]),
@@ -939,7 +1194,7 @@ const WP5 = {
   D2: {
     ledger: money(cents(1000) + cents(2000) + cents(3000), "Expense lines 1,000 / 2,000 / 3,000: direct_cost +6,000.00 in three keyed entries (direct_cost:<id>:<lineId>).", [P(731), AREA]),
     entryCount: count(3, "One entry per line key.", [P(731)]),
-    concurrentApprove: fig({ postings: 1, conflict409: 1 }, "outcome", "Two concurrent approvals post once; the loser gets 409 DIRECT_COST_NOT_PENDING.", [P(731), S("direct-cost.service.js", "480-483")]),
+    concurrentApprove: fig({ postings: 1, conflict409: 1 }, "outcome", "Two concurrent approvals post once; the loser gets 409 DIRECT_COST_NOT_PENDING.", [P(731), S("direct-cost.service.js", "480-483")], { note: "WP-5 G21 (2026-10-10): per round, on J's J-DC3 (one 500.00 line, pending): finance sends two approvals together in process, so both pass the pre-check (direct-cost.service.js:480) in one tick and the claim under the row lock (lockExpecting, FOR UPDATE with the status re-read, :483) lets one through; one ledger entry. WP5ADJ Q8: a round's set-up on J is cheap (a fresh pending J-DC3), so the probe runs N rounds and is green only if every round reads one 200, one 409 DIRECT_COST_NOT_PENDING and one entry, the same N at baseline and under M-DCL. Under M-DCL the loser answers 200 (already_posted) or 500 (P2002 aborts its transaction, cost-ledger.service.js:361): a 500 counts through G.5xx." }),
     voidMirror: money(-(cents(1000) + cents(2000) + cents(3000)), "Void writes -6,000.00; source net 0.00.", [P(731), S("direct-cost.service.js", "546-577")]),
     voidAgain: err(409, "DIRECT_COST_LOCKED", "Already void.", [S("direct-cost.service.js", "548")]),
   },
@@ -950,34 +1205,61 @@ const WP5 = {
     cashOutflow: money(cents(6000), "+6,000.00 in the payment month without a manual rebuild.", [P(732), S("direct-cost.service.js", "608")]),
   },
   D4: {
-    ledgerInvoiceBeforeReceipt: money(cents(10 * 100), "L35: stocked PO 10 @ 100; invoice approved BEFORE the receipt, then receipt, then issue 10: project ledger 1,000.00 (the issue).", [P(733)], { today: cents(2 * 10 * 100), note: "today the invoice is expensed (1,000) and the issue costs it again (1,000)." }),
+    ledgerInvoiceBeforeReceipt: money(cents(10 * 100), "L35: stocked PO 10 @ 100; invoice approved BEFORE the receipt, then receipt, then issue 10: project ledger 1,000.00 (the issue).", [P(733)], { assumption: true, today: cents(2 * 10 * 100), ref: "L35", note: "today the invoice is expensed (1,000) and the issue costs it again (1,000). WP-5 (2026-10-10): ref L35 (HR-C6, CERT-5: BLOCKED at today), an assumption. Read on 087-COM (SINV-EARLY and the membrane issue, KA.D4.087) and on J's J-STK (J-STK-INV approved before the receipt, then 10 received and issued to J-A130: KA.D4.J.invoiceBeforeReceipt)." }),
     controlPath: money(cents(10 * 100), "Receipt -> invoice -> issue = 1,000.00.", [AREA]),
   },
   D5: {
     priceVarianceVerdict: state("review", "Invoice 50 @ 14 vs PO 50 @ 13: |14-13|/13 = 7.69% > 0.5% -> blocking price_variance -> verdict review.", [P(734), S("goods-receipt.service.js", "27, 875-885, 919-924")]),
-    priceVarianceApproval: state("refused unless override", "HR-C5 recommendation: a blocking verdict refuses approval unless PM or finance overrides with a reason.", [P(734), P(1033)], { assumption: true, today: "approved (approval never reads the match)" }),
-    overInvoicedLedger: money(cents(60 * 10), "Service line 100 @ 10 (no stock item), received 100 (1,000.00), invoices of 60 and 60: the second takes invoiced 120 past received 100, flag invoiced_more_than_received (severity blocking, goods-receipt.service.js:861-867). HR-C5 recommendation: a blocking verdict refuses approval unless the PM or finance overrides with a reason, so only the first posts: 60 x 10.00 = 600.00.", [P(734), P(1033), S("goods-receipt.service.js", "861-867"), ADJ("C5")], { assumption: true, today: cents(60 * 10) * 2, note: "today both invoices are approved (approval never reads the match) and the ledger holds 60 x 10 + 60 x 10 = 1,200.00 for 1,000.00 received. Expected 600.00 rests on the HR-C5 recommendation (undecided)." }),
+    priceVarianceApproval: state("refused unless override", "HR-C5 recommendation: a blocking verdict refuses approval unless PM or finance overrides with a reason.", [P(734), P(1033)], { assumption: true, today: "approved (approval never reads the match)", ref: "HR-C5", note: "WP-5 (2026-10-10): ref HR-C5 (undecided: BLOCKED at today). On J: finance approves J-VAR, 50 @ 14.00 on the line of PO-B' (verdict review, WP5.D5.priceVarianceVerdict), and approveDirectCost never reads the match (direct-cost.service.js:478-529); J11." }),
+    overInvoicedLedger: money(cents(60 * 10), "Service line 100 @ 10 (no stock item), received 100 (1,000.00), invoices of 60 and 60: the second takes invoiced 120 past received 100, flag invoiced_more_than_received (severity blocking, goods-receipt.service.js:861-867). HR-C5 recommendation: a blocking verdict refuses approval unless the PM or finance overrides with a reason, so only the first posts: 60 x 10.00 = 600.00. The value rests on two things neither HEAD nor a decided rule gives: (1) the service line must stay a service line after its receipt, which HEAD does not do (WP5-SVC-1: goods receipt resolves, creating if needed, an inventory item for every received PO line, goods-receipt.service.js:241-263, and the line remembers it, :711; an invoice line whose PO line names an item is capitalised, postedAmount 0, direct-cost.service.js:468-476, 491-495); (2) HR-C5 must refuse the second approval. Judged on J's J-SVC (crane hire 100 hr @ 10.00, no item; received 100; J-SVC-INV1 and J-SVC-INV2 of 60 hr each, both approved by finance: WP5.J.choreography J11) as J's direct_cost ledger delta across the two approvals.", [P(734), P(1033), S("goods-receipt.service.js", "861-867"), ADJ("C5"), PH5("744, 774, 791, 1073"), HF("backend/src/services/goods-receipt.service.js", "241-263, 711"), HF("backend/src/services/direct-cost.service.js", "468-476, 491-495"), "docs/certification/OCTAPM_LAUNCH_BLOCKERS.md:292 @48db9e9", BLD("087-com.js", "2305-2318"), WP5ADJ("Q12"), PREP5("section 0 fact 9; section 10 G3")], { assumption: true, today: 0, ref: "HR-C5", note: "today both invoices are approved (approval never reads the match) and the ledger holds 60 x 10 + 60 x 10 = 1,200.00 for 1,000.00 received. Expected 600.00 rests on the HR-C5 recommendation (undecided). WP-5 BOOK-G3 (2026-10-10, applied first by WP5ADJ Q12): the today was 1,200.00 (120,000 cents), which HEAD cannot show: the received service line is stocked (WP5-SVC-1, register P2, observed by the 087-COM build on SINV-OVER1, approved with postedAmount 0.00), so both approved invoices are capitalised and the direct_cost ledger moves by 0.00. 1,200.00 is what HEAD would post if service lines were not stocked; 600.00 needs that AND HR-C5. Ref HR-C5 (undecided: BLOCKED at today); WP5-SVC-1 is classified at the WP-5 run with this corrected leaf (CF.SVC1, WP5ADJ Q12)." }),
   },
   D6: {
-    invoiceSideVerdict: state("review", "One PO line at +10% plus one freight line without poLineId: blocking dominates.", [P(734)], { today: "check (goods-receipt.service.js:1036 downgrades whenever a line lacks a poLineId)" }),
+    invoiceSideVerdict: state("review", "One PO line at +10% plus one freight line without poLineId: blocking dominates.", [P(734)], { assumption: true, today: "check (goods-receipt.service.js:1036 downgrades whenever a line lacks a poLineId)", ref: "HR-C5", note: "WP-5 (2026-10-10): ref HR-C5, whose recommendation includes 'fix the verdict downgrade' (:1073 PH5; undecided: BLOCKED at today), an assumption. On J's J-D6INV (J11): 100 kg x 2.20 = 220.00 on the line of J-D6, ordered at 2.00 (+10%, above the 0.5% price tolerance), plus a 50.00 freight line with no poLineId." }),
   },
   D7: {
     balanced: fig(true, "boolean", "After every test /cost/reconciliation balanced true and budget and activity projections equal the ledger.", [P(735), ST("stage4-procurement-inventory.js", "266-269")]),
   },
   mutations: {
-    poCloseTransitions: fig(["WP5.O2.forceWithReason", "WP5.O2.fullyReceivedClose"], "mutation", "Remove the new partial/received -> closed rows.", [P(737), P(1109)]),
-    awardLock: fig(["WP5.R2.concurrentConfirms"], "mutation", "Remove the award-confirmation lock.", [P(737), P(1109)]),
-    receiptOverOrder: fig(["WP5.O4.overOrder"], "mutation", "Remove RECEIPT_OVER_ORDER.", [P(737), P(1109)]),
-    insufficientAvailable: fig(["WP5.N1.issue41"], "mutation", "Remove INV_INSUFFICIENT_AVAILABLE.", [P(737), P(1109)]),
-    directCostOnePosting: fig(["WP5.D2.concurrentApprove", "WP5.D2.ledger"], "mutation", "Remove the one-posting idempotency of direct costs.", [P(737), P(1109)]),
+    poCloseTransitions: fig(["O2.J.issued.forceWithReason red and O2.J.ack.forceWithReason red (M-PCL0, the E6 entry at HEAD: issued -> closed and acknowledged -> closed removed)", "O2.J.issued.forceWithReason red (M-PCL0i: the issued row only)", "O2.J.ack.forceWithReason red (M-PCL0k: the acknowledged row only)", "KA.O2.forceWithReason red, KA.O2.receiveAfterClose red and KA.O2.fullyReceivedClose red (M-PCL1, the E6 entry once HR-C8 is decided and fixed: its partial and received rows removed)", "O2.J.issued.closeOutstanding, O2.J.closeOutstanding, O2.closeOutstanding.087 and O2.closeOutstanding.052 red (M-PCLg, the close guard dropped: a HEAD-only complement, never re-run after HR-C8; M-PCLga, the outstanding check only: O2.J.issued.closeOutstanding)", "O2.J.issued.forceNoReason, O2.J.forceNoReason, O2.forceNoReason.087 and O2.forceNoReason.052 red (M-PCLgb, the short-close reason only: HEAD-only)"], "mutation", "Plan section 6.2 'PO close transitions' (:1149 PH5). The plan's transitions (partial -> closed with force and a reason, received -> closed) are the HR-C8 fix and HEAD has none, so at HEAD the guard is what exists: issued -> closed and acknowledged -> closed (ALLOWED, purchase-order.service.js:121-122). M-PCL0 removes CLOSED from both rows, and J-ISS's and J-ACKC's force closes with a reason (WP5.closeBeforeDelivery) then answer 409 PO_TRANSITION_INVALID. Once HR-C8 is decided and fixed, M-PCL1 removes its rows and the three HR-C8 known answers, then judged on their values, turn red (WP5ADJ Q7). The complement M-PCLg drops closeOrder's guard (:633, :642): the deep refusals precede the transition, so at HEAD they write nothing (the partial orders then answer 409 PO_TRANSITION_INVALID), and after HR-C8 it would close the deep orders: HEAD only. Every catcher writes only on J, because the mutation runner runs the whole proof under each mutant (WP5-PREP section 0 fact 2).", [PH5("737, 755, 777, 1076, 1136, 1149"), HF("backend/src/services/purchase-order.service.js", "116-136, 628-650"), WP5ADJ("Q7"), PREP5("section 7; section 10 G5"), "C:/Temp/octapm-cert/scratch/wp5/wp5-mutations-draft.json"], { note: "WP-5 G5 (2026-10-10): catchers named by check id; the value was ['WP5.O2.forceWithReason', 'WP5.O2.fullyReceivedClose']." }),
+    awardLock: fig(["R2.J.confirmAgain red (M-AWD0, the E6 entry at HEAD: the status pre-check dropped; the second confirm of J-BP1 answers 400 BID_NOT_FOUND and writes nothing)", "KA.R2.concurrentConfirms red (M-AWD1, the E6 entry once the atomic award confirmation lands: its in-transaction claim removed)"], "mutation", "Plan section 6.2 'the award lock' (:1149 PH5). HEAD has only the sequential pre-check (bid.service.js:1035), outside any transaction: M-AWD0 makes it false, and the second confirm of the awarded J-BP1 is then refused by the bid lookup (:1037, the bid is no longer submitted) with 400 BID_NOT_FOUND, so R2.J.confirmAgain (409 BID_PACKAGE_LOCKED expected) turns red on the code. Once the section 5 defect fix 'atomic award confirmation' lands (:1110 PH5; WP5-PREP section 9 F-1), M-AWD1 removes its claim and KA.R2.concurrentConfirms, then judged on its value, turns red; a round there is expensive (a bid package to the soft award), so a surviving mutant is rerun once and the rerun recorded as such (WP5ADJ Q8).", [PH5("749, 777, 1110, 1136, 1149"), HF("backend/src/services/bid.service.js", "1033-1079"), WP5ADJ("Q7, Q8"), PREP5("section 7; section 9 F-1; section 10 G18")], { note: "WP-5 G18 (2026-10-10): catchers named by check id; the value was ['WP5.R2.concurrentConfirms']." }),
+    receiptOverOrder: fig(["O4.J.overOrder red (M-OVER, the E6 entry: J-C then takes 41 against 40 outstanding, 201, the line at 101 of 100)"], "mutation", "Plan section 6.2 RECEIPT_OVER_ORDER (:1149 PH5): held once, in the one receipt writer behind both doors (goods-receipt.service.js:633-642, the test at :635; the procurement door reaches the same writer, routes/procurement.js:335-358). M-OVER makes the test false; the catcher runs on J's J-C (J6).", [PH5("738, 757, 777, 1149"), HF("backend/src/services/goods-receipt.service.js", "633-642"), HF("backend/src/routes/procurement.js", "299-361"), WP5ADJ("Q7"), PREP5("section 7")], { note: "WP-5 Q7 (2026-10-10): catcher named by check id, as the other WP-5 mutation leaves; the value was ['WP5.O4.overOrder']." }),
+    insufficientAvailable: fig(["N1.J.issue41 red and N1.J.issue41bin red (M-AVL, the E6 entry: both sites)", "N1.J.issue41 red (M-AVLa: the warehouse-level draw only; 201 issuing 40, silently short)", "N1.J.issue41bin red (M-AVLb: the per-balance check only; 201 issuing 41, 49 on hand under 50 reserved)"], "mutation", "Plan section 6.2 INV_INSUFFICIENT_AVAILABLE (:1149 PH5): held twice, in drawFromWarehouse for an issue naming no bin (inventory.service.js:1031-1040) and in postMovement for an issue naming the bin (:754-763). M-AVL removes both, each variant one. The catchers run on J's J-CEM (J9), never on 087-COM's cement (WP5.N1.issue41).", [PH5("740, 762, 777, 1149"), HF("backend/src/services/inventory.service.js", "754-763, 996-1066"), WP5ADJ("Q7"), PREP5("section 0 fact 7; section 7; section 10 G17")], { note: "WP-5 G17 (2026-10-10): two sites, catchers named by check id; the value was ['WP5.N1.issue41']." }),
+    directCostOnePosting: fig(["D2.J.concurrentApprove red (M-DCL, the E6 entry: the approval claim dropped; the loser answers 200 or 500, a 500 counted through G.5xx)", "D2.J.ledger red (M-DCK, the E6 entry: the line dropped from the ledger key; J-DC2 posts 1,000.00 in one entry)", "none (M-DCX, the ledger key pre-check dropped: EQUIVALENT, the unique index on (orgId, sourceKey) refuses the same posting; recorded, not run)"], "mutation", "Plan section 6.2 'one posting per direct-cost line' (:1149 PH5), held three times: the approval's in-transaction claim (direct-cost.service.js:483, FOR UPDATE and the status re-read), the ledger key's pre-check (cost-ledger.service.js:318-330) and the unique index on (orgId, sourceKey) (schema.prisma:8778; P2002 read as already posted, cost-ledger.service.js:361). The key carries the line (sourceKeyFor, :113-114: direct_cost:<id>:<lineId>). A code mutation cannot drop the index, so dropping the pre-check is equivalent; the catchers are the claim (M-DCL: two approvals at once, D2.J.concurrentApprove) and the per-line key (M-DCK: three keyed entries, D2.J.ledger), both on J.", [PH5("744, 771, 777, 1149"), HF("backend/src/services/direct-cost.service.js", "478-529"), HF("backend/src/services/cost-ledger.service.js", "113-114, 318-330, 361"), HF("backend/prisma/schema.prisma", "8778"), WP5ADJ("Q7, Q8"), PREP5("section 0 fact 8; section 7; section 10 G16")], { note: "WP-5 G16 (2026-10-10): catchers named by check id, M-DCX recorded as equivalent; the value was ['WP5.D2.concurrentApprove', 'WP5.D2.ledger']." }),
   },
   existing: {
-    stockOnHand: fig(90, "bag", "150 received - 60 issued.", [P(739), ST("stage4-procurement-inventory.js", "254")]),
-    stockValue: money(90 * WA, "90 x 11.00 = 990.00.", [P(739), ST("stage4-procurement-inventory.js", "255-259")]),
-    "stage12.invoiceA": money(cents(100 * 10), "100 @ 10 = 1,000.00, matched.", [ST("stage12-three-way-match.js", "4, 106")]),
-    "stage12.invoiceB": money(cents(50 * 14), "50 @ 14 = 700.00.", [ST("stage12-three-way-match.js", "5, 106")]),
-    "stage12.varianceB": money(cents(50 * 14) - cents(50 * 13), "700 - 650 = +50.00.", [ST("stage12-three-way-match.js", "5, 149")]),
-    "stage12.ledgerDelta": money(0, "Stocked invoices post no second cost.", [ST("stage12-three-way-match.js", "183")]),
+    stockOnHand: fig(90, "bag", "150 received - 60 issued.", [P(739), ST("stage4-procurement-inventory.js", "254")], { note: "WP-5 G20 (2026-10-10): re-derived on J (N1.J.existing: J-CEM's PO-A' 100 @ 10.00 and PO-B' 50 @ 13.00 received, 60 issued to J-A130; WP5.J.stock) and read on 087-COM's cement (N1.live.087)." }),
+    stockValue: money(90 * WA, "90 x 11.00 = 990.00.", [P(739), ST("stage4-procurement-inventory.js", "255-259")], { note: "WP-5 G20 (2026-10-10): re-derived on J (N1.J.existing) and read on 087-COM (N1.live.087)." }),
+    "stage12.invoiceA": money(cents(100 * 10), "100 @ 10 = 1,000.00, matched.", [ST("stage12-three-way-match.js", "4, 106")], { note: "WP-5 G20 (2026-10-10): re-derived on J: J-INVA, 100 @ 10.00 against PO-A' (D5.J.matched)." }),
+    "stage12.invoiceB": money(cents(50 * 14), "50 @ 14 = 700.00.", [ST("stage12-three-way-match.js", "5, 106")], { note: "WP-5 G20 (2026-10-10): re-derived on J: J-VAR, 50 @ 14.00 against PO-B' (D5.J.matched, D5.J.priceVariance)." }),
+    "stage12.varianceB": money(cents(50 * 14) - cents(50 * 13), "700 - 650 = +50.00.", [ST("stage12-three-way-match.js", "5, 149")], { note: "WP-5 G20 (2026-10-10): re-derived on J: J-VAR's 700.00 against the 650.00 received on PO-B'; the 50.00 then lands in neither stock nor cost (WP5.CF.L107)." }),
+    "stage12.ledgerDelta": money(0, "Stocked invoices post no second cost.", [ST("stage12-three-way-match.js", "183")], { note: "WP-5 G20 (2026-10-10): re-derived on J: J-INVA and J-VAR approved and capitalised, J's direct_cost ledger delta 0.00 (D5.J.matched)." }),
+  },
+
+  // WP-5 answer-book leaves (2026-10-10, WP5ADJ Q1-Q12): the closes before any delivery (G5), the confirm-first
+  // observations (G10) and the throwaway project J (G1).
+  closeBeforeDelivery: {
+    issuedForceClose: state("closed", "J-ISS (issued, 40 sheets of formwork plywood @ 25.00, nothing received) closed by procurement with force and a reason (J7): closeOrder finds the line outstanding, takes the force and the reason (purchase-order.service.js:628-648) and transitions issued -> closed, a row ALLOWED has at HEAD (:121); 200, closed. Without force it is refused 409 PO_CLOSE_OUTSTANDING and without a reason 400 PO_CLOSE_REASON_REQUIRED (WP5.O2.closeOutstanding, forceNoReason: the codes of a part-delivered order).", [PH5("737, 755, 777, 1149"), HF("backend/src/services/purchase-order.service.js", "116-136, 628-650"), WP5ADJ("Q1, Q7"), PREP5("section 0 fact 5; section 7; section 10 G5")], { note: "WP-5 G5 (2026-10-10): the catcher of M-PCL0 and M-PCL0i at HEAD (WP5.mutations.poCloseTransitions); the plan's close after a partial delivery is WP5.O2.forceWithReason (HR-C8)." }),
+    ackForceClose: state("closed", "J-ACKC (acknowledged, 20 formwork ties @ 10.00, nothing received) closed with force and a reason (J7): acknowledged -> closed is the other close row ALLOWED has at HEAD (purchase-order.service.js:122); 200, closed.", [PH5("737, 755, 777, 1149"), HF("backend/src/services/purchase-order.service.js", "116-136, 628-650"), WP5ADJ("Q7"), PREP5("section 7; section 10 G5")], { note: "WP-5 G5 (2026-10-10): the catcher of M-PCL0 and M-PCL0k at HEAD." }),
+    receiveAfterClose: err(409, "PO_NOT_ISSUED", "The warehouse keeper's receipt on J-ISS once it is closed (J7), naming an existing inventory item so that a refused receipt leaves nothing behind (items are settled before the order's status is read, goods-receipt.service.js:443): closed is not one of RECEIVABLE_STATUSES (:365), so the receipt is refused 409 PO_NOT_ISSUED (:471-483) before any write. The plan's code for its case, shown at HEAD on an order closed before any delivery.", [PH5("755"), HF("backend/src/services/goods-receipt.service.js", "365, 443, 471-483"), PREP5("section 0 facts 5, 13; section 10 G5")], { note: "WP-5 G5 (2026-10-10): read by O2.J.issued.receiveAfterClose; under M-PCL0 J-ISS stays issued and the receipt is accepted (collateral)." }),
+  },
+  CF: {
+    L199issue: fig({ movements: 1 }, "outcome", "The same stock issue body sent twice (J-GRAVEL, quantity 1 to J-A310, reference J-DUP; WP5.J.choreography J9) is one issue: one movement, the second request a replay or a refusal, the fix's choice (an idempotency key). POST /inventory/stock/issue takes no idempotency key and issueStock writes a movement for every request (routes/inventory.js:346-368; inventory.service.js:1199-1255).", [PH5("790"), HF("backend/src/routes/inventory.js", "346-368"), HF("backend/src/services/inventory.service.js", "1199-1255"), "docs/certification/OCTAPM_CERT_LEADS.md:205 @48db9e9", PREP5("section 4; section 10 G10")], { assumption: true, today: { statuses: [201, 201], movements: 2 }, ref: "L199", note: "WP-5 G10 (2026-10-10): the observation CF.L199issue classifies (P3 proposed, WP5ADJ Q3)." }),
+    L107: money(cents(50 * 14) - cents(50 * 13), "J-VAR (50 bags x 14.00 = 700.00 on the line of PO-B', 50 received at 13.00 = 650.00 of stock) approved by finance: the 50.00 purchase price variance is recognised once, in stock value or in project cost (where is the fix's). Read as the change of J-CEM's stock value plus J's ledger total across the approval.", [PH5("792"), HF("backend/src/services/direct-cost.service.js", "491-495"), HF("backend/src/services/goods-receipt.service.js", "519-522"), "docs/certification/OCTAPM_CERT_LEADS.md:113 @48db9e9", PREP5("section 4; section 10 G10")], { assumption: true, today: 0, ref: "L107", note: "WP-5 G10 (2026-10-10): HEAD capitalises the invoice line of a stocked PO line with postedAmount 0 whatever its amount (direct-cost.service.js:491-495), and stock stays valued at the receipt price (goods-receipt.service.js:519-522), so the 50.00 is in neither (lead L107, P2 proposed)." }),
+    L119: fig({ budgetActualDeltaEqualsLedgerDelta: true }, "outcome", "J-L119 (an expense of 750.00 coded to 05-100, which has no budget line on J) approved by finance: the budget register and the ledger agree on it, whether the posting reaches a budget line or approval is refused (the fix's choice). Read as GET /cost/reconciliation's ledger.total and GET /budget/lines summary.totals.actual before and after.", [PH5("792"), HF("backend/src/services/direct-cost.service.js", "515-521"), "docs/certification/OCTAPM_CERT_LEADS.md:125 @48db9e9", PREP5("section 4; section 10 G10")], { assumption: true, today: { ledgerDelta: cents(750), budgetActualDelta: 0 }, ref: "L119", note: "WP-5 G10 (2026-10-10): HEAD still posts when no budget line resolves and only notes it (direct-cost.service.js:515-521): the ledger rises by 750.00, the budget register does not (lead L119, P2 proposed)." }),
+    DFUN1delete: money(cents(5 * 20), "J-DEL2 (issued, two lines: 10 x 30.00 on J-A-DEL and 5 x 20.00 on J-A-KEEP = 400.00) after the PM deletes J-A-DEL (J8): the line on J-A-DEL goes with the activity (schema.prisma:3206, onDelete Cascade; activity.service.js:687-702), and the order's value follows its one line left: 5 x 20.00 = 100.00.", [PH5("793"), HF("backend/src/services/activity.service.js", "657-716"), HF("backend/prisma/schema.prisma", "3206"), "docs/certification/OCTAPM_LAUNCH_BLOCKERS.md:195 @48db9e9", PREP5("section 0 fact 11; section 10 G10")], { assumption: true, today: cents(10 * 30) + cents(5 * 20), ref: "D-FUN-1", note: "WP-5 G10 (2026-10-10): HEAD recomputes no order value on the cascade, so J-DEL2 keeps 400.00 with one line of 100.00 (register D-FUN-1, P2). Whether an issued order may lose a line to an activity delete at all is the fix's." }),
+    INV1: fig({ statusIn: [403, 404], codeIn: ["PROJECT_ACCESS_DENIED", "PROJECT_NOT_FOUND"] }, "outcome", "The warehouse keeper, a member of company 087 not on J's team (J3, before the PM adds them): stock/receive of J-INV1 10 @ 5.00 into J-SITE naming J, stock/issue of 2 to J-A110, stock/return of 1 from J-A110, and GET /inventory/purchase-orders?projectId=<087-COM-B> (a project the keeper is not on) are each refused as the project routes refuse an unassigned member: 403 PROJECT_ACCESS_DENIED, or 404 PROJECT_NOT_FOUND (the WP-0 permission probe's rule for S5).", [PH5("739-743, 787"), HF("backend/src/app.js", "148"), HF("backend/src/routes/inventory.js", "15-34"), HF("backend/src/services/inventory.service.js", "843-850"), "docs/certification/OCTAPM_LAUNCH_BLOCKERS.md:257, 265 @48db9e9", PREP5("section 4; section 8; section 10 G10")], { assumption: true, today: { receive: 201, issue: 201, issueCostOnJ: cents(2 * 5), return: 201, ordersOf087ComB: 200 }, ref: "WP0-INV-1", note: "WP-5 G10 (2026-10-10): HEAD: /api/v1/inventory is company-level (membersOnly and the permission guard, app.js:148), routes/inventory.js:15-34 constrains API keys only and inventory.service.js:843-850 checks a projectId against the organisation. Register WP0-INV-1 (P2, confirmed by the probe's S5 for the receipt), extended here to issue, return and the order list; its severity against HR-C9's proposed P1 goes to the owner (WP5ADJ Q3)." }),
+  },
+  J: {
+    project: fig(J_SUP.project, "outcome", "J0: the throwaway's create payload, the shape of WP4.K.project with an explicit defaultRetentionRate 10: every award confirm on J sends retentionRate 0, so no WP-5 figure depends on the HR-C1 fix (WP5-PREP section 11 Q11). Created and archived by the proof (WP5ADJ Q1), as WP-1's W, WP-2's P, WP-3's V and WP-4's K.", J_SRC, { assumption: true, note: "WP-5 G1 (2026-10-10): build choices; <stamp> is the run's." }),
+    team: fig(J_SUP.team, "outcome", "J0: the members assigned on J and their project roles; the warehouse keeper is not on the team until J3 has shown WP0-INV-1 (CF.INV1), after which the PM adds them. Each J step is driven by the persona the policy names (WP5-PREP section 8; E8 rests on the WP-0 probe).", J_SRC, { assumption: true }),
+    fixture: fig(J_SUP.fixture, "outcome", "J1, J2, J4: the activities; cost codes 02-100, 09-100 and 05-100 with budget lines 02-100/material and 09-100/indirect, none for 05-100 (CF.L119); the BOQ row J-B003 60 t @ 1,200.00 (B-003's row: WP5.R1.estimate's quantity and rate); the supplier J-SUP; the warehouses J-SITE and J-YARD with their bins; the items, each with projectId J; the plan row on J-A130 linked to the line of PO-A' (WP5.N6). Money here is in currency units, as sent.", J_SRC, { assumption: true }),
+    vendors: fig(J_SUP.vendors, "outcome", "J2: two stamped directory vendors made by the PM (company admin in 087), each with the nine criteria scored, decided approved and valid until 2028-01-01: J-QUAL with singleAwardLimit 250,000.00 (WP5.R5.singleAwardLimit, stage 11's limit), and J-EXP, whose insurance criterion expires 30 s after its decision (WP5.R5.expired). Company-level residue in 087 that J's archive leaves (WP5ADJ Q6). The limit here is in currency units, as sent.", [...J_SRC, HF("backend/src/services/vendor-prequalification.service.js", "369-534"), WP5ADJ("Q6, Q10")], { assumption: true }),
+    orders: fig(J_ORDERS, "list", "J5: the orders on J, each raised as a draft by procurement with the supplier J-SUP (J-NS without one) and a requiredBy (J-NR without one), every line coded 02-100 and 02-100/material; all but J-DRAFT, J-DEL1, J-NS, J-NR and J-PEND submitted by procurement, approved by the PM and issued by procurement, J-ACKC and J-ACK then acknowledged; J-PEND submitted only. stateAtJ6 is each order's status when the receivable list is read (after J6's receipts, before J7's closes). Money in cents: PO-A' 1,000.00 and PO-B' 650.00 are stage 4's PO-A and PO-B (stage4:170), J-C 1,000.00 is WP5.O2's order, J-DEL2 400.00 (10 x 30.00 on J-A-DEL + 5 x 20.00 on J-A-KEEP).", [...J_SRC, HF("backend/src/services/procurement.service.js", "1873-2056"), HF("backend/src/services/purchase-order.service.js", "116-136, 502-595")], { assumption: true }),
+    bids: fig(J_BIDS, "list", "J10: three bid packages, each with one line from J-B003 (60 t) coded J-A130 / 02-100 / 02-100/material; totals = 60 x the rate, in cents: J-BP1 J-QUAL 252,000.00 (the lowest, above its 250,000.00 limit), J-WD 255,000.00 (withdrawn and resubmitted), J-ADHOC 258,000.00; J-BP2 J-QUAL 240,000.00 (within the limit, so the two confirms race on the lock alone); J-BP3 J-EXP 60,000.00.", [...J_SRC, HF("backend/src/services/bid.service.js", "368-420, 550-661, 812-869, 984-1106")], { assumption: true }),
+    awardOrder: fig({ value: cents(252000), status: "planned", supplier: "J-QUAL", lines: [{ activity: "J-A130", qty: 60, unit: "t", unitCost: cents(4200), package: "J-PP1" }] }, "outcome", "R3.J.firstOrder: procurement raises the order from J-PP1 once J-BP1 is awarded (POST /procurement/packages/:id/order, 201): one line per priced package line, 60 t at J-QUAL's 4,200.00 on J-A130 with the package (procurement.service.js:1805-1819), value 252,000.00, status planned, J-QUAL's supplier: WP5.R4.awardPoValue's shape on J.", [...J_SRC, PH5("736, 750"), HF("backend/src/services/procurement.service.js", "1762-1859")], { assumption: true, note: "WP-5 G1 (2026-10-10): R3.J.firstOrder reads this leaf (the draft check list named WP5.R4.awardPoValue, 087-COM's 74,400.00)." }),
+    stock: fig({ movements: J_SUP.stock, figures: J_STOCK }, "outcome", "J3, J9: the stock movements on J, unit costs in currency units as sent, and the figures they give in cents: J-CEM 150 at the weighted average 11.00 (stage4:170.weightedAverage), 60 issued for 660.00, 90 / 990.00 left (WP5.existing), 40 available after the reserve of 50, 40 issued for 440.00; J-SAND 100 / 1,000.00 (WP5.N2); J-GRAVEL's activity at 60.00 after the return of 4; J-PIPE's credit, activity and stock (WP5.N3, value and today); J-CEM3's transfer, 110.00 = 77.00 + 33.00 (WP5.N4); J-INV1's issue of 2 at 5.00 (CF.INV1).", J_SRC, { assumption: true }),
+    directCosts: fig(J_DIRECT_COSTS, "list", "J11: the direct costs on J, made and submitted by the cost controller, approved, voided and paid by finance; invoices name their order and, on its lines, the poLineId; money in cents. J-DC2 1,000.00 / 2,000.00 / 3,000.00 (WP5.D2), J-DC4 6,000.00 (WP5.D3), the membrane invoices 1,000.00 each (WP5.D4), J-INVA 1,000.00 and J-VAR 700.00 (stage 12's invoices), J-SVC's two of 600.00 (WP5.D5.overInvoicedLedger), J-D6INV 220.00 + 50.00 freight (WP5.D6), J-L119 750.00 (WP5.CF.L119).", [...J_SRC, HF("backend/src/services/direct-cost.service.js", "330-613")], { assumption: true }),
+    choreography: fig(J_STEPS, "list", "J's run order (WP5-PREP section 5.1, as WP5ADJ settles it): the J choreography runs whole whenever one selected check runs on J, its steps depending on each other; each step names the check ids it serves. Every writing check and every section 6.2 catcher runs on J (WP5ADJ Q1), because the mutation runner runs the whole proof under each mutant (WP5-PREP section 0 fact 2); the moment map's rows 144 (the O2 closes), 148 (N1's issues), 150 (N6) and 151 (the D5 approvals) record the deviation when the proof lands. Order: J3 before the keeper joins J; J6's list read before J7's closes; J9's N1 before any other J-CEM movement; J-EXP's cover lapses 30 s after J2; J11's D4 receipt and issue after the invoice approval.", [...J_SRC, "backend/scripts/cert/cert3/build/MOMENT-MAP.md rows 144, 148, 150, 151"], { assumption: true, note: "WP-5 G1 (2026-10-10)." }),
   },
 };
 
@@ -1335,6 +1617,7 @@ const deep = {
     eotApprovedClaims: count(2, "EOT claims in every state, two of them approved (T2 + T3: cumulative 15).", [P(387), P(808)]),
     bidders: count(3, "Bid package with three bidders, award not lowest on override.", [P(387)]),
     warehouses: count(2, "Two warehouses with bins and a serial item.", [P(387)]),
+    o2CementEnd: fig(COM087_CEMENT2, "outcome", "087-COM's O2 cement at the end of the transfers: 60 received into Z-A-B02 (WP5.O2.received), quarantine 5 and release 2 (3 quarantined), 1 damaged, 10 issued to A310 and 4 returned: 50 on hand; the full transfer moves 10 to the yard (the item's total unchanged) and the short one sends 10, of which 7 land, 1 is damaged and 2 are written off short: 47 on hand, 2 damaged in all, 3 quarantined, nothing in transit (BLD 087-com.js:1957-1963, 1973, 2002-2017).", [P(387), PH5("427, 765"), BLD("087-com.js", "1957-1973, 1978-2019"), PREP5("section 10 G8")], { note: "WP-5 G8 (2026-10-10): the builder asserts these as literals (BLD 087-com.js:2017); read live by N.live.087.store." }),
     poStatuses: fig(["partial->closed (short)", "received->closed", "acknowledged", "cancelled", "from award"], "list", "POs in every status as listed.", [P(387)]),
     stateCoverage: {
       commitmentChangeOrders: fig(["draft", "pending", "approved", "rejected", "void"], "list", "'Commitment COs in every state': CO_STATUS (commitment.service.js:27-28). Reachable: pending <- draft, approved <- pending, rejected <- pending, void <- draft or pending; rejected and void need a reason (:902-904). One CO in each state at the end of the build.", [P(387), S("commitment.service.js", "27-28, 902-904"), ADJ("C8")], { assumption: true, note: "One record per state is this book's minimum reading of 'every state'." }),
@@ -1651,6 +1934,116 @@ const claudeMd = {
   walk(WP4, "WP4");
   for (const p of ["087-COM", "087-COM-B", "087-COM-C", "006-LITE"]) walk(deep[p], "deep." + p);
   for (const [k, v] of Object.entries(deep["052-COM"])) if (k !== "O2") walk(v, "deep.052-COM." + k);
+})();
+
+// Load checks for the WP-5 answer-book leaves (2026-10-10, WP5ADJ Q1-Q12): each added or changed leaf agrees with the figures it is built from.
+(() => {
+  const fail = (what) => {
+    throw new Error("commercial answer book: " + what);
+  };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const leafAt = (key) => key.split(".").reduce((node, part) => (node && typeof node === "object" ? node[part] : undefined), { WP5, deep });
+  const J = WP5.J;
+  const S4 = stages["stage4:170"];
+  const S4L = stages["stage4:167"];
+  const order = (ref) => J.orders.value.find((o) => o.ref === ref);
+  // G1: J's orders are the book's shapes
+  const poA = order("PO-A'");
+  const poB = order("PO-B'");
+  if (poA.value !== S4["PO-A.value"].value || poB.value !== S4["PO-B.value"].value || poA.lines[0].activity !== "J-" + S4L["PO-A.line.activity"].value || poB.lines[0].activity !== "J-" + S4L["PO-B.line.activity"].value || poA.lines[0].costCode !== S4L["PO-A.line.costCode"].value || poB.lines[0].costCode !== S4L["PO-B.line.costCode"].value) fail("WP5.J.orders: PO-A' and PO-B' must be stage 4's PO-A and PO-B on J-A130 / 02-100 (G1)");
+  const jc = order("J-C");
+  if (jc.value !== WP5.O2.order1000.value || jc.lines[0].qty !== WP5.O2.ordered.value || jc.stateAtJ6 !== WP5.O2.statusAfterPartial.value) fail("WP5.J.orders: J-C must be WP5.O2's order, partial when the list is read (G1)");
+  if (order("J-O4").lines[0].qty < WP5.O4.acceptedStock.value + WP5.O4.rejectedQty.value || order("J-O4").stateAtJ6 !== "partial") fail("WP5.J.orders: J-O4 must take WP5.O4's 10 + 2 and stay partial (G1)");
+  // G1, G11: J's stock reproduces stage 4, WP5.existing, N1, N2, N3 and N4
+  const st = J_STOCK;
+  if (J_WA !== S4.weightedAverage.value || st.cement.average !== J_WA || st.cement.issue60Cost !== S4.issue60Cost.value || st.cement.afterIssue.onHand !== WP5.existing.stockOnHand.value || st.cement.afterIssue.value !== WP5.existing.stockValue.value || st.cement.availableAfterReserve !== WP5.N1.availableAfterReserve.value || st.cement.issue40Cost !== WP5.N1.issue40Cost.value) fail("WP5.J.stock: J-CEM must give stage 4's, WP5.existing's and WP5.N1's figures (G1, G11)");
+  if (!same(st.sand.value, WP5.N2.stockAfterRefusal.value) || !same(st.sand.today, WP5.N2.stockAfterRefusal.today) || st.sand.projectCostToday !== WP5.N2.projectCostAfterRefusal.today || st.gravel.activityAfterReturn4 !== WP5.N2.activityAfterReturn4.value) fail("WP5.J.stock: J-SAND and J-GRAVEL must give WP5.N2's figures (G1)");
+  if (st.pipe.credit !== WP5.N3.credit.value || st.pipe.creditToday !== WP5.N3.credit.today || st.pipe.activity !== WP5.N3.activity.value || st.pipe.activityToday !== WP5.N3.activity.today || !same(st.pipe.stock, WP5.N3.stock.value) || !same(st.pipe.stockToday, WP5.N3.stock.today)) fail("WP5.J.stock: J-PIPE must give WP5.N3's figures, value and today (G1)");
+  if (st.cem3.sent !== WP5.N4.sentValue.value || st.cem3.received !== WP5.N4.receivedValue.value || st.cem3.writtenOff !== WP5.N4.writtenOff.value || st.cem3.sent !== st.cem3.received + st.cem3.writtenOff) fail("WP5.J.stock: J-CEM3's transfer must give WP5.N4's figures (G1)");
+  if (WP5.CF.INV1.today.issueCostOnJ !== st.inv1.issueCostOnJ) fail("WP5.CF.INV1: the keeper's issue of J-INV1 at its receipt cost (G1, G10)");
+  // G1, G13: J's bids straddle J-QUAL's limit; the award order is J-QUAL's bid
+  const bid = (pkg, bidder) => J.bids.value.find((p) => p.pkg === pkg).bids.find((b) => b.bidder === bidder);
+  const limit = WP5.R5.singleAwardLimit.value;
+  const bp1 = J.bids.value.find((p) => p.pkg === "J-BP1").bids;
+  const lowest = bp1.reduce((low, b) => (b.total < low.total ? b : low), bp1[0]);
+  const qual = bid("J-BP1", "J-QUAL").total;
+  if (lowest.bidder !== "J-QUAL" || !(qual > limit) || !(bid("J-BP2", "J-QUAL").total <= limit) || J.awardOrder.value.value !== qual || J.awardOrder.value.lines[0].qty * J.awardOrder.value.lines[0].unitCost !== qual || J.vendors.value["J-QUAL"].singleAwardLimit * 100 !== limit) fail("WP5.J.bids: J-QUAL lowest on J-BP1 and over its limit, within it on J-BP2; the award order is its bid (G1)");
+  const R5 = WP5.R5;
+  if (!same(R5.overLimit.value, R5.overLimitOrExpired.value) || !same(R5.expired.value, R5.overLimitOrExpired.value) || R5.overLimitDetails.value.status !== "approved" || R5.overLimitDetails.value.singleAwardLimit !== limit || R5.overLimitDetails.value.amount !== qual || R5.overLimitOverride.value.commitmentOriginal !== qual || R5.overLimitOverride.value.commitmentStatus !== "draft" || R5.overLimitOverride.value.status !== 201 || R5.expiredDetails.value.status !== "expired") fail("WP5.R5: over the limit (J-QUAL's 252,000.00 against 250,000.00) and expired, both refused; the override's draft (G13)");
+  // G2, G4: the award commitment, the confirm again, the concurrent confirms
+  const R2 = WP5.R2;
+  const ac = R2.awardCommitment.value;
+  const sov = ac.sovLines[0];
+  if (ac.status !== "draft" || ac.retentionRate !== 0 || ac.original !== WP5.R4.awardPoValue.value || ac.original !== WP5.R1["bid.emirates.total"].value || ac.sovLines.length !== 1 || sov.amount !== ac.original || sov.qty * sov.rate !== ac.original || sov.boqItem !== "B-003" || sov.activity !== stages["stage4:167"]["PO-A.line.activity"].value) fail("WP5.R2.awardCommitment: Emirates' 74,400.00 draft at retention 0, one SOV line carrying B-003 and A130 (G2)");
+  if (!same(R2.confirmAgain.value, WP5.R1.cancelAwarded.value) || !same(R2.concurrentConfirms.value, { confirms: 2, ok2xx: 1, conflict409: 1, commitments: 1 }) || R2.concurrentConfirms.today.commitments !== 2 || R2.concurrentConfirms.today.ok2xx !== 2) fail("WP5.R2: the confirm again 409 BID_PACKAGE_LOCKED; two confirms at once, one commitment (today two) (G4)");
+  // G3: the over-invoicing ledger
+  const dc = (ref) => J.directCosts.value.find((d) => d.ref === ref);
+  const svc = J.directCosts.value.filter((d) => d.order === "J-SVC");
+  const svcOrder = order("J-SVC");
+  if (svc.length !== 2 || WP5.D5.overInvoicedLedger.value !== svc[0].total || svc[0].total !== svc[1].total || WP5.D5.overInvoicedLedger.today !== 0 || !(svc[0].total + svc[1].total > svcOrder.value) || svcOrder.lines[0].item !== null || svcOrder.stateAtJ6 !== "received") fail("WP5.D5.overInvoicedLedger: one of J-SVC's two equal invoices, which together pass the received service line; today 0.00 (WP5-SVC-1) (G3)");
+  // G1, G10, G20: the direct costs give WP5.D, stage 12 and L107
+  if (dc("J-DC2").total !== WP5.D2.ledger.value || dc("J-DC2").lines.length !== WP5.D2.entryCount.value || -dc("J-DC2").total !== WP5.D2.voidMirror.value || dc("J-DC4").total !== WP5.D3.cashOutflow.value || dc("J-STK-INV").total !== WP5.D4.ledgerInvoiceBeforeReceipt.value || dc("J-STK2-INV").total !== WP5.D4.controlPath.value || dc("J-STK-INV").total !== order("J-STK").value) fail("WP5.J.directCosts: J-DC2, J-DC4 and the membrane invoices must give WP5.D2, D3 and D4 (G1)");
+  if (dc("J-INVA").total !== WP5.existing["stage12.invoiceA"].value || dc("J-INVA").total !== poA.value || dc("J-VAR").total !== WP5.existing["stage12.invoiceB"].value || dc("J-VAR").total - poB.value !== WP5.existing["stage12.varianceB"].value || WP5.CF.L107.value !== WP5.existing["stage12.varianceB"].value) fail("WP5.J: J-INVA and J-VAR are stage 12's invoices on PO-A' and PO-B'; L107's variance is stage 12's (G1, G10, G20)");
+  const d6 = dc("J-D6INV");
+  if (d6.lines[0].amount !== pctOf(order("J-D6").value, 110) || d6.lines[1].onOrderLine !== false || WP5.CF.L119.today.ledgerDelta !== dc("J-L119").total || dc("J-L119").lines[0].costCode !== "05-100" || J.fixture.value.budgetLines.some((b) => b.startsWith("05-100"))) fail("WP5.J: J-D6INV at +10% with a freight line off the order; J-L119 on 05-100, which has no budget line (G1, G10)");
+  // G9: the receivable lists
+  const O5 = WP5.O5;
+  const jIn = (statuses) => J.orders.value.filter((o) => statuses.includes(o.stateAtJ6)).map((o) => o.ref);
+  const cIn = (statuses) => COM087_ORDERS.filter((o) => statuses.includes(o.state)).map((o) => o.key);
+  if (!same(O5.receivableList.value, RCV_STATUSES.value) || !same(O5.receivableList.today, RCV_STATUSES.today)) fail("WP5.O5.receivableList: the statuses of RCV_STATUSES (G9)");
+  if (!same(O5.onJ.value, jIn(RCV_STATUSES.value)) || !same(O5.onJ.today, jIn(RCV_STATUSES.today)) || !same(O5.on087.value, cIn(RCV_STATUSES.value)) || !same(O5.on087.today, cIn(RCV_STATUSES.today))) fail("WP5.O5.onJ and on087: the orders whose statuses the value and HEAD list (G9)");
+  if (!O5.on087.value.includes("ACK") || O5.on087.today.includes("ACK") || COM087_ORDERS.some((o) => o.state === "draft") || COM087_ORDERS.find((o) => o.key === "ACK").ref !== deep["087-COM-B"].poRefCollision.value || !O5.onJ.today.includes("J-DRAFT") || O5.onJ.value.includes("J-DRAFT") || !O5.onJ.value.includes("J-ACKC") || O5.onJ.today.includes("J-ACKC")) fail("WP5.O5: 087-COM holds no draft, so its today only lacks the acknowledged PO-00001; on J today lists the drafts and lacks J-ACKC (G9)");
+  // G5: the closes before any delivery
+  const cbd = WP5.closeBeforeDelivery;
+  if (cbd.issuedForceClose.value !== WP5.O2.forceWithReason.value || cbd.ackForceClose.value !== WP5.O2.forceWithReason.value || !same(cbd.receiveAfterClose.value, WP5.O2.receiveAfterClose.value) || order("J-ISS").stateAtJ6 !== "issued" || order("J-ACKC").stateAtJ6 !== "acknowledged" || order("J-ISS").lines.some((l) => l.item !== null)) fail("WP5.closeBeforeDelivery: J-ISS issued and J-ACKC acknowledged close with force and a reason; then 409 PO_NOT_ISSUED (G5)");
+  // G10: D-FUN-1's delete
+  const del2 = order("J-DEL2");
+  const kept = del2.lines.filter((l) => l.activity !== "J-A-DEL");
+  if (WP5.CF.DFUN1delete.value !== kept.reduce((s, l) => s + l.amount, 0) || WP5.CF.DFUN1delete.today !== del2.value || kept.length !== 1 || del2.lines.length !== 2 || order("J-DEL1").lines.some((l) => l.activity !== "J-A-DEL")) fail("WP5.CF.DFUN1delete: J-DEL2 recomputed from its kept line, today its value before the delete; J-DEL1 only on J-A-DEL (G10)");
+  // G8: 087-COM's O2 cement
+  if (!same(deep["087-COM"].o2CementEnd.value, COM087_CEMENT2) || !same(COM087_CEMENT2, { onHand: 47, damaged: 2, quarantined: 3, inTransit: 0 })) fail("deep.087-COM.o2CementEnd: the movements the builder makes leave 47 / 2 / 3 / 0 (G8)");
+  // G1: the choreography serves every J check id exactly once
+  const steps = J.choreography.value;
+  if (steps.length !== 13 || !steps.every((s, i) => (i < 12 ? s.startsWith("J" + i + " ") : s.startsWith("end ")))) fail("WP5.J.choreography must list J0-J11 and the end (G1)");
+  if (J_CHECKS.length !== 98 || new Set(J_CHECKS).size !== J_CHECKS.length) fail("WP5.J: the 98 J check ids, each once (G1)");
+  for (const id of J_CHECKS) {
+    const n = steps.filter((s) => s.split(/[ ,;()]+/).includes(id)).length;
+    if (n !== 1) fail("WP5.J.choreography: the check " + id + " must be served by exactly one step (G1)");
+  }
+  // G5, G16-G18, Q7: the mutation leaves name their catchers by check id
+  const mu = WP5.mutations;
+  const named = (leaf) => leaf.value.join(" | ");
+  const need = [
+    [mu.poCloseTransitions, ["O2.J.issued.forceWithReason red and O2.J.ack.forceWithReason red (M-PCL0,", "(M-PCL0i:", "(M-PCL0k:", "KA.O2.forceWithReason red, KA.O2.receiveAfterClose red and KA.O2.fullyReceivedClose red (M-PCL1,", "(M-PCLg,", "(M-PCLgb,"]],
+    [mu.awardLock, ["R2.J.confirmAgain red (M-AWD0,", "KA.R2.concurrentConfirms red (M-AWD1,"]],
+    [mu.receiptOverOrder, ["O4.J.overOrder red (M-OVER,"]],
+    [mu.insufficientAvailable, ["N1.J.issue41 red and N1.J.issue41bin red (M-AVL,", "N1.J.issue41 red (M-AVLa:", "N1.J.issue41bin red (M-AVLb:"]],
+    [mu.directCostOnePosting, ["D2.J.concurrentApprove red (M-DCL,", "D2.J.ledger red (M-DCK,", "(M-DCX,"]],
+  ];
+  for (const [leaf, texts] of need) for (const t of texts) if (named(leaf).indexOf(t) < 0) fail("WP5.mutations: a leaf must name '" + t + "' (G5, G16-G18, Q7)");
+  // Q4: the known answers carry their today and ref, as assumptions
+  for (const [key, ref] of WP5_KNOWN) {
+    const leaf = leafAt(key);
+    if (!leaf || leaf.today === undefined || leaf.ref !== ref || !leaf.assumption) fail(key + ": a known answer with its today and ref " + ref + ", an assumption (Q4)");
+  }
+  // Q2: 052-COM's O2 mirror carries the same refs
+  for (const k of ["forceWithReason", "receiveAfterClose", "fullyReceivedClose"]) if (deep["052-COM"].O2[k].ref !== "HR-C8" || !same(deep["052-COM"].O2[k].today, WP5.O2[k].today)) fail("deep.052-COM.O2." + k + ": the mirror of WP5.O2's HR-C8 known answer (Q2)");
+  // the leaf contract of the WP-5 leaves and the 052-COM O2 mirror: a today names its ref and a ref its today, from
+  // WP5_REFS; every such leaf is an assumption, and its value never equals its today (no WP-5 rule is decided)
+  const walk = (node, key) => {
+    if (node && typeof node === "object" && !Array.isArray(node) && "unit" in node && "derivation" in node) {
+      if (node.today !== undefined && !node.ref) fail(key + " carries a today without its ref");
+      if (node.ref !== undefined && node.today === undefined) fail(key + ": a ref without its today");
+      if (node.ref !== undefined && !WP5_REFS.includes(node.ref)) fail(key + ": unknown ref " + node.ref);
+      if (node.today !== undefined && !node.assumption) fail(key + ": a today under an undecided row must be an assumption");
+      if (node.today !== undefined && same(node.today, node.value)) fail(key + ": a value equal to its today would pre-judge " + node.ref);
+      return;
+    }
+    if (node && typeof node === "object" && !Array.isArray(node)) for (const [k, v] of Object.entries(node)) walk(v, key + "." + k);
+  };
+  walk(WP5, "WP5");
+  walk(deep["052-COM"].O2, "deep.052-COM.O2");
+  walk(deep["087-COM"].o2CementEnd, "deep.087-COM.o2CementEnd");
 })();
 
 // ─── the tree and its flattening ──────────────────────────────────────────────────────────────

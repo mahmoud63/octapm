@@ -1,0 +1,517 @@
+{
+  "proof": "scripts/cert/cert3/wp4-commercial-proof.js",
+  "guards": "Plan section 6.2 WP-4 'retention default' (:1148) and section 4 WP-4 Mutations 'the retention-default null guard' (:721): the HR-C1 fix put back, part by part (answer book WP4.mutations.retentionDefaultGuard; HRC1-FIX-PLAN.md s9). Plus, per plan section 1.4, a mutation that puts each landed WP-4 defect fix back: the atomic convert (M-CONV1, also the convert-lock E6 entry once it lands) and the commitment-CO parent check (CCO-M1), and M-VAR1 once HR-C2 is decided and fixed. Those three have no fix plan yet: pending[] below, not run.",
+  "requires": "the HR-C1 fix commit (HRC1-FIX-PLAN.md s4 as adjudicated after its Codex plan review), FIXES['HR-C1'] set in the proof, the proof edits that land with it (I1.submitUnconfigured and HRC1.contractShapes: 150 -> 152 checks, PREP4-ADJUDICATION A I-1, I-2; the K5-K10 texts for P-11b), the unmutated full run exiting 0 on that code (results/cert3/wp4-commercial-proof.baseline.json). Re-derive from / to on the real fix diff first (mutsyntax-wp4.js --post-fix).",
+  "pendingCheckIds": [
+    "I1.submitUnconfigured",
+    "HRC1.contractShapes"
+  ],
+  "pendingCheckIdsNote": "Checks the HR-C1 fix commit adds to the proof (PREP4-ADJUDICATION.md A: I-1 adopts P-11b with I1.submitUnconfigured; I-2 adopts HRC1.contractShapes; the fixed count moves 150 -> 152 at that commit). mutsyntax-wp4.js accepts these ids here and reports them pending until the proof's CHECKS carries them.",
+  "catchersTableNote": "The proof's CATCHERS (:644) names M-RET, M-RET-c, M-RET-d, M-RET-l (and CCO-M1, M-CONV1, M-VAR1). M-RET-s, M-RET-r, M-RET-o and M-RET-p are new here (HRC1-FIX-PLAN.md s9): at the fix commit CATCHERS gains them AND the book's WP4.mutations.retentionDefaultGuard names their catchers, because the proof's load guard (G23, :655-660) refuses a CATCHERS id the book's WP4.mutations text does not name (I1.afterConfiguration, HRC1.projectDisplay, I1.submitUnconfigured, HRC1.contractShapes are not named today).",
+  "proofRequirement": "R-SET for the post-fix K choreography (WP4-RUN-PLAN.md section 13.3): under M-RET-l the K9 claim on K-IPC-NR is refused at submission (the contract's explicit 0 is ignored), and the current kHrc1 need()s that submit (:1570), which would end the HRC1 section before K10-K11 and leave L114.newPeriodItemRate NOT RUN (no evidence). The post-fix proof must record K9's refusal as I1.explicitNoRetention FAIL and go on to K10 and K11; likewise K5 / K7 under M-RET-s and M-RET-d must record, not need(), the submit answers (the fix plan s8.2 already says \"setup, recorded\").",
+  "anchors": "anchors.head: 0 for every edit (the fix does not exist at HEAD 999dc9c; the runner records NOT APPLIED). anchors.postFixSim: count and line on the simulated fix copies (C:/Temp/octapm-cert/scratch/wp4/fixplan/work/fix/, made by work/sim-fix.js from f599e67; CRLF only). Every mutant parses there (mutsyntax-wp4.js). The real fix may differ: re-count with mutsyntax-wp4.js --post-fix on the fixed worktree and re-derive any from that is not found exactly once.",
+  "note": "Fields as in wp4-mutations.commercial.json. Judged by wp4-mutation-evidence.js against the post-fix baseline (exit 0). Collateral names the reds a mutant's own path makes on K; CF.HRC1 (decided: must read REJECTED) fails whenever one of its inputs reads today or wrong. Run one id per invocation, quoted and with a trailing comma (\"--only=M-OPEN,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-OPEN would also run M-OPENa and M-OPENb; M-LOCK also M-LOCKa and M-LOCKb; M-RET also every M-RET-x), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists.",
+  "notRun": [
+    {
+      "name": "M-RET-w (unit only, not run against the proof) an item PATCH without a rate drops the line's entered rate",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "    existing.retentionRateSource === ITEM_RATE_SOURCES.ITEM_OVERRIDE;",
+      "to": "    false;",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1014
+          }
+        ]
+      },
+      "requires": "the HR-C1 fix commit (HRC1-FIX-PLAN.md s4 as adjudicated after its Codex plan review), FIXES['HR-C1'] set in the proof, the proof edits that land with it (I1.submitUnconfigured and HRC1.contractShapes: 150 -> 152 checks, PREP4-ADJUDICATION A I-1, I-2; the K5-K10 texts for P-11b), the unmutated full run exiting 0 on that code (results/cert3/wp4-commercial-proof.baseline.json). Re-derive from / to on the real fix diff first (mutsyntax-wp4.js --post-fix).",
+      "reason": "No K step PATCHes an overridden line again without its rate (HRC1-FIX-PLAN.md s9): no proof check can see it. Unit catcher U-5 (wp4-fix-mutations.unit.json UM-RET-w). Recorded as a TEST GAP of the live proof (WP4-RUN-PLAN.md section 13.1), the M-CEILa/b precedent."
+    },
+    {
+      "name": "M-RET-n (unit only, not run against the proof) PATCH {retentionRate: null} stores an explicit 0 again",
+      "file": "backend/src/services/prime-contract.service.js",
+      "from": "      data.retentionRate = null;\r\n      data.retentionRateSource = null;",
+      "to": "      data.retentionRate = 0;\r\n      data.retentionRateSource = RETENTION_SOURCES.CONTRACT_ENTRY;",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 452
+          }
+        ]
+      },
+      "requires": "the HR-C1 fix commit (HRC1-FIX-PLAN.md s4 as adjudicated after its Codex plan review), FIXES['HR-C1'] set in the proof, the proof edits that land with it (I1.submitUnconfigured and HRC1.contractShapes: 150 -> 152 checks, PREP4-ADJUDICATION A I-1, I-2; the K5-K10 texts for P-11b), the unmutated full run exiting 0 on that code (results/cert3/wp4-commercial-proof.baseline.json). Re-derive from / to on the real fix diff first (mutsyntax-wp4.js --post-fix).",
+      "reason": "No K step sends the contract rate null (P-11b's K7 unsets the project default instead). Unit catcher: the fix's updateContract-null case in prime-contract.service.test.js (UM-RET-n). TEST GAP of the live proof."
+    }
+  ],
+  "pending": [
+    {
+      "name": "M-VAR1 the variation matched on the BOQ item again (post-HR-C2; replaces M-VAR0 as the E6 entry)",
+      "e6": "section 6.2 WP-4 guard 2 of 6 (variation scope), once HR-C2 is decided and fixed (WP4ADJ Q8)",
+      "supersedes": "M-VAR0",
+      "requires": "an owner decision on HR-C2 (undecided; plan :727, :1070), its fix and fix commit; the proof's RULES['HR-C2'] decided so a today of KA.I3.* fails. No fix plan exists: from / to are the fix's.",
+      "loci": [
+        {
+          "file": "backend/src/services/ipc.service.js",
+          "text": "      (boqItemId && row.boqItemId === boqItemId),",
+          "note": "the BOQ-item leg an HR-C2 fix would remove; M-VAR1 restores it on the fix diff",
+          "head": {
+            "count": 1,
+            "line": 190
+          }
+        }
+      ],
+      "catchers": [
+        "KA.I3.limits.A130",
+        "KA.I3.patchA130Qty650"
+      ],
+      "collateral": [
+        "CF.HRC2"
+      ],
+      "expectVerdict": "CAUGHT once HR-C2 is decided and fixed: both known answers read today (650 / 97,500.00; PATCH 650 accepted) where the fixed code reads value"
+    },
+    {
+      "name": "M-CONV1 the atomic convert's claim removed (post-fix; replaces M-CONV0 as the E6 entry)",
+      "e6": "section 6.2 WP-4 guard 3 of 6 (the convert lock), once the atomic, idempotent conversion lands (section 5 defect fix :1109, made in WP-4 if it confirms as P1; WP4ADJ Q8, Q9)",
+      "supersedes": "M-CONV0",
+      "requires": "the CONVERT-ATOMIC fix and its commit, FIXES['CONVERT-ATOMIC'] set (the KA.E2 checks and CF.convertAtomic then defect checks), CONTRACT['CONVERT-ATOMIC'].midwayRollback from its fix plan, the unmutated full run exiting 0 on that code. No fix plan exists: from / to are the fix's in-transaction claim of the event.",
+      "loci": [
+        {
+          "file": "backend/src/services/change-event.service.js",
+          "text": "  if (event.status === STATUS.CONVERTED || event.changeOrderId) throw new HttpError(409, \"CHANGE_EVENT_CONVERTED\", `${event.ref} is already ${event.changeOrder?.ref || \"converted\"}`);",
+          "note": "the sequential check M-CONV0 removes; the fix may rewrite it",
+          "head": {
+            "count": 1,
+            "line": 804
+          }
+        },
+        {
+          "file": "backend/src/services/change-event.service.js",
+          "text": "  await prisma.changeEvent.update({ where: { id: changeEventId }, data: { status: STATUS.CONVERTED, changeOrderId: created.id, convertedAt: now, updatedBy: actor?.id || null } });",
+          "note": "the status write after the CO is created (L199); the fix makes claim, CO and status one transaction",
+          "head": {
+            "count": 1,
+            "line": 848
+          }
+        }
+      ],
+      "catchers": [
+        "KA.E2.concurrent",
+        "KA.E2.pendingDelta",
+        "KA.E2.midwayOrphans"
+      ],
+      "racy": [
+        "KA.E2.concurrent",
+        "KA.E2.pendingDelta"
+      ],
+      "racyNote": "The five concurrent converts may serialise by luck under the mutant (one success: value). KA.E2.midwayOrphans is the deterministic catcher if the fix makes the prime CO and its commitment COs one transaction. A racy catcher that does not flip is reported, not failed, when every deterministic catcher flipped; one marked rerun of the mutant is allowed (the WP5ADJ Q8 precedent, to confirm for WP-4: WP4-RUN-PLAN.md section 13.3).",
+      "collateral": [
+        "CF.convertAtomic",
+        "E1.convertAgain",
+        "K.E1.convertAgain"
+      ],
+      "expectVerdict": "CAUGHT once the fix lands: KA.E2.midwayOrphans (and, unless the race serialises, KA.E2.concurrent / pendingDelta) read today where the fixed code reads value"
+    },
+    {
+      "name": "CCO-M1 the commitment-CO approval's parent check removed (post-fix; a defect-fix mutation, not a section 6.2 guard)",
+      "e6": "fix mutation (plan section 1.4), not an E6 entry",
+      "requires": "the CCO-PARENT fix (section 5 :1111, made in WP-4 if it confirms as P1; WP4ADJ Q9) and its commit, FIXES['CCO-PARENT'] set, CONTRACT['CCO-PARENT'].refusalStatusCode from its fix plan, the unmutated full run exiting 0 on that code. No fix plan exists: from / to are the fix's parent check in transitionChangeOrder.",
+      "loci": [
+        {
+          "file": "backend/src/services/commitment.service.js",
+          "text": "  const allowedFrom = { [CO_STATUS.PENDING]: [CO_STATUS.DRAFT], [CO_STATUS.APPROVED]: [CO_STATUS.PENDING], [CO_STATUS.REJECTED]: [CO_STATUS.PENDING], [CO_STATUS.VOID]: [CO_STATUS.DRAFT, CO_STATUS.PENDING] }[to];",
+          "note": "transitionChangeOrder checks only the CO's own status (:902 at f599e67); the fix adds the parent check here or under the parent lock (:916-920)",
+          "head": {
+            "count": 1,
+            "line": 902
+          }
+        },
+        {
+          "file": "backend/src/services/commitment.service.js",
+          "text": "  if ([STATUS.VOID, STATUS.CLOSED].includes(commitment.status)) throw new HttpError(409, \"COMMITMENT_LOCKED\", `A ${commitment.status} commitment cannot take change orders`);",
+          "note": "createChangeOrder's void/closed guard (:848), the shape the fix can mirror",
+          "head": {
+            "count": 1,
+            "line": 848
+          }
+        }
+      ],
+      "catchers": [
+        "KA.CCO.voidParent",
+        "KA.CCO.closedParent"
+      ],
+      "collateral": [
+        "CF.CCOparent"
+      ],
+      "expectVerdict": "CAUGHT once the fix lands: both known answers read today (200 approved; committed 6,000.00 after closeout) where the fixed code reads value"
+    }
+  ],
+  "mutations": [
+    {
+      "name": "M-RET the certification refusal dropped (HR-C1 put back: an unconfigured certificate settles at no retention)",
+      "guard": "section 6.2 WP-4 'retention default' (plan :1148, :721): the HR-C1 fix's refusal in certifyIpcPeriod (fix copy ipc.service.js :1396-1400, P-11)",
+      "e6": "section 6.2 WP-4 guard 1 of 6 (retention default; post-fix: nothing at HEAD to mutate, WP4ADJ Q8)",
+      "requires": "the HR-C1 fix commit (HRC1-FIX-PLAN.md s4 as adjudicated after its Codex plan review), FIXES['HR-C1'] set in the proof, the proof edits that land with it (I1.submitUnconfigured and HRC1.contractShapes: 150 -> 152 checks, PREP4-ADJUDICATION A I-1, I-2; the K5-K10 texts for P-11b), the unmutated full run exiting 0 on that code (results/cert3/wp4-commercial-proof.baseline.json). Re-derive from / to on the real fix diff first (mutsyntax-wp4.js --post-fix).",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "    const retentionBasis = await assertRetentionConfigured({ tx, projectId, period, items });",
+      "to": "    const retentionBasis = await retentionBasisFor({ tx, projectId });",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1400
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.retentionDefaultGuard",
+        "WP4.I1.certifyUnconfigured"
+      ],
+      "catchers": [
+        "I1.certifyUnconfigured"
+      ],
+      "collateral": [
+        "I1.afterConfiguration",
+        "HRC1.contractShapes",
+        "CF.HRC1"
+      ],
+      "collateralWhy": {
+        "I1.afterConfiguration": "K10: K-IPC-01 was already certified at K7 (unrated lines at no retention): 409 IPC_INVALID_CERTIFICATION_STATE, HEAD's today, which fails under the decided rule.",
+        "HRC1.contractShapes": "K-IPC-01's claimed line after certification is { null, null }, not { 10, contract }.",
+        "CF.HRC1": "I1.certifyUnconfigured reads today: CONFIRMED / PARTIAL, not REJECTED (decided)."
+      },
+      "shifts": [],
+      "expectVerdict": "CAUGHT: I1.certifyUnconfigured PASS in the post-fix baseline, FAIL under the mutant",
+      "expect": "K7 (P-11b order: project default 5 set, K-IPC-01 submitted, default unset): the PM certifies the unconfigured K-IPC-01: 200, certified, retention 0.00, net 40,000.00 instead of 409 IPC_RETENTION_NOT_CONFIGURED with nothing settled: I1.certifyUnconfigured FAIL (today). Collateral: I1.afterConfiguration, HRC1.contractShapes, CF.HRC1. The submission refusal (M-RET-s's guard) is intact: I1.submitUnconfigured PASS.",
+      "mutatedAnswer": "K7: 200 certified, retention 0.00, net 40,000.00",
+      "storedDefect": "on K only: a certificate certified without retention (archived with K)",
+      "unitCatcher": "UM-RET (U-3)"
+    },
+    {
+      "name": "M-RET-s the submission refusal dropped (P-11b)",
+      "guard": "the HR-C1 fix's refusal at submission (fix copy ipc.service.js :1273-1276, P-11b, adopted by PREP4-ADJUDICATION A I-1)",
+      "e6": "variant of guard 1 (post-fix; run, not tallied)",
+      "requires": "the HR-C1 fix commit (HRC1-FIX-PLAN.md s4 as adjudicated after its Codex plan review), FIXES['HR-C1'] set in the proof, the proof edits that land with it (I1.submitUnconfigured and HRC1.contractShapes: 150 -> 152 checks, PREP4-ADJUDICATION A I-1, I-2; the K5-K10 texts for P-11b), the unmutated full run exiting 0 on that code (results/cert3/wp4-commercial-proof.baseline.json). Re-derive from / to on the real fix diff first (mutsyntax-wp4.js --post-fix).",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "    await assertRetentionConfigured({ tx, projectId, period });",
+      "to": "    await retentionBasisFor({ tx, projectId });",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1276
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.retentionDefaultGuard"
+      ],
+      "catchers": [
+        "I1.submitUnconfigured"
+      ],
+      "collateral": [
+        "CF.HRC1"
+      ],
+      "collateralWhy": {
+        "CF.HRC1": "only if the post-fix CF.HRC1 takes I1.submitUnconfigured as an input (the fix commit's proof edit decides)."
+      },
+      "shifts": [],
+      "expectVerdict": "CAUGHT: I1.submitUnconfigured PASS in the post-fix baseline, FAIL under the mutant",
+      "expect": "K5: the QS submits K-IPC-01 with an unconfigured claimed line: 200 submitted instead of 409 IPC_RETENTION_NOT_CONFIGURED with K-IPC-01 a draft: I1.submitUnconfigured FAIL. K7's second submit then answers 409 IPC_INVALID_SUBMISSION_STATE (recorded, fix plan s8.2); the certification refusal still holds: I1.certifyUnconfigured PASS. If the post-fix proof need()s K7's submit the run ends exit 1 with the catcher already FAIL (counts: the WP-1 C1 / I1 precedent).",
+      "mutatedAnswer": "K5: 200 submitted with an unconfigured claimed line",
+      "storedDefect": "none beyond K",
+      "unitCatcher": "UM-RET-s (U-6)"
+    },
+    {
+      "name": "M-RET-l the contract rate never read (L114 put back)",
+      "guard": "the HR-C1 fix's resolution order (retentionBasisFor, fix copy ipc.service.js :68-83: the contract's configured rate first; L114 folded in, plan :726)",
+      "e6": "variant of guard 1 (post-fix; run, not tallied)",
+      "requires": "the HR-C1 fix commit (HRC1-FIX-PLAN.md s4 as adjudicated after its Codex plan review), FIXES['HR-C1'] set in the proof, the proof edits that land with it (I1.submitUnconfigured and HRC1.contractShapes: 150 -> 152 checks, PREP4-ADJUDICATION A I-1, I-2; the K5-K10 texts for P-11b), the unmutated full run exiting 0 on that code (results/cert3/wp4-commercial-proof.baseline.json). Re-derive from / to on the real fix diff first (mutsyntax-wp4.js --post-fix).",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "  if (primeContractService.retentionConfigured(contract)) {",
+      "to": "  if (false && primeContractService.retentionConfigured(contract)) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 73
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.retentionDefaultGuard",
+        "WP4.L114.newPeriodItemRate",
+        "WP4.I2.retention"
+      ],
+      "catchers": [
+        "L114.newPeriodItemRate",
+        "I2.contractRate"
+      ],
+      "collateral": [
+        "I1.explicitNoRetention",
+        "I1.afterConfiguration",
+        "HRC1.contractShapes",
+        "CF.HRC1",
+        "CF.DRAFTS1"
+      ],
+      "collateralWhy": {
+        "I1.explicitNoRetention": "K9: the contract's explicit 0 is ignored, K's project default is null: K-IPC-NR's claim is refused at submission (409) instead of certifying 10,000.00 / 0.00 / 10,000.00 (needs the proofRequirement: recorded, not need()ed).",
+        "I1.afterConfiguration": "K10: the contract's 10 is ignored: the certify of K-IPC-01 is refused again (409) instead of 4,000.00 / 36,000.00: wrong.",
+        "HRC1.contractShapes": "K2's line at creation reads { 7.5, project_default }, not { 10, contract }.",
+        "CF.HRC1": "L114.newPeriodItemRate and I2.contractRate read today / wrong.",
+        "CF.DRAFTS1": "K25: both E-001 drafts are refused at submission (unconfigured): the probe's own setup fails (R-SET, a section error, exit 1) and the classification reads TEST GAP. The catchers ran before it (K11, K2), so the run counts (WP-1 C1 / I1 precedent)."
+      },
+      "shifts": [],
+      "expectVerdict": "CAUGHT (exit 1 expected: K25's probe setup error after the catch): L114.newPeriodItemRate and I2.contractRate PASS in the post-fix baseline, FAIL under the mutant",
+      "expect": "K11: K-IPC-D opened after the contract is configured at 10: its D-001 item reads null (no contract rate, no project default) instead of 10: L114.newPeriodItemRate FAIL. K2: K2-IPC-01 certified at the project's 7.5: retention 3,000.00, net 37,000.00 instead of 4,000.00 / 36,000.00: I2.contractRate FAIL. Collateral as named; K.IPC.D stays green (D-001 claimed with an explicit 10, an item_override).",
+      "mutatedAnswer": "new lines take the project default only (HEAD's L114)",
+      "storedDefect": "none beyond K and K2",
+      "unitCatcher": "UM-RET-l (U-2b)"
+    },
+    {
+      "name": "M-RET-r certification no longer re-resolves the lines the QS did not rate",
+      "guard": "the HR-C1 fix's re-resolution at certification (P-10; fix copy ipc.service.js :1504-1519)",
+      "e6": "variant of guard 1 (post-fix; run, not tallied)",
+      "requires": "the HR-C1 fix commit (HRC1-FIX-PLAN.md s4 as adjudicated after its Codex plan review), FIXES['HR-C1'] set in the proof, the proof edits that land with it (I1.submitUnconfigured and HRC1.contractShapes: 150 -> 152 checks, PREP4-ADJUDICATION A I-1, I-2; the K5-K10 texts for P-11b), the unmutated full run exiting 0 on that code (results/cert3/wp4-commercial-proof.baseline.json). Re-derive from / to on the real fix diff first (mutsyntax-wp4.js --post-fix).",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "      if (item.retentionRateSource === ITEM_RATE_SOURCES.ITEM_OVERRIDE) continue;",
+      "to": "      if (true) continue;",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1508
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.retentionDefaultGuard",
+        "WP4.HRC1.afterConfiguration"
+      ],
+      "catchers": [
+        "I1.afterConfiguration"
+      ],
+      "collateral": [
+        "HRC1.contractShapes",
+        "CF.HRC1"
+      ],
+      "collateralWhy": {
+        "HRC1.contractShapes": "K-IPC-01's claimed line after certification keeps { null, null }.",
+        "CF.HRC1": "I1.afterConfiguration reads wrong (a gap)."
+      },
+      "shifts": [],
+      "expectVerdict": "CAUGHT: I1.afterConfiguration PASS in the post-fix baseline, FAIL under the mutant",
+      "expect": "K10: with the contract at 10 the PM certifies K-IPC-01, whose lines were drafted unrated: certified at retention 0.00, net 40,000.00 instead of 4,000.00 / 36,000.00: I1.afterConfiguration FAIL (wrong). Every later K or K2 period is opened after its contract is configured, so its lines carry the rate from creation: no other figure moves.",
+      "mutatedAnswer": "K10: certified, retention 0.00, net 40,000.00",
+      "storedDefect": "none beyond K",
+      "unitCatcher": "UM-RET-r (U-4)"
+    },
+    {
+      "name": "M-RET-o certification re-resolves an entered rate too (the override not kept)",
+      "guard": "the HR-C1 fix's item_override rule (P-8; fix copy ipc.service.js :1508)",
+      "e6": "variant of guard 1 (post-fix; run, not tallied)",
+      "requires": "the HR-C1 fix commit (HRC1-FIX-PLAN.md s4 as adjudicated after its Codex plan review), FIXES['HR-C1'] set in the proof, the proof edits that land with it (I1.submitUnconfigured and HRC1.contractShapes: 150 -> 152 checks, PREP4-ADJUDICATION A I-1, I-2; the K5-K10 texts for P-11b), the unmutated full run exiting 0 on that code (results/cert3/wp4-commercial-proof.baseline.json). Re-derive from / to on the real fix diff first (mutsyntax-wp4.js --post-fix). HRC1.contractShapes must exist (adopted, PREP4-ADJUDICATION A I-2): it is the only proof catcher.",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "      if (item.retentionRateSource === ITEM_RATE_SOURCES.ITEM_OVERRIDE) continue;",
+      "to": "      if (false) continue;",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1508
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.retentionDefaultGuard"
+      ],
+      "catchers": [
+        "HRC1.contractShapes"
+      ],
+      "collateral": [],
+      "shifts": [],
+      "expectVerdict": "CAUGHT: HRC1.contractShapes PASS in the post-fix baseline, FAIL under the mutant",
+      "expect": "K12: K-IPC-D's D-001 line, claimed with an explicit 10, is re-resolved at certification to the contract's 10 with source contract: the figures are the same (K's only override equals the contract's rate), so only HRC1.contractShapes ({ 10, item_override } expected) fails. K.IPC.D stays green.",
+      "mutatedAnswer": "an entered line rate replaced by the configured rate at certification",
+      "storedDefect": "none beyond K",
+      "unitCatcher": "UM-RET-o (U-4, the override line)"
+    },
+    {
+      "name": "M-RET-c the commitment's silent 5 put back",
+      "guard": "the HR-C1 fix's commitment refusal (P-12, WP4ADJ Q3; fix copy commitment.service.js :372-389)",
+      "e6": "variant of guard 1 (post-fix; run, not tallied)",
+      "requires": "the HR-C1 fix commit (HRC1-FIX-PLAN.md s4 as adjudicated after its Codex plan review), FIXES['HR-C1'] set in the proof, the proof edits that land with it (I1.submitUnconfigured and HRC1.contractShapes: 150 -> 152 checks, PREP4-ADJUDICATION A I-1, I-2; the K5-K10 texts for P-11b), the unmutated full run exiting 0 on that code (results/cert3/wp4-commercial-proof.baseline.json). Re-derive from / to on the real fix diff first (mutsyntax-wp4.js --post-fix).",
+      "file": "backend/src/services/commitment.service.js",
+      "from": "const projectRetentionForCommitment = (project) => project?.defaultRetentionRate ?? null;",
+      "to": "const projectRetentionForCommitment = (project) => project?.defaultRetentionRate ?? 5;",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 373
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.retentionDefaultGuard",
+        "WP4.C3.noDefaultNoRate"
+      ],
+      "catchers": [
+        "C3.noDefaultNoRate"
+      ],
+      "collateral": [
+        "CF.HRC1"
+      ],
+      "collateralWhy": {
+        "CF.HRC1": "C3.noDefaultNoRate reads today."
+      },
+      "shifts": [],
+      "expectVerdict": "CAUGHT: C3.noDefaultNoRate PASS in the post-fix baseline, FAIL under the mutant",
+      "expect": "K8: the QS POST /commitments K-SC-NR with no rate on K (no default): 201 draft at 5 instead of 400 COMMITMENT_RETENTION_REQUIRED: C3.noDefaultNoRate FAIL. Every other K commitment names its rate; C3.projectDefault (087-COM-B, explicit 7.5) stays green.",
+      "mutatedAnswer": "K8: 201 draft K-SC-NR at 5",
+      "storedDefect": "a draft commitment at 5 on K (archived with K)",
+      "unitCatcher": "UM-RET-c"
+    },
+    {
+      "name": "M-RET-d the contract's silent 5 put back at its first read",
+      "guard": "the HR-C1 fix's ensureContract (P-5; fix copy prime-contract.service.js :96-102)",
+      "e6": "variant of guard 1 (post-fix; run, not tallied)",
+      "requires": "the HR-C1 fix commit (HRC1-FIX-PLAN.md s4 as adjudicated after its Codex plan review), FIXES['HR-C1'] set in the proof, the proof edits that land with it (I1.submitUnconfigured and HRC1.contractShapes: 150 -> 152 checks, PREP4-ADJUDICATION A I-1, I-2; the K5-K10 texts for P-11b), the unmutated full run exiting 0 on that code (results/cert3/wp4-commercial-proof.baseline.json). Re-derive from / to on the real fix diff first (mutsyntax-wp4.js --post-fix).",
+      "file": "backend/src/services/prime-contract.service.js",
+      "from": "    ? { retentionRate: null, retentionRateSource: null }",
+      "to": "    ? { retentionRate: 5, retentionRateSource: RETENTION_SOURCES.PROJECT_DEFAULT }",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 100
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.retentionDefaultGuard",
+        "WP4.I1.silentContractRate"
+      ],
+      "catchers": [
+        "HRC1.contractFirstRead"
+      ],
+      "collateral": [
+        "I1.submitUnconfigured",
+        "I1.certifyUnconfigured",
+        "I1.afterConfiguration",
+        "HRC1.contractShapes",
+        "CF.HRC1"
+      ],
+      "collateralWhy": {
+        "I1.submitUnconfigured": "the contract now counts as configured at 5 (source project_default): K5's submit is accepted.",
+        "I1.certifyUnconfigured": "K7 certifies K-IPC-01 at 5: 2,000.00 / 38,000.00, wrong.",
+        "I1.afterConfiguration": "K10: K-IPC-01 already certified at 5: 409, wrong.",
+        "HRC1.contractShapes": "K-IPC-01's line reads { 5, contract }.",
+        "CF.HRC1": "its inputs read wrong / today."
+      },
+      "shifts": [],
+      "expectVerdict": "CAUGHT: HRC1.contractFirstRead PASS in the post-fix baseline, FAIL under the mutant",
+      "expect": "K5: the contract's first read on K (no project default) stores and serves retentionRate 5, source project_default, configured, instead of { null, null, retentionConfigured false }: HRC1.contractFirstRead FAIL. Collateral as named (exit 1 possible if the post-fix proof need()s K7's second submit; the catcher is recorded first at K5).",
+      "mutatedAnswer": "K5: GET /prime-contract retentionRate 5, configured",
+      "storedDefect": "on K only: a certificate certified at 5",
+      "unitCatcher": "UM-RET-d"
+    },
+    {
+      "name": "M-RET-p the project's silent 5 put back on display",
+      "guard": "the HR-C1 fix's project serializer (P-1; fix copy project.service.js :283-284)",
+      "e6": "variant of guard 1 (post-fix; run, not tallied)",
+      "requires": "the HR-C1 fix commit (HRC1-FIX-PLAN.md s4 as adjudicated after its Codex plan review), FIXES['HR-C1'] set in the proof, the proof edits that land with it (I1.submitUnconfigured and HRC1.contractShapes: 150 -> 152 checks, PREP4-ADJUDICATION A I-1, I-2; the K5-K10 texts for P-11b), the unmutated full run exiting 0 on that code (results/cert3/wp4-commercial-proof.baseline.json). Re-derive from / to on the real fix diff first (mutsyntax-wp4.js --post-fix).",
+      "file": "backend/src/services/project.service.js",
+      "from": "    defaultRetentionRate: commercial ? project.defaultRetentionRate ?? null : null,",
+      "to": "    defaultRetentionRate: commercial ? project.defaultRetentionRate ?? 5 : null,",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 284
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.retentionDefaultGuard",
+        "WP4.HRC1.contract.projectUnconfiguredShape"
+      ],
+      "catchers": [
+        "HRC1.projectDisplay"
+      ],
+      "collateral": [
+        "CF.HRC1"
+      ],
+      "collateralWhy": {
+        "CF.HRC1": "HRC1.projectDisplay reads today."
+      },
+      "shifts": [],
+      "expectVerdict": "CAUGHT: HRC1.projectDisplay PASS in the post-fix baseline, FAIL under the mutant",
+      "expect": "K5: GET /projects/K as the PM shows defaultRetentionRate 5 for the unset default: HRC1.projectDisplay FAIL. Display only: no figure moves (the services read the stored column).",
+      "mutatedAnswer": "K5: defaultRetentionRate 5 shown",
+      "storedDefect": "none",
+      "unitCatcher": "UM-RET-p"
+    }
+  ]
+}

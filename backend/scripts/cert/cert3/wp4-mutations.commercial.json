@@ -1,0 +1,568 @@
+{
+  "proof": "scripts/cert/cert3/wp4-commercial-proof.js",
+  "guards": "CERT-3 plan section 6.2 WP-4 (:1148): retention default; variation scope; the convert lock; one open pay application; the pay-application payment ceiling; the lock on approved COs. Plan section 4 WP-4 Mutations (:721). Answer book WP4.mutations.variationScopeMatch / convertLock / oneOpenPayApp / payAppPaymentCeiling / approvedCoLock (the WP-4 book patch, a9d64b8). Integration-owner adjudication C:/Temp/octapm-cert/scratch/wp4/WP4-ADJUDICATION.md Q8: M-VAR0 and M-CONV0 are the E6 entries for variation scope and the convert lock now (M-VAR1 only after an HR-C2 decision and fix, M-CONV1 after the atomic-convert fix); retention default (M-RET) waits for the HR-C1 fix and lives in wp4-fix-mutations.commercial.json. Variants M-OPENa, M-OPENb, M-LOCKa, M-LOCKb are run, not tallied. M-CEILa, M-CEILb and the variation allocation-leg mutant are equivalent for this proof (equivalent[] below, recorded with the reason, not run; book adjudication C1).",
+  "reconciled": "Read-only drafting 2026-10-10 against the committed proof scripts/cert/cert3/wp4-commercial-proof.js at 999dc9c (150 fixed checks + G.5xx; CATCHERS :638-646, COLLATERAL :647-653) and the product files at f599e67 (backend/src unchanged since). Every id in catchers, collateral, shifts[].id and unchanged, and every check id an expect names, is a CHECKS id; catchers equal the proof's CATCHERS table for M-VAR0, M-CONV0, M-OPEN, M-OPENa, M-OPENb, M-CEIL, M-LOCK, M-LOCKa, M-LOCKb (mutsyntax-wp4.js, report mutsyntax-wp4-report.json). Collateral and shifts are derived from the proof's code paths and the product code (WP4-RUN-PLAN.md section 7.5), not observed: nothing was run. Where this list names collateral the proof's descriptive COLLATERAL table does not (M-CONV0: KA.HRC12.archivedCoEvent; M-VAR0: KA.I3.limits.A130), the derivation is in collateralWhy / shifts.",
+  "runsOn": "HEAD, before or after the HR-C1 fix. The runner (mutate-multi.js) scores any non-zero exit CAUGHT; at HEAD the unmutated proof already exits 2 on the 11 decided HR-C1 reds, so the runner's column proves nothing. Evidence is wp4-mutation-evidence.js: every named catcher PASS in the baseline (the unmutated full run on the same tree: results/cert3/wp4-commercial-proof.baseline-head.json) and FAIL (ran and failed) under the mutant, the baseline's decided reds excluded, named collateral and shifts accepted, anything else flagged (WP4-RUN-PLAN.md section 7.3).",
+  "anchors": "anchors.head: count and line of each edit on the worktree (backend/src identical to f599e67; every file CRLF only, 0 bare LF, so a multi-line from carries \\r\\n). anchors.postFixSim: the same with the simulated HR-C1 fix copies overlaid (C:/Temp/octapm-cert/scratch/wp4/fixplan/work/fix/: ipc.service.js, prime-contract.service.js, commitment.service.js, project.service.js); every section 6.2 anchor survives the fix (HRC1-FIX-PLAN.md s4.10), only M-VAR0's line moves. A later edit of the same mutation is located after the earlier ones are applied, as the runner applies them. Re-count on the real tree before each run (mutsyntax-wp4.js --tree=<worktree>): the runner applies an edit only when its from occurs exactly once.",
+  "note": "Fields as in wp3-mutations.ev.json: catchers must read FAIL (ran and failed, not \"not run\") under the mutant and PASS in the baseline; collateral are other checks expected (or allowed) to go red, each with collateralWhy; shifts are non-red status changes expected under the mutant (a known answer's BLOCKED -> PASS, a confirm-first classification CONFIRMED -> PARTIAL); unchanged names checks the derivation says must stay as at baseline (reported, not judged); expectVerdict is the evidence checker's verdict, not the runner's. Run one id per invocation, quoted and with a trailing comma (\"--only=M-OPEN,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-OPEN would also run M-OPENa and M-OPENb; M-LOCK also M-LOCKa and M-LOCKb; M-RET also every M-RET-x), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists. Every mutant writes, if at all, only on the throwaway project K (archived by the proof's cleanup, which also runs after a section error); on 087-COM, 052-COM and 006-LITE every probe stays a read or a refusal before any write under every mutant of this list (derived per entry in safety).",
+  "equivalent": [
+    {
+      "name": "M-CEILa (EQUIVALENT, not run) the payment ceiling's pre-check alone removed",
+      "file": "backend/src/services/sub-pay-app.service.js",
+      "from": "  if (addMoney(alreadyPaid, amount) > net + EPSILON) {",
+      "to": "  if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1012
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1012
+          }
+        ]
+      },
+      "reason": "recordPayment holds the ceiling twice with the same test, addMoney(paid, amount) > net + EPSILON: the pre-check (sub-pay-app.service.js:1012 at f599e67) and the re-check under the row lock (:1021 FOR UPDATE, :1029). With only the pre-check removed, the locked re-check answers the same 400 SUB_PAY_APP_PAYMENT_EXCEEDS before the payment row is written, so P4.payOverNetPlus2 stays green: equivalent in effect for every API observation (book adjudication C1; WP4.mutations.payAppPaymentCeiling). No unit test tells them apart either (wp4-mutations.unit.json noUnitCatcher)."
+    },
+    {
+      "name": "M-CEILb (EQUIVALENT for this proof, not run) the payment ceiling's locked re-check alone removed",
+      "file": "backend/src/services/sub-pay-app.service.js",
+      "from": "    if (addMoney(alreadyPaidNow, amount) > netNow + EPSILON) {",
+      "to": "    if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1029
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1029
+          }
+        ]
+      },
+      "reason": "With only the locked re-check removed, the pre-check (:1012) refuses the proof's sequential +0.02 probe first with the same status and code: equivalent for P4.payOverNetPlus2 and every other proof step (no step pays one application concurrently). It is NOT equivalent in general: the re-check is the guard against a payment that lands between the pre-check and the lock (CX21-005). The mocked unit test 'CX21-005: a payment is checked against the payment rows under a lock, not the figure read before the transaction' simulates exactly that and catches it (wp4-mutations.unit.json UM-CEILb): a lead, not evidence (plan section 1.4). Recorded as a TEST GAP of the live proof (WP4-RUN-PLAN.md section 13.1)."
+    },
+    {
+      "name": "M-VAReq-alloc (EQUIVALENT on this data, not run) the variation allowance's allocation leg dropped",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "    (allocationId && row.allocationId === allocationId) ||",
+      "to": "    false ||",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 189
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 254
+          }
+        ]
+      },
+      "reason": "variationLinkNames matches a link row on its allocation OR its BOQ item (ipc.service.js:187-191 at f599e67), and a CO allocation link always stores its allocation's boqItemId (change-order.service.js:748, link.boqItemId || allocation?.boqItemId). With the allocation leg gone the BOQ-item leg still matches every linked allocation (A120 on 052-COM, K-A120 on K), so I3.limits.A120 stays 250 / 37,500.00: no proof or deep observation differs (book WP4.mutations.variationScopeMatch). It becomes the interesting mutant only after an HR-C2 fix removes the BOQ-item leg (then M-VAR1 is the entry)."
+    }
+  ],
+  "mutations": [
+    {
+      "name": "M-VAR0 no approved variation counted at all: variationLinkNames always false (the section 6.2 variation-scope entry at HEAD)",
+      "guard": "section 6.2 WP-4 'variation scope' (plan :1148, :697-698). What exists at HEAD: an approved CO allocation link raises its allocation's certification limit (getApprovedVariationAllowances / getCertificationLimit, ipc.service.js:183-269 at f599e67). The scope the plan wants (only the linked allocation, HR-C2) does not exist yet.",
+      "e6": "section 6.2 WP-4 guard 2 of 6 (variation scope; the HEAD entry, replaced by M-VAR1 once HR-C2 is decided and fixed, WP4ADJ Q8)",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "const variationLinkNames = (row, { allocationId, boqItemId }) =>",
+      "to": "const variationLinkNames = (row, { allocationId, boqItemId }) => false &&",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 187
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 252
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.variationScopeMatch",
+        "WP4.I3.A120LimitQuantity",
+        "WP4.I3.A120LimitAmount"
+      ],
+      "catchers": [
+        "I3.limits.A120"
+      ],
+      "collateral": [],
+      "shifts": [
+        {
+          "id": "KA.I3.limits.A130",
+          "baseline": "BLOCKED",
+          "mutant": "PASS",
+          "why": "052-COM A130's limit loses the leaked 50 m3: 600 / 90,000.00, the book's value (HR-C2 undecided: BLOCKED at baseline on today 650 / 97,500.00). A pass either way."
+        },
+        {
+          "id": "KA.I3.patchA130Qty650",
+          "baseline": "BLOCKED",
+          "mutant": "PASS",
+          "why": "K13: K-A130's limit is its bare 600 m3, so the PATCH to 650 answers 400 IPC_ALLOCATION_QTY_EXCEEDED, the book's value (baseline today 200). Named by the proof's COLLATERAL table (\"reads value (a pass)\")."
+        },
+        {
+          "id": "CF.HRC2",
+          "baseline": "CONFIRMED",
+          "mutant": "PARTIAL",
+          "why": "both known answers absent, the static scan (variationMatchesBoqItem) still present in the source text: PARTIAL, a pass for an undecided rule (proof COLLATERAL \"CF.HRC2 PARTIAL (a pass)\"). REJECTED is possible if the scan regex no longer matches the mutated declaration; also a pass."
+        }
+      ],
+      "unchanged": [
+        "I6.setupObstacle",
+        "CF.OVR1",
+        "I4.patchItemStatus",
+        "I4.patchAfterSubmit",
+        "K.IPC.D",
+        "I7.live",
+        "I10.live",
+        "IPC.itemsFromAllocations"
+      ],
+      "unchangedWhy": "I6.setupObstacle: 087-COM IPC-10 B-002/A130 qty 200 is checked against the limit first (updateIpcItem :954-964): 200 <= 600 m3 and cumulative 60,000.00 <= 90,000.00, then earned 25% of 90,000.00 = 22,500.00 < 60,000.00: the same 400 IPC_APPROVED_PROGRESS_EXCEEDED. CF.OVR1: IPC-09's live review still requires the PM override (A130 over earned 7,500.00 instead of 5,625.00, WP4.OVR1.review), so both refusals are sent and answer as at baseline, nothing written. I4.*: the state and status checks answer before any limit. The certified figures (I7, I10, K.IPC.D) are stored totals.",
+      "expectVerdict": "CAUGHT: I3.limits.A120 PASS in the baseline, FAIL under the mutant",
+      "expect": "052-COM IPC-01 (draft, read only, D2 section): the B-002/A120 item's certificationReview reads approvedLimitQuantity 200 and approvedLimitAmount 30,000.00 instead of 250 / 37,500.00 (CO-I3's approved link of 50 m3 / 7,500.00 no longer counted): I3.limits.A120 FAIL. Shifts KA.I3.limits.A130 and KA.I3.patchA130Qty650 BLOCKED -> PASS and CF.HRC2 CONFIRMED -> PARTIAL (passes). No other red; the 11 decided HR-C1 reds stay red at HEAD (excluded).",
+      "mutatedAnswer": "052-COM A120 limit 200 m3 / 30,000.00; K13 PATCH A130 650 refused 400 IPC_ALLOCATION_QTY_EXCEEDED",
+      "storedDefect": "none: read paths; K13's PATCH is refused under the mutant (writes nothing)",
+      "safety": "Reads only on 052-COM (I3, D2). On 087-COM the IPC-10 PATCH and the IPC-09 certifies stay refused (unchangedWhy). No deep write."
+    },
+    {
+      "name": "M-CONV0 the sequential converted check dropped (the section 6.2 convert-lock entry at HEAD)",
+      "guard": "section 6.2 WP-4 'the convert lock' (plan :1148, :683). What exists at HEAD: convertToChangeOrder refuses a converted event before any write (change-event.service.js:804 at f599e67), outside a transaction; the atomic, idempotent conversion is the section 5 defect fix (:1109), M-CONV1's once it lands.",
+      "e6": "section 6.2 WP-4 guard 3 of 6 (the convert lock; the HEAD entry, replaced by M-CONV1 once the atomic convert lands, WP4ADJ Q8)",
+      "file": "backend/src/services/change-event.service.js",
+      "from": "  if (event.status === STATUS.CONVERTED || event.changeOrderId) throw new HttpError(409, \"CHANGE_EVENT_CONVERTED\", `${event.ref} is already ${event.changeOrder?.ref || \"converted\"}`);",
+      "to": "  if (false) throw new HttpError(409, \"CHANGE_EVENT_CONVERTED\", `${event.ref} is already ${event.changeOrder?.ref || \"converted\"}`);",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 804
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 804
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.convertLock",
+        "WP4.E1.convertAgain"
+      ],
+      "catchers": [
+        "K.E1.convertAgain"
+      ],
+      "collateral": [
+        "E1.convertAgain",
+        "KA.HRC12.archivedCoEvent",
+        "KA.E2.concurrent",
+        "KA.E2.pendingDelta"
+      ],
+      "collateralWhy": {
+        "E1.convertAgain": "K17: K-E2, converted by the race, is converted a sixth time: 201 and a new draft CO instead of 409 CHANGE_EVENT_CONVERTED (named by the proof's COLLATERAL table; the reason it was moved off 087-COM's E1, meta.deviations).",
+        "KA.HRC12.archivedCoEvent": "K19: after K-ARC's CO is archived, the re-convert answers 201 (a new CO) instead of today's 409 CHANGE_EVENT_CONVERTED, and the event read before it is converted, not the value priced: neither value nor today, wrong, FAIL. Not in the proof's COLLATERAL table: derived here from kEvents (:1849-1864) and convertToChangeOrder (:802-851).",
+        "KA.E2.concurrent": "named by the proof's COLLATERAL table: the five concurrent converts all succeed (k = 5), today, BLOCKED as at baseline; red only if the register disagrees with the answers (wrong). Racy at baseline (a single success reads value).",
+        "KA.E2.pendingDelta": "as KA.E2.concurrent: k x 9,500.00 in the register (today, BLOCKED); red only if wrong."
+      },
+      "shifts": [
+        {
+          "id": "CF.HRC12",
+          "baseline": "CONFIRMED",
+          "mutant": "PARTIAL",
+          "why": "KA.HRC12.archivedCoEvent reads wrong, a gap for the classification: PARTIAL, still a pass (HR-C12 undecided)."
+        }
+      ],
+      "unchanged": [
+        "KA.E2.midwayOrphans",
+        "CF.convertAtomic",
+        "KA.HRC12.secondAccept",
+        "KA.HRC12.dropsBudgetLines",
+        "K.E1.converted",
+        "E1.voidConverted",
+        "E1.patchConverted",
+        "E1.deleteWithRfqs",
+        "RFI.convertTwice"
+      ],
+      "unchangedWhy": "K18 converts K-E3 for the first time (409 COMMITMENT_LOCKED midway, one orphan, event priced: today). CF.convertAtomic stays CONFIRMED (its scan reads the missing transaction, not the removed check). 087-COM's E1 is only PATCHed (:536) and voided (:867) and its pricing event deleted (:644): other guards, untouched. RFI.convertTwice is the RFI service's own guard.",
+      "expectVerdict": "CAUGHT: K.E1.convertAgain PASS in the baseline, FAIL under the mutant",
+      "expect": "K16: the QS converts the converted K-E1 again: 201 and a second draft CO of 9,500.00 instead of 409 CHANGE_EVENT_CONVERTED with the register unchanged: K.E1.convertAgain FAIL. Collateral FAIL: E1.convertAgain (K-E2's sixth convert), KA.HRC12.archivedCoEvent (wrong). KA.E2.concurrent / pendingDelta stay BLOCKED (today) unless the register shape is wrong. CF.HRC12 PARTIAL. Nothing else red.",
+      "mutatedAnswer": "a converted event converts again (201), each time a new draft prime CO",
+      "storedDefect": "on K only: a second CO from K-E1, a sixth from K-E2, a second from K-ARC; K archived by the cleanup",
+      "safety": "No 087-COM or 052-COM event is converted by the proof (E1.convertAgain runs on K-E2, WP4ADJ B1); RFI.convertTwice uses the RFI path. No deep write."
+    },
+    {
+      "name": "M-OPEN the one-open-application rule dropped at both sites (raise and back to draft)",
+      "guard": "section 6.2 WP-4 'one open pay application' (plan :1148, :677, :709): createPayApp's open check (sub-pay-app.service.js:451-456 at f599e67) and transition's check when an application comes back to draft (:822-832).",
+      "e6": "section 6.2 WP-4 guard 4 of 6 (one open pay application)",
+      "file": "backend/src/services/sub-pay-app.service.js",
+      "from": "    const open = await tx.subPayApp.findFirst({ where: { commitmentId, status: { in: [STATUS.DRAFT, STATUS.SUBMITTED, STATUS.UNDER_REVIEW] } }, select: { ref: true } });",
+      "to": "    const open = null;",
+      "also": [
+        {
+          "file": "backend/src/services/sub-pay-app.service.js",
+          "from": "      const [open] = await tx.$queryRaw`SELECT ref FROM \"SubPayApp\" WHERE \"commitmentId\" = ${existing.commitmentId} AND id <> ${payAppId} AND status IN ('draft', 'submitted', 'under_review') LIMIT 1`;",
+          "to": "      const open = null;"
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 451
+          },
+          {
+            "count": 1,
+            "line": 827
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 451
+          },
+          {
+            "count": 1,
+            "line": 827
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.oneOpenPayApp",
+        "WP4.P1.secondOpen",
+        "WP4.P1.reopenWhileOpen"
+      ],
+      "catchers": [
+        "P1.secondOpen",
+        "P1.reopenWhileOpen"
+      ],
+      "collateral": [],
+      "shifts": [],
+      "unchanged": [
+        "P1.submitEmpty",
+        "P2.exceedsSchedule",
+        "P2.overClaim",
+        "P4.payOverNetPlus2",
+        "KA.P4.payOverNet",
+        "P5.complianceMissing",
+        "P5.complianceOverride",
+        "P7.rejectedReopen",
+        "C5.closeWithRetentionHeld",
+        "P3.qsRevoke",
+        "P3.revokeWithoutReason",
+        "P4.revokeAfterPayment"
+      ],
+      "unchangedWhy": "K22: PA-K1b is created (201) and voided at once (restoration), so PA-K1's lane runs as at baseline. K23: PA-K3a is reopened (200) and voided at once (restoration); PA-K3b's claim is within the progress cap with less previous, its compliance gate untouched; PA-K3c's reopen from rejected finds no other open application, as at baseline. 087-COM PA-03's two probes are refused before the transaction (QS 403 at :777, PM without a reason 400 at :778); 052-COM PA-01's reopen is refused by assertRevocable's paid check (:778) before it (WP5ADJ Q5).",
+      "expectVerdict": "CAUGHT: P1.secondOpen and P1.reopenWhileOpen PASS in the baseline, FAIL under the mutant",
+      "expect": "K22: a second POST /pay-apps on K-SC1 while PA-K1 is a draft answers 201 (PA-K1b created, then voided by the proof's restoration, a LEAD line): P1.secondOpen FAIL. K23: the PM reopens the approved, unpaid PA-K3a while PA-K3b is a draft: 200, PA-K3a back to draft (then voided, a LEAD line): P1.reopenWhileOpen FAIL. No collateral (proof COLLATERAL for M-OPENa / M-OPENb: none).",
+      "mutatedAnswer": "two open applications on one commitment; an approved application reopened beside an open one",
+      "storedDefect": "on K only: PA-K1b and PA-K3a voided by the restorations (observations.restorations); PA-K3a's cost reversal on K's ledger",
+      "safety": "Every write on K. 087-COM PA-03 and 052-COM PA-01 refused before the removed checks (WP5ADJ Q5). No deep write."
+    },
+    {
+      "name": "M-OPENa the raise site only (variant of M-OPEN)",
+      "guard": "section 6.2 WP-4 'one open pay application', createPayApp (sub-pay-app.service.js:451-456)",
+      "e6": "variant of guard 4 (run, not tallied)",
+      "file": "backend/src/services/sub-pay-app.service.js",
+      "from": "    const open = await tx.subPayApp.findFirst({ where: { commitmentId, status: { in: [STATUS.DRAFT, STATUS.SUBMITTED, STATUS.UNDER_REVIEW] } }, select: { ref: true } });",
+      "to": "    const open = null;",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 451
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 451
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.oneOpenPayApp",
+        "WP4.P1.secondOpen"
+      ],
+      "catchers": [
+        "P1.secondOpen"
+      ],
+      "collateral": [],
+      "shifts": [],
+      "unchanged": [
+        "P1.reopenWhileOpen",
+        "P7.rejectedReopen"
+      ],
+      "unchangedWhy": "the back-to-draft check still refuses PA-K3a's reopen (409 SUB_PAY_APP_OPEN_EXISTS, PA-K3b open).",
+      "expectVerdict": "CAUGHT: P1.secondOpen PASS in the baseline, FAIL under the mutant",
+      "expect": "K22: PA-K1b created (201) and voided at once: P1.secondOpen FAIL. Nothing else red.",
+      "mutatedAnswer": "a second open application raised on K-SC1",
+      "storedDefect": "on K only: PA-K1b voided by the restoration",
+      "safety": "as M-OPEN"
+    },
+    {
+      "name": "M-OPENb the back-to-draft site only (variant of M-OPEN)",
+      "guard": "section 6.2 WP-4 'one open pay application', transition to draft (sub-pay-app.service.js:822-832)",
+      "e6": "variant of guard 4 (run, not tallied)",
+      "file": "backend/src/services/sub-pay-app.service.js",
+      "from": "      const [open] = await tx.$queryRaw`SELECT ref FROM \"SubPayApp\" WHERE \"commitmentId\" = ${existing.commitmentId} AND id <> ${payAppId} AND status IN ('draft', 'submitted', 'under_review') LIMIT 1`;",
+      "to": "      const open = null;",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 827
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 827
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.oneOpenPayApp",
+        "WP4.P1.reopenWhileOpen"
+      ],
+      "catchers": [
+        "P1.reopenWhileOpen"
+      ],
+      "collateral": [],
+      "shifts": [],
+      "unchanged": [
+        "P1.secondOpen",
+        "P7.rejectedReopen"
+      ],
+      "unchangedWhy": "the raise check still refuses PA-K1b (409 SUB_PAY_APP_OPEN_EXISTS); PA-K3c's reopen from rejected finds no other open application, as at baseline.",
+      "expectVerdict": "CAUGHT: P1.reopenWhileOpen PASS in the baseline, FAIL under the mutant",
+      "expect": "K23: PA-K3a reopened to draft (200) and voided at once: P1.reopenWhileOpen FAIL. Nothing else red.",
+      "mutatedAnswer": "an approved application reopened while another is open",
+      "storedDefect": "on K only: PA-K3a voided by the restoration, its cost reversed on K's ledger",
+      "safety": "as M-OPEN"
+    },
+    {
+      "name": "M-CEIL the payment ceiling removed at both checks (the pre-check and the re-check under the row lock)",
+      "guard": "section 6.2 WP-4 'the pay-application payment ceiling' (plan :1148, :712): recordPayment, sub-pay-app.service.js:1012-1016 and :1029-1033 at f599e67, both addMoney(paid, amount) > net + EPSILON (EPSILON 0.01, :27).",
+      "e6": "section 6.2 WP-4 guard 5 of 6 (the payment ceiling)",
+      "file": "backend/src/services/sub-pay-app.service.js",
+      "from": "  if (addMoney(alreadyPaid, amount) > net + EPSILON) {",
+      "to": "  if (false) {",
+      "also": [
+        {
+          "file": "backend/src/services/sub-pay-app.service.js",
+          "from": "    if (addMoney(alreadyPaidNow, amount) > netNow + EPSILON) {",
+          "to": "    if (false) {"
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1012
+          },
+          {
+            "count": 1,
+            "line": 1029
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1012
+          },
+          {
+            "count": 1,
+            "line": 1029
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.payAppPaymentCeiling",
+        "WP4.P4.payOverNetPlus2"
+      ],
+      "catchers": [
+        "P4.payOverNetPlus2"
+      ],
+      "collateral": [
+        "KA.P4.payOverNet",
+        "CF.C1TOL"
+      ],
+      "collateralWhy": {
+        "KA.P4.payOverNet": "K22: PA-K1 is already paid 45,000.02 (status paid, and COUNTED includes paid, :25), so the +0.01 payment is accepted too: paidAmount 90,000.03, neither the value (400, nothing paid) nor today (201, paidAmount 45,000.01): wrong, FAIL (proof COLLATERAL: \"wrong (45,000.02 already paid)\").",
+        "CF.C1TOL": "its only input reads wrong, a gap: TEST GAP, which fails for a reported item (proof COLLATERAL: \"CF.C1TOL TEST GAP\")."
+      },
+      "shifts": [],
+      "unchanged": [
+        "C5.closeWithRetentionHeld",
+        "KA.CASH.CF4.concurrentRebuilds",
+        "KA.CASH.CF3.deleteSystemRow",
+        "KA.CASH.CF3.period13"
+      ],
+      "unchangedWhy": "PA-K5's payment equals its net (K24); the K27 cash-flow probes compare K's own rebuilds with each other.",
+      "expectVerdict": "CAUGHT: P4.payOverNetPlus2 PASS in the baseline, FAIL under the mutant",
+      "expect": "K22: finance pays 45,000.02 on PA-K1 (net 45,000.00, nothing paid): 201 and paidAmount 45,000.02 instead of 400 SUB_PAY_APP_PAYMENT_EXCEEDS with nothing paid: P4.payOverNetPlus2 FAIL. Collateral FAIL: KA.P4.payOverNet (wrong), CF.C1TOL (TEST GAP). Nothing else red.",
+      "mutatedAnswer": "a payment over the approved net accepted (twice)",
+      "storedDefect": "on K only: PA-K1 over-paid (90,000.03 against 45,000.00) and its outflow in K's cash flow; K archived by the cleanup",
+      "safety": "The proof pays only K's applications (K22, K24); 087-COM's and 052-COM's payment probes are IPC payments (ipc.service.js), not this path. No deep write."
+    },
+    {
+      "name": "M-LOCK the lock on approved COs removed at both sites (the PATCH lock and the archive lock)",
+      "guard": "section 6.2 WP-4 'the lock on approved COs' (plan :1148, :674, :685): assertApprovedRecordLocked (change-order.service.js:465-483, APPROVAL_LOCKED_FIELDS :91-109 at f599e67) and deleteChangeOrder's approved check (:1658-1664).",
+      "e6": "section 6.2 WP-4 guard 6 of 6 (the lock on approved COs)",
+      "file": "backend/src/services/change-order.service.js",
+      "from": "    existing.status !== CHANGE_ORDER_STATUSES.APPROVED ||",
+      "to": "    true ||",
+      "also": [
+        {
+          "file": "backend/src/services/change-order.service.js",
+          "from": "  if (existing.status === CHANGE_ORDER_STATUSES.APPROVED) {\r\n    throw new HttpError(\r\n      409,\r\n      \"CHANGE_ORDER_APPROVED_LOCKED\",\r\n      \"Approved change orders cannot be archived after contract budget revision sync\",",
+          "to": "  if (false) {\r\n    throw new HttpError(\r\n      409,\r\n      \"CHANGE_ORDER_APPROVED_LOCKED\",\r\n      \"Approved change orders cannot be archived after contract budget revision sync\","
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 471
+          },
+          {
+            "count": 1,
+            "line": 1658
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 471
+          },
+          {
+            "count": 1,
+            "line": 1658
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.approvedCoLock",
+        "WP4.E3.patchApproved",
+        "WP4.E3.archiveApproved"
+      ],
+      "catchers": [
+        "E3.patchApproved",
+        "E3.archiveApproved"
+      ],
+      "collateral": [],
+      "shifts": [],
+      "unchanged": [
+        "E3.archivePendingDelta",
+        "E3.createWithStatusPending",
+        "E3.submitWithoutSummaries",
+        "E3.submitWithoutDocument",
+        "E3.rejectWithoutReason",
+        "E3.reopenRejected",
+        "E4.splitMismatch",
+        "E6.deductiveCo",
+        "KA.I3.patchA130Qty650"
+      ],
+      "unchangedWhy": "K14 runs after K13 (the A130 PATCH reads K-CO-I3's link first). E3.archivePendingDelta measures the pending total across K-CO-40's own archive; archiving the approved K-CO-I3 at K14 moves only the approved total. The K15 refusals answer on their own COs. If the edit of an approved CO's value answers a 5xx on its normal update path, G.5xx turns red: not named, so the checker flags it for classification.",
+      "expectVerdict": "CAUGHT: E3.patchApproved and E3.archiveApproved PASS in the baseline, FAIL under the mutant",
+      "expect": "K14: the QS PATCH the approved K-CO-I3 {value 8000}: no longer 409 CHANGE_ORDER_APPROVED_LOCKED (the update goes through): E3.patchApproved FAIL; the PM DELETE K-CO-I3: archived instead of 409: E3.archiveApproved FAIL. Nothing else red.",
+      "mutatedAnswer": "an approved CO edited, then archived",
+      "storedDefect": "on K only: K-CO-I3 edited and archived; K's approved changes total moves; K archived by the cleanup",
+      "safety": "No deep CO is PATCHed or archived by the proof (E5 reads 087-COM's register only). No deep write."
+    },
+    {
+      "name": "M-LOCKa the PATCH lock only (variant of M-LOCK)",
+      "guard": "section 6.2 WP-4 'the lock on approved COs', assertApprovedRecordLocked (change-order.service.js:465-483)",
+      "e6": "variant of guard 6 (run, not tallied)",
+      "file": "backend/src/services/change-order.service.js",
+      "from": "    existing.status !== CHANGE_ORDER_STATUSES.APPROVED ||",
+      "to": "    true ||",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 471
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 471
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.approvedCoLock",
+        "WP4.E3.patchApproved"
+      ],
+      "catchers": [
+        "E3.patchApproved"
+      ],
+      "collateral": [],
+      "shifts": [],
+      "unchanged": [
+        "E3.archiveApproved"
+      ],
+      "unchangedWhy": "the archive lock still refuses K-CO-I3 (409 CHANGE_ORDER_APPROVED_LOCKED).",
+      "expectVerdict": "CAUGHT: E3.patchApproved PASS in the baseline, FAIL under the mutant",
+      "expect": "K14: K-CO-I3's value PATCH goes through: E3.patchApproved FAIL; the archive is still refused. Nothing else red.",
+      "mutatedAnswer": "an approved CO edited",
+      "storedDefect": "on K only",
+      "safety": "as M-LOCK"
+    },
+    {
+      "name": "M-LOCKb the archive lock only (variant of M-LOCK)",
+      "guard": "section 6.2 WP-4 'the lock on approved COs', deleteChangeOrder (change-order.service.js:1658-1664)",
+      "e6": "variant of guard 6 (run, not tallied)",
+      "file": "backend/src/services/change-order.service.js",
+      "from": "  if (existing.status === CHANGE_ORDER_STATUSES.APPROVED) {\r\n    throw new HttpError(\r\n      409,\r\n      \"CHANGE_ORDER_APPROVED_LOCKED\",\r\n      \"Approved change orders cannot be archived after contract budget revision sync\",",
+      "to": "  if (false) {\r\n    throw new HttpError(\r\n      409,\r\n      \"CHANGE_ORDER_APPROVED_LOCKED\",\r\n      \"Approved change orders cannot be archived after contract budget revision sync\",",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1658
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1658
+          }
+        ]
+      },
+      "bookKeys": [
+        "WP4.mutations.approvedCoLock",
+        "WP4.E3.archiveApproved"
+      ],
+      "catchers": [
+        "E3.archiveApproved"
+      ],
+      "collateral": [],
+      "shifts": [],
+      "unchanged": [
+        "E3.patchApproved"
+      ],
+      "unchangedWhy": "the PATCH lock still refuses the value edit (409 CHANGE_ORDER_APPROVED_LOCKED).",
+      "expectVerdict": "CAUGHT: E3.archiveApproved PASS in the baseline, FAIL under the mutant",
+      "expect": "K14: the PM archives the approved K-CO-I3 (200, archivedAt set): E3.archiveApproved FAIL. Nothing else red.",
+      "mutatedAnswer": "an approved CO archived",
+      "storedDefect": "on K only",
+      "safety": "as M-LOCK"
+    }
+  ]
+}

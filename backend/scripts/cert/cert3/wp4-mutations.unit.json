@@ -1,0 +1,233 @@
+{
+  "note": "WP-4 unit side (mutate-multi.js list key 'wp4-unit', proof null: jest --runTestsByPath the named suite under the proof lock, no database). Mocked-Prisma suites are not certification evidence (plan section 1.4): these entries only show that the unit gate also turns red beside the live catch. They run on the tree the live list runs on (HEAD, or the HR-C1 fix tree: none of these suites is rewritten by the HR-C1 fix except ipc-allocation-impact.test.js, whose variation cases :593-866 and :1060-1087 the fix leaves alone, HRC1-FIX-PLAN.md s7). Each entry's tests are the titles that must fail; every title was checked to exist in its suite at HEAD (mutsyntax-wp4.js). The unmutated suites must pass first (WP4-RUN-PLAN.md section 7.4). Run one id per invocation, quoted and with a trailing comma (\"--only=M-OPEN,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-OPEN would also run M-OPENa and M-OPENb; M-LOCK also M-LOCKa and M-LOCKb; M-RET also every M-RET-x), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists.",
+  "noUnitCatcher": [
+    "M-LOCK, M-LOCKa, M-LOCKb (approved-CO lock): no test asserts CHANGE_ORDER_APPROVED_LOCKED. CX21-496 and CX21-512 (change-order.service.test.js) answer CHANGE_ORDER_CHANGED from the status re-read under the lock, which neither edit touches. Live catchers E3.patchApproved / E3.archiveApproved only.",
+    "M-CEILa (pre-check only): unit-equivalent as well: 'payments cannot exceed the net approved and paid in full closes the application' is refused by the locked re-check with the same code and remaining 7,000; CX21-005 by the re-check too.",
+    "M-VAReq-alloc: equivalent on the mocked rows as on the data (every mocked link row carries the allocation and its boqItemId), so no case tells it apart; not run."
+  ],
+  "mutations": [
+    {
+      "name": "UM-VAR0 no approved variation counted (unit side of M-VAR0)",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "const variationLinkNames = (row, { allocationId, boqItemId }) =>",
+      "to": "const variationLinkNames = (row, { allocationId, boqItemId }) => false &&",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 187
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 252
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/ipc-allocation-impact.test.js",
+      "live": "M-VAR0 (wp4-mutations.commercial.json): I3.limits.A120",
+      "tests": [
+        "includes approved variation allowance when enforcing IPC item limits",
+        "allows only the partially allocated approved variation allowance",
+        "answers every allocation/BOQ pair of the approved-variation rule from one query"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "The two updateIpcItem cases reject with 400 IPC_ALLOCATION_AMOUNT_EXCEEDED (cumulative 1,100.00 and 1,050.00 against the bare 1,000.00 allocation, the mocked approved link no longer counted) where they expect the update; the pair case gets every allowance 0 where it expects { quantity: 7, amount: 70 } x3 and { 3, 30 }. The two it.each 'ignores %s variation allowance' cases still pass (they expect the refusal)."
+    },
+    {
+      "name": "UM-CONV0 the converted check dropped (unit side of M-CONV0)",
+      "file": "backend/src/services/change-event.service.js",
+      "from": "  if (event.status === STATUS.CONVERTED || event.changeOrderId) throw new HttpError(409, \"CHANGE_EVENT_CONVERTED\", `${event.ref} is already ${event.changeOrder?.ref || \"converted\"}`);",
+      "to": "  if (false) throw new HttpError(409, \"CHANGE_EVENT_CONVERTED\", `${event.ref} is already ${event.changeOrder?.ref || \"converted\"}`);",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 804
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 804
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/change-event.service.test.js",
+      "live": "M-CONV0 (wp4-mutations.commercial.json): K.E1.convertAgain",
+      "tests": [
+        "accepts a quote onto the lines, drafts a commitment change order, converts to a prime change order and links it"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "The second convertToChangeOrder of the converted event (:242) resolves with a second prime CO from the mocked change-order service instead of rejecting with CHANGE_EVENT_CONVERTED: the .rejects assertion fails."
+    },
+    {
+      "name": "UM-OPEN the one-open rule dropped at both sites (unit side of M-OPEN)",
+      "file": "backend/src/services/sub-pay-app.service.js",
+      "from": "    const open = await tx.subPayApp.findFirst({ where: { commitmentId, status: { in: [STATUS.DRAFT, STATUS.SUBMITTED, STATUS.UNDER_REVIEW] } }, select: { ref: true } });",
+      "to": "    const open = null;",
+      "also": [
+        {
+          "file": "backend/src/services/sub-pay-app.service.js",
+          "from": "      const [open] = await tx.$queryRaw`SELECT ref FROM \"SubPayApp\" WHERE \"commitmentId\" = ${existing.commitmentId} AND id <> ${payAppId} AND status IN ('draft', 'submitted', 'under_review') LIMIT 1`;",
+          "to": "      const open = null;"
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 451
+          },
+          {
+            "count": 1,
+            "line": 827
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 451
+          },
+          {
+            "count": 1,
+            "line": 827
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/sub-pay-app.service.test.js",
+      "live": "M-OPEN (wp4-mutations.commercial.json): P1.secondOpen, P1.reopenWhileOpen",
+      "tests": [
+        "seeds a numbered application from the executed commitment with previous claims",
+        "CX21-601: a rejected application cannot come back to draft while another application is open on the commitment"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "createPayApp with an open application mocked (:217-218) resolves instead of rejecting SUB_PAY_APP_OPEN_EXISTS / DUPLICATE_PERIOD; reopenPayApp of a rejected application with an open one mocked under the lock (:537-538) resolves instead of rejecting. Both are .rejects assertions on a resolved promise, not crashes. Later cases may fail as well (a once-value or a spy left behind by the aborted cases): extra fails, reported, not counted."
+    },
+    {
+      "name": "UM-OPENa the raise site only (unit side of M-OPENa)",
+      "file": "backend/src/services/sub-pay-app.service.js",
+      "from": "    const open = await tx.subPayApp.findFirst({ where: { commitmentId, status: { in: [STATUS.DRAFT, STATUS.SUBMITTED, STATUS.UNDER_REVIEW] } }, select: { ref: true } });",
+      "to": "    const open = null;",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 451
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 451
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/sub-pay-app.service.test.js",
+      "live": "M-OPENa: P1.secondOpen",
+      "tests": [
+        "seeds a numbered application from the executed commitment with previous claims"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "createPayApp at :218 resolves instead of rejecting SUB_PAY_APP_OPEN_EXISTS (the open check never calls findFirst, so the queued { ref } is not read): assertion failure."
+    },
+    {
+      "name": "UM-OPENb the back-to-draft site only (unit side of M-OPENb)",
+      "file": "backend/src/services/sub-pay-app.service.js",
+      "from": "      const [open] = await tx.$queryRaw`SELECT ref FROM \"SubPayApp\" WHERE \"commitmentId\" = ${existing.commitmentId} AND id <> ${payAppId} AND status IN ('draft', 'submitted', 'under_review') LIMIT 1`;",
+      "to": "      const open = null;",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 827
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 827
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/sub-pay-app.service.test.js",
+      "live": "M-OPENb: P1.reopenWhileOpen",
+      "tests": [
+        "CX21-601: a rejected application cannot come back to draft while another application is open on the commitment"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "reopenPayApp at :538 resolves (no open-application query under the lock) instead of rejecting SUB_PAY_APP_OPEN_EXISTS: assertion failure."
+    },
+    {
+      "name": "UM-CEIL the payment ceiling removed at both checks (unit side of M-CEIL)",
+      "file": "backend/src/services/sub-pay-app.service.js",
+      "from": "  if (addMoney(alreadyPaid, amount) > net + EPSILON) {",
+      "to": "  if (false) {",
+      "also": [
+        {
+          "file": "backend/src/services/sub-pay-app.service.js",
+          "from": "    if (addMoney(alreadyPaidNow, amount) > netNow + EPSILON) {",
+          "to": "    if (false) {"
+        }
+      ],
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1012
+          },
+          {
+            "count": 1,
+            "line": 1029
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1012
+          },
+          {
+            "count": 1,
+            "line": 1029
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/sub-pay-app.service.test.js",
+      "live": "M-CEIL: P4.payOverNetPlus2",
+      "tests": [
+        "payments cannot exceed the net approved and paid in full closes the application",
+        "CX21-005: a payment is checked against the payment rows under a lock, not the figure read before the transaction"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "recordPayment of 8,000.00 against 7,000.00 remaining (:243) and of 7,000.00 with 26,000.00 already in the payment rows (:409) both resolve instead of rejecting SUB_PAY_APP_PAYMENT_EXCEEDS."
+    },
+    {
+      "name": "UM-CEILb the locked re-check only (unit side of the equivalent M-CEILb)",
+      "file": "backend/src/services/sub-pay-app.service.js",
+      "from": "    if (addMoney(alreadyPaidNow, amount) > netNow + EPSILON) {",
+      "to": "    if (false) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 1,
+            "line": 1029
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1029
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/sub-pay-app.service.test.js",
+      "live": "M-CEILb is EQUIVALENT for the live proof (wp4-mutations.commercial.json equivalent[]): no live catcher; this case is its only catcher (a lead, plan section 1.4)",
+      "tests": [
+        "CX21-005: a payment is checked against the payment rows under a lock, not the figure read before the transaction"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "CX21-005: the pre-check reads paidAmount 20,000.00 + 7,000.00 = 27,000.00, not over the net, and passes; the payment rows under the lock say 26,000.00, but the re-check is gone: the payment is written and the promise resolves instead of rejecting SUB_PAY_APP_PAYMENT_EXCEEDS. 'payments cannot exceed the net approved and paid in full closes the application' still passes (the pre-check refuses it)."
+    }
+  ]
+}

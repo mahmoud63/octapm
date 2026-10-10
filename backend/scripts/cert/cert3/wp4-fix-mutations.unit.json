@@ -1,0 +1,300 @@
+{
+  "note": "HR-C1 fix, unit side (mutate-multi.js list key 'wp4fix-unit', proof null). Runs only on the fix tree, against the suites the fix rewrites (HRC1-FIX-PLAN.md s7). Mocked: not evidence (plan section 1.4). Every from occurs 0 times at HEAD and once on the simulated fix copy (mutsyntax-wp4.js). Run one id per invocation, quoted and with a trailing comma (\"--only=M-OPEN,\") and always with --lists=<key>: mutate-multi.js matches a value without a comma as a PREFIX (M-OPEN would also run M-OPENa and M-OPENb; M-LOCK also M-LOCKa and M-LOCKb; M-RET also every M-RET-x), PowerShell drops an unquoted trailing comma, and ids such as M1 or G1 repeat across other lists.",
+  "requires": "the HR-C1 fix's unit suites (HRC1-FIX-PLAN.md s7): the U-n cases are written by the fix; their titles below are the plan's labels, to reconcile with the fix diff before the run (the HEAD titles quoted are kept by the fix with rewritten assertions).",
+  "pending": [
+    {
+      "name": "UM-CONV1 (pending) the atomic convert's claim removed",
+      "requires": "the CONVERT-ATOMIC fix and its unit case (no fix plan yet)",
+      "live": "M-CONV1 (pending)"
+    },
+    {
+      "name": "UCCO-M1 (pending) the commitment-CO parent check removed",
+      "requires": "the CCO-PARENT fix and its unit case in commitment.service.test.js (no fix plan yet)",
+      "live": "CCO-M1 (pending)"
+    }
+  ],
+  "mutations": [
+    {
+      "name": "UM-RET certification refusal dropped (unit side of M-RET)",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "    const retentionBasis = await assertRetentionConfigured({ tx, projectId, period, items });",
+      "to": "    const retentionBasis = await retentionBasisFor({ tx, projectId });",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1400
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/ipc-allocation-impact.test.js",
+      "live": "M-RET: I1.certifyUnconfigured",
+      "requires": "the HR-C1 fix's unit suites (HRC1-FIX-PLAN.md s7): the U-n cases are written by the fix; their titles below are the plan's labels, to reconcile with the fix diff before the run (the HEAD titles quoted are kept by the fix with rewritten assertions).",
+      "tests": [
+        "U-3 certification refuses an unconfigured claimed line"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "U-3 fails: the certify resolves (certified at no retention) and ipcItem.update / ipcCertificate.update are called, where it expects 409 IPC_RETENTION_NOT_CONFIGURED with nothing written."
+    },
+    {
+      "name": "UM-RET-s submission refusal dropped (unit side of M-RET-s)",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "    await assertRetentionConfigured({ tx, projectId, period });",
+      "to": "    await retentionBasisFor({ tx, projectId });",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1276
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/ipc-allocation-impact.test.js",
+      "live": "M-RET-s: I1.submitUnconfigured",
+      "requires": "the HR-C1 fix's unit suites (HRC1-FIX-PLAN.md s7): the U-n cases are written by the fix; their titles below are the plan's labels, to reconcile with the fix diff before the run (the HEAD titles quoted are kept by the fix with rewritten assertions).",
+      "tests": [
+        "U-6 submission refuses"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "U-6 fails: the submit resolves and ipcItem.updateMany / ipcCertificate.update are called."
+    },
+    {
+      "name": "UM-RET-l contract rate not read (unit side of M-RET-l)",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "  if (primeContractService.retentionConfigured(contract)) {",
+      "to": "  if (false && primeContractService.retentionConfigured(contract)) {",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 73
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/ipc-allocation-impact.test.js",
+      "live": "M-RET-l: L114.newPeriodItemRate, I2.contractRate",
+      "requires": "the HR-C1 fix's unit suites (HRC1-FIX-PLAN.md s7): the U-n cases are written by the fix; their titles below are the plan's labels, to reconcile with the fix diff before the run (the HEAD titles quoted are kept by the fix with rewritten assertions).",
+      "tests": [
+        "U-2b the contract's configured rate wins (L114)",
+        "U-4 certification re-resolves, an entered rate is kept"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "U-2b fails (lines at the project's 7.5 / project_default, not 10 / contract); U-4 fails (line A re-resolved to null, not 10)."
+    },
+    {
+      "name": "UM-RET-r no re-resolution at certification (unit side of M-RET-r)",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "      if (item.retentionRateSource === ITEM_RATE_SOURCES.ITEM_OVERRIDE) continue;",
+      "to": "      if (true) continue;",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1508
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/ipc-allocation-impact.test.js",
+      "live": "M-RET-r: I1.afterConfiguration",
+      "requires": "the HR-C1 fix's unit suites (HRC1-FIX-PLAN.md s7): the U-n cases are written by the fix; their titles below are the plan's labels, to reconcile with the fix diff before the run (the HEAD titles quoted are kept by the fix with rewritten assertions).",
+      "tests": [
+        "U-4 certification re-resolves, an entered rate is kept"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "U-4 fails: ipcItem.update is not called for line A (expected { retentionRate: 10, retentionRateSource: contract, retention: 4000, netPayable: 36000 })."
+    },
+    {
+      "name": "UM-RET-o override re-resolved at certification (unit side of M-RET-o)",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "      if (item.retentionRateSource === ITEM_RATE_SOURCES.ITEM_OVERRIDE) continue;",
+      "to": "      if (false) continue;",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1508
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/ipc-allocation-impact.test.js",
+      "live": "M-RET-o: HRC1.contractShapes",
+      "requires": "the HR-C1 fix's unit suites (HRC1-FIX-PLAN.md s7): the U-n cases are written by the fix; their titles below are the plan's labels, to reconcile with the fix diff before the run (the HEAD titles quoted are kept by the fix with rewritten assertions).",
+      "tests": [
+        "U-4 certification re-resolves, an entered rate is kept"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "U-4 fails: ipcItem.update is called for line B (item_override, rate 2), which it asserts is left alone."
+    },
+    {
+      "name": "UM-RET-w PATCH drops the override (unit side of M-RET-w)",
+      "file": "backend/src/services/ipc.service.js",
+      "from": "    existing.retentionRateSource === ITEM_RATE_SOURCES.ITEM_OVERRIDE;",
+      "to": "    false;",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 1014
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/ipc-allocation-impact.test.js",
+      "live": "M-RET-w: none (unit only)",
+      "requires": "the HR-C1 fix's unit suites (HRC1-FIX-PLAN.md s7): the U-n cases are written by the fix; their titles below are the plan's labels, to reconcile with the fix diff before the run (the HEAD titles quoted are kept by the fix with rewritten assertions).",
+      "tests": [
+        "U-5 an item PATCH"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "U-5 fails: a {qty} PATCH on an override line takes the configured rate instead of keeping 7 / item_override."
+    },
+    {
+      "name": "UM-RET-c commitment silent 5 (unit side of M-RET-c)",
+      "file": "backend/src/services/commitment.service.js",
+      "from": "const projectRetentionForCommitment = (project) => project?.defaultRetentionRate ?? null;",
+      "to": "const projectRetentionForCommitment = (project) => project?.defaultRetentionRate ?? 5;",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 373
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/commitment.service.test.js",
+      "live": "M-RET-c: C3.noDefaultNoRate",
+      "requires": "the HR-C1 fix's unit suites (HRC1-FIX-PLAN.md s7): the U-n cases are written by the fix; their titles below are the plan's labels, to reconcile with the fix diff before the run (the HEAD titles quoted are kept by the fix with rewritten assertions).",
+      "tests": [
+        "the fix's new case: create without a rate on a project with no default is refused 400 COMMITMENT_RETENTION_REQUIRED"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "the new create case fails: commitment.create is called with retentionRate 5 instead of the 400. 'creates a numbered draft with the project's retention and the vendor's party' (:84, default 10) still passes."
+    },
+    {
+      "name": "UM-RET-d contract silent 5 (unit side of M-RET-d)",
+      "file": "backend/src/services/prime-contract.service.js",
+      "from": "    ? { retentionRate: null, retentionRateSource: null }",
+      "to": "    ? { retentionRate: 5, retentionRateSource: RETENTION_SOURCES.PROJECT_DEFAULT }",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 100
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/prime-contract.service.test.js",
+      "live": "M-RET-d: HRC1.contractFirstRead",
+      "requires": "the HR-C1 fix's unit suites (HRC1-FIX-PLAN.md s7): the U-n cases are written by the fix; their titles below are the plan's labels, to reconcile with the fix diff before the run (the HEAD titles quoted are kept by the fix with rewritten assertions).",
+      "tests": [
+        "falls back to the BOQ when the project carries no contract value"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "the case at :236-261, rewritten by the fix to expect retentionRate null and retentionRateSource null for a null project default, fails (5 / project_default)."
+    },
+    {
+      "name": "UM-RET-n null stores 0 (unit side of M-RET-n)",
+      "file": "backend/src/services/prime-contract.service.js",
+      "from": "      data.retentionRate = null;\r\n      data.retentionRateSource = null;",
+      "to": "      data.retentionRate = 0;\r\n      data.retentionRateSource = RETENTION_SOURCES.CONTRACT_ENTRY;",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 452
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/prime-contract.service.test.js",
+      "live": "M-RET-n: none (unit only)",
+      "requires": "the HR-C1 fix's unit suites (HRC1-FIX-PLAN.md s7): the U-n cases are written by the fix; their titles below are the plan's labels, to reconcile with the fix diff before the run (the HEAD titles quoted are kept by the fix with rewritten assertions).",
+      "tests": [
+        "the fix's new case: updateContract {retentionRate: null} writes { null, null }"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "the new case fails: the update writes { 0, contract_entry }."
+    },
+    {
+      "name": "UM-RET-p project display silent 5 (unit side of M-RET-p)",
+      "file": "backend/src/services/project.service.js",
+      "from": "    defaultRetentionRate: commercial ? project.defaultRetentionRate ?? null : null,",
+      "to": "    defaultRetentionRate: commercial ? project.defaultRetentionRate ?? 5 : null,",
+      "anchors": {
+        "head": [
+          {
+            "count": 0,
+            "line": null
+          }
+        ],
+        "postFixSim": [
+          {
+            "count": 1,
+            "line": 284
+          }
+        ]
+      },
+      "suite": "src/services/__tests__/project.service.test.js",
+      "live": "M-RET-p: HRC1.projectDisplay",
+      "requires": "the HR-C1 fix's unit suites (HRC1-FIX-PLAN.md s7): the U-n cases are written by the fix; their titles below are the plan's labels, to reconcile with the fix diff before the run (the HEAD titles quoted are kept by the fix with rewritten assertions).",
+      "tests": [
+        "returns defaults for existing projects without new nullable fields",
+        "normalizes blank optional metadata to null on update"
+      ],
+      "expectVerdict": "CAUGHT",
+      "expect": "the two cases, rewritten by the fix to expect defaultRetentionRate null (HEAD :391 and :464 expect 5), fail with 5."
+    }
+  ]
+}

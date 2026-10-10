@@ -645,7 +645,7 @@ const CATCHERS = {
   'CCO-M1': ['KA.CCO.voidParent', 'KA.CCO.closedParent'],
 };
 const COLLATERAL = {
-  'M-CONV0': ['E1.convertAgain (K-E2 converted a sixth time)', 'KA.E2.concurrent / pendingDelta read today (BLOCKED) or wrong'],
+  'M-CONV0': ['E1.convertAgain (K-E2 converted a sixth time)', 'KA.E2.concurrent / pendingDelta read today (BLOCKED) or wrong', 'KA.HRC12.archivedCoEvent reads wrong (K-ARC\'s re-convert answers 201; wp4-mutations.commercial.json)'],
   'M-CEIL': ['KA.P4.payOverNet wrong (45,000.02 already paid)', 'CF.C1TOL TEST GAP'],
   'M-VAR0': ['KA.I3.patchA130Qty650 reads value (a pass)', 'CF.HRC2 PARTIAL (a pass)'],
   'M-OPENa': ['none: the extra application is voided at once (a restoration on K)'],
