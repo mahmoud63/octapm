@@ -945,3 +945,5 @@ The setup error in run 1 came from finding **SCHED-RET-1 (P3)**. The job result 
 - **L-DETAILS.** Production strips `error.details`; it goes to the WP-8 client sweep.
 
 **Codex windows.** L34 plan review next, at the 20:23 CDT session cron, or by hand if the cron is skipped. Then the HR-C1 plan review.
+
+**XDOC-ISS and XDOC-CP confirmed (16:21 CDT).** `xdoc-1d-repro.js` (087/088, product routes only) exited 2 with exactly the 23 predicted defect checks failing. All 21 revision `issuedBy` writes store another company's user (five records, create and update, entry and record, plus document control), and both contract-profile `documentIds` writes store another company's document. The own, label and random controls, every read check and G.5xx pass. Both are P1 cross-company writes with no exposure. They join the HR-X1 batch through the final plan r3c §15 and §16. The plans are final after review round 3: `scratch\wp2\fixplan\r3c\WP2-FIX-PLAN.r3c.md` and `scratch\wp2\fixplan-hrx1\r3c\HRX1-FIX-PLAN.r3c.md`, with rulings in `scratch\wp2\r3c-rulings.md`.
