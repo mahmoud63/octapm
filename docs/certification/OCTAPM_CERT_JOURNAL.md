@@ -926,3 +926,22 @@ The setup error in run 1 came from finding **SCHED-RET-1 (P3)**. The job result 
 **Codex scheduling.** Session crons do not fire while background work runs, so the 08:41 and 13:53 Codex crons were skipped.
 - WP-2 plan review round 3, the last round, was started by hand at 15:12 CDT. WP-2 comes first in the sequence.
 - The L34 plan review moves to the next window (session cron 20:23), and the HR-C1 plan review to the window after.
+
+## 2026-10-10 — WP-2 plan review round 3 (the last); final plans r3c
+
+**Codex round 3** (256k tokens, started by hand at 15:12 CDT because session crons do not fire while background work runs) found no CRITICAL.
+- **QP (HR-Q1, HR-P1).** Implementable after adjudication; no HIGH. Its mutation evidence must separate staging validity from behavioural failures. The locked re-check of HEAD's existing `FORM_DEFICIENCY_EXISTS` is added.
+- **X (HR-X1 batch).** One HIGH, X-R3-H1, confirmed against the code by Claude Main. The normalisers turn an array-valued `fileUrl` into its string (`String(["…"])`), and the routes validate only the outer list. A foreign URL sent as `["…"]` would therefore escape a judge that reads string fields only.
+- **Closure.** Codex gave the smallest closure and said a fourth round is unnecessary: the judge reads the union of raw aliases and normalised rows on every judged path. Array-valued catchers and a mutation are added. Medium findings are adopted: the cap over selected ids, the waiter correlation, and the C-WF seed project.
+
+**Decision.** The plan allows at most three plan-review rounds. The closures go into the final plans r3c, and the Codex stable diff review of the implementation verifies them (plan §6.4). The owner is told that one HIGH remained at round 3 and how it was closed. Adjudication: `scratch\wp2\codex-plan-review-r3-adjudication.md`.
+
+**New suspects and leads:**
+- **XDOC-ISS (P1 suspect).** Revision `issuedBy` stores a request value unchecked.
+- **XDOC-CP (P1 suspect).** Contract-profile `documentIds` are stored unscoped.
+
+  Both are reproduced live by `xdoc-1d-repro.js`, drafted read-only, before the batch is implemented. If confirmed, they join the batch.
+- **FCST-WIN-1 (P3).** The forecast window limitation.
+- **L-DETAILS.** Production strips `error.details`; it goes to the WP-8 client sweep.
+
+**Codex windows.** L34 plan review next, at the 20:23 CDT session cron, or by hand if the cron is skipped. Then the HR-C1 plan review.
