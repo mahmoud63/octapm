@@ -246,9 +246,9 @@ const normalizeDraft = (parsed, { photos, fallback }) => {
   };
 };
 
-const complete = async ({ system, messages, transport, maxTokens }) => {
+const complete = async ({ feature = "daily_log.assistant", system, messages, transport, maxTokens }) => {
   try {
-    const completion = await aiProvider.complete({ system, messages, maxTokens, temperature: 0.2, transport });
+    const completion = await aiProvider.complete({ feature, system, messages, maxTokens, temperature: 0.2, transport });
     return { completion, parsed: aiProvider.parseJsonAnswer(completion.text) };
   } catch (error) {
     if (error?.code !== "AI_UNAVAILABLE" && error?.code !== "AI_NOT_CONFIGURED") throw error;
@@ -282,7 +282,7 @@ const draftReport = async ({ orgId, projectId, date, payload = {}, user, viewer 
   const imageBlocks = wantImages ? await loadImages({ orgId, projectId, photos: evidence.photos, fetchImpl }) : [];
   const included = new Set(imageBlocks.filter((block) => block.type === "image").map((block) => block.photoId));
   const content = imageBlocks.length ? [{ type: "text", text }, ...imageBlocks.map(({ photoId, ...block }) => block), { type: "text", text: "Write the daily report JSON now." }] : text;
-  const { completion, parsed, error } = await complete({ system: DRAFT_PROMPT, messages: [{ role: "user", content }], transport, maxTokens: 2500 });
+  const { completion, parsed, error } = await complete({ feature: "daily_log.draft", system: DRAFT_PROMPT, messages: [{ role: "user", content }], transport, maxTokens: 2500 });
   if (!completion) return degraded(`${error?.message || "The AI provider did not answer."} This draft was built from the day's records only.`);
   const draft = normalizeDraft(parsed, { photos: evidence.photos, fallback: deterministicDraft(evidence, notes) });
   const stored = await assistant.storeRun({ orgId, user, projectId, kind: KIND, recordType: "daily_log", recordId: evidence.log.id || null, title: `Daily report draft ${evidence.key}`, prompt: text, answer: JSON.stringify(draft), usage: completion.usage || null, provider: completion.provider || null, model: completion.model || null, builtWithoutBoq }).catch(() => null);

@@ -232,7 +232,7 @@ const ask = async ({ orgId, user, question, projectId = null, transport = null, 
   if (aiProvider.isEnabled() || transport) {
     prompt = `Today: ${new Date().toISOString().slice(0, 10)}${projectId ? "\nScope: one project" : "\nScope: every project the person can open"}\n\nCatalogue:\n${catalogueText(sourceList)}\n\nQuestion: ${text}`;
     try {
-      completion = await aiProvider.complete({ system: ASK_PROMPT, messages: [{ role: "user", content: prompt }], maxTokens: 1200, temperature: 0, transport });
+      completion = await aiProvider.complete({ feature: "report.ask", system: ASK_PROMPT, messages: [{ role: "user", content: prompt }], maxTokens: 1200, temperature: 0, transport });
       proposal = aiProvider.parseJsonAnswer(completion.text);
       if (!proposal || typeof proposal !== "object") throw Object.assign(new Error("The model did not return a report definition"), { code: "AI_UNAVAILABLE" });
     } catch (error) {
@@ -307,7 +307,7 @@ const narrate = async ({ orgId, user, payload = {}, transport = null, apiClient 
   if (!aiProvider.isEnabled() && !transport) return out(fallback, true, "AI summaries are not configured on this server; this summary was built from the numbers.", null);
   let completion;
   try {
-    completion = await aiProvider.complete({ system: NARRATE_PROMPT, messages: [{ role: "user", content: digest }], maxTokens: 700, temperature: 0.2, transport });
+    completion = await aiProvider.complete({ feature: "report.narrate", system: NARRATE_PROMPT, messages: [{ role: "user", content: digest }], maxTokens: 700, temperature: 0.2, transport });
   } catch (error) {
     if (error?.code !== "AI_UNAVAILABLE" && error?.code !== "AI_NOT_CONFIGURED") throw error;
     return out(fallback, true, `${error.message} This summary was built from the numbers.`, null);

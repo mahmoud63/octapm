@@ -2,6 +2,7 @@ const os = require("os");
 const { isSwitchOn, offMessage } = require("../config/switches");
 const jobService = require("./job.service");
 const { isTransientError } = require("./errors");
+const aiContext = require("../services/ai/context");
 
 /**
  * Background job worker.
@@ -148,13 +149,14 @@ const createJobWorker = ({
       jobService.updateJobProgress({ jobId: job.id, progress });
 
     try {
-      const result = await handler({
+      // AI calls a job makes are attributed to its organisation, project and requester (AI-1).
+      const result = await aiContext.runForJob(job, () => handler({
         job,
         payload: job.payload || {},
         updateProgress,
         workerId,
         log: (...args) => logger.log(`[job ${job.type}:${job.id}]`, ...args),
-      });
+      }));
       const completed = await jobService.completeJob({
         jobId: job.id,
         result: result && typeof result === "object" ? result : null,

@@ -8858,3 +8858,33 @@ model RateLimitBucket {
 
   @@index([resetAt])
 }
+
+/// AI usage ledger (AI-1): one row per model call, written only by the AI gateway
+/// (services/ai/gateway.js). Telemetry, not a business record: no foreign keys, so it
+/// survives record deletion; never holds prompt or answer content.
+model AiRun {
+  id           String   @id @default(uuid())
+  orgId        String?
+  projectId    String?
+  userId       String?
+  apiClientId  String?
+  jobId        String?
+  actorKind    String // human | api_key | job | system | anonymous
+  feature      String // e.g. assistant.ask, ai.attention, rfi.draft
+  provider     String?
+  model        String?
+  status       String // ok | failed | disabled | blocked
+  errorClass   String?
+  inputTokens  Int?
+  outputTokens Int?
+  costMicros   Int? // estimated USD, micro-units (services/ai/pricing.js)
+  latencyMs    Int      @default(0)
+  retries      Int      @default(0)
+  requestId    String?
+  route        String?
+  createdAt    DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([orgId, feature, createdAt])
+  @@index([projectId, createdAt])
+}

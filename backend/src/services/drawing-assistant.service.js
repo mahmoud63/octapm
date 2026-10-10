@@ -113,7 +113,7 @@ const readTitleBlocks = async ({ orgId, projectId, setId, user, payload = {}, tr
     }
     let completion;
     try {
-      completion = await aiProvider.complete({ system: READ_PROMPT, messages: [{ role: "user", content: [{ type: "text", text: `Set ${set.setNumber} — ${set.name}${set.discipline ? ` (${set.discipline})` : ""}; page ${revision.pageNumber}. Read the title block.` }, { type: "image", mediaType: image.mediaType, data: image.data }] }], maxTokens: 600, temperature: 0, transport });
+      completion = await aiProvider.complete({ feature: "drawing.read_title_block", system: READ_PROMPT, messages: [{ role: "user", content: [{ type: "text", text: `Set ${set.setNumber} — ${set.name}${set.discipline ? ` (${set.discipline})` : ""}; page ${revision.pageNumber}. Read the title block.` }, { type: "image", mediaType: image.mediaType, data: image.data }] }], maxTokens: 600, temperature: 0, transport });
     } catch (error) {
       if (error?.code !== "AI_UNAVAILABLE" && error?.code !== "AI_NOT_CONFIGURED") throw error;
       items.push({ revisionId: revision.id, pageNumber: revision.pageNumber, error: error.message, proposal: null });
@@ -281,7 +281,7 @@ const compareRevisions = async ({ orgId, projectId, sheetId, user, payload = {},
   const imageB = parseImage(payload.b.image, "Revision B");
   let completion;
   try {
-    completion = await aiProvider.complete({ system: COMPARE_PROMPT, messages: [{ role: "user", content: [{ type: "text", text: `Sheet ${sheet.number} — ${sheet.title}. Image A: revision ${a.revision || "?"}${a.publishedAt ? ` (${toIso(a.publishedAt).slice(0, 10)})` : ""}.` }, { type: "image", mediaType: imageA.mediaType, data: imageA.data }, { type: "text", text: `Image B: revision ${b.revision || "?"}${b.publishedAt ? ` (${toIso(b.publishedAt).slice(0, 10)})` : ""}. List the changes from A to B.` }, { type: "image", mediaType: imageB.mediaType, data: imageB.data }] }], maxTokens: 1500, temperature: 0.1, transport });
+    completion = await aiProvider.complete({ feature: "drawing.compare", system: COMPARE_PROMPT, messages: [{ role: "user", content: [{ type: "text", text: `Sheet ${sheet.number} — ${sheet.title}. Image A: revision ${a.revision || "?"}${a.publishedAt ? ` (${toIso(a.publishedAt).slice(0, 10)})` : ""}.` }, { type: "image", mediaType: imageA.mediaType, data: imageA.data }, { type: "text", text: `Image B: revision ${b.revision || "?"}${b.publishedAt ? ` (${toIso(b.publishedAt).slice(0, 10)})` : ""}. List the changes from A to B.` }, { type: "image", mediaType: imageB.mediaType, data: imageB.data }] }], maxTokens: 1500, temperature: 0.1, transport });
   } catch (error) {
     if (error?.code !== "AI_UNAVAILABLE" && error?.code !== "AI_NOT_CONFIGURED") throw error;
     return { degraded: true, reason: error.message, comparison: null, message: null };

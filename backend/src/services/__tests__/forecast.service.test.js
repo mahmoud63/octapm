@@ -174,7 +174,13 @@ describe("schedule delay and cost overrun prediction", () => {
     expect(result.message).toEqual(expect.objectContaining({ id: expect.any(String) }));
     expect(store.conversations[0]).toMatchObject({ kind: "forecast", recordType: "project", recordId: "p1", title: "Forecast 2026-09-05" });
 
-    const plain = await service.explain({ orgId: "org-1", projectId: "p1", user, asOf: ASOF });
+    // "Without one": no provider at all, whatever the developer's .env says (AI_PROVIDER=mock turns the mock on).
+    const savedProvider = process.env.AI_PROVIDER;
+    process.env.AI_PROVIDER = "disabled";
+    const plain = await service.explain({ orgId: "org-1", projectId: "p1", user, asOf: ASOF }).finally(() => {
+      if (savedProvider === undefined) delete process.env.AI_PROVIDER;
+      else process.env.AI_PROVIDER = savedProvider;
+    });
     expect(plain.degraded).toBe(true);
     expect(plain.narrative.headline).toBe("The project is projected to finish 59 days late and 56,429 over budget.");
     expect(plain.narrative.schedule).toContain("Level 3 slab: 47.5% behind the plan");

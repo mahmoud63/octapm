@@ -262,7 +262,7 @@ const extractClauses = async ({ orgId, projectId, user, payload = {}, viewer = n
     try {
       for (const document of readable) {
         for (const window of windowsOf(document.text).slice(0, perDocument)) {
-          const completion = await aiProvider.complete({ system: EXTRACT_PROMPT, messages: [{ role: "user", content: `Document: ${document.title}\n\n${window}` }], maxTokens: 1800, temperature: 0, transport });
+          const completion = await aiProvider.complete({ feature: "contract.extract", system: EXTRACT_PROMPT, messages: [{ role: "user", content: `Document: ${document.title}\n\n${window}` }], maxTokens: 1800, temperature: 0, transport });
           windowsRead += 1;
           usage = { inputTokens: (usage.inputTokens || 0) + (completion.usage?.inputTokens || 0), outputTokens: (usage.outputTokens || 0) + (completion.usage?.outputTokens || 0) };
           model = completion.model || model;
@@ -407,7 +407,7 @@ const draftNotice = async ({ orgId, projectId, user, payload = {}, transport = n
   if (!aiProvider.isEnabled() && !transport) return { degraded: true, reason: "AI drafting is not configured on this server; this is the standard template.", event, draft: { ...fallback, deadline: event.deadline, daysLeft: event.daysLeft }, message: null };
   let completion;
   try {
-    completion = await aiProvider.complete({ system: NOTICE_PROMPT, messages: [{ role: "user", content: `${facts}\n\nDraft the notice.` }], maxTokens: 1200, temperature: 0.2, transport });
+    completion = await aiProvider.complete({ feature: "contract.notice", system: NOTICE_PROMPT, messages: [{ role: "user", content: `${facts}\n\nDraft the notice.` }], maxTokens: 1200, temperature: 0.2, transport });
   } catch (error) {
     if (error?.code !== "AI_UNAVAILABLE" && error?.code !== "AI_NOT_CONFIGURED") throw error;
     return { degraded: true, reason: `${error.message} This is the standard template.`, event, draft: { ...fallback, deadline: event.deadline, daysLeft: event.daysLeft }, message: null };
@@ -529,7 +529,7 @@ const assessClaim = async ({ orgId, projectId, claimId, user, transport = null }
   if (!aiProvider.isEnabled() && !transport) return { degraded: true, reason: "AI assessment is not configured on this server; this assessment was built from the record.", claim: claimOut, assessment: fallback, notices, evidence, message: null };
   let completion;
   try {
-    completion = await aiProvider.complete({ system: ASSESS_PROMPT, messages: [{ role: "user", content: text }], maxTokens: 2500, temperature: 0.2, transport });
+    completion = await aiProvider.complete({ feature: "eot.assess", system: ASSESS_PROMPT, messages: [{ role: "user", content: text }], maxTokens: 2500, temperature: 0.2, transport });
   } catch (error) {
     if (error?.code !== "AI_UNAVAILABLE" && error?.code !== "AI_NOT_CONFIGURED") throw error;
     return { degraded: true, reason: `${error.message} This assessment was built from the record.`, claim: claimOut, assessment: fallback, notices, evidence, message: null };

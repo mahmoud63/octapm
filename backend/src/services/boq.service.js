@@ -1,4 +1,4 @@
-const Anthropic = require('@anthropic-ai/sdk');
+const { messagesClient } = require('./ai/messages-client');
 const { v4: uuidv4 } = require('uuid');
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
@@ -62,10 +62,8 @@ const DRY_RUN_ROW_LIMIT = 100;
 const BOQ_BASELINE_LOCK_REASON =
   'Pending BOQ revision comparison; baseline is locked';
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  timeout: 120_000,
-});
+// Every model call goes through the AI gateway (configured provider and model, usage ledger).
+const client = messagesClient('boq.activity_breakdown');
 
 const normalizeCode = normalizeBoqCode;
 const activeStatuses = ['draft', 'submitted', 'approved'];
@@ -1647,7 +1645,7 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
     const prompt = buildBoqActivityPrompt(project, items);
 
     const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+      feature: 'boq.activity_breakdown',
       max_tokens: 8192,
       messages: [{ role: 'user', content: prompt }],
     });

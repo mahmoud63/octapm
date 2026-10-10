@@ -807,7 +807,7 @@ const explain = async ({ orgId, projectId, user, transport = null, asOf = new Da
   if (!aiProvider.isEnabled() && !transport) return { degraded: true, reason: "AI narratives are not configured on this server; this summary was built from the forecast itself.", forecast, narrative: fallback(), message: null };
   let completion;
   try {
-    completion = await aiProvider.complete({ system: EXPLAIN_PROMPT, messages: [{ role: "user", content: text }], maxTokens: 1500, temperature: 0.2, transport });
+    completion = await aiProvider.complete({ feature: "forecast.explain", system: EXPLAIN_PROMPT, messages: [{ role: "user", content: text }], maxTokens: 1500, temperature: 0.2, transport });
   } catch (error) {
     if (error?.code !== "AI_UNAVAILABLE" && error?.code !== "AI_NOT_CONFIGURED") throw error;
     return { degraded: true, reason: `${error.message} This summary was built from the forecast itself.`, forecast, narrative: fallback(), message: null };

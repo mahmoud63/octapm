@@ -70,6 +70,9 @@ const createApp = () => {
   app.use(helmet());
   app.use(cors(createCorsOptions()));
   app.use(requestId);
+  // Attribution for AI calls (AI-1): the AI gateway records each model call against the
+  // request's organisation, project and user, read at call time from this context.
+  app.use(require("./services/ai/context").middleware);
   // Which build answered, on every response, so a rolling deploy can be
   // watched from outside and a support report names the release.
   const release = getRelease();
@@ -154,6 +157,7 @@ const createApp = () => {
   app.use("/api/v1/public/bids", require("./routes/bid-portal"));
   app.use("/api/v1/public/rfqs", require("./routes/rfq-portal"));
   app.use("/api/v1/assistant", require("./routes/assistant").orgRouter);
+  app.use("/api/v1/ai", membersOnly, require("./routes/ai"));
   app.use("/api/v1/conversations", require("./routes/conversations"));
 
   app.use(notFoundHandler);

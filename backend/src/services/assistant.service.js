@@ -255,7 +255,7 @@ const ask = async ({ orgId, user, projectId = null, conversationId = null, quest
   let degraded = false;
   if (aiProvider.isEnabled() || transport) {
     try {
-      const completion = await aiProvider.complete({ system: SYSTEM_PROMPT, messages: buildMessages({ history, question: text, sources, projects: retrieved.projects }), maxTokens: 1500, temperature: 0.2, transport });
+      const completion = await aiProvider.complete({ feature: "assistant.ask", system: SYSTEM_PROMPT, messages: buildMessages({ history, question: text, sources, projects: retrieved.projects }), maxTokens: 1500, temperature: 0.2, transport });
       const parsed = aiProvider.parseJsonAnswer(completion.text);
       answer = trimOrNull(parsed?.answer) || trimOrNull(completion.text) || "I could not produce an answer.";
       citations = citationsFrom({ answer, citations: parsed?.citations, sources });

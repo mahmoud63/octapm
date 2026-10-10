@@ -1,4 +1,4 @@
-const Anthropic = require("@anthropic-ai/sdk");
+const { messagesClient } = require("./ai/messages-client");
 const XLSX = require("@e965/xlsx");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
@@ -43,14 +43,8 @@ const PROCUREMENT_SEVERITY_RANK = {
   critical: 4,
 };
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  timeout: 120_000, // 2 min max per API call
-});
-
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error("[schedule] ANTHROPIC_API_KEY not set");
-}
+// Every model call goes through the AI gateway (configured provider and model, usage ledger).
+const client = messagesClient("schedule.generate");
 
 const PHASES = [
   "Preliminary & General",
@@ -1870,7 +1864,7 @@ async function structureBoqRows(rawText, { onRetry } = {}) {
   const msg = await callWithRetry(
     () =>
       client.messages.create({
-        model: "claude-sonnet-4-6",
+        feature: "schedule.structure_boq",
         max_tokens: 4000,
         system:
           "You are a BOQ parser. Return ONLY valid JSON array. No markdown.",
@@ -1989,7 +1983,7 @@ async function generateActivities(
   const msg = await callWithRetry(
     () =>
       client.messages.create({
-        model: "claude-sonnet-4-6",
+        feature: "schedule.activities",
         max_tokens: 8000,
         system:
           "Expert construction planning engineer. Return ONLY a raw JSON object — no markdown, no fences. Keep string values under 50 chars.",
@@ -2039,7 +2033,7 @@ async function generateSupportData(project, activityNames, { onRetry } = {}) {
   const msg = await callWithRetry(
     () =>
       client.messages.create({
-        model: "claude-sonnet-4-6",
+        feature: "schedule.support_data",
         max_tokens: 4000,
         system:
           "Expert construction planning engineer. Return ONLY a raw JSON object — no markdown, no fences. Keep string values under 60 chars.",
@@ -2105,7 +2099,7 @@ async function allocateResources({
   const msg = await callWithRetry(
     () =>
       client.messages.create({
-        model: "claude-sonnet-4-6",
+        feature: "schedule.resources",
         max_tokens: 7000,
         system:
           "You are a construction resource planner. Return ONLY valid JSON array. No markdown.",

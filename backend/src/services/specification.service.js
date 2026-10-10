@@ -646,7 +646,7 @@ const explainScopeGaps = async ({ orgId, projectId, user, access = BOQ_READER, v
   const digest = { summary: gaps.summary, notes: gaps.notes, uncoveredDisciplines: gaps.uncoveredDisciplines, sectionsWithGaps: gaps.sections.filter((section) => section.gaps.length).slice(0, 40).map((section) => ({ code: section.code, title: section.title, division: section.divisionLabel, gaps: section.gaps, keywords: section.keywords })), ...(gaps.boqWithheld ? { boqCoverage: "not part of this check — do not comment on BOQ coverage" } : { uncoveredBoq: gaps.uncoveredBoq.slice(0, 40).map((item) => `${item.code || ""} ${item.description}`.trim()) }) };
   let completion;
   try {
-    completion = await aiProvider.complete({ system: GAP_PROMPT, messages: [{ role: "user", content: JSON.stringify(digest) }], maxTokens: 1200, temperature: 0.2, transport });
+    completion = await aiProvider.complete({ feature: "specification.scope_gap", system: GAP_PROMPT, messages: [{ role: "user", content: JSON.stringify(digest) }], maxTokens: 1200, temperature: 0.2, transport });
   } catch (error) {
     if (error?.code !== "AI_UNAVAILABLE" && error?.code !== "AI_NOT_CONFIGURED") throw error;
     return { degraded: true, reason: error.message, gaps, review: fallback, message: null };
@@ -699,7 +699,7 @@ const findConflicts = async ({ orgId, projectId, sectionId, user, payload = {}, 
   ].join("\n");
   let completion;
   try {
-    completion = await aiProvider.complete({ system: CONFLICT_PROMPT, messages: [{ role: "user", content: prompt }], maxTokens: 1800, temperature: 0.1, transport });
+    completion = await aiProvider.complete({ feature: "specification.conflict", system: CONFLICT_PROMPT, messages: [{ role: "user", content: prompt }], maxTokens: 1800, temperature: 0.1, transport });
   } catch (error) {
     if (error?.code !== "AI_UNAVAILABLE" && error?.code !== "AI_NOT_CONFIGURED") throw error;
     return { degraded: true, reason: error.message, section: { id: section.id, code: section.code, title: section.title }, sheetsChecked: sheetBlocks.map(({ text, ...rest }) => rest), related: section.related, result: null, message: null };

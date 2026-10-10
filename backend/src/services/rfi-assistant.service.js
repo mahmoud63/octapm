@@ -117,9 +117,9 @@ const plainText = (text, citations) =>
     return ` (${citation.typeLabel}${citation.ref ? ` ${citation.ref}` : ` ${citation.title}`})`;
   });
 
-const complete = async ({ system, messages, transport, maxTokens = 1800 }) => {
+const complete = async ({ feature = "rfi.assistant", system, messages, transport, maxTokens = 1800 }) => {
   try {
-    const completion = await aiProvider.complete({ system, messages, maxTokens, temperature: 0.2, transport });
+    const completion = await aiProvider.complete({ feature, system, messages, maxTokens, temperature: 0.2, transport });
     return { completion, parsed: aiProvider.parseJsonAnswer(completion.text) };
   } catch (error) {
     if (error?.code !== "AI_UNAVAILABLE" && error?.code !== "AI_NOT_CONFIGURED") throw error;
@@ -187,7 +187,7 @@ const draftQuestion = async ({ orgId, user, projectId, payload = {}, projectAcce
   if (!aiProvider.isEnabled() && !transport) {
     return { degraded: true, reason: "AI drafting is not configured on this server (set ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY).", draft: null, similar: similarRfis, citations: assistant.citationsFrom({ answer: "", citations: sources.map((source) => source.n), sources }), message: null };
   }
-  const { completion, parsed, error } = await complete({ system: DRAFT_PROMPT, messages: [{ role: "user", content: userContent }], transport });
+  const { completion, parsed, error } = await complete({ feature: "rfi.draft", system: DRAFT_PROMPT, messages: [{ role: "user", content: userContent }], transport });
   if (!completion) {
     return { degraded: true, reason: error?.message || "The AI provider did not answer.", draft: null, similar: similarRfis, citations: assistant.citationsFrom({ answer: "", citations: sources.map((source) => source.n), sources }), message: null };
   }
@@ -228,7 +228,7 @@ const suggestResponse = async ({ orgId, user, projectId, rfiId, payload = {}, pr
   if (!aiProvider.isEnabled() && !transport) {
     return { degraded: true, reason: "AI drafting is not configured on this server (set ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY).", suggestion: null, similar: similarRfis, citations: allCitations, message: null };
   }
-  const { completion, parsed, error } = await complete({ system: RESPONSE_PROMPT, messages: [{ role: "user", content: userContent }], transport });
+  const { completion, parsed, error } = await complete({ feature: "rfi.response", system: RESPONSE_PROMPT, messages: [{ role: "user", content: userContent }], transport });
   if (!completion) return { degraded: true, reason: error?.message || "The AI provider did not answer.", suggestion: null, similar: similarRfis, citations: allCitations, message: null };
   const suggestion = normalizeSuggestion(parsed, { sources });
   const stored = await store({ orgId, user, projectId, kind: KINDS.RESPONSE, recordType: "rfi", recordId: rfi.id, title: `Response draft: ${rfi.ref}`, prompt: userContent, answer: suggestion.response, citations: suggestion.citations, sources, usage: completion.usage || null, provider: completion.provider || null, model: completion.model || null });
@@ -263,7 +263,7 @@ const summarize = async ({ orgId, user, projectId, rfiId, transport = null }) =>
   const rfi = await loadRfi({ orgId, projectId, rfiId, user });
   const block = rfiBlock(rfi);
   if (!aiProvider.isEnabled() && !transport) return { degraded: true, reason: "AI summaries are not configured on this server.", summary: deterministicSummary(rfi), message: null };
-  const { completion, parsed, error } = await complete({ system: SUMMARY_PROMPT, messages: [{ role: "user", content: block }], transport, maxTokens: 900 });
+  const { completion, parsed, error } = await complete({ feature: "rfi.summary", system: SUMMARY_PROMPT, messages: [{ role: "user", content: block }], transport, maxTokens: 900 });
   if (!completion) return { degraded: true, reason: error?.message || "The AI provider did not answer.", summary: deterministicSummary(rfi), message: null };
   const summary = normalizeSummary(parsed, rfi);
   const stored = await store({ orgId, user, projectId, kind: KINDS.SUMMARY, recordType: "rfi", recordId: rfi.id, title: `Summary: ${rfi.ref}`, prompt: block, answer: summary.summary, usage: completion.usage || null, provider: completion.provider || null, model: completion.model || null });

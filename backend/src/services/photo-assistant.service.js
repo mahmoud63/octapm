@@ -173,7 +173,7 @@ const analyzePhoto = async ({ orgId, projectId, photoId, user = null, transport 
   const context = await contextBlock({ projectId, photo });
   let completion;
   try {
-    completion = await aiProvider.complete({ system: PHOTO_PROMPT, messages: [{ role: "user", content: [{ type: "text", text: `${context}\n\nInspect the photo and answer in JSON.` }, { type: "image", mediaType: image.mediaType, data: image.data }] }], maxTokens: 1200, temperature: 0.1, transport });
+    completion = await aiProvider.complete({ feature: "photo.analyze", system: PHOTO_PROMPT, messages: [{ role: "user", content: [{ type: "text", text: `${context}\n\nInspect the photo and answer in JSON.` }, { type: "image", mediaType: image.mediaType, data: image.data }] }], maxTokens: 1200, temperature: 0.1, transport });
   } catch (error) {
     if (error?.code !== "AI_UNAVAILABLE" && error?.code !== "AI_NOT_CONFIGURED") throw error;
     return { degraded: true, reason: error.message, photo: photoOut(photo, projectId), analysis: null, analyzedAt: null, message: null, cached: false };
