@@ -248,8 +248,19 @@ const SCREEN_TEXT = 80;
 const screenText = (value) => (typeof value === "string" && value.trim() ? value.trim().replace(/\s+/g, " ").slice(0, SCREEN_TEXT) : null);
 const screenOf = (context) => {
   if (!context || typeof context !== "object") return null;
-  const screen = { module: screenText(context.module), child: screenText(context.child), label: screenText(context.label), recordType: screenText(context.recordType), recordId: screenText(context.recordId) };
+  const screen = { module: screenText(context.module), moduleKey: screenText(context.moduleKey), child: screenText(context.child), label: screenText(context.label), recordType: screenText(context.recordType), recordId: screenText(context.recordId) };
   return Object.values(screen).some(Boolean) ? screen : null;
+};
+// The deterministic results of the module on screen (the schedule's CPM
+// results on Schedule…), from the route's moduleFor, which decides access.
+const screenModuleSources = async ({ moduleFor, projectId, screen }) => {
+  if (!moduleFor || !projectId || !screen?.moduleKey) return [];
+  try {
+    return (await moduleFor(projectId, screen)) || [];
+  } catch (error) {
+    console.error(`[assistant] module context unavailable: ${error?.code || error?.name || "error"}`);
+    return [];
+  }
 };
 const currentRecord = async ({ recordFor, projectId, screen }) => {
   if (!recordFor || !projectId || !screen?.recordType || !screen?.recordId) return null;
@@ -267,7 +278,7 @@ const currentRecord = async ({ recordFor, projectId, screen }) => {
  * retrieved or sent to a model before the caller's access to the
  * conversation's project is decided (projectAccessFor).
  */
-const ask = async ({ orgId, user, projectId = null, conversationId = null, question, projectAccess = null, accessFor = null, digestFor = null, recordFor = null, context = null, transport = null, readsBoq = READS_NO_BOQ }) => {
+const ask = async ({ orgId, user, projectId = null, conversationId = null, question, projectAccess = null, accessFor = null, digestFor = null, recordFor = null, moduleFor = null, context = null, transport = null, readsBoq = READS_NO_BOQ }) => {
   const text = trimOrNull(question);
   if (!text) throw new HttpError(400, "ASSISTANT_QUESTION_REQUIRED", "Ask a question");
   if (text.length > MAX_QUESTION) throw new HttpError(400, "ASSISTANT_QUESTION_TOO_LONG", `Keep the question under ${MAX_QUESTION} characters`);
@@ -288,9 +299,11 @@ const ask = async ({ orgId, user, projectId = null, conversationId = null, quest
   // caller may read it (recordFor decides, failing closed), first.
   const screen = screenOf(context);
   const record = await currentRecord({ recordFor, projectId: scopeProjectId, screen });
+  const moduleSources = await screenModuleSources({ moduleFor, projectId: scopeProjectId, screen });
   const sources = [
     ...(record ? [record] : []),
-    ...retrieved.sources.filter((source) => !record || source.id !== record.id),
+    ...moduleSources.filter((source) => !record || source.id !== record.id),
+    ...retrieved.sources.filter((source) => (!record || source.id !== record.id) && !moduleSources.some((item) => item.id === source.id)),
     ...(await projectDigestSources({ digestFor, projectId: scopeProjectId, after: 0 })),
   ].map((source, index) => ({ ...source, n: index + 1 }));
   let answer;

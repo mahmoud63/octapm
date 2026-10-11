@@ -1,5 +1,6 @@
 import { useLocation } from '@tanstack/react-router'
 import { useAiDrawer, type AiRecordContext } from '@/stores/ai-drawer-store'
+import { moduleFromSlug } from '@/features/projects/lib/project-modules'
 
 /**
  * Where Ask OctaPM was opened from: the project, module and sub-tab in the
@@ -42,12 +43,16 @@ export interface AiScreenContext {
 export const useAiScreenContext = (): AiScreenContext => {
   const location = useLocation()
   const record = useAiDrawer((state) => state.record)
-  const match = /^(?:\/o\/[^/]+)?\/projects\/([^/]+)/.exec(location.pathname)
+  // `/projects/{id}/{module-slug}/{child}` (OCTA-FE-ROUTES-008); a link may
+  // still carry them as `?module=…&child=…`.
+  const match = /^(?:\/o\/[^/]+)?\/projects\/([^/]+)(?:\/([^/]+))?(?:\/([^/]+))?/.exec(location.pathname)
   const search = (location.search ?? {}) as Record<string, unknown>
   const text = (value: unknown) => (typeof value === 'string' && value ? value : null)
   const projectId = match?.[1] ?? null
-  const module = projectId ? (text(search.module) ?? 'overview') : null
-  const child = projectId ? text(search.child) : null
+  const module = projectId
+    ? ((match?.[2] ? moduleFromSlug(decodeURIComponent(match[2])) : null) ?? text(search.module) ?? 'overview')
+    : null
+  const child = projectId ? ((match?.[3] ? decodeURIComponent(match[3]) : null) ?? text(search.child)) : null
   return {
     projectId,
     module,
@@ -62,6 +67,7 @@ export const useAiScreenContext = (): AiScreenContext => {
 /** The context sent with a question: labels and, when an action named one, the record. */
 export const askContextOf = (screen: AiScreenContext) => ({
   module: screen.moduleLabel,
+  moduleKey: screen.module,
   child: screen.childLabel,
   label: screen.record?.label ?? null,
   recordType: screen.record?.recordType ?? null,

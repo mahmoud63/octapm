@@ -35,6 +35,7 @@ import { ProjectModuleBar } from './project-module-bar'
 import { ProjectSetupWizard } from './project-setup-wizard'
 import { SetupGuide } from './setup-guide/setup-guide'
 import { ProjectAiBrief } from '@/features/ai/components/project-ai-brief'
+import { ModuleAiActions } from '@/features/ai/components/module-ai-actions'
 import { ProjectStatusBadge } from './project-status-badge'
 
 /**
@@ -936,6 +937,9 @@ export function ProjectDetail({
             {/* Navigation moved to the module bar above the project header, so
                 the workspace gets the full width — which matters most for
                 Gantt, Budget, BOQ, Earned Value, Reports, BIM and Drawings. */}
+            {!permissionsSettling && (
+              <ModuleAiActions module={visibleModule} child={offeredChild} />
+            )}
             <section
               data-testid={`uat-project-content-${visibleModule}`}
               className='mt-2 min-w-0'

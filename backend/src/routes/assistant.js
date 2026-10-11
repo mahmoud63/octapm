@@ -9,6 +9,7 @@ const { validate } = require("../middleware/validate");
 const service = require("../services/assistant.service");
 const briefService = require("../services/ai/project-brief.service");
 const { currentRecordSource, RECORD_TYPES } = require("../services/ai/sources/current-record");
+const { moduleSources } = require("../services/ai/sources/module-sources");
 const { requestForProject } = require("../middleware/project-access");
 const { throwProjectNotFoundOrAccessDenied } = require("../services/project-authorization.service");
 const { canReadBoq } = require("../utils/boq-figures");
@@ -75,7 +76,7 @@ const build = ({ withActions }) => {
       body("projectId").optional({ nullable: true }).isString().isUUID(),
       // The screen asked from (AI UX correction): labels plus the record on it.
       body("context").optional({ nullable: true }).isObject(),
-      body(["context.module", "context.child", "context.label"]).optional({ nullable: true }).isString().isLength({ max: 120 }),
+      body(["context.module", "context.moduleKey", "context.child", "context.label"]).optional({ nullable: true }).isString().isLength({ max: 120 }),
       body("context.recordType").optional({ nullable: true }).isIn(RECORD_TYPES),
       body("context.recordId").optional({ nullable: true }).isUUID(),
       validate,
@@ -96,6 +97,9 @@ const build = ({ withActions }) => {
           // routes would show it to them (services/ai/sources/current-record).
           recordFor: async (projectId, screen) =>
             currentRecordSource({ view: await requestForProject(req, projectId), projectId, recordType: screen.recordType, recordId: screen.recordId }),
+          // The module on screen's own results (CPM on Schedule…), decided per module.
+          moduleFor: async (projectId, screen) =>
+            moduleSources({ view: await requestForProject(req, projectId), projectId, moduleKey: screen.moduleKey }),
           context: req.body.context || null,
           readsBoq: readsBoqFor(req),
         }),
