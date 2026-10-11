@@ -139,6 +139,26 @@ ACTIONS.bim = [
   },
 ]
 
+// Closeout / Turnover: the server reads the readiness checks, the turnover
+// package and the milestones; the AI explains them and records nothing.
+ACTIONS.closeout = [
+  {
+    label: 'Summarize Closeout Readiness',
+    question:
+      'Summarize closeout readiness: which milestones are recorded, which readiness checks are open, and how much of the turnover package is settled.',
+  },
+  {
+    label: 'What Blocks Handover?',
+    question:
+      'What blocks handover and final completion right now? List each outstanding deliverable and open check with who is responsible and what clears it.',
+  },
+  {
+    label: 'Draft Turnover Status Update',
+    question:
+      'Draft a short turnover status update for the owner from the recorded closeout status, deliverables and warranties. Use only what is recorded and mark it as a draft.',
+  },
+]
+
 const COMMERCIAL_RISK: ModuleAction = {
   label: 'Summarize Commercial Risk',
   question:

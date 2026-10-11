@@ -85,6 +85,7 @@ const RECORD_TYPE_MODULES = Object.freeze({
   conversation: "conversation",
   inbound_email: "email",
   bim_model: "bim",
+  closeout_deliverable: "closeout",
   boq_item: "boq",
   location: "location",
   project: "project_parties",
@@ -149,6 +150,7 @@ const RECORD_TYPE_MODELS = Object.freeze({
   direct_cost: "directCost",
   lookahead: "lookahead",
   bim_model: "bimModel",
+  closeout_deliverable: "closeoutDeliverable",
   boq_item: "boqItem",
   location: "location",
 });
@@ -221,6 +223,26 @@ const normalizeTags = (tags) => {
         .map((tag) => tag.trim());
   const unique = [...new Set(list.map((tag) => String(tag).trim().toLowerCase()).filter(Boolean))];
   return unique.slice(0, PHOTO_TAG_LIMIT);
+};
+
+/**
+ * Evidence a reviewer has seen stays as it was: a closeout deliverable's files
+ * are fixed while it is submitted and once it is settled (CLOSEOUT V1); reopen
+ * the deliverable to change them.
+ */
+const EVIDENCE_LOCKS = Object.freeze({
+  closeout_deliverable: async (recordId) => {
+    const row = await prisma.closeoutDeliverable.findFirst({ where: { id: recordId }, select: { status: true } });
+    return row && ["submitted", "accepted", "waived", "not_applicable"].includes(row.status)
+      ? "This deliverable is submitted or settled; reopen it to change its files"
+      : null;
+  },
+});
+
+const assertEvidenceOpen = async (recordType, recordId) => {
+  const lock = EVIDENCE_LOCKS[recordType];
+  const reason = lock ? await lock(recordId) : null;
+  if (reason) throw new HttpError(409, "ATTACHMENT_RECORD_LOCKED", reason);
 };
 
 const ensureProject = async ({ orgId, projectId }) => {
@@ -427,6 +449,7 @@ const createAttachments = async ({
   if (!id) throw new HttpError(400, "ATTACHMENT_RECORD_ID_REQUIRED", "recordId is required");
   // The record is one of this project's before anything is uploaded, stored, audited or queued.
   await assertRecordInProject({ orgId, projectId, recordType, recordId: id });
+  await assertEvidenceOpen(recordType, id);
   // Offline replay (OCTA-MOB-PWA-018): the same upload sent twice returns what the first one made.
   const replayKey = trimOrNull(clientRequestId)?.slice(0, 120) || null;
   if (replayKey && prisma.attachment?.findMany) {
@@ -669,6 +692,7 @@ const getAttachment = async ({ orgId, projectId, attachmentId }) => {
 /** Unlinks a document from a record. The document and its photo stay. */
 const deleteAttachment = async ({ orgId, projectId, attachmentId, userId = null, userRole = null }) => {
   const existing = await getAttachment({ orgId, projectId, attachmentId });
+  await assertEvidenceOpen(existing.recordType, existing.recordId);
   await prisma.$transaction(async (tx) => {
     await tx.attachment.delete({ where: { id: attachmentId } });
     await auditService.recordEvent({

@@ -60,7 +60,7 @@ const upload = multer({
  */
 // The modules whose records carry workflow evidence. `workflow` itself is not
 // on the list: every org role holds workflow.submit, so it would let anyone in.
-const EVIDENCE_MODULES = ['ncr', 'safety', 'punch', 'inspection', 'change_order', 'change_event', 'commitment', 'sub_pay_app', 'progress'];
+const EVIDENCE_MODULES = ['ncr', 'safety', 'punch', 'inspection', 'change_order', 'change_event', 'commitment', 'sub_pay_app', 'progress', 'closeout'];
 const EVIDENCE_ACTIONS = ['create', 'update', 'submit', 'approve'];
 
 const requireEvidenceRights = (req, _res, next) => {

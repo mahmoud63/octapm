@@ -537,6 +537,8 @@ const RECORD_RULES = Object.freeze({
   sub_valuation: { model: "subValuation", party: true, clauses: ({ companyIds }) => [some("companyId", companyIds)] },
   commitment_change_order: { model: "commitmentChangeOrder", party: true, clauses: ({ companyIds, userId }) => [{ commitment: { OR: [...(companyIds?.length ? [{ vendorCompanyId: { in: companyIds } }] : []), ...(userId ? [{ createdBy: userId }] : [])] } }] },
   punch_item: { model: "punchItem", party: true, clauses: ({ companyIds, userId }) => [some("assigneeCompanyId", companyIds), own("createdBy", userId), own("assigneeUserId", userId)] },
+  // A closeout deliverable: the responsible company and person, and its author (CLOSEOUT V1).
+  closeout_deliverable: { model: "closeoutDeliverable", party: true, clauses: ({ companyIds, userId }) => [some("responsibleCompanyId", companyIds), own("createdBy", userId), own("responsibleUserId", userId)] },
   form_instance: { model: "formInstance", party: true, clauses: ({ companyIds, userId }) => [some("assigneeCompanyId", companyIds), own("createdBy", userId), own("assigneeUserId", userId), own("inspectorUserId", userId), own("approverUserId", userId)] },
   task: { model: "task", party: true, clauses: ({ userId }) => [own("assigneeId", userId), own("createdById", userId)] },
   lookahead: { model: "lookahead", party: true, clauses: ({ userId }) => [{ status: { in: ["published", "archived"] } }, own("createdBy", userId)] },

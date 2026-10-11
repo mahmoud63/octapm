@@ -56,6 +56,8 @@ const ENTITY_TYPES = Object.freeze({
   MARKUP: "markup",
   PIN: "pin",
   PUNCH_ITEM: "punch_item",
+  PROJECT_CLOSEOUT: "project_closeout",
+  CLOSEOUT_DELIVERABLE: "closeout_deliverable",
   FORM_TEMPLATE: "form_template",
   FORM_INSTANCE: "form_instance",
   SUBMITTAL_PACKAGE: "submittal_package",

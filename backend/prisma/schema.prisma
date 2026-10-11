@@ -143,6 +143,8 @@ model Organisation {
   bimElementLinks     BimElementLink[]
   bimMeasurementRules BimMeasurementRule[]
   bimChangeReviews    BimChangeReview[]
+  projectCloseouts    ProjectCloseout[]
+  closeoutDeliverables CloseoutDeliverable[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -608,6 +610,8 @@ model Project {
   bimElementLinks               BimElementLink[]
   bimMeasurementRules           BimMeasurementRule[]
   bimChangeReviews              BimChangeReview[]
+  projectCloseout               ProjectCloseout?
+  closeoutDeliverables          CloseoutDeliverable[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -1717,6 +1721,7 @@ model Activity {
   @@index([projectId, wbsCode])
   @@index([wbsNodeId])
   @@index([locationId])
+  closeoutDeliverables CloseoutDeliverable[]
 }
 
 model ActivityDependency {
@@ -6320,6 +6325,94 @@ model BimChangeReview {
   @@unique([toModelId, globalId])
   @@index([orgId])
   @@index([projectId, status])
+}
+
+// ─── Project closeout / turnover (CLOSEOUT V1, 2026-10-11) ─────────────────
+
+/**
+ * The project's closeout: the three completion milestones, each recorded by a
+ * person with a date and note — never set by the system. Readiness is derived
+ * on read from the punch list, inspections, NCRs, submittals, RFIs, drawings,
+ * subcontract closeouts, changes and IPCs; only a waiver of a derived check
+ * is stored (checkWaiversJson: key -> { reason, by, at }).
+ */
+model ProjectCloseout {
+  id                        String    @id @default(uuid())
+  orgId                     String
+  projectId                 String    @unique
+  // in_progress, substantially_complete, handed_over, final_complete
+  status                    String    @default("in_progress")
+  substantialCompletionAt   DateTime?
+  substantialCompletionBy   String?
+  substantialCompletionNote String?
+  handoverAt                DateTime?
+  handoverBy                String?
+  handoverNote              String?
+  finalCompletionAt         DateTime?
+  finalCompletionBy         String?
+  finalCompletionNote       String?
+  checkWaiversJson          Json      @default("{}")
+  createdBy                 String?
+  updatedBy                 String?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+
+  @@unique([projectId, orgId])
+  @@index([orgId])
+}
+
+/**
+ * One turnover deliverable handed to the owner: as-builts, O&M manuals,
+ * warranties, test and commissioning certificates, training, spares, keys,
+ * authority certificates, lien waivers. Submitted with evidence by the
+ * responsible party, accepted or rejected by a reviewer; a required one can
+ * be waived or marked not applicable only with a reason.
+ */
+model CloseoutDeliverable {
+  id                   String    @id @default(uuid())
+  orgId                String
+  projectId            String
+  number               Int
+  ref                  String
+  category             String
+  title                String
+  description          String?
+  required             Boolean   @default(true)
+  // outstanding, submitted, accepted, rejected, waived, not_applicable
+  status               String    @default("outstanding")
+  responsibleCompanyId String?
+  responsibleUserId    String?
+  activityId           String?
+  locationId           String?
+  dueDate              DateTime?
+  warrantyStart        DateTime?
+  warrantyMonths       Int?
+  warrantyEnd          DateTime?
+  documentIdsJson      Json      @default("[]")
+  submittedAt          DateTime?
+  submittedBy          String?
+  reviewedAt           DateTime?
+  reviewedBy           String?
+  reviewComment        String?
+  waivedReason         String?
+  createdBy            String?
+  updatedBy            String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+  activity Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, ref])
+  @@unique([projectId, number])
+  @@index([orgId])
+  @@index([projectId, status])
+  @@index([projectId, category])
+  @@index([activityId])
 }
 
 /**

@@ -74,6 +74,7 @@ const RECORD_MODULES: Record<string, PermissionModule> = {
   delivery_receipt: 'procurement',
   cost_record: 'cost',
   boq_item: 'boq',
+  closeout_deliverable: 'closeout',
   location: 'location',
   project: 'project_parties',
 }

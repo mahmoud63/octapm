@@ -51,6 +51,7 @@ export type PermissionModule =
   | 'conversation'
   | 'email'
   | 'bim'
+  | 'closeout'
 
 export type RoleId =
   | 'pm'

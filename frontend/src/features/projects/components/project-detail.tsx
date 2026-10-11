@@ -37,6 +37,7 @@ import { SetupGuide } from './setup-guide/setup-guide'
 import { ProjectAiBrief } from '@/features/ai/components/project-ai-brief'
 import { ModuleAiActions } from '@/features/ai/components/module-ai-actions'
 import { Bim5dSummaryCard } from '@/features/bim/components/bim-5d-summary-card'
+import { CloseoutSummaryCard } from '@/features/closeout/components/closeout-summary-card'
 import { ProjectAiReports } from '@/features/ai/components/project-ai-reports'
 import { ProjectStatusBadge } from './project-status-badge'
 
@@ -86,6 +87,12 @@ const ScheduleUploadZone = lazy(() =>
 const BoqPage = lazy(() =>
   import('@/features/boq/components/boq-page').then((m) => ({
     default: m.BoqPage,
+  }))
+)
+// Closeout / Turnover (CLOSEOUT V1).
+const CloseoutPanel = lazy(() =>
+  import('@/features/closeout/components/closeout-workspace').then((m) => ({
+    default: m.CloseoutWorkspace,
   }))
 )
 // BIM / 5D (BIM-1..6): the commercial workspace; its Models tab is the existing BIM panel.
@@ -431,6 +438,7 @@ export function ProjectDetail({
         children: controlsChildren,
       },
       { key: 'bim', label: 'BIM / 5D' },
+      { key: 'closeout', label: 'Closeout' },
       { key: 'activities', label: 'Activities' },
       { key: 'equipment', label: 'Equipment' },
       { key: 'locations', label: 'Locations' },
@@ -650,6 +658,9 @@ export function ProjectDetail({
       case 'bim':
         return <BimPanel projectId={projectId} initialTarget={initialTarget} />
 
+      case 'closeout':
+        return <CloseoutPanel projectId={projectId} />
+
       case 'siteReporting':
         return (
           <SiteReportingDashboard
@@ -827,6 +838,9 @@ export function ProjectDetail({
             <HealthDashboard projectId={projectId} currency={project?.currency} />
             {menuItems.some((item) => item.key === 'bim') && (
               <Bim5dSummaryCard projectId={projectId} onOpen={() => goTo('bim')} />
+            )}
+            {menuItems.some((item) => item.key === 'closeout') && (
+              <CloseoutSummaryCard projectId={projectId} onOpen={() => goTo('closeout')} />
             )}
             <ProjectOverview project={project} parties={activeProjectParties} />
           </div>

@@ -15,6 +15,7 @@ const { qualitySources } = require("./quality-snapshot");
 const { submittalSources } = require("./submittal-snapshot");
 const { safetySources } = require("./safety-snapshot");
 const { bimSources } = require("./bim-snapshot");
+const { closeoutSources } = require("./closeout-snapshot");
 
 const BUILDERS = Object.freeze({
   schedule: scheduleSources,
@@ -33,6 +34,7 @@ const BUILDERS = Object.freeze({
   quality: qualitySources,
   "quality:safety": safetySources,
   bim: bimSources,
+  closeout: closeoutSources,
   "docControl:submittals": submittalSources,
 });
 
