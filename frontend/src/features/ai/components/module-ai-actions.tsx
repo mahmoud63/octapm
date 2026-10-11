@@ -29,7 +29,28 @@ const SCHEDULE_DEFAULT: ModuleAction[] = [
   },
 ]
 
+const ACTIONS: Record<string, ModuleAction[]> = {
+  boq: [
+    {
+      label: 'Explain BOQ Coverage',
+      question:
+        'Explain the BOQ coverage: how much of the BOQ is allocated, approved, pending, scheduled and unallocated, and what that means for earned value.',
+    },
+    {
+      label: 'Find Unallocated Scope',
+      question:
+        'Which BOQ rows are unallocated, partly allocated or over-allocated, largest first, and what should be done about each?',
+    },
+    {
+      label: 'Explain Allocation',
+      question:
+        'Explain how the BOQ is allocated to activities: what is approved, what is still pending approval, and where allocations look unusual.',
+    },
+  ],
+}
+
 const actionsFor = (module: string, child: string | null): ModuleAction[] => {
+  if (ACTIONS[module]) return ACTIONS[module]
   if (module === 'schedule') {
     if (child === 'progress')
       return [

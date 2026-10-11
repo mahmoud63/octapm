@@ -7,10 +7,12 @@
  */
 const { scheduleSources } = require("./schedule-snapshot");
 const { progressSources } = require("./progress-snapshot");
+const { boqSources } = require("./boq-snapshot");
 
 const BUILDERS = Object.freeze({
   schedule: scheduleSources,
   "schedule:progress": progressSources,
+  boq: boqSources,
 });
 
 const moduleSources = async ({ view, projectId, moduleKey, child = null }) => {

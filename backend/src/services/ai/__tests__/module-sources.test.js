@@ -1,7 +1,8 @@
 jest.mock("../../../config/db", () => ({ prisma: { project: { findFirst: jest.fn(async () => ({ name: "Riverside Tower", dataDate: null })) }, activity: { findMany: jest.fn() } } }));
 jest.mock("../../../middleware/rbac", () => ({ hasPermission: jest.fn() }));
 jest.mock("../../progress.service", () => ({ listProgressSubmissions: jest.fn() }));
-jest.mock("../../../utils/boq-figures", () => ({ boqFigureAccess: jest.fn(() => ({ boq: false, budget: false })), withheldProgressSubmissions: jest.fn((rows) => rows) }));
+jest.mock("../../../utils/boq-figures", () => ({ boqFigureAccess: jest.fn(() => ({ boq: false, budget: false })), withheldProgressSubmissions: jest.fn((rows) => rows), canReadBoq: jest.fn() }));
+jest.mock("../../activity-boq-allocation.service", () => ({ getCoverage: jest.fn() }));
 
 const { prisma } = require("../../../config/db");
 const { hasPermission } = require("../../../middleware/rbac");
@@ -35,6 +36,29 @@ describe("module sources (AI-7)", () => {
     expect(sources[0].text).toMatch(/Delayed \d+ calendar days past finish: A1100 Piling/);
     expect(sources.map((source) => source.id)).toEqual([`${P}:schedule`, "a1"]);
     expect(prisma.activity.findMany.mock.calls[0][0].select.budget).toBeUndefined();
+  });
+
+  test("BOQ: nothing for a caller who may not read the BOQ; the coverage summary and its gaps for one who may", async () => {
+    const { canReadBoq } = require("../../../utils/boq-figures");
+    const allocationService = require("../../activity-boq-allocation.service");
+    canReadBoq.mockReturnValue(false);
+    expect(await moduleSources({ view, projectId: P, moduleKey: "boq" })).toEqual([]);
+    expect(allocationService.getCoverage).not.toHaveBeenCalled();
+
+    canReadBoq.mockReturnValue(true);
+    allocationService.getCoverage.mockResolvedValue({
+      totalBoqAmount: 1000, activeAllocatedAmount: 600, approvedAllocatedAmount: 500, pendingAllocatedAmount: 100, unallocatedAmount: 400,
+      counts: { complete: 1, partial: 1, unmapped: 1, over: 0, notApplicable: 0 },
+      items: [
+        { boqItemId: "b1", code: "01", description: "Piling", mappingState: "complete", unallocatedAmount: 0, pendingAllocatedAmount: 0, allocationCount: 1 },
+        { boqItemId: "b2", code: "02", description: "Frame", mappingState: "partial", unallocatedAmount: 100, pendingAllocatedAmount: 100, allocationCount: 1 },
+        { boqItemId: "b3", code: "03", description: "Facade", mappingState: "unmapped", unallocatedAmount: 300, pendingAllocatedAmount: 0, allocationCount: 0 },
+      ],
+    });
+    const sources = await moduleSources({ view, projectId: P, moduleKey: "boq" });
+    expect(allocationService.getCoverage).toHaveBeenCalledWith({ orgId: "org-1", projectId: P });
+    expect(sources[0].text).toMatch(/3 BOQ rows: 1 fully allocated, 1 partly, 1 unallocated/);
+    expect(sources.slice(1).map((source) => source.id)).toEqual(["b3", "b2"]);
   });
 
   test("official progress is the latest approved submission over a stale stored figure", async () => {
