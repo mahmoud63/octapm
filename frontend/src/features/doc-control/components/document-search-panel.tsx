@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { DocumentAsk } from '@/features/ai/components/document-ask'
 import {
   useDocumentIndexStatus,
   useDocumentSearch,
@@ -147,7 +148,8 @@ function RecordChip({
   )
 }
 
-function HitCard({ hit }: { hit: DocumentSearchHit }) {
+function HitCard({ hit, projectId }: { hit: DocumentSearchHit; projectId: string }) {
+  const [asking, setAsking] = useState(false)
   return (
     <li
       data-testid='uat-document-search-hit'
@@ -183,6 +185,16 @@ function HitCard({ hit }: { hit: DocumentSearchHit }) {
               {Math.round(hit.semanticScore * 100)}%
             </Badge>
           )}
+          <Button
+            size='sm'
+            variant={asking ? 'secondary' : 'ghost'}
+            onClick={() => setAsking((value) => !value)}
+            aria-expanded={asking}
+            data-testid='uat-document-ask-toggle'
+          >
+            <Sparkles className='mr-1.5 h-3.5 w-3.5 text-primary' />
+            Ask This Document
+          </Button>
           <Button asChild size='sm' variant='outline'>
             <a href={hit.fileUrl} target='_blank' rel='noreferrer'>
               <ExternalLink className='mr-2 h-4 w-4' />
@@ -192,6 +204,9 @@ function HitCard({ hit }: { hit: DocumentSearchHit }) {
         </div>
       </div>
       <Snippet value={hit.snippet} />
+      {asking && (
+        <DocumentAsk projectId={projectId} documentId={hit.documentId} documentTitle={hit.title} />
+      )}
       {(hit.revision || hit.records.length > 0) && (
         <div className='flex flex-wrap items-center gap-1.5'>
           <span className='text-xs text-muted-foreground'>Linked to</span>
@@ -340,6 +355,8 @@ export function DocumentSearchPanel({ projectId }: { projectId: string }) {
   return (
     <div className='space-y-3' data-testid='uat-document-search'>
       <CoverageCard projectId={projectId} />
+      {/* Document Q&A inside the Documents module (AI-6). */}
+      <DocumentAsk projectId={projectId} className='rounded-md border p-3' />
       <div className='flex flex-wrap items-end gap-3'>
         <div className='min-w-[240px] flex-1 space-y-1'>
           <Label htmlFor='document-search-term'>Search inside documents</Label>
@@ -401,7 +418,7 @@ export function DocumentSearchPanel({ projectId }: { projectId: string }) {
           </div>
           <ul className='space-y-2'>
             {items.map((hit) => (
-              <HitCard key={hit.documentId} hit={hit} />
+              <HitCard key={hit.documentId} hit={hit} projectId={projectId} />
             ))}
           </ul>
         </div>
