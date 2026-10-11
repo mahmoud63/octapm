@@ -59,6 +59,8 @@ describe("natural-language reporting", () => {
     store.conversations.length = 0;
     store.messages.length = 0;
     jest.clearAllMocks();
+    // "Without a provider" means none at all: a development .env may name the mock (AI-1).
+    delete process.env.AI_PROVIDER;
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENAI_API_KEY;
     delete process.env.GEMINI_API_KEY;
@@ -168,10 +170,16 @@ describe("natural-language reporting", () => {
       expect(digest).toContain("Source: RFIs; 7 rows across 2 projects (1 skipped for permissions)");
       expect(digest).toContain("- open: count 5");
       expect(digest).toContain("RFI: RFI-001 · Subject: Pile cap links · Status: open · Raised: 2026-08-30");
-      return { text: JSON.stringify({ headline: "Five of seven RFIs are still open.", summary: "Two were answered; the open ones were raised in the last week.", highlights: ["5 open", "2 answered"], caveats: ["One project was skipped"] }), usage: { inputTokens: 400, outputTokens: 90 } };
+      return { text: JSON.stringify({ headline: "Five of seven RFIs are still open.", summary: "Two were answered; the open ones were raised in the last week.", highlights: ["5 open", "2 answered"], caveats: ["One project was skipped"], recommendations: ["Chase the five open RFIs"] }), usage: { inputTokens: 400, outputTokens: 90 } };
     });
     const told = await service.narrate({ orgId: "org-1", user, payload: { source: "rfi", groupBy: "status" }, transport });
     expect(told.degraded).toBe(false);
+    // AI-5: FACT is the builder's own numbers whatever the model says; the model's parts are labelled.
+    expect(told.facts).toEqual({ headline: plain.narrative.headline, items: plain.narrative.highlights, caveats: plain.narrative.caveats });
+    expect(plain.facts).toEqual(told.facts);
+    expect([plain.generatedBy, told.generatedBy]).toEqual(["rules", "ai"]);
+    expect(told.recommendations).toEqual(["Chase the five open RFIs"]);
+    expect(plain.recommendations).toEqual([]);
     expect(told.narrative).toEqual({ headline: "Five of seven RFIs are still open.", summary: "Two were answered; the open ones were raised in the last week.", highlights: ["5 open", "2 answered"], caveats: ["One project was skipped"] });
     expect(store.conversations[0]).toMatchObject({ kind: "report_narrative", title: "Narrative: RFIs" });
   });

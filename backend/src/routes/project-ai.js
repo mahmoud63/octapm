@@ -6,6 +6,7 @@ const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
 const { requirePermission, noApiKey } = require("../middleware/rbac");
 const briefService = require("../services/ai/project-brief.service");
+const reportService = require("../services/ai/project-report.service");
 
 /**
  * Project-level AI (AI-3), mounted at /projects/:projectId/ai behind the
@@ -54,5 +55,26 @@ const briefRoute = (kind) => [
  */
 router.get("/attention", requirePermission("assistant", "read"), briefRoute("attention"));
 router.get("/summary", requirePermission("assistant", "read"), briefRoute("summary"));
+
+/**
+ * @openapi
+ * /projects/{projectId}/ai/report:
+ *   get:
+ *     tags: [AI]
+ *     summary: AI project status report - FACT, AI INTERPRETATION and AI RECOMMENDATION kept apart
+ *     description: "`facts` and `attention` are OctaPM's own figures and records for the caller; `interpretation` and `recommendations` are the model's, each citing the numbered `sources` (uncited recommendations are dropped). Without AI only the facts are returned (`degraded`)."
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string, format: uuid } }
+ *     responses:
+ *       200: { description: Status report }
+ */
+router.get(
+  "/report",
+  requirePermission("assistant", "read"),
+  asyncHandler(async (req, res) => {
+    req.aiProjectId = req.params.projectId;
+    return sendSuccess(res, await reportService.report({ req, projectId: req.params.projectId }));
+  }),
+);
 
 module.exports = router;

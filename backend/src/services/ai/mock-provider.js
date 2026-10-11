@@ -63,7 +63,13 @@ const mockTransport = async ({ system, messages }) => {
   const wantsAssistantJson = /"answer"\s*:/.test(String(system || "")) && /"citations"/.test(String(system || ""));
   const wantsJson = !wantsAssistantJson && /return only a json/i.test(String(system || ""));
   let text = answer;
-  if (wantsAssistantJson) text = JSON.stringify({ answer, citations: sources.slice(0, MAX_ITEMS).map((source) => source.n), actions: [] });
+  // A feature that also asks for recommendations (AI reporting) gets one
+  // "review this record" line per listed record after the first (the
+  // project facts), so the section renders; it states nothing new.
+  const recommendations = /"recommendations"/.test(String(system || ""))
+    ? sources.slice(1, 4).map((source) => ({ text: `Mock: review ${source.head} [${source.n}]`, citations: [source.n] }))
+    : undefined;
+  if (wantsAssistantJson) text = JSON.stringify({ answer, citations: sources.slice(0, MAX_ITEMS).map((source) => source.n), actions: [], ...(recommendations ? { recommendations } : {}) });
   else if (wantsJson) text = JSON.stringify({ mock: true, summary: answer });
   const promptText = `${system || ""}\n${(messages || []).map((message) => textOf(message.content)).join("\n")}`;
   return { text, usage: { inputTokens: estimateTokens(promptText), outputTokens: estimateTokens(text) }, stopReason: "end_turn" };

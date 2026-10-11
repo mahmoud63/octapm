@@ -28,6 +28,11 @@ export interface ReportAskResult {
 export interface ReportNarrativeResult {
   degraded: boolean
   reason?: string | null
+  /** The builder's own numbers: never written by a model (AI-5). */
+  facts?: { headline: string; items: string[]; caveats: string[] }
+  /** "ai" when `narrative` is the model's interpretation, "rules" when it restates the facts. */
+  generatedBy?: 'ai' | 'rules'
+  recommendations?: string[]
   narrative: {
     headline: string
     summary: string

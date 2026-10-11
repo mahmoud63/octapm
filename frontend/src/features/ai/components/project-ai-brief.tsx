@@ -13,9 +13,11 @@ import {
 } from '@/features/assistant/components/assistant-sheet'
 import type { AssistantCitation } from '@/features/assistant/hooks/use-assistant'
 import { workspaceLink } from '@/features/workflows/hooks/use-workflow-engine'
+import { ProjectStatusReportDialog } from './project-status-report'
 import {
   useExplainProject,
   useProjectBrief,
+  useProjectStatusReport,
   type BriefCitation,
   type BriefItem,
   type BriefKind,
@@ -107,8 +109,20 @@ export function ProjectAiBrief({ projectId }: { projectId: string }) {
   const explain = useExplainProject(projectId)
   const [result, setResult] = useState<ProjectBrief | null>(null)
   const [showFacts, setShowFacts] = useState(false)
+  const statusReport = useProjectStatusReport(projectId)
+  const [reportOpen, setReportOpen] = useState(false)
 
   if (!canAsk) return null
+
+  const openReport = () => {
+    setReportOpen(true)
+    statusReport.mutate(undefined, {
+      onError: (error) => {
+        setReportOpen(false)
+        toast.error(getServerErrorMessage(error))
+      },
+    })
+  }
 
   const run = async (kind: BriefKind) => {
     try {
@@ -161,6 +175,15 @@ export function ProjectAiBrief({ projectId }: { projectId: string }) {
               <Loader2 className='me-1 h-3.5 w-3.5 animate-spin' />
             ) : null}
             Summarise project
+          </Button>
+          <Button
+            size='sm'
+            disabled={statusReport.isPending || !brief}
+            onClick={openReport}
+            data-testid='uat-ai-status-report-open'
+          >
+            {statusReport.isPending ? <Loader2 className='me-1 h-3.5 w-3.5 animate-spin' /> : null}
+            Status report
           </Button>
         </div>
       </header>
@@ -226,6 +249,12 @@ export function ProjectAiBrief({ projectId }: { projectId: string }) {
           )}
         </div>
       </div>
+      <ProjectStatusReportDialog
+        open={reportOpen}
+        onOpenChange={setReportOpen}
+        report={statusReport.data ?? null}
+        loading={statusReport.isPending}
+      />
     </section>
   )
 }

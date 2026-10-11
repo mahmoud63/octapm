@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Loader2, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
@@ -9,6 +9,14 @@ import {
   type ReportNarrativeResult,
 } from '../hooks/use-report-assistant'
 import type { ReportDefinitionInput } from '../hooks/use-report-builder'
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className='pt-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase'>
+      {children}
+    </p>
+  )
+}
 
 /** "Explain these numbers": a plain-language summary of the current preview. */
 export function ReportNarrative({
@@ -58,21 +66,58 @@ export function ReportNarrative({
           className='space-y-1.5 rounded-md border p-3 text-sm'
           data-testid='uat-report-narrative-result'
         >
-          <p className='font-semibold'>{result.narrative.headline}</p>
-          <p className='whitespace-pre-wrap'>{result.narrative.summary}</p>
-          {result.narrative.highlights.length > 0 && (
-            <ul className='list-disc pl-4 text-xs'>
-              {result.narrative.highlights.map((item, index) => (
-                <li key={index}>{item}</li>
-              ))}
-            </ul>
+          {/* AI-5: the builder's numbers (FACT) apart from the model's
+              reading of them and its suggestions. */}
+          <SectionLabel>Fact</SectionLabel>
+          {(() => {
+            const facts = result.facts ?? {
+              headline: result.narrative.headline,
+              items: result.narrative.highlights,
+              caveats: result.narrative.caveats,
+            }
+            return (
+              <>
+                <p className='font-semibold'>{facts.headline}</p>
+                {facts.items.length > 0 && (
+                  <ul className='list-disc pl-4 text-xs'>
+                    {facts.items.map((item, index) => (
+                      <li key={index}>{item}</li>
+                    ))}
+                  </ul>
+                )}
+                {facts.caveats.length > 0 && (
+                  <ul className='list-disc pl-4 text-xs text-muted-foreground'>
+                    {facts.caveats.map((item, index) => (
+                      <li key={index}>{item}</li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )
+          })()}
+          {result.generatedBy === 'ai' && (
+            <>
+              <SectionLabel>AI interpretation</SectionLabel>
+              <p className='font-medium'>{result.narrative.headline}</p>
+              <p className='whitespace-pre-wrap'>{result.narrative.summary}</p>
+              {result.narrative.highlights.length > 0 && (
+                <ul className='list-disc pl-4 text-xs'>
+                  {result.narrative.highlights.map((item, index) => (
+                    <li key={index}>{item}</li>
+                  ))}
+                </ul>
+              )}
+            </>
           )}
-          {result.narrative.caveats.length > 0 && (
-            <ul className='list-disc pl-4 text-xs text-muted-foreground'>
-              {result.narrative.caveats.map((item, index) => (
-                <li key={index}>{item}</li>
-              ))}
-            </ul>
+          {(result.recommendations?.length ?? 0) > 0 && (
+            <>
+              <SectionLabel>AI recommendation</SectionLabel>
+              <ul className='list-disc pl-4 text-xs'>
+                {(result.recommendations ?? []).map((item, index) => (
+                  <li key={index}>{item}</li>
+                ))}
+              </ul>
+            </>
           )}
           {result.degraded && (
             <p className='text-xs text-muted-foreground'>{result.reason}</p>

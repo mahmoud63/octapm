@@ -48,7 +48,8 @@ Return ONLY a JSON object:
 {"name": "short report name", "description": "one sentence", "source": "…", "columns": ["…"], "filters": [], "sort": {"field": "…", "dir": "asc|desc"} or null, "groupBy": null, "aggregates": [], "chart": null, "explanation": "one sentence on how the question was read", "assumptions": ["anything you had to assume"]}`;
 
 const NARRATE_PROMPT = `You summarise the result of a construction project report for the person who asked for it. Use ONLY the figures given: totals, groups and the sample rows. Name the biggest groups and the outliers with their numbers; do not invent causes. Be brief.
-Return ONLY a JSON object: {"headline": "one sentence with the key number", "summary": "2–4 sentences", "highlights": ["short facts with numbers"], "caveats": ["what the data cannot tell, e.g. truncation, skipped projects"]}`;
+Recommendations are optional: only where the figures point to something to check or chase next, each naming the group or row it rests on; never a figure that is not given.
+Return ONLY a JSON object: {"headline": "one sentence with the key number", "summary": "2–4 sentences", "highlights": ["short facts with numbers"], "caveats": ["what the data cannot tell, e.g. truncation, skipped projects"], "recommendations": ["what to check or chase next"]}`;
 
 // ─── Repair against the builder's own normaliser ──────────────────────────
 
@@ -303,7 +304,11 @@ const narrate = async ({ orgId, user, payload = {}, transport = null, apiClient 
   const result = await reportBuilder.preview({ orgId, user, payload, limit: 200, apiClient });
   const fallback = deterministicNarrative(result);
   const digest = digestOf(result);
-  const out = (narrative, degraded, reason, stored) => ({ degraded, reason, narrative, result: { total: result.total, groups: result.groups?.length || 0, projects: result.projects, truncated: result.truncated }, message: runMessage(stored) });
+  // AI-5: `facts` is always the builder's own numbers (never a model's), so
+  // the reader can tell FACT from the AI's interpretation (`narrative`, when
+  // generatedBy is "ai") and its suggestions (`recommendations`).
+  const facts = { headline: fallback.headline, items: fallback.highlights, caveats: fallback.caveats };
+  const out = (narrative, degraded, reason, stored, recommendations = []) => ({ degraded, reason, facts, narrative, recommendations, generatedBy: degraded ? "rules" : "ai", result: { total: result.total, groups: result.groups?.length || 0, projects: result.projects, truncated: result.truncated }, message: runMessage(stored) });
   if (!aiProvider.isEnabled() && !transport) return out(fallback, true, "AI summaries are not configured on this server; this summary was built from the numbers.", null);
   let completion;
   try {
@@ -315,7 +320,7 @@ const narrate = async ({ orgId, user, payload = {}, transport = null, apiClient 
   const parsed = aiProvider.parseJsonAnswer(completion.text);
   const narrative = { headline: clip(parsed?.headline, 300) || fallback.headline, summary: clip(parsed?.summary, 2000) || fallback.summary, highlights: (Array.isArray(parsed?.highlights) ? list(parsed.highlights, 8) : fallback.highlights), caveats: (Array.isArray(parsed?.caveats) ? list(parsed.caveats, 6) : fallback.caveats) };
   const stored = await assistant.storeRun({ orgId, user, projectId: trimOrNull(payload.projectId), kind: "report_narrative", title: `Narrative: ${result.source.label}`, prompt: digest, answer: JSON.stringify(narrative), usage: completion.usage || null, provider: completion.provider || null, model: completion.model || null }).catch(() => null);
-  return out(narrative, false, null, stored);
+  return out(narrative, false, null, stored, list(parsed?.recommendations, 5));
 };
 
 module.exports = { ASK_PROMPT, NARRATE_PROMPT, SOURCE_KEYWORDS, catalogueText, repair, heuristicDefinition, ask, narrate, digestOf, deterministicNarrative };

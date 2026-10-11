@@ -79,6 +79,30 @@ export const useProjectBrief = (projectId: string, enabled = true) =>
     enabled,
   })
 
+export interface ProjectStatusReport {
+  title: string
+  project: ProjectBrief['project']
+  cutoffDate: string
+  generatedAt: string
+  facts: BriefFact[]
+  attention: BriefItem[]
+  sources: Array<BriefCitation & { projectName?: string | null }>
+  interpretation: { text: string; citations: BriefCitation[] } | null
+  recommendations: Array<{ text: string; citations: BriefCitation[] }>
+  ai: { enabled: boolean; mode: 'mock' | 'live' | 'disabled'; provider: string | null; model: string | null }
+  degraded: boolean
+  degradedReason: string | null
+}
+
+/** The AI status report (AI-5): FACT, AI INTERPRETATION and AI RECOMMENDATION. */
+export const useProjectStatusReport = (projectId: string) =>
+  useMutation({
+    mutationFn: () =>
+      data<ProjectStatusReport>(
+        apiClient.get(`/projects/${projectId}/ai/report`, { timeout: 120_000 })
+      ),
+  })
+
 /** The model's brief over the same facts, when the reader asks for it. */
 export const useExplainProject = (projectId: string) =>
   useMutation({
