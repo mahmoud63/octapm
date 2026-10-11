@@ -71,6 +71,7 @@ import {
 } from '../hooks/use-doc-control'
 import { RaiseChangeEventButton } from '@/features/controls/exceptions/raise-change-event-button'
 import { RfiResponseAssistant } from './rfi-ai-response'
+import { AiAction } from '@/features/ai/components/ai-action'
 import { RfiPeopleList } from './rfi-people-list'
 
 const NONE = '__none'
@@ -301,6 +302,20 @@ export function RfiDetailDialog({
                   : ''}
                 {rfi.changeOrderId ? ' · converted to a change event' : ''}
               </DialogDescription>
+              {/* AI on this RFI, without leaving it (AI UX correction). */}
+              <div className='flex flex-wrap gap-2' data-testid='uat-rfi-ai-actions'>
+                <AiAction
+                  label='Summarize'
+                  record={{ recordType: 'rfi', recordId: rfi.id, label: rfi.ref }}
+                  question={`Summarize ${rfi.ref}: the question, where it stands, who it is waiting on, and any answer given.`}
+                />
+                <AiAction
+                  label='Improve Wording'
+                  variant='ghost'
+                  record={{ recordType: 'rfi', recordId: rfi.id, label: rfi.ref }}
+                  question={`Suggest clearer, more answerable wording for the question in ${rfi.ref}, keeping every technical detail it states. Do not add facts it does not contain.`}
+                />
+              </div>
             </DialogHeader>
 
             <div

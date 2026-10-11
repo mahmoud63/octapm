@@ -57,6 +57,7 @@ import {
   type DailyLogEntry,
 } from '../hooks/use-daily-log'
 import { DailyLogDraftAssistant } from './daily-log-ai-draft'
+import { AiAction } from '@/features/ai/components/ai-action'
 import {
   QUANTITIES_SECTION,
   QuantitiesSectionCard,
@@ -872,6 +873,22 @@ export function DailyLogPanel({
               date={date}
               log={log}
             />
+          )}
+          {/* AI on this day's report, without leaving it (AI UX correction). */}
+          {log.exists && log.id && (
+            <div className='flex flex-wrap gap-2' data-testid='uat-dailylog-ai-actions'>
+              <AiAction
+                label='Summarize Today'
+                record={{ recordType: 'daily_log', recordId: log.id, label: `Daily report ${log.date}` }}
+                question={`Summarize the daily report for ${log.date}: work done, manpower, plant, deliveries, delays and issues. State the report's status as recorded.`}
+              />
+              <AiAction
+                label='Check Missing Information'
+                variant='ghost'
+                record={{ recordType: 'daily_log', recordId: log.id, label: `Daily report ${log.date}` }}
+                question={`Check the daily report for ${log.date} for missing or thin information a site manager would expect (sections left empty, delays without a cause, manpower without hours) and list what to complete.`}
+              />
+            </div>
           )}
 
           <div className='grid gap-3 xl:grid-cols-2'>

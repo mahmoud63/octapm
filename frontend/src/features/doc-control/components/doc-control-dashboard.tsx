@@ -75,6 +75,7 @@ import {
 import { DocumentSearchPanel } from './document-search-panel'
 import { RfiCreateDialog } from './rfi-create-dialog'
 import { RfiDetailDialog } from './rfi-detail-dialog'
+import { AiAction } from '@/features/ai/components/ai-action'
 import { RfiSavedViews } from './rfi-saved-views'
 import { SubmittalCreateDialog } from './submittal-create-dialog'
 import { SubmittalDetailDialog } from './submittal-detail-dialog'
@@ -1333,6 +1334,11 @@ export function DocControlDashboard({
                     <Eye className='mr-2 h-4 w-4' />
                     Open
                   </Button>
+                  <AiAction
+                    label='Summarize'
+                    record={{ recordType: 'rfi', recordId: row.id, label: row.ref }}
+                    question={`Summarize ${row.ref}: the question, where it stands, who it is waiting on, and any answer given.`}
+                  />
                   {(row.status === 'draft' || row.status === 'open') &&
                     canSubmitRfi && (
                       <Button
