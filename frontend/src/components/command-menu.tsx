@@ -34,6 +34,11 @@ import {
   type GlobalSearchType,
   useGlobalSearch,
 } from '@/features/search/hooks/use-global-search'
+import { SmartSearchStrip } from '@/features/ai/components/smart-search-strip'
+import {
+  useExplainSearch,
+  useSmartSearch,
+} from '@/features/ai/hooks/use-smart-search'
 import { sidebarData } from './layout/data/sidebar-data'
 import { ScrollArea } from './ui/scroll-area'
 
@@ -126,9 +131,11 @@ function FilterButton({
 function SearchResultItem({
   result,
   onSelect,
+  matchText,
 }: {
   result: GlobalSearchResult
   onSelect: () => void
+  matchText?: string
 }) {
   const Icon = resultIcons[result.type] ?? Search
   const status = formatStatus(result.status)
@@ -137,6 +144,7 @@ function SearchResultItem({
   return (
     <CommandItem
       value={[
+        matchText,
         result.typeLabel,
         result.identifier,
         result.title,
@@ -210,7 +218,15 @@ export function CommandMenu() {
     typeFilter !== 'all' ||
     statusFilter !== 'all' ||
     dateFilter !== 'all'
-  const { data: searchResults, isFetching: isSearching } = useGlobalSearch(
+  // Smart Search (AI-4): a query of two or more words with no filter chosen
+  // is read as plain language ("overdue RFIs on Marina") into the search's
+  // own filters, under the same access; one word keeps the plain search.
+  const smartActive =
+    debouncedSearch.split(/\s+/).filter(Boolean).length >= 2 &&
+    typeFilter === 'all' &&
+    statusFilter === 'all' &&
+    dateFilter === 'all'
+  const { data: plainResults, isFetching: isPlainSearching } = useGlobalSearch(
     {
       q: debouncedSearch,
       type: typeFilter,
@@ -218,8 +234,23 @@ export function CommandMenu() {
       dateFrom: getDateFrom(dateFilter),
       limit: 24,
     },
-    { enabled: open && searchActive }
+    { enabled: open && searchActive && !smartActive }
   )
+  const { data: smartResults, isFetching: isSmartSearching } = useSmartSearch(
+    debouncedSearch,
+    open && smartActive
+  )
+  const explainSearch = useExplainSearch()
+  React.useEffect(() => {
+    explainSearch.reset()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch])
+  const searchResults = smartActive ? smartResults : plainResults
+  const isSearching = smartActive ? isSmartSearching : isPlainSearching
+  const smartAnswer =
+    explainSearch.data && explainSearch.data.query === debouncedSearch
+      ? explainSearch.data
+      : null
   const resultGroups = searchResults?.groups ?? []
   const resultsByType = React.useMemo(() => {
     const map = new Map<GlobalSearchType, GlobalSearchResult[]>()
@@ -276,6 +307,14 @@ export function CommandMenu() {
             </FilterButton>
           ))}
         </div>
+        {smartActive && smartResults && (
+          <SmartSearchStrip
+            response={smartResults}
+            answer={smartAnswer}
+            explaining={explainSearch.isPending}
+            onExplain={() => explainSearch.mutate(debouncedSearch)}
+          />
+        )}
       </div>
       <CommandList>
         <ScrollArea type='hover' className='h-96 pe-1'>
@@ -305,6 +344,9 @@ export function CommandMenu() {
                       <SearchResultItem
                         key={`${result.type}-${result.id}`}
                         result={result}
+                        // The palette filters items by the typed text; a smart
+                        // result already matched the query as interpreted.
+                        matchText={smartActive ? debouncedSearch : undefined}
                         onSelect={() => {
                           runCommand(() => navigate({ to: result.url }))
                         }}
