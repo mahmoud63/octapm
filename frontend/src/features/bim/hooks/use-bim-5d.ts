@@ -45,6 +45,8 @@ export interface Bim5dOverview {
     paid: UnitSum
     potentialChange: UnitSum
   }
+  /** BOQ items per reconciliation status; null without BOQ read. */
+  reconciliation: null | (Record<'UNMAPPED' | 'OVER_CONTRACT' | 'BELOW_CERTIFIED' | 'UNDER_CONTRACT' | 'RULE_ISSUES' | 'MATCHED', number> & { potentialVariations: number })
   alerts: Bim5dAlert[]
   formats: Bim5dFormat[]
 }
@@ -169,8 +171,8 @@ export interface Provenance {
   measured: Record<string, { value: number; unit: string }>
 }
 
-export const useBim5dOverview = (projectId: string) =>
-  useQuery<Bim5dOverview>({ queryKey: [...key(projectId), 'overview'], queryFn: () => data(apiClient.get(`${base(projectId)}/overview`)) })
+export const useBim5dOverview = (projectId: string, enabled = true) =>
+  useQuery<Bim5dOverview>({ queryKey: [...key(projectId), 'overview'], queryFn: () => data(apiClient.get(`${base(projectId)}/overview`)), enabled })
 
 export const useBim5dRegister = (projectId: string, enabled = true) =>
   useQuery<Bim5dRegister>({ queryKey: [...key(projectId), 'register'], queryFn: () => data(apiClient.get(`${base(projectId)}/register`)), enabled })

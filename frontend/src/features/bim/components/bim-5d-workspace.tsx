@@ -26,6 +26,7 @@ import {
   type RuleStatus,
   type UnitSum,
 } from '../hooks/use-bim-5d'
+import { AiAction } from '@/features/ai/components/ai-action'
 import { ChangesTab, DuplicatesPanel, ElementCommercialPanel } from './bim-5d-changes'
 import { BimPanel } from './bim-panel'
 
@@ -235,6 +236,25 @@ function RevisionsTab({ projectId }: { projectId: string }) {
 
 // ─── Why this quantity? ───────────────────────────────────────────────────
 
+// Ask OctaPM about this element (BIM-12): the server reads its provenance and
+// commercial state as a bim_element record under the caller's access.
+const ELEMENT_ACTIONS = [
+  { label: 'Explain Quantity', question: 'Explain why this element has the quantity OctaPM shows: the model revision, the measured property, the rule, the conversion and the BOQ item. Use only the recorded figures.' },
+  { label: 'Explain Commercial Status', question: "Explain this element's commercial status: is it installed, inspected, approved, certified and paid on its BOQ item, and what is each based on?" },
+  { label: 'Explain Why Not Certifiable', question: 'Is this element ready for certification? If not, say exactly what is missing or blocking it (progress, approved quantity at its location, inspections, NCRs).' },
+  { label: 'Explain Model Change', question: 'How has this element changed between model revisions, and does the change affect a BOQ item that was already certified?' },
+]
+
+function ElementAiActions({ elementId, label }: { elementId: string; label: string }) {
+  return (
+    <div className='flex flex-wrap gap-1' data-testid='uat-bim5d-element-ai'>
+      {ELEMENT_ACTIONS.map((action) => (
+        <AiAction key={action.label} label={action.label} question={action.question} record={{ recordType: 'bim_element', recordId: elementId, label }} variant='ghost' className='h-7 px-2 text-xs' />
+      ))}
+    </div>
+  )
+}
+
 function ProvenancePanel({ projectId, elementId, boqItemId }: { projectId: string; elementId: string; boqItemId: string | null }) {
   const { data, isLoading } = useBimProvenance(projectId, elementId, boqItemId)
   if (isLoading || !data) return <p className='py-3 text-sm text-muted-foreground'>Tracing the quantity…</p>
@@ -246,7 +266,10 @@ function ProvenancePanel({ projectId, elementId, boqItemId }: { projectId: strin
   )
   return (
     <div className='space-y-3 rounded-md border bg-muted/30 p-3 text-sm' data-testid='uat-bim5d-provenance'>
-      <p className='text-xs font-semibold tracking-wide text-muted-foreground uppercase'>Why this quantity?</p>
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <p className='text-xs font-semibold tracking-wide text-muted-foreground uppercase'>Why this quantity?</p>
+        <ElementAiActions elementId={elementId} label={`${data.element.tag || data.element.name || data.element.globalId} (${data.element.ifcType})`} />
+      </div>
       <dl className='grid grid-cols-[auto_1fr] gap-x-4 gap-y-1'>
         {row('Element', `${data.element.tag || data.element.name || ''} · ${data.element.ifcType}`)}
         {row('GlobalId', <span className='font-mono text-xs'>{data.element.globalId}</span>)}

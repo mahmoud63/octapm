@@ -119,6 +119,26 @@ const ACTIONS: Record<string, ModuleAction[]> = {
   ],
 }
 
+// BIM / 5D (BIM-12): the server reads the reconciliation, revision impact
+// and duplicate findings; the AI explains them and never measures.
+ACTIONS.bim = [
+  {
+    label: 'Find Potential Variations',
+    question:
+      'Which BOQ items does the BIM model measure above or below the contract, and which model changes could be variations? Use only the reconciliation and revision figures; nothing is a variation until it is approved.',
+  },
+  {
+    label: 'Summarize Revision Impact',
+    question:
+      'Summarize the impact of the latest model revision: what was added, removed and modified, which BOQ items change and by how much, and what was already certified.',
+  },
+  {
+    label: 'Compare Revisions',
+    question:
+      'Compare the current model revision with the previous one element by element: quantity, type, level and mapping changes, and which need a commercial review.',
+  },
+]
+
 const COMMERCIAL_RISK: ModuleAction = {
   label: 'Summarize Commercial Risk',
   question:

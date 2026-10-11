@@ -20,6 +20,7 @@ const MODULE_LABELS: Record<string, string> = {
   docControl: 'Documents',
   meetings: 'Meetings',
   boq: 'BOQ',
+  bim: 'BIM / 5D',
   reports: 'Reports',
   inventory: 'Inventory',
 }

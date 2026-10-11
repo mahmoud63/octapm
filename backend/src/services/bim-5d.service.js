@@ -497,6 +497,7 @@ const overview = async ({ orgId, projectId, reader, canReadBoq }) => {
 
   let quantities = null;
   let changedAfterCertification = null;
+  let reconciliationStatus = null;
   if (canReadBoq) {
     const recon = await reconciliation({ orgId, projectId, reader });
     const mappedRows = recon.rows.filter((row) => row.mappedElements > 0);
@@ -516,6 +517,9 @@ const overview = async ({ orgId, projectId, reader, canReadBoq }) => {
       potentialChange: sum((row) => (row.variation !== null ? row.variation : 0)),
     };
     changedAfterCertification = recon.rows.filter((row) => row.status === "BELOW_CERTIFIED").length;
+    // BOQ items per reconciliation status; a potential variation is an item the model measures beyond the contract tolerance, either way.
+    reconciliationStatus = Object.fromEntries(STATUS_ORDER.map((status) => [status, recon.rows.filter((row) => row.status === status).length]));
+    reconciliationStatus.potentialVariations = reconciliationStatus.OVER_CONTRACT + reconciliationStatus.UNDER_CONTRACT;
     // BIM-9: elements of a certified BOQ item removed or reduced by the latest revision of each model.
     const changes = require("./bim-5d-changes.service");
     for (const model of models) {
@@ -529,6 +533,7 @@ const overview = async ({ orgId, projectId, reader, canReadBoq }) => {
     models: { count: totalModels, current: models.map((model) => ({ id: model.id, name: model.name, discipline: model.discipline, revision: revisionLabel(model.version), elements: model.elementCount, revisionDate: model.createdAt.toISOString() })) },
     elements: { total: elementCount, mapped, unmapped: elementCount - mapped, mappedPct: elementCount ? round((mapped / elementCount) * 100, 1) : 0, unmappedPct: elementCount ? round(((elementCount - mapped) / elementCount) * 100, 1) : 0, withBoq, withLocation },
     quantities,
+    reconciliation: reconciliationStatus,
     alerts: [
       alert("BIM_UNMAPPED", "Unmapped BIM elements", elementCount - mapped, "warning", "mapping"),
       alert("BIM_NO_BOQ", "Elements without a BOQ item", elementCount - withBoq, "warning", "mapping"),

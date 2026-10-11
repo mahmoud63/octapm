@@ -36,6 +36,7 @@ import { ProjectSetupWizard } from './project-setup-wizard'
 import { SetupGuide } from './setup-guide/setup-guide'
 import { ProjectAiBrief } from '@/features/ai/components/project-ai-brief'
 import { ModuleAiActions } from '@/features/ai/components/module-ai-actions'
+import { Bim5dSummaryCard } from '@/features/bim/components/bim-5d-summary-card'
 import { ProjectAiReports } from '@/features/ai/components/project-ai-reports'
 import { ProjectStatusBadge } from './project-status-badge'
 
@@ -824,6 +825,9 @@ export function ProjectDetail({
           <div className='space-y-4'>
             <NeedsYouPanel projectId={projectId} />
             <HealthDashboard projectId={projectId} currency={project?.currency} />
+            {menuItems.some((item) => item.key === 'bim') && (
+              <Bim5dSummaryCard projectId={projectId} onOpen={() => goTo('bim')} />
+            )}
             <ProjectOverview project={project} parties={activeProjectParties} />
           </div>
         )
