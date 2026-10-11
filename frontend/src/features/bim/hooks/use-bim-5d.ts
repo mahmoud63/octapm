@@ -68,6 +68,10 @@ export interface Bim5dRevision {
   previousRevisionId: string | null
   elementCount: number
   linkedCount: number
+  revisionCode: string | null
+  notes: string | null
+  error: string | null
+  warnings: number
 }
 
 export interface Bim5dRegister {
@@ -300,3 +304,104 @@ export const useApplyBimSuggestions = (projectId: string) => {
     },
   })
 }
+
+// ─── Import, download and export (BIM UX completion) ──────────────────────
+
+export interface ImportModelInput {
+  file: File
+  mode: 'new' | 'revision'
+  name?: string
+  baseModelId?: string
+  discipline?: string
+  revision?: string
+  revisionDate?: string
+  notes?: string
+}
+
+export interface ImportedModel {
+  id: string
+  name: string
+  status: 'processing' | 'ready' | 'failed'
+  revision: string
+  version: number
+  elementCount: number
+  entityCount: number
+  storeyCount: number
+  schema: string | null
+  warnings: Array<string | { message?: string; code?: string }>
+  error: string | null
+}
+
+/** Uploads a model or a new revision; `onProgress` gets 0–100 while the file travels. */
+export const useImportBimModel = (projectId: string) => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ input, onProgress }: { input: ImportModelInput; onProgress?: (pct: number) => void }) => {
+      const form = new FormData()
+      form.append('file', input.file)
+      form.append('mode', input.mode)
+      for (const field of ['name', 'baseModelId', 'discipline', 'revision', 'revisionDate', 'notes'] as const) {
+        const value = input[field]
+        if (value && String(value).trim()) form.append(field, String(value).trim())
+      }
+      return data<ImportedModel>(
+        apiClient.post(`/projects/${projectId}/bim/models`, form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          onUploadProgress: (event) => onProgress?.(event.total ? Math.round((event.loaded / event.total) * 100) : 0),
+        })
+      )
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: key(projectId) })
+      queryClient.invalidateQueries({ queryKey: ['bim', projectId] })
+    },
+  })
+}
+
+/** One model revision while it is read, polled until it is ready or failed. */
+export const useImportedModel = (projectId: string, modelId: string | null) =>
+  useQuery<ImportedModel>({
+    queryKey: ['bim', projectId, 'import', modelId],
+    queryFn: () => data(apiClient.get(`/projects/${projectId}/bim/models/${modelId}`)),
+    enabled: Boolean(modelId),
+    refetchInterval: (query) => (query.state.data?.status === 'processing' || !query.state.data ? 1500 : false),
+  })
+
+export const useModelSuggestions = (projectId: string, modelId: string | null, enabled: boolean) =>
+  useQuery<{ location: unknown[]; boq: unknown[]; boqWithheld?: string }>({
+    queryKey: [...key(projectId), 'suggestions', modelId],
+    queryFn: () => data(apiClient.get(`${base(projectId)}/models/${modelId}/suggestions`)),
+    enabled: Boolean(modelId) && enabled,
+  })
+
+const fileNameFrom = (disposition: string | undefined, fallback: string) => {
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(disposition || '')?.[1]
+  const plain = /filename="?([^";]+)"?/i.exec(disposition || '')?.[1]
+  try {
+    return decodeURIComponent(star || plain || fallback)
+  } catch {
+    return fallback
+  }
+}
+
+/** Downloads a file the API serves (with the caller's token) and saves it under the name the server gives. */
+export const downloadFromApi = async (url: string, fallbackName: string) => {
+  const response = await apiClient.get(url, { responseType: 'blob' })
+  const name = fileNameFrom(response.headers['content-disposition'] as string | undefined, fallbackName)
+  const href = URL.createObjectURL(response.data as Blob)
+  const link = document.createElement('a')
+  link.href = href
+  link.download = name
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(href), 1000)
+}
+
+export type BimExportKind = 'elements' | 'reconciliation' | 'mapping' | 'revision-impact'
+
+export const downloadBimExport = (projectId: string, kind: BimExportKind, format: 'xlsx' | 'csv') =>
+  downloadFromApi(`${base(projectId)}/export?kind=${kind}&format=${format}`, `bim-${kind}.${format}`)
+
+export const downloadModelSource = (projectId: string, modelId: string) =>
+  downloadFromApi(`/projects/${projectId}/bim/models/${modelId}/file`, 'model.ifc')

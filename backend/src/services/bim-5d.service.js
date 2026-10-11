@@ -34,7 +34,8 @@ const SUPPORTED_FORMATS = Object.freeze([
 
 const round = (value, digits = 3) => (typeof value === "number" && Number.isFinite(value) ? Math.round(value * 10 ** digits) / 10 ** digits : null);
 const num = (value) => (value === null || value === undefined ? null : Number(value));
-const revisionLabel = (version) => `R${String(version).padStart(2, "0")}`;
+/** A revision's label: the code it was issued under (e.g. "C03"), else R01, R02… by upload order. Takes a model row or a version number. */
+const revisionLabel = (value) => (value && typeof value === "object" ? value.revisionCode || revisionLabel(value.version) : `R${String(value).padStart(2, "0")}`);
 const normUnit = (unit) => String(unit || "").toLowerCase().replace(/[²³\s.]/g, (c) => ({ "²": "2", "³": "3" })[c] || "").replace(/^sqm$/, "m2").replace(/^cum$/, "m3").replace(/^(no|nr|nos|ea|each)$/, "nr");
 
 const ensureProject = async ({ orgId, projectId }) => {
@@ -51,8 +52,9 @@ const revisionRegister = async ({ orgId, projectId }) => {
   const rows = await prisma.bimModel.findMany({
     where: { orgId, projectId },
     orderBy: [{ name: "asc" }, { version: "desc" }],
-    select: { id: true, name: true, discipline: true, version: true, isCurrent: true, status: true, ifcSchema: true, elementCount: true, linkedCount: true, uploadedBy: true, createdAt: true, parsedAt: true, documentId: true, sourceDocument: { select: { originalName: true, sha256: true, title: true } } },
+    select: { id: true, name: true, discipline: true, version: true, revisionCode: true, revisionDate: true, isCurrent: true, status: true, ifcSchema: true, elementCount: true, linkedCount: true, uploadedBy: true, createdAt: true, parsedAt: true, documentId: true, notes: true, error: true, warningsJson: true, sourceDocument: { select: { originalName: true, sha256: true, title: true } } },
   });
+  const uploaders = new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(rows.map((row) => row.uploadedBy).filter(Boolean))] } }, select: { id: true, name: true } })).map((user) => [user.id, user.name]));
   const byName = new Map();
   for (const row of rows) {
     if (!byName.has(row.name)) byName.set(row.name, []);
@@ -64,15 +66,15 @@ const revisionRegister = async ({ orgId, projectId }) => {
       name,
       discipline: latest.discipline,
       currentRevisionId: revisions.find((rev) => rev.isCurrent)?.id || latest.id,
-      latestRevision: revisionLabel(latest.version),
+      latestRevision: revisionLabel(latest),
       revisions: revisions.map((rev) => ({
         id: rev.id,
-        revision: revisionLabel(rev.version),
+        revision: revisionLabel(rev),
         version: rev.version,
         isCurrent: rev.isCurrent,
         status: rev.status,
-        revisionDate: rev.createdAt.toISOString(),
-        uploadedBy: rev.uploadedBy,
+        revisionDate: (rev.revisionDate || rev.createdAt).toISOString(),
+        uploadedBy: uploaders.get(rev.uploadedBy) || null,
         uploadedAt: rev.createdAt.toISOString(),
         parsedAt: rev.parsedAt ? rev.parsedAt.toISOString() : null,
         sourceFormat: rev.ifcSchema ? `IFC (${rev.ifcSchema})` : "IFC",
@@ -82,6 +84,10 @@ const revisionRegister = async ({ orgId, projectId }) => {
         previousRevisionId: revisions.find((other) => other.version === rev.version - 1)?.id || null,
         elementCount: rev.elementCount,
         linkedCount: rev.linkedCount,
+        revisionCode: rev.revisionCode || null,
+        notes: rev.notes || null,
+        error: rev.error || null,
+        warnings: Array.isArray(rev.warningsJson) ? rev.warningsJson.length : 0,
       })),
     };
   });
@@ -90,7 +96,7 @@ const revisionRegister = async ({ orgId, projectId }) => {
 
 /** The project's current, parsed revisions (one per model name). */
 const currentModels = (projectId) =>
-  prisma.bimModel.findMany({ where: { projectId, isCurrent: true, status: "ready" }, select: { id: true, name: true, version: true, discipline: true, elementCount: true, createdAt: true } });
+  prisma.bimModel.findMany({ where: { projectId, isCurrent: true, status: "ready" }, select: { id: true, name: true, version: true, revisionCode: true, revisionDate: true, discipline: true, elementCount: true, createdAt: true } });
 
 // ─── BIM-5: measurement rules ─────────────────────────────────────────────
 
@@ -164,7 +170,7 @@ const measure = ({ element, rule, boqItem, quantityField = null }) => {
 // ─── BIM-4: mapping ───────────────────────────────────────────────────────
 
 const loadModel = async ({ orgId, projectId, modelId }) => {
-  const model = await prisma.bimModel.findFirst({ where: { id: modelId, orgId, projectId }, select: { id: true, name: true, version: true, status: true, isCurrent: true } });
+  const model = await prisma.bimModel.findFirst({ where: { id: modelId, orgId, projectId }, select: { id: true, name: true, version: true, revisionCode: true, revisionDate: true, status: true, isCurrent: true } });
   if (!model) throw new HttpError(404, "BIM_MODEL_NOT_FOUND", "Model not found");
   return model;
 };
@@ -303,7 +309,7 @@ const nameOf = async (recordType, recordId) => {
 
 /** The quantity's full provenance for one element and BOQ item: model, revision, property, rule, raw, converted, links, actor. */
 const provenance = async ({ orgId, projectId, elementId, boqItemId = null }) => {
-  const element = await prisma.bimElement.findFirst({ where: { id: elementId, orgId, projectId }, select: { ...elementSelect, model: { select: { id: true, name: true, version: true, discipline: true, createdAt: true, isCurrent: true } } } });
+  const element = await prisma.bimElement.findFirst({ where: { id: elementId, orgId, projectId }, select: { ...elementSelect, model: { select: { id: true, name: true, version: true, revisionCode: true, revisionDate: true, discipline: true, createdAt: true, isCurrent: true } } } });
   if (!element) throw new HttpError(404, "BIM_ELEMENT_NOT_FOUND", "Element not found");
   const links = await prisma.bimElementLink.findMany({ where: { elementId }, orderBy: { createdAt: "asc" } });
   const boqLinks = links.filter((link) => link.recordType === "boq_item" && (!boqItemId || link.recordId === boqItemId));
@@ -334,7 +340,7 @@ const provenance = async ({ orgId, projectId, elementId, boqItemId = null }) => 
   }
   return {
     element: { id: element.id, globalId: element.globalId, ifcType: element.ifcType, name: element.name, typeName: element.typeName, tag: element.tag, storeyName: element.storeyName },
-    source: { modelId: element.model.id, model: element.model.name, revision: revisionLabel(element.model.version), discipline: element.model.discipline, revisionDate: element.model.createdAt.toISOString(), isCurrentRevision: element.model.isCurrent },
+    source: { modelId: element.model.id, model: element.model.name, revision: revisionLabel(element.model), discipline: element.model.discipline, revisionDate: (element.model.revisionDate || element.model.createdAt).toISOString(), isCurrentRevision: element.model.isCurrent },
     location: context.location,
     activity: context.activity,
     wbs: context.wbs_node,
@@ -406,7 +412,7 @@ const reconciliation = async ({ orgId, projectId, reader, tolerancePct = 2 }) =>
   });
   rows.sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status));
   return {
-    models: models.map((model) => ({ id: model.id, name: model.name, revision: revisionLabel(model.version) })),
+    models: models.map((model) => ({ id: model.id, name: model.name, revision: revisionLabel(model) })),
     tolerancePct,
     rows,
     basis: {
@@ -427,7 +433,7 @@ const boqItemElements = async ({ orgId, projectId, boqItemId }) => {
   const models = await currentModels(projectId);
   const rule = await prisma.bimMeasurementRule.findUnique({ where: { projectId_boqItemId: { projectId, boqItemId } } });
   const links = models.length ? await prisma.bimElementLink.findMany({ where: { projectId, modelId: { in: models.map((model) => model.id) }, recordType: "boq_item", recordId: boqItemId }, select: { id: true, quantityField: true, rawQuantity: true, factor: true, quantity: true, unit: true, method: true, modelId: true, element: { select: elementSelect } }, orderBy: { createdAt: "asc" }, take: 5000 }) : [];
-  const modelName = new Map(models.map((model) => [model.id, `${model.name} ${revisionLabel(model.version)}`]));
+  const modelName = new Map(models.map((model) => [model.id, `${model.name} ${revisionLabel(model)}`]));
   return {
     boqItem: { id: item.id, code: item.code || item.ref || "", description: item.description, unit: item.unit, contract: round(item.qty) },
     rule: serializeRule(rule),
@@ -530,7 +536,7 @@ const overview = async ({ orgId, projectId, reader, canReadBoq }) => {
 
   const alert = (key, label, count, severity, action) => ({ key, label, count, severity: count ? severity : "ok", action });
   return {
-    models: { count: totalModels, current: models.map((model) => ({ id: model.id, name: model.name, discipline: model.discipline, revision: revisionLabel(model.version), elements: model.elementCount, revisionDate: model.createdAt.toISOString() })) },
+    models: { count: totalModels, current: models.map((model) => ({ id: model.id, name: model.name, discipline: model.discipline, revision: revisionLabel(model), elements: model.elementCount, revisionDate: (model.revisionDate || model.createdAt).toISOString() })) },
     elements: { total: elementCount, mapped, unmapped: elementCount - mapped, mappedPct: elementCount ? round((mapped / elementCount) * 100, 1) : 0, unmappedPct: elementCount ? round(((elementCount - mapped) / elementCount) * 100, 1) : 0, withBoq, withLocation },
     quantities,
     reconciliation: reconciliationStatus,

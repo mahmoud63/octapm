@@ -39,7 +39,7 @@ const upload = multer({
   limits: { fileSize: 300 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (path.extname(file.originalname || "").toLowerCase() === ".ifc") cb(null, true);
-    else cb(new HttpError(400, "UNSUPPORTED_FORMAT", "Upload the model as an IFC file (.ifc)"));
+    else cb(new HttpError(400, "UNSUPPORTED_FORMAT", /\.(rvt|rfa|nwd|nwc|dwg|dgn|skp|pln)$/i.test(file.originalname || "") ? "Native Revit, Navisworks, DWG and other authoring formats are not supported yet. Export the model from your authoring tool as IFC (.ifc) and upload that." : /\.(ifczip|ifcxml)$/i.test(file.originalname || "") ? "Compressed IFC (.ifczip) and IFC-XML are not supported yet; export a plain IFC file (.ifc)." : "Upload the model as an IFC file (.ifc)"));
   },
 });
 
@@ -81,6 +81,19 @@ router.get("/models/:modelId", requirePermission("bim", "read"), [...modelParam,
 router.patch("/models/:modelId", requirePermission("bim", "update"), [...modelParam, body("name").optional().isString().trim().isLength({ min: 1, max: 200 }), body("discipline").optional({ nullable: true }).isIn([...service.DISCIPLINES, null]), body("notes").optional({ nullable: true }).isString().isLength({ max: 4000 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.updateModel({ ...scope(req), modelId: req.params.modelId, payload: req.body, actor: actorFor(req) }))));
 router.delete("/models/:modelId", requirePermission("bim", "delete"), [...modelParam, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.deleteModel({ ...scope(req), modelId: req.params.modelId, actor: actorFor(req) }))));
 router.post("/models/:modelId/reparse", requirePermission("bim", "update"), [...modelParam, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.reparseModel({ ...scope(req), modelId: req.params.modelId, actor: actorFor(req) }), 202)));
+// The original uploaded file of one revision, under bim:read.
+router.get(
+  "/models/:modelId/file",
+  requirePermission("bim", "read"),
+  [...modelParam, validate],
+  asyncHandler(async (req, res) => {
+    const file = await service.getModelSourceFile({ ...scope(req), modelId: req.params.modelId });
+    if (file.redirectUrl) return res.redirect(302, file.redirectUrl);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(file.fileName)}"; filename*=UTF-8''${encodeURIComponent(file.fileName)}`);
+    res.type(file.mimeType || "application/octet-stream");
+    return res.sendFile(file.path);
+  }),
+);
 router.get("/models/:modelId/spatial", requirePermission("bim", "read"), [...modelParam, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.spatialTree({ ...scope(req), modelId: req.params.modelId }))));
 router.get("/models/:modelId/quantities", requirePermission("bim", "read"), [...modelParam, ...elementFilters, query("groupBy").isString().optional().isIn(["type", "storey"]), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.quantitySummary({ ...scope(req), modelId: req.params.modelId, query: req.query }))));
 

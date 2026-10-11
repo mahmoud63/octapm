@@ -8,6 +8,7 @@ const { canReadBoq } = require("../utils/boq-figures");
 const { HttpError } = require("../utils/http-error");
 const controlsDetailService = require("../services/controls-detail.service");
 const service = require("../services/bim-5d.service");
+const exporter = require("../services/bim-5d-export.service");
 
 /**
  * BIM / 5D commercial intelligence (BIM-1..BIM-6), `/projects/:projectId/bim/5d`,
@@ -98,6 +99,26 @@ router.post(
   requireBoq,
   [...modelParam, validate],
   asyncHandler(async (req, res) => sendSuccess(res, await changes.carryForward({ ...scope(req), toModelId: req.params.modelId, actor: actorFor(req) }))),
+);
+// Exports (XLSX, or CSV of the main sheet) under bim:export; BOQ figures only for a BOQ reader.
+router.get(
+  "/export",
+  requirePermission("bim", "export"),
+  [query("kind").isIn(Object.keys(exporter.KINDS)), query("format").optional().isIn(["xlsx", "csv"]), validate],
+  asyncHandler(async (req, res) => {
+    const built = await exporter.buildExport({ ...scope(req), kind: req.query.kind, reader: controlsDetailService.detailReader(req), canReadBoq: canReadBoq(req) });
+    if (req.query.format === "csv") {
+      const { body, filename } = exporter.toCsv(built);
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+      return res.send(body);
+    }
+    const { workbook, filename } = exporter.toWorkbook(built);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    await workbook.xlsx.write(res);
+    return res.end();
+  })
 );
 router.get("/duplicates", requirePermission("bim", "read"), requireBoq, asyncHandler(async (req, res) => sendSuccess(res, await changes.duplicates(scope(req)))));
 router.get("/elements/:elementId/commercial", requirePermission("bim", "read"), [param("elementId").isUUID(), validate], asyncHandler(async (req, res) => {

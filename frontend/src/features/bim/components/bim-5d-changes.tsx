@@ -38,12 +38,15 @@ function Tile({ label, value, tone }: { label: string; value: React.ReactNode; t
 }
 
 /** BIM-7/9/11: one revision against the previous one, and the commercial review of each change. */
-export function ChangesTab({ projectId }: { projectId: string }) {
+export function ChangesTab({ projectId, focusRevisionId = null }: { projectId: string; focusRevisionId?: string | null }) {
   const { data: register } = useBim5dRegister(projectId)
   const models = (register?.models ?? []).filter((model) => model.revisions.length > 1)
   const [modelName, setModelName] = useState<string | null>(null)
-  const model = models.find((row) => row.name === modelName) ?? models[0]
-  const current = model?.revisions.find((rev) => rev.isCurrent) ?? model?.revisions[0]
+  const focused = focusRevisionId ? models.find((row) => row.revisions.some((rev) => rev.id === focusRevisionId)) : null
+  // "Compare with previous" on a revision: that revision against the one before it, until another model is chosen.
+  const model = (modelName ? models.find((row) => row.name === modelName) : focused) ?? models[0]
+  const focusedRevision = !modelName && focused ? focused.revisions.find((rev) => rev.id === focusRevisionId && rev.previousRevisionId) : null
+  const current = focusedRevision ?? model?.revisions.find((rev) => rev.isCurrent) ?? model?.revisions[0]
   const { data: diff, isLoading } = useRevisionDiff(projectId, current?.id ?? null)
   const canLink = useCanPerform('bim', 'update', 'bim.link')
   const canRaise = useCanPerform('change_event', 'create')
@@ -54,7 +57,7 @@ export function ChangesTab({ projectId }: { projectId: string }) {
   const [associating, setAssociating] = useState<string | null>(null)
 
   if (!register) return <p className='py-6 text-sm text-muted-foreground'>Loading…</p>
-  if (!models.length) return <p className='py-6 text-sm text-muted-foreground'>A model needs two revisions to compare. Upload the next revision of a model under Models &amp; elements.</p>
+  if (!models.length) return <p className='py-6 text-sm text-muted-foreground'>A model needs two revisions to compare. Upload the next revision of a model with Upload / Import Model.</p>
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     try {

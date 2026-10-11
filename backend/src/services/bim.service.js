@@ -32,7 +32,7 @@ const notificationService = require("./notification.service");
  */
 
 const STATUS = Object.freeze({ PROCESSING: "processing", READY: "ready", FAILED: "failed" });
-const DISCIPLINES = Object.freeze(["architectural", "structural", "mechanical", "electrical", "plumbing", "civil", "coordination", "other"]);
+const DISCIPLINES = Object.freeze(["architectural", "structural", "mep", "mechanical", "electrical", "plumbing", "civil", "coordination", "other"]);
 const RELATION_TYPES = Object.freeze(["represents", "affects", "reference"]);
 /** Record types an element may be tied to. Every one of these tables is project-scoped. */
 const LINK_RECORD_MODELS = Object.freeze({
@@ -82,6 +82,9 @@ const modelOut = (row, { detail = false } = {}) => ({
   schema: row.ifcSchema || null,
   status: row.status,
   version: row.version,
+  revision: row.revisionCode || `R${String(row.version).padStart(2, "0")}`,
+  revisionCode: row.revisionCode || null,
+  revisionDate: toIso(row.revisionDate),
   isCurrent: row.isCurrent,
   supersededById: row.supersededById || null,
   ifcProjectName: row.ifcProjectName || null,
@@ -204,11 +207,94 @@ const nextVersion = async ({ projectId, name }) => {
   return (previous._max.version || 0) + 1;
 };
 
+/** The IFC schemas the reader understands (attribute order differs between them). */
+const SUPPORTED_SCHEMAS = Object.freeze(["IFC2X3", "IFC4"]);
+const NATIVE_FORMATS = /\.(rvt|rfa|nwd|nwc|dwg|dgn|skp|pln|ifczip|ifcxml)$/i;
+
+/**
+ * Checks the file is an IFC STEP file in a schema the reader understands,
+ * before anything is stored: the STEP header (ISO-10303-21) and its
+ * FILE_SCHEMA. Returns the schema; refuses with a message the engineer can act on.
+ */
+const inspectIfcFile = async (file) => {
+  if (!file?.path) throw new HttpError(400, "NO_FILE", "Choose an IFC file to upload");
+  if (!file.size) throw new HttpError(400, "BIM_FILE_EMPTY", "The file is empty");
+  const handle = await fsp.open(file.path, "r");
+  let head = "";
+  try {
+    const buffer = Buffer.alloc(16 * 1024);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    head = buffer.subarray(0, bytesRead).toString("latin1").replace(/^\uFEFF|^ï»¿/, "");
+  } finally {
+    await handle.close();
+  }
+  if (!/^\s*ISO-10303-21\s*;/.test(head)) throw new HttpError(400, "BIM_FILE_INVALID", "This is not a readable IFC file: an IFC export starts with the STEP header ISO-10303-21. Export the model from your authoring tool as IFC (.ifc).");
+  const schema = /FILE_SCHEMA\s*\(\s*\(\s*'([^']+)'/i.exec(head)?.[1]?.toUpperCase() || null;
+  if (!schema || !/^IFC/.test(schema)) throw new HttpError(400, "BIM_FILE_INVALID", "The file has no IFC schema in its header (FILE_SCHEMA); it is not an IFC model");
+  const family = SUPPORTED_SCHEMAS.find((name) => schema === name || schema.startsWith(`${name}_`));
+  if (!family) throw new HttpError(400, "BIM_SCHEMA_UNSUPPORTED", `IFC schema ${schema} is not supported yet; export as IFC2X3 or IFC4`);
+  return schema;
+};
+
+const sha256Of = (filePath) =>
+  new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    fs.createReadStream(filePath).on("data", (chunk) => hash.update(chunk)).on("error", reject).on("end", () => resolve(hash.digest("hex")));
+  });
+
+const revisionCodeOf = (row) => row.revisionCode || `R${String(row.version).padStart(2, "0")}`;
+
+/**
+ * Uploads a model: a new model, or a new revision of an existing one
+ * (`mode: "revision"` with `baseModelId`). A revision never overwrites an
+ * older one: it gets the next version and supersedes the current revision.
+ * Refused before anything is stored when the file is empty, not IFC, in an
+ * unsupported schema, a revision code the model already has, or the same file
+ * as an earlier revision. Without `mode` a name already in use becomes its
+ * next revision (the behaviour API clients relied on).
+ */
 const createModel = async ({ orgId, projectId, userId = null, file, payload = {} }) => {
   await ensureProject({ orgId, projectId });
   if (!file) throw new HttpError(400, "NO_FILE", "Upload the model as an IFC file");
-  const discipline = trimOrNull(payload.discipline);
+  const mode = trimOrNull(payload.mode);
+  if (mode && !["new", "revision"].includes(mode)) throw new HttpError(400, "VALIDATION_ERROR", "mode is new or revision");
+  let discipline = trimOrNull(payload.discipline);
   if (discipline && !DISCIPLINES.includes(discipline)) throw new HttpError(400, "BIM_DISCIPLINE_INVALID", `Discipline must be one of ${DISCIPLINES.join(", ")}`);
+
+  const schema = await inspectIfcFile(file);
+
+  let name = trimOrNull(payload.name);
+  if (mode === "revision") {
+    const baseId = trimOrNull(payload.baseModelId);
+    const base = baseId ? await prisma.bimModel.findFirst({ where: { id: baseId, orgId, projectId }, select: { name: true, discipline: true } }) : null;
+    if (!base) throw new HttpError(404, "BIM_MODEL_NOT_FOUND", "Choose the model this file is a new revision of");
+    name = base.name;
+    discipline = discipline || base.discipline || null;
+  } else if (mode === "new") {
+    if (!name) throw new HttpError(400, "BIM_MODEL_NAME_REQUIRED", "Give the model a name");
+    const taken = await prisma.bimModel.findFirst({ where: { projectId, name }, select: { id: true } });
+    if (taken) throw new HttpError(409, "BIM_MODEL_EXISTS", `A model called "${name}" already exists; upload this file as a new revision of it`);
+  }
+  name = name || String(file.originalname || "").replace(/\.ifc$/i, "") || "Model";
+  if (name.length > 200) throw new HttpError(400, "VALIDATION_ERROR", "The model name is too long");
+
+  const revisionCode = trimOrNull(payload.revision)?.toUpperCase() || null;
+  if (revisionCode && (revisionCode.length > 20 || !/^[A-Z0-9][A-Z0-9._-]*$/.test(revisionCode))) throw new HttpError(400, "BIM_REVISION_INVALID", "A revision code is letters, digits, dots, dashes or underscores (e.g. R03, C02, P1.1)");
+  let revisionDate = null;
+  if (trimOrNull(payload.revisionDate)) {
+    revisionDate = new Date(payload.revisionDate);
+    if (Number.isNaN(revisionDate.getTime())) throw new HttpError(400, "VALIDATION_ERROR", "Invalid revision date");
+    if (revisionDate.getTime() > Date.now() + 24 * 60 * 60 * 1000) throw new HttpError(400, "BIM_REVISION_DATE_IN_FUTURE", "The revision date cannot be in the future");
+  }
+
+  const earlier = await prisma.bimModel.findMany({ where: { projectId, name }, select: { id: true, version: true, revisionCode: true, sourceDocument: { select: { sha256: true } } } });
+  const version = (earlier.reduce((max, row) => Math.max(max, row.version), 0) || 0) + 1;
+  const code = revisionCode || `R${String(version).padStart(2, "0")}`;
+  const sameCode = earlier.find((row) => revisionCodeOf(row) === code);
+  if (sameCode) throw new HttpError(409, "BIM_REVISION_DUPLICATE", `"${name}" already has revision ${code}; revisions are never overwritten — give this one a new revision code`);
+  const checksum = await sha256Of(file.path);
+  const sameFile = earlier.find((row) => row.sourceDocument?.sha256 === checksum);
+  if (sameFile) throw new HttpError(409, "BIM_REVISION_DUPLICATE_FILE", `This file is identical to revision ${revisionCodeOf(sameFile)} of "${name}"`);
 
   const document = await fileStorageService.uploadProjectDocument({
     orgId,
@@ -219,13 +305,11 @@ const createModel = async ({ orgId, projectId, userId = null, file, payload = {}
     linkedEntityType: "bim_model",
   });
 
-  const name = trimOrNull(payload.name) || document.originalName?.replace(/\.ifc$/i, "") || document.fileName;
-  const version = await nextVersion({ projectId, name });
   const created = await prisma.$transaction(async (tx) => {
-    // A new version of the same model supersedes the one the team was using.
+    // A new revision of the same model supersedes the one the team was using; the older revision stays.
     const previous = await tx.bimModel.findFirst({ where: { projectId, name, isCurrent: true } });
     const row = await tx.bimModel.create({
-      data: { orgId, projectId, name, discipline, documentId: document.id, status: STATUS.PROCESSING, version, isCurrent: true, notes: trimOrNull(payload.notes), uploadedBy: userId },
+      data: { orgId, projectId, name, discipline, documentId: document.id, status: STATUS.PROCESSING, version, revisionCode, revisionDate, isCurrent: true, notes: trimOrNull(payload.notes), uploadedBy: userId },
     });
     if (previous) await tx.bimModel.update({ where: { id: previous.id }, data: { isCurrent: false, supersededById: row.id } });
     return row;
@@ -234,8 +318,19 @@ const createModel = async ({ orgId, projectId, userId = null, file, payload = {}
   const job = await jobService.enqueueJob({ orgId, projectId, type: jobService.JOB_TYPES.BIM_PARSE, payload: { modelId: created.id }, requestedBy: userId });
   await prisma.bimModel.update({ where: { id: created.id }, data: { jobId: job.id } });
   await fileStorageService.markDocumentLinked({ documentId: document.id, entityType: "bim_model", entityId: created.id }).catch(() => null);
-  await auditService.recordEvent({ orgId, projectId, entityType: "bim_model", entityId: created.id, action: auditService.ACTIONS.CREATED, actorId: userId, summary: { name, version, discipline, fileName: document.fileName, sizeBytes: document.sizeBytes } }).catch(() => null);
+  await auditService.recordEvent({ orgId, projectId, entityType: "bim_model", entityId: created.id, action: auditService.ACTIONS.CREATED, actorId: userId, summary: { name, version, revision: code, discipline, schema, fileName: document.fileName, sizeBytes: document.sizeBytes } }).catch(() => null);
   return modelOut({ ...created, jobId: job.id, sourceDocument: document });
+};
+
+/** The original uploaded file of one model revision, for download (bim:read). */
+const getModelSourceFile = async ({ orgId, projectId, modelId }) => {
+  const model = await prisma.bimModel.findFirst({ where: { id: modelId, orgId, projectId }, select: { id: true, name: true, version: true, revisionCode: true, documentId: true, sourceDocument: { select: { originalName: true, fileName: true } } } });
+  if (!model) throw new HttpError(404, "BIM_MODEL_NOT_FOUND", "Model not found");
+  if (!model.documentId) throw new HttpError(404, "FILE_NOT_FOUND", "The original file of this revision is not available");
+  const file = await fileStorageService.getBimModelFile({ orgId, projectId, key: model.documentId });
+  const original = model.sourceDocument?.originalName || model.sourceDocument?.fileName || `${model.name}.ifc`;
+  const fileName = `${model.name} ${revisionCodeOf(model)} - ${original}`.replace(/[\\/:*?"<>|\r\n]+/g, " ").slice(0, 180);
+  return { ...file, fileName };
 };
 
 /** Runs `fn` with a readable local path, downloading from object storage when needed. */
@@ -771,6 +866,9 @@ const exportElements = async ({ orgId, projectId, modelId, query = {} }) => {
 module.exports = {
   STATUS,
   DISCIPLINES,
+  SUPPORTED_SCHEMAS,
+  inspectIfcFile,
+  getModelSourceFile,
   RELATION_TYPES,
   LINK_RECORD_TYPES,
   typeLabel,

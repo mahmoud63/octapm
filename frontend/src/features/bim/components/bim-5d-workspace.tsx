@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, CircleHelp, Info, Loader2, Wand2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, CircleHelp, Download, FileSpreadsheet, GitCompare, Info, ListTree, Loader2, Upload, Wand2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useCanPerform } from '@/lib/permissions'
@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -20,6 +21,9 @@ import {
   useBimProvenance,
   useBoqItemElements,
   useSaveMeasurementRule,
+  downloadBimExport,
+  downloadModelSource,
+  type BimExportKind,
   type Figure,
   type ReconRow,
   type ReconStatus,
@@ -28,6 +32,7 @@ import {
 } from '../hooks/use-bim-5d'
 import { AiAction } from '@/features/ai/components/ai-action'
 import { ChangesTab, DuplicatesPanel, ElementCommercialPanel } from './bim-5d-changes'
+import { ImportModelDialog } from './bim-5d-import'
 import { BimPanel } from './bim-panel'
 
 const fmt = (value: number | null | undefined, digits = 2) =>
@@ -189,48 +194,129 @@ function OverviewTab({ projectId, onOpen }: { projectId: string; onOpen: (tab: s
 
 // ─── Revisions ────────────────────────────────────────────────────────────
 
-function RevisionsTab({ projectId }: { projectId: string }) {
+const REVISION_STATE: Record<string, { label: string; tone: string }> = {
+  current: { label: 'CURRENT', tone: 'bg-primary/15 text-primary' },
+  superseded: { label: 'SUPERSEDED', tone: 'bg-muted text-muted-foreground' },
+  processing: { label: 'PROCESSING', tone: 'bg-sky-500/15 text-sky-700 dark:text-sky-400' },
+  failed: { label: 'FAILED', tone: 'bg-destructive/15 text-destructive' },
+}
+
+const download = async (fn: () => Promise<void>) => {
+  try {
+    await fn()
+  } catch (error) {
+    toast.error(getServerErrorMessage(error))
+  }
+}
+
+/** Models and their revision history: never overwritten, each revision downloadable and comparable with the one before. */
+function ModelsTab({ projectId, onUpload, onCompare, onOpenElements }: { projectId: string; onUpload: (baseRevisionId: string | null) => void; onCompare: (revisionId: string) => void; onOpenElements: (revisionId: string) => void }) {
   const { data, isLoading } = useBim5dRegister(projectId)
-  if (isLoading || !data) return <p className='py-6 text-sm text-muted-foreground'>Loading the register…</p>
-  if (!data.models.length) return <p className='py-6 text-sm text-muted-foreground'>No model yet. Upload an IFC model under Models.</p>
+  const canCreate = useCanPerform('bim', 'create')
+  if (isLoading || !data) return <p className='py-6 text-sm text-muted-foreground'>Loading the models…</p>
+  if (!data.models.length)
+    return (
+      <div className='rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground' data-testid='uat-bim5d-models-empty'>
+        <p>No BIM model on this project yet.</p>
+        {canCreate ? <Button size='sm' className='mt-3' onClick={() => onUpload(null)}><Upload className='h-4 w-4' /> Upload / Import Model</Button> : <p className='mt-1'>Someone with BIM upload permission can import the project's IFC model.</p>}
+      </div>
+    )
   return (
-    <div className='space-y-4' data-testid='uat-bim5d-revisions'>
+    <div className='space-y-4' data-testid='uat-bim5d-models'>
       {data.models.map((model) => (
-        <section key={model.name} className='rounded-md border'>
+        <section key={model.name} className='rounded-md border' data-testid={`uat-bim5d-model-${model.name}`}>
           <div className='flex flex-wrap items-center gap-2 border-b px-3 py-2'>
             <h3 className='text-sm font-semibold'>{model.name}</h3>
-            {model.discipline && <Badge variant='outline'>{model.discipline}</Badge>}
-            <span className='text-xs text-muted-foreground'>Latest {model.latestRevision} · older revisions are kept, never overwritten</span>
+            {model.discipline && <Badge variant='outline' className='capitalize'>{model.discipline === 'mep' ? 'MEP' : model.discipline}</Badge>}
+            <span className='text-xs text-muted-foreground'>{model.revisions.length} revision{model.revisions.length === 1 ? '' : 's'} · older revisions are kept, never overwritten</span>
+            {canCreate && (
+              <Button size='sm' variant='outline' className='ms-auto h-7 text-xs' onClick={() => onUpload(model.currentRevisionId)} data-testid='uat-bim5d-upload-revision'>
+                <Upload className='h-3.5 w-3.5' /> Upload New Revision
+              </Button>
+            )}
           </div>
           <div className='overflow-x-auto'>
             <table className='w-full text-sm tabular-nums'>
               <thead className='text-xs text-muted-foreground'>
                 <tr>
-                  {['Revision', 'Status', 'Date', 'Format', 'File', 'Checksum (SHA-256)', 'Elements', 'Linked', 'Previous'].map((head) => (
+                  {['Revision', 'State', 'Revision date', 'Uploaded', 'File', 'Elements', 'Linked', 'Warnings', 'Notes', ''].map((head) => (
                     <th key={head} className='px-3 py-2 text-left font-medium whitespace-nowrap'>{head}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {model.revisions.map((rev) => (
-                  <tr key={rev.id} className='border-t'>
-                    <td className='px-3 py-1.5 font-medium'>{rev.revision}{rev.isCurrent && <Pill className='ms-2 bg-primary/15 text-primary'>Current</Pill>}</td>
-                    <td className='px-3 py-1.5'>{rev.status}</td>
-                    <td className='px-3 py-1.5'>{day(rev.revisionDate)}</td>
-                    <td className='px-3 py-1.5'>{rev.sourceFormat}</td>
-                    <td className='max-w-[14rem] truncate px-3 py-1.5' title={rev.fileName || ''}>{rev.fileName || '—'}</td>
-                    <td className='px-3 py-1.5 font-mono text-xs' title={rev.checksum || ''}>{rev.checksum ? `${rev.checksum.slice(0, 12)}…` : '—'}</td>
-                    <td className='px-3 py-1.5'>{fmt(rev.elementCount, 0)}</td>
-                    <td className='px-3 py-1.5'>{fmt(rev.linkedCount, 0)}</td>
-                    <td className='px-3 py-1.5'>{model.revisions.find((other) => other.id === rev.previousRevisionId)?.revision || '—'}</td>
-                  </tr>
-                ))}
+                {model.revisions.map((rev) => {
+                  const state = rev.status === 'failed' ? 'failed' : rev.status === 'processing' ? 'processing' : rev.isCurrent ? 'current' : 'superseded'
+                  return (
+                    <tr key={rev.id} className='border-t align-top'>
+                      <td className='px-3 py-1.5 font-semibold'>{rev.revision}</td>
+                      <td className='px-3 py-1.5'><Pill className={REVISION_STATE[state].tone}>{REVISION_STATE[state].label}</Pill>{rev.error && <p className='mt-0.5 max-w-[16rem] text-xs text-destructive'>{rev.error}</p>}</td>
+                      <td className='px-3 py-1.5 whitespace-nowrap'>{day(rev.revisionDate)}</td>
+                      <td className='px-3 py-1.5 text-xs whitespace-nowrap'>{day(rev.uploadedAt)}{rev.uploadedBy ? ` · ${rev.uploadedBy}` : ''}</td>
+                      <td className='max-w-[12rem] truncate px-3 py-1.5 text-xs' title={`${rev.fileName || ''}${rev.checksum ? `\nSHA-256 ${rev.checksum}` : ''}`}>{rev.fileName || '—'}<span className='block text-muted-foreground'>{rev.sourceFormat}</span></td>
+                      <td className='px-3 py-1.5'>{fmt(rev.elementCount, 0)}</td>
+                      <td className='px-3 py-1.5'>{fmt(rev.linkedCount, 0)}</td>
+                      <td className='px-3 py-1.5'>{rev.warnings || '—'}</td>
+                      <td className='max-w-[14rem] px-3 py-1.5 text-xs text-muted-foreground'>{rev.notes || '—'}</td>
+                      <td className='px-3 py-1.5'>
+                        <div className='flex flex-wrap justify-end gap-1'>
+                          {rev.previousRevisionId && rev.status === 'ready' && (
+                            <Button size='sm' variant='ghost' className='h-7 px-2 text-xs' onClick={() => onCompare(rev.id)} title='Compare with the previous revision'><GitCompare className='h-3.5 w-3.5' /> Compare with previous</Button>
+                          )}
+                          {rev.status === 'ready' && (
+                            <Button size='sm' variant='ghost' className='h-7 px-2 text-xs' onClick={() => onOpenElements(rev.id)}><ListTree className='h-3.5 w-3.5' /> Open elements</Button>
+                          )}
+                          {rev.documentId && (
+                            <Button size='sm' variant='ghost' className='h-7 px-2 text-xs' onClick={() => download(() => downloadModelSource(projectId, rev.id))} data-testid='uat-bim5d-download-original'><Download className='h-3.5 w-3.5' /> Download original</Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
         </section>
       ))}
     </div>
+  )
+}
+
+const EXPORTS: Array<{ kind: BimExportKind; label: string; boq?: boolean }> = [
+  { kind: 'elements', label: 'BIM element register' },
+  { kind: 'reconciliation', label: 'Commercial reconciliation', boq: true },
+  { kind: 'mapping', label: 'Mapping register' },
+  { kind: 'revision-impact', label: 'Revision impact' },
+]
+
+function ExportMenu({ projectId }: { projectId: string }) {
+  const canReadBoq = useCanPerform('boq', 'read')
+  const [busy, setBusy] = useState<string | null>(null)
+  const run = async (kind: BimExportKind, format: 'xlsx' | 'csv') => {
+    setBusy(`${kind}.${format}`)
+    await download(() => downloadBimExport(projectId, kind, format))
+    setBusy(null)
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size='sm' variant='outline' data-testid='uat-bim5d-export'>
+          {busy ? <Loader2 className='h-4 w-4 animate-spin' /> : <FileSpreadsheet className='h-4 w-4' />} Export
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align='end' className='w-64'>
+        {EXPORTS.filter((item) => !item.boq || canReadBoq).map((item, index) => (
+          <div key={item.kind}>
+            {index > 0 && <DropdownMenuSeparator />}
+            <DropdownMenuLabel className='text-xs'>{item.label}</DropdownMenuLabel>
+            <DropdownMenuItem onSelect={() => run(item.kind, 'xlsx')} data-testid={`uat-bim5d-export-${item.kind}-xlsx`}>Excel (.xlsx)</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => run(item.kind, 'csv')}>CSV</DropdownMenuItem>
+          </div>
+        ))}
+        {!canReadBoq && <p className='px-2 py-1.5 text-xs text-muted-foreground'>BOQ codes and quantities are left out: you cannot read the BOQ.</p>}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -524,34 +610,63 @@ function RulesTab({ projectId }: { projectId: string }) {
  */
 export function Bim5dWorkspace({ projectId, initialTarget }: { projectId: string; initialTarget?: ProjectSetupTarget }) {
   const canReadBoq = useCanPerform('boq', 'read')
-  const [tab, setTab] = useState(initialTarget?.source === 'bim_model' ? 'models' : 'overview')
+  const canCreate = useCanPerform('bim', 'create')
+  const canExport = useCanPerform('bim', 'export')
+  const [tab, setTab] = useState(initialTarget?.source === 'bim_model' ? 'elements' : 'overview')
+  const [importing, setImporting] = useState<{ base: string | null } | null>(null)
+  const [compareId, setCompareId] = useState<string | null>(null)
+  const [elementsTarget, setElementsTarget] = useState<ProjectSetupTarget | undefined>(initialTarget)
+  const compare = (revisionId: string) => {
+    setCompareId(revisionId)
+    setTab('changes')
+  }
+  const openElements = (revisionId: string) => {
+    setElementsTarget({ module: 'bim', source: 'bim_model', recordId: revisionId })
+    setTab('elements')
+  }
   return (
     <div className='space-y-3' data-testid='uat-bim5d'>
-      <div className='flex flex-wrap items-baseline gap-2'>
+      <div className='flex flex-wrap items-center gap-2'>
         <h2 className='text-lg font-semibold'>BIM / 5D</h2>
         <p className='text-xs text-muted-foreground'>
           Element → revision → location → activity → BOQ → executed → approved → certified → paid: why each quantity is commercially valid.
         </p>
-        <span className='ms-auto inline-flex items-center gap-1 text-xs text-muted-foreground' title='OctaPM parses IFC directly. Native Revit (RVT) needs Autodesk Platform Services, which is not connected.'>
-          <CircleHelp className='h-3.5 w-3.5' /> IFC supported · RVT not yet
-        </span>
+        <div className='ms-auto flex items-center gap-2'>
+          <span className='inline-flex items-center gap-1 text-xs text-muted-foreground' title='OctaPM reads IFC directly. Native Revit (RVT) needs Autodesk Platform Services, which is not connected.'>
+            <CircleHelp className='h-3.5 w-3.5' /> IFC supported · RVT not yet
+          </span>
+          {canCreate && (
+            <Button size='sm' onClick={() => setImporting({ base: null })} data-testid='uat-bim5d-upload'>
+              <Upload className='h-4 w-4' /> Upload / Import Model
+            </Button>
+          )}
+          {canExport && <ExportMenu projectId={projectId} />}
+        </div>
       </div>
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className='h-auto flex-wrap'>
           <TabsTrigger value='overview'>Overview</TabsTrigger>
-          <TabsTrigger value='models'>Models &amp; elements</TabsTrigger>
-          <TabsTrigger value='revisions'>Revisions</TabsTrigger>
+          <TabsTrigger value='models'>Models</TabsTrigger>
+          <TabsTrigger value='elements'>Elements</TabsTrigger>
           <TabsTrigger value='changes'>Changes</TabsTrigger>
           {canReadBoq && <TabsTrigger value='reconciliation'>Commercial reconciliation</TabsTrigger>}
           {canReadBoq && <TabsTrigger value='rules'>Measurement rules</TabsTrigger>}
         </TabsList>
         <TabsContent value='overview'><OverviewTab projectId={projectId} onOpen={setTab} /></TabsContent>
-        <TabsContent value='models'><BimPanel projectId={projectId} initialTarget={initialTarget} /></TabsContent>
-        <TabsContent value='revisions'><RevisionsTab projectId={projectId} /></TabsContent>
-        <TabsContent value='changes'><ChangesTab projectId={projectId} /></TabsContent>
+        <TabsContent value='models'><ModelsTab projectId={projectId} onUpload={(base) => setImporting({ base })} onCompare={compare} onOpenElements={openElements} /></TabsContent>
+        <TabsContent value='elements'><BimPanel key={elementsTarget?.recordId ?? 'all'} projectId={projectId} initialTarget={elementsTarget} onUpload={() => setImporting({ base: null })} /></TabsContent>
+        <TabsContent value='changes'><ChangesTab projectId={projectId} focusRevisionId={compareId} /></TabsContent>
         {canReadBoq && <TabsContent value='reconciliation'><ReconciliationTab projectId={projectId} /></TabsContent>}
         {canReadBoq && <TabsContent value='rules'><RulesTab projectId={projectId} /></TabsContent>}
       </Tabs>
+      <ImportModelDialog
+        projectId={projectId}
+        open={importing !== null}
+        baseModelId={importing?.base ?? null}
+        onClose={() => setImporting(null)}
+        onCompare={compare}
+        onOpenElements={openElements}
+      />
     </div>
   )
 }

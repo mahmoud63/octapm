@@ -24,7 +24,7 @@ const round = (value, digits = 3) => (typeof value === "number" && Number.isFini
 const elementSelect = { id: true, globalId: true, ifcType: true, name: true, typeName: true, objectType: true, tag: true, storeyName: true, propertiesJson: true, modelId: true, netVolume: true, grossVolume: true, netArea: true, grossArea: true, length: true, width: true, height: true, perimeter: true, weight: true, quantityCount: true };
 
 const loadModel = async ({ orgId, projectId, modelId }) => {
-  const model = await prisma.bimModel.findFirst({ where: { id: modelId, orgId, projectId }, select: { id: true, name: true, version: true, status: true, isCurrent: true, createdAt: true } });
+  const model = await prisma.bimModel.findFirst({ where: { id: modelId, orgId, projectId }, select: { id: true, name: true, version: true, revisionCode: true, revisionDate: true, status: true, isCurrent: true, createdAt: true } });
   if (!model) throw new HttpError(404, "BIM_MODEL_NOT_FOUND", "Model not found");
   return model;
 };
@@ -60,8 +60,8 @@ const compareRevisions = async ({ orgId, projectId, toModelId, fromModelId = nul
   const to = await loadModel({ orgId, projectId, modelId: toModelId });
   const from = fromModelId
     ? await loadModel({ orgId, projectId, modelId: fromModelId })
-    : await prisma.bimModel.findFirst({ where: { orgId, projectId, name: to.name, version: { lt: to.version } }, orderBy: { version: "desc" }, select: { id: true, name: true, version: true, status: true, createdAt: true } });
-  if (!from) return { model: to.name, to: fivedee.revisionLabel(to.version), from: null, summary: null, note: "This is the first revision of the model: nothing to compare." };
+    : await prisma.bimModel.findFirst({ where: { orgId, projectId, name: to.name, version: { lt: to.version } }, orderBy: { version: "desc" }, select: { id: true, name: true, version: true, revisionCode: true, revisionDate: true, status: true, createdAt: true } });
+  if (!from) return { model: to.name, to: fivedee.revisionLabel(to), from: null, summary: null, note: "This is the first revision of the model: nothing to compare." };
   if (from.name !== to.name) throw new HttpError(400, "BIM_DIFFERENT_MODELS", "Compare two revisions of the same model");
   const [fromElements, toElements, fromLinks, toLinks, rules] = await Promise.all([
     prisma.bimElement.findMany({ where: { modelId: from.id }, select: elementSelect }),
@@ -184,8 +184,8 @@ const compareRevisions = async ({ orgId, projectId, toModelId, fromModelId = nul
   const potentialValue = byItem.reduce((sum, row) => sum + (row.deltaValue || 0), 0);
   return {
     model: to.name,
-    from: { id: from.id, revision: fivedee.revisionLabel(from.version), date: from.createdAt.toISOString() },
-    to: { id: to.id, revision: fivedee.revisionLabel(to.version), date: to.createdAt.toISOString() },
+    from: { id: from.id, revision: fivedee.revisionLabel(from), date: (from.revisionDate || from.createdAt).toISOString() },
+    to: { id: to.id, revision: fivedee.revisionLabel(to), date: (to.revisionDate || to.createdAt).toISOString() },
     summary: {
       added: count("added"),
       removed: count("removed"),
@@ -240,8 +240,8 @@ const carryForward = async ({ orgId, projectId, toModelId, actor = null }) => {
 // ─── BIM-8: potential duplicate quantity ──────────────────────────────────
 
 const duplicates = async ({ orgId, projectId }) => {
-  const models = await prisma.bimModel.findMany({ where: { orgId, projectId, isCurrent: true, status: "ready" }, select: { id: true, name: true, version: true } });
-  const modelLabel = new Map(models.map((model) => [model.id, `${model.name} ${fivedee.revisionLabel(model.version)}`]));
+  const models = await prisma.bimModel.findMany({ where: { orgId, projectId, isCurrent: true, status: "ready" }, select: { id: true, name: true, version: true, revisionCode: true, revisionDate: true } });
+  const modelLabel = new Map(models.map((model) => [model.id, `${model.name} ${fivedee.revisionLabel(model)}`]));
   const sameName = await prisma.bimModel.groupBy({ by: ["name"], where: { projectId, isCurrent: true }, _count: { _all: true } });
   const links = models.length ? await prisma.bimElementLink.findMany({ where: { modelId: { in: models.map((model) => model.id) }, recordType: "boq_item" }, select: { id: true, recordId: true, quantityField: true, quantity: true, modelId: true, element: { select: { id: true, globalId: true, ifcType: true, name: true, tag: true, storeyName: true } } } }) : [];
   const items = links.length ? await prisma.boqItem.findMany({ where: { id: { in: [...new Set(links.map((link) => link.recordId))] } }, select: { id: true, code: true, ref: true } }) : [];
@@ -275,7 +275,7 @@ const duplicates = async ({ orgId, projectId }) => {
  * Each part only where the caller may read that module (reader.can).
  */
 const elementCommercialState = async ({ orgId, projectId, elementId, reader }) => {
-  const element = await prisma.bimElement.findFirst({ where: { id: elementId, orgId, projectId }, select: { id: true, globalId: true, tag: true, name: true, modelId: true, model: { select: { name: true, version: true } } } });
+  const element = await prisma.bimElement.findFirst({ where: { id: elementId, orgId, projectId }, select: { id: true, globalId: true, tag: true, name: true, modelId: true, model: { select: { name: true, version: true, revisionCode: true, revisionDate: true } } } });
   if (!element) throw new HttpError(404, "BIM_ELEMENT_NOT_FOUND", "Element not found");
   const links = await prisma.bimElementLink.findMany({ where: { elementId }, select: { recordType: true, recordId: true, quantity: true, unit: true } });
   const activityId = links.find((link) => link.recordType === "activity")?.recordId || null;
@@ -356,9 +356,9 @@ const elementCommercialState = async ({ orgId, projectId, elementId, reader }) =
 const elementHistory = async ({ orgId, projectId, elementId }) => {
   const element = await prisma.bimElement.findFirst({ where: { id: elementId, orgId, projectId }, select: { globalId: true, model: { select: { name: true } } } });
   if (!element) throw new HttpError(404, "BIM_ELEMENT_NOT_FOUND", "Element not found");
-  const rows = await prisma.bimElement.findMany({ where: { projectId, globalId: element.globalId, model: { name: element.model.name } }, select: { id: true, netVolume: true, netArea: true, length: true, typeName: true, storeyName: true, model: { select: { version: true, createdAt: true, isCurrent: true } } }, orderBy: { model: { version: "asc" } } });
+  const rows = await prisma.bimElement.findMany({ where: { projectId, globalId: element.globalId, model: { name: element.model.name } }, select: { id: true, netVolume: true, netArea: true, length: true, typeName: true, storeyName: true, model: { select: { version: true, revisionCode: true, revisionDate: true, createdAt: true, isCurrent: true } } }, orderBy: { model: { version: "asc" } } });
   const reviews = await prisma.bimChangeReview.findMany({ where: { projectId, globalId: element.globalId }, select: { kind: true, status: true, changeEventId: true, updatedAt: true } });
-  return { globalId: element.globalId, revisions: rows.map((row) => ({ elementId: row.id, revision: fivedee.revisionLabel(row.model.version), date: row.model.createdAt.toISOString(), isCurrent: row.model.isCurrent, netVolume: row.netVolume, netArea: row.netArea, length: row.length, typeName: row.typeName, storeyName: row.storeyName })), reviews };
+  return { globalId: element.globalId, revisions: rows.map((row) => ({ elementId: row.id, revision: fivedee.revisionLabel(row.model), date: (row.model.revisionDate || row.model.createdAt).toISOString(), isCurrent: row.model.isCurrent, netVolume: row.netVolume, netArea: row.netArea, length: row.length, typeName: row.typeName, storeyName: row.storeyName })), reviews };
 };
 
 // ─── BIM-11: model change review ──────────────────────────────────────────
