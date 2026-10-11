@@ -36,7 +36,12 @@ export interface DocumentAnswer {
 
 export const useAskDocuments = (projectId: string) =>
   useMutation({
-    mutationFn: (payload: { question: string; documentIds?: string[] }) =>
+    mutationFn: (payload: {
+      question: string
+      documentIds?: string[]
+      /** summary / compare read the named documents from their start. */
+      mode?: 'answer' | 'summary' | 'compare'
+    }) =>
       apiClient
         .post(`/projects/${projectId}/ai/documents/ask`, payload, { timeout: 120_000 })
         .then((response) => response.data.data as DocumentAnswer),

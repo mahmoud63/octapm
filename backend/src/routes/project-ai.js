@@ -97,6 +97,7 @@ router.get(
  *             properties:
  *               question: { type: string, maxLength: 1000 }
  *               documentIds: { type: array, maxItems: 10, items: { type: string, format: uuid } }
+ *               mode: { type: string, enum: [answer, summary, compare], default: answer, description: "summary / compare read the named documents from their start; documentIds required" }
  *     responses:
  *       200: { description: Answer with passages }
  */
@@ -107,11 +108,12 @@ router.post(
     body("question").isString().trim().isLength({ min: 3, max: 1000 }),
     body("documentIds").optional({ nullable: true }).isArray({ max: 10 }),
     body("documentIds.*").isUUID(),
+    body("mode").optional().isIn(["answer", "summary", "compare"]),
     validate,
   ],
   asyncHandler(async (req, res) => {
     req.aiProjectId = req.params.projectId;
-    return sendSuccess(res, await documentQa.ask({ req, projectId: req.params.projectId, question: req.body.question, documentIds: req.body.documentIds || null }));
+    return sendSuccess(res, await documentQa.ask({ req, projectId: req.params.projectId, question: req.body.question, documentIds: req.body.documentIds || null, mode: req.body.mode || "answer" }));
   }),
 );
 

@@ -75,6 +75,16 @@ describe("Document Q&A (AI-6)", () => {
     expect(result.passages[0]).toMatchObject({ documentId: SPEC, chunkIndex: 1 });
   });
 
+  test("summary reads a named document from its start, even with no matching words; compare spreads across the documents", async () => {
+    documentText.readableDocumentIds.mockImplementation(async ({ documentIds }) => new Set(documentIds));
+    const summary = await qa.ask({ req, projectId: P, question: "Summarize this document", documentIds: [SPEC], mode: "summary" });
+    expect(summary.passages.map((passage) => passage.chunkIndex)).toEqual([0, 1]);
+    expect(summary.insufficient).toBe(false);
+    const compare = await qa.ask({ req, projectId: P, question: "Compare these documents", documentIds: [SPEC, MINUTES], mode: "compare" });
+    expect(new Set(compare.passages.map((passage) => passage.documentId))).toEqual(new Set([SPEC, MINUTES]));
+    await expect(qa.ask({ req, projectId: P, question: "Summarize", mode: "summary" })).rejects.toMatchObject({ code: "DOCUMENTS_REQUIRED" });
+  });
+
   test("no project access context, nothing read", async () => {
     await expect(qa.ask({ req: { user: req.user }, projectId: P, question: "glazing", documentIds: [SPEC] })).rejects.toMatchObject({ code: "AI_CONTEXT_MISSING" });
     expect(documentText.readableDocumentIds).not.toHaveBeenCalled();

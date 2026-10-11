@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Loader2, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
@@ -75,35 +75,61 @@ function Answer({ result }: { result: DocumentAnswer }) {
  * the Documents module (AI-6). The server decides which documents the
  * caller may read before any passage is read.
  */
+export interface DocumentAskPreset {
+  label: string
+  question: string
+  mode: 'answer' | 'summary' | 'compare'
+}
+
 export function DocumentAsk({
   projectId,
   documentId,
+  documentIds,
   documentTitle,
+  presets = [],
+  autoRun = null,
   className,
 }: {
   projectId: string
   documentId?: string
+  /** Several documents (Compare Documents). */
+  documentIds?: string[]
   documentTitle?: string
+  /** One-click questions shown beside the box (Summarize…). */
+  presets?: DocumentAskPreset[]
+  /** Asked as soon as the box opens. */
+  autoRun?: DocumentAskPreset | null
   className?: string
 }) {
   const canAsk = useCanPerform('assistant', 'read')
   const ask = useAskDocuments(projectId)
   const [question, setQuestion] = useState('')
   const [result, setResult] = useState<DocumentAnswer | null>(null)
-  if (!canAsk) return null
+  const ids = documentIds ?? (documentId ? [documentId] : undefined)
+  const idsKey = (ids ?? []).join(',')
+  const ran = useRef<string | null>(null)
 
-  const submit = async () => {
-    const text = question.trim()
-    if (text.length < 3) return
+  const run = async (text: string, mode: DocumentAskPreset['mode'] = 'answer') => {
+    if (text.trim().length < 3) return
     try {
-      setResult(await ask.mutateAsync({ question: text, documentIds: documentId ? [documentId] : undefined }))
+      setResult(await ask.mutateAsync({ question: text.trim(), documentIds: ids, mode }))
     } catch (error) {
       toast.error(getServerErrorMessage(error))
     }
   }
 
+  useEffect(() => {
+    if (!autoRun || !canAsk || ran.current === idsKey) return
+    ran.current = idsKey
+    void run(autoRun.question, autoRun.mode)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsKey, autoRun, canAsk])
+
+  if (!canAsk) return null
+  const submit = () => run(question)
+
   return (
-    <div className={cn('space-y-2', className)} data-testid={documentId ? 'uat-document-ask-one' : 'uat-document-ask'}>
+    <div className={cn('space-y-2', className)} data-testid={ids ? 'uat-document-ask-one' : 'uat-document-ask'}>
       <div className='flex items-center gap-2'>
         <Sparkles className='h-4 w-4 shrink-0 text-primary' aria-hidden />
         <Input
@@ -120,6 +146,22 @@ export function DocumentAsk({
           {ask.isPending ? <Loader2 className='h-4 w-4 animate-spin' /> : 'Ask'}
         </Button>
       </div>
+      {presets.length > 0 && (
+        <div className='flex flex-wrap gap-1.5'>
+          {presets.map((preset) => (
+            <Button
+              key={preset.label}
+              size='sm'
+              variant='outline'
+              className='h-7 px-2 text-xs'
+              disabled={ask.isPending}
+              onClick={() => void run(preset.question, preset.mode)}
+            >
+              {preset.label}
+            </Button>
+          ))}
+        </div>
+      )}
       {result && <Answer result={result} />}
       {result && result.notIndexed.length > 0 && (
         <p className='text-xs text-muted-foreground'>

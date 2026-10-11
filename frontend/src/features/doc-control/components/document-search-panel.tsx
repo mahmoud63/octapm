@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { DocumentAsk } from '@/features/ai/components/document-ask'
+import { DocumentAsk, type DocumentAskPreset } from '@/features/ai/components/document-ask'
 import {
   useDocumentIndexStatus,
   useDocumentSearch,
@@ -148,7 +148,29 @@ function RecordChip({
   )
 }
 
-function HitCard({ hit, projectId }: { hit: DocumentSearchHit; projectId: string }) {
+// One-click document questions (AI-6); typing in the box is Find Clause / Topic.
+const SUMMARIZE_PRESET: DocumentAskPreset = {
+  label: 'Summarize',
+  question: 'Summarize this document: its purpose, key requirements, quantities, dates and obligations.',
+  mode: 'summary',
+}
+const COMPARE_PRESET: DocumentAskPreset = {
+  label: 'Compare Documents',
+  question: 'Compare these documents: where they agree, where they differ, and any requirement one states that the other contradicts or omits.',
+  mode: 'compare',
+}
+
+function HitCard({
+  hit,
+  projectId,
+  selected,
+  onSelect,
+}: {
+  hit: DocumentSearchHit
+  projectId: string
+  selected: boolean
+  onSelect: (selected: boolean) => void
+}) {
   const [asking, setAsking] = useState(false)
   return (
     <li
@@ -185,6 +207,15 @@ function HitCard({ hit, projectId }: { hit: DocumentSearchHit; projectId: string
               {Math.round(hit.semanticScore * 100)}%
             </Badge>
           )}
+          <label className='flex items-center gap-1 px-1 text-xs text-muted-foreground'>
+            <input
+              type='checkbox'
+              checked={selected}
+              onChange={(event) => onSelect(event.target.checked)}
+              data-testid='uat-document-compare-select'
+            />
+            Compare
+          </label>
           <Button
             size='sm'
             variant={asking ? 'secondary' : 'ghost'}
@@ -205,7 +236,12 @@ function HitCard({ hit, projectId }: { hit: DocumentSearchHit; projectId: string
       </div>
       <Snippet value={hit.snippet} />
       {asking && (
-        <DocumentAsk projectId={projectId} documentId={hit.documentId} documentTitle={hit.title} />
+        <DocumentAsk
+          projectId={projectId}
+          documentId={hit.documentId}
+          documentTitle={`${hit.title} — find a clause or topic`}
+          presets={[SUMMARIZE_PRESET]}
+        />
       )}
       {(hit.revision || hit.records.length > 0) && (
         <div className='flex flex-wrap items-center gap-1.5'>
@@ -351,12 +387,37 @@ export function DocumentSearchPanel({ projectId }: { projectId: string }) {
   )
   const items = useMemo(() => data?.items ?? [], [data?.items])
   const hasQuery = debouncedTerm.trim().length > 0
+  // Documents chosen for Compare Documents (AI-6).
+  const [compareIds, setCompareIds] = useState<string[]>([])
+  const [comparing, setComparing] = useState(false)
+  const toggleCompare = (documentId: string, selected: boolean) => {
+    setComparing(false)
+    setCompareIds((ids) =>
+      selected ? [...new Set([...ids, documentId])].slice(0, 10) : ids.filter((id) => id !== documentId)
+    )
+  }
 
   return (
     <div className='space-y-3' data-testid='uat-document-search'>
       <CoverageCard projectId={projectId} />
       {/* Document Q&A inside the Documents module (AI-6). */}
       <DocumentAsk projectId={projectId} className='rounded-md border p-3' />
+      {compareIds.length >= 2 && (
+        <div className='space-y-2 rounded-md border p-3' data-testid='uat-document-compare'>
+          <div className='flex items-center gap-2'>
+            <Button size='sm' onClick={() => setComparing(true)} disabled={comparing}>
+              <Sparkles className='mr-1.5 h-3.5 w-3.5' />
+              Compare Documents ({compareIds.length})
+            </Button>
+            <Button size='sm' variant='ghost' onClick={() => { setCompareIds([]); setComparing(false) }}>
+              Clear
+            </Button>
+          </div>
+          {comparing && (
+            <DocumentAsk projectId={projectId} documentIds={compareIds} autoRun={COMPARE_PRESET} documentTitle='the selected documents' />
+          )}
+        </div>
+      )}
       <div className='flex flex-wrap items-end gap-3'>
         <div className='min-w-[240px] flex-1 space-y-1'>
           <Label htmlFor='document-search-term'>Search inside documents</Label>
@@ -418,7 +479,13 @@ export function DocumentSearchPanel({ projectId }: { projectId: string }) {
           </div>
           <ul className='space-y-2'>
             {items.map((hit) => (
-              <HitCard key={hit.documentId} hit={hit} projectId={projectId} />
+              <HitCard
+                key={hit.documentId}
+                hit={hit}
+                projectId={projectId}
+                selected={compareIds.includes(hit.documentId)}
+                onSelect={(selected) => toggleCompare(hit.documentId, selected)}
+              />
             ))}
           </ul>
         </div>

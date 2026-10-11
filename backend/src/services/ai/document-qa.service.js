@@ -98,7 +98,26 @@ Use ONLY the numbered passages. Cite every statement as [n]; quote short phrases
 You do not decide contractual entitlement, approval or payment; state what the document says.
 Return ONLY a JSON object (no markdown fences): {"answer": "...", "citations": [1, 2]}`;
 
-const ask = async ({ req, projectId, question, documentIds = null, transport = null }) => {
+// "summary" and "compare" read named documents from their start (a summary
+// has no keywords to rank by): the first passages of each, in order, after
+// any the question's words rank higher.
+const MODES = Object.freeze(["answer", "summary", "compare"]);
+const openingPassages = (chunks, ranked, perDocument) => {
+  const picked = [...ranked];
+  const count = new Map();
+  for (const chunk of picked) count.set(chunk.documentId, (count.get(chunk.documentId) || 0) + 1);
+  for (const chunk of chunks) {
+    if (picked.length >= MAX_PASSAGES) break;
+    if (picked.includes(chunk) || (count.get(chunk.documentId) || 0) >= perDocument) continue;
+    count.set(chunk.documentId, (count.get(chunk.documentId) || 0) + 1);
+    picked.push(chunk);
+  }
+  return picked;
+};
+
+const ask = async ({ req, projectId, question, documentIds = null, mode = "answer", transport = null }) => {
+  if (!MODES.includes(mode)) throw new HttpError(400, "INVALID_MODE", "Unknown document question mode");
+  if (mode !== "answer" && !documentIds?.length) throw new HttpError(400, "DOCUMENTS_REQUIRED", "Choose the documents to summarise or compare");
   const text = String(question || "").trim();
   if (text.length < 3) throw new HttpError(400, "QUESTION_REQUIRED", "Ask a question about the documents");
   if (text.length > MAX_QUESTION) throw new HttpError(400, "QUESTION_TOO_LONG", `Keep the question under ${MAX_QUESTION} characters`);
@@ -115,7 +134,9 @@ const ask = async ({ req, projectId, question, documentIds = null, transport = n
       ])
     : [[], []];
   const byId = new Map(documents.map((document) => [document.id, document]));
-  const passages = rankPassages(chunks, text).map((chunk, index) => {
+  const ranked = rankPassages(chunks, text);
+  const chosen = mode === "answer" ? ranked : openingPassages(chunks, ranked.slice(0, 2), mode === "summary" && ids.length === 1 ? MAX_PASSAGES : Math.max(2, Math.floor(MAX_PASSAGES / ids.length)));
+  const passages = chosen.map((chunk, index) => {
     const document = byId.get(chunk.documentId);
     const title = document?.title || document?.originalName || "Document";
     return { n: index + 1, documentId: chunk.documentId, title, ref: document?.documentNumber || null, chunkIndex: chunk.index, charStart: chunk.charStart, charEnd: chunk.charEnd, snippet: chunk.text.slice(0, 280), text: chunk.text.slice(0, PASSAGE_CHARS), url: `/projects/${projectId}?module=docControl&child=register&recordId=${chunk.documentId}` };
@@ -129,7 +150,7 @@ const ask = async ({ req, projectId, question, documentIds = null, transport = n
 
   const block = passages.map((passage) => `[${passage.n}] Document ${passage.ref ? `${passage.ref} ` : ""}— ${passage.title} (passage ${passage.chunkIndex + 1})\n${passage.text}`).join("\n\n");
   try {
-    const completion = await gateway.complete({ feature: "document.ask", system: SYSTEM, messages: [{ role: "user", content: `Passages:\n${block}\n\nQuestion: ${text}` }], maxTokens: 1000, temperature: 0.1, transport });
+    const completion = await gateway.complete({ feature: mode === "answer" ? "document.ask" : `document.${mode}`, system: SYSTEM, messages: [{ role: "user", content: `Passages:\n${block}\n\nQuestion: ${text}` }], maxTokens: 1000, temperature: 0.1, transport });
     const parsed = parseJsonAnswer(completion.text);
     const answer = String(parsed?.answer || completion.text || "").trim();
     const numbers = new Set([...(Array.isArray(parsed?.citations) ? parsed.citations : []), ...[...answer.matchAll(/\[(\d+)\]/g)].map((match) => match[1])].map(Number));
