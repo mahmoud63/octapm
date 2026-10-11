@@ -1,7 +1,9 @@
 jest.mock("../../../config/db", () => ({ prisma: { project: { findFirst: jest.fn(async () => ({ name: "Riverside Tower", dataDate: null })) }, activity: { findMany: jest.fn() } } }));
-jest.mock("../../../middleware/rbac", () => ({ hasPermission: jest.fn() }));
+jest.mock("../../../middleware/rbac", () => ({ hasPermission: jest.fn(), getEffectiveRole: jest.fn(() => "pm") }));
+jest.mock("../../cost.service", () => ({ getCostSummary: jest.fn(async () => ({ totals: { budget: 100, committed: 90, actual: 120, forecast: 130 }, budget: {}, eac: {}, records: [] })) }));
+jest.mock("../../forecast.service", () => ({ buildForecast: jest.fn(async () => ({ available: true, cost: { eac: 150, topRisks: [] }, schedule: {} })) }));
 jest.mock("../../progress.service", () => ({ listProgressSubmissions: jest.fn() }));
-jest.mock("../../../utils/boq-figures", () => ({ boqFigureAccess: jest.fn(() => ({ boq: false, budget: false })), withheldProgressSubmissions: jest.fn((rows) => rows), canReadBoq: jest.fn() }));
+jest.mock("../../../utils/boq-figures", () => ({ boqFigureAccess: jest.fn(() => ({ boq: false, budget: false })), withheldProgressSubmissions: jest.fn((rows) => rows), canReadBoq: jest.fn(), exceptionAccess: jest.fn(() => ({})), withheldCostSummary: jest.fn((summary) => ({ ...summary, withheld: true })), withheldForecast: jest.fn((forecast) => forecast) }));
 jest.mock("../../activity-boq-allocation.service", () => ({ getCoverage: jest.fn() }));
 
 const { prisma } = require("../../../config/db");
@@ -59,6 +61,27 @@ describe("module sources (AI-7)", () => {
     expect(allocationService.getCoverage).toHaveBeenCalledWith({ orgId: "org-1", projectId: P });
     expect(sources[0].text).toMatch(/3 BOQ rows: 1 fully allocated, 1 partly, 1 unallocated/);
     expect(sources.slice(1).map((source) => source.id)).toEqual(["b3", "b2"]);
+  });
+
+  test("cost: each part only with its own module's read, through the route's withholding", async () => {
+    const costService = require("../../cost.service");
+    const forecastService = require("../../forecast.service");
+    const { withheldCostSummary } = require("../../../utils/boq-figures");
+    hasPermission.mockReturnValue(false);
+    expect(await moduleSources({ view, projectId: P, moduleKey: "cost", child: "overview" })).toEqual([]);
+    expect(costService.getCostSummary).not.toHaveBeenCalled();
+    expect(forecastService.buildForecast).not.toHaveBeenCalled();
+
+    hasPermission.mockImplementation((_view, moduleName) => moduleName === "cost");
+    const sources = await moduleSources({ view, projectId: P, moduleKey: "cost", child: "overview" });
+    expect(sources.map((item) => item.type)).toEqual(["cost_facts"]);
+    expect(withheldCostSummary).toHaveBeenCalled();
+    expect(sources[0].text).toMatch(/budget 100, committed 90, actual 120, forecast 130/);
+    expect(forecastService.buildForecast).not.toHaveBeenCalled();
+
+    hasPermission.mockImplementation((_view, moduleName) => moduleName === "schedule");
+    const forecastOnly = await moduleSources({ view, projectId: P, moduleKey: "schedule", child: "forecast" });
+    expect(forecastOnly.map((item) => item.type)).toEqual(["forecast_facts"]);
   });
 
   test("official progress is the latest approved submission over a stale stored figure", async () => {

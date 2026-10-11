@@ -30,6 +30,23 @@ const SCHEDULE_DEFAULT: ModuleAction[] = [
 ]
 
 const ACTIONS: Record<string, ModuleAction[]> = {
+  cost: [
+    {
+      label: 'Explain Cost',
+      question:
+        'Explain the cost position: budget, committed, actual and forecast, and which activities drive it. Use only the cost ledger and forecast figures.',
+    },
+    {
+      label: 'Explain Variance',
+      question:
+        'Where does actual cost exceed budget, by how much, and why do the records say it happened?',
+    },
+    {
+      label: 'Explain Forecast',
+      question:
+        'Explain the cost forecast: the estimate at completion, its basis and range, and the activities driving any overrun.',
+    },
+  ],
   boq: [
     {
       label: 'Explain BOQ Coverage',
@@ -49,7 +66,34 @@ const ACTIONS: Record<string, ModuleAction[]> = {
   ],
 }
 
+const COMMERCIAL_RISK: ModuleAction = {
+  label: 'Summarize Commercial Risk',
+  question:
+    'Summarize the commercial risk on this project from the cost ledger, forecast, commitments and cash flow: where money is at risk and why.',
+}
+
+// Per sub-tab, when it differs from its module's actions.
+const CHILD_ACTIONS: Record<string, ModuleAction[]> = {
+  'commercial:commitments': [
+    {
+      label: 'Explain Commitments',
+      question:
+        'Explain the commitments: what is committed with whom, against what budget, and where commitments exceed budget.',
+    },
+    COMMERCIAL_RISK,
+  ],
+  'commercial:cash-flow': [
+    {
+      label: 'Explain Cash Flow',
+      question:
+        'Explain the cash flow: inflow, outflow and net by month, and what stands out.',
+    },
+    COMMERCIAL_RISK,
+  ],
+}
+
 const actionsFor = (module: string, child: string | null): ModuleAction[] => {
+  if (child && CHILD_ACTIONS[`${module}:${child}`]) return CHILD_ACTIONS[`${module}:${child}`]
   if (ACTIONS[module]) return ACTIONS[module]
   if (module === 'schedule') {
     if (child === 'progress')

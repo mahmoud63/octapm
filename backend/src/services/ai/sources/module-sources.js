@@ -8,11 +8,16 @@
 const { scheduleSources } = require("./schedule-snapshot");
 const { progressSources } = require("./progress-snapshot");
 const { boqSources } = require("./boq-snapshot");
+const cost = require("./cost-snapshot");
 
 const BUILDERS = Object.freeze({
   schedule: scheduleSources,
   "schedule:progress": progressSources,
+  "schedule:forecast": cost.forecastSources,
   boq: boqSources,
+  cost: cost.costSources,
+  "commercial:commitments": cost.commitmentSources,
+  "commercial:cash-flow": cost.cashFlowSources,
 });
 
 const moduleSources = async ({ view, projectId, moduleKey, child = null }) => {
