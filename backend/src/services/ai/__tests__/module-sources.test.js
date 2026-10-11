@@ -9,6 +9,10 @@ jest.mock("../../procurement.service", () => ({ getProcurementOverview: jest.fn(
 jest.mock("../../long-lead.service", () => ({ listLongLeadItems: jest.fn(async () => []) }));
 jest.mock("../../bid.service", () => ({ listPackages: jest.fn(async () => [{ id: "pk1", ref: "BP-01", title: "Facade", status: "open" }]), leveling: jest.fn(async () => ({ estimateTotal: 100, bidders: [{ companyName: "Acme", total: 90, normalizedTotal: 95, pluggedLines: 1, status: "submitted" }] })) }));
 jest.mock("../../inventory-analytics.service", () => ({ getAnalytics: jest.fn(async () => ({ headline: { totalValue: 56988.03, itemCount: 6, lowStock: 1 }, byWarehouse: [], lowStock: [{ sku: "SLC-PU25", name: "Polyurethane joint sealant", onHand: 24, reorderLevel: 60, shortfall: 36 }], outOfStock: [], overstock: [] })) }));
+jest.mock("../../quality.service", () => ({ getQualityDashboard: jest.fn(async () => ({ metrics: { qualityScore: 92, majorNcrs: 0, minorNcrs: 1, failedItps: 0, openDefects: 0, testsPassed: 0, testsFailed: 0, overdue: 1 } })) }));
+jest.mock("../../ncr.service", () => ({ listNcrs: jest.fn(async () => ({ rows: [{ id: "n1", ref: "NCR-001", severity: "minor", status: "open", activityId: "a1", description: "Cover to reinforcement 18mm" }] })) }));
+jest.mock("../../itp.service", () => ({ listItps: jest.fn(async () => ({ rows: [{ id: "i1", ref: "ITP-003", title: "Riser first fix", pointType: "hold", status: "pending", activityId: "a2" }] })) }));
+jest.mock("../../punch.service", () => ({ listPunchItems: jest.fn(async () => ({ items: [] })) }));
 jest.mock("../../forecast.service", () => ({ buildForecast: jest.fn(async () => ({ available: true, cost: { eac: 150, topRisks: [] }, schedule: {} })) }));
 jest.mock("../../progress.service", () => ({ listProgressSubmissions: jest.fn() }));
 jest.mock("../../../utils/boq-figures", () => ({ boqFigureAccess: jest.fn(() => ({ boq: false, budget: false })), withheldProgressSubmissions: jest.fn((rows) => rows), canReadBoq: jest.fn(), exceptionAccess: jest.fn(() => ({})), withheldCostSummary: jest.fn((summary) => ({ ...summary, withheld: true })), withheldForecast: jest.fn((forecast) => forecast), withheldAllocationLinks: jest.fn((order) => order) }));
@@ -145,6 +149,27 @@ describe("module sources (AI-7)", () => {
     expect(analytics.getAnalytics).toHaveBeenCalledWith({ orgId: "org-1", projectId: null, projectIds: null });
     expect(source.text).toMatch(/LOW STOCK: SLC-PU25 Polyurethane joint sealant: on hand 24/);
     expect(await orgModuleSources({ req, moduleKey: "unknown" })).toEqual([]);
+  });
+
+  test("quality: each register only with its own read; activity names only with schedule read", async () => {
+    const ncrService = require("../../ncr.service");
+    const itpService = require("../../itp.service");
+    const quality = require("../../quality.service");
+    hasPermission.mockReturnValue(false);
+    expect(await moduleSources({ view, projectId: P, moduleKey: "quality" })).toEqual([]);
+    expect(quality.getQualityDashboard).not.toHaveBeenCalled();
+
+    hasPermission.mockImplementation((_view, moduleName) => moduleName === "inspection");
+    const [itpOnly] = await moduleSources({ view, projectId: P, moduleKey: "quality", child: "itp" });
+    expect(ncrService.listNcrs).not.toHaveBeenCalled();
+    expect(itpOnly.text).toMatch(/Quality score 92/);
+    expect(itpOnly.text).toMatch(/Inspection ITP-003 Riser first fix \(hold point, pending\) on activity \(activity you cannot see\).*HOLD point/);
+    expect(itpOnly.text).not.toMatch(/NCR-001/);
+
+    hasPermission.mockImplementation((_view, moduleName) => ["ncr", "schedule"].includes(moduleName));
+    const [withNcr] = await moduleSources({ view, projectId: P, moduleKey: "quality", child: "ncr" });
+    expect(itpService.listItps).toHaveBeenCalledTimes(1);
+    expect(withNcr.text).toMatch(/NCR NCR-001 \(minor, open\) on activity A1100 Piling/);
   });
 
   test("official progress is the latest approved submission over a stale stored figure", async () => {

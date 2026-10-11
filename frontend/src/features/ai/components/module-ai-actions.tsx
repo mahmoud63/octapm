@@ -36,6 +36,23 @@ const LONG_LEAD: ModuleAction = {
 }
 
 const ACTIONS: Record<string, ModuleAction[]> = {
+  quality: [
+    {
+      label: 'AI Summary',
+      question:
+        'Summarize quality on this project: the quality score and how it is made up, open NCRs, pending or failed inspections and open punch items.',
+    },
+    {
+      label: 'What is Blocking Progress?',
+      question:
+        'Which NCRs, hold points and pending inspections are holding up activities, and what does each wait on?',
+    },
+    {
+      label: 'Identify Quality Risks',
+      question:
+        'Which quality issues are overdue, repeated or severe, and where is quality risk concentrated?',
+    },
+  ],
   inventory: [
     {
       label: 'Identify Low Stock',
