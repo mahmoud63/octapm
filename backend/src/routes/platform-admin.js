@@ -12,12 +12,15 @@ const express = require("express");
 const { param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
+const { dateInput } = require("../utils/date-input");
 const { validate } = require("../middleware/validate");
 const { auditPlatformAction, requirePlatformAdmin } = require("../middleware/platform-admin");
 const platformAdmin = require("../services/platform/platform-admin.service");
 const analytics = require("../services/platform/platform-analytics.service");
 const health = require("../services/platform/platform-health.service");
 const platformAudit = require("../services/platform/platform-audit.service");
+const platformAi = require("../services/platform/platform-ai.service");
+const platformFeatures = require("../services/platform/platform-features.service");
 const { daysAgo, paging, pageInfo } = require("../services/platform/platform-read-models");
 
 const router = express.Router();
@@ -29,7 +32,7 @@ const PAGE = [
 ];
 const SEARCH = query("q").optional().isString().trim().isLength({ max: 120 });
 const sortOf = (sorts) => query("sort").optional().isIn(Object.keys(sorts));
-const ORG_ID = query("orgId").optional().isUUID();
+const ORG_ID = query("orgId").optional().isString().isUUID();
 
 router.get(
   "/session",
@@ -56,8 +59,8 @@ router.get(
     query("kind").optional().isIn(["company", "personal"]),
     query("activity").optional().isIn(["active", "inactive"]),
     query("size").optional().isIn(["solo", "small", "medium", "large"]),
-    query("createdFrom").optional().isISO8601().toDate(),
-    query("createdTo").optional().isISO8601().toDate(),
+    query("createdFrom").optional().isString().custom(dateInput).toDate(),
+    query("createdTo").optional().isString().custom(dateInput).toDate(),
   ],
   validate,
   asyncHandler(async (req, res) => sendSuccess(res, await platformAdmin.listCompanies(req.query))),
@@ -68,7 +71,39 @@ router.get(
   auditPlatformAction("platform.company.view", (req) => ({ type: "organisation", id: req.params.orgId, orgId: req.params.orgId })),
   [param("orgId").isUUID()],
   validate,
-  asyncHandler(async (req, res) => sendSuccess(res, await platformAdmin.getCompany(req.params.orgId))),
+  asyncHandler(async (req, res) => {
+    const company = await platformAdmin.getCompany(req.params.orgId);
+    // The company's AI consumption (gateway ledger, 30 days) and which capabilities its projects use: counts only.
+    const [ai, features] = await Promise.all([
+      platformAi.getAiUsage({ days: 30, orgId: req.params.orgId }),
+      platformFeatures.getFeatureAdoption({ orgId: req.params.orgId }),
+    ]);
+    return sendSuccess(res, { ...company, ai: { windowDays: 30, configuration: ai.configuration, today: ai.today, window: ai.window, byFeature: ai.byFeature, byModel: ai.byModel, byUser: ai.byUser, failures: ai.failures, todayShareOfLimit: ai.byOrganisation[0]?.todayShareOfLimit ?? null }, features: { capabilities: features.byCompany[0]?.capabilities || {}, projects: features.byCompany[0]?.projects || 0, inventoryItems: features.byCompany[0]?.inventoryItems || 0, detail: features.detail } });
+  }),
+);
+
+router.get(
+  "/ai-usage",
+  auditPlatformAction("platform.ai_usage.view", (req) => (req.query.orgId ? { type: "organisation", id: req.query.orgId, orgId: req.query.orgId } : {})),
+  [query("days").optional().isIn(["1", "7", "30", "90"]), ORG_ID],
+  validate,
+  asyncHandler(async (req, res) => sendSuccess(res, await platformAi.getAiUsage({ days: req.query.days, orgId: req.query.orgId || null }))),
+);
+
+router.get(
+  "/features",
+  auditPlatformAction("platform.features.view", (req) => (req.query.orgId ? { type: "organisation", id: req.query.orgId, orgId: req.query.orgId } : {})),
+  [ORG_ID],
+  validate,
+  asyncHandler(async (req, res) => sendSuccess(res, await platformFeatures.getFeatureAdoption({ orgId: req.query.orgId || null }))),
+);
+
+router.get(
+  "/search",
+  auditPlatformAction("platform.search"),
+  [query("q").isString().trim().isLength({ min: 2, max: 120 })],
+  validate,
+  asyncHandler(async (req, res) => sendSuccess(res, await platformAdmin.search(req.query.q))),
 );
 
 router.get(
@@ -144,8 +179,8 @@ router.get(
   auditPlatformAction("platform.audit.view"),
   [
     ...PAGE,
-    query("actorUserId").optional().isUUID(),
-    query("targetOrgId").optional().isUUID(),
+    query("actorUserId").optional().isString().isUUID(),
+    query("targetOrgId").optional().isString().isUUID(),
     query("action").optional().isString().isLength({ max: 80 }).matches(/^[a-z_.]+$/),
     query("days").optional().isInt({ min: 1, max: 365 }).toInt(),
   ],

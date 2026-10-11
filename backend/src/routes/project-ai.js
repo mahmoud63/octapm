@@ -109,7 +109,7 @@ router.post(
   [
     body("question").isString().trim().isLength({ min: 3, max: 1000 }),
     body("documentIds").optional({ nullable: true }).isArray({ max: 10 }),
-    body("documentIds.*").isUUID(),
+    body("documentIds.*").isString().isUUID(),
     body("mode").optional().isIn(["answer", "summary", "compare"]),
     validate,
   ],

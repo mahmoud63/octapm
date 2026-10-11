@@ -44,6 +44,8 @@ export interface AuthUser {
   memberships?: WorkspaceMembership[]
   /** The workspace this token is bound to — only on `GET /auth/me`; null for an identity token. */
   active?: { orgId: string; membershipId: string | null } | null
+  /** A provisioned platform operator — only on `GET /auth/me`; shows the menu entry, grants nothing. */
+  platformOperator?: boolean
 }
 
 export interface MfaChallenge {

@@ -2,6 +2,7 @@ const express = require("express");
 const { query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
+const { dateInput } = require("../utils/date-input");
 const { authenticate } = require("../middleware/auth");
 const { requireCompanyAdmin, noApiKey } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
@@ -30,7 +31,7 @@ router.get(
   "/usage",
   noApiKey,
   requireCompanyAdmin,
-  [query("from").optional().isISO8601(), query("to").optional().isISO8601(), validate],
+  [query("from").optional().isString().custom(dateInput), query("to").optional().isString().custom(dateInput), validate],
   asyncHandler(async (req, res) => {
     const to = req.query.to ? new Date(req.query.to) : new Date();
     const from = req.query.from ? new Date(req.query.from) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
@@ -57,7 +58,7 @@ router.get(
   noApiKey,
   [
     query("q").isString().trim().isLength({ min: 2, max: 300 }),
-    query("projectId").optional().isUUID(),
+    query("projectId").optional().isString().isUUID(),
     query("explain").optional().isBoolean().toBoolean(),
     validate,
   ],

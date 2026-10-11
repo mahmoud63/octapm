@@ -88,6 +88,19 @@ const getSystemHealth = async ({ now = new Date() } = {}) => {
         GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20`,
     ]);
 
+  // AI gateway outcomes, BIM model parses and the notification e-mail backlog: counts only.
+  const [aiOutcomes, bimParses, emailBacklog] = await Promise.all([
+    prisma.$queryRaw`
+      SELECT status, coalesce("errorClass", '—') AS error_class, count(*)::int AS n
+      FROM "AiRun" WHERE "createdAt" >= ${since1} GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20`,
+    prisma.$queryRaw`
+      SELECT status, count(*)::int AS n FROM "BimModel" WHERE "createdAt" >= ${since7} GROUP BY 1`,
+    prisma.$queryRaw`
+      SELECT count(*) FILTER (WHERE status = 'pending')::int AS pending,
+             count(*) FILTER (WHERE status = 'pending' AND "createdAt" < ${new Date(now.getTime() - 15 * 60 * 1000)})::int AS pending_over_15m
+      FROM "NotificationDeliveryAttempt" WHERE channel = 'email' AND "createdAt" >= ${since7}`,
+  ]);
+  const aiConfig = require("./platform-ai.service").configuration();
   const workerEnabled = envFlag("JOB_WORKER_ENABLED", true);
   const schedulersEnabled = envFlag("SCHEDULERS_ENABLED", true);
   return {
@@ -127,6 +140,15 @@ const getSystemHealth = async ({ now = new Date() } = {}) => {
     webhooks: { last7DaysByStatus: Object.fromEntries(webhooks.map((r) => [r.status, r.n])) },
     notifications: { last7Days: deliveries, failuresByCode: deliveryErrors },
     telemetry: telemetry.stats(),
+    ai: {
+      mode: aiConfig.mode,
+      provider: aiConfig.provider,
+      model: aiConfig.model,
+      last24Hours: aiOutcomes.map((row) => ({ status: row.status, errorClass: row.error_class, count: row.n })),
+      note: "From the AI gateway ledger: failed = provider error; blocked = spending guard; disabled = no provider configured.",
+    },
+    bim: { last7DaysByStatus: Object.fromEntries(bimParses.map((row) => [row.status, row.n])), note: "BIM model uploads by parse status (processing / ready / failed)." },
+    emailBacklog: { pending: emailBacklog[0].pending, pendingOver15Minutes: emailBacklog[0].pending_over_15m, note: "Notification e-mails queued in the last 7 days and not yet sent." },
   };
 };
 

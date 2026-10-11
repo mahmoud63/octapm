@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import type { HealthAdditions } from '@/services/platform-admin/integration-api'
 import { Link } from '@tanstack/react-router'
 import { platformAdminApi } from '@/services/platform-admin/api'
 import {
@@ -170,6 +171,30 @@ export function PlatformHealthPage() {
               hint={`${h.release.environment} · up ${Math.round(h.release.uptimeSeconds / 3600)} h · ${h.release.node}`}
             />
           </div>
+
+          {(h as typeof h & HealthAdditions).ai ? (
+            <div className='grid gap-4 lg:grid-cols-3' data-testid='platform-health-integration'>
+              <Section title='AI gateway (24 h)' description={`${(h as typeof h & HealthAdditions).ai!.provider || 'no provider'} · ${(h as typeof h & HealthAdditions).ai!.model || '—'} · ${(h as typeof h & HealthAdditions).ai!.mode}`}>
+                <ul className='space-y-1 text-sm'>
+                  {(h as typeof h & HealthAdditions).ai!.last24Hours.length ? (h as typeof h & HealthAdditions).ai!.last24Hours.map((row) => (
+                    <li key={`${row.status}-${row.errorClass}`} className='flex justify-between gap-2'><span>{row.status}{row.errorClass !== '—' ? ` · ${row.errorClass}` : ''}</span><span className={row.status === 'ok' ? 'tabular-nums' : 'font-semibold text-amber-600 tabular-nums'}>{fmtNumber(row.count)}</span></li>
+                  )) : <li className='text-muted-foreground'>No AI calls in 24 h.</li>}
+                </ul>
+                <p className='mt-2 text-xs text-muted-foreground'>{(h as typeof h & HealthAdditions).ai!.note}</p>
+              </Section>
+              <Section title='BIM model parsing (7 days)'>
+                <ul className='space-y-1 text-sm'>
+                  {Object.entries((h as typeof h & HealthAdditions).bim?.last7DaysByStatus || {}).length ? Object.entries((h as typeof h & HealthAdditions).bim!.last7DaysByStatus).map(([status, count]) => (
+                    <li key={status} className='flex justify-between gap-2'><span>{status}</span><span className={status === 'failed' ? 'font-semibold text-amber-600 tabular-nums' : 'tabular-nums'}>{fmtNumber(count)}</span></li>
+                  )) : <li className='text-muted-foreground'>No models uploaded in 7 days.</li>}
+                </ul>
+              </Section>
+              <Section title='Notification e-mail backlog' description={(h as typeof h & HealthAdditions).emailBacklog?.note}>
+                <p className='text-2xl font-semibold tabular-nums'>{fmtNumber((h as typeof h & HealthAdditions).emailBacklog?.pending)}</p>
+                <p className={((h as typeof h & HealthAdditions).emailBacklog?.pendingOver15Minutes || 0) > 0 ? 'text-sm text-amber-600' : 'text-sm text-muted-foreground'}>{fmtNumber((h as typeof h & HealthAdditions).emailBacklog?.pendingOver15Minutes)} waiting more than 15 minutes</p>
+              </Section>
+            </div>
+          ) : null}
 
           <div className='grid gap-4 lg:grid-cols-2'>
             <Section title='Background jobs (24 h)' description={h.worker.note}>

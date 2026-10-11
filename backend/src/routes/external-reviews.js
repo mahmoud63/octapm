@@ -2,6 +2,7 @@ const express = require("express");
 const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
+const { dateInput } = require("../utils/date-input");
 const { authenticate } = require("../middleware/auth");
 const { requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
@@ -26,11 +27,11 @@ const reason = (field = "reason") => body(field).isString().trim().isLength({ mi
 const filters = [
   query("status").optional().isIn(["open", "awaiting", "returned", "responded", "closed", "all", ...Object.values(service.STATUS)]),
   query("sourceType").optional().isIn(sources.SOURCE_TYPES),
-  query(["partyId", "reviewerId"]).optional().isUUID(),
+  query(["partyId", "reviewerId"]).optional().isString().isUUID(),
   query("overdue").optional().isIn(["true", "false"]),
   query("action").optional().isIn(["consultant", "contractor"]),
   query("discipline").optional().isString().isLength({ max: 40 }),
-  query(["dueFrom", "dueTo", "submittedFrom", "submittedTo"]).optional().isISO8601(),
+  query(["dueFrom", "dueTo", "submittedFrom", "submittedTo"]).optional().isString().custom(dateInput),
   query("q").optional().isString().isLength({ max: 200 }),
   query("sort").optional().isIn(["priority", "oldest", "newest", "due", "overdue"]),
 ];
@@ -41,7 +42,7 @@ router.get("/summary", asyncHandler(async (req, res) => sendSuccess(res, await s
 
 router.get(
   "/performance",
-  [query(["partyId", "reviewerId"]).optional().isUUID(), query("sourceType").optional().isIn(sources.SOURCE_TYPES), query(["from", "to"]).optional().isISO8601(), validate],
+  [query(["partyId", "reviewerId"]).optional().isString().isUUID(), query("sourceType").optional().isIn(sources.SOURCE_TYPES), query(["from", "to"]).optional().isString().custom(dateInput), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.performance({ ...scope(req), query: req.query })))
 );
 
@@ -92,15 +93,15 @@ router.post(
   requirePermission("external_review", "create"),
   [
     body("sourceType").isIn(sources.SOURCE_TYPES),
-    body("sourceId").isUUID(),
-    body("partyId").isUUID(),
-    body("responsibleUserId").isUUID(),
+    body("sourceId").isString().isUUID(),
+    body("partyId").isString().isUUID(),
+    body("responsibleUserId").isString().isUUID(),
     body("ccUserIds").optional().isArray({ max: 20 }),
-    body("ccUserIds.*").isUUID(),
-    body("dueAt").isISO8601(),
+    body("ccUserIds.*").isString().isUUID(),
+    body("dueAt").isString().custom(dateInput),
     body("coverNote").optional({ nullable: true }).isString().isLength({ max: 8000 }),
     body("documentIds").optional().isArray({ max: 50 }),
-    body("documentIds.*").isUUID(),
+    body("documentIds.*").isString().isUUID(),
     validate,
   ],
   asyncHandler(async (req, res) => sendSuccess(res, await service.submit({ ...scope(req), payload: req.body }), 201))
@@ -124,7 +125,7 @@ router.post(
 
 router.post(
   "/:id/resubmit",
-  [...idParam, body("dueAt").isISO8601(), body("responsibleUserId").optional().isUUID(), body("coverNote").optional({ nullable: true }).isString().isLength({ max: 8000 }), body("documentIds").optional().isArray({ max: 50 }), body("documentIds.*").isUUID(), validate],
+  [...idParam, body("dueAt").isString().custom(dateInput), body("responsibleUserId").optional().isString().isUUID(), body("coverNote").optional({ nullable: true }).isString().isLength({ max: 8000 }), body("documentIds").optional().isArray({ max: 50 }), body("documentIds.*").isString().isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.resubmit({ ...scope(req), id: req.params.id, payload: req.body })))
 );
 
@@ -138,13 +139,13 @@ router.post(
 
 router.post(
   "/:id/reassign",
-  [...idParam, body("responsibleUserId").isUUID(), reason(), validate],
+  [...idParam, body("responsibleUserId").isString().isUUID(), reason(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.reassign({ ...scope(req), id: req.params.id, responsibleUserId: req.body.responsibleUserId, reason: req.body.reason })))
 );
 
 router.post(
   "/:id/due-date",
-  [...idParam, body("dueAt").isISO8601(), reason(), validate],
+  [...idParam, body("dueAt").isString().custom(dateInput), reason(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.changeDueDate({ ...scope(req), id: req.params.id, dueAt: req.body.dueAt, reason: req.body.reason })))
 );
 

@@ -39,7 +39,7 @@ router.post(
     body("companyName").isString().trim().isLength({ min: 1, max: 200 }),
     body("discipline").isIn(Object.keys(service.CONSULTANT_TYPES)),
     body("contactName").optional({ nullable: true }).isString().isLength({ max: 200 }),
-    body("email").isEmail(),
+    body("email").isString().isEmail(),
     body("jobTitle").optional({ nullable: true }).isString().isLength({ max: 200 }),
     body("projectRole").optional({ nullable: true }).isString().isLength({ max: 200 }),
     body("isPrimaryReviewer").optional().isBoolean(),

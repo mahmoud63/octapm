@@ -1,4 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
+import type { CompanyAdditions } from '@/services/platform-admin/integration-api'
+import { CompanyAiAndAdoption } from '../components/company-ai-adoption'
 import { Link, useParams } from '@tanstack/react-router'
 import { platformAdminApi } from '@/services/platform-admin/api'
 import { ArrowLeft } from 'lucide-react'
@@ -153,6 +155,7 @@ export function PlatformCompanyDetailPage() {
               <TabsTrigger value='projects'>Projects</TabsTrigger>
               <TabsTrigger value='subscription'>Subscription</TabsTrigger>
               <TabsTrigger value='usage'>Product usage</TabsTrigger>
+              <TabsTrigger value='ai'>AI &amp; feature adoption</TabsTrigger>
               <TabsTrigger value='errors'>Errors &amp; jobs</TabsTrigger>
               <TabsTrigger value='audit'>Audit summary</TabsTrigger>
             </TabsList>
@@ -288,6 +291,10 @@ export function PlatformCompanyDetailPage() {
                   This organisation has no subscription row.
                 </Note>
               )}
+            </TabsContent>
+
+            <TabsContent value='ai' className='mt-4 space-y-4'>
+              <CompanyAiAndAdoption orgId={orgId} detail={d as typeof d & CompanyAdditions} />
             </TabsContent>
 
             <TabsContent

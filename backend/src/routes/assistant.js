@@ -79,7 +79,7 @@ const build = ({ withActions }) => {
       body("context").optional({ nullable: true }).isObject(),
       body(["context.module", "context.moduleKey", "context.child", "context.childKey", "context.label"]).optional({ nullable: true }).isString().isLength({ max: 120 }),
       body("context.recordType").optional({ nullable: true }).isIn(RECORD_TYPES),
-      body("context.recordId").optional({ nullable: true }).isUUID(),
+      body("context.recordId").optional({ nullable: true }).isString().isUUID(),
       validate,
     ],
     asyncHandler(async (req, res) =>

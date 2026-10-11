@@ -8,6 +8,7 @@ import {
   Bell,
   CreditCard,
   Sparkles,
+  ShieldCheck,
 } from 'lucide-react'
 import { useAuthStore, workspaceSegment } from '@/stores/auth-store'
 import { useCanPerform, useIsCompanyAdmin } from '@/lib/permissions'
@@ -234,6 +235,17 @@ function UserDropdown() {
               </div>
             </div>
           </DropdownMenuLabel>
+          {authUser?.platformOperator ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link to='/platform-admin' data-testid='user-menu-platform-admin'>
+                  <ShieldCheck className='size-4' />
+                  Platform Administration
+                </Link>
+              </DropdownMenuItem>
+            </>
+          ) : null}
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
             <DropdownMenuItem asChild>

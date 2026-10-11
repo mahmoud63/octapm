@@ -84,6 +84,11 @@ const getOverview = async ({ now = new Date() } = {}) => {
       FROM "PlatformErrorEvent" WHERE "occurredAt" >= ${since1}`,
   ]);
 
+  // AI (gateway ledger) and the newer capabilities, as counts.
+  const [aiUsage, newFeatures] = await Promise.all([
+    require("./platform-ai.service").getAiUsage({ days: 7, now }),
+    require("./platform-features.service").newFeatureDetail({ now }),
+  ]);
   const byPlan = {};
   const byStatus = {};
   for (const row of subs) {
@@ -127,6 +132,8 @@ const getOverview = async ({ now = new Date() } = {}) => {
     jobs: { failedLast24Hours: jobs[0].failed_24h, failedLast7Days: jobs[0].failed_7d },
     errors: { last24Hours: errors[0].all_24h, serverErrorsLast24Hours: errors[0].server_24h },
     release: getRelease(),
+    ai: { mode: aiUsage.configuration.mode, provider: aiUsage.configuration.provider, model: aiUsage.configuration.model, today: aiUsage.today, last7Days: aiUsage.window },
+    features: newFeatures,
     definitions: {
       activeLast30Days:
         "Distinct people/companies with a recorded change, a tracked product event or a session issued or refreshed in the last 30 days (active companies only).",
@@ -572,7 +579,7 @@ const listProjects = async (query = {}, { now = new Date() } = {}) => {
   const ids = rows.map((r) => r.id);
   const since90 = daysAgo(ACTIVITY_LOOKBACK_DAYS, now);
   const since30 = daysAgo(30, now);
-  const [members, activity, modules] = ids.length
+  const [members, activity, modules, features] = ids.length
     ? await Promise.all([
         prisma.$queryRaw`
           SELECT "projectId", count(*)::int AS n FROM "ProjectAssignment"
@@ -592,8 +599,18 @@ const listProjects = async (query = {}, { now = new Date() } = {}) => {
             SELECT "projectId", module FROM "ProductEvent"
             WHERE "projectId" IN (${Prisma.join(ids)}) AND "createdAt" >= ${since30}
           ) x GROUP BY 1`,
+        // Newer capabilities: counts only (BIM models, closeout deliverables, consultant reviews, AI calls in 30 days).
+        prisma.$queryRaw`
+          SELECT p.id AS "projectId",
+                 (SELECT count(*)::int FROM "BimModel" m WHERE m."projectId" = p.id) AS bim_models,
+                 (SELECT count(*)::int FROM "CloseoutDeliverable" d WHERE d."projectId" = p.id) AS closeout_deliverables,
+                 (SELECT count(*)::int FROM "ExternalSubmission" s WHERE s."projectId" = p.id) AS consultant_reviews,
+                 (SELECT count(*)::int FROM "ProjectParty" q WHERE q."projectId" = p.id AND q.role = 'consultant') AS consultant_parties,
+                 (SELECT count(*)::int FROM "AiRun" r WHERE r."projectId" = p.id AND r."createdAt" >= ${since30}) AS ai_calls_30d
+          FROM "Project" p WHERE p.id IN (${Prisma.join(ids)})`,
       ])
-    : [[], [], []];
+    : [[], [], [], []];
+  const featuresBy = new Map(features.map((r) => [r.projectId, r]));
   const membersBy = new Map(members.map((r) => [r.projectId, r.n]));
   const activityBy = new Map(activity.map((r) => [r.projectId, r]));
   const modulesBy = new Map(modules.map((r) => [r.projectId, r.modules]));
@@ -616,6 +633,13 @@ const listProjects = async (query = {}, { now = new Date() } = {}) => {
         lastActivityAt: act?.last_activity || null,
         recordChanges30d: act?.changes_30d || 0,
         modulesUsed30d: modulesBy.get(r.id) || [],
+        features: {
+          bimModels: featuresBy.get(r.id)?.bim_models || 0,
+          closeoutDeliverables: featuresBy.get(r.id)?.closeout_deliverables || 0,
+          consultantReviews: featuresBy.get(r.id)?.consultant_reviews || 0,
+          consultantParties: featuresBy.get(r.id)?.consultant_parties || 0,
+          aiCalls30d: featuresBy.get(r.id)?.ai_calls_30d || 0,
+        },
         healthFlags: health,
       };
     }),
@@ -685,6 +709,27 @@ const listSubscriptions = async (query = {}, { now = new Date() } = {}) => {
   };
 };
 
+
+/**
+ * Platform search across companies (name), people (name, email) and projects
+ * (name) — identifying fields only, never a project's records or documents.
+ */
+const search = async (q) => {
+  const term = String(q || "").trim();
+  if (term.length < 2) return { companies: [], users: [], projects: [] };
+  const pattern = like(term);
+  const [companies, users, projects] = await Promise.all([
+    prisma.$queryRaw`SELECT id, name, status, kind FROM "Organisation" WHERE name ILIKE ${pattern} ORDER BY lower(name) LIMIT 8`,
+    prisma.$queryRaw`SELECT id, name, email, status FROM "User" WHERE email ILIKE ${pattern} OR name ILIKE ${pattern} ORDER BY lower(email) LIMIT 8`,
+    prisma.$queryRaw`SELECT p.id, p.name, p.status, o.id AS org_id, o.name AS org_name FROM "Project" p JOIN "Organisation" o ON o.id = p."orgId" WHERE p.name ILIKE ${pattern} ORDER BY lower(p.name) LIMIT 8`,
+  ]);
+  return {
+    companies: companies.map((row) => ({ id: row.id, name: row.name, status: row.status, kind: row.kind })),
+    users: users.map((row) => ({ id: row.id, name: row.name, email: row.email, status: row.status })),
+    projects: projects.map((row) => ({ id: row.id, name: row.name, status: row.status, organisation: { id: row.org_id, name: row.org_name } })),
+  };
+};
+
 module.exports = {
   COMPANY_SORTS,
   PROJECT_SORTS,
@@ -692,6 +737,7 @@ module.exports = {
   USER_SORTS,
   getCompany,
   getOverview,
+  search,
   listCompanies,
   listProjects,
   listSubscriptions,

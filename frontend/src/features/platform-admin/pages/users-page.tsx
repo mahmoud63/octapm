@@ -24,9 +24,9 @@ import { FilterSelect, SearchBox } from '../components/list-filters'
 import { fmtDate, fmtNumber, fmtRelative, humanize } from '../lib/format'
 import { useListState } from '../lib/use-list-state'
 
-export function PlatformUsersPage() {
+export function PlatformUsersPage({ initialQ = '' }: { initialQ?: string }) {
   const { filters, set, page, setPage } = useListState({
-    q: '',
+    q: initialQ,
     status: '',
     multiCompany: '',
     lastLogin: '',

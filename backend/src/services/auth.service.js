@@ -18,6 +18,7 @@ const {
   verifyRefreshToken,
 } = require("../utils/tokens");
 const membershipService = require("./membership.service");
+const { resolvePlatformPrincipal } = require("./platform/platform-access.service");
 const authAbuseService = require("./auth-abuse.service");
 const organisationService = require("./organisation.service");
 const { sendEmail, templates } = require("./email.service");
@@ -947,8 +948,13 @@ const logout = async ({ refreshToken, client = "web" }) => {
  * as before), plus every workspace the person belongs to and which one the
  * token is for (membership doc §3). With an identity token there is no active
  * workspace and the identity is described from its own columns.
+ *
+ * `platformOperator` only decides whether the person's own menu offers
+ * "Platform Administration": true for a provisioned platform operator who
+ * passes the console's own checks (MFA included), never for an API key. It
+ * grants nothing — every platform route re-checks access itself.
  */
-const getProfile = async ({ userId, orgId, principal = null }) => {
+const getProfile = async ({ userId, orgId, principal = null, viaApiKey = false }) => {
   const user = principal?.membershipId || !orgId
     ? await prisma.user.findUnique({ where: { id: userId } })
     : await prisma.user.findFirst({ where: { id: userId, orgId } });
@@ -957,9 +963,13 @@ const getProfile = async ({ userId, orgId, principal = null }) => {
     throw new HttpError(404, "USER_NOT_FOUND", "User not found");
   }
 
-  const memberships = await membershipService.listWorkspacesForUser(user.id);
+  const [memberships, platform] = await Promise.all([
+    membershipService.listWorkspacesForUser(user.id),
+    viaApiKey ? { ok: false } : resolvePlatformPrincipal(user.id),
+  ]);
   return {
     ...sanitizeUser(user, principal?.orgId ? principal : null),
+    platformOperator: platform.ok === true,
     memberships,
     active: principal?.orgId
       ? { orgId: principal.orgId, membershipId: principal.membershipId || null }

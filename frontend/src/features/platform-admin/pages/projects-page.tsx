@@ -1,4 +1,5 @@
 import { useCallback } from 'react'
+import type { ProjectFeatures } from '@/services/platform-admin/integration-api'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { platformAdminApi } from '@/services/platform-admin/api'
@@ -84,6 +85,7 @@ export function PlatformProjectsPage() {
                   <TableHead>Last activity</TableHead>
                   <TableHead className='text-right'>Changes (30 d)</TableHead>
                   <TableHead>Modules used (30 d)</TableHead>
+                  <TableHead>BIM · Closeout · Consultants · AI (30 d)</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Flags</TableHead>
                 </TableRow>
@@ -139,6 +141,13 @@ export function PlatformProjectsPage() {
                           </span>
                         )}
                       </div>
+                    </TableCell>
+                    <TableCell className='text-xs whitespace-nowrap tabular-nums'>
+                      {(() => {
+                        const f = (p as typeof p & { features?: ProjectFeatures }).features
+                        if (!f) return '—'
+                        return `${f.bimModels} models · ${f.closeoutDeliverables} deliverables · ${f.consultantParties} consultants / ${f.consultantReviews} reviews · ${f.aiCalls30d} AI calls`
+                      })()}
                     </TableCell>
                     <TableCell>{fmtDate(p.createdAt)}</TableCell>
                     <TableCell>

@@ -2,6 +2,7 @@ const express = require("express");
 const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
+const { scalarFigure } = require("../utils/figure-input");
 const { dateInput } = require("../utils/date-input");
 const { authenticate } = require("../middleware/auth");
 const { hasPermission, requirePermission } = require("../middleware/rbac");
@@ -27,14 +28,14 @@ const deliverableFields = (partial) => [
   partial ? body("category").optional().isIn(service.CATEGORY_KEYS) : body("category").isIn(service.CATEGORY_KEYS),
   body("description").optional({ nullable: true }).isString().isLength({ max: 4000 }),
   body("required").optional().isBoolean(),
-  body("responsibleCompanyId").optional({ nullable: true }).isUUID(),
-  body("responsibleUserId").optional({ nullable: true }).isUUID(),
-  body("activityId").optional({ nullable: true }).isUUID(),
-  body("locationId").optional({ nullable: true }).isUUID(),
+  body("responsibleCompanyId").optional({ nullable: true }).isString().isUUID(),
+  body("responsibleUserId").optional({ nullable: true }).isString().isUUID(),
+  body("activityId").optional({ nullable: true }).isString().isUUID(),
+  body("locationId").optional({ nullable: true }).isString().isUUID(),
   body("dueDate").optional({ nullable: true }).custom(dateInput),
   body("warrantyStart").optional({ nullable: true }).custom(dateInput),
   body("warrantyEnd").optional({ nullable: true }).custom(dateInput),
-  body("warrantyMonths").optional({ nullable: true }).isInt({ min: 0, max: 600 }),
+  body("warrantyMonths").optional({ nullable: true }).custom(scalarFigure).bail().isInt({ min: 0, max: 600 }),
 ];
 
 router.get("/", requirePermission("closeout", "read"), asyncHandler(async (req, res) => sendSuccess(res, await service.overview(scope(req)))));
@@ -56,7 +57,7 @@ router.delete("/deliverables/:deliverableId", requirePermission("closeout", "del
 router.post(
   "/deliverables/:deliverableId/submit",
   requirePermission("closeout", "submit"),
-  [...idParam, body("documentIds").optional().isArray({ max: 50 }), body("documentIds.*").isUUID(), body("note").optional({ nullable: true }).isString().isLength({ max: 2000 }), validate],
+  [...idParam, body("documentIds").optional().isArray({ max: 50 }), body("documentIds.*").isString().isUUID(), body("note").optional({ nullable: true }).isString().isLength({ max: 2000 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.submitDeliverable({ ...scope(req), id: req.params.deliverableId, documentIds: req.body.documentIds, note: req.body.note })))
 );
 

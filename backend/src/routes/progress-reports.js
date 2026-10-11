@@ -22,7 +22,7 @@ const contractorOnly = (req, _res, next) => (isPartyScopedAccess(req.projectAcce
 const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
 const actor = (req) => ({ id: req.user.id });
 const fields = (partial) => [
-  partial ? body("period").optional().matches(/^\d{4}-(0[1-9]|1[0-2])$/) : body("period").matches(/^\d{4}-(0[1-9]|1[0-2])$/),
+  partial ? body("period").optional().isString().matches(/^\d{4}-(0[1-9]|1[0-2])$/) : body("period").isString().matches(/^\d{4}-(0[1-9]|1[0-2])$/),
   body("kind").optional().isIn(service.KINDS),
   body("title").optional({ nullable: true }).isString().isLength({ max: 200 }),
   body("summary").optional({ nullable: true }).isString().isLength({ max: 20000 }),

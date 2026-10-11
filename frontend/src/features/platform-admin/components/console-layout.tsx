@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { PlatformSearch } from './platform-search'
 import { Link, Outlet, useLocation } from '@tanstack/react-router'
 import { platformAdminApi } from '@/services/platform-admin/api'
 import {
@@ -40,6 +41,7 @@ const NAV = [
     label: 'Product Adoption',
     icon: BarChart3,
   },
+  { to: '/platform-admin/ai-usage', label: 'AI Usage', icon: Bot },
   { to: '/platform-admin/health', label: 'System Health', icon: Activity },
   { to: '/platform-admin/audit', label: 'Audit', icon: ScrollText },
 ] as const
@@ -101,29 +103,6 @@ export function PlatformConsoleLayout() {
               </Link>
             )
           })}
-          <div className='mt-4 border-t border-slate-800 pt-3'>
-            <div className='px-3 pb-1 text-[11px] tracking-wide text-slate-500 uppercase'>
-              Future
-            </div>
-            <Link
-              to='/platform-admin/ai-usage'
-              className={cn(
-                'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm',
-                isActive('/platform-admin/ai-usage')
-                  ? 'bg-slate-800 text-white'
-                  : 'text-slate-500 hover:bg-slate-900'
-              )}
-            >
-              <Bot className='size-4' aria-hidden />
-              AI Usage
-              <Badge
-                variant='outline'
-                className='ml-auto border-slate-700 text-[10px] text-slate-400'
-              >
-                Not active
-              </Badge>
-            </Link>
-          </div>
         </nav>
         <div className='border-t border-slate-800 px-4 py-3 text-xs text-slate-400'>
           <div className='truncate' title={session.data?.operator.email}>
@@ -159,7 +138,8 @@ export function PlatformConsoleLayout() {
               </Link>
             ))}
           </nav>
-          <div className='ml-auto flex items-center gap-2'>
+          <div className='ml-auto flex min-w-0 flex-1 items-center justify-end gap-2'>
+            <PlatformSearch />
             <Link
               to='/'
               className='flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground'

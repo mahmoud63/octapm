@@ -18455,6 +18455,29 @@ add("/platform-admin/health", "get", platformOperation({
   operationId: "getPlatformSystemHealth",
   data: "{ release, database, jobs, worker, scheduler, webhooks, notifications, telemetry }. No hostnames, connection strings or error messages.",
 }));
+add("/platform-admin/ai-usage", "get", platformOperation({
+  summary: "AI usage from the AI gateway ledger",
+  operationId: "getPlatformAiUsage",
+  description: "One record per model call: who, which feature, which model, tokens, latency, outcome. Never a prompt or an answer. Cost is an estimate from the configured price table only (unpriced calls are counted, not guessed). Limits are read-only.",
+  parameters: [
+    queryParam("days", "Window: 1, 7, 30 or 90 days (default 7).", { type: "integer", enum: [1, 7, 30, 90] }),
+    queryParam("orgId", "One organisation.", { type: "string", format: "uuid" }),
+  ],
+  data: "{ configuration{mode, provider, model, fastModel, limits}, today, window, byModel, byFeature, byOrganisation, byUser, failures, daily, definitions, generatedAt }",
+}));
+add("/platform-admin/features", "get", platformOperation({
+  summary: "Feature adoption by company",
+  operationId: "getPlatformFeatureAdoption",
+  description: "Projects using each capability (schedule, progress, BOQ, cost, commercial, procurement, quality, RFIs, submittals, reports, documents, BIM / 5D, closeout, consultant reviews, AI), from the records each capability creates. Counts only.",
+  parameters: [queryParam("orgId", "One organisation.", { type: "string", format: "uuid" })],
+  data: "{ capabilities, byCompany, detail{bim, closeout, consultantReviews}, definitions }",
+}));
+add("/platform-admin/search", "get", platformOperation({
+  summary: "Search companies, people and projects",
+  operationId: "searchPlatform",
+  parameters: [queryParam("q", "2-120 characters.", { type: "string", minLength: 2, maxLength: 120 }, { required: true })],
+  data: "{ companies: [{ id, name, kind, status }], users: [{ id, name, email, status }], projects: [{ id, name, status, organisation }] }. Identifying fields only; at most 8 of each.",
+}));
 add("/platform-admin/errors", "get", platformOperation({
   summary: "API error analytics",
   operationId: "getPlatformErrorAnalytics",

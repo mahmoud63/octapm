@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import type { OverviewAdditions } from '@/services/platform-admin/integration-api'
 import { Link } from '@tanstack/react-router'
 import { platformAdminApi } from '@/services/platform-admin/api'
 import {
@@ -44,6 +45,16 @@ export function PlatformOverviewPage() {
       {query.error ? <ErrorBlock error={query.error} /> : null}
       {d ? (
         <div className='space-y-6'>
+          {(d as typeof d & OverviewAdditions).ai ? (
+            <div className='grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6' data-testid='platform-overview-ai'>
+              <KpiTile label='AI requests today' value={fmtNumber((d as typeof d & OverviewAdditions).ai!.today.requests)} hint={`${fmtNumber((d as typeof d & OverviewAdditions).ai!.last7Days.requests)} in 7 days`} />
+              <KpiTile label='AI tokens today' value={fmtNumber((d as typeof d & OverviewAdditions).ai!.today.totalTokens)} hint={`${(d as typeof d & OverviewAdditions).ai!.provider || 'no provider'} · ${(d as typeof d & OverviewAdditions).ai!.model || '—'}`} />
+              <KpiTile label='AI failed today' value={fmtNumber((d as typeof d & OverviewAdditions).ai!.today.failed)} tone={(d as typeof d & OverviewAdditions).ai!.today.failed ? 'warning' : 'default'} hint={`${fmtNumber((d as typeof d & OverviewAdditions).ai!.today.blocked)} blocked by limits`} />
+              <KpiTile label='BIM / 5D projects' value={fmtNumber((d as typeof d & OverviewAdditions).features?.bim.projects)} hint={`${fmtNumber((d as typeof d & OverviewAdditions).features?.bim.models)} models`} />
+              <KpiTile label='Closeout projects' value={fmtNumber((d as typeof d & OverviewAdditions).features?.closeout.projects)} hint={`${fmtNumber((d as typeof d & OverviewAdditions).features?.closeout.deliverables)} deliverables`} />
+              <KpiTile label='Consultant reviews open' value={fmtNumber((d as typeof d & OverviewAdditions).features?.consultantReviews.awaitingConsultant)} tone={(d as typeof d & OverviewAdditions).features?.consultantReviews.overdue ? 'warning' : 'default'} hint={`${fmtNumber((d as typeof d & OverviewAdditions).features?.consultantReviews.overdue)} overdue · ${fmtNumber((d as typeof d & OverviewAdditions).features?.consultantReviews.projectsWithConsultants)} projects with consultants`} />
+            </div>
+          ) : null}
           <div className='grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6'>
             <KpiTile
               label='Organisations'

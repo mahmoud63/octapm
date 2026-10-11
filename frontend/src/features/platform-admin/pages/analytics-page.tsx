@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { FeatureAdoptionSection } from '../components/feature-adoption'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
   platformAdminApi,
@@ -117,6 +118,9 @@ export function PlatformAnalyticsPage() {
       />
       {query.isLoading ? <LoadingBlock rows={8} /> : null}
       {query.error ? <ErrorBlock error={query.error} /> : null}
+      <div className='mb-6'>
+        <FeatureAdoptionSection />
+      </div>
       {d ? (
         <div className='space-y-6'>
           {d.tracking.note ? (

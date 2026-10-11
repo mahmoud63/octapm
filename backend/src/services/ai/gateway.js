@@ -127,4 +127,5 @@ const capabilities = ({ detailed = false } = {}) => {
   return detailed ? { ...base, provider: resolved?.provider || null, model: resolved?.model || null } : base;
 };
 
-module.exports = { complete, capabilities, errorClassOf };
+// The configured spending limits, read by the platform console (Superadmin AI usage).
+module.exports = { complete, capabilities, errorClassOf, limits: LIMITS };

@@ -313,6 +313,7 @@ router.get(
       userId: req.user.id,
       orgId: req.user.orgId,
       principal: req.user,
+      viaApiKey: Boolean(req.apiClient),
     });
 
     return sendSuccess(res, result);

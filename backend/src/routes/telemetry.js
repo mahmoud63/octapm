@@ -27,8 +27,8 @@ router.post(
   [
     body("events").isArray({ min: 1, max: MAX_EVENTS }),
     body("events.*.name").isString().isLength({ max: 64 }),
-    body("events.*.projectId").optional({ nullable: true }).isUUID(),
-    body("workspaceId").optional().isUUID(),
+    body("events.*.projectId").optional({ nullable: true }).isString().isUUID(),
+    body("workspaceId").optional().isString().isUUID(),
   ],
   validate,
   asyncHandler(async (req, res) => {
