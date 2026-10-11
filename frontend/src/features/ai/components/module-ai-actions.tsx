@@ -158,6 +158,23 @@ const CHILD_ACTIONS: Record<string, ModuleAction[]> = {
     },
   ],
   'schedule:longLead': [LONG_LEAD],
+  'quality:safety': [
+    {
+      label: 'Summarize Incidents',
+      question:
+        'Summarize the safety incidents: how many of each type, what is still open, lost days, and who each open incident waits on.',
+    },
+    {
+      label: 'Explain Trend',
+      question:
+        'Explain the safety trend by month and type from the recorded incidents. Say if there are too few records to call it a trend.',
+    },
+    {
+      label: 'Safety Briefing',
+      question:
+        'Draft a short toolbox-talk safety briefing for the site team from the recorded incidents and their investigations. Use only what is recorded.',
+    },
+  ],
   'docControl:submittals': [
     {
       label: 'Summarize',
