@@ -248,7 +248,7 @@ const SCREEN_TEXT = 80;
 const screenText = (value) => (typeof value === "string" && value.trim() ? value.trim().replace(/\s+/g, " ").slice(0, SCREEN_TEXT) : null);
 const screenOf = (context) => {
   if (!context || typeof context !== "object") return null;
-  const screen = { module: screenText(context.module), moduleKey: screenText(context.moduleKey), child: screenText(context.child), label: screenText(context.label), recordType: screenText(context.recordType), recordId: screenText(context.recordId) };
+  const screen = { module: screenText(context.module), moduleKey: screenText(context.moduleKey), child: screenText(context.child), childKey: screenText(context.childKey), label: screenText(context.label), recordType: screenText(context.recordType), recordId: screenText(context.recordId) };
   return Object.values(screen).some(Boolean) ? screen : null;
 };
 // The deterministic results of the module on screen (the schedule's CPM

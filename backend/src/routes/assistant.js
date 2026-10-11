@@ -76,7 +76,7 @@ const build = ({ withActions }) => {
       body("projectId").optional({ nullable: true }).isString().isUUID(),
       // The screen asked from (AI UX correction): labels plus the record on it.
       body("context").optional({ nullable: true }).isObject(),
-      body(["context.module", "context.moduleKey", "context.child", "context.label"]).optional({ nullable: true }).isString().isLength({ max: 120 }),
+      body(["context.module", "context.moduleKey", "context.child", "context.childKey", "context.label"]).optional({ nullable: true }).isString().isLength({ max: 120 }),
       body("context.recordType").optional({ nullable: true }).isIn(RECORD_TYPES),
       body("context.recordId").optional({ nullable: true }).isUUID(),
       validate,
@@ -99,7 +99,7 @@ const build = ({ withActions }) => {
             currentRecordSource({ view: await requestForProject(req, projectId), projectId, recordType: screen.recordType, recordId: screen.recordId }),
           // The module on screen's own results (CPM on Schedule…), decided per module.
           moduleFor: async (projectId, screen) =>
-            moduleSources({ view: await requestForProject(req, projectId), projectId, moduleKey: screen.moduleKey }),
+            moduleSources({ view: await requestForProject(req, projectId), projectId, moduleKey: screen.moduleKey, child: screen.childKey }),
           context: req.body.context || null,
           readsBoq: readsBoqFor(req),
         }),

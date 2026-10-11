@@ -31,6 +31,24 @@ const SCHEDULE_DEFAULT: ModuleAction[] = [
 
 const actionsFor = (module: string, child: string | null): ModuleAction[] => {
   if (module === 'schedule') {
+    if (child === 'progress')
+      return [
+        {
+          label: 'Summarize Progress',
+          question:
+            'Summarize progress: official (approved) progress first, then what is submitted and still awaiting approval. Never count submitted progress as official.',
+        },
+        {
+          label: 'What is Awaiting Approval?',
+          question:
+            'Which progress submissions are awaiting approval, how far does each differ from the official figure, and how long have they waited?',
+        },
+        {
+          label: 'Explain Variance',
+          question:
+            'Where does submitted progress differ most from the official approved progress, and what was rejected recently and why?',
+        },
+      ]
     if (child === 'forecast')
       return [
         {

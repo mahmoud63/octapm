@@ -69,6 +69,7 @@ export const askContextOf = (screen: AiScreenContext) => ({
   module: screen.moduleLabel,
   moduleKey: screen.module,
   child: screen.childLabel,
+  childKey: screen.child,
   label: screen.record?.label ?? null,
   recordType: screen.record?.recordType ?? null,
   recordId: screen.record?.recordId ?? null,

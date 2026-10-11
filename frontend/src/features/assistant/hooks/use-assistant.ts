@@ -130,6 +130,7 @@ export const useAskAssistant = (projectId: string | null) => {
         module: string | null
         moduleKey?: string | null
         child: string | null
+        childKey?: string | null
         label: string | null
         recordType: string | null
         recordId: string | null

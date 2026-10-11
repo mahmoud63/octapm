@@ -13,6 +13,16 @@ const { hasPermission } = require("../../../middleware/rbac");
 
 const LIST = 12;
 const DAY = 86_400_000;
+
+// An activity's official % complete, as the product reads it
+// (schedule-export.service): its latest APPROVED progress submission, else
+// the stored figure. Submitted progress never counts.
+const APPROVED_PROGRESS = { progress: { where: { status: "approved" }, orderBy: { updatedAt: "desc" }, take: 1, select: { pctComplete: true } } };
+const officialPct = (activity) => {
+  const approved = Array.isArray(activity.progress) ? activity.progress[0] : null;
+  return Math.min(100, Math.max(0, Number(approved?.pctComplete ?? activity.physComplete ?? 0)));
+};
+const withOfficial = (activity) => ({ ...activity, physComplete: officialPct(activity) });
 const day = (value) => (value ? new Date(value).toISOString().slice(0, 10) : "—");
 const pct = (value) => `${Math.round(Number(value || 0))}%`;
 
@@ -27,15 +37,16 @@ const activityLine = (activity) =>
  */
 const scheduleSources = async ({ view, projectId, today = new Date() }) => {
   if (!view?.user || !hasPermission(view, "schedule", "read")) return [];
-  const [project, activities] = await Promise.all([
+  const [project, rows] = await Promise.all([
     prisma.project.findFirst({ where: { id: projectId }, select: { name: true, dataDate: true } }),
     prisma.activity.findMany({
       where: { projectId, isActive: true, retiredAt: null },
-      select: { id: true, name: true, activityCode: true, startDate: true, endDate: true, physComplete: true, totalFloat: true, isCritical: true, isMilestone: true, duration: true, remainingDuration: true, predecessors: true },
+      select: { id: true, name: true, activityCode: true, startDate: true, endDate: true, physComplete: true, totalFloat: true, isCritical: true, isMilestone: true, duration: true, remainingDuration: true, predecessors: true, ...APPROVED_PROGRESS },
       orderBy: [{ startDate: "asc" }, { sortOrder: "asc" }],
       take: 3000,
     }),
   ]);
+  const activities = rows.map(withOfficial);
   if (!activities.length) return [];
   const open = activities.filter((activity) => Number(activity.physComplete || 0) < 100);
   const critical = open.filter((activity) => activity.isCritical);
@@ -75,4 +86,4 @@ const scheduleSources = async ({ view, projectId, today = new Date() }) => {
   ];
 };
 
-module.exports = { scheduleSources };
+module.exports = { scheduleSources, APPROVED_PROGRESS, officialPct };
