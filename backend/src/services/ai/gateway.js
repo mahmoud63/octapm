@@ -18,6 +18,33 @@ const { estimateCostMicros } = require("./pricing");
 const MAX_RETRIES = 3;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Spending guard for a live provider (the mock costs nothing): tokens per UTC
+// day for the organisation and for one user, calls per day for one user, and
+// a ceiling on any one answer's length. 0 switches a limit off.
+const limit = (name, fallback) => {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+};
+const LIMITS = () => ({
+  orgTokens: limit("AI_DAILY_TOKEN_LIMIT_ORG", 1_000_000),
+  userTokens: limit("AI_DAILY_TOKEN_LIMIT_USER", 250_000),
+  userCalls: limit("AI_DAILY_REQUEST_LIMIT_USER", 150),
+  maxOutput: limit("AI_MAX_OUTPUT_TOKENS", 2_000),
+});
+const overBudget = async (who) => {
+  const limits = LIMITS();
+  const totals = await usage.todayTotals({ orgId: who.orgId, userId: who.userId }).catch(() => null);
+  if (!totals) return null;
+  if (limits.orgTokens && totals.org && totals.org.tokens >= limits.orgTokens) return "organisation";
+  if (limits.userTokens && totals.user && totals.user.tokens >= limits.userTokens) return "user";
+  if (limits.userCalls && totals.user && totals.user.calls >= limits.userCalls) return "user";
+  return null;
+};
+
+// Short structured tasks may use a cheaper model (AI_FAST_MODEL); everything
+// else uses AI_MODEL / the provider default.
+const FAST_FEATURES = new Set(["search.interpret", "search.answer"]);
+
 const errorClassOf = (error) => {
   if (error?.name === "TimeoutError" || error?.name === "AbortError") return "timeout";
   const status = providers.statusOf(error);
@@ -43,9 +70,22 @@ const complete = async ({ feature = "unspecified", system, messages, maxTokens =
     throw new HttpError(503, "AI_NOT_CONFIGURED", "No AI provider is configured on this server");
   }
   const provider = resolved?.provider || "test";
-  const model = resolved?.model || "test";
+  const fastModel = providers.env("AI_FAST_MODEL");
+  const model = resolved && provider !== "mock" && fastModel && FAST_FEATURES.has(feature) ? fastModel : resolved?.model || "test";
+  const live = Boolean(resolved) && provider !== "mock" && !transport;
+  if (live) {
+    const over = await overBudget(who);
+    if (over) {
+      await usage.record({ ...who, feature, provider, model, status: "blocked", errorClass: "budget", latencyMs: 0 });
+      // AI_UNAVAILABLE keeps every feature's degraded path: the records and facts still come back.
+      const blocked = new HttpError(429, "AI_UNAVAILABLE", over === "organisation" ? "Today's AI usage limit for your company has been reached. OctaPM's records are still shown; AI answers resume tomorrow." : "Your AI usage limit for today has been reached. OctaPM's records are still shown; AI answers resume tomorrow.");
+      blocked.details = { reason: "budget", scope: over };
+      throw blocked;
+    }
+  }
   const send = transport || providers.TRANSPORTS[provider];
-  const args = { apiKey: resolved?.apiKey || null, model, system, messages, maxTokens, temperature };
+  const cappedTokens = live && LIMITS().maxOutput ? Math.min(maxTokens, LIMITS().maxOutput) : maxTokens;
+  const args = { apiKey: resolved?.apiKey || null, model, system, messages, maxTokens: cappedTokens, temperature };
   let lastError = null;
   let attempt = 0;
   for (attempt = 1; attempt <= retries; attempt += 1) {

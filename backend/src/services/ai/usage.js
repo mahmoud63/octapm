@@ -51,6 +51,24 @@ const record = async (run) => {
   }
 };
 
+/**
+ * Today's live-provider usage (UTC day) for the spending guard: tokens and
+ * calls for the organisation and for the user. The mock and failed calls
+ * are not counted.
+ */
+const todayTotals = async ({ orgId, userId }) => {
+  if (!prisma.aiRun?.aggregate) return null;
+  const since = new Date();
+  since.setUTCHours(0, 0, 0, 0);
+  const base = { createdAt: { gte: since }, status: "ok", provider: { not: "mock" } };
+  const sum = async (where) => {
+    const row = await prisma.aiRun.aggregate({ where: { ...base, ...where }, _sum: { inputTokens: true, outputTokens: true }, _count: { _all: true } });
+    return { tokens: (row._sum.inputTokens || 0) + (row._sum.outputTokens || 0), calls: row._count._all };
+  };
+  const [org, user] = await Promise.all([orgId ? sum({ orgId }) : null, userId ? sum({ userId }) : null]);
+  return { org, user };
+};
+
 /** One organisation's usage between two instants, by feature and by status (no prompt content). */
 const summary = async ({ orgId, from, to }) => {
   if (!prisma.aiRun?.groupBy) return { byFeature: [], byStatus: [], totals: { runs: 0, inputTokens: 0, outputTokens: 0, costMicros: 0 } };
@@ -66,4 +84,4 @@ const summary = async ({ orgId, from, to }) => {
   return { from: from.toISOString(), to: to.toISOString(), byFeature: features, byStatus: byStatus.map((row) => ({ status: row.status, runs: row._count._all })).sort((a, b) => a.status.localeCompare(b.status)), totals };
 };
 
-module.exports = { record, summary };
+module.exports = { record, summary, todayTotals };
