@@ -72,8 +72,28 @@ const COMMERCIAL_RISK: ModuleAction = {
     'Summarize the commercial risk on this project from the cost ledger, forecast, commitments and cash flow: where money is at risk and why.',
 }
 
+const CHANGE_ACTIONS: ModuleAction[] = [
+  {
+    label: 'Summarize Impact',
+    question:
+      'Summarize the change register: what is pending, its stated cost and schedule impact, and what has been approved. Pending changes do not change the contract.',
+  },
+  {
+    label: 'Explain Cost Impact',
+    question:
+      'Explain the cost impact of the pending and approved changes, from their stated values and cost impact notes.',
+  },
+  {
+    label: 'Explain Schedule Impact',
+    question:
+      'Explain the schedule impact of the changes: which activities they affect and the stated days of impact.',
+  },
+]
+
 // Per sub-tab, when it differs from its module's actions.
 const CHILD_ACTIONS: Record<string, ModuleAction[]> = {
+  'commercial:change-orders': CHANGE_ACTIONS,
+  'commercial:change-events': CHANGE_ACTIONS,
   'commercial:commitments': [
     {
       label: 'Explain Commitments',
@@ -95,6 +115,7 @@ const CHILD_ACTIONS: Record<string, ModuleAction[]> = {
 const actionsFor = (module: string, child: string | null): ModuleAction[] => {
   if (child && CHILD_ACTIONS[`${module}:${child}`]) return CHILD_ACTIONS[`${module}:${child}`]
   if (ACTIONS[module]) return ACTIONS[module]
+  if (module === 'commercial') return [COMMERCIAL_RISK]
   if (module === 'schedule') {
     if (child === 'progress')
       return [

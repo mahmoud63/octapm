@@ -1,9 +1,12 @@
 jest.mock("../../../config/db", () => ({ prisma: { project: { findFirst: jest.fn(async () => ({ name: "Riverside Tower", dataDate: null })) }, activity: { findMany: jest.fn() } } }));
 jest.mock("../../../middleware/rbac", () => ({ hasPermission: jest.fn(), getEffectiveRole: jest.fn(() => "pm") }));
 jest.mock("../../cost.service", () => ({ getCostSummary: jest.fn(async () => ({ totals: { budget: 100, committed: 90, actual: 120, forecast: 130 }, budget: {}, eac: {}, records: [] })) }));
+jest.mock("../../change-order.service", () => ({ listChangeOrders: jest.fn(async () => ({ orders: [{ id: "co1", ref: "VO-02", status: "pending", description: "Drainage", value: 96500, scheduleImpact: 0 }, { id: "co2", ref: "VO-01", status: "approved", description: "Glazing", value: 185000, scheduleImpact: 5 }] })) }));
+jest.mock("../../change-event.service", () => ({ listChangeEvents: jest.fn(async () => ({ items: [], summary: { count: 0 } })) }));
+jest.mock("../../exception.service", () => ({ changeEventAnswerFor: jest.fn(async ({ answer }) => answer) }));
 jest.mock("../../forecast.service", () => ({ buildForecast: jest.fn(async () => ({ available: true, cost: { eac: 150, topRisks: [] }, schedule: {} })) }));
 jest.mock("../../progress.service", () => ({ listProgressSubmissions: jest.fn() }));
-jest.mock("../../../utils/boq-figures", () => ({ boqFigureAccess: jest.fn(() => ({ boq: false, budget: false })), withheldProgressSubmissions: jest.fn((rows) => rows), canReadBoq: jest.fn(), exceptionAccess: jest.fn(() => ({})), withheldCostSummary: jest.fn((summary) => ({ ...summary, withheld: true })), withheldForecast: jest.fn((forecast) => forecast) }));
+jest.mock("../../../utils/boq-figures", () => ({ boqFigureAccess: jest.fn(() => ({ boq: false, budget: false })), withheldProgressSubmissions: jest.fn((rows) => rows), canReadBoq: jest.fn(), exceptionAccess: jest.fn(() => ({})), withheldCostSummary: jest.fn((summary) => ({ ...summary, withheld: true })), withheldForecast: jest.fn((forecast) => forecast), withheldAllocationLinks: jest.fn((order) => order) }));
 jest.mock("../../activity-boq-allocation.service", () => ({ getCoverage: jest.fn() }));
 
 const { prisma } = require("../../../config/db");
@@ -82,6 +85,25 @@ describe("module sources (AI-7)", () => {
     hasPermission.mockImplementation((_view, moduleName) => moduleName === "schedule");
     const forecastOnly = await moduleSources({ view, projectId: P, moduleKey: "schedule", child: "forecast" });
     expect(forecastOnly.map((item) => item.type)).toEqual(["forecast_facts"]);
+  });
+
+  test("change: each register only with its own read; pending orders are records, never stated as approved", async () => {
+    const changeOrders = require("../../change-order.service");
+    const changeEvents = require("../../change-event.service");
+    const { withheldAllocationLinks } = require("../../../utils/boq-figures");
+    hasPermission.mockReturnValue(false);
+    expect(await moduleSources({ view, projectId: P, moduleKey: "commercial", child: "change-orders" })).toEqual([]);
+    expect(changeOrders.listChangeOrders).not.toHaveBeenCalled();
+    expect(changeEvents.listChangeEvents).not.toHaveBeenCalled();
+
+    hasPermission.mockImplementation((_view, moduleName) => moduleName === "change_order");
+    const sources = await moduleSources({ view, projectId: P, moduleKey: "commercial", child: "change-orders" });
+    expect(changeEvents.listChangeEvents).not.toHaveBeenCalled();
+    expect(withheldAllocationLinks).toHaveBeenCalledTimes(2);
+    expect(sources[0].text).toMatch(/Only an approved change order changes the contract/);
+    expect(sources[0].text).toMatch(/2 change orders: 1 pending, 1 approved/);
+    expect(sources.slice(1).map((item) => [item.id, item.status])).toEqual([["co1", "pending"]]);
+    expect(sources[1].text).toMatch(/Status: pending \(not approved\)/);
   });
 
   test("official progress is the latest approved submission over a stale stored figure", async () => {
