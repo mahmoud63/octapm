@@ -61,7 +61,8 @@ describe("AI gateway spending guard (live provider)", () => {
   test("the mock is never limited and never queries the ledger", async () => {
     process.env.AI_PROVIDER = "mock";
     totals(9_999_999, 9_999_999, 9_999);
-    await expect(ask()).resolves.toMatchObject({ provider: "mock" });
+    // AI_MODEL (the staged live model) does not rename the mock.
+    await expect(ask()).resolves.toMatchObject({ provider: "mock", model: "octapm-mock-1" });
     expect(prisma.aiRun.aggregate).not.toHaveBeenCalled();
   });
 });

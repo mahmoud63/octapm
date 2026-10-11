@@ -23,7 +23,8 @@ const env = (name) => process.env[name] || null;
 const resolveProvider = () => {
   const wanted = (env("AI_PROVIDER") || "").toLowerCase();
   if (wanted === "disabled" || wanted === "off" || wanted === "none") return null;
-  if (wanted === "mock") return { provider: "mock", apiKey: null, model: env("AI_MODEL") || DEFAULT_MODELS.mock };
+  // The mock always names itself: AI_MODEL is the live model's id, staged ahead of a key.
+  if (wanted === "mock") return { provider: "mock", apiKey: null, model: DEFAULT_MODELS.mock };
   const keys = { anthropic: env("ANTHROPIC_API_KEY"), openai: env("OPENAI_API_KEY"), gemini: env("GEMINI_API_KEY") };
   if (wanted && keys[wanted]) return { provider: wanted, apiKey: keys[wanted], model: env("AI_MODEL") || DEFAULT_MODELS[wanted] };
   for (const provider of ["anthropic", "openai", "gemini"]) if (keys[provider]) return { provider, apiKey: keys[provider], model: env("AI_MODEL") || DEFAULT_MODELS[provider] };
