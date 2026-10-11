@@ -87,9 +87,10 @@ const BoqPage = lazy(() =>
     default: m.BoqPage,
   }))
 )
+// BIM / 5D (BIM-1..6): the commercial workspace; its Models tab is the existing BIM panel.
 const BimPanel = lazy(() =>
-  import('@/features/bim/components/bim-panel').then((m) => ({
-    default: m.BimPanel,
+  import('@/features/bim/components/bim-5d-workspace').then((m) => ({
+    default: m.Bim5dWorkspace,
   }))
 )
 const SiteReportingDashboard = lazy(() =>
@@ -428,7 +429,7 @@ export function ProjectDetail({
         label: 'Project Controls',
         children: controlsChildren,
       },
-      { key: 'bim', label: 'BIM' },
+      { key: 'bim', label: 'BIM / 5D' },
       { key: 'activities', label: 'Activities' },
       { key: 'equipment', label: 'Equipment' },
       { key: 'locations', label: 'Locations' },

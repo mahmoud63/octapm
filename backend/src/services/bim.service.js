@@ -39,6 +39,8 @@ const LINK_RECORD_MODELS = Object.freeze({
   activity: "activity",
   location: "location",
   boq_item: "boqItem",
+  // BIM/5D (BIM-4): an element's place in the project's own WBS.
+  wbs_node: "wbsNode",
   punch_item: "punchItem",
   observation: "punchItem",
   rfi: "rfi",

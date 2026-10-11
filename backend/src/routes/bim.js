@@ -22,6 +22,9 @@ router.use(authenticate);
 const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
 const actorFor = (req) => ({ id: req.user.id, name: req.user.name || null, role: getEffectiveRole(req) });
 
+// BIM / 5D commercial intelligence (BIM-1..BIM-6): `/projects/:projectId/bim/5d`.
+router.use("/5d", require("./bim-5d"));
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => {

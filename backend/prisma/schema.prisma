@@ -141,6 +141,8 @@ model Organisation {
   bimModels           BimModel[]
   bimElements         BimElement[]
   bimElementLinks     BimElementLink[]
+  bimMeasurementRules BimMeasurementRule[]
+  bimChangeReviews    BimChangeReview[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -604,6 +606,8 @@ model Project {
   bimModels                     BimModel[]
   bimElements                   BimElement[]
   bimElementLinks               BimElementLink[]
+  bimMeasurementRules           BimMeasurementRule[]
+  bimChangeReviews              BimChangeReview[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -1424,6 +1428,7 @@ model BoqItem {
   stockTransactions       StockTransaction[]
   quantityProgressEntries QuantityProgressEntry[]
   dailyLogQuantities      DailyLogQuantity[]
+  bimMeasurementRules     BimMeasurementRule[]
 
   @@unique([projectId, activeCodeKey])
   @@index([projectId])
@@ -6230,6 +6235,15 @@ model BimElementLink {
   recordId     String
   relationType String   @default("represents") // represents, affects, reference
   notes        String?
+  // Quantity provenance of a BOQ link (BIM/5D, BIM-5): which measured property
+  // of the element, its raw value, the conversion and the converted quantity
+  // in the BOQ item's unit, and how the link was made. Null on other links.
+  quantityField String? // netVolume, grossVolume, netArea, grossArea, length, perimeter, weight, quantityCount
+  rawQuantity   Float?
+  factor        Float?
+  quantity      Float?
+  unit          String?
+  method        String   @default("manual") // manual, bulk, rule, suggested
   createdBy    String?
   createdAt    DateTime @default(now())
 
@@ -6242,6 +6256,70 @@ model BimElementLink {
   @@index([orgId])
   @@index([projectId, recordType, recordId])
   @@index([modelId, recordType])
+}
+
+/**
+ * A BOQ item's contract measurement rule for model quantities (BIM/5D,
+ * BIM-5): which measured property of an element is the BOQ quantity, which
+ * element types may be measured against the item, the conversion into the
+ * item's unit and the rounding. Deterministic: OctaPM, never the AI, decides
+ * whether an element is measured the contractual way.
+ */
+model BimMeasurementRule {
+  id              String   @id @default(uuid())
+  orgId           String
+  projectId       String
+  boqItemId       String
+  quantityField   String // netVolume, grossVolume, netArea, grossArea, length, perimeter, weight, quantityCount
+  allowedTypes    Json     @default("[]") // IFC entity types, e.g. ["IFCCOLUMN","IFCSLAB"]; [] = any
+  factor          Float    @default(1)
+  rounding        Int      @default(3)
+  unit            String?
+  includeText     String? // an element's name/type must contain this (case-insensitive)
+  excludeText     String? // ... and must not contain this
+  notes           String?
+  createdBy       String?
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+  boqItem BoqItem      @relation(fields: [boqItemId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, boqItemId])
+  @@index([orgId])
+}
+
+/**
+ * A model change under commercial review (BIM/5D, BIM-7/BIM-11): one element
+ * added, removed or changed between two revisions of a model. Never a
+ * contractual change by itself: it may be ignored, associated with an
+ * existing change event, or turned into a DRAFT change event by a person.
+ */
+model BimChangeReview {
+  id            String    @id @default(uuid())
+  orgId         String
+  projectId     String
+  modelName     String
+  fromModelId   String
+  toModelId     String
+  globalId      String
+  kind          String // added, removed, modified
+  status        String    @default("open") // open, ignored, associated, draft_created
+  changeEventId String?
+  note          String?
+  decidedBy     String?
+  decidedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+
+  @@unique([toModelId, globalId])
+  @@index([orgId])
+  @@index([projectId, status])
 }
 
 /**
