@@ -27,6 +27,15 @@ describe("BIM/5D deterministic measurement (BIM-5)", () => {
     expect(ruleCheck({ element: column, link: null, rule: null, boqItem }).status).toBe("NOT_CONFIGURED");
   });
 
+  test("revision diff (BIM-7): quantity, type, level and mapping changes are told apart; an identical element is unchanged", () => {
+    const { _changesOf: changesOf } = require("../bim-5d-changes.service");
+    const before = { ...column, storeyName: "Level 02", tag: "C02-001", propertiesJson: { a: 1 } };
+    expect(changesOf(before, { ...before }, new Set(["b2"]), new Set(["b2"]))).toEqual([]);
+    const after = { ...before, netVolume: 3.87, typeName: "Concrete Column:700x700", storeyName: "Level 03" };
+    const kinds = changesOf(before, after, new Set(["b2"]), new Set(["b9"])).map((change) => change.kind);
+    expect(kinds).toEqual(["quantity", "type", "level", "mapping"]);
+  });
+
   test("storeys and locations match on their level number; revisions are labelled R01, R02", () => {
     expect(["Level 01", "L3", "level 03", "Ground floor", "B1", "Roof", "Tower A"].map(levelOf)).toEqual([1, 3, 3, 0, -1, 99, null]);
     expect([1, 6, 12].map(revisionLabel)).toEqual(["R01", "R06", "R12"]);

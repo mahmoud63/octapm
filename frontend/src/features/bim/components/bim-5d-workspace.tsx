@@ -26,6 +26,7 @@ import {
   type RuleStatus,
   type UnitSum,
 } from '../hooks/use-bim-5d'
+import { ChangesTab, DuplicatesPanel, ElementCommercialPanel } from './bim-5d-changes'
 import { BimPanel } from './bim-panel'
 
 const fmt = (value: number | null | undefined, digits = 2) =>
@@ -159,7 +160,7 @@ function OverviewTab({ projectId, onOpen }: { projectId: string; onOpen: (tab: s
               {alert.severity === 'ok' ? <CheckCircle2 className='h-4 w-4 text-emerald-600' /> : alert.severity === 'critical' ? <AlertTriangle className='h-4 w-4 text-destructive' /> : alert.severity === 'warning' ? <AlertTriangle className='h-4 w-4 text-amber-600' /> : <Info className='h-4 w-4 text-sky-600' />}
               <span className='flex-1'>{alert.label}</span>
               <span className='font-semibold tabular-nums'>{fmt(alert.count, 0)}</span>
-              <Button size='sm' variant='ghost' className='h-7' onClick={() => onOpen(alert.action === 'mapping' ? 'models' : alert.action === 'changes' ? 'revisions' : 'reconciliation')}>
+              <Button size='sm' variant='ghost' className='h-7' onClick={() => onOpen(alert.action === 'mapping' ? 'models' : alert.action === 'changes' ? 'changes' : 'reconciliation')}>
                 Open
               </Button>
             </li>
@@ -315,6 +316,7 @@ function BoqItemSheet({ projectId, row, onClose }: { projectId: string; row: Rec
               </table>
             </div>
             {elementId && <ProvenancePanel projectId={projectId} elementId={elementId} boqItemId={row?.boqItemId ?? null} />}
+            {elementId && <ElementCommercialPanel projectId={projectId} elementId={elementId} />}
           </>
         )}
       </SheetContent>
@@ -389,6 +391,7 @@ function ReconciliationTab({ projectId }: { projectId: string }) {
           </tbody>
         </table>
       </div>
+      <DuplicatesPanel projectId={projectId} />
       <details className='text-xs text-muted-foreground'>
         <summary className='cursor-pointer'>Where each figure comes from</summary>
         <ul className='mt-1 list-disc ps-5'>{Object.entries(data.basis).map(([keyName, text]) => <li key={keyName}><span className='font-medium'>{keyName}</span>: {text}</li>)}</ul>
@@ -515,12 +518,14 @@ export function Bim5dWorkspace({ projectId, initialTarget }: { projectId: string
           <TabsTrigger value='overview'>Overview</TabsTrigger>
           <TabsTrigger value='models'>Models &amp; elements</TabsTrigger>
           <TabsTrigger value='revisions'>Revisions</TabsTrigger>
+          <TabsTrigger value='changes'>Changes</TabsTrigger>
           {canReadBoq && <TabsTrigger value='reconciliation'>Commercial reconciliation</TabsTrigger>}
           {canReadBoq && <TabsTrigger value='rules'>Measurement rules</TabsTrigger>}
         </TabsList>
         <TabsContent value='overview'><OverviewTab projectId={projectId} onOpen={setTab} /></TabsContent>
         <TabsContent value='models'><BimPanel projectId={projectId} initialTarget={initialTarget} /></TabsContent>
         <TabsContent value='revisions'><RevisionsTab projectId={projectId} /></TabsContent>
+        <TabsContent value='changes'><ChangesTab projectId={projectId} /></TabsContent>
         {canReadBoq && <TabsContent value='reconciliation'><ReconciliationTab projectId={projectId} /></TabsContent>}
         {canReadBoq && <TabsContent value='rules'><RulesTab projectId={projectId} /></TabsContent>}
       </Tabs>

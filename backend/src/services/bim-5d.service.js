@@ -491,10 +491,8 @@ const overview = async ({ orgId, projectId, reader, canReadBoq }) => {
     const key = `${link.elementId}:${link.quantityField}`;
     perElementField.set(key, (perElementField.get(key) || 0) + 1);
   }
-  const sameMeasureTwice = [...perElementField.values()].filter((count) => count > 1).length;
-  const globalModels = new Map();
-  for (const link of boqLinks) globalModels.set(link.element.globalId, new Set([...(globalModels.get(link.element.globalId) || []), link.element.modelId]));
-  const acrossModels = [...globalModels.values()].filter((set) => set.size > 1).length;
+  // BIM-8: every potential duplicate finding (same element twice, two models, identical elements, two current revisions).
+  const duplicateFindings = canReadBoq ? (await require("./bim-5d-changes.service").duplicates({ orgId, projectId })).findings.length : [...perElementField.values()].filter((count) => count > 1).length;
   const openReviews = await prisma.bimChangeReview.count({ where: { projectId, status: "open" } });
 
   let quantities = null;
@@ -518,6 +516,12 @@ const overview = async ({ orgId, projectId, reader, canReadBoq }) => {
       potentialChange: sum((row) => (row.variation !== null ? row.variation : 0)),
     };
     changedAfterCertification = recon.rows.filter((row) => row.status === "BELOW_CERTIFIED").length;
+    // BIM-9: elements of a certified BOQ item removed or reduced by the latest revision of each model.
+    const changes = require("./bim-5d-changes.service");
+    for (const model of models) {
+      const diff = await changes.compareRevisions({ orgId, projectId, toModelId: model.id, reader, canReadBoq: true }).catch(() => null);
+      changedAfterCertification += diff?.summary?.previouslyCertifiedChanged || 0;
+    }
   }
 
   const alert = (key, label, count, severity, action) => ({ key, label, count, severity: count ? severity : "ok", action });
@@ -530,8 +534,8 @@ const overview = async ({ orgId, projectId, reader, canReadBoq }) => {
       alert("BIM_NO_BOQ", "Elements without a BOQ item", elementCount - withBoq, "warning", "mapping"),
       alert("BIM_LOCATION_MISSING", "Elements without a location", elementCount - withLocation, "info", "mapping"),
       alert("BIM_LOCATION_CONFLICT", "Elements in the wrong location", locationConflicts, "critical", "mapping"),
-      alert("BIM_CHANGED_AFTER_CERTIFICATION", "Quantity below what is already certified", changedAfterCertification ?? 0, "critical", "reconciliation"),
-      alert("BIM_POTENTIAL_DUPLICATE", "Potential duplicate quantity", sameMeasureTwice + acrossModels, "critical", "reconciliation"),
+      alert("BIM_CHANGED_AFTER_CERTIFICATION", "Model changed after certification (commercial review required)", changedAfterCertification ?? 0, "critical", "changes"),
+      alert("BIM_POTENTIAL_DUPLICATE", "Potential duplicate quantity", duplicateFindings, "critical", "reconciliation"),
       alert("BIM_CHANGE_REVIEW", "Model changes needing commercial review", openReviews, "warning", "changes"),
     ],
     formats: SUPPORTED_FORMATS,

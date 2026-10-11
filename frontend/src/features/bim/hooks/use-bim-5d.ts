@@ -196,6 +196,97 @@ export const useSaveMeasurementRule = (projectId: string) => {
   })
 }
 
+// ─── Second batch (BIM-7..BIM-11) ─────────────────────────────────────────
+
+export interface RevisionDiff {
+  model: string
+  from: { id: string; revision: string; date: string } | null
+  to: { id: string; revision: string; date: string } | string
+  summary: null | { added: number; removed: number; modified: number; unchanged: number; quantityChanged: number; boqImpacting: number; previouslyCertifiedChanged: number; potentialVariationValue: number | null; openReviews: number }
+  byBoqItem?: Array<{ boqItemId: string; code: string | null; description: string | null; unit: string | null; elements: number; deltaQuantity: number | null; deltaValue: number | null; certified: number | null }>
+  changes?: Array<{
+    kind: 'added' | 'removed' | 'modified'
+    globalId: string
+    elementId: string | null
+    previousElementId: string | null
+    label: string
+    ifcType: string
+    storeyName: string | null
+    boqItemId: string | null
+    boqCode: string | null
+    deltaQuantity: number | null
+    unit: string | null
+    certifiedOnItem: boolean
+    changes: Array<{ kind: string; field: string; from: unknown; to: unknown }>
+    review: { id: string; status: string; changeEventId: string | null; note: string | null } | null
+  }>
+  note: string
+}
+
+export interface Duplicates {
+  findings: Array<{ kind: string; label: string; records: Array<{ linkId: string; elementId: string; element: string; globalId: string; model: string; boqItemId: string; boqCode: string | null; quantity: number | null; measured: string | null }> }>
+  note: string
+}
+
+export interface ElementCommercialState {
+  elementId: string
+  label: string
+  installed: boolean | 'unconfirmed' | null
+  progress: null | { activity: string | null; officialPct: number; approvedQuantity: number; submittedQuantity: number; approvedAtElementLocation: number | null }
+  inspections: Array<{ id: string; ref: string; title: string; pointType: string; status: string }>
+  ncrs: Array<{ id: string; ref: string; severity: string; status: string; description: string }>
+  certified: null | { boqItem: string; onItem: number | null; unit: string | null }
+  paid: null | { boqItem: string; onItem: number | null; unit: string | null }
+  state: string
+  reasons: string[]
+}
+
+export interface ElementHistory {
+  globalId: string
+  revisions: Array<{ elementId: string; revision: string; date: string; isCurrent: boolean; netVolume: number | null; netArea: number | null; length: number | null; typeName: string | null; storeyName: string | null }>
+  reviews: Array<{ kind: string; status: string; changeEventId: string | null; updatedAt: string }>
+}
+
+export const useRevisionDiff = (projectId: string, modelId: string | null) =>
+  useQuery<RevisionDiff>({ queryKey: [...key(projectId), 'diff', modelId], queryFn: () => data(apiClient.get(`${base(projectId)}/models/${modelId}/diff`)), enabled: Boolean(modelId) })
+
+export const useBimDuplicates = (projectId: string, enabled = true) =>
+  useQuery<Duplicates>({ queryKey: [...key(projectId), 'duplicates'], queryFn: () => data(apiClient.get(`${base(projectId)}/duplicates`)), enabled })
+
+export const useElementCommercialState = (projectId: string, elementId: string | null) =>
+  useQuery<ElementCommercialState>({ queryKey: [...key(projectId), 'commercial', elementId], queryFn: () => data(apiClient.get(`${base(projectId)}/elements/${elementId}/commercial`)), enabled: Boolean(elementId) })
+
+export const useElementHistory = (projectId: string, elementId: string | null) =>
+  useQuery<ElementHistory>({ queryKey: [...key(projectId), 'history', elementId], queryFn: () => data(apiClient.get(`${base(projectId)}/elements/${elementId}/history`)), enabled: Boolean(elementId) })
+
+export const useOpenRevisionReviews = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (modelId: string) => data<RevisionDiff>(apiClient.post(`${base(projectId)}/models/${modelId}/diff/reviews`, {})),
+    onSuccess: () => qc.invalidateQueries({ queryKey: key(projectId) }),
+  })
+}
+
+export const useCarryForward = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (modelId: string) => data<{ carried: number }>(apiClient.post(`${base(projectId)}/models/${modelId}/carry-forward`, {})),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: key(projectId) })
+      qc.invalidateQueries({ queryKey: ['bim'] })
+    },
+  })
+}
+
+export const useDecideReview = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ reviewId, ...payload }: { reviewId: string; action: 'ignore' | 'associate' | 'draft_change_event' | 'reopen'; changeEventId?: string | null; note?: string | null }) =>
+      data<{ id: string; status: string; changeEventId: string | null }>(apiClient.post(`${base(projectId)}/reviews/${reviewId}/decision`, payload)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: key(projectId) }),
+  })
+}
+
 export const useApplyBimSuggestions = (projectId: string) => {
   const qc = useQueryClient()
   return useMutation({

@@ -75,4 +75,43 @@ router.get("/elements/:elementId/provenance", requirePermission("bim", "read"), 
   return sendSuccess(res, canReadBoq(req) ? answer : { ...answer, quantities: [], quantitiesWithheld: "BOQ quantities need BOQ read access on this project" });
 }));
 
+// ─── Second batch (BIM-7..BIM-11) ─────────────────────────────────────────
+const changes = require("../services/bim-5d-changes.service");
+const { hasPermission } = require("../middleware/rbac");
+
+router.get(
+  "/models/:modelId/diff",
+  requirePermission("bim", "read"),
+  [...modelParam, query("fromModelId").optional().isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await changes.compareRevisions({ ...scope(req), toModelId: req.params.modelId, fromModelId: req.query.fromModelId || null, reader: controlsDetailService.detailReader(req), canReadBoq: canReadBoq(req) }))),
+);
+// Opens a review for each BOQ-impacting change of the revision (decided reviews keep their decision).
+router.post(
+  "/models/:modelId/diff/reviews",
+  requirePermission("bim", "update", { transition: "bim.link" }),
+  [...modelParam, validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await changes.compareRevisions({ ...scope(req), toModelId: req.params.modelId, reader: controlsDetailService.detailReader(req), canReadBoq: canReadBoq(req), persistReviews: true }))),
+);
+router.post(
+  "/models/:modelId/carry-forward",
+  requirePermission("bim", "update", { transition: "bim.link" }),
+  requireBoq,
+  [...modelParam, validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await changes.carryForward({ ...scope(req), toModelId: req.params.modelId, actor: actorFor(req) }))),
+);
+router.get("/duplicates", requirePermission("bim", "read"), requireBoq, asyncHandler(async (req, res) => sendSuccess(res, await changes.duplicates(scope(req)))));
+router.get("/elements/:elementId/commercial", requirePermission("bim", "read"), [param("elementId").isUUID(), validate], asyncHandler(async (req, res) => {
+  const state = await changes.elementCommercialState({ ...scope(req), elementId: req.params.elementId, reader: controlsDetailService.detailReader(req) });
+  // Certified and paid are BOQ quantities: only for a BOQ reader.
+  return sendSuccess(res, canReadBoq(req) ? state : { ...state, certified: null, paid: null });
+}));
+router.get("/elements/:elementId/history", requirePermission("bim", "read"), [param("elementId").isUUID(), validate], asyncHandler(async (req, res) => sendSuccess(res, await changes.elementHistory({ ...scope(req), elementId: req.params.elementId }))));
+router.get("/reviews", requirePermission("bim", "read"), [query("status").optional().isIn(["open", "ignored", "associated", "draft_created"]), validate], asyncHandler(async (req, res) => sendSuccess(res, await changes.listReviews({ ...scope(req), status: req.query.status || null }))));
+router.post(
+  "/reviews/:reviewId/decision",
+  requirePermission("bim", "update", { transition: "bim.link" }),
+  [param("reviewId").isUUID(), body("action").isIn(["ignore", "associate", "draft_change_event", "reopen"]), body("changeEventId").optional({ nullable: true }).isUUID(), body("note").optional({ nullable: true }).isString().isLength({ max: 1000 }), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await changes.decideReview({ ...scope(req), reviewId: req.params.reviewId, action: req.body.action, changeEventId: req.body.changeEventId || null, note: req.body.note || null, actor: actorFor(req), canCreateChangeEvent: hasPermission(req, "change_event", "create"), reader: controlsDetailService.detailReader(req), canReadBoq: canReadBoq(req) }))),
+);
+
 module.exports = router;
