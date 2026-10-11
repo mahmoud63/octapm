@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { safeInternalPath } from '@/lib/domains'
 import { SwitchOffer } from '@/features/home/switch-offer'
 
 type SwitchSearch = {
@@ -18,7 +19,9 @@ type SwitchSearch = {
 export const Route = createFileRoute('/_authenticated/switch')({
   validateSearch: (search: Record<string, unknown>): SwitchSearch => ({
     to: typeof search.to === 'string' ? search.to : '',
-    next: typeof search.next === 'string' ? search.next : '/',
+    // Only a path inside this application (never //host or a scheme): the
+    // offer's button navigates to it (open-redirect protection).
+    next: safeInternalPath(search.next) ?? '/',
     name: typeof search.name === 'string' ? search.name : undefined,
     project: typeof search.project === 'string' ? search.project : undefined,
   }),

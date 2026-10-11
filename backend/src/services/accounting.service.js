@@ -1,4 +1,5 @@
 ﻿const crypto = require("crypto");
+const domains = require("../config/domains");
 const ExcelJS = require("exceljs");
 const { brandWorkbook } = require("../utils/export-branding");
 const { prisma } = require("../config/db");
@@ -36,7 +37,7 @@ const day = (value) => (value ? new Date(value).toISOString().slice(0, 10) : new
 const tablesReady = () => Boolean(prisma.accountingConnection?.findFirst);
 
 const redirectUri = (provider) => process.env.ACCOUNTING_REDIRECT_URI || apiUrl(`/integrations/accounting/${provider}/callback`);
-const webAppUrl = () => (process.env.WEB_APP_URL || "http://localhost:5173").replace(/\/$/, "");
+const webAppUrl = () => domains.surfaceUrl(domains.SURFACES.APP);
 
 // ─── connections ───────────────────────────────────────────────────────────
 

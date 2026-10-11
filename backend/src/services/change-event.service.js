@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const domains = require("../config/domains");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { recordWorkspacePath } = require("../utils/record-links");
@@ -115,8 +116,8 @@ const optionalDate = (value, field) => {
 };
 const hashToken = (token) => crypto.createHash("sha256").update(String(token)).digest("hex");
 const newToken = () => crypto.randomBytes(24).toString("base64url");
-const webAppUrl = () => (process.env.WEB_APP_URL || "http://localhost:5173").replace(/\/$/, "");
-const portalUrl = (token) => `${webAppUrl()}/rfq/${token}`;
+// A quoting subcontractor is an external party: the token page lives on the external collaboration portal.
+const portalUrl = (token) => domains.buildUrl(domains.SURFACES.PORTAL, `/rfq/${encodeURIComponent(token)}`);
 const linkExpiry = (dueDate) => new Date(Math.max(Date.now() + LINK_DAYS() * 86_400_000, dueDate ? new Date(dueDate).getTime() + 7 * 86_400_000 : 0));
 
 // ─── Serialisers ──────────────────────────────────────────────────────────

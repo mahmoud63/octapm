@@ -2,6 +2,7 @@ import { createFileRoute, redirect } from '@tanstack/react-router'
 import axios from 'axios'
 import { getMyProfile } from '@/services/auth/api'
 import { useAuthStore } from '@/stores/auth-store'
+import { currentSurface } from '@/lib/domains'
 import { AuthenticatedLayout } from '@/components/layout/authenticated-layout'
 import { NotFoundError } from '@/features/errors/not-found-error'
 
@@ -23,6 +24,18 @@ const isUnauthenticated = (error: unknown): boolean => {
   return false
 }
 
+/**
+ * Where a signed-out visitor goes: the marketing page where this frontend also
+ * serves it (one host for everything, or the public site), the sign-in page on
+ * app., portal. and admin.octapm.com, which carry no marketing.
+ */
+const signedOut = () => {
+  const mode = currentSurface()
+  return mode === 'combined' || mode === 'public'
+    ? redirect({ to: '/landing' })
+    : redirect({ to: '/sign-in' })
+}
+
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: async () => {
     const { auth } = useAuthStore.getState()
@@ -37,7 +50,7 @@ export const Route = createFileRoute('/_authenticated')({
         } catch (error) {
           if (isUnauthenticated(error)) {
             auth.reset()
-            throw redirect({ to: '/landing' })
+            throw signedOut()
           }
         }
       }
@@ -50,7 +63,7 @@ export const Route = createFileRoute('/_authenticated')({
     } catch (error) {
       if (isUnauthenticated(error)) {
         auth.reset()
-        throw redirect({ to: '/landing' })
+        throw signedOut()
       }
 
       // One retry, because the common case is a transient blip.
@@ -60,7 +73,7 @@ export const Route = createFileRoute('/_authenticated')({
       } catch (retryError) {
         if (isUnauthenticated(retryError)) {
           auth.reset()
-          throw redirect({ to: '/landing' })
+          throw signedOut()
         }
         // Still failing, but not with a 401: keep the session and let the page
         // load. Individual screens surface their own load errors, which is far

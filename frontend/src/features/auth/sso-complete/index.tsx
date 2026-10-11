@@ -6,6 +6,7 @@ import type { ApiErrorEnvelope } from '@/services/auth/types'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import { safeInternalPath } from '@/lib/domains'
 import { Button } from '@/components/ui/button'
 import { AuthLayout } from '../auth-layout'
 
@@ -34,10 +35,7 @@ export function SsoComplete() {
       .then((session) => {
         auth.setSession(session.user, session.tokens.accessToken)
         toast.success(`Welcome, ${session.user.name}!`)
-        const target =
-          search.redirect && search.redirect.startsWith('/')
-            ? search.redirect
-            : '/'
+        const target = safeInternalPath(search.redirect) ?? '/'
         navigate({ to: target, replace: true })
       })
       .catch((err) => {

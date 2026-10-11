@@ -44,6 +44,7 @@
     "test:assistant": "node scripts/assistant-ui.test.mjs",
     "test:attachments-photos": "node scripts/attachments-photos-ui.test.mjs",
     "test:auth-security": "node scripts/auth-security-ui.test.mjs",
+    "test:domains": "node scripts/domains.test.mjs",
     "test:bids": "node scripts/bids-ui.test.mjs",
     "test:bim": "node scripts/bim-ui.test.mjs",
     "test:budget": "node scripts/budget-ui.test.mjs",

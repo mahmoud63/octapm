@@ -1,4 +1,5 @@
 import { NeedsYouPanel } from './needs-you-panel'
+import { currentSurface, surfaceHref } from '@/lib/domains'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { AxiosError } from 'axios'
 import { Link, useNavigate } from '@tanstack/react-router'
@@ -877,6 +878,28 @@ export function ProjectDetail({
       default:
         return null
     }
+  }
+
+  // The portal opens a project only as the external party one is on it
+  // (domain architecture §22): a contractor's own project belongs to the
+  // application, so the portal points there instead of showing it here.
+  if (project && !isProjectAccessDenied && currentSurface() === 'portal' && !isExternalParty) {
+    return (
+      <Main>
+        <div className='rounded-lg border bg-card p-6 text-sm' data-testid='portal-internal-project'>
+          <p className='font-medium'>{project.name} is not shared with you as an external party.</p>
+          <p className='mt-1 text-muted-foreground'>
+            You work on this project in the OctaPM application.
+          </p>
+          <a
+            className='mt-3 inline-flex text-primary hover:underline'
+            href={surfaceHref('app', window.location.pathname + window.location.search)}
+          >
+            Open it in the OctaPM application
+          </a>
+        </div>
+      </Main>
+    )
   }
 
   return (

@@ -8,6 +8,7 @@ const { loginLimiter } = require("../middleware/rate-limit");
 const authService = require("../services/auth.service");
 const mfaService = require("../services/mfa.service");
 const ssoService = require("../services/sso.service");
+const { RETURN_SURFACES } = require("../config/domains");
 
 /**
  * Two-factor and single sign-on endpoints (OCTA-SEC-AUTH-040), registered
@@ -39,7 +40,7 @@ const register = (router, { sendSession, getRequestContext }) => {
 
   // ── SSO ──
   router.get("/sso/lookup", [query("email").isString().isEmail(), validate], asyncHandler(async (req, res) => sendSuccess(res, await ssoService.lookup({ email: req.query.email }))));
-  router.post("/sso/start", loginLimiter, [body("email").optional({ nullable: true }).isString().isEmail(), body("orgId").optional({ nullable: true }).isString().isUUID(), body("redirectTo").optional({ nullable: true }).isString().isLength({ max: 500 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await ssoService.start({ email: req.body.email || null, orgId: req.body.orgId || null, redirectTo: req.body.redirectTo || null }))));
+  router.post("/sso/start", loginLimiter, [body("email").optional({ nullable: true }).isString().isEmail(), body("orgId").optional({ nullable: true }).isString().isUUID(), body("redirectTo").optional({ nullable: true }).isString().isLength({ max: 500 }), body("surface").optional({ nullable: true }).isString().isIn(RETURN_SURFACES), validate], asyncHandler(async (req, res) => sendSuccess(res, await ssoService.start({ email: req.body.email || null, orgId: req.body.orgId || null, redirectTo: req.body.redirectTo || null, surface: req.body.surface || null }))));
   router.get(
     "/sso/callback",
     asyncHandler(async (req, res) => {

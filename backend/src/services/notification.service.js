@@ -1,4 +1,6 @@
 const { prisma } = require("../config/db");
+const domains = require("../config/domains");
+const linkAudience = require("./link-audience.service");
 const { normalizeRoleId } = require("../config/permissions");
 const { sendEmail } = require("./email.service");
 const { HttpError } = require("../utils/http-error");
@@ -757,6 +759,13 @@ const createNotifications = async ({
   // Stored once with its workspace, so the in-app link, the email and a push
   // all open under `/o/{slug}/…` (workspace switching doc §5).
   const storedActionUrl = await workspaceActionUrl(tx, orgId, actionUrl);
+  // A recipient who works on this project as an external party (a consultant)
+  // has the e-mail link on the external collaboration portal; everyone else on
+  // the application (domain architecture, sections 28-29). Recorded on the row,
+  // so the delivery later needs no second look.
+  const onPortal = storedActionUrl
+    ? await linkAudience.portalRecipients({ tx, projectId, userIds: recipients.map((recipient) => recipient.id) })
+    : new Set();
 
   // Web Push (OCTA-MOB-PWA-018): only users with a registered device get a
   // push attempt; the preference can switch it off per category.
@@ -800,7 +809,7 @@ const createNotifications = async ({
           entityType,
           entityId,
           dedupeKey: dedupeKeyBase ? `${dedupeKeyBase}:${recipient.id}` : null,
-          metadataJson: compactJson(metadata),
+          metadataJson: compactJson(onPortal.has(recipient.id) ? { ...metadata, surface: domains.SURFACES.PORTAL } : metadata),
         },
       });
 
@@ -1535,13 +1544,22 @@ const markAllRead = async ({ orgId, userId, viewer = null }) => {
   return { updated: result.count };
 };
 
+/** The e-mail link: the stored path on the recipient's surface (portal or app). */
+const deliveryLink = (notification) => {
+  const surface = notification.metadataJson?.surface === domains.SURFACES.PORTAL ? domains.SURFACES.PORTAL : domains.SURFACES.APP;
+  try {
+    return domains.buildUrl(surface, notification.actionUrl);
+  } catch {
+    // A stored link that is not an application path is not repeated in mail.
+    return domains.surfaceUrl(surface);
+  }
+};
+
 const deliveryBody = (notification) =>
   [
     notification.message,
     "",
-    notification.actionUrl
-      ? `Open in OctaPM: ${process.env.WEB_APP_URL || ""}${notification.actionUrl}`
-      : null,
+    notification.actionUrl ? `Open in OctaPM: ${deliveryLink(notification)}` : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -2034,6 +2052,7 @@ module.exports = {
   mayReceive,
   inBulkTransaction,
   processPendingEmailDeliveries,
+  deliveryBody,
   readableNotification,
   readableNotifications,
   retryNotificationEmail,

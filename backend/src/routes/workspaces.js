@@ -5,7 +5,7 @@ const { HttpError } = require("../utils/http-error");
 const { validate } = require("../middleware/validate");
 const { loginLimiter } = require("../middleware/rate-limit");
 const { prisma } = require("../config/db");
-const { tokenEpoch, tokenEpochCurrent, verifyAccessToken } = require("../utils/tokens");
+const { mfaProvenAt, tokenEpoch, tokenEpochCurrent, verifyAccessToken } = require("../utils/tokens");
 const { API_KEY_PREFIX } = require("../services/api-client.service");
 const authService = require("../services/auth.service");
 const workspaceLinkService = require("../services/workspace-link.service");
@@ -61,7 +61,7 @@ const subjectOfToken = (req, _res, next) => {
       // An identity token names no workspace; an access token names the one the
       // session is bound to, which is what "is this link's project in the active
       // workspace" is answered against.
-      req.tokenSubject = { userId: payload.sub, type: payload.type, orgId: payload.orgId || null, ssoOrgId: payload.sso || null, epoch: tokenEpoch(payload) };
+      req.tokenSubject = { userId: payload.sub, type: payload.type, orgId: payload.orgId || null, ssoOrgId: payload.sso || null, epoch: tokenEpoch(payload), mfaAt: mfaProvenAt(payload) };
       return next();
     })
     .catch(next);
@@ -111,7 +111,7 @@ const register = (router, { sendSession, getRequestContext }) => {
     subjectOfToken,
     asyncHandler(async (req, res) => {
       const result = await authService.issueWorkspaceSession(
-        { userId: req.tokenSubject.userId, orgId: req.params.orgId, ssoOrgId: req.tokenSubject.ssoOrgId, expectedEpoch: req.tokenSubject.epoch },
+        { userId: req.tokenSubject.userId, orgId: req.params.orgId, ssoOrgId: req.tokenSubject.ssoOrgId, expectedEpoch: req.tokenSubject.epoch, mfaAt: req.tokenSubject.mfaAt },
         getRequestContext(req),
       );
       return sendSession(req, res, result);

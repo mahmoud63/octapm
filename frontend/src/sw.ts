@@ -122,10 +122,14 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const target = new URL(
-    (event.notification.data as { url?: string } | undefined)?.url || '/',
-    self.location.origin
-  ).href
+  // A push opens a path on this host only: an absolute or protocol-relative
+  // url in a payload is not followed (open-redirect protection).
+  const raw = (event.notification.data as { url?: string } | undefined)?.url
+  const path =
+    typeof raw === 'string' && raw.startsWith('/') && !raw.startsWith('//') && !raw.startsWith('/\\')
+      ? raw
+      : '/'
+  const target = new URL(path, self.location.origin).href
   event.waitUntil(
     self.clients
       .matchAll({ type: 'window', includeUncontrolled: true })

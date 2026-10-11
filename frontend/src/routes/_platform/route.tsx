@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { getMyProfile } from '@/services/auth/api'
+import { getMyProfile, logout } from '@/services/auth/api'
 import { platformAdminApi } from '@/services/platform-admin/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { NotFoundError } from '@/features/errors/not-found-error'
@@ -9,6 +9,10 @@ import { PLATFORM_SESSION_KEY } from '@/features/platform-admin/lib/session'
 
 const statusOf = (error: unknown) =>
   axios.isAxiosError(error) ? error.response?.status : undefined
+const codeOf = (error: unknown) =>
+  axios.isAxiosError(error)
+    ? (error.response?.data as { error?: { code?: string } } | undefined)?.error?.code
+    : undefined
 
 /**
  * The platform operations console (/platform-admin/*). Deliberately outside
@@ -41,7 +45,14 @@ export const Route = createFileRoute('/_platform')({
       })
     } catch (error) {
       const status = statusOf(error)
-      if (status === 401) throw redirect({ to: '/sign-in' })
+      // The console needs a session that proved the second factor itself,
+      // recently (domain architecture §21): an operator signed in to the
+      // application without the code, or long ago, signs in again with it.
+      if (status === 401 || codeOf(error) === 'PLATFORM_MFA_SESSION_REQUIRED') {
+        await logout().catch(() => null)
+        useAuthStore.getState().auth.reset()
+        throw redirect({ to: '/sign-in', search: { redirect: '/platform-admin' } })
+      }
       if (status === 403) throw redirect({ to: '/403' })
       throw error
     }

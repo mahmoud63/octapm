@@ -1,4 +1,5 @@
 const { createHash, randomBytes } = require("crypto");
+const domains = require("../config/domains");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { normalizeLimit } = require("../utils/list-query");
@@ -77,19 +78,12 @@ const getInvitationExpiresAt = () =>
         1000,
   );
 
-const getWebAppBaseUrl = () =>
-  (
-    process.env.WEB_APP_URL ||
-    process.env.FRONTEND_URL ||
-    process.env.PUBLIC_APP_URL ||
-    "http://localhost:5173"
-  ).replace(/\/$/, "");
-
-const buildAcceptInvitationUrl = (token) => {
-  const url = new URL("/accept-invite", `${getWebAppBaseUrl()}/`);
-  url.searchParams.set("token", token);
-  return url.toString();
-};
+// The acceptance link opens where the invitation's person will work (domain
+// architecture §14): a project-party invitation (a consultant, any external
+// company on the project) on the external collaboration portal, every other
+// invitation on the application. Decided by the invitation, never the e-mail.
+const buildAcceptInvitationUrl = (token, invitation = {}) =>
+  domains.buildUrl(domains.invitationSurface(invitation), "/accept-invite", { token });
 
 const recordAuthAuditEvent = async ({
   tx = prisma,
@@ -826,7 +820,7 @@ const inviteUser = async ({ orgId, actor, payload, context = {}, via = "users.in
     return { invitation: created, existingUserId: existingUser?.id || null };
   });
 
-  const acceptUrl = buildAcceptInvitationUrl(rawToken);
+  const acceptUrl = buildAcceptInvitationUrl(rawToken, { projectPartyId });
   const template = templates.invitation({
     orgName: org.name,
     inviterName: actor?.name || actor?.email || null,

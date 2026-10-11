@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { Bell, CheckCheck, Circle, Inbox } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { safeInternalPath } from '@/lib/domains'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -76,10 +77,14 @@ function NotificationRow({ item }: { item: NotificationItem }) {
     </div>
   )
 
-  if (item.actionUrl) {
+  // A stored link is a path in this application, opened on the host the
+  // person is on (the portal for a consultant, the app for the contractor);
+  // anything else is not followed (open-redirect protection).
+  const href = safeInternalPath(item.actionUrl)
+  if (href) {
     return (
       <a
-        href={item.actionUrl}
+        href={href}
         onClick={() => {
           if (unread) markRead.mutate({ id: item.id })
         }}

@@ -79,6 +79,17 @@ const epochClaim = (user) => ({
   cep: Number.isInteger(user?.credentialEpoch) ? user.credentialEpoch : 0,
 });
 const tokenEpoch = (payload) => (Number.isInteger(payload?.cep) ? payload.cep : 0);
+
+/**
+ * When the session proved a second factor (epoch seconds), carried as `mfa`
+ * from the sign-in that verified the code through every refresh and workspace
+ * switch of that session. A session opened any other way (a password alone,
+ * a company's single sign-on, an invitation acceptance) has none. The
+ * platform console asks for it: an account that has MFA enrolled is not
+ * enough, the session itself must have used it (domain architecture §21).
+ */
+const mfaClaim = (user) => (Number.isInteger(user?.mfaAt) && user.mfaAt > 0 ? { mfa: user.mfaAt } : {});
+const mfaProvenAt = (payload) => (Number.isInteger(payload?.mfa) && payload.mfa > 0 ? payload.mfa : null);
 const storedEpoch = (account) =>
   Number.isInteger(account?.credentialEpoch) ? account.credentialEpoch : 0;
 /** Whether a verified token was minted at the identity's current epoch. */
@@ -102,6 +113,7 @@ const createAccessToken = (user) => {
       // session in another workspace the person belongs to.
       ...(user.ssoOrgId ? { sso: user.ssoOrgId } : {}),
       ...epochClaim(user),
+      ...mfaClaim(user),
       type: 'access',
     },
     getEnv('JWT_SECRET'),
@@ -129,6 +141,7 @@ const createRefreshToken = (user, sessionId, client = 'web') => {
       // Carried through every refresh: an SSO session stays bound to its company (L10).
       ...(user.ssoOrgId ? { sso: user.ssoOrgId } : {}),
       ...epochClaim(user),
+      ...mfaClaim(user),
       type: 'refresh',
       // The delivery channel this token was issued on: 'web' (httpOnly cookie)
       // or 'mobile' (response body, kept in the device keychain). A token that
@@ -181,6 +194,7 @@ const createIdentityToken = (user) =>
       email: user.email,
       name: user.name,
       ...epochClaim(user),
+      ...mfaClaim(user),
       type: 'identity',
     },
     getEnv('JWT_SECRET'),
@@ -222,6 +236,8 @@ module.exports = {
   epochClaim,
   tokenEpoch,
   tokenEpochCurrent,
+  mfaClaim,
+  mfaProvenAt,
   createAccessToken,
   createIdentityToken,
   createRefreshToken,

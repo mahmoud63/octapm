@@ -11,6 +11,7 @@ const {
   releaseHeaderValue,
 } = require("./config/release");
 const authRoutes = require("./routes/auth");
+const { requireApprovedOrigin } = require("./middleware/origin-guard");
 const projectRoutes = require("./routes/projects");
 const userRoutes = require("./routes/users");
 const companyRoutes = require("./routes/companies");
@@ -70,6 +71,12 @@ const createApp = () => {
 
   app.use(helmet());
   app.use(cors(createCorsOptions()));
+  // The API is never a page to index, on any host (domain architecture: app,
+  // portal and admin are not indexed; only the public site is).
+  app.use((_req, res, next) => {
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    next();
+  });
   app.use(requestId);
   // Attribution for AI calls (AI-1): the AI gateway records each model call against the
   // request's organisation, project and user, read at call time from this context.
@@ -140,7 +147,8 @@ const createApp = () => {
   // bearer), so the gate has to land after that route, inside the router.
   const membersOnly = requireOrganizationMembership({ kind: "member" });
 
-  app.use("/api/v1/auth", authRoutes);
+  // The cookie-bearing auth routes refuse a cross-site browser request (CSRF).
+  app.use("/api/v1/auth", requireApprovedOrigin, authRoutes);
   app.use("/api/v1/organisations", require("./routes/organisations"));
   // OctaPM staff only, gated by platform access — never by a membership
   // (routes/platform-admin.js). Not under /o/{slug}: it has no tenant.

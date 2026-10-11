@@ -14,10 +14,12 @@ const {
   getAccessTokenExpiresInSeconds,
   getRefreshTokenExpiresAt,
   hashRefreshToken,
+  mfaProvenAt,
   tokenEpochCurrent,
   verifyRefreshToken,
 } = require("../utils/tokens");
 const membershipService = require("./membership.service");
+const domains = require("../config/domains");
 const { resolvePlatformPrincipal } = require("./platform/platform-access.service");
 const authAbuseService = require("./auth-abuse.service");
 const organisationService = require("./organisation.service");
@@ -70,19 +72,10 @@ const getInvitationExpiresAt = () =>
         1000,
   );
 
-const getWebAppBaseUrl = () =>
-  (
-    process.env.WEB_APP_URL ||
-    process.env.FRONTEND_URL ||
-    process.env.PUBLIC_APP_URL ||
-    "http://localhost:5173"
-  ).replace(/\/$/, "");
-
-const buildWebAppUrl = (path, token) => {
-  const url = new URL(path, `${getWebAppBaseUrl()}/`);
-  url.searchParams.set("token", token);
-  return url.toString();
-};
+// A one-time link on the surface the person came from (domain architecture):
+// a consultant who asked for a reset on the portal is sent back to the portal.
+const buildWebAppUrl = (path, token, surface = domains.SURFACES.APP) =>
+  domains.buildUrl(domains.parseReturnSurface(surface), path, { token });
 
 const recordAuthAuditEvent = async ({
   tx = prisma,
@@ -270,10 +263,13 @@ const holdCredentialEpoch = async (tx, userId, epoch) => {
   if (!rows.length) throw sessionRevokedError();
 };
 
-const createAuthSessionPayload = async (tx, user, context = {}, { orgId = null, ssoOrgId = null, expectedEpoch = null } = {}) => {
+const createAuthSessionPayload = async (tx, user, context = {}, { orgId = null, ssoOrgId = null, expectedEpoch = null, mfaAt = null } = {}) => {
   if (expectedEpoch !== null) await holdCredentialEpoch(tx, user.id, expectedEpoch);
   const resolved = await membershipService.resolveSessionPrincipal(tx, user, { orgId });
   const principal = ssoOrgId ? { ...resolved, ssoOrgId } : resolved;
+  // A second factor proven by this sign-in (or by the session that asked for
+  // this one) is carried; nothing else can set it.
+  if (Number.isInteger(mfaAt) && mfaAt > 0) principal.mfaAt = mfaAt;
   // Tokens carry the epoch that was proven, not whatever the row says now.
   if (expectedEpoch !== null) principal.credentialEpoch = expectedEpoch;
   const refreshSession = await createRefreshSession(tx, principal, context);
@@ -569,7 +565,8 @@ const completeMfaLogin = async ({ mfaToken, code }, context = {}) => {
   });
   const entry = await resolveLoginEntry(user);
   const org = entry.orgId ? await readWorkspacePolicy(entry.orgId) : null;
-  return issueLoginOutcome({ user, entry, org, context });
+  // This session proved the second factor now: the platform console asks for that.
+  return issueLoginOutcome({ user, entry, org, context, mfaAt: Math.floor(Date.now() / 1000) });
 };
 
 // ─── Workspaces ─────────────────────────────────────────────────────────────
@@ -646,7 +643,7 @@ const resolveLoginEntry = async (user) => {
   return { mode: active.length ? "many" : "none", orgId: null, isCompanyAdmin: false, workspaces };
 };
 
-const issueLoginOutcome = async ({ user, entry, org, context }) =>
+const issueLoginOutcome = async ({ user, entry, org, context, mfaAt = null }) =>
   prisma.$transaction(async (tx) => {
     // The password (and code) were checked against `user` as it was read: a
     // reset that landed since then must not be answered with a session at the
@@ -663,12 +660,12 @@ const issueLoginOutcome = async ({ user, entry, org, context }) =>
       // is chosen with POST /auth/workspaces/:orgId/session.
       return {
         ...(entry.mode === "many" ? { chooseWorkspace: true } : { needsWorkspace: true }),
-        identityToken: createIdentityToken({ ...updatedUser, credentialEpoch: provenEpoch }),
+        identityToken: createIdentityToken({ ...updatedUser, credentialEpoch: provenEpoch, mfaAt }),
         memberships: entry.workspaces,
       };
     }
 
-    const payload = await createAuthSessionPayload(tx, updatedUser, context, { orgId: entry.orgId, expectedEpoch: provenEpoch });
+    const payload = await createAuthSessionPayload(tx, updatedUser, context, { orgId: entry.orgId, expectedEpoch: provenEpoch, mfaAt });
     payload.user.mfaEnrollmentRequired = Boolean(
       org?.mfaRequired && !updatedUser.mfaEnabled,
     );
@@ -682,7 +679,7 @@ const issueLoginOutcome = async ({ user, entry, org, context }) =>
  * that membership on the caller's channel. Nothing is revoked: the other
  * workspace's session family stays valid so the person can switch back.
  */
-const issueWorkspaceSession = async ({ userId, orgId, ssoOrgId = null, expectedEpoch = null }, context = {}) => {
+const issueWorkspaceSession = async ({ userId, orgId, ssoOrgId = null, expectedEpoch = null, mfaAt = null }, context = {}) => {
   // A session from a company's single sign-on opens that company only (certification
   // finding L10): that company's identity provider vouches for nobody elsewhere.
   if (ssoOrgId && ssoOrgId !== orgId) {
@@ -721,6 +718,7 @@ const issueWorkspaceSession = async ({ userId, orgId, ssoOrgId = null, expectedE
     const payload = await createAuthSessionPayload(tx, user, context, {
       orgId,
       ssoOrgId,
+      mfaAt,
       expectedEpoch: Number.isInteger(expectedEpoch) ? expectedEpoch : (Number.isInteger(user.credentialEpoch) ? user.credentialEpoch : 0),
     });
     payload.user.mfaEnrollmentRequired = Boolean(org.mfaRequired && !user.mfaEnabled);
@@ -858,7 +856,10 @@ const refresh = async ({
     }
     const standingPrincipal = standing.principal || membershipService.principalFromUser(session.user);
     // An SSO session stays bound to its company through every refresh (L10).
-    const principal = payload.sso ? { ...standingPrincipal, ssoOrgId: payload.sso } : standingPrincipal;
+    const bound = payload.sso ? { ...standingPrincipal, ssoOrgId: payload.sso } : standingPrincipal;
+    // So does the time the session proved a second factor: a refresh keeps it, never renews it.
+    const provenAt = mfaProvenAt(payload);
+    const principal = provenAt ? { ...bound, mfaAt: provenAt } : bound;
 
     // The read above is not a claim: two refreshes with the same token (a
     // retry, two tabs, two API tasks) both see revokedAt still empty. The
@@ -987,7 +988,7 @@ const flushPasswordResetDeliveries = async () => {
   }
 };
 
-const requestPasswordReset = async ({ email }, context = {}) => {
+const requestPasswordReset = async ({ email, surface = null }, context = {}) => {
   const normalizedEmail = normalizeEmail(email);
   const user = await prisma.user.findUnique({
     where: { email: normalizedEmail },
@@ -1060,7 +1061,7 @@ const requestPasswordReset = async ({ email }, context = {}) => {
   });
 
   if (resetToken) {
-    const resetUrl = buildWebAppUrl("/reset-password", rawToken);
+    const resetUrl = buildWebAppUrl("/reset-password", rawToken, surface);
     const template = templates.passwordReset({
       name: user.name,
       resetUrl,

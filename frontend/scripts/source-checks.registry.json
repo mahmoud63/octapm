@@ -24,6 +24,7 @@
     "daily-log-assistant-ui.test.mjs",
     "daily-log-ui.test.mjs",
     "dashboard-construction.test.mjs",
+    "domains.test.mjs",
     "direct-costs-ui.test.mjs",
     "document-control-register-ui.test.mjs",
     "document-search-ui.test.mjs",

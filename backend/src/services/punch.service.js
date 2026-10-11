@@ -1,4 +1,5 @@
 const fs = require("fs/promises");
+const domains = require("../config/domains");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const auditService = require("./audit.service");
@@ -749,7 +750,7 @@ const distributePunchItems = async ({ orgId, projectId, itemIds = [], companyIds
   if (!recipientIds.length) throw new HttpError(400, "PUNCH_NO_RECIPIENTS", "Nobody to send to: assign a company or user first");
   const recipients = await prisma.user.findMany({ where: { id: { in: recipientIds }, orgId, status: "active" }, select: { id: true, name: true, email: true } });
 
-  const baseUrl = (process.env.WEB_APP_URL || process.env.FRONTEND_URL || "").replace(/\/$/, "");
+  const baseUrl = domains.surfaceUrl(domains.SURFACES.APP);
   const lines = items.map((item) =>
     `${item.ref}  ${item.title}${item.locationText || item.location?.name ? ` — ${item.locationText || item.location?.name}` : ""}${item.dueDate ? ` (due ${formatDate(item.dueDate)})` : ""} [${item.status.replace(/_/g, " ")}]`,
   );

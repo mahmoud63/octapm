@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { surfaceHref } from '@/lib/domains'
 import { PlatformSearch } from './platform-search'
 import { Link, Outlet, useLocation } from '@tanstack/react-router'
 import { platformAdminApi } from '@/services/platform-admin/api'
@@ -71,9 +72,9 @@ export function PlatformConsoleLayout() {
         <div className='flex items-center gap-2 border-b border-slate-800 px-4 py-4'>
           <OctaMark className='size-7' />
           <div className='leading-tight'>
-            <div className='text-sm font-semibold'>OctaPM Platform</div>
+            <div className='text-sm font-semibold'>OctaPM Admin</div>
             <div className='text-[11px] tracking-wide text-slate-400 uppercase'>
-              Operations console
+              Platform Administration
             </div>
           </div>
         </div>
@@ -140,12 +141,14 @@ export function PlatformConsoleLayout() {
           </nav>
           <div className='ml-auto flex min-w-0 flex-1 items-center justify-end gap-2'>
             <PlatformSearch />
-            <Link
-              to='/'
+            {/* The customer application lives on its own host (app.octapm.com)
+                when the console has one (admin.octapm.com). */}
+            <a
+              href={surfaceHref('app', '/')}
               className='flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground'
             >
               <ArrowLeft className='size-4' aria-hidden /> Back to OctaPM
-            </Link>
+            </a>
             <ThemeSwitch />
           </div>
         </header>

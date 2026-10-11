@@ -1,4 +1,5 @@
 import { StrictMode } from 'react'
+import { currentSurface, shouldIndex } from '@/lib/domains'
 import ReactDOM from 'react-dom/client'
 import { AxiosError } from 'axios'
 import {
@@ -192,6 +193,15 @@ document.documentElement.style.setProperty(
   '--octa-print-url',
   `'${window.location.host}'`
 )
+
+// Only the public site is for search engines (domain architecture §31): the
+// application, the portal and the admin console say so on every page.
+if (!shouldIndex(currentSurface(), window.location.pathname)) {
+  const robots = document.createElement('meta')
+  robots.name = 'robots'
+  robots.content = 'noindex, nofollow'
+  document.head.appendChild(robots)
+}
 
 // Render the app
 const rootElement = document.getElementById('root')!

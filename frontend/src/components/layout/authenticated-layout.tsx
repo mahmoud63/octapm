@@ -4,6 +4,8 @@ import { LayoutProvider } from '@/context/layout-provider'
 import { useRealtimeConnection } from '@/hooks/use-realtime'
 import { useScreenOpenTracking } from '@/lib/product-usage'
 import { TopNavbar } from '@/components/layout/top-navbar'
+import { PortalTopBar } from '@/components/layout/portal-top-bar'
+import { currentSurface } from '@/lib/domains'
 import { SkipToMain } from '@/components/skip-to-main'
 import { AskOctaPMLauncher } from '@/features/ai/components/ask-octapm-launcher'
 
@@ -21,7 +23,9 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
       <LayoutProvider>
         <SkipToMain />
         <div className='flex min-h-svh flex-col'>
-          <TopNavbar />
+          {/* portal.octapm.com has its own shell (domain architecture §13):
+              an external party never gets the contractor's navigation. */}
+          {currentSurface() === 'portal' ? <PortalTopBar /> : <TopNavbar />}
           {/* Bottom room so the floating Ask OctaPM button never covers a
               page's last controls. */}
           <div className='flex flex-1 flex-col pb-20 @container/content'>

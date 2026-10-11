@@ -1,4 +1,5 @@
 ﻿const crypto = require("crypto");
+const domains = require("../config/domains");
 const ExcelJS = require("exceljs");
 const { brandWorkbook } = require("../utils/export-branding");
 const { prisma } = require("../config/db");
@@ -46,8 +47,8 @@ const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const round3 = (value) => Math.round((Number(value) || 0) * 1000) / 1000;
 const hashToken = (token) => crypto.createHash("sha256").update(String(token)).digest("hex");
 const newToken = () => crypto.randomBytes(24).toString("base64url");
-const webAppUrl = () => (process.env.WEB_APP_URL || "http://localhost:5173").replace(/\/$/, "");
-const portalUrl = (token) => `${webAppUrl()}/bid/${token}`;
+// A bidder is an external party: the token page lives on the external collaboration portal.
+const portalUrl = (token) => domains.buildUrl(domains.SURFACES.PORTAL, `/bid/${encodeURIComponent(token)}`);
 const optionalDate = (value, field) => {
   if (value === undefined) return undefined;
   if (value === null || value === "") return null;

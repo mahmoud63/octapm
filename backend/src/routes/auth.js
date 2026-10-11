@@ -13,6 +13,7 @@ const {
   refreshLimiter,
 } = require("../middleware/rate-limit");
 const authService = require("../services/auth.service");
+const { RETURN_SURFACES } = require("../config/domains");
 const { disconnectUser } = require("../realtime/socket");
 const userSettingsService = require("../services/user-settings.service");
 
@@ -69,10 +70,27 @@ const getRequestContext = (req) => ({
   client: clientOf(req),
 });
 
+/**
+ * The refresh cookie is host-only on the API host (no Domain attribute, so it
+ * is never shared with app., portal., admin. or market.octapm.com pages), it
+ * is httpOnly, and its path is the auth routes alone. SameSite defaults to
+ * None in production (a cross-site API host keeps working) and can be
+ * tightened with AUTH_COOKIE_SAMESITE=strict|lax once every OctaPM surface and
+ * the API share the octapm.com site (domain architecture §20). None is only
+ * ever sent with Secure.
+ */
+const refreshCookieSameSite = () => {
+  const production = process.env.NODE_ENV === "production";
+  const chosen = String(process.env.AUTH_COOKIE_SAMESITE || "").trim().toLowerCase();
+  if (chosen === "strict" || chosen === "lax") return chosen;
+  if (chosen === "none") return production ? "none" : "lax";
+  return production ? "none" : "lax";
+};
+
 const getRefreshCookieBaseOptions = () => ({
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
-  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+  sameSite: refreshCookieSameSite(),
   path: "/api/v1/auth",
 });
 
@@ -191,10 +209,15 @@ require("./workspaces").register(router, {
 
 router.post(
   "/forgot-password",
-  [body("email").isString().isEmail().normalizeEmail(), validate],
+  [
+    body("email").isString().isEmail().normalizeEmail(),
+    // Which OctaPM surface the reset link returns to; an OctaPM surface only.
+    body("surface").optional().isString().isIn(RETURN_SURFACES),
+    validate,
+  ],
   asyncHandler(async (req, res) => {
     const result = await authService.requestPasswordReset(
-      req.body,
+      { email: req.body.email, ...(req.body.surface ? { surface: req.body.surface } : {}) },
       getRequestContext(req),
     );
     return sendSuccess(res, result);

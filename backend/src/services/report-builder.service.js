@@ -1,4 +1,5 @@
 ﻿const ExcelJS = require("exceljs");
+const domains = require("../config/domains");
 const { brandWorkbook } = require("../utils/export-branding");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
@@ -1061,7 +1062,7 @@ const deliverRun = async ({ orgId, report, run, recipients, user }) => {
         await sendEmail({
           to: email,
           subject: `Report: ${report.name}`,
-          body: `${report.name} — ${summary}.\n\nSign in to OctaPM to download it${process.env.WEB_APP_URL ? `: ${process.env.WEB_APP_URL}${actionUrl}` : "."}\n\nSent by ${user?.name || "a scheduled report"}.`,
+          body: `${report.name} — ${summary}.\n\nSign in to OctaPM to download it${process.env.WEB_APP_URL ? `: ${domains.buildUrl(domains.SURFACES.APP, actionUrl)}` : "."}\n\nSent by ${user?.name || "a scheduled report"}.`,
           metadata: { event: "report.delivered", reportId: report.id, runId: run.id },
         });
         sent.push(email);

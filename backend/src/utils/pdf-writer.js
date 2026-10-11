@@ -124,8 +124,12 @@ const BRAND = {
 const BRAND_NAME = "octapm";
 const BRAND_TAGLINE = "One Platform, Total Project Control";
 /** Overridable so a deployment can point at its own tenant URL. */
+const domains = require("../config/domains");
+
 const brandUrl = () =>
-  (process.env.BRAND_PUBLIC_URL || process.env.WEB_APP_URL || "https://octapm.com").replace(/\/+$/, "");
+  process.env.BRAND_PUBLIC_URL || process.env.PUBLIC_SITE_URL || process.env.WEB_APP_URL
+    ? domains.surfaceUrl(domains.SURFACES.PUBLIC)
+    : "https://octapm.com";
 
 const HEADER_HEIGHT = 34;
 const FOOTER_HEIGHT = 26;

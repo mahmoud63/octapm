@@ -1,0 +1,10 @@
+# OctaPM. Only the public site is for search engines (docs/platform/OCTAPM_DOMAIN_ARCHITECTURE.md).
+# One frontend build serves every host, so this file allows only the public pages; app., portal.
+# and admin.octapm.com should answer "Disallow: /" (and X-Robots-Tag: noindex) from the CDN
+# when they get hosts of their own. Every application page also carries a noindex meta tag.
+User-agent: *
+Allow: /$
+Allow: /landing
+Allow: /privacy
+Allow: /terms
+Disallow: /

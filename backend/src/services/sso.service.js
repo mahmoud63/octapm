@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const domains = require("../config/domains");
 const jwt = require("jsonwebtoken");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
@@ -48,7 +49,8 @@ const decryptSecret = (value) => {
     return open(value);
   }
 };
-const webAppUrl = () => (process.env.WEB_APP_URL || "http://localhost:5173").replace(/\/$/, "");
+// The surface the sign-in started on (app, portal or admin) is where it ends.
+const webAppUrl = (surface = domains.SURFACES.APP) => domains.surfaceUrl(domains.parseReturnSurface(surface));
 const redirectUri = () => process.env.SSO_REDIRECT_URI || apiUrl("/auth/sso/callback");
 const hashToken = (token) => crypto.createHash("sha256").update(String(token)).digest("hex");
 const fetcher = (fetchImpl) => fetchImpl || globalThis.fetch;
@@ -169,7 +171,7 @@ const lookup = async ({ email }) => {
 const codeChallenge = (verifier) => crypto.createHash("sha256").update(verifier).digest("base64url");
 
 /** Builds the provider's authorization URL for an email's organisation (or an explicit org). */
-const start = async ({ email = null, orgId = null, redirectTo = null, fetchImpl = null }) => {
+const start = async ({ email = null, orgId = null, redirectTo = null, surface = null, fetchImpl = null }) => {
   let org = null;
   if (orgId) org = await prisma.organisation.findFirst({ where: { id: orgId, ssoEnabled: true } });
   else if (email) {
@@ -184,7 +186,7 @@ const start = async ({ email = null, orgId = null, redirectTo = null, fetchImpl 
   const document = await discover(org.ssoIssuer, { fetchImpl });
   const verifier = crypto.randomBytes(32).toString("base64url");
   const nonce = crypto.randomBytes(16).toString("base64url");
-  const state = jwt.sign({ type: "sso_state", orgId: org.id, nonce, verifier, redirectTo: trimOrNull(redirectTo)?.slice(0, 500) || null, hint: trimOrNull(email)?.toLowerCase() || null }, secretFor("JWT_SECRET"), { expiresIn: STATE_EXPIRY });
+  const state = jwt.sign({ type: "sso_state", orgId: org.id, nonce, verifier, redirectTo: domains.safeReturnPath(trimOrNull(redirectTo)), surface: domains.parseReturnSurface(surface), hint: trimOrNull(email)?.toLowerCase() || null }, secretFor("JWT_SECRET"), { expiresIn: STATE_EXPIRY });
   const url = new URL(document.authorization_endpoint);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", org.ssoClientId);
@@ -215,7 +217,11 @@ const verifyState = (state) => {
  * sent to (with a one-time ticket, or an error code).
  */
 const callback = async ({ code, state, error = null, errorDescription = null }, context = {}, { fetchImpl = null } = {}) => {
-  const fail = (codeName) => ({ redirectUrl: `${webAppUrl()}/sign-in?ssoError=${encodeURIComponent(codeName)}`, error: codeName });
+  // Until the signed state is read, a failure goes back to the application;
+  // after it, to the surface the sign-in started on (the state is signed, so
+  // the surface in it is one of OctaPM's own).
+  let surface = domains.SURFACES.APP;
+  const fail = (codeName) => ({ redirectUrl: `${webAppUrl(surface)}/sign-in?ssoError=${encodeURIComponent(codeName)}`, error: codeName });
   if (error) return fail(String(errorDescription || error).slice(0, 120));
   let payload;
   try {
@@ -223,6 +229,7 @@ const callback = async ({ code, state, error = null, errorDescription = null }, 
   } catch (err) {
     return fail(err.code || "SSO_STATE_INVALID");
   }
+  surface = domains.parseReturnSurface(payload.surface);
   const org = await prisma.organisation.findFirst({ where: { id: payload.orgId, ssoEnabled: true } });
   if (!org) return fail("SSO_NOT_CONFIGURED");
   try {
@@ -320,9 +327,11 @@ const callback = async ({ code, state, error = null, errorDescription = null }, 
       await require("./auth.service").holdCredentialEpoch(tx, user.id, Number.isInteger(user.credentialEpoch) ? user.credentialEpoch : 0);
       await tx.ssoTicket.create({ data: { orgId: org.id, userId: user.id, tokenHash: hashToken(ticket), expiresAt: new Date(Date.now() + TICKET_TTL_MS), ipAddress: context.ipAddress || null, ...(membership ? { membershipId: membership.id } : {}) } });
     });
-    const target = new URL(`${webAppUrl()}/sso/complete`);
+    const target = new URL(`${webAppUrl(surface)}/sso/complete`);
     target.searchParams.set("ticket", ticket);
-    if (payload.redirectTo && payload.redirectTo.startsWith("/")) target.searchParams.set("redirect", payload.redirectTo);
+    // A path in this application only: "//host" and "/\\host" are other sites.
+    const returnPath = domains.safeReturnPath(payload.redirectTo);
+    if (returnPath) target.searchParams.set("redirect", returnPath);
     return { redirectUrl: target.toString(), userId: user.id, error: null };
   } catch (err) {
     if (prisma.authAuditEvent?.create) await prisma.authAuditEvent.create({ data: { orgId: org.id, entityType: "organisation", entityId: org.id, action: "sso.login_failed", ipAddress: context.ipAddress || null, userAgent: context.userAgent || null, metadataJson: { code: err?.code || "SSO_FAILED", message: String(err?.message || "").slice(0, 300) } } }).catch(() => null);

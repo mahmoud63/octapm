@@ -1,4 +1,5 @@
 const { prisma } = require("../config/db");
+const domains = require("../config/domains");
 const { HttpError } = require("../utils/http-error");
 const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
@@ -1426,7 +1427,7 @@ const distribute = async ({ orgId, projectId, date, actor = null, to = null, not
       await sendEmail({
         to: email,
         subject: `Daily log ${key} — ${project.name}`,
-        body: `${extra ? `${extra}\n\n` : ""}${digest}\n\nThe PDF is attached to the day in OctaPM${process.env.WEB_APP_URL ? `: ${process.env.WEB_APP_URL}${pathFor(projectId, key)}` : "."}`,
+        body: `${extra ? `${extra}\n\n` : ""}${digest}\n\nThe PDF is attached to the day in OctaPM${process.env.WEB_APP_URL ? `: ${domains.buildUrl(domains.SURFACES.APP, pathFor(projectId, key))}` : "."}`,
         metadata: { event: "daily_log.distributed", projectId, dailyLogId: existing.id, documentId: document.id },
       });
       sent.push(email);

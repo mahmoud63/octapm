@@ -49,7 +49,7 @@ const modules = read('src/features/projects/lib/project-modules.ts')
 
 // ── Workspace shell: URL-driven, lazy modules, no navigation state ───────
 const detail = read('src/features/projects/components/project-detail.tsx')
-assert.match(detail, /moduleFromSlug\(moduleSlug\) \?\? DEFAULT_MODULE/, 'active module comes from the URL')
+assert.match(detail, /moduleFromSlug\(moduleSlug\) \?\? \(isExternalParty \? 'reviews' : DEFAULT_MODULE\)/, 'active module comes from the URL')
 assert.ok(!/useState<ModuleKey>/.test(detail), 'no local active-module state')
 // One effect exists since a60bf81 (Phase 22B): a URL naming a module or tab the
 // policy hides is REPLACED by the one offered, so the address bar says what is

@@ -1,4 +1,5 @@
 ﻿import * as React from 'react'
+import { surfaceHref } from '@/lib/domains'
 import { Link, useLocation } from '@tanstack/react-router'
 import {
   Menu,
@@ -239,10 +240,12 @@ function UserDropdown() {
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
-                <Link to='/platform-admin' data-testid='user-menu-platform-admin'>
+                {/* On its own host (admin.octapm.com) when there is one; the
+                    console asks for the second factor again either way. */}
+                <a href={surfaceHref('admin', '/platform-admin')} data-testid='user-menu-platform-admin'>
                   <ShieldCheck className='size-4' />
                   Platform Administration
-                </Link>
+                </a>
               </DropdownMenuItem>
             </>
           ) : null}

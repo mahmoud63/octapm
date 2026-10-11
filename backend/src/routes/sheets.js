@@ -1,4 +1,5 @@
 const express = require("express");
+const domains = require("../config/domains");
 const crypto = require("crypto");
 const multer = require("multer");
 // The NUL / lone-surrogate guard again after multer: it parses the multipart body inside the route (CERT-2).
@@ -157,8 +158,7 @@ router.get(
       sheetId: req.params.sheetId,
       includeSuperseded: false,
     });
-    const baseUrl = (process.env.WEB_APP_URL || process.env.FRONTEND_URL || "").replace(/\/$/, "");
-    const target = `${baseUrl}/projects/${req.params.projectId}/quality/defects?source=sheet_qr&recordId=${sheet.id}`;
+    const target = domains.buildUrl(domains.SURFACES.APP, `/projects/${req.params.projectId}/quality/defects`, { source: "sheet_qr", recordId: sheet.id });
     const { qrToSvg } = require("../utils/qr");
     const svg = qrToSvg(target, { moduleSize: 6, label: `${sheet.number} · ${sheet.title}`.slice(0, 60) });
     res.setHeader("Content-Type", "image/svg+xml");

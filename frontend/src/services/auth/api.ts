@@ -1,4 +1,5 @@
 import { apiClient, authlessClient } from '@/services/api/client'
+import { currentSurface } from '@/lib/domains'
 import type {
   ApiSuccess,
   AcceptInvitationPayload,
@@ -92,13 +93,24 @@ export const ssoLookup = async (email: string): Promise<SsoLookup> => {
   return unwrapData(response)
 }
 
+/**
+ * The OctaPM surface this page is (portal or admin), sent with requests whose
+ * e-mail or redirect must come back here: a consultant who resets a password
+ * on the portal gets a portal link. The server accepts only OctaPM's own
+ * surfaces; the application is the default and is not sent.
+ */
+const returnSurface = (): { surface?: 'portal' | 'admin' } => {
+  const mode = currentSurface()
+  return mode === 'portal' || mode === 'admin' ? { surface: mode } : {}
+}
+
 export const ssoStart = async (payload: {
   email?: string | null
   redirectTo?: string | null
 }): Promise<{ authorizationUrl: string; orgName: string }> => {
   const response = await apiClient.post<
     ApiSuccess<{ authorizationUrl: string; orgName: string }>
-  >('/auth/sso/start', payload)
+  >('/auth/sso/start', { ...payload, ...returnSurface() })
   return unwrapData(response)
 }
 
@@ -174,7 +186,7 @@ export const requestPasswordReset = async (
 ): Promise<ForgotPasswordResponse> => {
   const response = await apiClient.post<ApiSuccess<ForgotPasswordResponse>>(
     '/auth/forgot-password',
-    payload
+    { ...payload, ...returnSurface() }
   )
   return unwrapData(response)
 }

@@ -5,10 +5,14 @@ const { emailWebhookUrl, resolveEmailProvider } = require('./email-provider');
 const { readPoolSetting } = require('./db');
 const { RELEASE_HEADER } = require('./release');
 const { REQUEST_LOG_FORMATS } = require('../middleware/request-log');
+const { applicationOrigins } = require('./domains');
 
 const DEFAULT_DEVELOPMENT_ORIGINS = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  // Local previews of the portal and admin shells (domain architecture).
+  'http://portal.localhost:5173',
+  'http://admin.localhost:5173',
   'http://localhost:5174',
   'http://127.0.0.1:5174',
   'http://localhost:5175',
@@ -120,10 +124,14 @@ const getConfiguredCorsOrigins = (env = process.env) =>
       .filter(Boolean),
   );
 
+// The external collaboration portal and the platform console call this API
+// from hosts of their own when PORTAL_URL / ADMIN_URL give them one (domain
+// architecture): those exact origins are allowed with the rest, never a
+// wildcard of the parent domain. OctaMarket is a separate product and is not.
 const getAllowedCorsOrigins = (env = process.env) => {
   const configured = getConfiguredCorsOrigins(env);
-  if (configured.length > 0) return configured;
-  return env.NODE_ENV === 'production' ? [] : DEFAULT_DEVELOPMENT_ORIGINS;
+  const base = configured.length > 0 ? configured : env.NODE_ENV === 'production' ? [] : DEFAULT_DEVELOPMENT_ORIGINS;
+  return unique([...base, ...applicationOrigins(env)]);
 };
 
 // A request with no Origin header is not a browser cross-origin request
@@ -290,6 +298,11 @@ const checkPublicOrigin = (env, key, problems, { allowApiRoot = false } = {}) =>
 const validateProductionEmailAndLinks = (env, problems) => {
   checkPublicOrigin(env, 'WEB_APP_URL', problems);
   checkPublicOrigin(env, 'API_BASE_URL', problems, { allowApiRoot: true });
+  // The other canonical hosts are optional — unset, their links fall back to
+  // the app's host — but a value that is set must be a public https origin.
+  for (const key of ['PUBLIC_SITE_URL', 'PORTAL_URL', 'ADMIN_URL', 'MARKET_URL']) {
+    if (String(env[key] ?? '').trim()) checkPublicOrigin(env, key, problems);
+  }
 
   const { provider, invalid } = resolveEmailProvider(env);
   if (invalid) {
@@ -549,6 +562,10 @@ const validateProductionCorsOrigins = (env, problems) => {
     ...splitList(env.CORS_ALLOWED_ORIGINS),
     ...splitList(env.FRONTEND_URL),
   ];
+  // A credentialed API never trusts the whole parent domain.
+  if (originValues.some((value) => value !== '*' && value.includes('*'))) {
+    problems.push('CORS origins must name exact hosts, not a wildcard such as https://*.octapm.com');
+  }
 
   if (originValues.length === 0) {
     problems.push(
