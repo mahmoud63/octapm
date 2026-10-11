@@ -158,6 +158,23 @@ const CHILD_ACTIONS: Record<string, ModuleAction[]> = {
     },
   ],
   'schedule:longLead': [LONG_LEAD],
+  'docControl:submittals': [
+    {
+      label: 'Summarize',
+      question:
+        'Summarize the submittal register: what is pending, under review or to resubmit, and what was approved or rejected.',
+    },
+    {
+      label: 'Explain Review Status',
+      question:
+        'Explain where each open submittal is in review and who it is waiting on.',
+    },
+    {
+      label: 'Identify Overdue Reviews',
+      question:
+        'Which submittals are past their due date, how late is each, and who holds them?',
+    },
+  ],
   'commercial:change-orders': CHANGE_ACTIONS,
   'commercial:change-events': CHANGE_ACTIONS,
   'commercial:commitments': [

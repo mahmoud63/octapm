@@ -13,6 +13,7 @@ jest.mock("../../quality.service", () => ({ getQualityDashboard: jest.fn(async (
 jest.mock("../../ncr.service", () => ({ listNcrs: jest.fn(async () => ({ rows: [{ id: "n1", ref: "NCR-001", severity: "minor", status: "open", activityId: "a1", description: "Cover to reinforcement 18mm" }] })) }));
 jest.mock("../../itp.service", () => ({ listItps: jest.fn(async () => ({ rows: [{ id: "i1", ref: "ITP-003", title: "Riser first fix", pointType: "hold", status: "pending", activityId: "a2" }] })) }));
 jest.mock("../../punch.service", () => ({ listPunchItems: jest.fn(async () => ({ items: [] })) }));
+jest.mock("../../submittal.service", () => ({ listSubmittals: jest.fn(async () => ({ rows: [{ id: "s1", ref: "SUB-001", title: "Curtain wall shop drawings", status: "under_review", dueDate: "2026-01-01T00:00:00.000Z", ballInCourtUser: { name: "Dana" } }], summary: { underReview: 1 } })) }));
 jest.mock("../../forecast.service", () => ({ buildForecast: jest.fn(async () => ({ available: true, cost: { eac: 150, topRisks: [] }, schedule: {} })) }));
 jest.mock("../../progress.service", () => ({ listProgressSubmissions: jest.fn() }));
 jest.mock("../../../utils/boq-figures", () => ({ boqFigureAccess: jest.fn(() => ({ boq: false, budget: false })), withheldProgressSubmissions: jest.fn((rows) => rows), canReadBoq: jest.fn(), exceptionAccess: jest.fn(() => ({})), withheldCostSummary: jest.fn((summary) => ({ ...summary, withheld: true })), withheldForecast: jest.fn((forecast) => forecast), withheldAllocationLinks: jest.fn((order) => order) }));
@@ -170,6 +171,18 @@ describe("module sources (AI-7)", () => {
     const [withNcr] = await moduleSources({ view, projectId: P, moduleKey: "quality", child: "ncr" });
     expect(itpService.listItps).toHaveBeenCalledTimes(1);
     expect(withNcr.text).toMatch(/NCR NCR-001 \(minor, open\) on activity A1100 Piling/);
+  });
+
+  test("submittals: only with submittal read, through the register with the caller's party access", async () => {
+    const { listSubmittals } = require("../../submittal.service");
+    hasPermission.mockReturnValue(false);
+    expect(await moduleSources({ view, projectId: P, moduleKey: "docControl", child: "submittals" })).toEqual([]);
+    expect(listSubmittals).not.toHaveBeenCalled();
+    hasPermission.mockImplementation((_view, moduleName) => moduleName === "submittal");
+    const sources = await moduleSources({ view, projectId: P, moduleKey: "docControl", child: "submittals" });
+    expect(listSubmittals).toHaveBeenCalledWith({ orgId: "org-1", projectId: P, query: { limit: 100 }, projectAccess: view.projectAccess });
+    expect(sources[0].text).toMatch(/Submittal SUB-001 Curtain wall shop drawings — under_review; due 2026-01-01 \(OVERDUE\); ball in court Dana/);
+    expect(sources[1]).toMatchObject({ id: "s1", type: "submittal" });
   });
 
   test("official progress is the latest approved submission over a stale stored figure", async () => {
