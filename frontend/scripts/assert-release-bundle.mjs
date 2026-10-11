@@ -2,13 +2,15 @@
 /**
  * A release bundle must talk to the real API and nothing on a developer's desk.
  *
- * Vite bakes VITE_API_URL into the JavaScript at build time. A build made
- * without it calls same-origin /api/v1; a build made on a laptop picks up the
+ * Vite bakes VITE_API_URL into the JavaScript at build time. OctaPM's web app
+ * calls the API on its own host (same-origin /api/v1 on app., portal. and
+ * admin.octapm.com — owner decision, no api.octapm.com), so a release build is
+ * made with VITE_API_URL=/api/v1. A build made on a laptop picks up the
  * untracked frontend/.env and ships http://localhost:5000/api/v1 to every
- * browser. Neither fails the build, so this scan runs on the output:
+ * browser; that does not fail the build, so this scan runs on the output:
  *
  *   node frontend/scripts/assert-release-bundle.mjs --dist frontend/dist \
- *     --expect-api https://api.octapm.com/api/v1
+ *     --expect-api /api/v1
  *   node frontend/scripts/assert-release-bundle.mjs --self-test
  *
  * It fails when any .js, .mjs, .html, .css, .json or .webmanifest file under
@@ -24,6 +26,9 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { dirname, extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+// The API on the page's own host: "/api/v1", never "//host/api".
+const SAME_ORIGIN_API = /^\/api\/v\d+$/
 
 const SCANNED_EXTENSIONS = new Set(['.js', '.mjs', '.html', '.css', '.json', '.webmanifest'])
 
@@ -72,8 +77,8 @@ export const releaseBundleProblems = (distDir, expectedApi) => {
   const expected = String(expectedApi || '').trim()
   if (!expected) {
     problems.push('no expected API URL: pass --expect-api or set VITE_API_URL to the URL this build was made with')
-  } else if (!/^https:\/\//.test(expected)) {
-    problems.push(`the expected API URL ${expected} is not https`)
+  } else if (!/^https:\/\//.test(expected) && !SAME_ORIGIN_API.test(expected)) {
+    problems.push(`the expected API URL ${expected} is neither https nor a same-origin /api/vN path`)
   }
   const scan = scanBundle(distDir, expected)
   if (scan.files === 0) problems.push(`no scannable files under ${resolve(distDir)}`)
@@ -129,6 +134,16 @@ const selfTest = () => {
     problems = releaseBundleProblems(dir, '')
     if (!problems.some((problem) => /no expected API URL/.test(problem))) {
       throw new Error('self-test: a missing --expect-api was not reported')
+    }
+
+    // The same-origin build (the release shape): /api/v1 on the page's host.
+    problems = releaseBundleProblems(dir, '/api/v1')
+    if (problems.length) throw new Error(`self-test: a same-origin bundle was refused: ${problems.join('; ')}`)
+    for (const bad of ['//evil.example/api/v1', 'http://app.octapm.com/api/v1', 'api/v1']) {
+      problems = releaseBundleProblems(dir, bad)
+      if (!problems.some((problem) => /neither https nor a same-origin/.test(problem))) {
+        throw new Error(`self-test: ${bad} was accepted as the API`)
+      }
     }
     console.log('Release bundle self-test passed')
   } finally {

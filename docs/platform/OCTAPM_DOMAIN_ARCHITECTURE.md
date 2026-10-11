@@ -130,20 +130,38 @@ links use them. On a preview host a full page reload asks for sign-in again (the
 belongs to the API's own host, which is another site from `*.localhost`; production hosts share
 octapm.com and are not affected).
 
+## API host: same-origin `/api` (owner decision, 2026-10-11)
+
+**There is no `api.octapm.com`.** Each application host carries the one OctaPM API under its own
+`/api/*`:
+
+```
+https://app.octapm.com/api/*     ─┐
+https://portal.octapm.com/api/*  ─┼─ CloudFront behaviour /api/* ─▶ ALB ─▶ ECS Fargate API tasks
+https://admin.octapm.com/api/*   ─┘   (everything else ─▶ S3 static web build)
+```
+
+- The web build uses `VITE_API_URL=/api/v1` (relative), so every surface calls its own host: browser
+  requests are same-origin, the refresh cookie (host-only, path `/api/v1/auth`) is set per surface —
+  an app session's cookie is never sent to `admin.octapm.com` — and CORS is not needed for the web
+  surfaces (the allowlist stays for development and the mobile web target).
+- The host still grants nothing: tenant, project, party and platform authorization stay in the API.
+- `API_BASE_URL` (OAuth/SSO redirect URIs) is the app host: `https://app.octapm.com`.
+- Mobile: `EXPO_PUBLIC_API_ORIGIN=https://app.octapm.com` (`/api/v1` on the app host).
+- CloudFront `/api/*` behaviour: all methods, caching **disabled** (managed policy CachingDisabled),
+  origin request policy forwarding the `Authorization` header, all query strings and only the cookie
+  the API uses (`pmc_refresh_token`), plus `X-OctaPM-Client`; viewer protocol HTTPS only; the origin
+  adds `X-CloudFront-Secret` (`CLOUDFRONT_SHARED_SECRET`, `TRUST_PROXY_HOPS=2`) and the ALB security
+  group admits only CloudFront's origin-facing prefix list. Socket.IO (`/socket.io/*`) gets the same
+  uncached behaviour with WebSocket upgrade. Static behaviours forward no cookies or auth headers.
+
 ## Deployment and DNS readiness (nothing changed)
 
-The repository describes two deployment shapes; the API host is **not decided**:
-
-- **Shape A — Terraform (`infrastructure/terraform`, `deploy.yml`):** Route 53 hosted zone for
-  `octapm.com`, an apex A-alias to one CloudFront distribution (SPA from S3, `/api/*` to EC2 —
-  same-origin API), ACM certificate for `octapm.com` and `*.octapm.com`. `aliases` lists the apex only.
-- **Shape B — planned ECS (`docs/deployment/OCTAPM_AWS_MULTITASK_READINESS.md`, `backend/.env.example`,
-  `mobile/eas.json`):** web on `app.octapm.com`, API on `api.octapm.com` behind an ALB. No
-  infrastructure code exists yet.
-
-Recommendation: decide between a same-origin `/api` behind each host's CloudFront behaviour and a
-dedicated `api.octapm.com` during AWS deployment; this task did not create either. Either works with
-this code (the web app takes `VITE_API_URL`).
+- **Terraform today (`infrastructure/terraform`, `deploy.yml`):** Route 53 hosted zone for
+  `octapm.com`, an apex A-alias to one CloudFront distribution (SPA from S3, `/api/*` to a single EC2
+  instance — already same-origin), ACM certificate for `octapm.com` and `*.octapm.com`. To be rewritten
+  for ECS Fargate behind an ALB (docs/deployment/OCTAPM_AWS_MULTITASK_READINESS.md), keeping the
+  same-origin `/api/*` behaviour.
 
 What activation will need (**targets to be determined during AWS deployment** — no values exist yet):
 
@@ -155,7 +173,6 @@ What activation will need (**targets to be determined during AWS deployment** �
 | portal.octapm.com | Route 53 A/AAAA alias (or CNAME) | CloudFront distribution (same SPA) — TBD | add to `aliases`; `PORTAL_URL`, `VITE_PORTAL_URL` |
 | admin.octapm.com | Route 53 A/AAAA alias (or CNAME) | CloudFront distribution — TBD | add to `aliases`; WAF; `ADMIN_URL`, `VITE_ADMIN_URL` |
 | market.octapm.com | per OctaMarket's own hosting — TBD | — | `MARKET_URL` |
-| api.octapm.com (only if Shape B) | Route 53 alias | ALB — TBD | owner decision first |
 
 Plus: SES domain identity with SPF/DKIM/DMARC for `@octapm.com` mail; CloudFront response-header
 policies (HSTS, CSP, `X-Robots-Tag: noindex` on app/portal/admin, `Disallow: /` robots on them).

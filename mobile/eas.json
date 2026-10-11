@@ -16,14 +16,14 @@
       "android": { "buildType": "apk" },
       "env": {
         "EXPO_PUBLIC_ENV": "staging",
-        "EXPO_PUBLIC_API_ORIGIN": "https://api.staging.octapm.com",
+        "EXPO_PUBLIC_API_ORIGIN": "https://app.staging.octapm.com",
         "EXPO_PUBLIC_WEB_ORIGIN": "https://app.staging.octapm.com"
       }
     },
     "production": {
       "env": {
         "EXPO_PUBLIC_ENV": "production",
-        "EXPO_PUBLIC_API_ORIGIN": "https://api.octapm.com",
+        "EXPO_PUBLIC_API_ORIGIN": "https://app.octapm.com",
         "EXPO_PUBLIC_WEB_ORIGIN": "https://app.octapm.com"
       }
     }

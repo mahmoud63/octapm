@@ -106,7 +106,7 @@ const assertReleaseOrigins = (env = process.env) => {
     const reason = releaseReason(env)
     throw new Error(
       `Release origin check failed${reason ? ` (${reason})` : ''}:\n- ${problems.join('\n- ')}\n` +
-        'Set them in the eas.json profile, e.g. EXPO_PUBLIC_API_ORIGIN=https://api.octapm.com.',
+        'Set them in the eas.json profile, e.g. EXPO_PUBLIC_API_ORIGIN=https://app.octapm.com (the API is same-origin /api on the app host).',
     )
   }
 }

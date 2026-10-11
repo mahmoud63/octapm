@@ -18551,7 +18551,11 @@ const openApiSpec = {
       url: "http://localhost:5000/api/v1",
       description: "Local backend development",
     },
-    { url: "https://octapm.com/api/v1", description: "Production API" },
+    // One API, reached on the host the client uses (same-origin /api/* on each
+    // OctaPM surface; there is no api.octapm.com). Mobile uses the app host.
+    { url: "https://app.octapm.com/api/v1", description: "Production API (application host; also mobile)" },
+    { url: "https://portal.octapm.com/api/v1", description: "Production API (External Collaboration Portal host)" },
+    { url: "https://admin.octapm.com/api/v1", description: "Production API (Platform Administration host)" },
   ],
   tags: [
     {
