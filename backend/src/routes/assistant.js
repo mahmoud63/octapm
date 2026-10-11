@@ -7,6 +7,7 @@ const { authenticate } = require("../middleware/auth");
 const { requirePermission, hasPermission, noApiKey } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const service = require("../services/assistant.service");
+const briefService = require("../services/ai/project-brief.service");
 const { requestForProject } = require("../middleware/project-access");
 const { throwProjectNotFoundOrAccessDenied } = require("../services/project-authorization.service");
 const { canReadBoq } = require("../utils/boq-figures");
@@ -84,6 +85,7 @@ const build = ({ withActions }) => {
           question: req.body.question,
           projectAccess: req.projectAccess || null,
           accessFor: assistantAccessFor(req),
+          digestFor: (projectId) => briefService.digest(req, projectId),
           readsBoq: readsBoqFor(req),
         }),
       ),

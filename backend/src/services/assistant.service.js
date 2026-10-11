@@ -222,13 +222,31 @@ const projectAccessFor = async ({ orgId, user, projectId, projectAccess = null, 
   return assertProjectAccess({ orgId, projectId, userId: user.id, role: user.role, isCompanyAdmin: Boolean(user.isCompanyAdmin) });
 };
 
+// The project's facts and the top of its attention list (AI-3) join the
+// retrieved records, so "how is the project doing?" or "what is late?" is
+// answered from what the caller's own dashboard shows them. `digestFor` is
+// the route's (services/ai/project-brief digest, decided per module on the
+// caller's own access); a digest that cannot be built leaves the retrieved
+// records alone.
+const DIGEST_SOURCES = 9;
+const projectDigestSources = async ({ digestFor, projectId, after }) => {
+  if (!digestFor || !projectId) return [];
+  try {
+    const digest = await digestFor(projectId);
+    return (digest?.sources || []).slice(0, DIGEST_SOURCES).map((source, index) => ({ ...source, n: after + index + 1 }));
+  } catch (error) {
+    console.error(`[assistant] project digest unavailable: ${error?.code || error?.name || "error"}`);
+    return [];
+  }
+};
+
 /**
  * Answers a question inside a conversation (new when `conversationId` is
  * null). `transport` lets tests inject a fake model. Nothing is stored,
  * retrieved or sent to a model before the caller's access to the
  * conversation's project is decided (projectAccessFor).
  */
-const ask = async ({ orgId, user, projectId = null, conversationId = null, question, projectAccess = null, accessFor = null, transport = null, readsBoq = READS_NO_BOQ }) => {
+const ask = async ({ orgId, user, projectId = null, conversationId = null, question, projectAccess = null, accessFor = null, digestFor = null, transport = null, readsBoq = READS_NO_BOQ }) => {
   const text = trimOrNull(question);
   if (!text) throw new HttpError(400, "ASSISTANT_QUESTION_REQUIRED", "Ask a question");
   if (text.length > MAX_QUESTION) throw new HttpError(400, "ASSISTANT_QUESTION_TOO_LONG", `Keep the question under ${MAX_QUESTION} characters`);
@@ -245,7 +263,7 @@ const ask = async ({ orgId, user, projectId = null, conversationId = null, quest
   const userMessage = await prisma.assistantMessage.create({ data: { orgId, conversationId: conversation.id, role: "user", content: text } });
 
   const retrieved = await retrieval.retrieve({ orgId, user, projectId: scopeProjectId, query: text, projectAccess: scopeAccess });
-  const sources = retrieved.sources;
+  const sources = [...retrieved.sources, ...(await projectDigestSources({ digestFor, projectId: scopeProjectId, after: retrieved.sources.length }))];
   let answer;
   let citations;
   let actions = [];

@@ -7,8 +7,8 @@ const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
 const { requestForProject, requireProjectAccess } = require("../middleware/project-access");
 const { hasPermission, requireRoles } = require("../middleware/rbac");
-const { boqFigureAccess, canReadBoq, withheldWorkspaceDashboard } = require("../utils/boq-figures");
-const exceptionService = require("../services/exception.service");
+const { canReadBoq } = require("../utils/boq-figures");
+const { authorizedWorkspaceDashboard } = require("../services/ai/sources/workspace-snapshot");
 const exceptionsRouter = require("./exceptions");
 const { validate } = require("../middleware/validate");
 const {
@@ -18,8 +18,6 @@ const {
 const { moneyBody } = require("../utils/money");
 const projectService = require("../services/project.service");
 const setupReadinessService = require("../services/project-setup-readiness.service");
-const workspaceDashboardService = require("../services/workspace-dashboard.service");
-const taskService = require("../services/task.service");
 
 const router = express.Router();
 
@@ -200,75 +198,9 @@ router.get(
 
 router.get(
   "/workspace-dashboard",
-  asyncHandler(async (req, res) => {
-    // The caller as each project's own routes see them (template, role,
-    // party), resolved once per project.
-    const views = new Map();
-    const viewFor = (projectId) => {
-      if (!views.has(projectId)) views.set(projectId, requestForProject(req, projectId));
-      return views.get(projectId);
-    };
-
-    const result = await workspaceDashboardService.getWorkspaceDashboard({
-      orgId: req.user.orgId,
-      userId: req.user.id,
-      role: req.user.role,
-      isCompanyAdmin: req.user.isCompanyAdmin,
-      // The IPC queue, as the IPC routes admit it: a project's certificates
-      // only to a member who may read its IPC (ipc:read, the guard on
-      // GET /ipc), and its certificate lines — one per BOQ row allocated,
-      // valued off it — only to one who may also read its BOQ, as
-      // GET /ipc/:period withholds them (utils/boq-figures).
-      ipcAccessFor: async (projectId) => {
-        const view = await viewFor(projectId);
-        const certificates = hasPermission(view, "ipc", "read");
-        return { certificates, lines: certificates && canReadBoq(view) };
-      },
-      // Every other queue, as that module's own routes decide it on that
-      // project (certification N3), and tasks under the task list's rule.
-      moduleAccessFor: async (projectId) => {
-        const view = await viewFor(projectId);
-        return {
-          can: (moduleName) => hasPermission(view, moduleName, "read"),
-          projectWideTasks: Boolean(view.user) && taskService.hasProjectWideTaskVisibility({ role: req.user.role, projectAccess: view.projectAccess }),
-        };
-      },
-    });
-
-    // Each project's row states its budget (bac) and the EAC built from it:
-    // the approved allocations, which that project's schedule, forecast and
-    // history withhold from someone who may read neither the BOQ nor the
-    // cost module there (§12, utils/boq-figures). Decided per project, as
-    // that project's own routes decide it.
-    const rows = Array.isArray(result?.projectHealth) ? result.projectHealth : [];
-    const access = new Map(
-      await Promise.all(
-        rows.map(async (row) => [row.id, boqFigureAccess(await viewFor(row.id))]),
-      ),
-    );
-    // PC-7b: the open-exceptions figure, org-wide (§35 rule 2) over the
-    // projects the caller can open, counting on each only the exceptions
-    // they may read there (utils/boq-figures, per project).
-    const openExceptions = await exceptionService.workspaceOpenExceptions({
-      orgId: req.user.orgId,
-      userId: req.user.id,
-      role: req.user.role,
-      isCompanyAdmin: req.user.isCompanyAdmin,
-      accessFor: async (projectId) => exceptionService.exceptionAccessForView(await viewFor(projectId)),
-    });
-    const dashboard = withheldWorkspaceDashboard(result, (projectId) => access.get(projectId));
-    // Each project's contract value, and their total, only where the caller
-    // may read the project's commercial terms (certification L25).
-    const withTerms = await projectService.withheldDashboardContractValues({
-      dashboard,
-      orgId: req.user.orgId,
-      userId: req.user.id,
-      role: req.user.role,
-      isCompanyAdmin: req.user.isCompanyAdmin,
-      commercialAccessFor: async (projectId) => hasPermission(await viewFor(projectId), "ipc", "read"),
-    });
-    return sendSuccess(res, { ...withTerms, openExceptions });
-  }),
+  // Every queue, figure and count as the caller's own access decides it on
+  // each project (services/ai/sources/workspace-snapshot, shared with the AI).
+  asyncHandler(async (req, res) => sendSuccess(res, await authorizedWorkspaceDashboard(req))),
 );
 
 router.post(
@@ -391,6 +323,7 @@ router.use("/:projectId/custom-fields", nestedProjectAccess, require("./custom-f
 router.use("/:projectId/accounting", nestedProjectAccess, require("./project-accounting"));
 router.use("/:projectId/bids", nestedProjectAccess, require("./bids"));
 router.use("/:projectId/assistant", nestedProjectAccess, require("./assistant"));
+router.use("/:projectId/ai", nestedProjectAccess, require("./project-ai"));
 router.use("/:projectId/forecast", nestedProjectAccess, require("./forecast"));
 router.use("/:projectId/contract", nestedProjectAccess, require("./contract"));
 router.use("/:projectId/team", nestedProjectAccess, require("./project-team"));

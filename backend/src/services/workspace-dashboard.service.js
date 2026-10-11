@@ -488,6 +488,9 @@ async function getWorkspaceDashboard({
   // Portfolio snapshots (OCTA-RPT-BUILDER-023) need every project's health,
   // not just the six most at risk.
   allProjects = false,
+  // One project only (the project-level AI, services/ai/sources): narrows the
+  // projects the caller can open; it never widens them.
+  onlyProjectId = null,
   // What the caller may be shown of each project's IPC queue, as the IPC
   // routes decide it: async (projectId) => ({ certificates, lines }). A
   // certificate line is a BOQ row's claim (one per approved allocation,
@@ -510,6 +513,7 @@ async function getWorkspaceDashboard({
       orgId,
       archivedAt: null,
       ...getProjectAccessWhere({ userId, role, isCompanyAdmin }),
+      ...(onlyProjectId ? { id: onlyProjectId } : {}),
     },
     orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
     select: {

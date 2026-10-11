@@ -34,6 +34,7 @@ import { ControlsStrip } from './controls-strip'
 import { ProjectModuleBar } from './project-module-bar'
 import { ProjectSetupWizard } from './project-setup-wizard'
 import { SetupGuide } from './setup-guide/setup-guide'
+import { ProjectAiBrief } from '@/features/ai/components/project-ai-brief'
 import { ProjectStatusBadge } from './project-status-badge'
 
 /**
@@ -930,6 +931,7 @@ export function ProjectDetail({
               />
             )}
             {visibleModule === 'overview' && <SetupGuide projectId={projectId} readiness={setupReadiness} onNavigate={handleSetupNavigate} canNavigate={canSetupNavigate} />}
+            {visibleModule === 'overview' && !permissionsSettling && <ProjectAiBrief projectId={projectId} />}
 
             {/* Navigation moved to the module bar above the project header, so
                 the workspace gets the full width — which matters most for

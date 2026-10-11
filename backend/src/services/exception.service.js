@@ -821,12 +821,12 @@ const exceptionAccessForView = async (view) => {
  * BOQ the caller may not read, nor a module's kinds where they may not read
  * it — and `withheld` says so, without a count.
  */
-const workspaceOpenExceptions = async ({ orgId, userId, role, isCompanyAdmin = false, accessFor }) => {
+const workspaceOpenExceptions = async ({ orgId, userId, role, isCompanyAdmin = false, accessFor, onlyProjectId = null }) => {
   const basis = "Unresolved project exceptions the caller may read, on every project they can open; open = not carried by a live change event and not snoozed";
   const empty = { total: 0, bySeverity: { critical: 0, warning: 0, info: 0 }, inChange: 0, snoozed: 0, basis };
   const { getProjectAccessWhere } = require("./project-authorization.service");
   const projects = await prisma.project.findMany({
-    where: { orgId, archivedAt: null, ...getProjectAccessWhere({ userId, role, isCompanyAdmin, orgId }) },
+    where: { orgId, archivedAt: null, ...getProjectAccessWhere({ userId, role, isCompanyAdmin, orgId }), ...(onlyProjectId ? { id: onlyProjectId } : {}) },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
   });

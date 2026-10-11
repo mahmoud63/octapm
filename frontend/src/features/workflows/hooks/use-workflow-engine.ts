@@ -512,11 +512,13 @@ export const workspaceLink = (path: string | null | undefined) => {
   )
   if (!match) return null
   const search = new URLSearchParams(queryString)
+  // Search results and AI citations carry the module in the query
+  // (`/projects/{id}?module=…&child=…`), workflow links in the path.
   return {
     projectId: decodeURIComponent(match[1]),
     search: {
-      module: match[2] ? decodeURIComponent(match[2]) : undefined,
-      child: match[3] ? decodeURIComponent(match[3]) : undefined,
+      module: match[2] ? decodeURIComponent(match[2]) : (search.get('module') ?? undefined),
+      child: match[3] ? decodeURIComponent(match[3]) : (search.get('child') ?? undefined),
       recordId: search.get('recordId') ?? undefined,
     },
   }
