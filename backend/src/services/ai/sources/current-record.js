@@ -35,6 +35,34 @@ const dailyLogSource = async ({ view, projectId, recordId }) => {
   return { id: recordId, type: "daily_log", typeLabel: "Daily report on your screen", module: "daily_log", title: `Daily report ${date}`, ref: date, status: shown.status || null, projectId, projectName: project?.name || null, url: `/projects/${projectId}/site-reporting?date=${date}`, snippet: null, text: dailyLogs.renderText({ project: project || { name: "Project" }, log: shown }).slice(0, 4000) };
 };
 
+/**
+ * A meeting, read through the meeting route's own path (meeting:read and
+ * getMeetingById with the caller's role and project access): its attendees,
+ * agenda notes, recorded decisions, action items and minutes, so Generate
+ * Minutes / Extract Decisions / Extract Actions work from what was recorded.
+ */
+const meetingSource = async ({ view, projectId, recordId }) => {
+  if (!hasPermission(view, "meeting", "read")) return null;
+  const meetingService = require("../../meeting.service");
+  const { getEffectiveRole } = require("../../../middleware/rbac");
+  const meeting = await meetingService.getMeetingById({ orgId: view.user.orgId, projectId, meetingId: recordId, userId: view.user.id, role: getEffectiveRole(view), projectAccess: view.projectAccess || null }).catch((error) => {
+    if (error?.status === 404 || error?.status === 403) return null;
+    throw error;
+  });
+  if (!meeting) return null;
+  const day = (value) => (value ? String(value).slice(0, 10) : "—");
+  const lines = [
+    `Meeting ${meeting.meetingNumber}: ${meeting.title} (${meeting.meetingType}, status ${meeting.status}); scheduled ${day(meeting.scheduledAt)}${meeting.location ? ` at ${meeting.location}` : ""}`,
+    meeting.objective ? `Objective: ${meeting.objective}` : null,
+    `Attendees: ${(meeting.attendees || []).map((person) => `${person.name || "—"}${person.companyName ? ` (${person.companyName})` : ""}${person.attendanceStatus ? ` [${person.attendanceStatus}]` : ""}`).join("; ") || "none recorded"}`,
+    ...(meeting.agendaItems || []).map((item, index) => `Agenda ${index + 1}: ${item.title}${item.notes ? ` - notes: ${String(item.notes).slice(0, 400)}` : ""} (${item.status})`),
+    ...(meeting.decisions || []).map((item) => `Recorded decision: ${item.title} - ${String(item.decision || "").slice(0, 300)}${item.impact ? ` (impact: ${item.impact})` : ""}`),
+    ...(meeting.actionItems || []).map((item) => `Recorded action ${item.itemNumber ?? ""}: ${item.title}${item.description ? ` - ${String(item.description).slice(0, 200)}` : ""}; owner ${item.ownerName || "—"}; due ${day(item.dueDate)}; ${item.status}`),
+    meeting.minutesText ? `Minutes text: ${String(meeting.minutesText).slice(0, 2000)}` : "Minutes text: none written yet",
+  ].filter(Boolean);
+  return { id: meeting.id, type: "meeting", typeLabel: "Meeting on your screen", module: "meeting", title: `${meeting.meetingNumber} ${meeting.title}`, ref: meeting.meetingNumber, status: meeting.status, projectId, projectName: null, url: `/projects/${projectId}?module=meetings&recordId=${meeting.id}`, snippet: null, text: lines.join("\n").slice(0, 5000) };
+};
+
 const TYPE_LABELS = { rfi: "RFI", submittal: "Submittal", correspondence: "Correspondence", change_order: "Change order", ncr: "NCR", punch_item: "Punch item", task: "Task", meeting: "Meeting", risk: "Risk", activity: "Activity", commitment: "Commitment" };
 // The field each record is titled by: the first of these its loader selects.
 const TITLE_FIELDS = ["subject", "title", "name", "description"];
@@ -46,6 +74,7 @@ const RECORD_TYPES = [...Object.keys(BODY_LOADERS), "daily_log"];
  */
 const currentRecordSource = async ({ view, projectId, recordType, recordId }) => {
   if (recordType === "daily_log") return view?.user && recordId ? dailyLogSource({ view, projectId, recordId }) : null;
+  if (recordType === "meeting") return view?.user && recordId ? meetingSource({ view, projectId, recordId }) : null;
   const loader = BODY_LOADERS[recordType];
   if (!loader || !recordId || !view?.user || !prisma[loader.model]?.findFirst) return null;
   const viewer = documentText.documentViewer({ userId: view.user.id, projectAccess: view.projectAccess, canRead: (moduleName) => hasPermission(view, moduleName, "read") });

@@ -32,6 +32,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { Activity } from '@/features/activities/data/schema'
 import { useActivities } from '@/features/activities/hooks/use-activities'
 import { RaiseChangeEventButton } from '@/features/controls/exceptions/raise-change-event-button'
+import { AiAction } from '@/features/ai/components/ai-action'
 import {
   type MeetingActionStatus,
   type MeetingPayload,
@@ -1147,6 +1148,26 @@ export function MeetingsDashboard({
                     {formatDateTime(selectedMeeting.scheduledAt)} |{' '}
                     {selectedMeeting.location || 'No location'}
                   </p>
+                  {/* AI on this meeting (AI UX correction): drafts only; nothing is saved. */}
+                  <div className='mt-2 flex flex-wrap gap-2' data-testid='uat-meeting-ai-actions'>
+                    <AiAction
+                      label='Generate Minutes'
+                      record={{ recordType: 'meeting', recordId: selectedMeeting.id, label: selectedMeeting.meetingNumber }}
+                      question={`Draft minutes for ${selectedMeeting.meetingNumber} from its recorded agenda notes, decisions and action items: attendees, items discussed, decisions, actions with owners and due dates. Add nothing that is not recorded.`}
+                    />
+                    <AiAction
+                      label='Extract Decisions'
+                      variant='ghost'
+                      record={{ recordType: 'meeting', recordId: selectedMeeting.id, label: selectedMeeting.meetingNumber }}
+                      question={`List the decisions in ${selectedMeeting.meetingNumber}, from the recorded decisions and the agenda notes and minutes, quoting the wording.`}
+                    />
+                    <AiAction
+                      label='Extract Actions'
+                      variant='ghost'
+                      record={{ recordType: 'meeting', recordId: selectedMeeting.id, label: selectedMeeting.meetingNumber }}
+                      question={`List the actions from ${selectedMeeting.meetingNumber} with owner, due date and status, including any stated in the notes or minutes that are not yet recorded as action items.`}
+                    />
+                  </div>
                 </div>
                 <div className='flex flex-wrap gap-2'>
                   {canUpdate && (
