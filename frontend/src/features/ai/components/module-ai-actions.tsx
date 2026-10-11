@@ -29,7 +29,26 @@ const SCHEDULE_DEFAULT: ModuleAction[] = [
   },
 ]
 
+const LONG_LEAD: ModuleAction = {
+  label: 'Summarize Long-Lead Exposure',
+  question:
+    'Summarize long-lead exposure: which items are at risk against their order-by and required dates, and what the schedule depends on.',
+}
+
 const ACTIONS: Record<string, ModuleAction[]> = {
+  procurement: [
+    {
+      label: 'Identify Procurement Risk',
+      question:
+        'Which procurement items are at risk, why (order-by, delivery, lead-time alerts), and which activities do they affect?',
+    },
+    LONG_LEAD,
+    {
+      label: 'Compare Suppliers',
+      question:
+        'Compare the suppliers: their orders, status and lead-time reliability as recorded.',
+    },
+  ],
   cost: [
     {
       label: 'Explain Cost',
@@ -92,6 +111,19 @@ const CHANGE_ACTIONS: ModuleAction[] = [
 
 // Per sub-tab, when it differs from its module's actions.
 const CHILD_ACTIONS: Record<string, ModuleAction[]> = {
+  'commercial:bids': [
+    {
+      label: 'Compare Bids',
+      question:
+        'Compare the bids on each package: totals, normalised totals, plugged lines, exclusions, lead time and validity. Do not recommend an award as decided.',
+    },
+    {
+      label: 'Explain Commercial Differences',
+      question:
+        'Explain the commercial differences between the bidders: what the plugged lines, inclusions and exclusions change in the comparison.',
+    },
+  ],
+  'schedule:longLead': [LONG_LEAD],
   'commercial:change-orders': CHANGE_ACTIONS,
   'commercial:change-events': CHANGE_ACTIONS,
   'commercial:commitments': [

@@ -10,6 +10,7 @@ const { progressSources } = require("./progress-snapshot");
 const { boqSources } = require("./boq-snapshot");
 const cost = require("./cost-snapshot");
 const { changeSources } = require("./change-snapshot");
+const { procurementSources } = require("./procurement-snapshot");
 
 const BUILDERS = Object.freeze({
   schedule: scheduleSources,
@@ -22,6 +23,9 @@ const BUILDERS = Object.freeze({
   "commercial:change-orders": changeSources,
   "commercial:change-events": changeSources,
   commercial: cost.commercialSources,
+  "commercial:bids": procurementSources,
+  "schedule:longLead": procurementSources,
+  procurement: procurementSources,
 });
 
 const moduleSources = async ({ view, projectId, moduleKey, child = null }) => {

@@ -4,6 +4,10 @@ jest.mock("../../cost.service", () => ({ getCostSummary: jest.fn(async () => ({ 
 jest.mock("../../change-order.service", () => ({ listChangeOrders: jest.fn(async () => ({ orders: [{ id: "co1", ref: "VO-02", status: "pending", description: "Drainage", value: 96500, scheduleImpact: 0 }, { id: "co2", ref: "VO-01", status: "approved", description: "Glazing", value: 185000, scheduleImpact: 5 }] })) }));
 jest.mock("../../change-event.service", () => ({ listChangeEvents: jest.fn(async () => ({ items: [], summary: { count: 0 } })) }));
 jest.mock("../../exception.service", () => ({ changeEventAnswerFor: jest.fn(async ({ answer }) => answer) }));
+jest.mock("../sources/workspace-snapshot", () => ({ authorizedWorkspaceDashboard: jest.fn(async () => ({ workflowQueues: [{ key: "procurementRisks", count: 1, items: [{ projectId: "11111111-1111-4111-8111-111111111111", title: "Glazing panel", severity: "critical", meta: "order by missed" }] }] })) }));
+jest.mock("../../procurement.service", () => ({ getProcurementOverview: jest.fn(async () => ({ orders: [{ ref: "PO-0001", item: "Formwork", supplier: "Riverstone", status: "issued" }], suppliers: [], packages: [] })), listLeadTimeAlerts: jest.fn(async () => []) }));
+jest.mock("../../long-lead.service", () => ({ listLongLeadItems: jest.fn(async () => []) }));
+jest.mock("../../bid.service", () => ({ listPackages: jest.fn(async () => [{ id: "pk1", ref: "BP-01", title: "Facade", status: "open" }]), leveling: jest.fn(async () => ({ estimateTotal: 100, bidders: [{ companyName: "Acme", total: 90, normalizedTotal: 95, pluggedLines: 1, status: "submitted" }] })) }));
 jest.mock("../../forecast.service", () => ({ buildForecast: jest.fn(async () => ({ available: true, cost: { eac: 150, topRisks: [] }, schedule: {} })) }));
 jest.mock("../../progress.service", () => ({ listProgressSubmissions: jest.fn() }));
 jest.mock("../../../utils/boq-figures", () => ({ boqFigureAccess: jest.fn(() => ({ boq: false, budget: false })), withheldProgressSubmissions: jest.fn((rows) => rows), canReadBoq: jest.fn(), exceptionAccess: jest.fn(() => ({})), withheldCostSummary: jest.fn((summary) => ({ ...summary, withheld: true })), withheldForecast: jest.fn((forecast) => forecast), withheldAllocationLinks: jest.fn((order) => order) }));
@@ -104,6 +108,28 @@ describe("module sources (AI-7)", () => {
     expect(sources[0].text).toMatch(/2 change orders: 1 pending, 1 approved/);
     expect(sources.slice(1).map((item) => [item.id, item.status])).toEqual([["co1", "pending"]]);
     expect(sources[1].text).toMatch(/Status: pending \(not approved\)/);
+  });
+
+  test("procurement: orders only with procurement read, bids only with bid read, risks from the caller's own dashboard", async () => {
+    const procurementService = require("../../procurement.service");
+    const bidService = require("../../bid.service");
+    const { authorizedWorkspaceDashboard } = require("../sources/workspace-snapshot");
+    hasPermission.mockReturnValue(false);
+    const none = await moduleSources({ view, projectId: P, moduleKey: "procurement" });
+    expect(authorizedWorkspaceDashboard).toHaveBeenCalledWith(view, { projectId: P });
+    expect(procurementService.getProcurementOverview).not.toHaveBeenCalled();
+    expect(bidService.listPackages).not.toHaveBeenCalled();
+    expect(none[0].text).not.toMatch(/PO-0001|Acme/);
+    expect(none[0].text).toMatch(/At risk \(critical\): Glazing panel/);
+
+    hasPermission.mockImplementation((_view, moduleName) => moduleName === "procurement");
+    const orders = await moduleSources({ view, projectId: P, moduleKey: "procurement" });
+    expect(orders[0].text).toMatch(/PO PO-0001 Formwork/);
+    expect(bidService.listPackages).not.toHaveBeenCalled();
+
+    hasPermission.mockImplementation((_view, moduleName) => moduleName === "bid");
+    const bids = await moduleSources({ view, projectId: P, moduleKey: "commercial", child: "bids" });
+    expect(bids[0].text).toMatch(/Bid from Acme: total 90, normalised 95, 1 plugged lines/);
   });
 
   test("official progress is the latest approved submission over a stale stored figure", async () => {
