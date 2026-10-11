@@ -253,9 +253,12 @@ const screenOf = (context) => {
 };
 // The deterministic results of the module on screen (the schedule's CPM
 // results on Schedule…), from the route's moduleFor, which decides access.
-const screenModuleSources = async ({ moduleFor, projectId, screen }) => {
-  if (!moduleFor || !projectId || !screen?.moduleKey) return [];
+// A company screen (Inventory…) has no project: orgModuleFor reads it.
+const screenModuleSources = async ({ moduleFor, orgModuleFor = null, projectId, screen }) => {
+  if (!screen?.moduleKey) return [];
   try {
+    if (!projectId) return orgModuleFor ? (await orgModuleFor(screen)) || [] : [];
+    if (!moduleFor) return [];
     return (await moduleFor(projectId, screen)) || [];
   } catch (error) {
     console.error(`[assistant] module context unavailable: ${error?.code || error?.name || "error"}`);
@@ -278,7 +281,7 @@ const currentRecord = async ({ recordFor, projectId, screen }) => {
  * retrieved or sent to a model before the caller's access to the
  * conversation's project is decided (projectAccessFor).
  */
-const ask = async ({ orgId, user, projectId = null, conversationId = null, question, projectAccess = null, accessFor = null, digestFor = null, recordFor = null, moduleFor = null, context = null, transport = null, readsBoq = READS_NO_BOQ }) => {
+const ask = async ({ orgId, user, projectId = null, conversationId = null, question, projectAccess = null, accessFor = null, digestFor = null, recordFor = null, moduleFor = null, orgModuleFor = null, context = null, transport = null, readsBoq = READS_NO_BOQ }) => {
   const text = trimOrNull(question);
   if (!text) throw new HttpError(400, "ASSISTANT_QUESTION_REQUIRED", "Ask a question");
   if (text.length > MAX_QUESTION) throw new HttpError(400, "ASSISTANT_QUESTION_TOO_LONG", `Keep the question under ${MAX_QUESTION} characters`);
@@ -299,7 +302,7 @@ const ask = async ({ orgId, user, projectId = null, conversationId = null, quest
   // caller may read it (recordFor decides, failing closed), first.
   const screen = screenOf(context);
   const record = await currentRecord({ recordFor, projectId: scopeProjectId, screen });
-  const moduleSources = await screenModuleSources({ moduleFor, projectId: scopeProjectId, screen });
+  const moduleSources = await screenModuleSources({ moduleFor, orgModuleFor, projectId: scopeProjectId, screen });
   const sources = [
     ...(record ? [record] : []),
     ...moduleSources.filter((source) => !record || source.id !== record.id),

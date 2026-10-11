@@ -8,6 +8,7 @@ jest.mock("../sources/workspace-snapshot", () => ({ authorizedWorkspaceDashboard
 jest.mock("../../procurement.service", () => ({ getProcurementOverview: jest.fn(async () => ({ orders: [{ ref: "PO-0001", item: "Formwork", supplier: "Riverstone", status: "issued" }], suppliers: [], packages: [] })), listLeadTimeAlerts: jest.fn(async () => []) }));
 jest.mock("../../long-lead.service", () => ({ listLongLeadItems: jest.fn(async () => []) }));
 jest.mock("../../bid.service", () => ({ listPackages: jest.fn(async () => [{ id: "pk1", ref: "BP-01", title: "Facade", status: "open" }]), leveling: jest.fn(async () => ({ estimateTotal: 100, bidders: [{ companyName: "Acme", total: 90, normalizedTotal: 95, pluggedLines: 1, status: "submitted" }] })) }));
+jest.mock("../../inventory-analytics.service", () => ({ getAnalytics: jest.fn(async () => ({ headline: { totalValue: 56988.03, itemCount: 6, lowStock: 1 }, byWarehouse: [], lowStock: [{ sku: "SLC-PU25", name: "Polyurethane joint sealant", onHand: 24, reorderLevel: 60, shortfall: 36 }], outOfStock: [], overstock: [] })) }));
 jest.mock("../../forecast.service", () => ({ buildForecast: jest.fn(async () => ({ available: true, cost: { eac: 150, topRisks: [] }, schedule: {} })) }));
 jest.mock("../../progress.service", () => ({ listProgressSubmissions: jest.fn() }));
 jest.mock("../../../utils/boq-figures", () => ({ boqFigureAccess: jest.fn(() => ({ boq: false, budget: false })), withheldProgressSubmissions: jest.fn((rows) => rows), canReadBoq: jest.fn(), exceptionAccess: jest.fn(() => ({})), withheldCostSummary: jest.fn((summary) => ({ ...summary, withheld: true })), withheldForecast: jest.fn((forecast) => forecast), withheldAllocationLinks: jest.fn((order) => order) }));
@@ -130,6 +131,20 @@ describe("module sources (AI-7)", () => {
     hasPermission.mockImplementation((_view, moduleName) => moduleName === "bid");
     const bids = await moduleSources({ view, projectId: P, moduleKey: "commercial", child: "bids" });
     expect(bids[0].text).toMatch(/Bid from Acme: total 90, normalised 95, 1 plugged lines/);
+  });
+
+  test("inventory (a company screen): nothing without inventory read; the analytics with it", async () => {
+    const analytics = require("../../inventory-analytics.service");
+    const { orgModuleSources } = require("../sources/inventory-snapshot");
+    const req = { user: { id: "u-1", orgId: "org-1" } };
+    hasPermission.mockReturnValue(false);
+    expect(await orgModuleSources({ req, moduleKey: "inventory" })).toEqual([]);
+    expect(analytics.getAnalytics).not.toHaveBeenCalled();
+    hasPermission.mockImplementation((_req, moduleName) => moduleName === "inventory");
+    const [source] = await orgModuleSources({ req, moduleKey: "inventory" });
+    expect(analytics.getAnalytics).toHaveBeenCalledWith({ orgId: "org-1", projectId: null, projectIds: null });
+    expect(source.text).toMatch(/LOW STOCK: SLC-PU25 Polyurethane joint sealant: on hand 24/);
+    expect(await orgModuleSources({ req, moduleKey: "unknown" })).toEqual([]);
   });
 
   test("official progress is the latest approved submission over a stale stored figure", async () => {

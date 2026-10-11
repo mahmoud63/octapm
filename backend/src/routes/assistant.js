@@ -10,6 +10,7 @@ const service = require("../services/assistant.service");
 const briefService = require("../services/ai/project-brief.service");
 const { currentRecordSource, RECORD_TYPES } = require("../services/ai/sources/current-record");
 const { moduleSources } = require("../services/ai/sources/module-sources");
+const { orgModuleSources } = require("../services/ai/sources/inventory-snapshot");
 const { requestForProject } = require("../middleware/project-access");
 const { throwProjectNotFoundOrAccessDenied } = require("../services/project-authorization.service");
 const { canReadBoq } = require("../utils/boq-figures");
@@ -100,6 +101,8 @@ const build = ({ withActions }) => {
           // The module on screen's own results (CPM on Schedule…), decided per module.
           moduleFor: async (projectId, screen) =>
             moduleSources({ view: await requestForProject(req, projectId), projectId, moduleKey: screen.moduleKey, child: screen.childKey }),
+          // A company screen (no project), on the caller's own request.
+          orgModuleFor: (screen) => orgModuleSources({ req, moduleKey: screen.moduleKey }),
           context: req.body.context || null,
           readsBoq: readsBoqFor(req),
         }),

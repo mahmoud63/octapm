@@ -49,9 +49,13 @@ export const useAiScreenContext = (): AiScreenContext => {
   const search = (location.search ?? {}) as Record<string, unknown>
   const text = (value: unknown) => (typeof value === 'string' && value ? value : null)
   const projectId = match?.[1] ?? null
+  // A company screen outside any project (Inventory…).
+  const companyScreen = projectId
+    ? null
+    : (/^(?:\/o\/[^/]+)?\/(inventory)(?:\/|$)/.exec(location.pathname)?.[1] ?? null)
   const module = projectId
     ? ((match?.[2] ? moduleFromSlug(decodeURIComponent(match[2])) : null) ?? text(search.module) ?? 'overview')
-    : null
+    : companyScreen
   const child = projectId ? ((match?.[3] ? decodeURIComponent(match[3]) : null) ?? text(search.child)) : null
   return {
     projectId,

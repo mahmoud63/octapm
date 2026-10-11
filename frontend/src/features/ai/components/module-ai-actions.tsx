@@ -36,6 +36,23 @@ const LONG_LEAD: ModuleAction = {
 }
 
 const ACTIONS: Record<string, ModuleAction[]> = {
+  inventory: [
+    {
+      label: 'Identify Low Stock',
+      question:
+        'Which items are out of stock or below their reorder level, how short is each, and how long is its lead time?',
+    },
+    {
+      label: 'Explain Stock',
+      question:
+        'Explain the stock position: value by warehouse, overstock and slow-moving items, and what was issued recently.',
+    },
+    {
+      label: 'Material Risk',
+      question:
+        'Which materials are a supply risk given their stock, reorder levels and lead times?',
+    },
+  ],
   procurement: [
     {
       label: 'Identify Procurement Risk',

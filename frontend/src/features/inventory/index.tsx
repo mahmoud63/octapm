@@ -15,6 +15,7 @@ const money = (value: number) =>
     currency: 'USD',
     maximumFractionDigits: 0,
   }).format(value)
+import { ModuleAiActions } from '@/features/ai/components/module-ai-actions'
 import { AnalyticsPanel } from './components/analytics-panel'
 import { GoodsReceiptPanel } from './components/goods-receipt-panel'
 import { ItemsPanel } from './components/items-panel'
@@ -68,6 +69,9 @@ export function InventoryWorkspace() {
           to the activity that consumed it.
         </p>
       </div>
+
+      {/* AI on this screen (AI UX correction): explains the inventory analytics. */}
+      <ModuleAiActions module='inventory' child={null} />
 
       <div className='mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5'>
         {[
