@@ -6,6 +6,7 @@ const { scalarFigure } = require("../utils/figure-input");
 const { dateInput } = require("../utils/date-input");
 const { authenticate } = require("../middleware/auth");
 const { getEffectiveRole, hasPermission, requirePermission } = require("../middleware/rbac");
+const { lockIfIssued } = require("../middleware/external-review-lock");
 const { validate } = require("../middleware/validate");
 const {
   assignmentReferenceValidators,
@@ -486,6 +487,7 @@ router.post(
 router.patch(
   "/:submittalId",
   requirePermission("submittal", "update"),
+  lockIfIssued("submittal", "submittalId"),
   [
     param("submittalId").isUUID(),
     body("status")

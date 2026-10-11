@@ -22,6 +22,7 @@ const MODULE_LABELS: Record<string, string> = {
   boq: 'BOQ',
   bim: 'BIM / 5D',
   closeout: 'Closeout / Turnover',
+  reviews: 'Consultant Reviews',
   reports: 'Reports',
   inventory: 'Inventory',
 }

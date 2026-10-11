@@ -6,6 +6,7 @@ const { dateInput } = require("../utils/date-input");
 const { authenticate } = require("../middleware/auth");
 const { getEffectiveRole, requirePermission, requirePermissionOr } = require("../middleware/rbac");
 const { prisma } = require("../config/db");
+const { lockIfIssued } = require("../middleware/external-review-lock");
 const { validate } = require("../middleware/validate");
 const {
   assignmentReferenceValidators,
@@ -205,6 +206,7 @@ router.post(
 router.patch(
   "/:ncrId",
   requirePermission("ncr", "update"),
+  lockIfIssued("ncr", "ncrId"),
   [
     param("ncrId").isUUID(),
     body("severity").optional().isIn(["major", "minor"]),

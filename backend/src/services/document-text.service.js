@@ -539,6 +539,10 @@ const RECORD_RULES = Object.freeze({
   punch_item: { model: "punchItem", party: true, clauses: ({ companyIds, userId }) => [some("assigneeCompanyId", companyIds), own("createdBy", userId), own("assigneeUserId", userId)] },
   // A closeout deliverable: the responsible company and person, and its author (CLOSEOUT V1).
   closeout_deliverable: { model: "closeoutDeliverable", party: true, clauses: ({ companyIds, userId }) => [some("responsibleCompanyId", companyIds), own("createdBy", userId), own("responsibleUserId", userId)] },
+  // A review cycle's response files: its consultant party's and the people the submission is addressed to (CONSULTANT V1).
+  external_review_cycle: { model: "externalReviewCycle", party: true, clauses: ({ partyIds, userId }) => [some("partyId", partyIds), userId ? { submission: { recipients: { some: { userId, removedAt: null } } } } : null] },
+  // A progress report: a party reads it once issued.
+  progress_report: { model: "progressReport", party: true, clauses: () => [{ status: "issued" }] },
   form_instance: { model: "formInstance", party: true, clauses: ({ companyIds, userId }) => [some("assigneeCompanyId", companyIds), own("createdBy", userId), own("assigneeUserId", userId), own("inspectorUserId", userId), own("approverUserId", userId)] },
   task: { model: "task", party: true, clauses: ({ userId }) => [own("assigneeId", userId), own("createdById", userId)] },
   lookahead: { model: "lookahead", party: true, clauses: ({ userId }) => [{ status: { in: ["published", "archived"] } }, own("createdBy", userId)] },

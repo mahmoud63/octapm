@@ -26,6 +26,7 @@ export type ModuleKey =
   | 'boq'
   | 'bim'
   | 'closeout'
+  | 'reviews'
   | 'controls'
 
 export type ModuleWithChildren =
@@ -59,6 +60,7 @@ export const MODULE_SLUGS: Record<ModuleKey, string> = {
   boq: 'boq',
   bim: 'bim',
   closeout: 'closeout',
+  reviews: 'reviews',
   controls: 'controls',
 }
 
@@ -134,6 +136,7 @@ export const MODULE_PERMISSIONS: Partial<
   boq: ['boq'],
   bim: ['bim'],
   closeout: ['closeout'],
+  reviews: ['external_review'],
   // Project Controls pages reuse boq read/update (integration doc §2): no
   // new catalogue module gates them. Exceptions (PC-7b) follow their
   // subject's module — BOQ for quantity kinds, cost for money kinds,

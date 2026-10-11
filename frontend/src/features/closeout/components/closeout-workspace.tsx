@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { ExternalReviewPanel } from '@/features/consultant-reviews/components/submit-to-consultant'
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { useProjectParties } from '@/features/projects/hooks/use-projects'
@@ -501,6 +502,7 @@ function DeliverableSheet({ projectId, row, categories, onClose }: { projectId: 
             )}
           </section>
 
+          <ExternalReviewPanel projectId={projectId} sourceType='closeout_deliverable' sourceId={row.id} label={row.ref} />
           <AttachmentPanel projectId={projectId} recordType='closeout_deliverable' recordId={row.id} compact />
           <HistoryPanel projectId={projectId} entityType='closeout_deliverable' entityId={row.id} title={`${row.ref} History`} limit={30} showFilters={false} />
         </div>

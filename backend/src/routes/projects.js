@@ -466,6 +466,10 @@ router.use("/:projectId/itp", nestedProjectAccess, require("./itp"));
 router.use("/:projectId/defects", nestedProjectAccess, require("./defects"));
 router.use("/:projectId/punch", nestedProjectAccess, require("./punch"));
 router.use("/:projectId/closeout", nestedProjectAccess, require("./project-closeout"));
+// Consultant portal (CONSULTANT V1): the external review engine, consultant parties and progress reports.
+router.use("/:projectId/external-reviews", nestedProjectAccess, require("./external-reviews"));
+router.use("/:projectId/consultants", nestedProjectAccess, require("./consultants"));
+router.use("/:projectId/progress-reports", nestedProjectAccess, require("./progress-reports"));
 router.use("/:projectId/forms/templates", nestedProjectAccess, require("./form-templates"));
 router.use("/:projectId/forms", nestedProjectAccess, require("./forms"));
 router.use("/:projectId/safety", nestedProjectAccess, require("./safety"));

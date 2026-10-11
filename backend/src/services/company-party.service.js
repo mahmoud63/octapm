@@ -762,7 +762,7 @@ const acceptProjectPartyInvitation = async ({ tx, invitation, user }) => {
 
   if (projectPartyId && projectId) {
     await assertPartyOffer({ tx, invitation });
-    return addProjectPartyMemberWithTx({
+    const member = await addProjectPartyMemberWithTx({
       tx,
       orgId,
       projectId,
@@ -772,6 +772,9 @@ const acceptProjectPartyInvitation = async ({ tx, invitation, user }) => {
       invitedAt: invitation.createdAt || null,
       acceptedAt: new Date(),
     });
+    // A consultant invitation carries the reviewer's details and the access the contractor chose (CONSULTANT V1).
+    await require("./consultant.service").applyInvitationDetails({ tx, invitation, userId: user.id });
+    return member;
   }
 
   if (invitation.companyId) {

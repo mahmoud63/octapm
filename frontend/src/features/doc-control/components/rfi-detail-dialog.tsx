@@ -47,6 +47,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { UserPicker } from '@/components/user-picker'
 import { useActivities } from '@/features/activities/hooks/use-activities'
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
+import { ExternalReviewPanel } from '@/features/consultant-reviews/components/submit-to-consultant'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { CommentThread } from '@/features/comments/components/comment-thread'
 import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
@@ -1009,6 +1010,7 @@ export function RfiDetailDialog({
                   compact
                 />
               </section>
+              <ExternalReviewPanel projectId={projectId} sourceType='rfi' sourceId={rfi.id} label={rfi.ref} />
               <section className='space-y-2'>
                 <h4 className='flex items-center gap-2 text-sm font-semibold'>
                   <History className='h-4 w-4' /> History

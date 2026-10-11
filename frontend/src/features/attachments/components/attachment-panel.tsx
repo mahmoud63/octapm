@@ -75,6 +75,8 @@ const RECORD_MODULES: Record<string, PermissionModule> = {
   cost_record: 'cost',
   boq_item: 'boq',
   closeout_deliverable: 'closeout',
+  external_review_cycle: 'external_review',
+  progress_report: 'report',
   location: 'location',
   project: 'project_parties',
 }

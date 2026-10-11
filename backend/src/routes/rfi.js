@@ -7,6 +7,7 @@ const { dateInput } = require("../utils/date-input");
 const { authenticate } = require("../middleware/auth");
 const { HttpError } = require("../utils/http-error");
 const { getEffectiveRole, hasPermission, requirePermission } = require("../middleware/rbac");
+const { lockIfIssued } = require("../middleware/external-review-lock");
 const { validate } = require("../middleware/validate");
 const {
   assignmentReferenceValidators,
@@ -487,6 +488,7 @@ router.post(
 router.patch(
   "/:rfiId",
   requirePermission("rfi", "update"),
+  lockIfIssued("rfi", "rfiId"),
   [
     param("rfiId").isUUID(),
     body("priority").optional().isIn(["low", "normal", "high", "urgent"]),

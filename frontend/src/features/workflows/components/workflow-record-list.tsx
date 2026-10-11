@@ -17,6 +17,7 @@ import { csvFileName, downloadCsv } from '@/lib/export-csv'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ExternalReviewPanel } from '@/features/consultant-reviews/components/submit-to-consultant'
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { CommentThread } from '@/features/comments/components/comment-thread'
@@ -458,6 +459,9 @@ function ApprovalList({ history = [] }: { history?: WorkflowApprovalEntry[] }) {
   )
 }
 
+// Records a contractor submits to a consultant from this list (CONSULTANT V1): RFIs, submittals, NCR corrective actions, ITP inspection requests.
+const REVIEWABLE: Record<string, 'rfi' | 'submittal' | 'ncr' | 'itp'> = { rfi: 'rfi', submittal: 'submittal', ncr: 'ncr', itp: 'itp' }
+
 export function WorkflowRecordList<
   T extends WorkflowRecordMeta & { id: string },
 >({
@@ -609,6 +613,9 @@ export function WorkflowRecordList<
             {isSelected && (
               <div className='space-y-4 border-t p-3'>
                 {renderMeta?.(row)}
+                {projectId && typeof recordType === 'string' && REVIEWABLE[recordType] ? (
+                  <ExternalReviewPanel projectId={projectId} sourceType={REVIEWABLE[recordType]} sourceId={row.id} label={(row as { ref?: string }).ref || REVIEWABLE[recordType]} />
+                ) : null}
                 <AssignmentGrid row={row} />
                 {projectId && recordType ? (
                   <RecordPins

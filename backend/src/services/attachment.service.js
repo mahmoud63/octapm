@@ -86,6 +86,8 @@ const RECORD_TYPE_MODULES = Object.freeze({
   inbound_email: "email",
   bim_model: "bim",
   closeout_deliverable: "closeout",
+  external_review_cycle: "external_review",
+  progress_report: "report",
   boq_item: "boq",
   location: "location",
   project: "project_parties",
@@ -151,6 +153,8 @@ const RECORD_TYPE_MODELS = Object.freeze({
   lookahead: "lookahead",
   bim_model: "bimModel",
   closeout_deliverable: "closeoutDeliverable",
+  external_review_cycle: "externalReviewCycle",
+  progress_report: "progressReport",
   boq_item: "boqItem",
   location: "location",
 });
@@ -231,6 +235,17 @@ const normalizeTags = (tags) => {
  * the deliverable to change them.
  */
 const EVIDENCE_LOCKS = Object.freeze({
+  // A consultant's response files (CONSULTANT V1): added and removed only by the consultant side, only while
+  // the cycle waits for their response; once answered they are the response as given.
+  external_review_cycle: async (recordId, userId) => {
+    const cycle = await prisma.externalReviewCycle.findFirst({ where: { id: recordId }, select: { status: true, partyId: true, submissionId: true } });
+    if (!cycle) return null;
+    if (cycle.status !== "open") return "This review has been answered or withdrawn; its response files are fixed";
+    if (!userId) return null;
+    const member = await prisma.projectPartyMember.findFirst({ where: { userId, status: "active", projectPartyId: cycle.partyId }, select: { id: true } });
+    const recipient = member ? null : await prisma.externalSubmissionRecipient.findFirst({ where: { submissionId: cycle.submissionId, userId, removedAt: null }, select: { id: true } });
+    return member || recipient ? null : "Response files are attached by the consultant";
+  },
   closeout_deliverable: async (recordId) => {
     const row = await prisma.closeoutDeliverable.findFirst({ where: { id: recordId }, select: { status: true } });
     return row && ["submitted", "accepted", "waived", "not_applicable"].includes(row.status)
@@ -239,9 +254,9 @@ const EVIDENCE_LOCKS = Object.freeze({
   },
 });
 
-const assertEvidenceOpen = async (recordType, recordId) => {
+const assertEvidenceOpen = async (recordType, recordId, userId = null) => {
   const lock = EVIDENCE_LOCKS[recordType];
-  const reason = lock ? await lock(recordId) : null;
+  const reason = lock ? await lock(recordId, userId) : null;
   if (reason) throw new HttpError(409, "ATTACHMENT_RECORD_LOCKED", reason);
 };
 
@@ -449,7 +464,7 @@ const createAttachments = async ({
   if (!id) throw new HttpError(400, "ATTACHMENT_RECORD_ID_REQUIRED", "recordId is required");
   // The record is one of this project's before anything is uploaded, stored, audited or queued.
   await assertRecordInProject({ orgId, projectId, recordType, recordId: id });
-  await assertEvidenceOpen(recordType, id);
+  await assertEvidenceOpen(recordType, id, userId);
   // Offline replay (OCTA-MOB-PWA-018): the same upload sent twice returns what the first one made.
   const replayKey = trimOrNull(clientRequestId)?.slice(0, 120) || null;
   if (replayKey && prisma.attachment?.findMany) {
@@ -692,7 +707,7 @@ const getAttachment = async ({ orgId, projectId, attachmentId }) => {
 /** Unlinks a document from a record. The document and its photo stay. */
 const deleteAttachment = async ({ orgId, projectId, attachmentId, userId = null, userRole = null }) => {
   const existing = await getAttachment({ orgId, projectId, attachmentId });
-  await assertEvidenceOpen(existing.recordType, existing.recordId);
+  await assertEvidenceOpen(existing.recordType, existing.recordId, userId);
   await prisma.$transaction(async (tx) => {
     await tx.attachment.delete({ where: { id: attachmentId } });
     await auditService.recordEvent({

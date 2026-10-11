@@ -1560,6 +1560,56 @@
         "closeout.override": ["pm"]
       }
     },
+    "external_review": {
+      "label": "Consultant Reviews",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance",
+          "quality_engineer"
+        ],
+        "create": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "procurement",
+          "site_engineer",
+          "quality_engineer"
+        ],
+        "update": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "procurement",
+          "site_engineer",
+          "quality_engineer"
+        ],
+        "delete": [],
+        "submit": [],
+        "approve": [],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "quality_engineer"]
+      },
+      "transitions": {
+        "external_review.withdraw": ["pm", "qs", "site_engineer", "quality_engineer"],
+        "external_review.reassign": ["pm"],
+        "external_review.due_date": ["pm"],
+        "external_review.invite": ["pm"],
+        "external_review.review_rfi": [],
+        "external_review.review_submittal": [],
+        "external_review.review_progress_report": [],
+        "external_review.review_itp": [],
+        "external_review.review_ncr": [],
+        "external_review.review_closeout_deliverable": []
+      }
+    },
     "email": {
       "label": "Project Emails",
       "actions": {
@@ -1672,6 +1722,17 @@
           "transitions": []
         },
         "closeout": { "actions": ["read", "export"], "transitions": [] },
+        "external_review": {
+          "actions": ["read", "update", "approve"],
+          "transitions": [
+            "external_review.review_rfi",
+            "external_review.review_submittal",
+            "external_review.review_progress_report",
+            "external_review.review_itp",
+            "external_review.review_ncr",
+            "external_review.review_closeout_deliverable"
+          ]
+        },
         "bim": { "actions": ["read", "export"], "transitions": [] },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": { "actions": ["read"], "transitions": [] },

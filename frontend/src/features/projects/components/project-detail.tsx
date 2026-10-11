@@ -38,6 +38,8 @@ import { ProjectAiBrief } from '@/features/ai/components/project-ai-brief'
 import { ModuleAiActions } from '@/features/ai/components/module-ai-actions'
 import { Bim5dSummaryCard } from '@/features/bim/components/bim-5d-summary-card'
 import { CloseoutSummaryCard } from '@/features/closeout/components/closeout-summary-card'
+import { ConsultantReviewsCard } from '@/features/consultant-reviews/components/consultant-reviews-card'
+import { ProgressReportsPanel } from '@/features/consultant-reviews/components/progress-reports-panel'
 import { ProjectAiReports } from '@/features/ai/components/project-ai-reports'
 import { ProjectStatusBadge } from './project-status-badge'
 
@@ -87,6 +89,12 @@ const ScheduleUploadZone = lazy(() =>
 const BoqPage = lazy(() =>
   import('@/features/boq/components/boq-page').then((m) => ({
     default: m.BoqPage,
+  }))
+)
+// Consultant Reviews (CONSULTANT V1): the contractor's open requests, or a consultant's review workspace.
+const ConsultantReviewsPanel = lazy(() =>
+  import('@/features/consultant-reviews/components/reviews-module').then((m) => ({
+    default: m.ConsultantReviewsModule,
   }))
 )
 // Closeout / Turnover (CLOSEOUT V1).
@@ -240,6 +248,9 @@ function ModuleLoading() {
   )
 }
 
+// Modules an external party never sees, whatever its template: the contractor's own dashboards, team, site and commercial tools.
+const EXTERNAL_PARTY_HIDDEN = new Set<ModuleKey>(['overview', 'capture', 'siteReporting', 'team', 'equipment', 'controls', 'photos', 'activities'])
+
 export function ProjectDetail({
   projectId,
   module: moduleSlug,
@@ -288,6 +299,8 @@ export function ProjectDetail({
     project?.projectAccess?.role ??
     null
 
+  // An external party (a consultant) sees the project through what they were given, never the contractor's own dashboards.
+  const isExternalParty = projectEffectiveRole === 'external_party'
   const scheduleActivitiesCount = schedule?.activities?.length ?? 0
   const activeProjectParties = projectParties?.items ?? []
   const scheduleCriticalCount =
@@ -439,6 +452,7 @@ export function ProjectDetail({
       },
       { key: 'bim', label: 'BIM / 5D' },
       { key: 'closeout', label: 'Closeout' },
+      { key: 'reviews', label: 'Consultant Reviews' },
       { key: 'activities', label: 'Activities' },
       { key: 'equipment', label: 'Equipment' },
       { key: 'locations', label: 'Locations' },
@@ -459,11 +473,13 @@ export function ProjectDetail({
       )
       .filter(
         (item) =>
+          !(isExternalParty && EXTERNAL_PARTY_HIDDEN.has(item.key as ModuleKey)) &&
           isModuleVisible(permissionMatrix, item.key as ModuleKey) &&
           (!('children' in item) || !item.children || item.children.length > 0)
       ) as MenuItem[]
   }, [
     hasWbs,
+    isExternalParty,
     permissionMatrix,
     scheduleActivitiesCount,
     scheduleCriticalCount,
@@ -471,12 +487,15 @@ export function ProjectDetail({
   ])
 
   // The URL is the state: module and sub-tab come from the route params.
-  const requestedModule = moduleFromSlug(moduleSlug) ?? DEFAULT_MODULE
+  // An external party (a consultant) lands on their review workspace.
+  const requestedModule = moduleFromSlug(moduleSlug) ?? (isExternalParty ? 'reviews' : DEFAULT_MODULE)
   // If a template hides the module currently open, show the first visible one.
   const visibleModule: ModuleKey =
     menuItems.some((item) => item.key === requestedModule) || !menuItems.length
       ? requestedModule
-      : menuItems[0].key
+      : isExternalParty && menuItems.some((item) => item.key === 'reviews')
+        ? 'reviews'
+        : menuItems[0].key
 
   const childFor = useCallback(
     (module: ModuleWithChildren) => {
@@ -661,6 +680,9 @@ export function ProjectDetail({
       case 'closeout':
         return <CloseoutPanel projectId={projectId} />
 
+      case 'reviews':
+        return <ConsultantReviewsPanel projectId={projectId} initialRecordId={initialTarget?.recordId ?? null} />
+
       case 'siteReporting':
         return (
           <SiteReportingDashboard
@@ -812,8 +834,11 @@ export function ProjectDetail({
         return <PhotoGallery projectId={projectId} />
 
       case 'reports':
+        // An external party reads the progress reports issued to it, nothing of the contractor's own reporting.
+        if (isExternalParty) return <ProgressReportsPanel projectId={projectId} initialRecordId={initialTarget?.recordId ?? null} />
         return (
           <div className='space-y-6'>
+            <ProgressReportsPanel projectId={projectId} initialRecordId={initialTarget?.recordId ?? null} />
             <ProjectAiReports projectId={projectId} />
             <div className='rounded-md border p-4'>
               <h3 className='mb-3 text-base font-semibold'>Weekly Progress</h3>
@@ -838,6 +863,9 @@ export function ProjectDetail({
             <HealthDashboard projectId={projectId} currency={project?.currency} />
             {menuItems.some((item) => item.key === 'bim') && (
               <Bim5dSummaryCard projectId={projectId} onOpen={() => goTo('bim')} />
+            )}
+            {menuItems.some((item) => item.key === 'reviews') && (
+              <ConsultantReviewsCard projectId={projectId} onOpen={() => goTo('reviews')} />
             )}
             {menuItems.some((item) => item.key === 'closeout') && (
               <CloseoutSummaryCard projectId={projectId} onOpen={() => goTo('closeout')} />

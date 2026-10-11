@@ -3,6 +3,7 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
 const { dateInput } = require("../utils/date-input");
+const { lockIfIssued } = require("../middleware/external-review-lock");
 const { validate } = require("../middleware/validate");
 const { requirePermission } = require("../middleware/rbac");
 const {
@@ -74,6 +75,7 @@ router.post(
 router.patch(
   "/:itpId",
   requirePermission("inspection", "update"),
+  lockIfIssued("itp", "itpId"),
   [
     param("itpId").isUUID(),
     body("pointType").optional().isIn(["hold", "witness", "review"]),

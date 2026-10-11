@@ -144,6 +144,10 @@ model Organisation {
   bimMeasurementRules BimMeasurementRule[]
   bimChangeReviews    BimChangeReview[]
   projectCloseouts    ProjectCloseout[]
+  externalSubmissions ExternalSubmission[]
+  externalReviewCycles ExternalReviewCycle[]
+  externalReviewMessages ExternalReviewMessage[]
+  progressReports     ProgressReport[]
   closeoutDeliverables CloseoutDeliverable[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
@@ -611,6 +615,10 @@ model Project {
   bimMeasurementRules           BimMeasurementRule[]
   bimChangeReviews              BimChangeReview[]
   projectCloseout               ProjectCloseout?
+  externalSubmissions           ExternalSubmission[]
+  externalReviewCycles          ExternalReviewCycle[]
+  externalReviewMessages        ExternalReviewMessage[]
+  progressReports               ProgressReport[]
   closeoutDeliverables          CloseoutDeliverable[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
@@ -718,6 +726,8 @@ model ProjectParty {
   permissionsJson      Json             @default("{}")
   permissionTemplateId String?
   status               String           @default("active")
+  // Consultant type / discipline (lead, resident_engineer, architect, structural, mep, qs, specialist, other).
+  discipline           String?
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 
@@ -742,6 +752,7 @@ model ProjectParty {
   @@index([companyId])
   @@index([permissionTemplateId])
   @@index([status])
+  externalSubmissions ExternalSubmission[]
 }
 
 model ProjectPartyMember {
@@ -751,6 +762,10 @@ model ProjectPartyMember {
   companyMembershipId String?
   role                String    @default("member")
   status              String    @default("active")
+  jobTitle            String?
+  projectRole         String?
+  // The party member who issues the party's authoritative responses by default.
+  isPrimaryReviewer   Boolean            @default(false)
   invitedAt           DateTime?
   acceptedAt          DateTime?
   createdAt           DateTime  @default(now())
@@ -892,6 +907,8 @@ model InvitationToken {
   role         String
   tokenHash    String    @unique
   note         String?
+  // Offer details applied at acceptance (consultant invitation: job title, project role, primary reviewer, access template and overrides).
+  detailsJson Json      @default("{}")
   status       String    @default("pending")
   invitedById  String?
   acceptedById String?
@@ -1722,6 +1739,8 @@ model Activity {
   @@index([wbsNodeId])
   @@index([locationId])
   closeoutDeliverables CloseoutDeliverable[]
+  externalSubmissions ExternalSubmission[]
+  progressReports      ProgressReport[]
 }
 
 model ActivityDependency {
@@ -6415,6 +6434,190 @@ model CloseoutDeliverable {
   @@index([orgId])
   @@index([projectId, status])
   @@index([projectId, category])
+  @@index([activityId])
+}
+
+// ─── External review / consultant portal (CONSULTANT V1, 2026-10-11) ──────
+
+/**
+ * One record (RFI, submittal, progress report, ITP, NCR corrective action,
+ * closeout deliverable) formally issued to a consultant party for review. The
+ * one engine every module uses: the source record stays where it is; what was
+ * issued, when, to whom and what came back live in the review cycles, each
+ * preserved on its own. `status` decides who holds the action:
+ * submitted / under_review → consultant; returned / revising / responded →
+ * contractor; acknowledged / closed / withdrawn → nobody.
+ */
+model ExternalSubmission {
+  id                String    @id @default(uuid())
+  orgId             String
+  projectId         String
+  number            Int
+  ref               String
+  sourceType        String
+  sourceId          String
+  sourceRef         String?
+  title             String
+  activityId        String?
+  partyId           String
+  responsibleUserId String
+  // submitted, under_review, returned, revising, responded, acknowledged, closed, withdrawn
+  status            String    @default("submitted")
+  revision          Int       @default(1)
+  currentCycle      Int       @default(1)
+  dueAt             DateTime
+  decision          String?
+  firstSubmittedAt  DateTime
+  lastSubmittedAt   DateTime
+  lastRespondedAt   DateTime?
+  closedAt          DateTime?
+  closedBy          String?
+  closeReason       String?
+  createdBy         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  org        Organisation                  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project    Project                       @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+  party      ProjectParty                  @relation(fields: [partyId], references: [id], onDelete: Restrict)
+  activity   Activity?                     @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  cycles     ExternalReviewCycle[]
+  recipients ExternalSubmissionRecipient[]
+  messages   ExternalReviewMessage[]
+
+  @@unique([projectId, number])
+  @@unique([projectId, ref])
+  @@index([orgId])
+  @@index([projectId, status])
+  @@index([projectId, sourceType, sourceId])
+  @@index([partyId, status])
+  @@index([responsibleUserId, status])
+  @@index([activityId])
+}
+
+/**
+ * One issue of a submission and its answer, never rewritten: what was issued
+ * (snapshot and files), when (submittedAt starts the review clock), the due
+ * date, who it was with, when the reviewer first opened it, the decision with
+ * its comments and when, and when the contractor acknowledged it.
+ */
+model ExternalReviewCycle {
+  id                    String    @id @default(uuid())
+  orgId                 String
+  projectId             String
+  submissionId          String
+  cycle                 Int
+  revision              Int
+  partyId               String
+  responsibleUserId     String
+  coverNote             String?
+  snapshotJson          Json      @default("{}")
+  issuedDocumentIdsJson Json      @default("[]")
+  submittedBy           String?
+  submittedAt           DateTime
+  dueAt                 DateTime
+  firstOpenedAt         DateTime?
+  firstOpenedBy         String?
+  // open, responded, withdrawn
+  status                String    @default("open")
+  decision              String?
+  decisionLabel         String?
+  responseComment       String?
+  respondedAt           DateTime?
+  respondedBy           String?
+  acknowledgedAt        DateTime?
+  acknowledgedBy        String?
+  withdrawnAt           DateTime?
+  withdrawnBy           String?
+  withdrawReason        String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  org        Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project    Project            @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+  submission ExternalSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, cycle])
+  @@index([orgId])
+  @@index([projectId, status])
+}
+
+/** Who a submission is addressed to: the responsible reviewer and the people copied. */
+model ExternalSubmissionRecipient {
+  id           String    @id @default(uuid())
+  submissionId String
+  userId       String
+  partyId      String?
+  // responsible, cc
+  role         String
+  addedBy      String?
+  addedAt      DateTime  @default(now())
+  removedAt    DateTime?
+
+  submission ExternalSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, userId])
+  @@index([userId])
+}
+
+/**
+ * Correspondence on a submission. `shared` is seen by the contractor and the
+ * consultant participants; `internal` only by the contractor's own people —
+ * never by a party.
+ */
+model ExternalReviewMessage {
+  id           String   @id @default(uuid())
+  orgId        String
+  projectId    String
+  submissionId String
+  cycle        Int
+  authorId     String?
+  // contractor, consultant
+  authorSide   String
+  // shared, internal
+  visibility   String   @default("shared")
+  body         String
+  createdAt    DateTime @default(now())
+
+  org        Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project    Project            @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+  submission ExternalSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId, createdAt])
+  @@index([orgId])
+}
+
+/**
+ * A progress report the contractor issues (monthly by default): its period,
+ * text and files, revised by number. What was issued for review is kept in
+ * the external review cycles.
+ */
+model ProgressReport {
+  id         String    @id @default(uuid())
+  orgId      String
+  projectId  String
+  number     Int
+  ref        String
+  kind       String    @default("monthly")
+  period     String
+  title      String
+  summary    String?
+  // draft, issued
+  status     String    @default("draft")
+  revision   Int       @default(1)
+  activityId String?
+  createdBy  String?
+  updatedBy  String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+  activity Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, number])
+  @@unique([projectId, ref])
+  @@index([orgId])
   @@index([activityId])
 }
 

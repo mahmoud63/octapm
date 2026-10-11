@@ -5,6 +5,7 @@ const { sendSuccess } = require("../utils/api-response");
 const { dateInput } = require("../utils/date-input");
 const { authenticate } = require("../middleware/auth");
 const { hasPermission, requirePermission } = require("../middleware/rbac");
+const { lockIfIssued } = require("../middleware/external-review-lock");
 const { validate } = require("../middleware/validate");
 const service = require("../services/project-closeout.service");
 
@@ -48,7 +49,7 @@ router.post("/deliverables/standard", requirePermission("closeout", "create"), a
 
 router.get("/deliverables/:deliverableId", requirePermission("closeout", "read"), [...idParam, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.getDeliverable({ ...scope(req), id: req.params.deliverableId }))));
 
-router.patch("/deliverables/:deliverableId", requirePermission("closeout", "update"), [...idParam, ...deliverableFields(true), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.updateDeliverable({ ...scope(req), id: req.params.deliverableId, payload: req.body }))));
+router.patch("/deliverables/:deliverableId", requirePermission("closeout", "update"), lockIfIssued("closeout_deliverable", "deliverableId"), [...idParam, ...deliverableFields(true), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.updateDeliverable({ ...scope(req), id: req.params.deliverableId, payload: req.body }))));
 
 router.delete("/deliverables/:deliverableId", requirePermission("closeout", "delete"), [...idParam, validate], asyncHandler(async (req, res) => sendSuccess(res, await service.deleteDeliverable({ ...scope(req), id: req.params.deliverableId }))));
 

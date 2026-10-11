@@ -52,6 +52,7 @@ export type PermissionModule =
   | 'email'
   | 'bim'
   | 'closeout'
+  | 'external_review'
 
 export type RoleId =
   | 'pm'

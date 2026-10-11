@@ -66,7 +66,7 @@ const meetingSource = async ({ view, projectId, recordId }) => {
 const TYPE_LABELS = { rfi: "RFI", submittal: "Submittal", correspondence: "Correspondence", change_order: "Change order", ncr: "NCR", punch_item: "Punch item", task: "Task", meeting: "Meeting", risk: "Risk", activity: "Activity", commitment: "Commitment" };
 // The field each record is titled by: the first of these its loader selects.
 const TITLE_FIELDS = ["subject", "title", "name", "description"];
-const RECORD_TYPES = [...Object.keys(BODY_LOADERS), "daily_log", "bim_element"];
+const RECORD_TYPES = [...Object.keys(BODY_LOADERS), "daily_log", "bim_element", "external_submission"];
 
 /**
  * `view` is the caller as the project's own routes see them
@@ -75,6 +75,7 @@ const RECORD_TYPES = [...Object.keys(BODY_LOADERS), "daily_log", "bim_element"];
 const currentRecordSource = async ({ view, projectId, recordType, recordId }) => {
   if (recordType === "daily_log") return view?.user && recordId ? dailyLogSource({ view, projectId, recordId }) : null;
   if (recordType === "meeting") return view?.user && recordId ? meetingSource({ view, projectId, recordId }) : null;
+  if (recordType === "external_submission") return view?.user && recordId ? require("./review-snapshot").reviewRecordSource({ view, projectId, recordId }) : null;
   if (recordType === "bim_element") return view?.user && recordId ? require("./bim-snapshot").bimElementSource({ view, projectId, recordId }) : null;
   const loader = BODY_LOADERS[recordType];
   if (!loader || !recordId || !view?.user || !prisma[loader.model]?.findFirst) return null;

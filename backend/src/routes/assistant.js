@@ -93,7 +93,9 @@ const build = ({ withActions }) => {
           question: req.body.question,
           projectAccess: req.projectAccess || null,
           accessFor: assistantAccessFor(req),
-          digestFor: (projectId) => briefService.digest(req, projectId),
+          // The project digest is the contractor's dashboard; an external party gets none of it (CONSULTANT V1) —
+          // their questions are answered from their review queue and the records they may read.
+          digestFor: async (projectId) => (require("../services/company-party.service").isPartyScopedAccess((await requestForProject(req, projectId)).projectAccess || {}) ? null : briefService.digest(req, projectId)),
           // The record on the caller's screen, only as that project's own
           // routes would show it to them (services/ai/sources/current-record).
           recordFor: async (projectId, screen) =>

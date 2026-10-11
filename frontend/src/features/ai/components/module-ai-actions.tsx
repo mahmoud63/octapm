@@ -1,3 +1,4 @@
+import { useProjectEffectiveRole } from '@/lib/permissions'
 import { AiAction } from './ai-action'
 
 /**
@@ -159,6 +160,38 @@ ACTIONS.closeout = [
   },
 ]
 
+// Consultant reviews (CONSULTANT V1): the server reads the caller's own review
+// queue; the AI explains and drafts, and never approves, returns or submits.
+ACTIONS.reviews = [
+  {
+    label: 'What Is Waiting With Consultants?',
+    question:
+      'What is waiting with consultants right now: each request, who has it, how long it has been open and when it is due?',
+  },
+  {
+    label: 'Which Requests Are Overdue?',
+    question:
+      'Which consultant requests are overdue, by how much, and with which consultant and reviewer?',
+  },
+  {
+    label: 'What Needs My Attention?',
+    question:
+      'From the consultant reviews, what needs my attention: overdue requests, returned items to revise, and responses to acknowledge.',
+  },
+]
+
+const CONSULTANT_REVIEW_ACTIONS: ModuleAction[] = [
+  {
+    label: 'What Do I Need to Review Today?',
+    question:
+      'What do I need to review today: overdue first, then what is due soonest, with how long each has been open.',
+  },
+  {
+    label: 'Which Reviews Are Overdue?',
+    question: 'Which of my reviews are overdue and by how much?',
+  },
+]
+
 const COMMERCIAL_RISK: ModuleAction = {
   label: 'Summarize Commercial Risk',
   question:
@@ -295,7 +328,9 @@ export function ModuleAiActions({
   module: string
   child: string | null
 }) {
-  const actions = actionsFor(module, child)
+  // A consultant on the reviews screen gets the reviewer's questions, not the contractor's.
+  const external = useProjectEffectiveRole() === 'external_party'
+  const actions = module === 'reviews' && external ? CONSULTANT_REVIEW_ACTIONS : actionsFor(module, child)
   if (!actions.length) return null
   return (
     <div

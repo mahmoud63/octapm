@@ -35,6 +35,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { UserPicker } from '@/components/user-picker'
 import { useActivities } from '@/features/activities/hooks/use-activities'
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
+import { ExternalReviewPanel } from '@/features/consultant-reviews/components/submit-to-consultant'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { CommentThread } from '@/features/comments/components/comment-thread'
 import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
@@ -1016,6 +1017,7 @@ export function SubmittalDetailDialog({
                   recordId={submittal.id}
                   compact
                 />
+                <ExternalReviewPanel projectId={projectId} sourceType='submittal' sourceId={submittal.id} label={submittal.ref} />
                 <HistoryPanel
                   projectId={projectId}
                   entityType='submittal'
