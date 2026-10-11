@@ -1,5 +1,5 @@
 const express = require("express");
-const { query } = require("express-validator");
+const { body, query } = require("express-validator");
 const { validate } = require("../middleware/validate");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
@@ -7,6 +7,7 @@ const { authenticate } = require("../middleware/auth");
 const { requirePermission, noApiKey } = require("../middleware/rbac");
 const briefService = require("../services/ai/project-brief.service");
 const reportService = require("../services/ai/project-report.service");
+const documentQa = require("../services/ai/document-qa.service");
 
 /**
  * Project-level AI (AI-3), mounted at /projects/:projectId/ai behind the
@@ -74,6 +75,43 @@ router.get(
   asyncHandler(async (req, res) => {
     req.aiProjectId = req.params.projectId;
     return sendSuccess(res, await reportService.report({ req, projectId: req.params.projectId }));
+  }),
+);
+
+/**
+ * @openapi
+ * /projects/{projectId}/ai/documents/ask:
+ *   post:
+ *     tags: [AI]
+ *     summary: Document Q&A - a question answered from the passages of documents the caller may read
+ *     description: "With `documentIds`, every one must be readable by the caller (else 404); without, the project's documents are found by the caller's own document search (needs document_control read). `passages` are always returned; `answer` cites them, or is null when AI is unavailable (`degraded`). `insufficient` when no passage matches."
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string, format: uuid } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [question]
+ *             properties:
+ *               question: { type: string, maxLength: 1000 }
+ *               documentIds: { type: array, maxItems: 10, items: { type: string, format: uuid } }
+ *     responses:
+ *       200: { description: Answer with passages }
+ */
+router.post(
+  "/documents/ask",
+  requirePermission("assistant", "read"),
+  [
+    body("question").isString().trim().isLength({ min: 3, max: 1000 }),
+    body("documentIds").optional({ nullable: true }).isArray({ max: 10 }),
+    body("documentIds.*").isUUID(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    req.aiProjectId = req.params.projectId;
+    return sendSuccess(res, await documentQa.ask({ req, projectId: req.params.projectId, question: req.body.question, documentIds: req.body.documentIds || null }));
   }),
 );
 
