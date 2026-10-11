@@ -152,8 +152,10 @@ const createCorsOptions = (env = process.env) => ({
   // The request id is the support reference every client shows, so a browser
   // client (the web platform, or the mobile app running as a web build) must
   // be able to read it too. Native apps are not subject to CORS. The release
-  // header lets the web app notice it is talking to a newer API.
-  exposedHeaders: ["X-Request-Id", RELEASE_HEADER],
+  // header lets the web app notice it is talking to a newer API. A download's
+  // Content-Disposition carries the file name the server chose (BIM exports,
+  // an original IFC revision), which a cross-origin web app cannot read otherwise.
+  exposedHeaders: ["X-Request-Id", RELEASE_HEADER, "Content-Disposition"],
 });
 
 const createSocketCorsOptions = (env = process.env) => ({

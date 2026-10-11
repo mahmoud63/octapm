@@ -6148,6 +6148,9 @@ model BimModel {
   ifcSchema      String? // IFC4, IFC2X3
   status         String    @default("processing") // processing, ready, failed
   version        Int       @default(1)
+  // The code and date the revision was issued under (e.g. "C03", 2026-10-01); R01, R02… by upload order when not given.
+  revisionCode   String?
+  revisionDate   DateTime?
   isCurrent      Boolean   @default(true)
   supersededById String?
   ifcProjectName String?

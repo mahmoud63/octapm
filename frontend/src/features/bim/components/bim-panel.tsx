@@ -188,9 +188,12 @@ function UploadDialog({
 export function BimPanel({
   projectId,
   initialTarget,
+  onUpload,
 }: {
   projectId: string
   initialTarget?: ProjectSetupTarget
+  /** Opens the BIM / 5D import dialog instead of the panel's own upload. */
+  onUpload?: () => void
 }) {
   const canCreate = useCanPerform('bim', 'create')
   const canDelete = useCanPerform('bim', 'delete')
@@ -233,7 +236,7 @@ export function BimPanel({
         {canCreate && (
           <Button
             size='sm'
-            onClick={() => setUploading(true)}
+            onClick={() => (onUpload ? onUpload() : setUploading(true))}
             data-testid='uat-bim-new'
           >
             <Upload className='mr-2 h-4 w-4' /> Upload IFC

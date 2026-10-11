@@ -185,7 +185,8 @@ END-ISO-10303-21;
 
 const scope = { orgId: "org-1", projectId: "p1" };
 const actor = { id: "u-plan", name: "Plan", role: "planning_eng" };
-const file = { path: "/tmp/upload.ifc", originalname: "Riverside Tower.ifc", mimetype: "application/octet-stream", size: 2048 };
+// The upload is the fixture written in beforeAll: createModel reads its STEP header before storing it.
+const file = { get path() { return mockIfcPath; }, originalname: "Riverside Tower.ifc", mimetype: "application/octet-stream", size: 2048 };
 
 const reset = () => {
   for (const key of Object.keys(store)) store[key] = [];

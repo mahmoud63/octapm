@@ -16851,13 +16851,30 @@ const bimElementFilters = [
 ].forEach((route) => addGenericRoute({ tag: "BIM", ...route }));
 add("/projects/{projectId}/bim/models", "post", operation({
   tag: "BIM",
-  summary: "Upload an IFC model (.ifc, up to BIM_MAX_BYTES / 300 MB). The file is stored as a project document and read in the background (`bim.parse`): the spatial breakdown, every element with its type, materials, property sets and base quantities. Geometry is not evaluated. A second upload under the same name becomes version n+1 and supersedes the previous current model. Answers 202 with the model in `processing`.",
+  summary: "Upload an IFC model (.ifc, up to BIM_MAX_BYTES / 300 MB). Checked before anything is stored: 400 BIM_FILE_EMPTY, BIM_FILE_INVALID (no ISO-10303-21 STEP header or IFC FILE_SCHEMA), BIM_SCHEMA_UNSUPPORTED (IFC2X3 and IFC4 only), UNSUPPORTED_FORMAT (RVT, NWD, DWG, ifcZIP, ifcXML), 409 BIM_REVISION_DUPLICATE_FILE (the same file as an earlier revision). The file is stored as a project document and read in the background (`bim.parse`): the spatial breakdown, every element with its type, materials, property sets and base quantities. Geometry is not evaluated. A second upload under the same name becomes version n+1 and supersedes the previous current model. Answers 202 with the model in `processing`.",
   operationId: "createBimModel",
   parameters: projectParams,
   permissions: modulePermission("bim", "create"),
-  requestBody: fileUploadBody({ description: "The IFC model.", accepted: "IFC (.ifc)", extraProperties: { name: { type: "string" }, discipline: { type: "string" }, notes: { type: "string" } } }),
+  requestBody: fileUploadBody({ description: "The IFC model.", accepted: "IFC (.ifc)", extraProperties: { mode: { type: "string", enum: ["new", "revision"], description: "new: a model the project does not have (409 BIM_MODEL_EXISTS if the name is taken); revision: a new revision of `baseModelId`. Omitted: a name already in use becomes its next revision." }, name: { type: "string" }, baseModelId: { type: "string", format: "uuid" }, discipline: { type: "string", enum: ["architectural", "structural", "mep", "mechanical", "electrical", "plumbing", "civil", "coordination", "other"] }, revision: { type: "string", description: "Revision code (e.g. R03, C02); default R01, R02… 409 BIM_REVISION_DUPLICATE if the model already has it." }, revisionDate: { type: "string", format: "date", description: "Not in the future." }, notes: { type: "string" } } }),
   responseSchema: bimModelSchema,
   status: 202,
+}));
+
+add("/projects/{projectId}/bim/models/{modelId}/file", "get", operation({
+  tag: "BIM",
+  summary: "Download the original uploaded file of one model revision (bim:read).",
+  operationId: "downloadBimModelSource",
+  parameters: [...projectParams, pathParam("modelId", "Model revision UUID.")],
+  permissions: modulePermission("bim", "read"),
+  responses: { 200: { description: "The IFC file.", content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } } }, 302: { description: "Redirect to object storage." } },
+}));
+add("/projects/{projectId}/bim/5d/export", "get", operation({
+  tag: "BIM",
+  summary: "Export from BIM / 5D: `kind` elements (element register), reconciliation (needs BOQ read), mapping (mapping register) or revision-impact; `format` xlsx (default) or csv (the main sheet). BOQ codes and quantities only for a BOQ reader; element-level contract / approved / certified / paid columns are the figures of the element's BOQ item.",
+  operationId: "exportBim5d",
+  parameters: [...projectParams, queryParam("kind", "What to export.", { type: "string", enum: ["elements", "reconciliation", "mapping", "revision-impact"] }, { required: true }), queryParam("format", "xlsx (default) or csv.", { type: "string", enum: ["xlsx", "csv"] })],
+  permissions: modulePermission("bim", "export"),
+  responses: { 200: { description: "The export file.", content: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": { schema: { type: "string", format: "binary" } }, "text/csv": { schema: { type: "string" } } } } },
 }));
 
 // ─── Conversations and inbound email (OCTA-COMM-CONV-042) ─────────────────
