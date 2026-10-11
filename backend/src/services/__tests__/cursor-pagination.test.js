@@ -65,10 +65,49 @@ const walk = async (fetchPage, pageSize) => {
 /** The org with the most rows, because a two-row org proves nothing. */
 const busiestOrg = async () => {
   const orgs = await prisma.organisation.findMany({
-    select: { id: true, name: true, _count: { select: { projects: true } } },
+    select: { id: true, name: true, _count: { select: { projects: true, memberships: true } } },
   });
   return orgs.sort((a, b) => b._count.projects - a._count.projects)[0];
 };
+
+// Enough rows for every page size below to cross at least one boundary.
+const MIN_PROJECTS = 4;
+const MIN_MEMBERS = 4;
+
+/**
+ * A database seeded from scratch (prisma/seed.js) holds one project per
+ * workspace, which crosses no boundary; the test then failed on the fixture,
+ * not on paging. When no organisation is big enough, the test builds its own
+ * throwaway `LiveTest <uuid>` organisation with the live kit and drops it
+ * afterwards. A database that already has a big enough organisation is only
+ * read, as before.
+ */
+const ensurePagingFixture = async () => {
+  const busiest = await busiestOrg();
+  if (busiest && busiest._count.projects >= MIN_PROJECTS && busiest._count.memberships >= MIN_MEMBERS) {
+    return { org: busiest, created: null };
+  }
+  const { createLiveOrg, createLiveUser } = require("../../__live__/helpers");
+  const { org } = await createLiveOrg(prisma);
+  for (let i = 1; i < MIN_MEMBERS; i += 1) {
+    await createLiveUser(prisma, {
+      orgId: org.id,
+      name: `Paging Person ${i}`,
+      email: `paging-${i}-${org.id}@octapm-live.test`,
+      role: "site_engineer",
+    });
+  }
+  for (let i = 1; i <= MIN_PROJECTS + 1; i += 1) {
+    await prisma.project.create({ data: { orgId: org.id, name: `Paging Project ${i}` } });
+  }
+  return { org: await busiestOrgById(org.id), created: org.id };
+};
+
+const busiestOrgById = (id) =>
+  prisma.organisation.findUnique({
+    where: { id },
+    select: { id: true, name: true, _count: { select: { projects: true, memberships: true } } },
+  });
 
 describe("cursor pagination returns every row exactly once", () => {
 
@@ -77,13 +116,21 @@ describe("cursor pagination returns every row exactly once", () => {
   // that follows — measured at 53 idle connections part-way through a full run,
   // which is how a report test that takes 1.8s alone began exceeding a five
   // second timeout (OCTA-QA-POOL-112).
+  let org;
+  let createdOrgId = null;
+
   afterAll(async () => {
+    if (createdOrgId) {
+      const { dropLiveOrg } = require("../../__live__/helpers");
+      await dropLiveOrg(prisma, createdOrgId);
+    }
     await prisma.$disconnect();
   });
-  let org;
 
   beforeAll(async () => {
-    org = await busiestOrg();
+    const fixture = await ensurePagingFixture();
+    org = fixture.org;
+    createdOrgId = fixture.created;
   });
 
   it("has a workspace big enough to have page boundaries", () => {

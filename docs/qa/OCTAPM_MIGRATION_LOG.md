@@ -4,6 +4,16 @@ One entry per migration applied to a database other than a throwaway one, in the
 `docs/qa/OCTAPM_MIGRATION_PREFLIGHT.md`. Evidence files live outside Git under `C:\Temp\` (named per entry).
 No production migration has been run.
 
+## 20261005070000_platform_admin + 20261005070100_audit_event_occurred_at_idx — preflighted 2026-10-04, NOT APPLIED
+
+Branch `feat/platform-superadmin-v1` (not merged). Steps 3–4 and 6–9 proved on disposable clones of `octapm_verify`
+(`scripts/db/clone-to-throwaway.js`; 245 tables / 234,162 rows): 0 existing tables changed (md5 over every row),
+sentinel / 24/24 / fingerprint / 133 composite checks / snapshot 36/36 / reconciliation 16/16 delta 0.00 / EV identical
+before and after. 070100 builds the AuditEvent index CONCURRENTLY (2 M-row test: writes continue; recovery after an
+interrupted build proved). Full record: docs/platform/OCTAPM_SUPERADMIN_MIGRATION_PREFLIGHT.md. Steps 1–2, 5 (backup),
+7–9 on the shared database are still to do when the owner authorises applying it; no shared or certification database
+has either migration.
+
 ## 20261005060000_project_exceptions + 20261005060100_record_ref_uniques — 2026-10-01
 
 **Why:** PC-7b (reviewed exceptions and the Change Event handoff): `ProjectException` (derived, rebuildable rows;

@@ -15,6 +15,8 @@
     "db:seed": "node prisma/seed.js",
     "db:studio": "npx prisma studio",
     "prisma:validate": "prisma validate --schema prisma/schema.prisma",
+    "prisma:guard": "node scripts/db/prisma-client-guard.js",
+    "prisma:generate": "node scripts/db/prisma-client-guard.js && prisma generate --schema prisma/schema.prisma",
     "openapi:validate": "node scripts/validate-openapi.js",
     "db:migrate:deploy": "npx prisma migrate deploy",
     "smoke": "node scripts/smoke.js",

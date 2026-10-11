@@ -103,6 +103,8 @@ installGracefulShutdown({
     // clients on the other tasks; closing the pool first would drop it.
     await waitForEventBus();
     await realtimeAdapter?.close();
+    // Usage/error counts still buffered for the platform console (best effort).
+    await require('./services/platform/telemetry.service').drain().catch(() => null);
     await prisma.$disconnect();
   },
 });

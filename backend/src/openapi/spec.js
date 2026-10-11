@@ -926,6 +926,10 @@ const components = {
         "FILE_TYPE_MISMATCH",
         "FILE_VIRUS_DETECTED",
         "FORBIDDEN",
+        "PLATFORM_ACCESS_REQUIRED",
+        "PLATFORM_AUDIT_UNAVAILABLE",
+        "PLATFORM_COMPANY_NOT_FOUND",
+        "PLATFORM_MFA_REQUIRED",
         "INTERNAL_ERROR",
         "INVALID_ALLOCATION_VALUES",
         "INVALID_ALLOCATION_SOURCE",
@@ -18338,6 +18342,172 @@ const crFilters = [queryParam("status", "open | awaiting | returned | responded 
   { method: "delete", path: "/projects/{projectId}/progress-reports/{id}", summary: "Delete a draft report never issued for review.", operationId: "deleteProgressReport", parameters: [...projectParams, crId], permissions: modulePermission("report", "delete"), responseSchema: crGeneric },
 ].forEach((route) => addGenericRoute({ tag: "Consultant Reviews", ...route }));
 
+// ---------------------------------------------------------------------------
+// Platform administration (OctaPM staff) — docs/platform/OCTAPM_SUPERADMIN_DESIGN.md
+// ---------------------------------------------------------------------------
+const platformAdminPermission = {
+  auth: "bearer",
+  roles: [],
+  platformRoles: ["platform_superadmin"],
+  note:
+    "OctaPM platform operators only: an active PlatformUserAccess row (granted by scripts/platform/platform-access.js, never by an API) on an active account, with MFA enrolled where required. No organisation role, company-admin or owner flag grants it; API keys are refused. Every request is written to PlatformAuditEvent before it is served (503 PLATFORM_AUDIT_UNAVAILABLE otherwise). Read-only.",
+};
+const platformPageParams = [
+  queryParam("page", "Page number (1-based).", { type: "integer", minimum: 1, default: 1 }),
+  queryParam("pageSize", "Rows per page.", { type: "integer", minimum: 1, maximum: 100, default: 25 }),
+];
+const platformSearchParam = queryParam("q", "Case-insensitive search (max 120 characters).", { type: "string", maxLength: 120 });
+const platformOrgFilter = queryParam("orgId", "Only this organisation.", { type: "string", format: "uuid" });
+const platformOperation = ({ summary, description, operationId, parameters = [], data }) =>
+  operation({
+    tag: "Platform Admin",
+    summary,
+    description,
+    operationId,
+    parameters,
+    responseSchema: freeObject(data),
+    permissions: platformAdminPermission,
+  });
+
+add("/platform-admin/session", "get", platformOperation({
+  summary: "The signed-in platform operator",
+  operationId: "getPlatformAdminSession",
+  data: "{ operator: { userId, email, name, role } }. 403 PLATFORM_ACCESS_REQUIRED for everyone else.",
+}));
+add("/platform-admin/overview", "get", platformOperation({
+  summary: "Platform overview KPIs",
+  operationId: "getPlatformOverview",
+  data: "Organisations, subscriptions by plan/status, users, projects, pending invitations, storage, failed jobs, API errors, release. Counts only.",
+}));
+add("/platform-admin/companies", "get", platformOperation({
+  summary: "Companies (one row per organisation)",
+  operationId: "listPlatformCompanies",
+  parameters: [
+    ...platformPageParams,
+    platformSearchParam,
+    queryParam("sort", "Sort.", { type: "string", enum: ["name", "-name", "created", "-created", "members", "-members", "projects", "-projects", "activity", "-activity"] }),
+    queryParam("plan", "Subscription plan.", { type: "string", enum: ["trial", "individual", "business", "enterprise", "standard"] }),
+    queryParam("subscriptionStatus", "Subscription status.", { type: "string", enum: ["incomplete", "trialing", "active", "past_due", "canceled", "expired"] }),
+    queryParam("status", "Organisation status.", { type: "string" }),
+    queryParam("kind", "Workspace type.", { type: "string", enum: ["company", "personal"] }),
+    queryParam("activity", "Activity in the last 30 days.", { type: "string", enum: ["active", "inactive"] }),
+    queryParam("size", "Active members: solo 0-1, small 2-10, medium 11-50, large 51+.", { type: "string", enum: ["solo", "small", "medium", "large"] }),
+    queryParam("createdFrom", "Created on/after.", { type: "string", format: "date-time" }),
+    queryParam("createdTo", "Created on/before.", { type: "string", format: "date-time" }),
+  ],
+  data: "{ items: [{ id, name, slug, workspaceType, status, plan, subscriptionStatus, seats, activeMembers, totalMembers, activeProjects, totalProjects, lastActivityAt, storageBytes, serverErrors7d, healthFlags }], page }",
+}));
+add("/platform-admin/companies/{orgId}", "get", platformOperation({
+  summary: "Company detail (platform metadata)",
+  description: "Metadata first: subscription, members, projects (names/status/counts), usage counts by module, errors, jobs, storage, recent platform views. No record content and no commercial figures.",
+  operationId: "getPlatformCompany",
+  parameters: [pathParam("orgId", "Organisation UUID.")],
+  data: "{ company, subscription, members, projects, usage, errors, jobs, storage, platformAccess }. 404 PLATFORM_COMPANY_NOT_FOUND.",
+}));
+add("/platform-admin/users", "get", platformOperation({
+  summary: "People across the platform",
+  operationId: "listPlatformUsers",
+  parameters: [
+    ...platformPageParams,
+    platformSearchParam,
+    platformOrgFilter,
+    queryParam("sort", "Sort.", { type: "string", enum: ["name", "created", "-created", "lastLogin", "-lastLogin", "-memberships"] }),
+    queryParam("status", "Account status.", { type: "string" }),
+    queryParam("multiCompany", "Only people with two or more active memberships.", { type: "string", enum: ["true", "false"] }),
+    queryParam("lastLogin", "never | 30d | stale (older than 90 days).", { type: "string", enum: ["never", "30d", "stale"] }),
+  ],
+  data: "{ items: [{ id, name, email, accountStatus, createdAt, lastLoginAt, mfaEnabled, ssoLinked, memberships, activeMemberships, companies[≤5], pendingInvitations, platformOperator }], page }. Never passwords, tokens or MFA material.",
+}));
+add("/platform-admin/projects", "get", platformOperation({
+  summary: "Projects across the platform (metadata)",
+  operationId: "listPlatformProjects",
+  parameters: [
+    ...platformPageParams,
+    platformSearchParam,
+    platformOrgFilter,
+    queryParam("sort", "Sort.", { type: "string", enum: ["-created", "created", "name", "company"] }),
+    queryParam("status", "active | archived | a stored status.", { type: "string" }),
+  ],
+  data: "{ items: [{ id, name, status, createdAt, archivedAt, organisation, members, lastActivityAt, recordChanges30d, modulesUsed30d, healthFlags }], page }. No contract values, budgets or costs.",
+}));
+add("/platform-admin/subscriptions", "get", platformOperation({
+  summary: "Subscriptions (read-only)",
+  operationId: "listPlatformSubscriptions",
+  parameters: [
+    ...platformPageParams,
+    platformSearchParam,
+    queryParam("sort", "Sort.", { type: "string", enum: ["company", "-updated", "trialEnds", "periodEnd"] }),
+    queryParam("plan", "Plan.", { type: "string" }),
+    queryParam("status", "Status.", { type: "string", enum: ["incomplete", "trialing", "active", "past_due", "canceled", "expired"] }),
+    queryParam("paymentIssue", "Past due or last invoice failed.", { type: "string", enum: ["true", "false"] }),
+    queryParam("trialEndingDays", "Trials ending within N days (1-90).", { type: "integer", minimum: 1, maximum: 90 }),
+  ],
+  data: "{ items: [{ organisation, plan, planName, recognized, status, hasAccess, seats, activeMembers, billingCycle, trialStartsAt, trialEndsAt, currentPeriodEnd, cancelAtPeriodEnd, canceledAt, providerCustomerLinked, providerSubscriptionLinked, lastInvoiceStatus, paymentIssue }], summary, page }. Provider ids and secrets are never returned.",
+}));
+add("/platform-admin/analytics", "get", platformOperation({
+  summary: "Product adoption analytics",
+  operationId: "getPlatformProductAnalytics",
+  parameters: [queryParam("windowDays", "Window: 7, 30 or 90 days.", { type: "string", enum: ["7", "30", "90"], default: "30" })],
+  data: "{ windowDays, denominators, tracking, modules{recordActivity, trackedEvents}, events, repeatUse, engagement, funnels }",
+}));
+add("/platform-admin/health", "get", platformOperation({
+  summary: "System health",
+  operationId: "getPlatformSystemHealth",
+  data: "{ release, database, jobs, worker, scheduler, webhooks, notifications, telemetry }. No hostnames, connection strings or error messages.",
+}));
+add("/platform-admin/errors", "get", platformOperation({
+  summary: "API error analytics",
+  operationId: "getPlatformErrorAnalytics",
+  data: "{ summary, topCodes, byModule, byOrganisation, topServerErrorRoutes, daily, spikes }. Codes and counts only.",
+}));
+add("/platform-admin/audit", "get", platformOperation({
+  summary: "Platform-admin audit trail",
+  operationId: "listPlatformAuditEvents",
+  parameters: [
+    ...platformPageParams,
+    queryParam("actorUserId", "Operator.", { type: "string", format: "uuid" }),
+    queryParam("targetOrgId", "Organisation looked at.", { type: "string", format: "uuid" }),
+    queryParam("action", "Action prefix, e.g. platform.company.", { type: "string" }),
+    queryParam("days", "Look back N days (1-365, default 30).", { type: "integer", minimum: 1, maximum: 365 }),
+  ],
+  data: "{ items: [{ actorUserId, actorEmail, actorRole, action, targetType, targetId, targetOrgId, method, path, queryKeys, statusCode, requestId, occurredAt }], page }",
+}));
+add("/telemetry/events", "post", operation({
+  tag: "Platform Admin",
+  summary: "Report screen opens (product usage)",
+  description:
+    "Web and mobile report `<module>.opened` events, at most 20 per call. Names outside the catalogue (services/platform/product-event-catalog.js) and project ids outside the caller's workspace are dropped. Tenant and person come from the token. Answers 202; queued, never fails a workflow.",
+  operationId: "postTelemetryEvents",
+  status: 202,
+  requestBody: {
+    required: true,
+    content: {
+      "application/json": {
+        schema: objectSchema(
+          {
+            events: {
+              type: "array",
+              minItems: 1,
+              maxItems: 20,
+              items: objectSchema(
+                { name: { type: "string", maxLength: 64, example: "boq.opened" }, projectId: { type: "string", format: "uuid", nullable: true } },
+                ["name"],
+              ),
+            },
+            workspaceId: {
+              type: "string",
+              format: "uuid",
+              description: "The workspace (organisation id) the events were recorded in. When it is not the token's workspace the whole batch is dropped.",
+            },
+          },
+          ["events"],
+        ),
+      },
+    },
+  },
+  responseSchema: objectSchema({ accepted: { type: "integer" }, dropped: { type: "integer" } }),
+}));
+
 const openApiSpec = {
   openapi: "3.0.3",
   info: {
@@ -18612,6 +18782,11 @@ const openApiSpec = {
       name: "Inventory",
       description:
         "Inventory, warehouses and the stock ledger (OCTA-INV-STOCK-050): an item master with barcode and QR resolution, warehouses with a zone/aisle/rack/shelf/bin tree, and every movement — receipt, issue to an activity or cost code, return, transfer, adjustment, damage and quarantine — written to an append-only ledger that the balances are kept in step with. Costing is weighted average; stock cannot go negative.",
+    },
+    {
+      name: "Platform Admin",
+      description:
+        "OctaPM platform operations console (staff only, read-only V1): companies, people, projects, subscriptions, product adoption, system health and the platform-admin audit trail, plus the clients' screen-open usage intake. Authorised by PlatformUserAccess, never by organisation membership. See docs/platform/OCTAPM_SUPERADMIN_DESIGN.md.",
     },
     {
       name: "Lookaheads",

@@ -163,6 +163,26 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "authz",
     message: "Permission denied",
   },
+  PLATFORM_ACCESS_REQUIRED: {
+    status: 403,
+    category: "authz",
+    message: "This area is for OctaPM platform operators only.",
+  },
+  PLATFORM_MFA_REQUIRED: {
+    status: 403,
+    category: "authz",
+    message: "Platform access requires two-factor authentication on this account.",
+  },
+  PLATFORM_AUDIT_UNAVAILABLE: {
+    status: 503,
+    category: "availability",
+    message: "The platform audit trail cannot be written; nothing was served.",
+  },
+  PLATFORM_COMPANY_NOT_FOUND: {
+    status: 404,
+    category: "not_found",
+    message: "Company not found",
+  },
   PROJECT_ACCESS_DENIED: {
     status: 403,
     category: "authz",
