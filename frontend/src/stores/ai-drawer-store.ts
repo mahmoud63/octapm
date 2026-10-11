@@ -15,6 +15,8 @@ export interface AiRecordContext {
 interface AiDrawerState {
   open: boolean
   record: AiRecordContext | null
+  /** The page the record was named on: away from it the record no longer applies. */
+  recordPath: string | null
   /** Asked as soon as the drawer opens. */
   question: string | null
   /** Bumped on every open so the drawer starts a new question. */
@@ -27,15 +29,17 @@ interface AiDrawerState {
 export const useAiDrawer = create<AiDrawerState>()((set) => ({
   open: false,
   record: null,
+  recordPath: null,
   question: null,
   requestId: 0,
   openDrawer: (options = {}) =>
     set((state) => ({
       open: true,
       record: options.record ?? null,
+      recordPath: options.record ? window.location.pathname : null,
       question: options.question ?? null,
       requestId: state.requestId + 1,
     })),
-  setOpen: (open) => set(open ? { open } : { open, record: null, question: null }),
+  setOpen: (open) => set(open ? { open } : { open, record: null, recordPath: null, question: null }),
   clearQuestion: () => set({ question: null }),
 }))

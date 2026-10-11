@@ -531,31 +531,32 @@ export function AssistantSheet({
  * action on every screen opens (stores/ai-drawer-store).
  */
 export function AssistantButton() {
+  const openDrawer = useAiDrawer((state) => state.openDrawer)
+  return (
+    <Button
+      variant='ghost'
+      size='sm'
+      aria-label='Ask OctaPM'
+      title='Ask OctaPM about this screen'
+      className='gap-1.5 px-2'
+      onClick={() => openDrawer()}
+      data-testid='uat-assistant-open'
+    >
+      <Sparkles className='h-4 w-4' />
+      <span className='hidden lg:inline'>Ask OctaPM</span>
+    </Button>
+  )
+}
+
+/**
+ * The one Ask OctaPM drawer, mounted once in the authenticated shell
+ * (AskOctaPMLauncher) whatever opened it: the header button, the floating
+ * button or an AI action on a screen.
+ */
+export function AssistantDrawerHost() {
   const projectId = useCurrentProjectId()
   const open = useAiDrawer((state) => state.open)
   const setOpen = useAiDrawer((state) => state.setOpen)
-  const openDrawer = useAiDrawer((state) => state.openDrawer)
-  return (
-    <>
-      <Button
-        variant='ghost'
-        size='sm'
-        aria-label='Ask OctaPM'
-        title='Ask OctaPM about this screen'
-        className='gap-1.5 px-2'
-        onClick={() => openDrawer()}
-        data-testid='uat-assistant-open'
-      >
-        <Sparkles className='h-4 w-4' />
-        <span className='hidden lg:inline'>Ask OctaPM</span>
-      </Button>
-      {open && (
-        <AssistantSheet
-          open={open}
-          onOpenChange={setOpen}
-          projectId={projectId}
-        />
-      )}
-    </>
-  )
+  if (!open) return null
+  return <AssistantSheet open={open} onOpenChange={setOpen} projectId={projectId} />
 }

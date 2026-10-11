@@ -42,7 +42,11 @@ export interface AiScreenContext {
 
 export const useAiScreenContext = (): AiScreenContext => {
   const location = useLocation()
-  const record = useAiDrawer((state) => state.record)
+  const namedRecord = useAiDrawer((state) => state.record)
+  const recordPath = useAiDrawer((state) => state.recordPath)
+  // A record an action named applies on its own page; navigate away and the
+  // drawer follows the new screen instead.
+  const record = namedRecord && recordPath === location.pathname ? namedRecord : null
   // `/projects/{id}/{module-slug}/{child}` (OCTA-FE-ROUTES-008); a link may
   // still carry them as `?module=…&child=…`.
   const match = /^(?:\/o\/[^/]+)?\/projects\/([^/]+)(?:\/([^/]+))?(?:\/([^/]+))?/.exec(location.pathname)
