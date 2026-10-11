@@ -58,6 +58,12 @@ const readJson = async (response) => {
 /** fetch with the request timeout (the SDK path has its own). */
 const timedFetch = (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 
+// Newer Claude models reject `temperature` ("temperature is deprecated for
+// this model"). A model that refuses it once is remembered and sent without
+// it from then on; every caller keeps passing a temperature unchanged.
+const NO_TEMPERATURE = new Set();
+const rejectsTemperature = (error) => statusOf(error) === 400 && /temperature/i.test(String(error?.message || ""));
+
 const anthropicTransport = async ({ apiKey, model, system, messages, maxTokens, temperature }) => {
   let Anthropic;
   try {
@@ -66,15 +72,25 @@ const anthropicTransport = async ({ apiKey, model, system, messages, maxTokens, 
     Anthropic = null;
   }
   const wire = messages.map((message) => ({ role: message.role, content: providerContent("anthropic", message.content) }));
-  if (Anthropic) {
-    const client = new Anthropic({ apiKey, timeout: REQUEST_TIMEOUT_MS });
-    const result = await client.messages.create({ model, max_tokens: maxTokens, temperature, system, messages: wire });
-    return { text: (result.content || []).filter((block) => block.type === "text").map((block) => block.text).join("\n"), usage: { inputTokens: result.usage?.input_tokens ?? null, outputTokens: result.usage?.output_tokens ?? null }, stopReason: result.stop_reason || null };
+  const params = () => ({ model, max_tokens: maxTokens, ...(NO_TEMPERATURE.has(model) || temperature === undefined || temperature === null ? {} : { temperature }), system, messages: wire });
+  const send = async () => {
+    if (Anthropic) {
+      const client = new Anthropic({ apiKey, timeout: REQUEST_TIMEOUT_MS });
+      const result = await client.messages.create(params());
+      return { text: (result.content || []).filter((block) => block.type === "text").map((block) => block.text).join("\n"), usage: { inputTokens: result.usage?.input_tokens ?? null, outputTokens: result.usage?.output_tokens ?? null }, stopReason: result.stop_reason || null };
+    }
+    const response = await timedFetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify(params()) });
+    const json = await readJson(response);
+    if (!response.ok) throw Object.assign(new Error(json?.error?.message || `Anthropic answered ${response.status}`), { status: response.status });
+    return { text: (json.content || []).filter((block) => block.type === "text").map((block) => block.text).join("\n"), usage: { inputTokens: json.usage?.input_tokens ?? null, outputTokens: json.usage?.output_tokens ?? null }, stopReason: json.stop_reason || null };
+  };
+  try {
+    return await send();
+  } catch (error) {
+    if (NO_TEMPERATURE.has(model) || !rejectsTemperature(error)) throw error;
+    NO_TEMPERATURE.add(model);
+    return send();
   }
-  const response = await timedFetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ model, max_tokens: maxTokens, temperature, system, messages: wire }) });
-  const json = await readJson(response);
-  if (!response.ok) throw Object.assign(new Error(json?.error?.message || `Anthropic answered ${response.status}`), { status: response.status });
-  return { text: (json.content || []).filter((block) => block.type === "text").map((block) => block.text).join("\n"), usage: { inputTokens: json.usage?.input_tokens ?? null, outputTokens: json.usage?.output_tokens ?? null }, stopReason: json.stop_reason || null };
 };
 
 const openaiTransport = async ({ apiKey, model, system, messages, maxTokens, temperature }) => {
@@ -98,4 +114,4 @@ const geminiTransport = async ({ apiKey, model, system, messages, maxTokens, tem
 
 const TRANSPORTS = Object.freeze({ anthropic: anthropicTransport, openai: openaiTransport, gemini: geminiTransport, mock: mockTransport });
 
-module.exports = { DEFAULT_MODELS, REQUEST_TIMEOUT_MS, resolveProvider, providerContent, statusOf, readJson, TRANSPORTS, env };
+module.exports = { DEFAULT_MODELS, REQUEST_TIMEOUT_MS, resolveProvider, providerContent, statusOf, readJson, TRANSPORTS, env, _noTemperatureModels: NO_TEMPERATURE };

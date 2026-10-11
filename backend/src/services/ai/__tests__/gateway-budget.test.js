@@ -58,6 +58,19 @@ describe("AI gateway spending guard (live provider)", () => {
     expect(mockCreate.mock.calls.map(([args]) => args.model)).toEqual(["claude-haiku-5-5", "claude-sonnet-5-5"]);
   });
 
+  test("a model that rejects temperature is retried once without it, and remembered", async () => {
+    totals(0, 0, 0);
+    process.env.AI_MODEL = "claude-test-no-temperature";
+    mockCreate.mockImplementationOnce(async () => { throw Object.assign(new Error("`temperature` is deprecated for this model."), { status: 400 }); });
+    await expect(ask()).resolves.toMatchObject({ text: "ok" });
+    await expect(ask()).resolves.toMatchObject({ text: "ok" });
+    const sent = mockCreate.mock.calls.map(([args]) => ("temperature" in args ? args.temperature : "omitted"));
+    expect(sent).toEqual([0.2, "omitted", "omitted"]);
+    // Any other bad request is not retried.
+    mockCreate.mockImplementationOnce(async () => { throw Object.assign(new Error("max_tokens too large"), { status: 400 }); });
+    await expect(ask()).rejects.toMatchObject({ code: "AI_UNAVAILABLE" });
+  });
+
   test("the mock is never limited and never queries the ledger", async () => {
     process.env.AI_PROVIDER = "mock";
     totals(9_999_999, 9_999_999, 9_999);

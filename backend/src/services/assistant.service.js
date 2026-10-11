@@ -190,10 +190,14 @@ const citationsFrom = ({ answer, citations, sources }) => {
   });
 };
 
-const fallbackAnswer = ({ sources }) => {
-  if (!sources.length) return "AI answers are not configured on this server, and no matching records or documents were found for that question.";
+// `configured` false: no provider on this server. True: a provider is set but
+// did not answer (its reason is already above the list), so the answer must
+// not claim AI is unconfigured.
+const fallbackAnswer = ({ sources, configured = false }) => {
+  const lead = configured ? "" : "AI answers are not configured on this server (set ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY). ";
+  if (!sources.length) return configured ? "No matching records or documents were found for that question." : "AI answers are not configured on this server, and no matching records or documents were found for that question.";
   const lines = sources.slice(0, 6).map((source) => `- [${source.n}] ${source.typeLabel}${source.ref ? ` ${source.ref}` : ""}: ${source.title}${source.snippet ? ` — ${source.snippet}` : ""}`);
-  return `AI answers are not configured on this server (set ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY). Here is what matched your question:\n${lines.join("\n")}`;
+  return `${lead}Here is what matched your question:\n${lines.join("\n")}`;
 };
 
 const buildMessages = ({ history, question, sources, projects, screen = null }) => {
@@ -329,7 +333,7 @@ const ask = async ({ orgId, user, projectId = null, conversationId = null, quest
     } catch (error) {
       if (error?.code !== "AI_UNAVAILABLE" && error?.code !== "AI_NOT_CONFIGURED") throw error;
       degraded = true;
-      answer = `${error.message}\n\n${fallbackAnswer({ sources })}`;
+      answer = `${error.message}\n\n${fallbackAnswer({ sources, configured: error.code === "AI_UNAVAILABLE" })}`;
       citations = citationsFrom({ answer: "", citations: sources.map((source) => source.n), sources });
     }
   } else {

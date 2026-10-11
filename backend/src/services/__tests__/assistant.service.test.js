@@ -89,6 +89,9 @@ describe("project knowledge assistant", () => {
     delete process.env.OPENAI_API_KEY;
     delete process.env.GEMINI_API_KEY;
     delete process.env.AI_PROVIDER;
+    // A development .env may stage a live model; this suite checks each provider's default.
+    delete process.env.AI_MODEL;
+    delete process.env.AI_FAST_MODEL;
   });
 
   it("retrieves only what the search layer allows, quotes record bodies and numbers the sources", async () => {
