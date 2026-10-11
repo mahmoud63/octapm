@@ -79,7 +79,19 @@ export const useProjectBrief = (projectId: string, enabled = true) =>
     enabled,
   })
 
+export type ReportKind =
+  | 'status'
+  | 'executive'
+  | 'weekly'
+  | 'monthly'
+  | 'commercial'
+  | 'quality'
+  | 'procurement'
+
 export interface ProjectStatusReport {
+  kind?: ReportKind
+  /** The subject's own module figures (cost ledger, change register…), as OctaPM states them. */
+  factLines?: Array<{ source: string; lines: string[] }>
   title: string
   project: ProjectBrief['project']
   cutoffDate: string
@@ -97,9 +109,12 @@ export interface ProjectStatusReport {
 /** The AI status report (AI-5): FACT, AI INTERPRETATION and AI RECOMMENDATION. */
 export const useProjectStatusReport = (projectId: string) =>
   useMutation({
-    mutationFn: () =>
+    mutationFn: (kind: ReportKind | void) =>
       data<ProjectStatusReport>(
-        apiClient.get(`/projects/${projectId}/ai/report`, { timeout: 120_000 })
+        apiClient.get(`/projects/${projectId}/ai/report`, {
+          params: kind ? { kind } : undefined,
+          timeout: 120_000,
+        })
       ),
   })
 

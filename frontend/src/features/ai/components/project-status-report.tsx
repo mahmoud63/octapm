@@ -53,6 +53,7 @@ const asText = (report: ProjectStatusReport) =>
     '',
     'FACT (OctaPM records)',
     ...report.facts.map((fact) => `- ${fact.label}: ${fact.value}`),
+    ...(report.factLines ?? []).flatMap((group) => group.lines.map((line) => `- ${line}`)),
     ...report.attention.slice(0, 10).map((item) => `- ${item.typeLabel}: ${item.title}${item.dueDate ? ` (due ${item.dueDate.slice(0, 10)})` : ''}`),
     '',
     'AI INTERPRETATION',
@@ -120,6 +121,16 @@ export function ProjectStatusReportDialog({
                   </div>
                 ))}
               </dl>
+              {(report.factLines ?? []).map((group) => (
+                <div key={group.source} className='mt-2 space-y-0.5 text-sm'>
+                  <p className='text-xs font-medium text-muted-foreground'>{group.source}</p>
+                  <ul className='list-disc space-y-0.5 pl-4'>
+                    {group.lines.slice(0, 14).map((line, index) => (
+                      <li key={index}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
               {report.attention.length > 0 && (
                 <ul className='mt-2 space-y-0.5 text-sm'>
                   {report.attention.slice(0, 10).map((item) => (

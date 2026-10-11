@@ -36,6 +36,7 @@ import { ProjectSetupWizard } from './project-setup-wizard'
 import { SetupGuide } from './setup-guide/setup-guide'
 import { ProjectAiBrief } from '@/features/ai/components/project-ai-brief'
 import { ModuleAiActions } from '@/features/ai/components/module-ai-actions'
+import { ProjectAiReports } from '@/features/ai/components/project-ai-reports'
 import { ProjectStatusBadge } from './project-status-badge'
 
 /**
@@ -800,6 +801,7 @@ export function ProjectDetail({
       case 'reports':
         return (
           <div className='space-y-6'>
+            <ProjectAiReports projectId={projectId} />
             <div className='rounded-md border p-4'>
               <h3 className='mb-3 text-base font-semibold'>Weekly Progress</h3>
               <WeeklyProgressReport projectId={projectId} />

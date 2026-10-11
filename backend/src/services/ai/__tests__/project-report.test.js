@@ -1,5 +1,6 @@
 jest.mock("../../../config/db", () => ({ prisma: { aiRun: { create: jest.fn(async () => ({ id: "run-1" })) } } }));
 jest.mock("../project-brief.service", () => ({ digest: jest.fn() }));
+jest.mock("../sources/module-sources", () => ({ moduleSources: jest.fn(async () => []) }));
 
 const briefService = require("../project-brief.service");
 const reportService = require("../project-report.service");
@@ -54,6 +55,17 @@ describe("AI project status report (AI-5)", () => {
     const result = await reportService.report({ req, projectId: P });
     expect(result).toMatchObject({ degraded: true, degradedReason: "AI_NOT_CONFIGURED", interpretation: null, recommendations: [] });
     expect(result.facts).toHaveLength(1);
+  });
+
+  test("a commercial summary adds the commercial screens' own results, read as the caller, as fact lines and sources", async () => {
+    const { moduleSources } = require("../sources/module-sources");
+    moduleSources.mockImplementation(async ({ moduleKey, child }) => (moduleKey === "cost" ? [{ id: `${P}:cost`, type: "cost_facts", typeLabel: "Cost (OctaPM cost ledger)", title: "Cost", text: "FACT: Cost ledger totals: budget 100, actual 120" }] : child === "change-orders" ? [{ id: `${P}:change`, type: "change_facts", typeLabel: "Change management", title: "Change register", text: "FACT: 2 change orders: 1 pending" }] : []));
+    const result = await reportService.report({ req, projectId: P, kind: "commercial" });
+    expect(moduleSources.mock.calls.map(([args]) => [args.moduleKey, args.child, args.view])).toEqual([["cost", null, req], ["commercial", "change-orders", req], ["commercial", "commitments", req]]);
+    expect(result.title).toBe("Riverside Tower commercial summary");
+    expect(result.factLines).toEqual([{ source: "Cost (OctaPM cost ledger)", lines: ["Cost ledger totals: budget 100, actual 120"] }, { source: "Change management", lines: ["2 change orders: 1 pending"] }]);
+    expect(result.sources.map((source) => source.n)).toEqual([1, 2, 3, 4]);
+    await expect(reportService.report({ req, projectId: P, kind: "gossip" })).rejects.toMatchObject({ code: "INVALID_REPORT_KIND" });
   });
 
   test("no project access context, nothing read", async () => {

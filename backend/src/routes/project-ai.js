@@ -66,15 +66,17 @@ router.get("/summary", requirePermission("assistant", "read"), briefRoute("summa
  *     description: "`facts` and `attention` are OctaPM's own figures and records for the caller; `interpretation` and `recommendations` are the model's, each citing the numbered `sources` (uncited recommendations are dropped). Without AI only the facts are returned (`degraded`)."
  *     parameters:
  *       - { in: path, name: projectId, required: true, schema: { type: string, format: uuid } }
+ *       - { in: query, name: kind, schema: { type: string, enum: [status, executive, weekly, monthly, commercial, quality, procurement], default: status }, description: "adds the subject's own module results (each under the caller's access) as FACT lines and sources" }
  *     responses:
  *       200: { description: Status report }
  */
 router.get(
   "/report",
   requirePermission("assistant", "read"),
+  [query("kind").optional().isIn(Object.keys(reportService.KINDS)), validate],
   asyncHandler(async (req, res) => {
     req.aiProjectId = req.params.projectId;
-    return sendSuccess(res, await reportService.report({ req, projectId: req.params.projectId }));
+    return sendSuccess(res, await reportService.report({ req, projectId: req.params.projectId, kind: req.query.kind || "status" }));
   }),
 );
 
