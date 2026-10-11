@@ -8,6 +8,7 @@ const { requirePermission, hasPermission, noApiKey } = require("../middleware/rb
 const { validate } = require("../middleware/validate");
 const service = require("../services/assistant.service");
 const briefService = require("../services/ai/project-brief.service");
+const { currentRecordSource, RECORD_TYPES } = require("../services/ai/sources/current-record");
 const { requestForProject } = require("../middleware/project-access");
 const { throwProjectNotFoundOrAccessDenied } = require("../services/project-authorization.service");
 const { canReadBoq } = require("../utils/boq-figures");
@@ -72,6 +73,11 @@ const build = ({ withActions }) => {
       body("question").isString().trim().notEmpty().isLength({ max: 2000 }),
       body("conversationId").optional({ nullable: true }).isString().isUUID(),
       body("projectId").optional({ nullable: true }).isString().isUUID(),
+      // The screen asked from (AI UX correction): labels plus the record on it.
+      body("context").optional({ nullable: true }).isObject(),
+      body(["context.module", "context.child", "context.label"]).optional({ nullable: true }).isString().isLength({ max: 120 }),
+      body("context.recordType").optional({ nullable: true }).isIn(RECORD_TYPES),
+      body("context.recordId").optional({ nullable: true }).isUUID(),
       validate,
     ],
     asyncHandler(async (req, res) =>
@@ -86,6 +92,11 @@ const build = ({ withActions }) => {
           projectAccess: req.projectAccess || null,
           accessFor: assistantAccessFor(req),
           digestFor: (projectId) => briefService.digest(req, projectId),
+          // The record on the caller's screen, only as that project's own
+          // routes would show it to them (services/ai/sources/current-record).
+          recordFor: async (projectId, screen) =>
+            currentRecordSource({ view: await requestForProject(req, projectId), projectId, recordType: screen.recordType, recordId: screen.recordId }),
+          context: req.body.context || null,
           readsBoq: readsBoqFor(req),
         }),
       ),

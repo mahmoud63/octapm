@@ -13,6 +13,7 @@ import {
 } from '@/features/assistant/components/assistant-sheet'
 import type { AssistantCitation } from '@/features/assistant/hooks/use-assistant'
 import { workspaceLink } from '@/features/workflows/hooks/use-workflow-engine'
+import { AiAction } from './ai-action'
 import { ProjectStatusReportDialog } from './project-status-report'
 import {
   useExplainProject,
@@ -140,30 +141,19 @@ export function ProjectAiBrief({ projectId }: { projectId: string }) {
     <section
       className='mt-3 rounded-lg border bg-card p-4'
       data-testid='uat-ai-project-brief'
-      aria-label='What needs attention'
+      aria-label='OctaPM AI'
     >
       <header className='flex flex-wrap items-center gap-2'>
         <Sparkles className='h-4 w-4 text-primary' aria-hidden />
-        <h2 className='text-sm font-semibold'>What needs attention</h2>
+        <h2 className='text-sm font-semibold'>OctaPM AI</h2>
         {mode === 'mock' && (
           <Badge variant='outline' title='No AI model is connected; answers restate OctaPM records'>
             Mock model
           </Badge>
         )}
         {mode === 'disabled' && <Badge variant='secondary'>AI off</Badge>}
-        <div className='ms-auto flex gap-2'>
-          <Button
-            size='sm'
-            variant='outline'
-            disabled={explain.isPending || !brief || mode === 'disabled'}
-            onClick={() => run('attention')}
-            data-testid='uat-ai-brief-attention'
-          >
-            {explain.isPending && explain.variables === 'attention' ? (
-              <Loader2 className='me-1 h-3.5 w-3.5 animate-spin' />
-            ) : null}
-            Brief me
-          </Button>
+        <div className='ms-auto flex flex-wrap gap-2'>
+          <AiAction label='Ask OctaPM' variant='default' testId='uat-ai-dashboard-ask' />
           <Button
             size='sm'
             variant='outline'
@@ -174,17 +164,36 @@ export function ProjectAiBrief({ projectId }: { projectId: string }) {
             {explain.isPending && explain.variables === 'summary' ? (
               <Loader2 className='me-1 h-3.5 w-3.5 animate-spin' />
             ) : null}
-            Summarise project
+            AI Project Summary
           </Button>
           <Button
             size='sm'
+            variant='outline'
+            disabled={explain.isPending || !brief || mode === 'disabled'}
+            onClick={() => run('attention')}
+            data-testid='uat-ai-brief-attention'
+          >
+            {explain.isPending && explain.variables === 'attention' ? (
+              <Loader2 className='me-1 h-3.5 w-3.5 animate-spin' />
+            ) : null}
+            What Needs My Attention?
+          </Button>
+          <Button
+            size='sm'
+            variant='outline'
             disabled={statusReport.isPending || !brief}
             onClick={openReport}
             data-testid='uat-ai-status-report-open'
           >
             {statusReport.isPending ? <Loader2 className='me-1 h-3.5 w-3.5 animate-spin' /> : null}
-            Status report
+            Generate Project Report
           </Button>
+          <AiAction
+            label='Explain Project Health'
+            variant='ghost'
+            question="Explain this project's health: its overall score, the weakest dimensions and the records behind them."
+            testId='uat-ai-explain-health'
+          />
         </div>
       </header>
 
@@ -243,7 +252,7 @@ export function ProjectAiBrief({ projectId }: { projectId: string }) {
             </div>
           ) : (
             <p className='mt-1 text-sm text-muted-foreground'>
-              Ask for a brief to have AI explain these records and suggest where to focus. Every
+              Choose AI Project Summary or What Needs My Attention? to have AI explain these records and suggest where to focus. Every
               statement links to its record; figures stay OctaPM's own.
             </p>
           )}

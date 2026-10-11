@@ -24,6 +24,11 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { workspaceLink } from '@/features/workflows/hooks/use-workflow-engine'
 import {
+  askContextOf,
+  useAiScreenContext,
+} from '@/features/ai/hooks/use-ai-screen-context'
+import { useAiDrawer } from '@/stores/ai-drawer-store'
+import {
   splitCitations,
   useAskAssistant,
   useAssistantConversation,
@@ -309,18 +314,23 @@ export function AssistantSheet({
   const [pending, setPending] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const messages = conversation?.messages ?? []
+  // The screen the drawer is over, and what an AI action asked it (AI UX correction).
+  const screen = useAiScreenContext()
+  const requestId = useAiDrawer((state) => state.requestId)
+  const actionQuestion = useAiDrawer((state) => state.question)
+  const clearQuestion = useAiDrawer((state) => state.clearQuestion)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' })
   }, [messages.length, pending])
 
-  const submit = async () => {
-    const text = question.trim()
+  const submit = async (asked?: string) => {
+    const text = (asked ?? question).trim()
     if (!text) return
     setPending(text)
     setQuestion('')
     try {
-      const result = await ask.mutateAsync({ question: text, conversationId })
+      const result = await ask.mutateAsync({ question: text, conversationId: asked ? null : conversationId, context: askContextOf(screen) })
       setConversationId(result.conversationId)
     } catch (error) {
       toast.error(getServerErrorMessage(error))
@@ -329,6 +339,24 @@ export function AssistantSheet({
       setPending(null)
     }
   }
+
+  // An AI action opened the drawer with a question: a new conversation, asked at once.
+  // Asked once per opening, even when an effect runs twice (StrictMode).
+  const handledRequest = useRef<number | null>(null)
+  useEffect(() => {
+    if (!open || !actionQuestion || handledRequest.current === requestId) return
+    handledRequest.current = requestId
+    setConversationId(null)
+    clearQuestion()
+    void submit(actionQuestion)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, requestId, actionQuestion])
+
+  const contextParts = [
+    screen.moduleLabel,
+    screen.childLabel,
+    screen.record?.label ?? null,
+  ].filter(Boolean)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -349,6 +377,19 @@ export function AssistantSheet({
               ? ' No AI provider is configured, so answers list the matching records instead.'
               : ''}
           </SheetDescription>
+          {contextParts.length > 0 && (
+            <p
+              className='flex flex-wrap items-center gap-1 text-xs text-muted-foreground'
+              data-testid='uat-assistant-context'
+            >
+              <span>Context:</span>
+              {contextParts.map((part) => (
+                <span key={part} className='rounded border bg-muted/50 px-1.5 py-0.5 text-foreground'>
+                  {part}
+                </span>
+              ))}
+            </p>
+          )}
         </SheetHeader>
         <div className='flex min-h-0 flex-1 gap-3'>
           <aside className='hidden w-44 shrink-0 flex-col gap-1 overflow-y-auto border-r pr-2 sm:flex'>
@@ -458,7 +499,7 @@ export function AssistantSheet({
               <Button
                 size='icon'
                 disabled={!question.trim() || ask.isPending}
-                onClick={submit}
+                onClick={() => void submit()}
                 aria-label='Ask'
                 data-testid='uat-assistant-ask'
               >
@@ -485,20 +526,28 @@ export function AssistantSheet({
 }
 
 /** Top-bar button that opens the assistant scoped to the current project. */
+/**
+ * The global Ask OctaPM button in the header, and the one drawer every AI
+ * action on every screen opens (stores/ai-drawer-store).
+ */
 export function AssistantButton() {
   const projectId = useCurrentProjectId()
-  const [open, setOpen] = useState(false)
+  const open = useAiDrawer((state) => state.open)
+  const setOpen = useAiDrawer((state) => state.setOpen)
+  const openDrawer = useAiDrawer((state) => state.openDrawer)
   return (
     <>
       <Button
         variant='ghost'
-        size='icon'
+        size='sm'
         aria-label='Ask OctaPM'
-        title='Ask OctaPM'
-        onClick={() => setOpen(true)}
+        title='Ask OctaPM about this screen'
+        className='gap-1.5 px-2'
+        onClick={() => openDrawer()}
         data-testid='uat-assistant-open'
       >
         <Sparkles className='h-4 w-4' />
+        <span className='hidden lg:inline'>Ask OctaPM</span>
       </Button>
       {open && (
         <AssistantSheet

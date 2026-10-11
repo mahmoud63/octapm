@@ -196,8 +196,9 @@ const fallbackAnswer = ({ sources }) => {
   return `AI answers are not configured on this server (set ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY). Here is what matched your question:\n${lines.join("\n")}`;
 };
 
-const buildMessages = ({ history, question, sources, projects }) => {
-  const context = projects.length ? `Project context:\n${projects.map((project) => `- ${project.name}${project.status ? ` (${project.status})` : ""}${project.clientName ? `, client ${project.clientName}` : ""}${project.contractValue ? `, contract ${project.contractValue.toLocaleString()} ${project.currency || ""}` : ""}${project.startDate ? `, ${project.startDate} → ${project.endDate || "?"}` : ""}`).join("\n")}\n\n` : "";
+const buildMessages = ({ history, question, sources, projects, screen = null }) => {
+  const where = screen ? `The user is asking from: ${[screen.module, screen.child, screen.label].filter(Boolean).join(" › ")}. Prefer sources about what is on that screen.\n` : "";
+  const context = where + (projects.length ? `Project context:\n${projects.map((project) => `- ${project.name}${project.status ? ` (${project.status})` : ""}${project.clientName ? `, client ${project.clientName}` : ""}${project.contractValue ? `, contract ${project.contractValue.toLocaleString()} ${project.currency || ""}` : ""}${project.startDate ? `, ${project.startDate} → ${project.endDate || "?"}` : ""}`).join("\n")}\n\n` : "");
   const sourceBlock = sources.length ? `Sources:\n${retrieval.formatSources(sources)}` : "Sources: none found.";
   const messages = history.map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.role === "assistant" ? message.content : message.content }));
   messages.push({ role: "user", content: `${context}${sourceBlock}\n\nQuestion: ${question}` });
@@ -240,13 +241,33 @@ const projectDigestSources = async ({ digestFor, projectId, after }) => {
   }
 };
 
+// The screen Ask OctaPM was opened from (module, sub-tab, a label such as
+// "RFI-102" and the record on it), as the client states it: plain labels for
+// the prompt, never trusted for access. Only recordFor reads a record.
+const SCREEN_TEXT = 80;
+const screenText = (value) => (typeof value === "string" && value.trim() ? value.trim().replace(/\s+/g, " ").slice(0, SCREEN_TEXT) : null);
+const screenOf = (context) => {
+  if (!context || typeof context !== "object") return null;
+  const screen = { module: screenText(context.module), child: screenText(context.child), label: screenText(context.label), recordType: screenText(context.recordType), recordId: screenText(context.recordId) };
+  return Object.values(screen).some(Boolean) ? screen : null;
+};
+const currentRecord = async ({ recordFor, projectId, screen }) => {
+  if (!recordFor || !projectId || !screen?.recordType || !screen?.recordId) return null;
+  try {
+    return await recordFor(projectId, screen);
+  } catch (error) {
+    console.error(`[assistant] current record unavailable: ${error?.code || error?.name || "error"}`);
+    return null;
+  }
+};
+
 /**
  * Answers a question inside a conversation (new when `conversationId` is
  * null). `transport` lets tests inject a fake model. Nothing is stored,
  * retrieved or sent to a model before the caller's access to the
  * conversation's project is decided (projectAccessFor).
  */
-const ask = async ({ orgId, user, projectId = null, conversationId = null, question, projectAccess = null, accessFor = null, digestFor = null, transport = null, readsBoq = READS_NO_BOQ }) => {
+const ask = async ({ orgId, user, projectId = null, conversationId = null, question, projectAccess = null, accessFor = null, digestFor = null, recordFor = null, context = null, transport = null, readsBoq = READS_NO_BOQ }) => {
   const text = trimOrNull(question);
   if (!text) throw new HttpError(400, "ASSISTANT_QUESTION_REQUIRED", "Ask a question");
   if (text.length > MAX_QUESTION) throw new HttpError(400, "ASSISTANT_QUESTION_TOO_LONG", `Keep the question under ${MAX_QUESTION} characters`);
@@ -263,7 +284,15 @@ const ask = async ({ orgId, user, projectId = null, conversationId = null, quest
   const userMessage = await prisma.assistantMessage.create({ data: { orgId, conversationId: conversation.id, role: "user", content: text } });
 
   const retrieved = await retrieval.retrieve({ orgId, user, projectId: scopeProjectId, query: text, projectAccess: scopeAccess });
-  const sources = [...retrieved.sources, ...(await projectDigestSources({ digestFor, projectId: scopeProjectId, after: retrieved.sources.length }))];
+  // The screen the question was asked from, and the record on it when the
+  // caller may read it (recordFor decides, failing closed), first.
+  const screen = screenOf(context);
+  const record = await currentRecord({ recordFor, projectId: scopeProjectId, screen });
+  const sources = [
+    ...(record ? [record] : []),
+    ...retrieved.sources.filter((source) => !record || source.id !== record.id),
+    ...(await projectDigestSources({ digestFor, projectId: scopeProjectId, after: 0 })),
+  ].map((source, index) => ({ ...source, n: index + 1 }));
   let answer;
   let citations;
   let actions = [];
@@ -273,7 +302,7 @@ const ask = async ({ orgId, user, projectId = null, conversationId = null, quest
   let degraded = false;
   if (aiProvider.isEnabled() || transport) {
     try {
-      const completion = await aiProvider.complete({ feature: "assistant.ask", system: SYSTEM_PROMPT, messages: buildMessages({ history, question: text, sources, projects: retrieved.projects }), maxTokens: 1500, temperature: 0.2, transport });
+      const completion = await aiProvider.complete({ feature: "assistant.ask", system: SYSTEM_PROMPT, messages: buildMessages({ history, question: text, sources, projects: retrieved.projects, screen }), maxTokens: 1500, temperature: 0.2, transport });
       const parsed = aiProvider.parseJsonAnswer(completion.text);
       answer = trimOrNull(parsed?.answer) || trimOrNull(completion.text) || "I could not produce an answer.";
       citations = citationsFrom({ answer, citations: parsed?.citations, sources });

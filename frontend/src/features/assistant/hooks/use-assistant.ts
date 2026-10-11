@@ -125,6 +125,14 @@ export const useAskAssistant = (projectId: string | null) => {
     mutationFn: (payload: {
       question: string
       conversationId?: string | null
+      /** The screen asked from (labels) and the record on it, when an AI action named one. */
+      context?: {
+        module: string | null
+        child: string | null
+        label: string | null
+        recordType: string | null
+        recordId: string | null
+      } | null
     }) =>
       data<AssistantAskResult>(
         apiClient.post(`${base(projectId)}/ask`, payload, { timeout: 120_000 })
