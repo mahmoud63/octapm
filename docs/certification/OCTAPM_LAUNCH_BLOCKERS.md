@@ -281,6 +281,14 @@ Deferred (recorded, not L38):
   - **Live repro** `scripts/cert/cert3/wp1-activation-code-repro.js`: 12/12 on the fix.
   - **Reviews.** A Codex plan review, then Codex diff rounds 1 and 2 (R-H1, R-M1, G1, G2 and the round-2 test gap confirmed and closed).
   - **Mutations.** 22/22 caught, each by its named check (`wp1-fix-mutations.*.json`).
+- **CERT-3 WP-0 E2: section 3.3 build order, run 2 (2026-10-12 00:22-00:50 UTC; run date Monday 2026-10-12, Cairo a weekday) - DONE; `cert3d` taken.**
+  - **Steps.** cert2c restored, migrations applied, D-ID-1 proofs 316/316 (user-add 48, guards 68, sessions 67, sso 36, owner-recovery 74, keys 23), fingerprint cert3-pre, run-all --fresh exit 2 (by design), fingerprint cert3-post, fingerprint97 exit 0, snapshot `octapm_cert_snap_cert3d` (40 s).
+  - **Builders (15, all fresh).** BUILT: 087-SCH, 087-IMP, 087-COM-B, 087-COM-C, 087-EXC, 087-OTH. INCOMPLETE only on allowed BLOCKED refs: 087-EV (L34 x7, L112, HR-S9), 087-COM (HR-C1, HR-C8 x2), 087-FLD (HR-C11 x3, RFI-DRAFT), 087-HLT (HR-K2, HR-K1), 087-EXTRAS (HR-K7), 052-SCH-EV (L34), 052-COM (HR-C1), 052-FLD (HR-C11 x3, HR-K1), 006-LITE (HR-C1). BLOCKED refs outside the allowed set: none. Failed steps: none. 5xx: 0 (builders and api.log). Pending records: 0. The one kept 'unexpected' record is 087-EV's budget-revision DELETE answered 200 = L112, BLOCKED.
+  - **Fingerprints.** The deep companies changed 285 (company, table) pairs (the build); the 97 other companies: 0 changed pairs, 0 in the request-noise tables. Watchdog: 0 API restarts in this run.
+  - **Findings re-observed (already registered):** WP1-RB-1, HR-S1, HR-S3, HR-S4, WP3-TZ-1 (x3), HR-C1 (x5), HR-C14, L114 (x2), WP4-DRAFTS-1, HR-C3 (x2), WP4-OVR-1, WP5-AWD-1, WP5-SVC-1, WP8-TRN-1. No new P0 or P1.
+  - **Run 2 note.** The first launch at 19:13 CDT stopped at restore-cert2c because the cert cluster was still recovering after an unclean shutdown ("the database system is starting up"); its logs are kept as `logs\cert3-build-order-run2-attempt1`. Relaunched at 19:22 CDT after the cluster logged ready. Run 1's logs: `logs\cert3-build-order-run1`.
+  - **E2 status.** Executed and clean. WP-0 stays formally open on E2 only until the allowed BLOCKED refs land (plan rule); cert3d is the working baseline from now on.
+
 - **CERT-3 WP-0 builder suspects (2026-10-09).** Raised while building the deep companies; recorded, not fixed. Each is reproduced and classified in its work package's confirm-first list (plan §4). Source: the builder adjudication, `C:\Temp\octapm-cert\scratch\wp0\builders-adjudication.md`.
 
   | Id | Suspect | WP | Proposed |

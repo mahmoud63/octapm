@@ -967,3 +967,23 @@ Recorded in plan §0.1.
 - **Debug run.** With `--skip=F52,CF`, 91 of 91 recorded checks passed. One probe stopped as a setup error, which was a TEST defect: the submittal GET serves its steps as `reviewSteps` (`submittal-workflow.service.js:660`, `:668`), and the proof read `steps`. After the fix, the targeted rerun `--only=SUB` passed 14 of 14. 26 known answers are BLOCKED and there was no 5xx.
 - **Register.** RFI-RESP-1 (provisional P1) and SAFE-ARCH-1 (P2) are on the fix list and settled at the primary run. Leads DL-REPLAY-1, SUB-LINK-1 and MTG-SENT-1 are recorded.
 - **Section 3.3 run date verified for the owner.** The run date is the earlier of the UTC date and the company-zone date (`build/lib.js:879`). For 087, in Africa/Cairo, that is the UTC date. At Sunday 2026-10-11 19:12 CDT it is Monday 2026-10-12 00:12 UTC, a weekday, so 087-EXC's guard (`087-exc.js:71-72`) passes. It stays Monday until 19:00 CDT Monday. The build order keeps its Sunday 19:12 CDT start.
+
+## 2026-10-11 (19:12 CDT) / 2026-10-12 UTC - WP-0 E2: section 3.3 build order run 2 DONE; cert3d taken
+
+**Pre-flight.** UTC 2026-10-12 00:12 Monday, Cairo 03:12 Monday: 087's run date is a weekday. No proof lock, no builder or proof process, nothing on :5190 (`api.pid` 13180 stale). The cert cluster on :55433 was down (machine restart); started with `start-cluster.ps1`.
+
+**Launch.** Run 1's logs moved to `logs\cert3-build-order-run1`. The first launch (WMI) stopped at restore-cert2c: the cluster was still in crash recovery ("the database system is starting up"). Logs kept as `logs\cert3-build-order-run2-attempt1`. After `pg.log` said ready to accept connections, relaunched (WMI pid in `build-order.pid`): 19:22-19:50 CDT, status DONE.
+
+**The owner's eight items** (`scratch\wp0\build-report.js`):
+1. **Build exit/result.** Every step exit 0 except run-all exit 2 (BLOCKED steps, by design). Final line DONE.
+2. **Unexpected failures.** None: no failed step, no missing result, no pending record. The one kept 'unexpected' record (087-EV `budgetRevision.T5.delete`, 200) is L112's known answer, BLOCKED.
+3. **Expected BLOCKED steps.** 26 steps, refs only from the allowed set: L34 (8), L112 (1), HR-S9 (1), HR-C1 (3), HR-C8 (2), HR-C11 (6), RFI-DRAFT (1), HR-K1 (2), HR-K2 (1), HR-K7 (1). Outside the set: none.
+4. **Fingerprints.** cert3-pre (909,005 bytes, 00:42:34 UTC) and cert3-post (909,330 bytes, 00:49:34 UTC). The deep companies changed 285 (company, table) pairs.
+5. **The 97 companies.** Unchanged: fingerprint97 exit 0, 0 changed pairs outside the noise tables, 0 in them.
+6. **cert3d.** Created (`octapm_cert_snap_cert3d`, 40 s). The cert API restarted (PID 24476).
+7. **P0/P1.** None new. The builders re-observed only registered items (WP1-RB-1, HR-S1, HR-S3, HR-S4, WP3-TZ-1, HR-C1, HR-C14, L114, WP4-DRAFTS-1, HR-C3, WP4-OVR-1, WP5-AWD-1, WP5-SVC-1, WP8-TRN-1). D-ID-1 proofs 316/316.
+8. **Unexpected 5xx / data corruption.** 0 5xx in the builders and in api.log; watchdog 0 restarts in this run (its log's 27 lines are cumulative since 2026-10-03); no corruption signal.
+
+Register: the E2 row in `OCTAPM_LAUNCH_BLOCKERS.md` (above the builder suspects).
+
+**Next exact action.** The confirm-first sweep on cert3d (plan section 7 step 3): the reproduction scripts in `scripts/cert/cert3/` (d-id-2, d-id-3, wp1-milestone, wp1-activation-code, wp3-l34, xdoc-1, -1b, -1c, -1d) one at a time through `run-locked.js`, each compared with its recorded result; then restore cert3d (they write throwaways) and the WP-1 primary run per `WP1-RUN-PLAN.md` section 1, with no manual viewing step.
