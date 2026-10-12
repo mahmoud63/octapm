@@ -3,6 +3,17 @@
 # consultant and closeout evidence, IFC models, reports). Neither is public;
 # project files are reached only through the API's authorized presigned URLs.
 
+# The account is dedicated to OctaPM Staging: S3 Block Public Access for the
+# whole account, on top of each bucket's own. Nothing here is public — the web
+# build is read through CloudFront OAC, uploads through presigned URLs.
+resource "aws_s3_account_public_access_block" "account" {
+  account_id              = var.account_id
+  block_public_acls       = true
+  ignore_public_acls      = true
+  block_public_policy     = true
+  restrict_public_buckets = true
+}
+
 locals {
   web_bucket      = "${var.name}-web-${var.account_id}"
   uploads_bucket  = "${var.name}-uploads-${var.account_id}"

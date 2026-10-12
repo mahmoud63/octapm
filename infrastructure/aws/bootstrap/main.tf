@@ -4,9 +4,9 @@
 # encrypted, versioned, TLS-only. Locking uses S3's native lock file
 # (backend "s3" use_lockfile = true, Terraform >= 1.10), so no DynamoDB table.
 #
-# Applied once, before the staging stack's first `terraform init`. Its own
-# (tiny) state stays local in this folder (gitignored); it can be migrated into
-# the bucket afterwards (key bootstrap/terraform.tfstate) — see ../README.md.
+# Applied once (2026-10-12) with local state, which was then migrated into the
+# bucket it created, under its own key (bootstrap/terraform.tfstate). A fresh
+# checkout simply runs `terraform init` (AWS_PROFILE=octapm-staging).
 
 terraform {
   required_version = ">= 1.10.0"
@@ -15,6 +15,14 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+  }
+
+  backend "s3" {
+    bucket       = "octapm-staging-tfstate-977476317319"
+    key          = "bootstrap/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
   }
 }
 
