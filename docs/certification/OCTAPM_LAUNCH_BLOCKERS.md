@@ -289,6 +289,16 @@ Deferred (recorded, not L38):
   - **Run 2 note.** The first launch at 19:13 CDT stopped at restore-cert2c because the cert cluster was still recovering after an unclean shutdown ("the database system is starting up"); its logs are kept as `logs\cert3-build-order-run2-attempt1`. Relaunched at 19:22 CDT after the cluster logged ready. Run 1's logs: `logs\cert3-build-order-run1`.
   - **E2 status.** Executed and clean. WP-0 stays formally open on E2 only until the allowed BLOCKED refs land (plan rule); cert3d is the working baseline from now on.
 
+- **CERT-3 confirm-first sweep and WP-1 on `cert3d` (2026-10-12).**
+  - **Sweep (plan §7 step 3).** All nine reproductions re-run on `cert3d` under the lock: D-ID-2 (13 red), D-ID-3 (8 red), L34 (`wp3-l34-repro`, R1 R2 R4 R5 R7), XDOC-1 (10), XDOC-1b (54), XDOC-1c (72), XDOC-1d (23) read exactly as recorded, still CONFIRMED; `wp1-milestone-repro` 11/11 and `wp1-activation-code-repro` 12/12, the WP1-MS-1 and WP1-ACT-1 fixes hold. 0 5xx. No delta: no new defect and no HR item whose reproduction changes the picture. `cert3d` restored afterwards.
+  - **WP-1 primary run.** exit 0, 147/147; 21 known answers BLOCKED (HR-S1 x4, HR-S3 x2, HR-S4 x2, HR-S5, HR-S6 x4, HR-S8, HR-P5 x5, WP1-RB-1, CONCURRENT), 1 at value; 0 wrong; 0 5xx. No new finding.
+  - **WP1-RB-1** classified CONFIRMED P2 (rollback re-creates a retired activity under a new id; the primary run shows no progress, allocation or cost orphaned on a main path). Destination: WP-9 ("activation and rollback keep ids").
+  - **WP1-CONC-1** (concurrent activations, row below): observed `today` again (both 200, no duplicates); P3, unchanged.
+  - **PB-1 (TEST GAP, book).** `WP1.revisions.hrS3Reproduction.approve.today` still names date_sanity beside critical_path; since `f599e67` only critical_path fails. The proof's predicate is unaffected. Book wording correction deferred to the book pass (owner execution rules: polish recorded, not done now).
+  - **PB-2 (EXPECTED BEHAVIOUR).** One BASELINE_LOCKED audit event per lock; the merged timeline shows two (audit + approval). Closed.
+  - **Plan :506 TEST GAP.** No API check can tell CPM inside the activation transaction from after it (C4) or from none (C5); both SURVIVED as designed. Recorded; not an E6 guard.
+  - **Mutations.** E6 5/5 (C1, C2, G1, G5, I1) by their named catchers; C3, G2-G4, I2, I3 caught; unit 7/7; census clean (the 97 others unchanged).
+
 - **CERT-3 WP-0 builder suspects (2026-10-09).** Raised while building the deep companies; recorded, not fixed. Each is reproduced and classified in its work package's confirm-first list (plan §4). Source: the builder adjudication, `C:\Temp\octapm-cert\scratch\wp0\builders-adjudication.md`.
 
   | Id | Suspect | WP | Proposed |

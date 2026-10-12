@@ -987,3 +987,39 @@ Recorded in plan §0.1.
 Register: the E2 row in `OCTAPM_LAUNCH_BLOCKERS.md` (above the builder suspects).
 
 **Next exact action.** The confirm-first sweep on cert3d (plan section 7 step 3): the reproduction scripts in `scripts/cert/cert3/` (d-id-2, d-id-3, wp1-milestone, wp1-activation-code, wp3-l34, xdoc-1, -1b, -1c, -1d) one at a time through `run-locked.js`, each compared with its recorded result; then restore cert3d (they write throwaways) and the WP-1 primary run per `WP1-RUN-PLAN.md` section 1, with no manual viewing step.
+
+## 2026-10-12 (UTC) - Confirm-first sweep on cert3d; WP-1 primary run, mutations, census
+
+**Confirm-first sweep (plan §7 step 3).** The nine reproductions, one at a time through `run-locked.js` (`scratch\cf-sweep\run-sweep.ps1`, logs `logs\cf-sweep\`), compared with the results recorded before `cert3d` (`results\cert3\cf-sweep-pre\`) by `scratch\cf-sweep\summarize.js`:
+
+| Reproduction | Exit | On `cert3d` | Classification |
+|---|---|---|---|
+| d-id-2-repro | 2 | 12/25, the same 13 red | D-ID-2 CONFIRMED (P3 -> CERT-7) |
+| d-id-3-repro | 2 | 6/14, the same 8 red | D-ID-3 CONFIRMED (P3 -> WP-8) |
+| wp1-milestone-repro | 0 | 11/11 | WP1-MS-1 fix holds (the stored "before" was the pre-fix run) |
+| wp1-activation-code-repro | 0 | 12/12 | WP1-ACT-1 fix holds (same) |
+| wp3-l34-repro | 2 | 8/13, the same R1 R2 R4 R5 R7 | L34 CONFIRMED (WP-3) |
+| xdoc-1-repro | 2 | 24/34, the same 10 | XDOC-1 CONFIRMED P1 (HR-X1 batch, WP-2) |
+| xdoc-1b-repro | 2 | 60/114, the same 54 | XDOC-1b CONFIRMED P1 (WP-2) |
+| xdoc-1c-repro | 2 | 82/154, the same 72 | XDOC-1c / XDOC-UPB CONFIRMED P1 (WP-2) |
+| xdoc-1d-repro | 2 | 30/53, the same 23 | XDOC-ISS / XDOC-CP CONFIRMED P1 (WP-2) |
+
+0 5xx. **Delta report: none.** No new defect, and no HR item whose reproduction changes the picture. The reproductions wrote throwaways, so `cert3d` was restored (API 24476 stopped as recorded, `snapshot-db.js restore cert3d`, API 55728).
+
+**WP-1 step 2.** The proof parses; the mutant syntax scan reads 42 mutations, every anchor once, 0 unparseable.
+
+**WP-1 primary run** (`logs\cert3-wp1-primary.log`; results `wp1-schedule-proof.primary.json` = `.baseline.json`): **exit 0, 147 passed of 147**; tally 125 pass, 0 fail of 146 recorded; known answers **1 value, 21 today (BLOCKED), 0 wrong**; G.5xx pass. Confirm-first: CF.1 and CF.4 REJECTED (the landed fixes hold); CF.2, 3, 5, 6, 7, 8, 9, 10 CONFIRMED. LANES.052 and LANES.006 passed on their first execution. Cleanup: lookahead deleted; X and W archived; 0 live throwaways; the F1float5 draft stays under_review (HR-S3). The run matches WP1-RUN-PLAN §2.3 and §5.1 line for line; the §3 table's pre-filled rows hold as written. No new finding, no fix (step 5 empty), so no targeted or second full run (§6.3).
+
+**Mutations** (`scratch\wp1\run-wp1-mutations.ps1`, logs `logs\wp1-mutations\`; per-mutant results `results\cert3\wp1-mutations\<id>.json`; `wp1-mutation-evidence.js` exit 0):
+- **E6 5/5** by the named catchers: C1 (all 15 T1 catchers; exit 1 by design, W stops after BL.covered.live), C2 (KA.T3.pure.hrS1 `wrong`), G1 (BL.noBoq, .zeroRated, .allOutOfScope), G5 (BL.notActivated), I1 (IMP.stagedNotApplied; exit 1 by design).
+- Complements caught: C3, G2, G3, G4, I2, I3. C4 and C5 SURVIVED as designed (plan :506 TEST GAP; C5's trace: tally 2 value / 20 today). Unit list 7/7 (UG1-UG4, UI3, UC4, UC5).
+- C1's extra reds CF.1, CF.6 and CF.10 sit on the W flow after C1's designed stop; the evidence checker reads C1 valid. Classified: harness consequence of the stop, not a product signal.
+- The 22 landed-fix guards stand at `f599e67` (no product diff since).
+
+**Census.** `fingerprint wp1-post`, then `fingerprint97 cert3-post wp1-post` exit 0: the 97 other companies 0 pairs; 087 changed 22 tables (the throwaway W/X projects of the 14 runs and the F1float5 status), 088 `user` and `refresh_session` (the outsider's sign-ins, noise). The worktree shows no mutated file. No restore needed after the lists (§7.6).
+
+**Reviews.** No product diff beyond `f599e67`; the proof, lists and book are unchanged since `fc29478`. Codex: not needed (loop closed by the owner). No new diff, so no `/code-review` round.
+
+**Owner decisions WP-1 waits on:** HR-S1, HR-S3, HR-S4, HR-S5, HR-S6, HR-S8, HR-P5 (and HR-S7 documentation). WP1-RB-1 classified P2 (WP-9). PB-1 book wording deferred; PB-2 closed.
+
+**Next exact action.** Restore `cert3d` (WP-1 left 28 archived throwaways and the F1float5 status in 087), then WP-2 per its run plan: the three decided-rule fixes (HR-Q1, HR-P1, HR-X1 with the XDOC P1s) on their final plans r3c.
