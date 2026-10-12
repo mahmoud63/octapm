@@ -1,3 +1,10 @@
+# RETIRED 2026-10-12. The EC2 + pm2 deployment this described (single t3.small,
+# SSH, local Terraform state) is obsolete: OctaPM staging runs on ECS Fargate
+# (infrastructure/aws/staging, .github/workflows/staging-deploy.yml).
+# Kept for reference only. It lives outside .github/workflows, so GitHub never
+# runs it; the copy still on main is disabled in the repository's Actions
+# settings (workflow 'Deploy', state disabled_manually).
+
 name: Deploy
 
 on:

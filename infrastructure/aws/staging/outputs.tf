@@ -36,11 +36,11 @@ output "secrets" {
 }
 
 output "migration_task" {
-  description = "Run migrations with this task definition and a command override (deploy phase)."
+  description = "The one-off migration task (run by .github/workflows/staging-deploy.yml)."
   value = {
-    task_definition = aws_ecs_task_definition.worker.family
+    task_definition = aws_ecs_task_definition.migrate.family
     subnets         = aws_subnet.public[*].id
     security_group  = aws_security_group.worker.id
-    command         = ["npx", "prisma", "migrate", "deploy"]
+    command         = ["npx", "--no", "prisma", "migrate", "deploy"]
   }
 }

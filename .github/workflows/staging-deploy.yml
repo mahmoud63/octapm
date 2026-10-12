@@ -1,0 +1,256 @@
+# OctaPM staging deploy (AWS account 977476317319, us-east-1).
+#
+# Runs ONLY on a push to release/staging, in the `staging` GitHub environment
+# (deployment branch policy: release/staging). It authenticates to AWS through
+# GitHub OIDC (role octapm-staging-github-deploy, trusted only by
+# repo:mahmoud63/octapm:environment:staging) — no stored AWS keys — and refuses
+# any account but OctaPM Staging. Production has no workflow.
+#
+#   1. backend image: build from backend/Dockerfile with the us-east-1 RDS root,
+#      inspect it, push it to ECR tagged with the commit SHA (immutable; an
+#      existing tag is reused, never rebuilt)
+#   2. task definition revisions (migrate, api, worker) with that image
+#   3. database: one-off `prisma migrate deploy` task; anything but exit 0 stops
+#      the run (never migrate reset / db push)
+#   4. services: api, then worker, rolled to the new revision with 1 task —
+#      only when DEPLOY_SERVICES is 'true' (the application boots only after the
+#      owner has stored octapm/staging/manual)
+#   5. web: build with the three staging hosts and same-origin /api/v1, check
+#      the bundle, sync to the web bucket, invalidate the three distributions
+#
+# Every value below is a public identifier, not a secret. The application's
+# secrets reach the tasks from Secrets Manager through ECS; this workflow never
+# reads them.
+
+name: Staging deploy
+
+on:
+  push:
+    branches: [release/staging]
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_ACCOUNT_ID: '977476317319'
+  AWS_REGION: us-east-1
+  AWS_DEPLOY_ROLE_ARN: arn:aws:iam::977476317319:role/octapm-staging-github-deploy
+  ECR_REPOSITORY: octapm-staging-backend
+  ECS_CLUSTER: octapm-staging
+  TASK_SUBNETS: subnet-0f3959cb0b6afb452,subnet-0603f6721e3be3f57
+  MIGRATE_SECURITY_GROUP: sg-0f3380c29e6398be6
+  TARGET_GROUP_ARN: arn:aws:elasticloadbalancing:us-east-1:977476317319:targetgroup/octapm-staging-api/e4778151178c4595
+  WEB_BUCKET: octapm-staging-web-977476317319
+  CF_DISTRIBUTION_IDS: E1FBX6SL5B2CZ7 E7YDNMVF3B154 E3461SZIGYOAG1
+  APP_URL: https://d15mppv42bx0t9.cloudfront.net
+  PORTAL_URL: https://d1kbepj9luv8w2.cloudfront.net
+  ADMIN_URL: https://d1afyte25wn7c1.cloudfront.net
+  # The RDS root the staging instance (rds-ca-rsa2048-g1, us-east-1) chains to;
+  # the Dockerfile's default is us-east-2 and Prisma would refuse this server.
+  RDS_CA_CN: Amazon RDS us-east-1 Root CA RSA2048 G1
+  # 'true' only once octapm/staging/manual holds the owner's values (the API's
+  # boot validation refuses to start without them).
+  DEPLOY_SERVICES: 'false'
+
+jobs:
+  deploy:
+    name: Deploy staging
+    if: github.ref == 'refs/heads/release/staging'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment:
+      name: staging
+      url: https://d15mppv42bx0t9.cloudfront.net
+
+    steps:
+      - name: Checkout the release commit
+        uses: actions/checkout@v4
+
+      - name: AWS credentials (OIDC, no stored keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: octapm-staging-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Refuse any account but OctaPM Staging
+        run: |
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          echo "AWS account: $account"
+          test "$account" = "$AWS_ACCOUNT_ID"
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Image reference
+        id: image
+        run: |
+          echo "ref=${{ steps.ecr.outputs.registry }}/$ECR_REPOSITORY:$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$GITHUB_SHA" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"; echo "image $GITHUB_SHA already in ECR: reused"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Plant a canary .env the image must not contain
+        if: steps.image.outputs.exists == 'false'
+        run: printf 'OCTAPM_CI_CANARY=leaked-into-the-image\n' > backend/.env
+
+      - name: Set up Docker Buildx
+        if: steps.image.outputs.exists == 'false'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the backend image
+        if: steps.image.outputs.exists == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          load: true
+          push: false
+          provenance: false
+          tags: ${{ steps.image.outputs.ref }}
+          build-args: |
+            RELEASE_GIT_SHA=${{ github.sha }}
+            RDS_CA_CN=${{ env.RDS_CA_CN }}
+            RELEASE_BUILD_TIME=${{ github.event.head_commit.timestamp }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Inspect the image before it is pushed
+        if: steps.image.outputs.exists == 'false'
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+        run: |
+          test "$(docker inspect -f '{{.Config.User}}' "$IMAGE")" = node
+          docker run --rm --entrypoint sh -e EXPECT_SHA="$GITHUB_SHA" -e EXPECT_CN="$RDS_CA_CN" "$IMAGE" -c '
+            set -eu
+            test "$(id -u)" != 0
+            test "$NODE_ENV" = production
+            test "$RELEASE_GIT_SHA" = "$EXPECT_SHA"
+            for path in /app/backend/.env /app/frontend /app/mobile /app/docs /app/infrastructure; do
+              if [ -e "$path" ]; then echo "unexpected $path"; exit 1; fi
+            done
+            if grep -rqs OCTAPM_CI_CANARY /app --exclude-dir=node_modules; then echo "the canary .env reached the image"; exit 1; fi
+            if find /app -path /app/node_modules -prune -o -path /app/backend/node_modules -prune -o \( -name "*.pem" ! -path /app/certs/rds-ca.pem -o -name ".aws" -o -name "credentials" \) -print | grep -q .; then echo "credential-like files in the image"; exit 1; fi
+            test "$(grep -c "BEGIN CERTIFICATE" /app/certs/rds-ca.pem)" = 1
+            node -e "
+              const c = new (require(\"crypto\").X509Certificate)(require(\"fs\").readFileSync(\"/app/certs/rds-ca.pem\"));
+              const cn = c.subject.split(String.fromCharCode(10)).find((l) => l.startsWith(\"CN=\"));
+              if (cn !== \"CN=\" + process.env.EXPECT_CN) { console.error(\"wrong RDS root: \" + cn); process.exit(1); }
+              console.log(\"RDS root: \" + cn);
+            "
+          '
+
+      - name: Push the image (immutable SHA tag)
+        if: steps.image.outputs.exists == 'false'
+        run: docker push "${{ steps.image.outputs.ref }}"
+
+      - name: Task definition revisions for this release
+        id: taskdefs
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+        run: |
+          for family in migrate api worker; do
+            aws ecs describe-task-definition --task-definition "$ECS_CLUSTER-$family" --query taskDefinition > current.json
+            jq --arg image "$IMAGE" '
+              del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+              | .containerDefinitions |= map(.image = $image)' current.json > release.json
+            arn="$(aws ecs register-task-definition --cli-input-json file://release.json --query taskDefinition.taskDefinitionArn --output text)"
+            echo "$family=$arn" >> "$GITHUB_OUTPUT"
+            echo "$family -> $arn"
+          done
+          rm -f current.json release.json
+
+      - name: Migrate the database (prisma migrate deploy)
+        env:
+          MIGRATE_TASK_DEFINITION: ${{ steps.taskdefs.outputs.migrate }}
+        run: |
+          task="$(aws ecs run-task --cluster "$ECS_CLUSTER" --launch-type FARGATE \
+            --task-definition "$MIGRATE_TASK_DEFINITION" \
+            --network-configuration "awsvpcConfiguration={subnets=[$TASK_SUBNETS],securityGroups=[$MIGRATE_SECURITY_GROUP],assignPublicIp=ENABLED}" \
+            --started-by "gha-$GITHUB_RUN_ID" --query 'tasks[0].taskArn' --output text)"
+          echo "migration task: $task"
+          aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$task"
+          aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$task" \
+            --query 'tasks[0].{stopped:stoppedReason,exit:containers[0].exitCode,reason:containers[0].reason}' --output table
+          aws logs get-log-events --log-group-name /octapm/staging/migrate \
+            --log-stream-name "migrate/migrate/${task##*/}" --query 'events[].message' --output text || true
+          code="$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$task" --query 'tasks[0].containers[0].exitCode' --output text)"
+          test "$code" = 0
+
+      - name: Roll the API (1 task) and wait for a healthy target
+        if: env.DEPLOY_SERVICES == 'true'
+        env:
+          API_TASK_DEFINITION: ${{ steps.taskdefs.outputs.api }}
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service api --task-definition "$API_TASK_DEFINITION" --desired-count 1 > /dev/null
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services api
+          healthy="$(aws elbv2 describe-target-health --target-group-arn "$TARGET_GROUP_ARN" --query "length(TargetHealthDescriptions[?TargetHealth.State=='healthy'])" --output text)"
+          echo "healthy API targets: $healthy"
+          test "$healthy" -ge 1
+
+      - name: Roll the worker (1 task)
+        if: env.DEPLOY_SERVICES == 'true'
+        env:
+          WORKER_TASK_DEFINITION: ${{ steps.taskdefs.outputs.worker }}
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service worker --task-definition "$WORKER_TASK_DEFINITION" --desired-count 1 > /dev/null
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services worker
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build the web app (three staging hosts, same-origin API)
+        env:
+          VITE_API_URL: /api/v1
+          VITE_APP_URL: ${{ env.APP_URL }}
+          VITE_PORTAL_URL: ${{ env.PORTAL_URL }}
+          VITE_ADMIN_URL: ${{ env.ADMIN_URL }}
+          VITE_STRIPE_PUBLISHABLE_KEY: ${{ vars.VITE_STRIPE_PUBLISHABLE_KEY }}
+        run: npm run build --workspace=frontend
+
+      - name: Check the bundle (same-origin API, no local origin)
+        run: node frontend/scripts/assert-release-bundle.mjs --dist frontend/dist --expect-api /api/v1
+
+      - name: Upload the web build
+        run: |
+          aws s3 sync frontend/dist/assets "s3://$WEB_BUCKET/assets" --cache-control 'public, max-age=31536000, immutable'
+          aws s3 sync frontend/dist "s3://$WEB_BUCKET" --exclude 'assets/*' --delete --cache-control 'no-cache'
+
+      - name: Invalidate the three distributions
+        run: |
+          for id in $CF_DISTRIBUTION_IDS; do
+            aws cloudfront create-invalidation --distribution-id "$id" --paths '/*' --query 'Invalidation.Id' --output text
+          done
+
+      - name: Record the release
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+          API_TASK_DEFINITION: ${{ steps.taskdefs.outputs.api }}
+          WORKER_TASK_DEFINITION: ${{ steps.taskdefs.outputs.worker }}
+        run: |
+          {
+            echo "### OctaPM staging release"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Git SHA | \`$GITHUB_SHA\` |"
+            echo "| Image | \`$IMAGE\` |"
+            echo "| API task definition | \`$API_TASK_DEFINITION\` |"
+            echo "| Worker task definition | \`$WORKER_TASK_DEFINITION\` |"
+            echo "| Services rolled | $DEPLOY_SERVICES |"
+            echo "| Deployed at (UTC) | $(date -u +%Y-%m-%dT%H:%M:%SZ) |"
+            echo "| App / Portal / Admin | $APP_URL / $PORTAL_URL / $ADMIN_URL |"
+          } >> "$GITHUB_STEP_SUMMARY"
