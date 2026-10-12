@@ -1,0 +1,14 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan*
+crash.log
+*.auto.tfvars
+terraform.tfvars
+# The repository root ignores *.tf; this stack's code is tracked.
+!*.tf
+# local planning before the state bucket exists (see README) - after the line above
+
+backend_override.tf
+plan-only.tfstate*
