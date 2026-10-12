@@ -6,10 +6,21 @@
 #                             encryption keys, the CloudFront origin secret.
 #                             Nothing is read from a local .env.
 #   octapm/staging/manual     Values only the owner has (Anthropic key, Stripe
-#                             test-mode values). Created with CHANGE_ME
-#                             placeholders, which the API's boot validation
-#                             refuses by name; the owner replaces them in the
-#                             console. Terraform never overwrites them again.
+#                             test-mode values). Terraform creates the secret
+#                             CONTAINER only and never manages a version of it:
+#                             the owner creates every value in the console (or
+#                             the CLI), as one JSON object with exactly the keys
+#                             in local.manual_keys. No apply can ever write,
+#                             replace or re-label those values. Until the owner
+#                             stores them, the tasks cannot start (the services
+#                             stay at 0 until the deploy phase anyway).
+#
+# Why no managed placeholder version: when a value is stored in the console,
+# Secrets Manager moves AWSCURRENT to the new version. A Terraform-managed
+# placeholder version would then show `version_stages` drift and a later
+# apply would move AWSCURRENT back to the placeholder; and if Secrets Manager
+# ever removed that unlabelled version, Terraform would re-create it as
+# current. Owning no version removes both paths.
 #
 # Generated values live in the encrypted, versioned remote state.
 
@@ -19,6 +30,8 @@ locals {
   database_url = "postgresql://${aws_db_instance.main.username}:${random_password.db.result}@${aws_db_instance.main.address}:${aws_db_instance.main.port}/${aws_db_instance.main.db_name}?sslmode=require&sslcert=/app/certs/rds-ca.pem&sslaccept=strict"
 
   generated_keys = ["DATABASE_URL", "JWT_SECRET", "JWT_REFRESH_SECRET", "MFA_SECRET_KEY", "INTEGRATION_SECRET_KEY", "CLOUDFRONT_SHARED_SECRET"]
+
+  # The JSON keys the owner stores in octapm/staging/manual (ECS reads each one).
   manual_keys = [
     "ANTHROPIC_API_KEY",
     "STRIPE_SECRET_KEY",
@@ -55,21 +68,18 @@ resource "aws_secretsmanager_secret_version" "generated" {
   ))
 }
 
+# Container only: the owner stores the value (see the header). Deliberately no
+# aws_secretsmanager_secret_version for this secret.
 resource "aws_secretsmanager_secret" "manual" {
   name                    = "octapm/staging/manual"
-  description             = "OctaPM staging: values the owner enters by hand (Anthropic key, Stripe test-mode values)"
+  description             = "OctaPM staging: owner-entered JSON with keys ANTHROPIC_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_INDIVIDUAL_MONTHLY, STRIPE_PRICE_INDIVIDUAL_ANNUAL, STRIPE_PRICE_BUSINESS_MONTHLY, STRIPE_PRICE_BUSINESS_ANNUAL, STRIPE_SECRET_ROTATION_CONFIRMED_AT, STRIPE_SECRET_ROTATION_TICKET. Terraform never writes its value."
   recovery_window_in_days = 7
   tags = {
     Component = "secrets"
   }
 }
 
-resource "aws_secretsmanager_secret_version" "manual" {
-  secret_id     = aws_secretsmanager_secret.manual.id
-  secret_string = jsonencode({ for k in local.manual_keys : k => "CHANGE_ME" })
-
-  # The owner's values are entered in the console; never reverted by a later apply.
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
+output "manual_secret_keys" {
+  description = "The JSON keys to store in octapm/staging/manual."
+  value       = local.manual_keys
 }
